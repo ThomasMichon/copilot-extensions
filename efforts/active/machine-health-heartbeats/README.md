@@ -1557,3 +1557,10 @@ The [owner comparison](architecture.md#owner-decision) explains this choice.
   This is a built-in convergence restriction, not a sandbox for arbitrary
   filesystem-authorized code. The enrollment/resource packet passed 210 cases;
   actor-free classification and existing composition/runner controls passed 42.
+- A non-selected custom-install control reproduced the discovery-based
+  reservation gap. Enrollment now uses the product-namespaced
+  `agent-machines.health.enrollment.json` filename, reserved independently of
+  installation location and resolved aliases without inventory scans.
+  Unrelated generic filenames remain available. The final enrollment/resource/
+  native withdrawal selection passed 214 cases; the actor-free packet and
+  runner controls passed 42.

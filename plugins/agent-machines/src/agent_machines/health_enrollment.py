@@ -20,7 +20,7 @@ from xml.etree import ElementTree as ET
 from . import _peer_launch, health_jobs, health_run, health_slots as slots
 
 SCHEMA = "agent-machines.health.enrollment"
-STATE = "health-job.json"
+STATE = health_jobs.ENROLLMENT_STATE
 REFERENCE = "agent-machines/health-job"
 MAX_STATE = 64 * 1024
 

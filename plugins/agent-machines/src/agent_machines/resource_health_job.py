@@ -6,28 +6,17 @@ import os
 import subprocess
 from pathlib import Path
 
+from .health_jobs import ENROLLMENT_STATE
 from .resources import (
     ResourceFinding, ResourceHandler, ResourceResult, _select_field,
 )
 
 
-def is_enrollment_state(target: Path, home: Path) -> bool:
+def is_enrollment_state(target: Path) -> bool:
     """Reserve native local-consent state from ordinary file resources."""
-    roots = [home / ".agent-machines"]
-    if os.environ.get("AGENT_RT_ROOT"):
-        roots.append(Path(os.environ["AGENT_RT_ROOT"]))
-    candidates = [target.absolute(), target.resolve()]
-    for path in candidates:
-        if any(path == (root / "health-job.json").resolve() for root in roots):
-            return True
-        root = path.parent
-        if (
-            path.name == "health-job.json" and root.name == "agent-machines"
-            and root.parent.name == "plugins"
-            and root.parent.parent.parent.name == "marketplaces"
-        ):
-            return True
-    return False
+    return Path(target.name) == Path(ENROLLMENT_STATE) or (
+        Path(target.resolve().name) == Path(ENROLLMENT_STATE)
+    )
 
 
 class HealthJobResourceHandler(ResourceHandler):

@@ -241,7 +241,7 @@ def test_file_resource_classification_keeps_enrollment_consent_local(owners, mon
 
     class VirtualPath(type(Path())):
         def resolve(self, *args, **fields):
-            return self
+            return self.with_name(module.ENROLLMENT_STATE) if self.name == "alias.json" else self
 
     home = VirtualPath(ROOT / "fixture-home")
     selected = VirtualPath(ROOT / "selected-install")
@@ -251,8 +251,11 @@ def test_file_resource_classification_keeps_enrollment_consent_local(owners, mon
         home / ".agent-machines", selected,
         home / ".copilot-extensions" / "marketplaces" / "example" / "plugins" / "agent-machines",
     ):
-        assert module.is_enrollment_state(root / "health-job.json", home)
-    assert not module.is_enrollment_state(home / "ordinary.json", home)
+        assert module.is_enrollment_state(root / module.ENROLLMENT_STATE)
+    assert module.is_enrollment_state(home / "another-custom-install" / module.ENROLLMENT_STATE)
+    assert not module.is_enrollment_state(home / "ordinary.json")
+    assert not module.is_enrollment_state(home / "health-job.json")
+    assert module.is_enrollment_state(home / "alias.json")
 
 
 @pytest.mark.parametrize("outcome,expected", [("unsupported", 2), ("failed", 2), ("timeout", 124), ("cleanup", 125)])

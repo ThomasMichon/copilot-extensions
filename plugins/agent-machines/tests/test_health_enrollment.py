@@ -592,7 +592,7 @@ def test_resource_converges_only_existing_local_consent(case, monkeypatch):
     assert result.ok and not result.changed and not native.calls and not refs.owners
 
 
-@pytest.mark.parametrize("location", ["legacy", "selected", "cell"])
+@pytest.mark.parametrize("location", ["legacy", "selected", "cell", "other"])
 @pytest.mark.parametrize("strategy", ["enforce", "ensure-present", "managed-block"])
 def test_generic_file_resources_cannot_adopt_local_collection(tmp_path, monkeypatch, location, strategy):
     from agent_machines.resources import HANDLERS, ResolvedResource
@@ -604,12 +604,15 @@ def test_generic_file_resources_cannot_adopt_local_collection(tmp_path, monkeypa
         "legacy": home / ".agent-machines",
         "selected": selected,
         "cell": home / ".copilot-extensions" / "marketplaces" / "example" / "plugins" / "agent-machines",
+        "other": tmp_path / "another-custom-install",
     }
     target = roots[location] / enrollment.STATE
     declaration = {
         "path": str(target), "format": "json", "strategy": strategy,
         "content": {"schema": enrollment.SCHEMA, "desired": {"enabled": True}},
     }
+    if strategy == "managed-block":
+        declaration.update(begin="{", end="}", content='"reserved": true')
     result = HANDLERS["file"].apply(
         ResolvedResource("file", "attempted-consent", (str(target),), declaration),
         SimpleNamespace(home=home, repo_paths={}), False,

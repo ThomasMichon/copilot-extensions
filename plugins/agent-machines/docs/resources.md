@@ -82,9 +82,10 @@ Use [`health job configure`](health-report.md#installed-windows-enrollment)
 for local preview/confirmation, and that page for replacement, rollback,
 unknown-outcome custody and status. This job is not the self-update watchdog.
 
-Ordinary `file` resources cannot write the reserved `health-job.json` local
-consent/recovery state in the selected installation, legacy home or canonical
-installation cells. This applies to JSON, text and managed-block strategies;
+Ordinary `file` resources cannot write the reserved
+`agent-machines.health.enrollment.json` local consent/recovery filename,
+regardless of installation location, including custom roots and resolved aliases.
+This applies to JSON, text and managed-block strategies;
 use the dedicated lifecycle rather than manufacturing opt-in with a package.
 Unrelated file resources are unchanged. This restriction is not a sandbox for
 arbitrary scripts or a replacement for filesystem permissions and trusted

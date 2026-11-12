@@ -4809,10 +4809,10 @@
         "tools/promotion_unit_tests/test_local_finalize.py::test_cleanup_requires_positive_local_branch_observation[remote]"
     ],
     "sources": {
-        "tools/promotion_unit_tests/test_health_composition.py": "c36dfd1bd83c513d8023f3674c7f1e353a7cd293bcd5779e6e3c381e800f2509",
+        "tools/promotion_unit_tests/test_health_composition.py": "9935c770e12f08e5a61e1325bbf5fa49fd65b126dba44b98bb7cfc0247958f7b",
         "plugins/agent-machines/tests/native/health_task_desktop.py": "742086a0c8ded805f6e9e2b519009b2d31872e936752f6e08051ba973a1c2d84",
         "plugins/agent-machines/src/agent_machines/cli_health.py": "282c294281319df55d12b287fd36f1f08b45241dbd32b13541c0fa5390e80cd7",
-        "plugins/agent-machines/src/agent_machines/health_jobs.py": "ec135a55725a1f29fa4688fa380e24bd6b703a46ae977c8ad416881a4ca6e75d",
+        "plugins/agent-machines/src/agent_machines/health_jobs.py": "eba051e3cce7717543b7e805ea308833618ac1d1535a300c31bd386e97323af9",
         "plugins/agent-machines/src/agent_machines/health_chart.py": "4ff6dcdf1189ff903f55ceb0445e4853974b6b3981d9f9ee455552a8f5a4b2bf",
         "plugins/agent-machines/src/agent_machines/health_report.py": "8e1684c9466b2d0d2a3065787ab2ffcc0232c14b0b01ae25f11605e70260f2da",
         "plugins/agent-machines/src/agent_machines/health_slots.py": "9317a16c7d6d70cce4afb93b5e9fb692d2a0dc25d8b5c19797ad5d0e00bb1149",
@@ -5497,11 +5497,11 @@
         "plugins/agent-machines/src/agent_machines/health_collect.py": "856c65d53b5146b9d80c4eeb81df7c350b3a18e1dbc844c2d2d3d9a3d18adcab",
         "tools/promotion_unit_tests/test_local_finalize.py": "9ccbe15278f853bd3e4280c150c86d6f4816159591b24660eb24ab2ba10d7edb",
         "plugins/agent-worktrees/src/agent_worktrees/finalize_local.py": "9fea9450ace2ee3461166bf5d6efcd9058414609f46e3c4614bb92e077486fbe",
-        "plugins/agent-machines/src/agent_machines/health_enrollment.py": "c2d10203b89995c82caca8665572dbcd6e889cff8dc987d9f034f9c2b5036847",
+        "plugins/agent-machines/src/agent_machines/health_enrollment.py": "fc3eb3a545819bb9757b882499c367738d14f47e2800321b59efd4d48a8c77e3",
         "plugins/agent-machines/src/agent_machines/health_job.py": "69f6b2ffd86adc4c8d262b6a42c59c9036e7d8eef88e6433f2b8fdc29cdbf1ca",
         "plugins/agent-machines/src/agent_machines/health_task_native.py": "62c20ca8136f9858335171118200b88ae25906745834b3bcfa804ae381638269",
         "libs/installer-engine/runtime_launcher.py": "0cd1ac9fd75cff85f605345ec958fabc70f59796343b798aceec253ecc0b7cde",
-        "plugins/agent-machines/src/agent_machines/resource_health_job.py": "eea23d4a44d0cba2e772b12df4ad61a3bf87dde46372d17077804b768412e6d9"
+        "plugins/agent-machines/src/agent_machines/resource_health_job.py": "7cf82714d6385b0c9fb26ae734cbe32c0a5457c8af882585a60ebf6cf3a11114"
     },
     "coverage_targets": [
         "plugins/agent-machines/src/agent_machines/resource_health_job.py",

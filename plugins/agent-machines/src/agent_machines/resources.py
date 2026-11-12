@@ -1077,7 +1077,7 @@ class FileResourceHandler(ResourceHandler):
             )
         from .resource_health_job import is_enrollment_state
 
-        if is_enrollment_state(target, ctx.home):
+        if is_enrollment_state(target):
             return ResourceResult(
                 self.TYPE, resolved.id, False, dry_run, "blocked",
                 blocked_reason="local health-job consent is reserved to the health-job lifecycle",

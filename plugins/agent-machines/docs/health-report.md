@@ -407,7 +407,7 @@ protects old/new dependencies until native and state settlement; no new pin
 store, collector, watchdog or retry scheduler is introduced.
 
 Local desired/confirmed state and a bounded recovery record live under that
-installation's `health-job.json`. An unknown effect retains dependency custody.
+installation's `agent-machines.health.enrollment.json`. An unknown effect retains dependency custody.
 The recovery record explicitly retains replace/disable/remove intent before
 native effects. Removal supersedes a pending replacement; failed or interrupted
 withdrawal cannot recover an enabled incumbent. Disable recovery uses exact
@@ -451,7 +451,8 @@ For normal declared machine-state convergence, a requirement package may add
 `resources: [{type: health-job, state: present, platforms: [windows]}]`.
 That resource only converges an existing local opt-in; it cannot supply
 collection settings or grant adoption. `state: absent` withdraws it. Local
-consent/recovery state is also reserved against ordinary `file` resources, so a
+product-namespaced consent/recovery filename is reserved against ordinary `file`
+resources at every installation location, including custom roots and resolved aliases, so a
 generic package JSON write cannot create this local opt-in. This protects the
 built-in convergence path, not arbitrary scripts with full filesystem authority.
 Runtime replacement retains the old registration's dependencies until this same owner

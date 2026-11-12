@@ -9,6 +9,7 @@ from xml.etree import ElementTree as ET
 
 SCHEMA = "agent-machines.health.job-preparation"
 NAME = "agent-machines-health"
+ENROLLMENT_STATE = "agent-machines.health.enrollment.json"
 NS = "http://schemas.microsoft.com/windows/2004/02/mit/task"
 
 
