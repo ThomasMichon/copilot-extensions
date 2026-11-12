@@ -19,7 +19,7 @@ import zipfile
 
 from packaging.markers import default_environment
 from packaging.requirements import Requirement
-from packaging.tags import sys_tags
+from packaging.tags import parse_tag, sys_tags
 from packaging.utils import canonicalize_name
 import pytest
 
@@ -31,13 +31,24 @@ from test_gateway_host import selected as select_host
 
 def _installed_wheel(distribution, output):
     """Keep actual installed public dependency bytes; replace only wheel RECORD."""
-    metadata = distribution.metadata
     wheel_metadata = distribution.read_text("WHEEL")
     assert wheel_metadata
-    tag = next(line[5:] for line in wheel_metadata.splitlines() if line.startswith("Tag: "))
-    name = metadata["Name"].replace("-", "_")
-    version = distribution.version.replace("-", "_")
-    path = output / f"{name}-{version}-{tag}.whl"
+    tags = {
+        tag for line in wheel_metadata.splitlines() if line.startswith("Tag: ")
+        for tag in parse_tag(line[5:].strip())
+    }
+    assert tags
+    tag = "-".join(".".join(sorted({getattr(item, field) for item in tags})) for field in (
+        "interpreter", "abi", "platform",
+    ))
+    assert parse_tag(tag) == tags, "installed wheel tags are not a compressed filename product"
+    prefixes = {
+        member.parent.name for member in distribution.files
+        if len(member.parts) == 2 and member.name == "WHEEL" and member.parent.name.endswith(".dist-info")
+    }
+    assert len(prefixes) == 1
+    prefix = prefixes.pop()
+    path = output / f"{prefix.removesuffix('.dist-info')}-{tag}.whl"
     records = []
     with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for member in distribution.files:
@@ -54,14 +65,281 @@ def _installed_wheel(distribution, output):
                 "sha256=" + base64.urlsafe_b64encode(hashlib.sha256(data).digest()).rstrip(b"=").decode(),
                 str(len(data)),
             ))
-        record_path = next(
-            member.as_posix() for member in distribution.files
-            if member.name == "RECORD" and member.parent.name.endswith(".dist-info")
-        )
+        record_path = prefix + "/RECORD"
         table = io.StringIO(newline="")
         csv.writer(table, lineterminator="\n").writerows([*records, (record_path, "", "")])
         archive.writestr(record_path, table.getvalue())
     return path
+
+
+@pytest.mark.parametrize("name", ["PyYAML", "cryptography"])
+def test_installed_dependency_archive_preserves_native_wheel_identity(tmp_path, monkeypatch, name):
+    monkeypatch.syspath_prepend(str(PROJECT.parent / "tools"))
+    from runtime_wheel_inspection import inspect_wheel_facts
+
+    distribution = importlib.metadata.distribution(name)
+    path = _installed_wheel(distribution, tmp_path)
+    with path.open("rb") as archive:
+        facts = inspect_wheel_facts(archive, {"filename": path.name})
+    assert facts.name == distribution.metadata["Name"]
+    assert facts.version == distribution.version
+
+
+def test_cohort_registry_retains_runtime_build_and_extra_dependency_closure():
+    from types import SimpleNamespace
+
+    from repository_ssh_cohort_fixture import _registry_distributions
+
+    projects = {"application": {"project": {
+        "dependencies": ["base"],
+        "optional-dependencies": {
+            "host": ["application[authentication]", "transport"],
+            "authentication": ["crypto"],
+            "dev": ["test-only"],
+        },
+    }}}
+    distributions = {
+        ("base", "1"): SimpleNamespace(requires=[]),
+        ("transport", "1"): SimpleNamespace(requires=[
+            "extra-child; extra == 'client'", "wrong-platform; sys_platform == 'unselected'",
+        ]),
+        ("crypto", "1"): SimpleNamespace(requires=["old-child"]),
+        ("crypto", "2"): SimpleNamespace(requires=["new-child"]),
+        ("old-child", "1"): SimpleNamespace(requires=[]),
+        ("new-child", "1"): SimpleNamespace(requires=[]),
+        ("extra-child", "1"): SimpleNamespace(requires=[]),
+        ("build-tool", "1"): SimpleNamespace(requires=["build-child"]),
+        ("build-child", "1"): SimpleNamespace(requires=[]),
+        ("test-only", "1"): SimpleNamespace(requires=[]),
+    }
+    selected = _registry_distributions(projects, distributions, [
+        "application[host]", "transport[client]", "build-tool",
+        "unselected-build-tool; sys_platform == 'unselected'",
+    ])
+    assert set(selected) == set(distributions) - {("test-only", "1")}
+    assert all(selected[key] is distributions[key] for key in selected)
+
+
+def test_cohort_registry_refuses_missing_prepared_dependency():
+    from types import SimpleNamespace
+
+    from repository_ssh_cohort_fixture import _registry_distributions
+
+    with pytest.raises(AssertionError, match="prepared dependency closure is missing absent"):
+        _registry_distributions({}, {
+            ("runtime", "1"): SimpleNamespace(requires=["absent"]),
+        }, ["runtime"])
+
+
+@pytest.mark.parametrize("selected", ["dev", "--help", "A" * 40, "a" * 39, "a" * 41])
+def test_cohort_source_commit_refuses_nonimmutable_inputs_before_git(monkeypatch, tmp_path, selected):
+    import repository_ssh_cohort_fixture as fixture
+
+    monkeypatch.setattr(fixture, "run", lambda *_args: pytest.fail("Invalid source reached Git"))
+    with pytest.raises(ValueError, match="full immutable"):
+        fixture._selected_source_commit(tmp_path, selected)
+
+
+@pytest.mark.parametrize("explicit", [False, True])
+def test_cohort_source_commit_preserves_head_default_and_explicit_selection(monkeypatch, tmp_path, explicit):
+    from types import SimpleNamespace
+    import repository_ssh_cohort_fixture as fixture
+
+    selected = "a" * 40
+    calls = []
+
+    def run(command):
+        calls.append(command)
+        return SimpleNamespace(returncode=0, stdout=selected + "\n")
+
+    monkeypatch.setattr(fixture, "run", run)
+    assert fixture._selected_source_commit(tmp_path, selected if explicit else None) == selected
+    assert calls == [
+        *([] if explicit else [["git", "-C", str(tmp_path), "rev-parse", "HEAD"]]),
+        ["git", "-C", str(tmp_path), "cat-file", "-e", selected + "^{commit}"],
+    ]
+
+
+def test_cohort_source_commit_does_not_fallback_when_selected_object_is_missing(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    import repository_ssh_cohort_fixture as fixture
+
+    calls = []
+
+    def run(command):
+        calls.append(command)
+        return SimpleNamespace(returncode=128, stdout="")
+
+    monkeypatch.setattr(fixture, "run", run)
+    with pytest.raises(AssertionError, match="application Source commit is unavailable"):
+        fixture._selected_source_commit(tmp_path, "a" * 40)
+    assert len(calls) == 1 and "rev-parse" not in calls[0]
+
+
+@pytest.mark.parametrize(("selected", "missing"), [("a" * 40, False), ("a" * 40, True), ("dev", False)])
+def test_cohort_native_workflow_retains_only_valid_selected_source(monkeypatch, selected, missing):
+    from types import SimpleNamespace
+    import subprocess
+    import yaml
+
+    workflow = yaml.safe_load(
+        (PROJECT.parent / ".github" / "workflows" / "installation-context-acceptance.yml").read_text()
+    )
+    code = next(
+        step["run"] for step in workflow["jobs"]["gateway-normal-setup-linux"]["steps"]
+        if step.get("name") == "Retain the selected immutable application Source"
+    )
+    calls = []
+
+    def run(command, **options):
+        calls.append((command, options["check"], options["timeout"]))
+        assert options["creationflags"] == (subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+        return SimpleNamespace(returncode=128 if missing and len(calls) == 1 else 0)
+
+    monkeypatch.setenv("COPILOT_EXTENSIONS_SSH_SETUP_SOURCE_COMMIT", selected)
+    monkeypatch.setattr(subprocess, "run", run)
+    if selected == "dev":
+        with pytest.raises(ValueError, match="full immutable"):
+            exec(compile(code, "<native-source-selection>", "exec"), {})
+        assert calls == []
+    else:
+        exec(compile(code, "<native-source-selection>", "exec"), {})
+        probe = ["git", "cat-file", "-e", selected + "^{commit}"]
+        assert calls == [(probe, False, 10), *(
+            [(["git", "fetch", "--no-tags", "--depth=1", "origin", selected], True, 30), (probe, True, 10)]
+            if missing else []
+        )]
+
+
+@pytest.mark.parametrize(("preparation_only", "prebuild_code"), [
+    (False, 0), (True, 0), (True, 124),
+])
+def test_cohort_native_workflow_selects_lifecycle_and_settles_preparation(
+    tmp_path, monkeypatch, preparation_only, prebuild_code,
+):
+    from types import SimpleNamespace
+    import runpy
+    import subprocess
+    import yaml
+
+    workflow = yaml.safe_load(
+        (PROJECT.parent / ".github" / "workflows" / "installation-context-acceptance.yml").read_text()
+    )
+    steps = workflow["jobs"]["gateway-normal-setup-linux"]["steps"]
+    code = next(step["run"] for step in steps if step.get("name") == "Normal Manager and engine SSH setup")
+    calls = []
+    lease = SimpleNamespace(release=lambda: calls.append("release"))
+    temporary = SimpleNamespace(
+        name=str(tmp_path / "sandbox"), retained=False,
+        retain=lambda: calls.append("retain"),
+    )
+    runner = {
+        "default_python": lambda _component: tmp_path / "venv" / "Scripts" / "python.exe",
+        "ordinary_cache_root": lambda path: path,
+        "acquire": lambda *_args: lease,
+        "TestSandbox": lambda **_options: temporary,
+        "run_prefix": lambda _name: "cohort",
+        "record_owner": lambda *_args, **_options: None,
+        "prepare": lambda *_args: calls.append("prepare"),
+        "isolated_environment": lambda environment, _sandbox: dict(environment),
+        "venv_root": lambda _root: tmp_path / "venvs",
+        "run_contained": lambda command, **options: (
+            calls.append(("source", command[-2:], options["limits"])), prebuild_code
+        )[1],
+        "Limits": lambda **options: options,
+        "UnreapedProcessError": type("UnreapedProcessError", (RuntimeError,), {}),
+        "cleanup_sandbox": lambda _temporary: calls.append("cleanup"),
+    }
+    monkeypatch.setenv("RUNNER_TEMP", str(tmp_path))
+    monkeypatch.setenv("COPILOT_EXTENSIONS_SSH_SETUP_SOURCE_COMMIT", "a" * 40)
+    monkeypatch.delenv("COPILOT_EXTENSIONS_SSH_SETUP_COHORT_ONLY", raising=False)
+    if preparation_only:
+        monkeypatch.setenv("COPILOT_EXTENSIONS_SSH_SETUP_COHORT_ONLY", "1")
+    monkeypatch.setattr(runpy, "run_path", lambda _path: runner)
+
+    def run(command, **options):
+        assert "--ephemeral-native-ssh-setup" in command
+        assert options["env"]["COPILOT_EXTENSIONS_SSH_SETUP_COHORT"].endswith("cohort.json")
+        calls.append("lifecycle")
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(subprocess, "run", run)
+    if prebuild_code:
+        with pytest.raises(RuntimeError, match="normal Source cohort preparation failed: 124"):
+            exec(compile(code, "<native-cohort-workflow>", "exec"), {})
+    else:
+        exec(compile(code, "<native-cohort-workflow>", "exec"), {})
+    assert calls == ["prepare", ("source", ["--source-commit", "a" * 40], {"wall_seconds": 180}), "release", *(
+        ["lifecycle"] if not preparation_only and prebuild_code == 0 else []
+    ), "cleanup"]
+
+
+def test_cohort_profile_preparation_overlaps_independent_outputs(tmp_path):
+    from threading import Barrier, Lock
+    from types import SimpleNamespace
+
+    from repository_ssh_cohort_fixture import _prepare_profiles
+
+    barrier, lock = Barrier(2), Lock()
+    active = peak = 0
+    observed = []
+
+    def prepare(snapshot, output, **options):
+        nonlocal active, peak
+        assert snapshot == tmp_path / "source"
+        assert options["uv"] == "selected-uv" and options["prepare_profile"] is True
+        assert time.monotonic() < options["deadline"] <= time.monotonic() + 120
+        with lock:
+            active += 1
+            peak = max(peak, active)
+            observed.append((output, options["component"], options["extras"]))
+        try:
+            barrier.wait(timeout=2)
+            output.mkdir()
+            return {"snapshot": str(output)}
+        finally:
+            with lock:
+                active -= 1
+
+    messages = []
+    result = _prepare_profiles(
+        tmp_path / "source", tmp_path, SimpleNamespace(prepare_registry_lock=prepare),
+        "selected-uv", messages.append, time.monotonic(),
+    )
+    assert peak == 2 and active == 0
+    assert set(result) == {"worktree-manager", "engine-base", "agent-worktrees", "fleet-manager"}
+    assert len({output for output, _component, _extras in observed}) == 4
+    assert len(messages) == 4 and all(path.is_dir() for path in result.values())
+
+
+def test_cohort_profile_failure_waits_for_running_sibling(tmp_path):
+    from threading import Event
+    from types import SimpleNamespace
+
+    from repository_ssh_cohort_fixture import _prepare_profiles
+
+    started, released, settled = Event(), Event(), Event()
+
+    def prepare(_snapshot, output, **_options):
+        if output.name == "profile-worktree-manager":
+            assert started.wait(timeout=2)
+            released.set()
+            raise ValueError("selected profile refused")
+        if output.name == "profile-engine-base":
+            started.set()
+            try:
+                assert released.wait(timeout=2)
+                time.sleep(0.05)
+            finally:
+                settled.set()
+        return {"snapshot": str(output)}
+
+    with pytest.raises(ValueError, match="selected profile refused"):
+        _prepare_profiles(
+            tmp_path / "source", tmp_path, SimpleNamespace(prepare_registry_lock=prepare),
+            "selected-uv", lambda _message: None, time.monotonic(),
+        )
+    assert settled.is_set()
 
 
 def _closure(first_party, output, *, extras="gateway-host"):
