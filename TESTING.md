@@ -2409,7 +2409,15 @@ then exercises a prestarted keeper and the internal launcher's real startup.
 The original conduit and upstream survive a physical backend change,
 authenticated outgoing retirement and supported rollback. Two clients share
 one keeper; actual interpreter prefix, module path, backend PID, mutation and
-initialization counts are asserted. Native Windows and POSIX source runs pass.
+initialization counts are asserted. Launch diagnostics now vary independently
+for every actual keeper, backend and conduit; observed backend traces must
+match admission-bound launch inputs while the original upstream trace stays
+unchanged through update, capable rollback and same-slot process replacement.
+The current trace-varying Windows source run passes; earlier constant-environment
+POSIX qualification does not qualify this expanded packet. The path-gated
+`mcp-owner-exec.yml` source workflow runs its Linux selection separately from
+required unit-only CI. Unsupported-capability rollback and existing legacy
+binding preservation have focused connector controls.
 The fixture uses contained,
 leased instance ownership and exact cleanup, not host credentials, installed
 services, desktop observation or a production-lifetime claim. It is not part

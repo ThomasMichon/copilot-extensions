@@ -63,8 +63,8 @@ second client against an older custodian. Explicit configuration references
 always keep those values semantically significant.
 
 Request-context negotiation does not upgrade the private checkpoint binding.
-Production custodians still issue the original complete identity. The optional
-receiver therefore declines custody when trace normalization would change the legacy
+Existing bindings retain their original identity mode. The optional
+receiver still declines custody when trace normalization would change the legacy
 checkpoint identity, using ordinary execution before effects. Qualifying that
 trace-sensitive binding across physical replacement remains an open #10486
 adoption item, not an incoming-installation gate. The configuration-consumption
@@ -142,10 +142,25 @@ configuration references, credentials, other environment and cwd remain bound.
 Fields remain in the physical process environment. Contained backend-epoch
 controls cover changed diagnostics and return to an earlier diagnostic value
 without initialization replay; they are not physical replacement or rollback
-qualification. Custodian capability selection, native trace-varying
-keeper/backend replacement and supported provider rollback remain open before
-removing the optional launcher's pre-effect guard. No caller emits this mode
-by default, and no existing session's binding is rewritten.
+qualification. The separate physical packet varies launch diagnostics for
+every actual keeper, backend and conduit, checks observed backend/upstream
+values, and retains the original upstream through update, capable rollback
+and same-slot backend-process replacement. Supported-platform qualification
+and optional-launcher custodian selection remain required before removing that
+launcher's pre-effect guard. No caller emits this mode
+to an unqualified peer, and no existing session's binding is rewritten.
+
+The authenticated connector records optional binding support only when both the
+selected backend's ping and attachment acknowledgment advertise it. A new
+custodian selects mode 1 once, before its first preparation and upstream
+admission, only through that qualified connector. Legacy connectors and peers
+retain mode 0. Later capable attachments never upgrade an already selected
+legacy binding. Conversely, rollback to a peer without the optional capability
+refuses before checkpoint preparation for a mode-1 session; the existing
+uncommitted-handover path resumes the original epoch without replay. It does
+not downgrade the snapshot, create another upstream or weaken incoming
+installation completion. Supported rollback between capable physical providers
+and unsupported legacy rollback are distinct qualification cases.
 
 The backend entrypoint validates the existing private endpoint
 authentication, actual immutable launch generation, selected installation,

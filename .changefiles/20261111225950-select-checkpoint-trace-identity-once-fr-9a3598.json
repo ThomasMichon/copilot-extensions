@@ -1,0 +1,9 @@
+{
+  "comment": "Select checkpoint trace identity once from authenticated backend support and preserve bindings during unsupported rollback.",
+  "changes": [
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    }
+  ]
+}

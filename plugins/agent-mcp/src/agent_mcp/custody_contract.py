@@ -32,3 +32,7 @@ def supports(value) -> bool:
         and isinstance(value.get("capabilities"), list)
         and all(capability in value["capabilities"] for capability in CONTRACT["capabilities"])
     )
+
+
+def supports_trace_binding(value) -> bool:
+    return supports(value) and CHECKPOINT_TRACE_CAPABILITY in value["capabilities"]
