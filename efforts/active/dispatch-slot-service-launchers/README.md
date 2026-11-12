@@ -14,7 +14,7 @@ must close; retiring another process is not a substitute for that correction.
 - **Repo:** copilot-extensions
 - **Branch(es):** separate proposal and implementation PRs against `dev`
 - **Created:** 2026-11-11
-- **Status:** Draft
+- **Status:** Blocked
 - **Vision:** [authoritative runtime replacement](../../../visions/installer/README.md#authoritative-runtime-replacement)
 - **Umbrella issue:** #11875
 - **Related ownership:** #11960 reader disposal; #10847 central retirement;
@@ -152,7 +152,11 @@ wording or authority.
 
 ## Proposal
 
-Pending review. No implementation or rollout is claimed.
+The proposal passed review and required CI in #12187, merged as
+`a95f2e66609710b063e571da8ade9cd16fca8e36`. Implementation remains blocked
+on the intersecting contributor-owned #11960 source or an explicit
+nonoverlapping edit agreement; its native qualification hold is not waived.
+No implementation or rollout is claimed.
 
 ## Journal
 
@@ -163,3 +167,23 @@ Pending review. No implementation or rollout is claimed.
 - Claimed this distinct launcher-lifetime scope on #11875. The existing installer
   vision already requires authoritative incoming selection and bounded,
   central-only outgoing retirement; no vision extension is needed.
+
+### 2026-11-11 - Proposal accepted; intersecting source retained
+
+- #12187 received approval at exact head
+  `d1261c9aab8ec32aab87e67e2ea29f79245a5ea2`, passed required CI and merged.
+  The continuing source worktree was pulled forward onto the accepted plan.
+- Direct source inspection confirms the stable generated service scripts contain
+  the long-lived coordinator/supervisor invocation. The installer's first-line
+  reader and a genuinely outgoing process are distinct handle-lifetime cases;
+  neither the historical exception nor this trace identifies its actual holder.
+- #11960 remains open at `1dd4b6f452f90c1d031604247b0ba1d3b8e449e0`,
+  explicitly blocked by adjacent native supervisor qualification. Its reader fix
+  and hold remain with its contributor. The generated launcher bodies and
+  publication statements are an actual edit intersection, not merely a shared
+  plugin name.
+- Requested sequencing or a nonoverlapping edit agreement on that PR. The next
+  source action is to reconcile its accepted correction or that agreement,
+  then continue Phase 1 and implement the separately reviewed lifetime scope.
+  No competing reader patch, native-test waiver, host repair or service
+  termination was performed. Original parent acceptance and resources remain.
