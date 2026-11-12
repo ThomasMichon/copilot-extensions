@@ -1539,3 +1539,8 @@ The [owner comparison](architecture.md#owner-decision) explains this choice.
   enrollment, and confirmed disabled configuration overrides pending enabled
   replacement intent. The focused native/unit packet passed 30 cases; the
   actor-free packet and runner controls passed 41.
+- CLI/resource boundaries retain the original native cleanup owner through one
+  bounded settlement attempt before returning; successful cleanup clears only
+  its native fence, never blindly replays the operation. Failed settlement
+  preserves the fence and error. The boundary controls cover both confirmed
+  and unconfirmed cleanup on both surfaces; all 33 focused unit cases passed.

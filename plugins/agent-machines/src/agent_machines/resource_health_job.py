@@ -43,8 +43,10 @@ class HealthJobResourceHandler(ResourceHandler):
         }, findings, [decision] if decision else []
 
     def apply(self, resolved, ctx, dry_run):
-        from .health_enrollment import Enrollment, STATE, select
+        from .health_enrollment import Enrollment, STATE, select, settle_native_cleanup
 
+        owner = None
+        settlement_attempted = False
         try:
             root = Path(os.environ.get("AGENT_RT_ROOT") or (ctx.home / ".agent-machines"))
             try:
@@ -62,12 +64,19 @@ class HealthJobResourceHandler(ResourceHandler):
                     detail="local health job: " + ("adopted" if status["adopted"] else "not adopted"),
                 )
             result = owner.converge(remove=resolved.desired.get("state") == "absent")
+            settlement_attempted = True
+            settle_native_cleanup(owner)
             return ResourceResult(
                 self.TYPE, resolved.id, bool(result["changed"]), False,
                 "error" if result["status"] in {"unknown", "rolled-back"} else "install" if result["changed"] else "none",
                 detail="local health job: " + result["status"],
             )
-        except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
+        except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
+            if not settlement_attempted:
+                try:
+                    settle_native_cleanup(owner, error)
+                except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
+                    pass
             return ResourceResult(
                 self.TYPE, resolved.id, False, dry_run, "error",
                 detail="health-job lifecycle unavailable; no new local enrollment adopted",

@@ -420,6 +420,14 @@ from a later CLI process. A withdrawal request may tighten recorded intent while
 fenced, but cannot claim success or stop a different mutator. Only the original
 cleanup owner's confirmed settlement clears this fence; task readback alone
 does not prove a paused native mutator has exited.
+CLI and resource boundaries retain the native cleanup owner through one
+ten-second settlement attempt, including callback delivery, before returning.
+Confirmed cleanup clears the fence but does not replay the unknown operation;
+the next lifecycle request reconciles it normally. Failed settlement remains
+an explicit error with the fence preserved. In-process callers retain the
+original owner for further bounded cleanup; an exiting CLI cannot promise
+later handle recovery. That case needs explicit owner-led recovery, not a
+successful disable or permission to force-clear state.
 `converge` first reconciles the recorded exact task; it does not blindly repeat
 registration. Conflicting definitions refuse without overwrite. Failed
 replacement restores a qualified known-good definition and reports rollback

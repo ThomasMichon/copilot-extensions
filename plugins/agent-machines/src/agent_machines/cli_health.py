@@ -83,6 +83,8 @@ def run_job(args) -> int:
     from .health_run import policy_preview
     from .health_slots import HealthError
 
+    owner = None
+    settlement_attempted = False
     try:
         owner = enrollment.Enrollment(enrollment.select(executing=True, for_collection=False))
         if args.job_operation == "configure":
@@ -96,9 +98,17 @@ def run_job(args) -> int:
             result = owner.disable()
         else:
             result = owner.converge(remove=args.job_operation == "remove")
+        settlement_attempted = True
+        if enrollment.settle_native_cleanup(owner):
+            result["native_cleanup_unconfirmed"] = False
         print(json.dumps(result, separators=(",", ":"), allow_nan=False), flush=True)
         return 2 if result["status"] in {"unknown", "rolled-back"} else 0
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
+        if not settlement_attempted:
+            try:
+                enrollment.settle_native_cleanup(owner, error)
+            except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
+                pass
         print(json.dumps({
             "ok": False, "error": str(error) if isinstance(error, HealthError) else "job-lifecycle-unavailable",
             "carrier_publication": "not-requested",

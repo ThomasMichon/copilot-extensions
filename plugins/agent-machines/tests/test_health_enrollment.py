@@ -352,6 +352,57 @@ def test_confirmed_disabled_config_overrides_pending_enabled_replacement(case):
     assert native.calls == ["disable"]
 
 
+@pytest.mark.parametrize("surface", ["cli", "resource"])
+@pytest.mark.parametrize("confirmed", [False, True])
+def test_boundaries_retain_native_owner_through_bounded_cleanup(case, monkeypatch, capsys, surface, confirmed):
+    from agent_machines import cli_health
+    from agent_machines.resources import HANDLERS, ResolvedResource
+    from agent_procutil.owned_process import OwnedCleanupError
+
+    owner, desired, native, _, selection, installed = case
+    adopt(owner, desired)
+    selection[0] = installed("2.0")
+    call = native.call
+    attempts = []
+
+    def retry(deadline):
+        assert time.monotonic() < deadline <= time.monotonic() + 10
+        attempts.append(deadline)
+        if not confirmed:
+            raise RuntimeError("cleanup still unconfirmed")
+
+    cleanup = OwnedCleanupError(None, cleanup_retry=retry)
+
+    def interrupt(operation, **fields):
+        if operation == "enable":
+            raise cleanup
+        return call(operation, **fields)
+
+    native.call = interrupt
+    monkeypatch.setattr(enrollment, "select", lambda **_fields: owner.installation)
+    monkeypatch.setattr(enrollment, "Enrollment", lambda *_args: owner)
+    monkeypatch.setenv("AGENT_RT_ROOT", str(owner.root))
+    if surface == "cli":
+        assert cli_health.run_job(SimpleNamespace(job_operation="converge")) == 2
+        capsys.readouterr()
+    else:
+        result = HANDLERS["health-job"].apply(
+            ResolvedResource("health-job", "health-job", ("health-job",), {"state": "present"}),
+            SimpleNamespace(home=owner.root), False,
+        )
+        assert not result.ok
+    assert len(attempts) == 1
+    assert owner.read()["pending"]["native_unsettled"] is not confirmed
+    native.call = call
+    if confirmed:
+        assert owner.native_cleanup_error is None
+        assert owner.disable()["status"] == "disabled"
+    else:
+        assert owner.native_cleanup_error is cleanup
+        with pytest.raises(ValueError, match="cleanup-unconfirmed"):
+            owner.disable()
+
+
 @pytest.mark.parametrize("after_effect", [False, True])
 def test_removal_supersedes_pending_replacement_before_any_effect(case, after_effect):
     owner, desired, native, refs, selection, installed = case

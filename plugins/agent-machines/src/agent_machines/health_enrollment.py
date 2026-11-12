@@ -14,6 +14,7 @@ import re
 import struct
 import subprocess
 import sys
+import time
 from xml.etree import ElementTree as ET
 
 from . import _peer_launch, health_jobs, health_run, health_slots as slots
@@ -22,6 +23,26 @@ SCHEMA = "agent-machines.health.enrollment"
 STATE = "health-job.json"
 REFERENCE = "agent-machines/health-job"
 MAX_STATE = 64 * 1024
+
+
+def settle_native_cleanup(owner, error=None) -> bool:
+    """Keep retained native handles through one bounded boundary settlement."""
+    from agent_procutil.owned_process import OwnedCleanupError
+
+    retained = getattr(owner, "native_cleanup_error", None) if owner is not None else None
+    errors = [retained] if retained is not None else []
+    if isinstance(error, OwnedCleanupError) and error not in errors:
+        errors.append(error)
+    if not errors:
+        return False
+    deadline = time.monotonic() + 10
+    if owner is not None:
+        owner.native_cleanup_deadline = deadline
+    for pending in errors:
+        pending.retry_cleanup(deadline=deadline)
+    if retained is not None:
+        owner.native_cleanup_error = None
+    return True
 
 
 @dataclass(frozen=True)
@@ -497,7 +518,8 @@ class Enrollment:
                 })
 
         def cleanup_settled():
-            with self.leases.reference_transaction_custody(self.root, timeout=5):
+            remaining = max(0, getattr(self, "native_cleanup_deadline", time.monotonic() + 5) - time.monotonic())
+            with self.leases.reference_transaction_custody(self.root, timeout=min(5, remaining)):
                 settled()
 
         try:
