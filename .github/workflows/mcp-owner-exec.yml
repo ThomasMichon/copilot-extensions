@@ -36,6 +36,7 @@ on:
       - "plugins/agent-mcp/tests/generation_native_fixture.py"
       - "plugins/agent-mcp/tests/native/test_owner_exec_copilot.py"
       - "plugins/agent-mcp/tests/native/test_generation_handover_copilot.py"
+      - "plugins/agent-mcp/tests/native/generation_copilot_provider.py"
 
 permissions:
   contents: read

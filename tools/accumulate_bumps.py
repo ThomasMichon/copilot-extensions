@@ -444,6 +444,7 @@ def compute(grouped: dict[str, list[str]]) -> dict[str, tuple[str, str]]:
 
 def apply(result: dict[str, tuple[str, str]]) -> list[str]:
     """Write the computed versions; return the list of successfully-applied consumers."""
+    _validate_version_destinations(result)
     applied: list[str] = []
     for consumer, (old, new_version) in result.items():
         if roots := library_roots(consumer):
@@ -493,6 +494,33 @@ def apply(result: dict[str, tuple[str, str]]) -> list[str]:
     return applied
 
 
+def _validate_version_destinations(result: dict[str, tuple[str, str]]) -> None:
+    """Admit all destinations before the first version write, including seeding."""
+    for consumer in result:
+        libraries = library_roots(consumer)
+        roots = libraries or [_consumer_root(consumer)]
+        if not libraries and not is_standalone_consumer(consumer):
+            _check_library_path(MARKETPLACE)
+        for root in roots:
+            for name in ("plugin.json", "pyproject.toml", "src", "instruction-projections.json"):
+                _check_library_path(root / name)
+            source = root / "src"
+            if source.is_dir():
+                for package in source.iterdir():
+                    _check_library_path(package)
+                    if package.is_dir():
+                        for name in ("__init__.py", "_build_info.py"):
+                            _check_library_path(package / name)
+            declaration = root / "instruction-projections.json"
+            if declaration.is_file():
+                try:
+                    entries = json.loads(declaration.read_text(encoding="utf-8")).get("projections", [])
+                except (OSError, json.JSONDecodeError):
+                    continue
+                if isinstance(entries, list):
+                    for entry in entries:
+                        if isinstance(entry, dict) and isinstance(entry.get("template"), str):
+                            _check_library_path(root / entry["template"])
 # --- --from-diff: derive the required bumps from the branch itself ----------
 
 def _version_bump_guard():
@@ -557,7 +585,10 @@ def _project_version_at(ref: str, rel_pyproject: str) -> str | None:
     `_version_at`'s generic "first `version = ` line" regex, which could
     read an earlier unrelated table's own `version` key instead of a
     standalone consumer's real release version (PR #4514 review)."""
-    text = _git("show", f"{ref}:{rel_pyproject}")
+    return _project_version_from_text(_git("show", f"{ref}:{rel_pyproject}"))
+
+
+def _project_version_from_text(text: str) -> str | None:
     if not text:
         return None
     try:
