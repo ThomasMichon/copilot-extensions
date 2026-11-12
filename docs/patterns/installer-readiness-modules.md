@@ -95,7 +95,8 @@ Repository-aware probes may run from the selected project, but that directory
 is configuration input, not an executable or Python import search root.
 The native Machines consumer strips relative/empty PATH entries for read-only
 children and disables implicit Windows cwd lookup, without changing installer
-environments. Payload module gates use `-I -B -X utf8` for readiness and
+environments. Read-only children also remove `BASH_ENV` to prevent implicit
+project-relative Bash startup execution. Payload module gates use `-I -B -X utf8` for readiness and
 invocation-contract metadata reads to load the selected
 installed package rather than a checkout-local module, including on Python
 3.10 where `PYTHONSAFEPATH` is unavailable. This preserves project-aware

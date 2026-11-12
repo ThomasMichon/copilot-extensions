@@ -2524,3 +2524,55 @@ context controls, canonical-copy check, F/E9 lint, existing module ceilings,
 all 13 install contracts, strict runtime resolution, documentation and
 whitespace checks also pass. No skipped platform is credited as executed,
 and no acceptance predicate or budget changes.
+
+### November 12 - Bind the unit source and close implicit Bash startup
+
+Source `2bed` is published through the managed rebase-aware flow after clean
+merge preflight and complete library-consumer changefile coverage. Its required
+CI 43167101955 fails before running eligible units: the configuration-context
+source digest still identifies the preceding implementation. Guards, types,
+installation contracts and synchronization pass; the required PR gate correctly
+remains failed.
+
+Refresh exactly that canonical committed-source digest. The source change is
+the qualified prefix's Python option literals; the unit cohort, coverage
+targets, effect policy and bounds are unchanged. All 693 source bindings are
+independently verified against committed Git bytes. A direct Windows working-
+tree check instead encounters an unrelated CRLF template, so that template is
+not rebound to local bytes. Local tooling lacks the unit runner's coverage
+dependency; no local unit-packet pass is claimed. Actual Linux CI must execute
+the unchanged admitted packet on the corrected source.
+
+Actual current-head Copilot Comment 5870046863 retains the import finding and
+adds High 4547044620: inherited relative `BASH_ENV` can source checkout code
+before an otherwise admitted Bash readiness script. A real Bash control
+reproduces it through the production environment/action boundary: the ordinary
+case passes and the read-only case fails because the startup marker exists.
+Read-only environment construction now removes this variable alongside
+case-insensitive PATH keys, without changing the owner input or ordinary/
+installer environment. The full selected project/PATH/Bash packet passes
+nine cases in 11.95 seconds under the existing budgets.
+
+Older exact-source native run 43164869963 on `dc1` terminates failed: normal
+and repair succeed, but fresh fails the strict process observer despite four
+successful lifecycle stages. Fresh artifact 13920343015 records 2,698 query
+attempts, 2,697 successes and one fatal query-pipeline CimException. The
+failure reports 2,813 ms elapsed, 300 retained records, status/native code 1,
+HRESULT -2146233088 and no embedded HRESULT. Maximum observed query-pipeline
+elapsed is 4,180 ms. The session closes and the observation window stops.
+These are whole-pipeline measurements, not proof of provider-only duration or
+the underlying cause.
+
+The failed result is retained, not credited as qualification, waived as a
+flake or retried unchanged. This recurrence does not relax the one-second
+DCOM operation setting, cadence, caps, fatal-error contract or cleanup.
+Final combined-head CI, actual review and strict native qualification remain
+required, along with the parent's admitted-baseline update, frozen enforcement
+and separate Main-adoption obligations.
+
+The retained fresh result independently records all five lifecycle assertions,
+observed runtime installation and satisfied required modules. Six owned daemons
+settle, no task remains, and no payload-difference report is present. These
+facts do not override the failed observer. The Bash correction passes F/E9,
+module limits, all 13 install contracts, strict runtime resolution, documentation
+and whitespace checks; source admission changes exactly one digest, not a gate.

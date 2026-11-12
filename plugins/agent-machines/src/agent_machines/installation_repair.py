@@ -140,7 +140,7 @@ def _environment(owner: OwnerBinding, *, readonly: bool) -> dict[str, str]:
     if readonly:
         paths = [entry for entry in os.get_exec_path(result) if Path(entry).is_absolute()]
         for key in list(result):
-            if key.upper() == "PATH":
+            if key.upper() in {"PATH", "BASH_ENV"}:
                 result.pop(key)
         # An empty PATH would re-enable current-directory lookup on POSIX.
         result["PATH"] = os.pathsep.join(paths) or str(Path(os.devnull).absolute())

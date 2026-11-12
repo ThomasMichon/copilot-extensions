@@ -106,6 +106,10 @@ actual platform-native Index gate from a Git checkout with marker-writing local
 Git commands and relative PATH entries. It also checks an all-relative PATH
 refuses rather than restoring cwd lookup. The existing project-context controls
 retain selected-project semantics and unchanged installer cwd.
+The same selection includes an actual Bash startup-file control: a relative
+`BASH_ENV` must not execute from the read-only child's project cwd, while the
+ordinary-action environment retains it. This runs with Git Bash on Windows
+or native Bash where available; it is not native POSIX runtime qualification.
 
 Vault's explicit T3 selection is
 `tests/test_identity_payload_gate.py -k installed_readiness_does_not_import`

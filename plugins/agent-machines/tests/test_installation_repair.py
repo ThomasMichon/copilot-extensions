@@ -771,6 +771,36 @@ def test_readonly_environment_excludes_checkout_git_before_actual_index_gate(
 @pytest.mark.timeout(30)
 @pytest.mark.portfolio_tier("T2")
 @pytest.mark.effect("process")
+@pytest.mark.parametrize("readonly", (False, True))
+def test_readonly_environment_excludes_relative_bash_startup(repair_fixture, readonly):
+    from dataclasses import replace
+    from .test_invoke_payload_runtime_lock import _bash
+
+    bash = _bash()
+    if bash is None:
+        pytest.skip("Bash is unavailable")
+    home, project, payload, _, _ = repair_fixture
+    startup = project / "checkout-startup.sh"
+    startup.write_text("printf sourced > checkout-startup-ran\n", encoding="utf-8")
+    script = payload / "readiness.sh"
+    script.write_text("printf '{\"state\":\"ready\"}\\n'\n", encoding="utf-8")
+    owner = next(iter(admit_host(project, home=home, readiness_only=True).bindings.values()))
+    source = dict(owner.environment, BASH_ENV="./checkout-startup.sh")
+    environment = repair_api._environment(replace(owner, environment=source), readonly=readonly)
+    result = run_action(
+        [bash, script.as_posix()], cwd=project, environment=environment,
+        timeout=10, readonly=readonly,
+    )
+    assert result.status == "exited" and result.exit_code == 0
+    assert json.loads(result.stdout)["state"] == "ready"
+    assert (project / "checkout-startup-ran").exists() is (not readonly)
+    assert ("BASH_ENV" in environment) is (not readonly)
+    assert source["BASH_ENV"] == "./checkout-startup.sh"
+
+
+@pytest.mark.timeout(30)
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
 @pytest.mark.contract("agent_machines.caller_owned_required_readiness")
 @pytest.mark.parametrize("generic", [False, True])
 def test_readiness_only_actual_caller_observes_without_constructing_an_install_plan(repair_fixture, generic):
