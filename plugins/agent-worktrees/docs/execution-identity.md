@@ -121,7 +121,9 @@ an optional topology's platform label cannot replace that OS check.
 A branch switch or detached HEAD does not change locality or rewrite the
 recorded branch. Branch-sensitive custody is separate: managed cleanup outside
 the current allocation namespace retains recorded-branch proof, and a conflicting
-or unproven retained checkout cannot establish claimant death.
+or unproven retained checkout cannot establish claimant death. Cross-project
+claimant checks use the owner's receiving configuration for that proof; failed
+configuration acquisition remains unknown without rebinding the active project.
 
 Existing local resolve/resume, folder trust, original-owner lookup and producer
 settlement use that proof before machine-name selection. A renamed, missing,

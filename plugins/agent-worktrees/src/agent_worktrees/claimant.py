@@ -73,11 +73,14 @@ def _claimant_is_local(parsed: tracking.ClaimRef, config) -> bool | None:
 
 def _confirmed_record_death(record, config) -> bool | None:
     from . import retained_checkout
+    from .execution_spaces import project_record_config
 
-    match = retained_checkout.recorded_branch_matches(record, config)
     try:
+        if getattr(config, "repo_name", record.repo) != record.repo:
+            config = project_record_config(record)
+        match = retained_checkout.recorded_branch_matches(record, config)
         retained = (Path(record.worktree_path) / ".git").exists()
-    except (AttributeError, OSError, TypeError):
+    except (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError, cfg.yaml.YAMLError):
         return None
     if match is False or match is None and retained:
         _LOG.warning("Claimant checkout branch/metadata is unproven for its recorded incarnation")

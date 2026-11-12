@@ -691,6 +691,43 @@ def test_retained_local_claimant_survives_invalid_topology(local_worktree):
     assert claimant.resolve_claimant_alive(ref, allow_remote=False) is True
 
 
+@pytest.mark.parametrize("status", ["active", "finalized"])
+@pytest.mark.parametrize("proof", ["matching", "conflicting", "unavailable"])
+def test_cross_project_owner_death_uses_receiving_branch_proof(
+    local_worktree, monkeypatch, tmp_path, status, proof,
+):
+    from agent_worktrees import claimant
+
+    fixture = local_worktree
+    _topology(fixture, "missing")
+    fixture.data["status"] = status
+    if proof == "conflicting":
+        fixture.data["branch"] = "worktree/replacement"
+    fixture.ledger.write_text(yaml.safe_dump(fixture.data), encoding="utf-8")
+    receiving = fixture.load()
+    ambient = replace(receiving, repo_name="other", machine="old-execution", repos={
+        "other": replace(receiving.default_repo, anchor=str(tmp_path / "other-anchor")),
+    })
+    monkeypatch.setattr(cfg, "_ACTIVE_PROJECT", "other")
+    monkeypatch.setattr(cfg, "load_config", lambda *a, **k: ambient)
+
+    def load_project(name, **kwargs):
+        assert name == "example"
+        if proof == "unavailable":
+            raise ValueError("receiving configuration unavailable")
+        return receiving
+
+    monkeypatch.setattr(cfg, "load_project_config", load_project)
+    monkeypatch.setattr(claimant, "_owner_looks_dead", lambda record: True)
+    ref = f"old-execution/example/{fixture.checkout.name}"
+    before = fixture.ledger.read_bytes()
+    expected = False if proof == "matching" else None
+    assert claimant.local_claimant_alive(ref) is expected
+    assert claimant.resolve_claimant_alive(ref, allow_remote=False) is expected
+    assert cfg.active_project() == "other"
+    assert fixture.ledger.read_bytes() == before
+
+
 @pytest.mark.parametrize("topology", ["scoped", "absent"])
 @pytest.mark.parametrize("status", ["active", "finalized"])
 def test_native_owner_cannot_select_coincident_versioned_guest(
