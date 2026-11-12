@@ -2413,11 +2413,16 @@ initialization counts are asserted. Launch diagnostics now vary independently
 for every actual keeper, backend and conduit; observed backend traces must
 match admission-bound launch inputs while the original upstream trace stays
 unchanged through update, capable rollback and same-slot process replacement.
-The current trace-varying Windows source run passes; earlier constant-environment
-POSIX qualification does not qualify this expanded packet. The path-gated
+The trace-varying Windows and POSIX source packets pass. The path-gated
 `mcp-owner-exec.yml` source workflow runs its Linux selection separately from
 required unit-only CI. Unsupported-capability rollback and existing legacy
 binding preservation have focused connector controls.
+The focused `test_custody_conduit.py` and `test_custody_host.py` controls also
+exercise running-keeper capability selection through the real socket seam:
+old-host refusal before attach, capable-host/legacy-backend refusal before
+preparation, exact mode acknowledgment, malformed modes, baseline compatibility
+and required-mode handover with the original upstream. This does not qualify
+optional-launcher adoption or remove its pre-effect guard.
 The fixture uses contained,
 leased instance ownership and exact cleanup, not host credentials, installed
 services, desktop observation or a production-lifetime claim. It is not part

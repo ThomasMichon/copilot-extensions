@@ -6,7 +6,7 @@ import socket
 import pytest
 
 from agent_mcp import custody_conduit as conduit, execution_context as ec, sockio
-from agent_mcp.custody_contract import CONTRACT
+from agent_mcp.custody_contract import CONTRACT, host_descriptor
 from agent_mcp.request_context import CONTEXT_VERSION
 from .test_custody_session import configuration
 
@@ -119,3 +119,58 @@ def test_slow_fragmented_ack_has_one_total_deadline(monkeypatch):
         sockio._read_ack_line(connection, deadline=1)
     assert len(connection.timeouts) == 3
     assert connection.timeouts[0] > connection.timeouts[-1] > 0
+
+
+def test_required_trace_mode_refuses_old_running_host_before_attach(admission):
+    root, _, _, connect = admission
+    connection = connect()
+    with pytest.raises(ec.SharingUnavailable, match="cannot enforce"):
+        conduit.attach(root / "custody.sock", "fixture", root, required_trace_bookkeeping=1)
+    assert connection.closed
+    assert [item["op"] for item in connection.requests] == ["ping"]
+
+
+@pytest.mark.parametrize("confirmation", [None, 0, True, 2, "1", 1])
+def test_required_mode_needs_actual_attach_confirmation(admission, confirmation):
+    root, ping, ack, connect = admission
+    ping["custody_host"] = host_descriptor()
+    ack["custody"] = host_descriptor()
+    if confirmation is not None:
+        ack["checkpoint_trace_bookkeeping"] = confirmation
+    connection = connect()
+    if type(confirmation) is int and confirmation == 1:
+        assert conduit.attach(
+            root / "custody.sock", "fixture", root, required_trace_bookkeeping=1,
+        ) is connection
+        assert not connection.closed
+    else:
+        with pytest.raises(ec.SharingUnavailable, match="not confirmed"):
+            conduit.attach(root / "custody.sock", "fixture", root, required_trace_bookkeeping=1)
+        assert connection.closed
+    assert [item["op"] for item in connection.requests] == ["ping", "attach"]
+    assert connection.requests[-1]["checkpoint_trace_bookkeeping"] == 1
+
+
+def test_required_trace_mode_preserves_normalized_context_during_handshake(admission, monkeypatch):
+    root, ping, ack, connect = admission
+    ping["custody_host"] = host_descriptor()
+    ack.update(custody=host_descriptor(), checkpoint_trace_bookkeeping=1)
+    monkeypatch.setenv("COPILOT_EXTENSIONS_BOOT_TRACE_SHIM_START_MS", "1000")
+
+    def changed(request):
+        if request["op"] == "attach":
+            monkeypatch.setenv("COPILOT_EXTENSIONS_BOOT_TRACE_SHIM_START_MS", "2000")
+    connection = connect(changed=changed)
+    assert conduit.attach(
+        root / "custody.sock", "fixture", root, required_trace_bookkeeping=1,
+    ) is connection
+    assert not connection.closed
+
+
+@pytest.mark.parametrize("mode", [True, -1, 2, "1", None])
+def test_invalid_required_mode_refuses_before_connect(admission, mode):
+    root, _, _, connect = admission
+    connection = connect()
+    with pytest.raises(ValueError):
+        conduit.attach(root / "custody.sock", "fixture", root, required_trace_bookkeeping=mode)
+    assert not connection.requests

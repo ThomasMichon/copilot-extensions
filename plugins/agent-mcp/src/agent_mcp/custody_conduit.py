@@ -12,7 +12,7 @@ from pathlib import Path
 from . import execution_context, sockio
 from .checkpoint import Binding
 from .config import load_config
-from .custody_contract import CONTRACT, supports
+from .custody_contract import CONTRACT, supports, supports_trace_binding
 from .request_context import capture_context, supports_context
 
 
@@ -33,7 +33,7 @@ def _exchange(connection, token, request, deadline):
     return reply
 
 
-def attach(handle, bridge, runtime_root, *, timeout=10):
+def attach(handle, bridge, runtime_root, *, timeout=10, required_trace_bookkeeping=0):
     """Adopt only known installation custody; never replay application bytes.
 
     The returned socket uses the existing ``sockio.pump`` unchanged. No normal
@@ -47,11 +47,12 @@ def attach(handle, bridge, runtime_root, *, timeout=10):
         not isinstance(bridge, str) or not bridge
         or type(timeout) not in (int, float)
         or not math.isfinite(timeout) or not 0 < timeout <= 60
+        or type(required_trace_bookkeeping) is not int or required_trace_bookkeeping not in (0, 1)
     ):
         raise ValueError("custody adoption requires a bridge and bounded timeout")
     root = root.resolve()
     cfg = load_config(bridge, repository_root=Path.cwd())
-    binding = Binding.issue()
+    binding = Binding.issue(trace_bookkeeping=required_trace_bookkeeping)
     identity = binding.identity(cfg)
     context = capture_context(bridge)
     deadline = time.monotonic() + timeout
@@ -71,7 +72,11 @@ def attach(handle, bridge, runtime_root, *, timeout=10):
             or Path(advertised).resolve() != root
         ):
             raise execution_context.SharingUnavailable("custody host did not qualify")
+        if required_trace_bookkeeping and not supports_trace_binding(reply.get("custody_host")):
+            raise execution_context.SharingUnavailable("custody host cannot enforce checkpoint identity mode")
         fields = execution_context.fields_for_peer(cfg, reply)
+        if required_trace_bookkeeping:
+            fields["checkpoint_trace_bookkeeping"] = required_trace_bookkeeping
         if not hmac.compare_digest(binding.identity(cfg), identity):
             raise execution_context.SharingUnavailable("custody caller context changed")
         ack = _exchange(
@@ -85,6 +90,12 @@ def attach(handle, bridge, runtime_root, *, timeout=10):
             or not supports(ack.get("custody"))
         ):
             raise execution_context.SharingUnavailable("custody attach was not confirmed")
+        if required_trace_bookkeeping and (
+            not supports_trace_binding(ack.get("custody"))
+            or type(ack.get("checkpoint_trace_bookkeeping")) is not int
+            or ack["checkpoint_trace_bookkeeping"] != required_trace_bookkeeping
+        ):
+            raise execution_context.SharingUnavailable("custody checkpoint identity mode was not confirmed")
         if not hmac.compare_digest(binding.identity(cfg), identity):
             raise execution_context.SharingUnavailable("custody caller context changed")
         connection.settimeout(None)

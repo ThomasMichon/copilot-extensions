@@ -12,6 +12,7 @@ from .checkpoint import Binding, CheckpointRefused, data_copy
 from .custody_contract import CONTRACT, MAX_APPLICATION, MAX_CONTROL, supports
 from .custody_state import CapacityUnavailable, CustodyState, MAX_OUTPUT_BYTES
 from .custody_wire import Peer
+from .execution_context import SharingUnavailable
 from .transports import build_transport
 
 
@@ -37,8 +38,11 @@ class CustodySession:
     arbitrary reader/writer here is not endpoint or physical-generation proof.
     """
 
-    def __init__(self, cfg, write_to_client, *, transport=None):
+    def __init__(self, cfg, write_to_client, *, transport=None, required_trace_bookkeeping=0):
+        if type(required_trace_bookkeeping) is not int or required_trace_bookkeeping not in (0, 1):
+            raise CheckpointRefused("required checkpoint identity mode is invalid")
         self.cfg, self.write_to_client = cfg, write_to_client
+        self._required_trace_bookkeeping = required_trace_bookkeeping
         self.binding = Binding.issue()
         self.identity = self.binding.identity(cfg)
         self._binding_selected = False
@@ -190,6 +194,8 @@ class CustodySession:
         mode = getattr(connect, "checkpoint_trace_bookkeeping", 0)
         if type(mode) is not int or mode not in (0, 1):
             raise CheckpointRefused("backend checkpoint identity support is invalid")
+        if self._required_trace_bookkeeping and not mode:
+            raise SharingUnavailable("backend cannot provide the required checkpoint identity mode")
         if not self._binding_selected:
             if self.binding.identity(self.cfg) != self.identity:
                 raise CheckpointRefused("custody context changed before initial preparation")
