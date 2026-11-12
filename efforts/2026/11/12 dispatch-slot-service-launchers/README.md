@@ -123,7 +123,8 @@ wording or authority.
 - [x] Compose existing incoming central-service retirement for an actual
   outgoing-process publication conflict. Bound the transition and recheck
   native identity, role, root and then-current selection before effects.
-  Close self-held readers rather than trying to kill around them.
+- [x] Deferred to `#11960`: Close self-held ownership readers rather than trying
+  to kill around them. Preserve its existing contributor and native hold.
 - [x] Preserve custom launchers, unrelated holders, session/worker children
   and current/later generations. Surface target path and truthful incomplete
   publication when the remaining OS conflict cannot be resolved.
@@ -393,6 +394,8 @@ claimed.
   reviewed implementation bytes. No Dev-to-Main ancestry inference substitutes
   for that generated-snapshot verification.
 - Every Plan and Validation Plan item for this source assignment is resolved.
+  The separately owned ownership-reader correction is explicitly deferred to
+  #11960 in the Phase 2 checklist, not claimed as completed by this source work.
   Archive the effort and release its source-worktree focus through the normal
   reviewed documentation and native lifecycle flows.
 - #11960 retains its independent reader contribution and native qualification
