@@ -501,10 +501,22 @@ def require_cleanup_identity(record: Any, anchor: str | Path) -> None:
     unscoped/legacy registry would make ``require_record_mutation``
     silently no-op, letting a foreign record be reaped.
     """
-    from . import config as cfg, record_machine_identity
+    from . import config as cfg, record_machine_identity, retained_checkout
 
     if record_machine_identity.machine_identity(record) is not None:
-        require_project_record_mutation(record)
+        config = project_record_config(record)
+        require_record_mutation(record, config)
+        root = Path(config.default_repo.worktree_root).expanduser()
+        checkout = Path(record.worktree_path)
+        current_namespace = (
+            checkout == root / record.worktree_id
+            and checkout.resolve() == root.resolve() / record.worktree_id
+        )
+        if (
+            record.worktree_id != "@anchor" and getattr(record, "checkout_managed", True) and not current_namespace
+            and retained_checkout.recorded_branch_matches(record, config) is not True
+        ):
+            raise ExecutionSpaceError("retained checkout branch conflicts with its receiving incarnation")
         return
 
     try:

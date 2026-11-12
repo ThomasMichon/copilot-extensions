@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from machine_transport import normalize_environment, resolve_machine_selection, split_machine_environment
 from machine_transport.registry import machine_identity_names
 
@@ -36,15 +38,22 @@ def retained_target(
     from . import retained_checkout, session_tracking_cli, tracking
     from .execution_spaces import project_record_config
 
-    if not worktree_id or (
+    if (
+        not worktree_id or Path(worktree_id).name != worktree_id
+        or "/" in worktree_id or "\\" in worktree_id or ".." in worktree_id
+    ) or (
         environment and normalize_environment(environment) != cfg.detect_platform()
     ):
         return None
     try:
-        path = (
-            session_tracking_cli._find_tracking_file_exact(worktree_id)
-            or session_tracking_cli._find_tracking_file(worktree_id)
-        )
+        path = cfg.tracking_dir(config.repo_name) / f"{worktree_id}.yaml"
+        if not path.is_file():
+            if worktree_id == tracking.ANCHOR_ID:
+                return None
+            path = (
+                session_tracking_cli._find_tracking_file_exact(worktree_id)
+                or session_tracking_cli._find_tracking_file(worktree_id)
+            )
         if path is None:
             return None
         record = tracking.load_record(path)
@@ -58,10 +67,15 @@ def retained_target(
         return target
     caller_entries = _optional_entries(config)
     entries = caller_entries if receiving is config else _optional_entries(receiving)
-    for selected_entries in (caller_entries, entries):
+    scopes = ((config, caller_entries),) if receiving is config else (
+        (config, caller_entries), (receiving, entries),
+    )
+    for selected_config, selected_entries in scopes:
         if selected_entries is not None and _declares_target(selected_entries, name):
             resolve_machine_selection(selected_entries, name, environment, allow_physical_context=True)
-            return None
+            return target if _strict_target_is_local(
+                selected_config, name, environment, entries=selected_entries,
+            ) else None
     observed = cfg.socket.gethostname()
     if name.casefold() in {observed.casefold(), observed.split(".")[0].casefold()}:
         return target
@@ -91,9 +105,14 @@ def target_is_local(
 ) -> bool:
     if retained_target_is_local(config, worktree_id, name, environment):
         return True
+    return _strict_target_is_local(config, name, environment)
+
+
+def _strict_target_is_local(config, name, environment, *, entries=None) -> bool:
     if not name:
         return not environment or normalize_environment(environment) == cfg.detect_platform()
-    entries = registry_for_config(config)
+    if entries is None:
+        entries = registry_for_config(config)
     named_target = _declares_target(entries, name)
     if (
         not named_target and not environment and config.machine

@@ -109,8 +109,7 @@ conflicting explicit tuples are errors, never fallback execution authority.
 A checkout already registered in this machine's receiving project store is
 local by that store and its actual Git checkout, not by a machine-topology
 lookup. The retained proof checks the selected project, exact tracking path
-and snapshot, absolute nonredirected checkout, repository family, recorded
-branch and reciprocal
+and snapshot, absolute nonredirected checkout, repository family and reciprocal
 Git worktree registration. It reads Git's marker, common-directory and
 backpointer files directly, without starting Git or acquiring optional topology.
 It also covers adopted linked checkouts and retained managed checkouts outside
@@ -119,6 +118,10 @@ local Git anchor, including a bare repository or a Git-file anchor whose
 `gitdir` and optional `commondir` point to the actual repository metadata.
 The record's platform must still match the actual current execution environment;
 an optional topology's platform label cannot replace that OS check.
+A branch switch or detached HEAD does not change locality or rewrite the
+recorded branch. Branch-sensitive custody is separate: managed cleanup outside
+the current allocation namespace retains recorded-branch proof, and a conflicting
+or unproven retained checkout cannot establish claimant death.
 
 Existing local resolve/resume, folder trust, original-owner lookup and producer
 settlement use that proof before machine-name selection. A renamed, missing,
@@ -138,6 +141,9 @@ metadata does not turn a retained checkout into a remote destination.
 Caller-declared targets also precede a cross-project historical-name fallback,
 even when the receiving project has no topology of its own. Malformed local
 record shapes are failed optional probes, not a veto on strict remote routing.
+The reserved `@anchor` ID is always scoped to the selected project, never a
+cross-project global-ID or relocation candidate. A declared local target still
+carries its proven receiving project and canonical worktree ID into resume.
 
 No identity migration is necessary. IDs, historical physical and execution
 names, sessions, pairs, claims and owner references remain intact. Qualified

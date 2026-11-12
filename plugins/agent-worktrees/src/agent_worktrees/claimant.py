@@ -71,6 +71,20 @@ def _claimant_is_local(parsed: tracking.ClaimRef, config) -> bool | None:
     return None if machine_identity.is_local_machine(parsed.machine, config) else False
 
 
+def _confirmed_record_death(record, config) -> bool | None:
+    from . import retained_checkout
+
+    match = retained_checkout.recorded_branch_matches(record, config)
+    try:
+        retained = (Path(record.worktree_path) / ".git").exists()
+    except (AttributeError, OSError, TypeError):
+        return None
+    if match is False or match is None and retained:
+        _LOG.warning("Claimant checkout branch/metadata is unproven for its recorded incarnation")
+        return None
+    return False
+
+
 #: Escape hatch: set truthy to disable cross-machine SSH probing entirely, so a
 #: cross-machine owner always degrades to ``None`` (spare) without a network
 #: call. For environments where the SSH mesh is unavailable or undesirable.
@@ -241,7 +255,7 @@ def local_claimant_alive(owner_ref: str) -> bool | None:
     # its children as "claimed". The children remain protected by their OWN
     # git/PR/session prune safety, so nothing with real work is lost.
     if owner_rec.status in tracking._TERMINAL_OWNER_STATUSES:
-        return False
+        return _confirmed_record_death(owner_rec, config)
     if owner_rec.worktree_path and not Path(owner_rec.worktree_path).exists():
         return False  # owner's worktree dir removed -> gone
     # Dead-session detection: a still-on-disk worktree dir is
@@ -251,7 +265,7 @@ def local_claimant_alive(owner_ref: str) -> bool | None:
     # process, no fresh liveness hint, and days-stale activity); the freed
     # resources still keep their own git/PR/session prune-safety.
     if _owner_looks_dead(owner_rec):
-        return False
+        return _confirmed_record_death(owner_rec, config)
     return True  # owner still present -> spare
 
 

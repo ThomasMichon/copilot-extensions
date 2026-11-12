@@ -65,10 +65,17 @@ def _git_directory(anchor: Path) -> Path:
         common = _gitdir_marker(anchor)
         shared = common / "commondir"
         if shared.is_file():
+            administrative = common
             relative = shared.read_text(encoding="utf-8").strip()
             if not relative:
                 raise ValueError("receiving anchor has an empty common directory")
-            common = common / relative
+            common = (common / relative).resolve()
+            backpointer = (administrative / "gitdir").read_text(encoding="utf-8").strip()
+            if (
+                administrative.parent != common / "worktrees" or not backpointer
+                or (administrative / backpointer).resolve() != marker.resolve()
+            ):
+                raise ValueError("receiving linked anchor registration points at another location")
     else:
         common = marker if marker.is_dir() else anchor
     common = common.resolve()
@@ -77,7 +84,7 @@ def _git_directory(anchor: Path) -> Path:
     return common
 
 
-def _require_linked_checkout(checkout: Path, anchor: Path, branch: str) -> None:
+def _require_linked_checkout(checkout: Path, anchor: Path) -> str:
     """Read Git's own reciprocal membership without starting Git on entry."""
     if not checkout.is_absolute() or checkout.resolve() != checkout.absolute():
         raise ValueError("local checkout must be an absolute nonredirected path")
@@ -93,18 +100,19 @@ def _require_linked_checkout(checkout: Path, anchor: Path, branch: str) -> None:
     if not backpointer or (administrative / backpointer).resolve() != marker.resolve():
         raise ValueError("Git worktree registration points at another location")
     head = (administrative / "HEAD").read_text(encoding="utf-8").strip()
-    if not branch or head != f"ref: refs/heads/{branch}":
-        raise ValueError("linked-worktree branch conflicts with its receiving ledger")
+    if not head:
+        raise ValueError("linked-worktree registration has no HEAD")
+    return head
 
 
-def is_local(record, config) -> bool:
+def _local_head(record, config) -> str | None:
     """Prove a retained local checkout without consulting machine topology."""
     from . import tracking
 
     try:
         repo = config.repos.get(record.repo)
         if repo is None or config.repo_name != record.repo or record.platform != cfg.detect_platform():
-            return False
+            return None
         checkout = Path(record.worktree_path)
         ledger = cfg.project_dir(record.repo) / "worktrees" / f"{record.worktree_id}.yaml"
         if (
@@ -116,9 +124,9 @@ def is_local(record, config) -> bool:
             or record.yaml_path.resolve() != ledger.resolve()
             or ledger.resolve().parent != ledger.parent.resolve()
         ):
-            return False
+            return None
         if record.worktree_id != "@anchor" and not (checkout / ".git").is_file():
-            return False
+            return None
         current = tracking.load_record(ledger)
         if (
             record.receiving_allocation_present and not current.receiving_allocation_present
@@ -127,7 +135,7 @@ def is_local(record, config) -> bool:
             from .receiving_allocation import recover_missing, require_record
 
             if not recover_missing(current, ledger.parent, upgrade_journal=False):
-                return False
+                return None
             require_record(current, config, local_record=True)
         fields = (
             "repo", "worktree_id", "worktree_path", "branch", "creation_nonce",
@@ -135,16 +143,29 @@ def is_local(record, config) -> bool:
             "owner_ref", "pair_ref", "receiving_allocation", "receiving_allocation_present",
         )
         if any(getattr(current, field) != getattr(record, field) for field in fields):
-            return False
+            return None
         if record.worktree_id == "@anchor":
             if checkout != Path(repo.anchor) or checkout.resolve() != checkout.absolute():
-                return False
-            _git_directory(checkout)
-        else:
-            _require_linked_checkout(checkout, Path(repo.anchor), record.branch)
-        return True
+                return None
+            return (_git_directory(checkout) / "HEAD").read_text(encoding="utf-8").strip() or None
+        return _require_linked_checkout(checkout, Path(repo.anchor))
     except (AttributeError, KeyError, TypeError, OSError, ValueError, RuntimeError, cfg.yaml.YAMLError, git_ops.GitError):
-        return False
+        return None
+
+
+def is_local(record, config) -> bool:
+    """Prove receiving-store membership, independent of the current branch."""
+    return _local_head(record, config) is not None
+
+
+def recorded_branch_matches(record, config) -> bool | None:
+    """Separate branch-sensitive custody from ordinary local entry."""
+    if record.worktree_id == "@anchor":
+        return None
+    head = _local_head(record, config)
+    if head is None:
+        return None
+    return bool(record.branch) and head == f"ref: refs/heads/{record.branch}"
 
 
 def matches(record, config) -> bool:

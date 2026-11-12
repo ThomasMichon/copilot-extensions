@@ -314,8 +314,9 @@ def test_ambiguous_declared_target_cannot_fall_back_to_a_historical_alias(
 
 
 @pytest.mark.parametrize("exact_suffix_collision", [False, True])
+@pytest.mark.parametrize("declared_local", [False, True])
 def test_cross_project_local_probe_uses_receiving_config_without_rebinding_remote(
-    local_worktree, monkeypatch, capfd, tmp_path, exact_suffix_collision,
+    local_worktree, monkeypatch, capfd, tmp_path, exact_suffix_collision, declared_local,
 ):
     from agent_worktrees import installer, local_cache_refresh, resolve_cli, resolve_target
 
@@ -324,12 +325,13 @@ def test_cross_project_local_probe_uses_receiving_config_without_rebinding_remot
     if exact_suffix_collision:
         original_checkout = fixture.checkout
         fixture.checkout = tmp_path / "exact" / "worktree"
+        branch = f"worktree/exact-{declared_local}"
         git_ops.git(
-            "worktree", "add", "-b", "worktree/exact", str(fixture.checkout), cwd=fixture.anchor,
+            "worktree", "add", "-b", branch, str(fixture.checkout), cwd=fixture.anchor,
         )
         fixture.ledger.unlink()
         fixture.data.update(
-            worktree_id="worktree", branch="worktree/exact", worktree_path=str(fixture.checkout),
+            worktree_id="worktree", branch=branch, worktree_path=str(fixture.checkout),
         )
         fixture.ledger = fixture.ledger.with_name("worktree.yaml")
         fixture.ledger.write_text(yaml.safe_dump(fixture.data), encoding="utf-8")
@@ -355,13 +357,21 @@ def test_cross_project_local_probe_uses_receiving_config_without_rebinding_remot
     monkeypatch.setattr(installer, "read_projects_registry", lambda: {
         "projects": {"example": {}, "other": {}},
     })
+    if declared_local:
+        entry = cfg.MachineEntry(
+            key=ambient.machine, display_name="Current", hostname="new-host",
+            execution_platform=cfg.detect_platform(),
+        )
+        monkeypatch.setattr(cfg, "load_machines_yaml", lambda anchor, *, config=None: (
+            {entry.key: entry} if config is not None and config.repo_name == "other" else {}
+        ))
     assert resolve_target.retained_target_is_local(ambient, fixture.checkout.name, "old-execution")
     assert cfg.active_project() == "other"
     assert not resolve_target.retained_target_is_local(ambient, fixture.checkout.name, "foreign-host")
     assert cfg.active_project() == "other"
     monkeypatch.setattr(local_cache_refresh, "prepare_tool_roster", lambda *a, **k: None)
     assert resolve_cli.cmd_resolve(_args(
-        worktree_id=fixture.checkout.name, machine="old-execution",
+        worktree_id=fixture.checkout.name, machine=ambient.machine if declared_local else "old-execution",
         no_resume=True, defer_projections=True,
     )) == 0
     plan = json.loads(capfd.readouterr().out)
@@ -515,7 +525,8 @@ def test_replacement_checkout_branch_cannot_authorize_forced_cleanup(
     )})
     monkeypatch.setattr(cfg, "load_project_config", lambda *a, **k: config)
     record = tracking.load_record(fixture.ledger)
-    assert not retained_checkout.is_local(record, config)
+    assert retained_checkout.is_local(record, config)
+    assert retained_checkout.recorded_branch_matches(record, config) is False
     result = cleanup_gc_cli._revalidate_cleanup_safety(
         record.worktree_id, repo=config.default_repo, tracking_path=fixture.ledger.parent, force=True,
         reap=lambda *args: pytest.fail("replacement checkout reached destructive cleanup"),
@@ -590,7 +601,7 @@ def test_malformed_local_record_does_not_consume_remote_selector(local_worktree,
     assert fixture.ledger.read_bytes() == before
 
 
-@pytest.mark.parametrize("kind", ["separate", "linked"])
+@pytest.mark.parametrize("kind", ["separate", "linked", "copied-linked"])
 def test_git_file_anchor_retains_local_authority(local_worktree, monkeypatch, tmp_path, kind):
     fixture = local_worktree
     _topology(fixture, "malformed")
@@ -604,8 +615,13 @@ def test_git_file_anchor_retains_local_authority(local_worktree, monkeypatch, tm
         )
     else:
         git_ops.git(
-            "worktree", "add", "-b", "worktree/linked-anchor", str(anchor), cwd=fixture.anchor,
+            "worktree", "add", "-b", f"worktree/{kind}-anchor", str(anchor), cwd=fixture.anchor,
         )
+        if kind == "copied-linked":
+            copied = anchor.parent / "copied"
+            copied.mkdir()
+            (copied / ".git").write_text((anchor / ".git").read_text(encoding="utf-8"), encoding="utf-8")
+            anchor = copied
     checkout = anchor.parent / fixture.checkout.name
     branch = f"worktree/git-file-{kind}"
     git_ops.git("worktree", "add", "-b", branch, str(checkout), cwd=anchor)
@@ -619,6 +635,10 @@ def test_git_file_anchor_retains_local_authority(local_worktree, monkeypatch, tm
     monkeypatch.setattr(cfg, "load_project_config", lambda *a, **k: config)
     monkeypatch.setattr(git_ops, "git", lambda *a, **k: pytest.fail("local proof spawned Git"))
     record = tracking.load_record(fixture.ledger)
+    if kind == "copied-linked":
+        assert not retained_checkout.is_local(record, config)
+        assert health.audit_local_registration([record])["unproven"] == 1
+        return
     execution_spaces.require_record_mutation(record, config)
     assert retained_checkout.is_local(record, config)
     assert health.audit_local_registration([record])["local"] == 1
@@ -773,3 +793,109 @@ def test_topology_alias_without_record_proof_cannot_inherit_dead_legacy_owner(
     )
     assert not verdict.safe and verdict.category == "claimed"
     assert fixture.ledger.read_bytes() == before
+
+
+@pytest.mark.parametrize("current_namespace", [False, True])
+def test_branch_switch_does_not_veto_registered_local_entry(
+    local_worktree, monkeypatch, tmp_path, capfd, current_namespace,
+):
+    from agent_worktrees import claimant, local_cache_refresh, resolve_cli
+
+    fixture = local_worktree
+    _topology(fixture, "malformed")
+    checkout = tmp_path / "feature" / fixture.checkout.name
+    original = f"worktree/registered-{current_namespace}"
+    git_ops.git("worktree", "add", "-b", original, str(checkout), cwd=fixture.anchor)
+    git_ops.git("switch", "-c", f"feature/switched-{current_namespace}", cwd=checkout)
+    fixture.data.update(worktree_path=str(checkout), branch=original)
+    fixture.ledger.write_text(yaml.safe_dump(fixture.data), encoding="utf-8")
+    config = fixture.load()
+    root = checkout.parent if current_namespace else tmp_path / "new-root"
+    config = replace(config, repos={"example": replace(
+        config.default_repo, worktree_root=str(root),
+    )})
+    _stub_launch_plumbing(monkeypatch, config)
+    monkeypatch.setattr(cfg, "load_project_config", lambda *a, **k: config)
+    monkeypatch.setattr(local_cache_refresh, "prepare_tool_roster", lambda *a, **k: None)
+    code = resolve_cli.cmd_resolve(_args(
+        worktree_id=fixture.checkout.name, no_resume=True, defer_projections=True,
+    ))
+    plan = json.loads(capfd.readouterr().out)
+    assert code == 0, plan
+    assert plan.get("launch", plan)["work_dir"] == str(checkout)
+    record = tracking.load_record(fixture.ledger)
+    assert record.branch == original
+    owner = tracking.format_claim_ref(record.execution_machine, record.repo, record.worktree_id)
+    assert claimant.local_claimant_alive(owner) is True
+    data = yaml.safe_load(fixture.ledger.read_text(encoding="utf-8"))
+    fixture.ledger.write_text(yaml.safe_dump({**data, "status": "finalized"}), encoding="utf-8")
+    assert claimant.local_claimant_alive(owner) is None
+
+
+@pytest.mark.parametrize("kind,selected_present", [
+    ("anchor", False), ("anchor", True), ("ordinary", True),
+])
+def test_anchor_entry_never_relocates_to_another_project(
+    local_worktree, monkeypatch, tmp_path, capfd, kind, selected_present,
+):
+    from agent_worktrees import installer, local_cache_refresh, resolve_cli, session_tracking_cli
+
+    fixture = local_worktree
+    _topology(fixture, "malformed")
+    config = fixture.load()
+    other_anchor = tmp_path / "other-anchor"
+    other_anchor.mkdir()
+    git_ops.git("init", cwd=other_anchor)
+    git_ops.git(
+        "-c", "user.name=Example", "-c", "user.email=example@example.com",
+        "commit", "--allow-empty", "-m", "fixture", cwd=other_anchor,
+    )
+    other = replace(config, repo_name="other", repos={"other": replace(
+        config.default_repo, anchor=str(other_anchor), worktree_root=str(tmp_path / "other-trees"),
+    )})
+    worktree_id = "@anchor" if kind == "anchor" else fixture.checkout.name
+    other_path = other_anchor
+    other_branch = fixture.data["branch"]
+    if kind == "ordinary":
+        other_path = Path(other.default_repo.worktree_root) / worktree_id
+        other_branch = "worktree/other-same-id"
+        git_ops.git("worktree", "add", "-b", other_branch, str(other_path), cwd=other_anchor)
+    records = cfg.project_dir("other") / "worktrees"
+    records.mkdir(parents=True)
+    (records / f"{worktree_id}.yaml").write_text(yaml.safe_dump({
+        **fixture.data, "worktree_id": worktree_id, "repo": "other",
+        "kind": "anchor" if kind == "anchor" else "session",
+        "worktree_path": str(other_path), "branch": other_branch, "resources": [],
+    }), encoding="utf-8")
+    if selected_present and kind == "anchor":
+        (fixture.ledger.parent / "@anchor.yaml").write_text(yaml.safe_dump({
+            **fixture.data, "worktree_id": "@anchor", "kind": "anchor",
+            "worktree_path": str(fixture.anchor), "resources": [],
+        }), encoding="utf-8")
+    _stub_launch_plumbing(monkeypatch, config)
+    monkeypatch.setattr(cfg, "tracking_dir", lambda name=None: cfg.project_dir(
+        name or cfg.active_project(),
+    ) / "worktrees")
+    monkeypatch.setattr(cfg, "load_project_config", lambda name, **kwargs: (
+        other if name == "other" else config
+    ))
+    monkeypatch.setattr(installer, "read_projects_registry", lambda: {
+        "projects": {"example": {}, "other": {}},
+    })
+    monkeypatch.setattr(local_cache_refresh, "prepare_tool_roster", lambda *a, **k: None)
+    code = resolve_cli.cmd_resolve(_args(
+        worktree_id=worktree_id, machine="old-execution" if selected_present else None,
+        no_resume=True, defer_projections=True,
+    ))
+    plan = json.loads(capfd.readouterr().out)
+    if selected_present:
+        assert code == 0, plan
+        expected = fixture.anchor if kind == "anchor" else fixture.checkout
+        assert plan.get("launch", plan)["work_dir"] == str(expected)
+    else:
+        assert code != 0 and "not found" in plan["error"].lower()
+    assert cfg.active_project() == "example"
+    if kind == "anchor":
+        expected_ledger = fixture.ledger.parent / "@anchor.yaml" if selected_present else None
+        assert session_tracking_cli._find_tracking_file_exact("@anchor") == expected_ledger
+        assert session_tracking_cli._find_tracking_file("@anchor") == expected_ledger
