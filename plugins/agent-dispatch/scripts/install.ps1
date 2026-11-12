@@ -1025,22 +1025,25 @@ function Get-PayloadHash {
                 ForEach-Object { $_.ToString('x2') }))
         } finally { $sha.Dispose() }
     }
-    <# Cheap payload fingerprint for the completion marker (#935): sha256 of
-       pyproject.toml + the vendored-lib version set. Never throws -> '' on error. #>
-    try {
-        $parts = @()
-        $pp = Join-Path $PluginDir 'pyproject.toml'
-        if (Test-Path $pp) { $parts += (Get-Content $pp -Raw) }
-        $libs = Join-Path $PluginDir 'libs'
-        if (Test-Path $libs) {
-            Get-ChildItem $libs -Recurse -Filter 'pyproject.toml' -ErrorAction SilentlyContinue |
-                Sort-Object FullName | ForEach-Object { $parts += (Get-Content $_.FullName -Raw) }
-        }
-        $joined = [string]::Join("`n", $parts)
-        $sha = [System.Security.Cryptography.SHA256]::Create()
-        $bytes = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($joined))
-        return (-join ($bytes | ForEach-Object { $_.ToString('x2') }))
-    } catch { return '' }
+    $python = Get-BootstrapPython -ExternalOnly
+    if (-not $python) { throw 'Input fingerprint requires the construction bootstrap Python' }
+    $probe = @'
+import sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+import installer_dependency_policy as policy
+sys.modules["tomllib"] = policy._toml_parser()
+import installer_engine as engine
+print(engine.runtime.fingerprint_source(engine._source_files(engine._package_roots(Path(sys.argv[2])))))
+'@
+    $nativeError = ''
+    $output = Invoke-Hidden -FilePath $python -ArgList @(
+        '-I', '-B', '-c', $probe, $ScriptDir, $PluginDir
+    ) -ErrorOutput ([ref]$nativeError)
+    if ($LASTEXITCODE -ne 0) { throw "Runtime input fingerprint failed: $output$nativeError" }
+    $digest = ($output | Out-String).Trim()
+    if ($digest -cnotmatch '^[0-9a-f]{64}$') { throw 'Invalid runtime input fingerprint' }
+    return $digest
 }
 
 function Invoke-VersionedSlotClean {
