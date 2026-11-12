@@ -322,7 +322,12 @@ def _daemon_custody(root: Path, *, create: bool):
         return
     if before is not None and os.name == "nt" and before.size == 0 and not create:
         raise ValueError("An empty Manager daemon lease needs its owner to settle first")
-    source = _plain(SCRIPTS.parent / "src" / "worktree_manager" / "mux_file_lock.py")
+    owner = SCRIPTS.parent
+    if owner.name == "_runtime_assets" and owner.parent.name == "worktree_manager":
+        owner = owner.parent
+    else:
+        owner = owner / "src" / "worktree_manager"
+    source = _plain(owner / "mux_file_lock.py")
     spec = importlib.util.spec_from_file_location("_manager_uninstall_lock", source)
     if spec is None or spec.loader is None:
         raise ValueError("Manager daemon lease owner is unavailable")
