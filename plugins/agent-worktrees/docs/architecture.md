@@ -651,6 +651,45 @@ boundary, not universal filesystem interception: custom launch commands and
 legacy setup scripts remain responsible for entering through
 `agent-worktrees config-root` before writing concrete setup configuration.
 
+### Actor-free recovery journal
+
+`launch_recovery_store.WorktreeRecoveryStore` adapts the standalone Driver
+core's complete recovery-record contract to the existing tracking writer.
+It is a bookkeeping provider, not an installed recovery controller or native
+admission path. No production launch caller invokes it yet.
+
+Construction takes a canonical, registered worktree-record path, not a path
+derived from a recovery descriptor. The descriptor's `owner_ref` must be that
+record's qualified execution-machine/project/worktree claim reference;
+`worktree_ref` is its worktree ID. The journal additionally binds the immutable
+worktree creation nonce. All eleven descriptor fields are exact keys. Source,
+lease and native-incarnation references are historical assertions, not proof
+of current authority or whole-scope settlement.
+
+The version-1 `launch_recovery_compare_and_swap` tracking-write verb uses the
+same registered implementation in the resident and pre-send direct fallback.
+Its receiver rechecks the canonical record and receiving execution-space
+authority under the strict record lock. An older resident does not advertise
+this verb; the existing pre-send fallback uses the current implementation.
+After possible admission, a failed acknowledgement stays ambiguous: reread
+the same original operation, never select another writer or replay an effect.
+
+One `launch-recovery.json` in the worktree's external launch-state directory
+retains complete versioned core records. Revision zero reserves absence;
+each CAS appends exactly one phase, preserves the prior step prefix and holds,
+and forbids operation-ID reuse across descriptors in that worktree store.
+The commit flushes the temporary file, publishes through the existing
+write-through/namespace durability helper, then acknowledges. Unknown effects
+remain in the complete history after restored observation. Read-only status
+does not create directories or lock files, renew authority or clear holds.
+Unsupported/corrupt state and the 64-record/2-MiB store limit refuse without
+repair, eviction or truncation. No reset or deletion API is supplied.
+
+Actor-free and contained fresh-process CAS controls cover this persistence
+contract. They do not qualify native retirement, restoration, automatic
+recovery, source-lease enforcement or live rollout. Those remain separate
+original-owner/provider integration gates.
+
 ### Launch-owned pane assets and current boundary handlers
 
 Windows Picker and `sessions.mux_new_session` creators coordinate through
