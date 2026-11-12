@@ -1,0 +1,9 @@
+{
+  "comment": "Refresh retained owner-membership evidence for project-scoped Worktrees session lookup.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

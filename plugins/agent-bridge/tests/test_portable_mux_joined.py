@@ -253,7 +253,7 @@ child.once('message',message=>{
 });
 setTimeout(()=>{},60000);
 """
-    spawned, births, listeners = [], [], []
+    spawned, births, listeners, pinned = [], [], [], []
     spawn = spawn_sync_in_kill_on_close_job
     accept = socket.socket.accept
 
@@ -271,6 +271,10 @@ setTimeout(()=>{},60000);
             time.sleep(.01)
         child = json.loads(marker.read_text(encoding="utf-8"))["child"]
         births.append((child, birth_identity(child)))
+        if os.name == "nt":
+            from agent_procutil.process_retirement import PinnedProcess
+
+            pinned.append(pins.enter_context(PinnedProcess(child, births[-1][1])))
         if phase == "construction":
             raise TimeoutError("synthetic carrier timeout")
         return connected
@@ -285,24 +289,28 @@ setTimeout(()=>{},60000);
                 "--state-file", str(tmp_path / "host.json"), "--",
             ],
         )
-    if phase == "construction":
-        with pytest.raises(TimeoutError, match="synthetic carrier timeout"):
-            construct()
-    else:
-        consumer = construct()
-        with pytest.raises(subprocess.TimeoutExpired):
-            consumer.close(timeout=.1)
-        assert not consumer.reader.is_alive() and not consumer.stderr.is_alive()
-        assert consumer.messages.closed and consumer.carrier.fileno() == -1
-    assert len(spawned) == len(births) == len(listeners) == 1
-    assert spawned[0].returncode is not None and spawned[0].stderr.closed
-    assert listeners[0].fileno() == -1
-    child, original = births[0]
-    try:
-        current = birth_identity(child)
-    except (OSError, ValueError, RuntimeError):
-        current = None
-    assert current != original
+    with contextlib.ExitStack() as pins:
+        if phase == "construction":
+            with pytest.raises(TimeoutError, match="synthetic carrier timeout"):
+                construct()
+        else:
+            consumer = construct()
+            with pytest.raises(subprocess.TimeoutExpired):
+                consumer.close(timeout=.1)
+            assert not consumer.reader.is_alive() and not consumer.stderr.is_alive()
+            assert consumer.messages.closed and consumer.carrier.fileno() == -1
+        assert len(spawned) == len(births) == len(listeners) == 1
+        assert spawned[0].returncode is not None and spawned[0].stderr.closed
+        assert listeners[0].fileno() == -1
+        if pinned:
+            assert pinned[0].exited(timeout=10)
+        else:
+            child, original = births[0]
+            try:
+                current = birth_identity(child)
+            except (OSError, ValueError, RuntimeError):
+                current = None
+            assert current != original
 
 
 @pytest.mark.parametrize("duplicate", [False, True], ids=["one-admitted-send", "duplicate-loadout-holds"])

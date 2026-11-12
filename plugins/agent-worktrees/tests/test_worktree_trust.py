@@ -163,8 +163,13 @@ def test_real_execution_space_fence_precedes_trust(
 def test_terminal_managed_record_does_not_trust(
     native_checkout, sample_record, monkeypatch_config,
 ):
+    from agent_worktrees import config as cfg
+
     checkout, home = native_checkout
-    record = replace(sample_record, worktree_path=str(checkout), kind="bridge", status="finalized")
+    record = replace(
+        sample_record, worktree_path=str(checkout), platform=cfg.detect_platform(),
+        kind="bridge", status="finalized",
+    )
     with pytest.raises(permissions.FolderTrustError, match="terminal managed"):
         worktree_trust.ensure_record_trusted(record)
     assert not home.exists()
