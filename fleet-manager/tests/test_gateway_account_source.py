@@ -191,6 +191,21 @@ def test_disconnect_after_acquisition_never_returns_credential():
     assert b"synthetic-token" not in response.body
 
 
+def test_disconnect_before_scheduled_acquisition_never_calls_source(monkeypatch):
+    source = Source()
+    value = request()
+    wait_for = asyncio.wait_for
+
+    async def close_before_start(awaitable, timeout):
+        value.lifetime.close()
+        return await wait_for(awaitable, timeout)
+
+    monkeypatch.setattr("fleet_manager.gateway_account_source.asyncio.wait_for", close_before_start)
+    response = asyncio.run(handler(source).handle(value))
+    assert response.status == 503
+    assert source.calls == []
+
+
 def test_channel_cancellation_is_propagated_without_retry():
     async def scenario():
         source = Source()

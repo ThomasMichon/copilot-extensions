@@ -128,10 +128,15 @@ class AccountSourceHandler:
         timeout = min(20.0, context.expires_at - started_wall)
         if timeout <= 0:
             return _error(403, "source-caller-denied")
+
+        async def acquire() -> str | None:
+            request.lifetime.check()
+            if time.time() >= context.expires_at:
+                raise ValueError
+            return await self._source.resolve(fields, value["capability"], source_lease=leased)
+
         try:
-            raw = await asyncio.wait_for(self._source.resolve(
-                fields, value["capability"], source_lease=leased,
-            ), timeout)
+            raw = await asyncio.wait_for(acquire(), timeout)
             request.lifetime.check()
             if time.time() >= context.expires_at:
                 return _error(403, "source-caller-denied")
