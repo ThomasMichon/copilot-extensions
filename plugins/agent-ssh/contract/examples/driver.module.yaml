@@ -1,0 +1,35 @@
+module: example
+kind: transport
+summary: Example provider transport that owns per-machine driver setup and status.
+# Selected per machine in machines.yaml:
+#   machines:
+#     workstation:
+#       hostname: workstation
+#       ssh:
+#         driver: { plugin: example-provider, module: example }
+# This file lives at <example-provider plugin root>/transports/example/module.yaml.
+proxy_command: '"{proxy_binary}" ssh-stdio "{hostname}"'
+proxy_binary_default: example-cli
+produces:
+  ssh_profile: true
+  keyed_by: machine-name
+inbound_ports: none
+topology:
+  default: per-machine
+  supported: [per-machine]
+capabilities:
+  install-client: false
+  emit-profile: true
+  verify: true
+  provision-server: false
+  setup: true      # `agent-ssh setup` runs entrypoints.setup
+  status: true     # `agent-ssh status` runs entrypoints.status (read-only)
+entrypoints:
+  # Invoked as: <entry> --machine <key> --machines <abs machines.yaml> [--apply] [--interactive] --json
+  # and must print one agent-ssh.driver-result v1 JSON object on stdout.
+  setup:
+    posix: scripts/setup.sh
+    windows: scripts/setup.ps1
+  status:
+    posix: scripts/status.sh
+    windows: scripts/status.ps1

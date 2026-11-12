@@ -33,6 +33,7 @@ def test_payload_manifest_describes_installation_context_runtime() -> None:
         "module": "agent_ssh",
         "legacyRuntimeRoot": ".agent-ssh",
         "installationContext": "required",
+        "installerLifecycle": True,
         "noSelfProvisionEnv": "AGENT_SSH_NO_SELFPROVISION",
         "purpose": "Emit inspect and verify SSH fabric profiles",
         "payloadRootEnv": "AGENT_SSH_PAYLOAD_ROOT",
