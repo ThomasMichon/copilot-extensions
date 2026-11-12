@@ -152,6 +152,8 @@ def test_dispatched_creation_waits_for_partial_rendezvous_without_replay(monkeyp
 
 
 def test_unknown_presence_cannot_admit_creation_after_acquiring_the_gate(monkeypatch):
+    import single_instance_lease
+
     class Lease:
         def __init__(self, *args, **kwargs):
             pass
@@ -165,7 +167,7 @@ def test_unknown_presence_cannot_admit_creation_after_acquiring_the_gate(monkeyp
     def unknown():
         raise mux.ObservationUnavailable("unconfirmed native session")
 
-    monkeypatch.setattr(mux, "SingleInstance", Lease)
+    monkeypatch.setattr(single_instance_lease, "SingleInstance", Lease)
     with pytest.raises(mux.ObservationUnavailable):
         with mux.session_gate("wt-fixture", exists=unknown, enabled=True):
             pytest.fail("Unknown presence admitted another creation")
@@ -205,3 +207,88 @@ def test_unknown_cli_argument_is_rejected(monkeypatch):
     with pytest.raises(SystemExit) as error:
         mux.main(["--create", "--typo"])
     assert error.value.code == 2
+
+
+@pytest.mark.parametrize("outcome", ["created", "failed", "malformed", "timeout"])
+def test_private_creation_uses_one_literal_socket_command_and_never_joins(
+    tmp_path, monkeypatch, capsys, outcome,
+):
+    binary = tmp_path / "tmux"
+    binary.touch()
+    request = {
+        "version": 1, "binary": str(binary), "socket": str(tmp_path / "tmux.sock"),
+        "session": "wt-fixture", "cwd": str(tmp_path),
+        "command": ["child", "", 'quote "inside"', "literal\nline", "tail\\"],
+    }
+    monkeypatch.setattr(mux.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(mux.sys, "stdin", io.StringIO(json.dumps(request)))
+    monkeypatch.setattr(mux, "run_or_join", lambda *a, **k: pytest.fail("No default-server join"))
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        assert kwargs["cwd"] == str(tmp_path) and kwargs["stdin"] == subprocess.DEVNULL
+        assert kwargs["timeout"] == 30
+        if outcome == "timeout":
+            raise subprocess.TimeoutExpired("private literal must not escape", 30)
+        return subprocess.CompletedProcess(
+            argv, 17 if outcome == "failed" else 0,
+            "private diagnostic" if outcome == "malformed" else "$1:1234|%2\n",
+        )
+
+    monkeypatch.setattr(mux.subprocess, "run", run)
+    assert mux.private_main() == (0 if outcome == "created" else 3)
+    assert calls == [[
+        str(binary), "-S", request["socket"], "new-session", "-d", "-s", "wt-fixture",
+        "-P", "-F", "#{session_id}:#{session_created}|#{pane_id}", "-c", str(tmp_path),
+        *request["command"],
+    ]]
+    reply = json.loads(capsys.readouterr().out)
+    assert reply == {
+        "contract": mux.CONTRACT, "version": 1,
+        "status": "created" if outcome == "created" else "unknown",
+        **({"native": {"incarnation": "$1:1234", "pane": "%2"}} if outcome == "created" else {}),
+    }
+
+
+@pytest.mark.parametrize("invalid", [
+    "windows", "duplicate", "oversized", "version", "extra", "command", "nul",
+    "session", "cwd", "binary", "socket", "linked-socket",
+])
+def test_private_refusal_precedes_any_native_effect(tmp_path, monkeypatch, capsys, invalid):
+    binary = tmp_path / "tmux"
+    binary.touch()
+    request = {
+        "version": 1, "binary": str(binary), "socket": str(tmp_path / "tmux.sock"),
+        "session": "wt-fixture", "cwd": str(tmp_path), "command": ["child"],
+    }
+    if invalid == "version":
+        request["version"] = True
+    elif invalid == "extra":
+        request["extra"] = True
+    elif invalid == "command":
+        request["command"] = []
+    elif invalid == "nul":
+        request["command"] = ["child", "\0"]
+    elif invalid == "session":
+        request["session"] = "-other"
+    elif invalid == "cwd":
+        request["cwd"] = "relative"
+    elif invalid == "binary":
+        request["binary"] = str(tmp_path / "other")
+    elif invalid == "socket":
+        (tmp_path / "tmux.sock").touch()
+    elif invalid == "linked-socket":
+        monkeypatch.setattr(type(tmp_path), "is_symlink", lambda path: path.name == "tmux.sock")
+    raw = json.dumps(request)
+    if invalid == "duplicate":
+        raw = raw[:-1] + ', "session": "other"}'
+    elif invalid == "oversized":
+        raw = " " * (1024 * 1024 + 1)
+    monkeypatch.setattr(mux.platform, "system", lambda: "Windows" if invalid == "windows" else "Linux")
+    monkeypatch.setattr(mux.sys, "stdin", io.StringIO(raw))
+    monkeypatch.setattr(mux.subprocess, "run", lambda *a, **k: pytest.fail("Invalid private request"))
+    assert mux.private_main() == 3
+    assert json.loads(capsys.readouterr().out) == {
+        "contract": mux.CONTRACT, "version": 1, "status": "rejected",
+    }
