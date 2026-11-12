@@ -117,6 +117,18 @@ def test_negative_snapshot_verification_keeps_original_deadline(tmp_path):
         snapshot.verify()
 
 
+@pytest.mark.parametrize("parents", [1, 2, 3])
+def test_missing_terminal_parent_components_keep_full_canonical_containment(tmp_path, parents):
+    target = tmp_path / "candidate"
+    target.mkdir()
+    value = target / "missing"
+    for _ in range(parents):
+        value /= ".."
+    snapshot = paths.ReferenceSnapshot(time.monotonic() + 3)
+    assert snapshot.under(str(value), str(target)) == paths.under(value, target)
+    snapshot.verify()
+
+
 @pytest.mark.skipif(os.name != "nt", reason="native Windows junction")
 def test_native_parent_junction_still_finds_candidate_reference(tmp_path):
     import _winapi

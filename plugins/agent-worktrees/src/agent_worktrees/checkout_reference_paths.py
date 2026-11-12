@@ -64,9 +64,9 @@ class ReferenceSnapshot:
             info = path.lstat()
         except FileNotFoundError:
             info = None
-        if info is None or (
+        if path.name != ".." and (info is None or (
             stat.S_ISREG(info.st_mode) and not getattr(info, "st_file_attributes", 0) & 0x400
-        ):
+        )):
             resolved = self._directory(path.parent) / path.name
         else:
             resolved = canonical(path)
