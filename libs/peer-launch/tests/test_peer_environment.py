@@ -8,6 +8,7 @@ import subprocess
 import sys
 from pathlib import Path, PureWindowsPath
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -370,13 +371,13 @@ print(json.dumps({"selected": str(selected), "probe": environment["COPILOT_EXTEN
      "\\\\?\\UNC\\server\\share\\" + "x" * 250 + r"\python.exe"),
 ], ids=["short-drive", "long-drive", "extended-drive", "long-unc"])
 def test_windows_peer_launch_binds_executable_without_rewriting_argv(
-    monkeypatch, tmp_path, pinned, selected, executable,
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, pinned: bool, selected: str, executable: str,
+) -> None:
     python = PureWindowsPath(selected)
     environment = {"COPILOT_EXTENSIONS_CONTEXT": "validated-peer"}
-    calls = []
+    calls: list[tuple[list[str], dict[str, Any]]] = []
 
-    def call(command, **kwargs):
+    def call(command: list[str], **kwargs: Any) -> int:
         calls.append((command, kwargs))
         return 23
 
