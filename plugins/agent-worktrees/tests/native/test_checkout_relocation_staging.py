@@ -4,7 +4,6 @@ import ctypes
 import hashlib
 import json
 import os
-import shutil
 import sys
 import uuid
 from ctypes import wintypes
@@ -266,7 +265,9 @@ def test_receiving_changed_root_fresh_process_and_cli_consumers(tmp_path_factory
         )
         assert remaining.returncode == 0 and remaining.stdout.count("worktree ") == 1
         assert persistent and (tmp_path / "scratch-owner.json").is_file()
-        shutil.rmtree(tmp_path)
+        from native_test_paths import NativeTemporaryDirectory
+
+        NativeTemporaryDirectory._rmtree(str(tmp_path))
 
 
 @pytest.mark.timeout(180)
