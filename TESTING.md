@@ -54,7 +54,12 @@ It records the actual Driver registration observations made during admission
 and requires nonempty native coverage for this existing-server qualification;
 an empty inventory is not evidence that the authenticated query path ran.
 Missing enrollment skips; a skip is not qualification. Retain external fixture
-roots and recovery evidence on failure instead of broadening cleanup.
+roots and recovery evidence on failure instead of broadening cleanup. The
+enrolled anchor, creation database and relocation journal live in a fresh
+persistent directory under `second`, outside runner temporary storage. That
+state is removed only after every synthetic linked checkout and fixture root
+has been cleaned successfully; a failing case retains the original recovery
+state with its external copies.
 
 This page is a reference catalog, not a sequential checklist. Read the lane
 needed for the changed behavior; optional packets below do not all become

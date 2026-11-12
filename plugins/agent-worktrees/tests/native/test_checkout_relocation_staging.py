@@ -4,6 +4,7 @@ import ctypes
 import hashlib
 import json
 import os
+import shutil
 import sys
 import uuid
 from ctypes import wintypes
@@ -118,18 +119,31 @@ def test_stage_creation_collision_retains_original_and_unknown_stage(admitted, m
     assert fixture.source.exists() and not fixture.destination.exists()
 
 
-def test_new_owner_after_copy_refuses_before_destination_publication(admitted, monkeypatch):
+@pytest.mark.parametrize("appearance", ["after-copy", "during-digest"])
+def test_new_owner_after_copy_refuses_before_destination_publication(admitted, monkeypatch, appearance):
     fixture = admitted
     copy = relocation.transfer.copy
+    digest = relocation._digest
+    finished_copy = False
 
     def newly_active(*_args):
         raise ValueError("new native owner")
 
     def copied(source, stage):
+        nonlocal finished_copy
         copy(source, stage)
-        monkeypatch.setattr(relocation, "_stopped", newly_active)
+        finished_copy = True
+        if appearance == "after-copy":
+            monkeypatch.setattr(relocation, "_stopped", newly_active)
+
+    def fingerprint(path):
+        value = digest(path)
+        if finished_copy and path == fixture.source and appearance == "during-digest":
+            monkeypatch.setattr(relocation, "_stopped", newly_active)
+        return value
 
     monkeypatch.setattr(relocation.transfer, "copy", copied)
+    monkeypatch.setattr(relocation, "_digest", fingerprint)
     with pytest.raises(ValueError, match="new native owner"):
         relocation.move(fixture.record.worktree_id, str(fixture.destination), fixture.config)
     journal = state.read(fixture.record.yaml_path)
@@ -140,7 +154,16 @@ def test_new_owner_after_copy_refuses_before_destination_publication(admitted, m
 
 @pytest.mark.timeout(180)
 def test_receiving_changed_root_fresh_process_and_cli_consumers(tmp_path_factory, record_property):
-    tmp_path = tmp_path_factory.mktemp("b")
+    persistent = os.environ.get("RELOCATION_LIVE_STATE")
+    if persistent:
+        tmp_path = Path(persistent)
+        tmp_path.mkdir()
+        (tmp_path / "scratch-owner.json").write_text(json.dumps({
+            "purpose": "Enrolled receiving fixture anchor and recovery state",
+            "retention": "Retain on failure; remove only after exact Git and fixture cleanup",
+        }), encoding="utf-8")
+    else:
+        tmp_path = tmp_path_factory.mktemp("b")
     package = Path(agent_worktrees.__file__).resolve().parent
     expected = {
         name: hashlib.sha256((package / name).read_bytes()).hexdigest()
@@ -237,6 +260,13 @@ def test_receiving_changed_root_fresh_process_and_cli_consumers(tmp_path_factory
                     pass
                 marker.unlink()
             root.rmdir()
+        remaining = run_caller_owned(
+            ["git", "-C", str(home / "anchor"), "worktree", "list", "--porcelain"],
+            cwd=tmp_path, env=env, timeout=15, max_stdout_bytes=64 * 1024, max_stderr_bytes=64 * 1024,
+        )
+        assert remaining.returncode == 0 and remaining.stdout.count("worktree ") == 1
+        assert persistent and (tmp_path / "scratch-owner.json").is_file()
+        shutil.rmtree(tmp_path)
 
 
 @pytest.mark.timeout(180)
@@ -256,6 +286,7 @@ def test_live_cross_volume_receiving_uses_existing_native_owners(
     monkeypatch.setenv("RELOCATION_LIVE_ROOTS", json.dumps([str(root / identity) for root in roots]))
     monkeypatch.setenv("RELOCATION_LIVE_PORTS", ports)
     monkeypatch.setenv("PSMUX_DATA_DIR", data)
+    monkeypatch.setenv("RELOCATION_LIVE_STATE", str(roots[1] / ("state-" + identity)))
     if enrolled.get("evidence"):
         monkeypatch.setenv("RELOCATION_LIVE_EVIDENCE", enrolled["evidence"])
     test_receiving_changed_root_fresh_process_and_cli_consumers(tmp_path_factory, record_property)

@@ -491,10 +491,10 @@ def move(worktree_id: str, destination: str, config) -> dict:
             state.write(ledger, report)
         if report["phase"] == "copied":
             if stage.exists() and not target.exists():
-                _stopped(record, source)
                 _sessionless(target)
                 if _digest(source) != report["fingerprint"]:
                     raise ValueError("original copy changed after copying; source retained")
+                _stopped(record, source)
                 durability.replace(stage, target, existing=False)
             if stage.exists() or not target.is_dir() or _digest(target) != report["fingerprint"]:
                 raise ValueError("destination publication is ambiguous; retain original move custody")
