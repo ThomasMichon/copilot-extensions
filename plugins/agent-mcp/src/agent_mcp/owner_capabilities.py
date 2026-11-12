@@ -58,6 +58,7 @@ def report() -> dict[str, object]:
             "python": str(Path(sys.executable).absolute()),
             "prefix": str(Path(sys.prefix).resolve()),
             "module": str(Path(__file__).with_name("owner_entry.py").resolve()),
+            "cwd": os.getcwd(),
             "environment": launch_environment(),
         },
         "invocation_allowed": forward._multiplex_enabled() and forward._ensure_serve_enabled(),

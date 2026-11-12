@@ -30,6 +30,7 @@ def _request():
         "receiver": {
             "python": str(Path(sys.executable).absolute()), "prefix": str(Path(sys.prefix).resolve()),
             "module": str(Path(owner_entry.__file__).resolve()),
+            "cwd": os.getcwd(),
             "environment": {key: os.environ.get(key) for key in owner_bootstrap.ENVIRONMENT_KEYS},
         },
         "selection": {"generation": "slot", "root": "unused"},
@@ -108,6 +109,7 @@ def admitted(monkeypatch, tmp_path):
     for key in ("AGENT_MCP_NO_MULTIPLEX", "AGENT_MCP_NO_SERVE", "AGENT_MCP_NO_ENSURE_SERVE"):
         monkeypatch.delenv(key, raising=False)
     request["receiver"]["environment"] = owner_entry.launch_environment()
+    request["receiver"]["cwd"] = os.getcwd()
     layout = ("slot", tmp_path / "versions" / "slot", tmp_path)
     request["selection"] = {
         "generation": "slot", "root": str(tmp_path.resolve()),
@@ -122,7 +124,7 @@ def admitted(monkeypatch, tmp_path):
     return request
 
 
-@pytest.mark.parametrize("reason", ["cwd", "selection", "optout", "context"])
+@pytest.mark.parametrize("reason", ["cwd", "wrapper-cwd", "selection", "optout", "context"])
 def test_receiver_ineligible_before_cold_start_preserves_ordinary_context(
     monkeypatch, admitted, tmp_path, reason,
 ):
@@ -131,6 +133,8 @@ def test_receiver_ineligible_before_cold_start_preserves_ordinary_context(
         project = tmp_path / "project"
         project.mkdir()
         monkeypatch.chdir(project)
+    elif reason == "wrapper-cwd":
+        admitted["receiver"]["cwd"] = str(tmp_path / "wrapper-selected-directory")
     elif reason == "selection":
         monkeypatch.setattr(incoming, "require_selected", Mock(
             side_effect=incoming.AdmissionRefused("selection changed"),
@@ -152,6 +156,27 @@ def test_receiver_ineligible_before_cold_start_preserves_ordinary_context(
     startup.assert_not_called()
 
 
+def test_receiver_applies_payload_wrapper_delta_before_qualifying_and_startup(monkeypatch, admitted):
+    baseline = os.environ.copy()
+    admitted["receiver"]["environment"]["AGENT_MCP_PAYLOAD_ROOT"] = "actual-wrapper-payload"
+    monkeypatch.setenv("AGENT_MCP_PAYLOAD_ROOT", "stale-inherited-payload")
+    from agent_mcp import cutover
+    observed = []
+    def selected(_layout):
+        observed.append(os.environ["AGENT_MCP_PAYLOAD_ROOT"])
+    monkeypatch.setattr(cutover, "_require_selected", selected)
+    monkeypatch.setattr(
+        custody_launch, "run_adopted",
+        lambda *_args, **_kwargs: observed.append(os.environ["AGENT_MCP_PAYLOAD_ROOT"]),
+    )
+    assert owner_entry.run(admitted) == 0
+    assert observed == ["actual-wrapper-payload", "actual-wrapper-payload"]
+    assert os.environ["AGENT_MCP_PAYLOAD_ROOT"] == "stale-inherited-payload"
+    for key, value in baseline.items():
+        if key != "AGENT_MCP_PAYLOAD_ROOT":
+            assert os.environ.get(key) == value
+
+
 def test_qualified_receiver_keeps_strict_owner_path_and_never_replays_unknown_startup(
     monkeypatch, admitted,
 ):
@@ -162,3 +187,16 @@ def test_qualified_receiver_keeps_strict_owner_path_and_never_replays_unknown_st
     assert owner_entry.run(admitted) == 1
     assert adopted.call_args.kwargs == {"owner_pid": 42, "owner_birth": "native:1"}
     ordinary.assert_not_called()
+
+
+def test_lost_originating_owner_refuses_without_startup_or_unowned_fallback(monkeypatch, admitted):
+    monkeypatch.setattr(custody_lifetime, "_pin", Mock(
+        side_effect=ProcessLookupError("origin exited"),
+    ))
+    ordinary, startup = Mock(), Mock()
+    monkeypatch.setattr(owner_entry.os, "execvpe", ordinary)
+    monkeypatch.setattr(incoming, "ensure_current", startup)
+    with pytest.raises(owner_entry.OwnerUnavailable, match="could not be pinned"):
+        owner_entry.run(admitted)
+    ordinary.assert_not_called()
+    startup.assert_not_called()

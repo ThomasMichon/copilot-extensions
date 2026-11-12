@@ -27,11 +27,12 @@ with the entry's unchanged environment and inherited cwd. It queries that
 entry's selected provider with probe-only `AGENT_MCP_NO_SELFPROVISION=1`;
 the eventual server does not inherit that probe-only override.
 Pair support alone does not qualify adoption. The new optional-entry
-capability identifies a physical interpreter, prefix, receiver module and
-explicit wrapper-owned environment delta. The bootstrap execs that immutable
+capability identifies a physical interpreter, prefix, receiver module, actual
+probe cwd and explicit wrapper-owned environment delta, including payload-root
+and bootstrap-trace fields. The bootstrap execs that immutable
 receiver, rather than emitting new syntax through a mutable wrapper.
 
-The receiver rechecks its actual code, selection, startup opt-outs, native
+The receiver rechecks its actual code, probe cwd, selection, startup opt-outs, native
 owner and cold custody context before any backend startup. An incompatible
 cwd or unsupported sharing context executes the original ordinary command
 with its original environment and cwd; it never forces the project into the
@@ -39,13 +40,14 @@ custody home. A changed selection, old provider, failed read-only query or
 unsupported optional contract also retains ordinary behavior before effects.
 No application operation is retried after startup or intake. The existing
 explicit paired `bridge`/`forward` flags remain strict and never acquire this
-optional fallback. Interpolated and already ownership-bound entries are not
-overridden.
+optional fallback. A lost or unverifiable originating owner also refuses rather
+than becoming an unowned ordinary call. Interpolated and already ownership-bound
+entries are not overridden.
 
 The session-only `--additional-mcp-config` overlay is a sealed anonymous file,
 read through the client's inherited Linux descriptor. Configuration and env
 values stay in the entry environment, not the bootstrap request or a persistent
-file. Only the provider's declared wrapper-owned path/interpreter delta travels
+file. Only the provider's declared wrapper-owned path/interpreter/trace delta travels
 to the physical receiver. Cwd,
 environment and literal native arguments otherwise remain unchanged. The OS
 reclaims the descriptor on client exit; no filesystem artifact needs a cleaner.

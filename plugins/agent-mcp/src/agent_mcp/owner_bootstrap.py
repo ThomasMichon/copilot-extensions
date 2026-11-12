@@ -9,6 +9,8 @@ import sys
 ENTRY_CAPABILITY = "optional-physical-owner-entry-v1"
 ENVIRONMENT_KEYS = (
     "AGENT_MCP_HOME", "AGENT_MCP_MARKETPLACE_ROOT", "COPILOT_EXTENSIONS_CONTEXT",
+    "AGENT_MCP_PAYLOAD_ROOT", "COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN",
+    "COPILOT_EXTENSIONS_BOOT_TRACE_SHIM_START_MS",
     "AGENT_RT_ROOT", "PYTHONUTF8", "PYTHONPATH", "PYTHONHOME",
 )
 
@@ -29,7 +31,7 @@ def receiver(report):
         and set(entry.get("environment", {})) == set(ENVIRONMENT_KEYS)
     ):
         return None
-    for key in ("python", "prefix", "module"):
+    for key in ("python", "prefix", "module", "cwd"):
         value = entry.get(key)
         if not isinstance(value, str) or "\0" in value or not Path(value).is_absolute():
             return None

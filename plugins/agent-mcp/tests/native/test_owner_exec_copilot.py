@@ -6,6 +6,7 @@ import asyncio
 import json
 import os
 from pathlib import Path
+import shutil
 import sys
 import venv
 
@@ -52,17 +53,26 @@ async def test_offline_copilot_consumes_overlay_with_its_actual_native_owner(tmp
         f" report={{'contract':{CONTRACT!r},'supported':True,'invocation_allowed':True}}\n"
         " report['entry']={'python':sys.executable,'prefix':str(Path(sys.prefix).resolve()),\n"
         " 'module':str(Path(__file__).with_name('owner_entry.py').resolve()),\n"
+        " 'cwd':os.getcwd(),\n"
         f" 'environment':{{key:os.environ.get(key) for key in {ENVIRONMENT_KEYS!r}}}}}\n"
         " report['selection']={'generation':'fixture-only'}\n"
         " print(json.dumps(report))\n"
         " raise SystemExit(0)\n"
         "args=sys.argv[1:]\n"
         "request=json.loads(args[1]) if args[0]=='session-owner-entry' else {}\n"
+        "if request:\n"
+        " assert os.getcwd()==request['receiver']['cwd']\n"
+        " for key,value in request['receiver']['environment'].items():\n"
+        "  if value is None: os.environ.pop(key,None)\n"
+        "  else: os.environ[key]=value\n"
         "assert 'AGENT_MCP_NO_SELFPROVISION' not in os.environ\n"
         "with open(os.environ['FIXTURE_RECEIPT'],'a') as receipt: receipt.write(json.dumps({\n"
         " 'owner_pid':request.get('pid'), 'owner_birth':request.get('birth'),\n"
         " 'server_pid':os.getpid(),'server_birth':birth_identity(os.getpid()),\n"
-        " 'cwd':os.getcwd(),'context':os.environ['FIXTURE_CONTEXT']})+'\\n')\n"
+        " 'cwd':os.getcwd(),'context':os.environ['FIXTURE_CONTEXT'],\n"
+        " 'payload_root':os.environ['AGENT_MCP_PAYLOAD_ROOT'],\n"
+        " 'resource':(Path(os.environ['AGENT_MCP_PAYLOAD_ROOT'])/'resource.txt').read_text(),\n"
+        " 'trace_plugin':os.environ['COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN']})+'\\n')\n"
         "for line in sys.stdin:\n"
         " request=json.loads(line)\n"
         " if 'id' not in request: continue\n"
@@ -73,13 +83,30 @@ async def test_offline_copilot_consumes_overlay_with_its_actual_native_owner(tmp
         " print(json.dumps({'jsonrpc':'2.0','id':request['id'],'result':result}),flush=True)\n",
         encoding="utf-8",
     )
+    payload = tmp_path / "payload"
+    (payload / "bin").mkdir(parents=True)
+    (payload / "scripts").mkdir()
+    wrapper = payload / "bin" / "agent-mcp"
+    shipped = Path(owner_exec.__file__).resolve().parents[2] / "bin" / "agent-mcp"
+    shutil.copyfile(shipped, wrapper)
+    wrapper.chmod(0o700)
+    (payload / "plugin.json").write_text("{}", encoding="utf-8")
+    (payload / "resource.txt").write_text("actual-payload-resource", encoding="utf-8")
+    (payload / "scripts" / "runtime-gate.sh").write_text(
+        '#!/usr/bin/env bash\nset -euo pipefail\nexec "$FIXTURE_PYTHON" -I -m agent_mcp "$@"\n',
+        encoding="utf-8",
+    )
+    stale = tmp_path / "stale-payload"
+    stale.mkdir()
+    (stale / "resource.txt").write_text("wrong-payload-resource", encoding="utf-8")
     configuration = tmp_path / "entries.json"
     configuration.write_text(json.dumps({"mcpServers": {"owner-fixture": {
-        "type": "local", "command": str(python),
-        "args": ["-I", "-m", "agent_mcp", "bridge", "fixture"], "tools": ["*"],
+        "type": "local", "command": str(wrapper),
+        "args": ["bridge", "fixture"], "tools": ["*"],
         "env": {
             "FIXTURE_RECEIPT": str(receipt),
             "FIXTURE_CONTEXT": "literal-original-context",
+            "FIXTURE_PYTHON": str(python), "AGENT_MCP_PAYLOAD_ROOT": str(stale),
         },
     }}}), encoding="utf-8")
     environment = {
@@ -174,3 +201,6 @@ async def test_offline_copilot_consumes_overlay_with_its_actual_native_owner(tmp
     baseline = await run(False, 0)
     adopted = await run(True, 1)
     assert adopted["cwd"] == baseline["cwd"]
+    assert adopted["payload_root"] == baseline["payload_root"] == str(payload)
+    assert adopted["resource"] == baseline["resource"] == "actual-payload-resource"
+    assert adopted["trace_plugin"] == baseline["trace_plugin"] == "agent-mcp"

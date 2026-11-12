@@ -11,8 +11,12 @@ from .execution_context import SharingUnavailable
 from .owner_bootstrap import ENVIRONMENT_KEYS, receiver
 
 
+class OwnerUnavailable(ValueError):
+    """A supplied originating lifetime cannot become an unowned ordinary call."""
+
+
 def launch_environment() -> dict:
-    """Describe only the wrapper-owned path/interpreter delta, never credentials."""
+    """Describe only wrapper-owned path/interpreter/trace fields, never credentials."""
     return {key: os.environ.get(key) for key in ENVIRONMENT_KEYS}
 
 
@@ -28,6 +32,7 @@ def _qualify(request):
         or str(Path(sys.executable).absolute()) != entry["python"]
         or str(Path(sys.prefix).resolve()) != entry["prefix"]
         or str(Path(__file__).resolve()) != entry["module"]
+        or os.getcwd() != entry["cwd"]
     ):
         raise SharingUnavailable("optional owner receiver differs from its physical declaration")
     layout = incoming.require_selected()
@@ -45,7 +50,11 @@ def _qualify(request):
     if not target:
         raise SharingUnavailable("optional owner receiver requires an ordinary target")
     execution_context._identity(load_config(target, repository_root=Path.cwd()), "0" * 64)
-    with custody_lifetime.SessionOwner(request["pid"], request["birth"]):
+    try:
+        owner = custody_lifetime.SessionOwner(request["pid"], request["birth"])
+    except (OSError, ValueError) as error:
+        raise OwnerUnavailable("originating owner could not be pinned") from error
+    with owner:
         _require_selected(layout)
     args.session_owner_pid, args.session_owner_birth = request["pid"], request["birth"]
     return args
@@ -71,6 +80,8 @@ def run(request) -> int:
                 os.environ[key] = value
         try:
             args = _qualify(request)
+        except OwnerUnavailable:
+            raise
         except (OSError, ValueError):
             os.environ.clear()
             os.environ.update(environment)
