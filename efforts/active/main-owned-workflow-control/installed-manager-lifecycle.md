@@ -2920,3 +2920,22 @@ finding accompanies it. The disclosed fatal CIM failure cannot be closed by
 these source controls; the changed source must be assessed by the existing
 bounded disposable Windows owner, with any recurring failure retaining its new
 numeric diagnostics and original fatal policy.
+
+CI 43325672417 at `5675e3704a` passes eligible coverage units in 1m51s,
+strict types, full source guards and installation/runtime checks, then refuses
+Bridge's current contract coverage: the synchronized peer launcher is an
+explicit semantic HTTP-52 source. Its current source declaration must change
+from the previous launcher hash, and a declaration alone cannot replace genuine
+current fixture evidence. The canonical `capture_bridge_http52.py --prepare`
+binds the committed source without changing protocol generation 52, prior
+capability floors, historical packets or immutable provenance. No guard is
+disabled and no old capture is relabeled.
+
+The existing source-only POSIX artifact lane, `bridge-http52-capture`, owns the
+next exact-source writer, independent no-write execution, historical guard and
+controlled artifact export. Its 30-minute job and ten-minute capture stages are
+unchanged. The prepared source checkpoint must be published before that lane
+can run; its expected missing-fixture refusal is not acceptance or merge
+authority. Windows installed-suite execution remains separate and on hold until
+the current required CI gate is green. Actual review 5883441074 on `5675e3704a`
+still retains both threads and requires exact-head native acceptance.
