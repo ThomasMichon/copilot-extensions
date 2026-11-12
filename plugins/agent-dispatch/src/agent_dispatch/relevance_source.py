@@ -52,9 +52,12 @@ class RelevanceSource:
         merged = merge_registration_sources(direct, declared)
         if selector.registration_id in merged.replacements:
             raise TaskError("relevance direct registration is superseded by its effective declaration")
-        registrations = {**other, **merged.registrations}
         predecessors: dict[str, frozenset[str]] = {}
         hold_replacements = merge_registration_sources(local_direct, declared).replacements
+        registrations = {
+            **{rid: reg for rid, reg in other.items() if rid not in hold_replacements},
+            **merged.registrations,
+        }
         for reg in local_direct:
             if replacement := hold_replacements.get(reg["id"]):
                 predecessors[replacement] = (

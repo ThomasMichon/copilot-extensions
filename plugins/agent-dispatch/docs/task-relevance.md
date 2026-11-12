@@ -166,7 +166,8 @@ tokens, for both the selected evaluator and its companion emitter. Fresh
 foreign-machine emitter declarations remain visible for provenance collision
 detection, without becoming eligible local callers or trusting stale mirrors.
 Predecessor hold correlation also includes paused local rows without admitting
-them as callers. Evaluator repo/ref selection precedes hold exclusion: an
+them as callers or counting an equivalent replaced emitter as a second source.
+Evaluator repo/ref selection precedes hold exclusion: an
 all-repos reporter cannot take over a held repo-specific evaluator's work.
 Legacy/manual tasks without matching emitter provenance remain outside scope.
 

@@ -283,21 +283,28 @@ def test_fresh_foreign_declaration_provenance_cannot_look_unique(q, venue, repor
 
 @pytest.mark.parametrize("held", [False, True])
 @pytest.mark.parametrize("bound", [False, True])
-def test_paused_evaluator_predecessor_carries_hold_without_becoming_eligible(
-    q, venue, held, bound,
+@pytest.mark.parametrize("predecessor,reporter", [
+    ("source-a", "emitter"), ("source-a", "evaluator"), ("evaluator-a", "evaluator"),
+])
+def test_paused_predecessor_carries_hold_without_becoming_eligible(
+    q, venue, held, bound, predecessor, reporter,
 ) -> None:
     api, trusted, override_path = venue
-    declaration(trusted, "review-source", "emitter", {**SPEC, "evaluator_ref": "review-loop"})
+    emitter(q, evaluator_ref="review-loop")
+    emitter_id = declaration(
+        trusted, "review-source", "emitter", {**SPEC, "evaluator_ref": "review-loop"},
+    )
     evaluator(q, venue, declared=False)
-    q.set_registration_status("evaluator-a", "paused")
-    rid = evaluator(q, venue)
+    evaluator_id = evaluator(q, venue)
+    q.set_registration_status(predecessor, "paused")
+    rid = emitter_id if reporter == "emitter" else evaluator_id
     t = emitted(q, evaluator_ref="review-loop")
     if bound:
         q.claim_one("host/worker", task_id=t.id)
         q.start(t.id, "host/worker", owner_session_id="original-native")
     report = request(api, t.id, rid)
     if held:
-        set_override(override_path, "evaluator-a", reason="paused predecessor held")
+        set_override(override_path, predecessor, reason="paused predecessor held")
     response = api.post(f"/task-relevance/tasks/{t.id}", headers=_headers(), json=report)
     assert response.status_code == (409 if held else 200), response.text
     if held:
