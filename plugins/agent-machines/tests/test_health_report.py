@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import io
+import importlib.util
 import json
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from xml.etree import ElementTree
 
 import pytest
@@ -27,6 +29,76 @@ def report(records, *, now=NOW):
     builder = health.HourlyReport(now)
     builder.scan(io.BytesIO(raw), len(raw))
     return builder.result(1)
+
+
+def native_bridge_records(events, *, stamp=STAMP // 1_000_000):
+    source = (
+        Path(__file__).resolve().parents[3] / "plugins" / "agent-bridge"
+        / "src" / "agent_bridge" / "telemetry.py"
+    )
+    spec = importlib.util.spec_from_file_location("health_report_bridge_producer", source)
+    assert spec and spec.loader
+    producer = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(producer)
+    reducer = producer.SessionTraceReducer(
+        "not-output-session", worktree_id="not-output-worktree", source="represented",
+    )
+    records = []
+    for event_id, (event, data) in enumerate(events, 1):
+        for record in reducer.observe(event, data, event_id=event_id):
+            # The persisted sink adds the timestamp after reduction.
+            records.append({**record, "ts": stamp})
+    return records
+
+
+def test_actual_bridge_native_transitions_are_separate_counts_without_latency_or_identifiers():
+    records = native_bridge_records([
+        ("user_message", {"prompt": "not-output"}),
+        ("agent_message", {"text": "not-output"}),
+        ("tool_call_start", {"tool_call_id": "not-output-tool"}),
+        ("tool_call_update", {"tool_call_id": "not-output-tool", "status": "failed"}),
+        ("turn_complete", {"stop_reason": "end_turn"}),
+    ])
+    result = report(records)
+    assert result["coverage"]["accepted_records"] == len(records)
+    groups = {group["kind"]: group for group in result["hours"][-1]["groups"]}
+    assert groups["bridge-conversation"]["outcomes"] == {
+        "sending": 1, "responding": 1, "end-turn": 1, "idle": 1,
+    }
+    assert groups["bridge-tool"]["outcomes"] == {"running": 1, "error": 1}
+    assert not any("p95_ns" in group or "successful_durations" in group for group in groups.values())
+    assert "not-output" not in json.dumps(result)
+    assert result["coverage"]["expected_events"] is None
+
+
+def test_actual_bridge_cancellation_remains_a_transition_not_a_transport_error():
+    result = report(native_bridge_records([
+        ("user_message", {}),
+        ("tool_call_start", {"tool_call_id": "fixture-tool"}),
+        ("turn_complete", {"stop_reason": "interrupted"}),
+    ]))
+    groups = {group["kind"]: group for group in result["hours"][-1]["groups"]}
+    assert groups["bridge-conversation"]["outcomes"]["cancelled"] == 1
+    assert groups["bridge-tool"]["outcomes"]["cancelled"] == 1
+    assert all("error" not in group["outcomes"] for group in groups.values())
+
+
+@pytest.mark.parametrize("change", [
+    {"event": "future-event"},
+    {"to": "private-unknown-state"},
+    {"event": "user_message", "to": "error"},
+    {"to": []},
+    {"from": {}},
+    {"schema": "future.v2"},
+])
+def test_native_transition_refusals_do_not_erase_independent_valid_records(change):
+    valid = {
+        "kind": "state_transition", "name": "conversation", "event": "turn_complete",
+        "to": "idle", "ts": STAMP // 1_000_000,
+    }
+    result = report([valid, {**valid, **change}])
+    assert result["coverage"]["accepted_records"] == 1
+    assert result["coverage"]["unsupported_records"] == 1
 
 
 def test_real_schema_families_keep_counts_durations_and_absence_distinct():

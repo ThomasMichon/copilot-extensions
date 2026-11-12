@@ -1651,3 +1651,34 @@ The [owner comparison](architecture.md#owner-decision) explains this choice.
   time. The added query costs approximately 1.4 seconds per explicit management
   read on that host, not on the hourly collector path. Release and installed
   adoption of this correction remain separate from this source qualification.
+
+### 2026-11-12 - Corrected runtime adopted and real collection preserved
+- #12264 merged as `8bf93a7ad949e32b8cca1e564bb468b139b34d8a` after
+  exact-head Copilot approval, required green CI and no open review issues.
+  The unit admission update changed only the corrected adapter's fingerprint;
+  node, effect, coverage and budget admission remained unchanged.
+- Promoted Main `20106e78eff5a8e95fc8e46e71a36ec0c1c75d14` matched the
+  accepted implementation, native regression and documentation. The separately
+  authorized target-only update installed the exact correction; native
+  convergence refreshed the retained job and repeat convergence was unchanged.
+- The current host's independently diagnosed frontend initialization failure
+  was recovered through its existing same-code lifecycle. A clean non-forcing
+  drain protected accepted work before health-gated cutover and native
+  predecessor retirement. Post-caller-cleanup readiness and configuration
+  preservation were verified; no package or other-host rollout was required.
+- The configuration owner changed only the selected listener endpoint,
+  preserving publisher, continuity, services and history. Fresh local
+  confirmation restored the hourly job. Its actual next UTC execution returned
+  result zero with correct timestamps, both target slots and settled instances
+  and admission. No missed-hour replay or fabricated historical coverage occurred.
+- Peer SSH, exact lookup and notification storage are observed separately from
+  native SDK consumption. The selected retained receiver still refuses
+  negotiation after serving readiness recovered. Its installation prerequisites
+  and the headed launch selection require separate owner/operator steering;
+  no receipt, binding or consumer guard was bypassed.
+- The normal report/chart consumer rendered the real local health history but
+  rejected the selected producer's valid conversation/tool transition records.
+  Schema-only inspection confirmed a consumer vocabulary gap, not missing
+  durations to invent. Extend only the bounded content-free transition decoder,
+  preserve homogeneous groups and unknown timing/population, then prove the
+  genuine producer-to-report path. Broader effort gates remain open.
