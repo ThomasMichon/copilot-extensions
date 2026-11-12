@@ -6611,6 +6611,26 @@ later header cannot poison a previously pending selector retry. Existing strict
 receipt/parser and pending-withdrawal suites still cover malformed legacy proof;
 the new constructor must not repair it.
 
+## Public toolchain metadata deadlines
+
+The public toolchain resolver accepts the caller's monotonic deadline without
+changing governed-feed selection, seasoning, or hash requirements. All package
+metadata requests share that deadline. Response status, headers, redirects and
+body reads cannot extend it by continuing to deliver bytes. Deadline-bound
+requests use a finite, isolated Python child so DNS, address attempts and proxy
+CONNECT negotiation share the same budget; expiration kills and waits for that
+request child rather than abandoning a resolver thread. Calls without a deadline
+retain their in-process fetch behavior.
+
+`tools/test_seasoned_public_feed.py` exercises finite and trickling responses,
+including chunk framing, redirects and HTTP errors, over fixture-owned local
+sockets. It checks timer/thread and request-child settlement as well as deadline
+failure, including stalled DNS and trickling HTTPS proxy negotiation.
+`tools/test_public_toolchain_source.py` checks shared-budget exhaustion and
+forwarding through the existing toolchain-lock owner. These socket/thread tests
+are separate from the actor-free promotion-unit packet; they do not establish
+native installer, private-feed or installed maintenance qualification.
+
 ## Unit-only promotion packet
 
 The actor-free `test_health_composition.py` packet executes the existing domain

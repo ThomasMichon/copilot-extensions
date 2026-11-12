@@ -3,10 +3,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from functools import partial
 from pathlib import Path
 
 from governed_feed_trust import ArtifactBuildError, _opaque_index_identity
-from seasoned_public_feed import SeasonedVersionError, resolve_seasoned_public_release
+from seasoned_public_feed import SeasonedVersionError, _default_fetch, resolve_seasoned_public_release
 
 
 @dataclass(frozen=True)
@@ -42,12 +43,15 @@ class PublicToolchainSource:
 
 
 def resolve_public_source(
-    packages: tuple[str, ...], min_age_days: int
+    packages: tuple[str, ...], min_age_days: int, *, deadline: float | None = None,
 ) -> PublicToolchainSource:
     now = datetime.now(timezone.utc)
     try:
         releases = {
-            name: resolve_seasoned_public_release(name, min_age_days=min_age_days, now=now)
+            name: resolve_seasoned_public_release(
+                name, min_age_days=min_age_days, now=now,
+                **({"fetch": partial(_default_fetch, deadline=deadline)} if deadline is not None else {}),
+            )
             for name in packages
         }
     except SeasonedVersionError as exc:
