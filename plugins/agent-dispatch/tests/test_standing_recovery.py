@@ -204,6 +204,55 @@ def recovery_result(operation, state):
     }
 
 
+@pytest.mark.parametrize("phase", ["prepare", "claim"])
+def test_write_contention_cannot_carry_recovery_authority_past_expiry(admission, monkeypatch, phase):
+    import sqlite3
+    from contextlib import contextmanager
+    from threading import Event
+
+    operation = prepare_native_recovery(admission)
+    queue, task_id = admission.queue, admission.task.id
+    if phase == "prepare":
+        queue.settle_standing_recovery(
+            task_id, operation_id=operation["operation_id"],
+            outcome=recovery_result(operation, "not-started"), prepared_only=True, now=125,
+        )
+    before = queue.get(task_id)
+    entered = Event()
+    clock = {"now": 150.0}
+    connect = queue._connect
+    monkeypatch.setattr(queue, "_now", lambda value=None: clock["now"] if value is None else value)
+
+    @contextmanager
+    def traced():
+        with connect() as conn:
+            conn.set_trace_callback(lambda sql: entered.set() if sql == "BEGIN IMMEDIATE" else None)
+            yield conn
+
+    monkeypatch.setattr(queue, "_connect", traced)
+
+    def work():
+        if phase == "claim":
+            return queue.claim_standing_recovery(task_id, operation_id=operation["operation_id"])
+        return queue.prepare_standing_recovery(
+            task_id, operation_id="after-contention", grant_id="grant-one",
+            expected_revision=before.standing_revision, trigger="confirmed-loss",
+        )
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        with sqlite3.connect(queue.db_path, timeout=5) as writer:
+            writer.execute("BEGIN IMMEDIATE")
+            future = pool.submit(work)
+            try:
+                assert entered.wait(5)
+                clock["now"] = 201.0
+            finally:
+                writer.rollback()
+        with pytest.raises(TaskError, match="expired"):
+            future.result(timeout=5)
+    assert queue.get(task_id) == before
+
+
 def test_recovery_write_ahead_survives_restart_and_claims_only_once(admission):
     operation = prepare_native_recovery(admission, trigger="boot")
     task = admission.queue.get(admission.task.id)

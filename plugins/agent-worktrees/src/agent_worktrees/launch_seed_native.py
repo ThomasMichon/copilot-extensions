@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import argparse
-from contextlib import contextmanager, nullcontext
+from contextlib import ExitStack, contextmanager, nullcontext
 from dataclasses import asdict
 import json
 import os
@@ -264,15 +264,20 @@ def admission(
     *, admission_only: bool = False, preserve_seed_id: str | None = None,
     native_resume_session: str | None = None, require_cold_stop: bool = True,
     planned_status: str | None = None,
+    head_fence: ExitStack | None = None,
 ):
     """Keep the original creation fence until the exec or retained owner releases it."""
     from . import launch_admission, tracking
 
     with (
         launch_admission.guard(record_path),
-        tracking._RecordLock(record_path, require_sidecar=True)
-        if native_resume_session is not None else nullcontext(),
+        ExitStack() as held,
     ):
+        record_scope = head_fence if head_fence is not None else held
+        if head_fence is not None:
+            held.callback(head_fence.close)
+        if native_resume_session is not None:
+            record_scope.enter_context(tracking._RecordLock(record_path, require_sidecar=True))
         check = _admission_check(
             record_path, correlation, operation_id, admission_only=admission_only,
             preserve_seed_id=preserve_seed_id, native_resume_session=native_resume_session,

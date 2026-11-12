@@ -227,9 +227,9 @@ class QueueStandingRecoveryMixin:
         _operation_id(operation_id)
         if trigger not in {"boot", "confirmed-loss"}:
             raise TaskError("standing recovery trigger must be boot or confirmed-loss")
-        ts = self._now(now)
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
+            ts = self._now(now)
             task = self._fetch(conn, task_id)
             if task is None or task.kind != "standing-charter":
                 raise TaskError("operation requires a standing charter task")
@@ -288,9 +288,9 @@ class QueueStandingRecoveryMixin:
     ) -> dict:
         """Consume once before invoking; a retry must inspect, never invoke again."""
         _operation_id(operation_id)
-        ts = self._now(now)
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
+            ts = self._now(now)
             task = self._fetch(conn, task_id)
             recovery = self._standing_recovery_authority(conn, task, ts, pending=True)
             pending = recovery["pending"]

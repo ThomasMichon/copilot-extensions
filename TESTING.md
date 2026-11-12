@@ -9799,8 +9799,12 @@ through the bounded test supervisor for the focused wrapper controls. They injec
 the unsettled-process error without creating a genuinely unreaped process.
 Fixtures are constructed before pytest's unchanged 30-second item checks;
 no constructor, dependency policy, package health or failed-selection assertion
-is mocked. The assertions run through `run-plugin-tests.py` with explicit
-`tests/native/test_manager_runtime_install.py` selection. The ordinary Manager
+is mocked. The native owner prepares the test interpreter through
+`run-plugin-tests.py` and retains its admission lease. Assertions use that same
+interpreter with the portfolio/command guard, isolated state roots and explicit
+native-file selection under the existing process-tree supervisor; they do not
+rebuild a second test-tool environment inside the timed product-construction
+group. The ordinary Manager
 suite does not recurse into that prepared native lane. Report both ordinary
 orchestration/assembly units and this cold native acceptance before publishing
 a Manager installation change; neither is a substitute for the other.

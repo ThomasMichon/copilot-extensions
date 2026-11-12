@@ -33,7 +33,7 @@ def owner(tmp_path, monkeypatch):
         pending_handoffs=[], pending_seed=None, status="active",
     )
     monkeypatch.setattr(launch_seed_exec.tracking, "load_record", lambda _: record)
-    monkeypatch.setattr(launch_seed_exec.launch_seed_state, "peek", lambda _: None)
+    monkeypatch.setattr(launch_seed_exec.launch_seed_state, "peek", lambda _, **kwargs: None)
     monkeypatch.setattr(launch_seed_exec.sessions, "has_mux_session", lambda _: False)
     monkeypatch.setattr(
         launch_seed_exec.sessions, "verify_worktree_active", lambda _: LiveVerdict(),

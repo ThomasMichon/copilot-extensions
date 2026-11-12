@@ -132,6 +132,28 @@ synthetic stores and native fixture owners.
 
 ### 2026-11-12 - Final source-pinned retention evidence
 
+- A subsequent review found stale claim timing under write contention, a headed
+  record fence held past confirmed creation and a preserved-seed checker that
+  could reacquire its parent's sidecar. Preparation/claim now sample time after
+  `BEGIN IMMEDIATE`; a verified headed native-child callback releases just the
+  record fence before the retained wait; admission-only seed reads use the
+  parent's protected snapshot. Worktrees passed 176 controls, including real
+  child/writer exclusion and the cross-process preserved-seed check. Dispatch
+  passed 51 controls, including real SQLite contention crossing grant expiry.
+- The [second native lane](https://github.com/ThomasMichon/copilot-extensions/actions/runs/43223757185)
+  passed Linux entry/installed consumers and Windows terminal/mux acceptance.
+  Its physical Linux seed stage passed 468 cases with 45 declared platform skips;
+  that job later failed older Manager forwarding fixtures. macOS exposed Bash
+  3.2 empty-array forwarding, and Windows construction exhausted its remaining
+  group time while rebuilding a second test-tool environment before assertions.
+  The fixes preserve empty/literal arguments and use current forwarding snippets.
+  The native owner now reuses its admitted interpreter with the portfolio and
+  command guard, isolated roots and the unchanged process/item/group limits.
+  All 25 wrapper controls passed. Local argument forwarding passed four cases,
+  database migration compatibility passed 12 and Manager command consumers passed
+  48 with four POSIX-only skips. A local cold Windows attempt still exceeded the
+  300-second limit during fresh bootstrap, before assertions; it is unqualified,
+  not a claimed cold-budget pass. The complete external lane must still pass.
 - The first [physical native lane](https://github.com/ThomasMichon/copilot-extensions/actions/runs/43218439323)
   failed its five selected jobs. The failures were retained, not waived:
   a generated POSIX probe needed escaped newlines and a positive fixture head

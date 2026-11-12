@@ -1195,8 +1195,10 @@ def test_manager_acceptance_cleans_settled_sandbox(
     acceptance, releases = manager_acceptance
     monkeypatch.setattr(acceptance.sys, "argv", [*acceptance.sys.argv, "--contract", contract])
     observed = []
+    commands = []
 
     def settled(command, **kwargs):
+        commands.append(command)
         sandbox = kwargs["sandbox"]
         assert not sandbox.is_relative_to(acceptance.REPO)
         with monkeypatch.context() as nested:
@@ -1211,6 +1213,13 @@ def test_manager_acceptance_cleans_settled_sandbox(
     assert acceptance.main() == returncode
     expected = {"updater": 4, "uninstall": 3, "source": 5}.get(contract, 2) if returncode == 0 else 1
     assert len(observed) == expected
+    if returncode == 0:
+        python = acceptance.venv_root(acceptance.REPO) / "worktree-manager" / (
+            "Scripts/python.exe" if os.name == "nt" else "bin/python"
+        )
+        assert commands[-1][:3] == [str(python), "-m", "pytest"]
+        assert commands[-1][commands[-1].index("-p") + 1] == "pytest_portfolio_guard"
+        assert "--timeout=30" in commands[-1] and "timeout_func_only=false" in commands[-1]
     assert not any(sandbox.exists() for sandbox in observed)
     assert releases == [True]
 
@@ -1257,7 +1266,9 @@ def test_manager_acceptance_source_contains_each_construction_and_keeps_final_as
         "release", "qualified", "source", "repair",
     ]
     assert all(command[-2] == "--prepare-step" for command, _, _ in observed[:-1])
-    assert observed[-1][0][-2:] == ["--test-file", "tests/native/test_manager_source_install.py"]
+    assert observed[-1][0][-1] == str(
+        acceptance.REPO / "worktree-manager" / "tests" / "native" / "test_manager_source_install.py"
+    )
     assert [limit for _, limit, _ in observed] == [1800, 1560, 1320, 1080, 840]
     assert len({sandbox for _, _, sandbox in observed}) == 1
     assert not observed[0][2].exists()

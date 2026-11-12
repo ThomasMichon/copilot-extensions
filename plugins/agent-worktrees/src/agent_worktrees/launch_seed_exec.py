@@ -618,7 +618,10 @@ def _prepare(
     except (AgentHostingError, ValueError) as exc:
         print(str(exc), file=sys.stderr)
         return 3
-    current = launch_seed_state.peek(record_path)
+    current = (
+        launch_seed_state.peek(record_path, read_only=True) if admission_only
+        else launch_seed_state.peek(record_path)
+    )
     if native_resume_session:
         from .session_liveness import session_liveness
 

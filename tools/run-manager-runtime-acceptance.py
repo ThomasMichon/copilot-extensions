@@ -1,7 +1,7 @@
 """Cold Manager acceptance under independently contained native group boundaries.
 
 Prepare real installed candidates before pytest's unchanged 30-second item
-checks, then execute those checks through the canonical plugin runner.
+checks, then execute them with the admitted interpreter and portfolio guard.
 The application-adapter contract instead times application preparation and
 every consumer as separate 30-second items inside one 300-second group.
 """
@@ -492,10 +492,15 @@ def main() -> int:
         sandbox = Path(raw)
         record_owner(sandbox, REPO, retention="disposable after verified process cleanup")
         env = isolated_environment(os.environ, sandbox)
+        env["PYTHONPATH"] = str(REPO / "tools")
+        env.pop("PYTEST_ADDOPTS", None)
         env["MANAGER_RUNTIME_ACCEPTANCE_DATA"] = str(sandbox / "fixtures.json")
         prepare_command = [str(python), "-I", "-B", str(native), "--prepare", str(sandbox)]
-        assertions = [sys.executable, str(REPO / "tools" / "run-plugin-tests.py"), "worktree-manager",
-                      "--test-file", "tests/native/" + filename]
+        assertions = [
+            str(python), "-m", "pytest", "-q", "-p", "pytest_portfolio_guard",
+            "--timeout=30", "-o", "timeout_func_only=false", "-o", "addopts=",
+            f"--basetemp={sandbox / 'assertions'}", str(native),
+        ]
         groups = (
             [("source constructions and assertions", [
                 *[[*prepare_command, "--prepare-step", step]

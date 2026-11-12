@@ -1,5 +1,5 @@
 {
-  "comment": "Resolve the native acceptance helper from its owned source path under isolated Python and verify the preparation entry point.",
+  "comment": "Keep native acceptance on owned helper paths and the admitted test interpreter, preserving containment, literal forwarding and existing construction/item deadlines without rebuilding tooling inside the product budget.",
   "changes": [
     {
       "plugin": "worktree-manager",
