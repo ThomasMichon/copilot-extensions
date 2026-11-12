@@ -533,6 +533,46 @@ def test_guarded_feed_refuses_a_changed_index(
     assert not (tmp_path / "guarded-delivery.zip").exists()
 
 
+def test_guarded_feed_publishes_despite_incompatible_wheel_metadata_changes(
+    tmp_path, monkeypatch, tls_source,  # noqa: F811
+):
+    uv = shutil.which("uv")
+    if uv is None:
+        pytest.skip("native uv is required")
+    producer, wheels, manifest, state, wheel, digest = tls_source
+    incompatible = "fixture-9.0-cp1-cp1-any.whl"
+    original = project(state, [
+        listed(hashes={"sha256": digest}, size=len(wheel)),
+        listed(filename=incompatible, url="/files/" + incompatible, hashes={"sha256": "c" * 64}),
+    ])
+    changed = json.loads(original)
+    changed["files"][1].update({
+        "hashes": {"sha256": "d" * 64}, "upload-time": "2021-01-01T00:00:00Z",
+    })
+    state["routes"]["/files/" + FILENAME] = (200, {}, wheel)
+    status, headers, _body = state["routes"]["/simple/fixture/"]
+    build_delivery = producer.build_profile_delivery
+
+    def mutate_after_delivery(*args, **kwargs):
+        result = build_delivery(*args, **kwargs)
+        state["routes"]["/simple/fixture/"] = (status, headers, json.dumps(changed).encode())
+        return result
+
+    monkeypatch.setattr(producer, "build_profile_delivery", mutate_after_delivery)
+    _configure_native_tls(tmp_path, monkeypatch, state)
+
+    result, destination = _resolve(tmp_path, producer, wheels, manifest, uv=uv)
+
+    assert result["selection"] == "guarded-native-feed"
+    with zipfile.ZipFile(destination) as delivery:
+        profile = json.loads(delivery.read("profile.json"))
+    selected = next(row for row in profile["wheels"] if row["name"] == "fixture")
+    assert (selected["version"], selected["sha256"]) == ("1.0", "sha256:" + digest)
+    paths = [path for path, _headers in state["requests"]]
+    assert paths.count("/simple/fixture/") == 2
+    assert "/files/" + incompatible not in paths
+
+
 def test_guarded_feed_rechecks_index_after_final_source_validation(
     tmp_path, monkeypatch, tls_source,  # noqa: F811
 ):

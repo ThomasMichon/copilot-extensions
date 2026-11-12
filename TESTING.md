@@ -7074,7 +7074,8 @@ invalid historical tag and native-compatible candidate parity with UV,
 single-project histories above the offered-candidate cap, bounded multi-project
 indexes and retained unsafe/tag-budget refusal,
 configured-feed redirects, credential isolation, explicit redirect refusal,
-late index and source rechecks, retained inputs,
+late index and source rechecks, target-incompatible metadata churn with
+compatible candidate and malformed-record refusal controls, retained inputs,
 one-download selected wheels, tampered retained bytes, shared budgets, sanitized
 admission refusals and Windows owned-worker timeout cleanup. Actor-free
 projection, candidate-witness, recheck, safe resolver-stop and isolated-worker

@@ -4633,7 +4633,11 @@ delivery policy, including public-index refusal and cross-origin credential
 isolation. Explicit nonempty download-origin restrictions still constrain
 artifact destinations.
 Native non-index selection settings and first-party exclusions remain in
-force. The observed project indexes are rechecked after selected-wheel
+force. Initial selection and final readback share entry validation and the
+same native tag projection. The recheck binds all compatible candidate records
+and their metadata, plus the index's transport identity; changes to incompatible
+wheels do not invalidate that selection. Malformed incompatible entries still
+refuse readback. The observed project indexes are rechecked after selected-wheel
 acquisition and source validation while the delivery is held; source is
 validated again afterward. The index check is a snapshot, not a lock on
 subsequent feed changes. The mode
