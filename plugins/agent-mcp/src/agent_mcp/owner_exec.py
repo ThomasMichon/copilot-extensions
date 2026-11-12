@@ -96,10 +96,46 @@ def _client(argv: list[str], environment: dict[str, str]) -> list[str]:
     return [executable, *argv[1:]]
 
 
+def _sealed_overlay(configuration: dict) -> int:
+    import fcntl
+
+    # Linux ABI flags remain valid when standalone Python omits their bindings.
+    cloexec_allow_sealing = 0x0001 | 0x0002
+    create = getattr(os, "memfd_create", None)
+    if create is not None:
+        descriptor = create("agent-mcp-session-overlay", cloexec_allow_sealing)
+    else:
+        import ctypes
+
+        library = ctypes.CDLL(None, use_errno=True)
+        try:
+            create = library.memfd_create
+        except AttributeError as error:
+            raise ValueError("Linux anonymous-file creation is unavailable") from error
+        create.argtypes = [ctypes.c_char_p, ctypes.c_uint]
+        create.restype = ctypes.c_int
+        descriptor = create(b"agent-mcp-session-overlay", cloexec_allow_sealing)
+        if descriptor < 0:
+            number = ctypes.get_errno()
+            raise OSError(number, os.strerror(number))
+    try:
+        with os.fdopen(os.dup(descriptor), "wb") as stream:
+            stream.write(json.dumps(configuration, ensure_ascii=True).encode("utf-8"))
+        # Standalone Python builds can omit bindings for these stable Linux ABI values.
+        seals = 1 | 2 | 4 | 8
+        fcntl.fcntl(descriptor, getattr(fcntl, "F_ADD_SEALS", 1033), seals)
+        if fcntl.fcntl(descriptor, getattr(fcntl, "F_GET_SEALS", 1034)) & seals != seals:
+            raise ValueError("Anonymous MCP overlay sealing was not confirmed")
+        return descriptor
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
 def execute(configuration: dict, names: list[str], argv: list[str]) -> None:
     """Become the native Linux client; no parent waiter or inherited owner env."""
-    if not sys.platform.startswith("linux") or not hasattr(os, "memfd_create"):
-        raise ValueError("Native owner exec currently requires Linux anonymous-file support")
+    if not sys.platform.startswith("linux"):
+        raise ValueError("Native owner exec currently requires Linux")
     from agent_procutil._daemon_instance_identity import birth_identity
 
     from .custody_lifetime import SessionOwner
@@ -113,16 +149,8 @@ def execute(configuration: dict, names: list[str], argv: list[str]) -> None:
     if not replacement["mcpServers"]:
         os.execve(command[0], command, environment)
         raise RuntimeError("Native client exec unexpectedly returned")
-    import fcntl
-
-    descriptor = os.memfd_create("agent-mcp-session-overlay", os.MFD_ALLOW_SEALING | os.MFD_CLOEXEC)
+    descriptor = _sealed_overlay(replacement)
     try:
-        with os.fdopen(os.dup(descriptor), "wb") as stream:
-            stream.write(json.dumps(replacement, ensure_ascii=True).encode("utf-8"))
-        fcntl.fcntl(
-            descriptor, fcntl.F_ADD_SEALS,
-            fcntl.F_SEAL_SEAL | fcntl.F_SEAL_SHRINK | fcntl.F_SEAL_GROW | fcntl.F_SEAL_WRITE,
-        )
         os.set_inheritable(descriptor, True)
         command.extend(("--additional-mcp-config", f"@/proc/self/fd/{descriptor}"))
         os.execve(command[0], command, environment)
