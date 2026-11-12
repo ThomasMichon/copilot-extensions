@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve native Windows paths while copying and retaining Manager installation payloads",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
