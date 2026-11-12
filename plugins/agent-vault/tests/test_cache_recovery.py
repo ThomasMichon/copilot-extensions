@@ -345,7 +345,10 @@ def test_exclusively_open_original_retains_pending_coordination(isolated):
 def test_real_finite_owner_settles_blocked_decoder(isolated, monkeypatch):
     from agent_procutil.owned_process import run_caller_owned
 
-    before = corrupt(isolated)
+    legacy = PersistentCache(isolated)
+    assert legacy.put("Example/rotating", "password", "previous", 1)
+    assert legacy.begin_replace("Example/rotating", "password", "candidate", 2)
+    before = {name: (isolated / name).read_bytes() for name in cache_recovery.FILES}
     calls = []
 
     def blocked(argv, **kwargs):
@@ -366,6 +369,10 @@ def test_real_finite_owner_settles_blocked_decoder(isolated, monkeypatch):
     assert not (cache._base_dir.parent / "coordinated.json").exists()
     assert not cache.recover_missing("Example/current", "password", "unconfirmed", 2)
     assert {name: (isolated / name).read_bytes() for name in before} == before
+    monkeypatch.setattr("agent_procutil.owned_process.run_caller_owned", run_caller_owned)
+    cache.prepare()
+    assert cache.pending_replace("Example/rotating", "password")["operation"] == 2
+    assert cache.get("Example/rotating", readonly=True) is None
 
 
 def test_adoption_during_old_store_transaction_cannot_overwrite_current_journal(
@@ -413,7 +420,10 @@ def test_changed_authority_never_falls_back_to_readable_originals(
         (isolated / filename).write_bytes(raw)
     if name == "KPDB":
         value = str(isolated.parent / value)
+    current_bytes = active._cache_file.read_bytes()
     monkeypatch.setenv(name, value)
+    assert not active.recover_missing("Example/late", "password", "fetched before switch", 3)
+    assert active._cache_file.read_bytes() == current_bytes
     with pytest.raises(CacheProtectionError):
         active.get("Example/shared", readonly=True)
     new = PersistentCache(isolated)
