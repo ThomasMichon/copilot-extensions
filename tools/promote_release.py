@@ -120,7 +120,10 @@ def add_scratch_worktree(dev_ref: str, *, repo: Path = REPO) -> Path:
     scratch = common_dir.parent / ".promote-scratch" / f"promote-{int(time.time() * 1000)}"
     scratch.parent.mkdir(parents=True, exist_ok=True)
     try:
-        _git(["worktree", "add", "--detach", str(scratch), dev_ref], cwd=repo)
+        _git(
+            ["-c", f"core.hooksPath={os.devnull}", "worktree", "add", "--detach", str(scratch), dev_ref],
+            cwd=repo,
+        )
     except subprocess.TimeoutExpired as error:
         raise PromotionError(f"scratch creation timed out; retain and inspect {scratch}") from error
     return scratch

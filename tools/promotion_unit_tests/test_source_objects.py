@@ -13,6 +13,24 @@ import promotion_source_archive as source_io
 from promotion_unit_tests.test_complete_source import case
 
 
+def test_scratch_creation_disables_hooks_only_for_the_checkout_command(tmp_path, monkeypatch):
+    import promote_release as promotion
+
+    calls = []
+
+    def git(arguments, **options):
+        calls.append((arguments, options))
+        return str(tmp_path / ".git") if arguments[0] == "rev-parse" else ""
+
+    monkeypatch.setattr(promotion, "_git", git)
+    scratch = promotion.add_scratch_worktree("a" * 40, repo=tmp_path)
+    assert calls == [
+        (["rev-parse", "--git-common-dir"], {"cwd": tmp_path}),
+        (["-c", f"core.hooksPath={os.devnull}", "worktree", "add",
+          "--detach", str(scratch), "a" * 40], {"cwd": tmp_path}),
+    ]
+
+
 def test_composition_budget_bounds_git_and_restores_the_original_transport(tmp_path, monkeypatch):
     import source_preparation_process as process
 

@@ -4,6 +4,8 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import shlex
+import time
 
 import pytest
 
@@ -11,6 +13,43 @@ import local_runtime_promotion as local
 import test_promote_release as support
 
 repo = support.repo
+
+
+@pytest.mark.parametrize("hooks_path", ["relative", "absolute"])
+def test_composition_cannot_execute_selected_checkout_hooks(repo, tmp_path, hooks_path):
+    main = support._git(["rev-parse", "main"], repo)
+    marker = tmp_path / "selected-hook-executed"
+    hook = repo / "tools/hooks/post-checkout"
+    hook.parent.mkdir()
+    hook.write_text(
+        "#!/bin/sh\nprintf 'selected-hook\\n' >> " + shlex.quote(marker.as_posix()) + "\n",
+        encoding="utf-8",
+    )
+    support._git(["add", "tools/hooks/post-checkout"], repo)
+    support._git(["update-index", "--chmod=+x", "tools/hooks/post-checkout"], repo)
+    support._git(["commit", "-m", "selected checkout hook fixture"], repo)
+    source = support._git(["rev-parse", "HEAD"], repo)
+    support._git([
+        "config", "core.hooksPath",
+        "tools/hooks" if hooks_path == "relative" else str(hook.parent),
+    ], repo)
+    canary = tmp_path / "unprotected-canary"
+    support._git(["worktree", "add", "--detach", str(canary), source], repo)
+    try:
+        assert marker.read_bytes() == b"selected-hook\n"
+    finally:
+        support._git(["worktree", "remove", str(canary)], repo)
+    configuration = (repo / ".git/config").read_bytes()
+    worktrees = support._git(["worktree", "list", "--porcelain"], repo)
+
+    composed = local.compose(
+        repo, source_commit=source, main_seed=main, deadline=time.monotonic() + 60,
+    )
+
+    assert composed.source_commit == source
+    assert marker.read_bytes() == b"selected-hook\n"
+    assert (repo / ".git/config").read_bytes() == configuration
+    assert support._git(["worktree", "list", "--porcelain"], repo) == worktrees
 
 
 @pytest.mark.skipif(os.name == "nt", reason="requires Git's native symlink checkout")

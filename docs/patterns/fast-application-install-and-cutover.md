@@ -62,8 +62,10 @@ JSON object mapping selected component names to extra lists. Select one
 Run `tools/local_install_source.py` from a dependency-prepared source environment.
 It admits the clean merged source, uses the canonical version-preserving
 composition and artifact owners, and keeps one toolchain alive for the profile
-worker. Only after every selected snapshot passes complete readback does it
-return a JSON component-to-snapshot map and write `applications.json`.
+worker. Scratch checkout suppresses configured Git hooks for that command,
+without changing repository settings. Only after every selected snapshot passes
+complete readback does it return a JSON component-to-snapshot map and write
+`applications.json`.
 Before composition it validates the existing output parent and ancestor chain
 against unprivileged replacement and exclusively creates an owner-private root.
 Linked parents and existing or partial output roots are refused without repair.
