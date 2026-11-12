@@ -9,7 +9,7 @@ import pytest
 
 from agent_mcp import backend, checkpoint as cp, execution_context as ec, incoming
 from agent_mcp.config import parse_config
-from agent_mcp.custody_contract import CONTRACT
+from agent_mcp.custody_contract import CONTRACT, CHECKPOINT_TRACE_CAPABILITY, supports
 from agent_mcp.custody_wire import MAX_FRAME, Peer
 from agent_mcp.request_context import capture_context
 
@@ -69,7 +69,9 @@ class Custody:
 
 
 @asynccontextmanager
-async def attached(custody, binding, *, snapshot=None, qualify=None, activate=True):
+async def attached(
+    custody, binding, *, snapshot=None, qualify=None, activate=True, binding_data=None,
+):
     instances, tasks = [], []
     cfg = configuration()
 
@@ -92,7 +94,8 @@ async def attached(custody, binding, *, snapshot=None, qualify=None, activate=Tr
     try:
         await custody.peer.request(
             "prepare", epoch=custody.epoch, contract=CONTRACT,
-            binding={"session": binding.session, "key": binding.key}, checkpoint=snapshot,
+            binding=binding.wire() if binding_data is None else binding_data,
+            checkpoint=snapshot,
         )
         if activate:
             await custody.peer.request("activate", epoch=custody.epoch)
@@ -128,6 +131,44 @@ async def test_new_epoch_rebuilds_pipeline_and_restores_data_without_initialize_
     assert custody.opened == [binding.identity(configuration())] * 2
     assert sum(message.get("method") == "initialize" for message in custody.messages) == 1
     assert [item["message"]["id"] for item in custody.outputs] == [0, 1, 2]
+
+
+async def test_opt_in_trace_binding_restores_across_three_backend_epochs(monkeypatch):
+    custody, binding = Custody(), cp.Binding.issue(trace_bookkeeping=1)
+    snapshot, pipelines = None, []
+    for epoch, trace in enumerate(("outgoing", "incoming", "rollback"), start=1):
+        custody.epoch = epoch
+        monkeypatch.setenv("COPILOT_EXTENSIONS_BOOT_TRACE_SHIM_START_MS", trace)
+        async with attached(custody, binding, snapshot=snapshot) as current:
+            pipelines.append(current.session._pipeline)
+            await custody.input({
+                "jsonrpc": "2.0", "id": epoch,
+                "method": "initialize" if epoch == 1 else "tools/list",
+            })
+            await custody.peer.request("quiesce", epoch=epoch)
+            snapshot = await custody.peer.request("checkpoint", epoch=epoch)
+            assert snapshot["trace_bookkeeping"] == 1
+    assert len({id(pipeline) for pipeline in pipelines}) == 3
+    assert len(set(custody.opened)) == 1
+    assert sum(item.get("method") == "initialize" for item in custody.messages) == 1
+    assert [item["message"]["id"] for item in custody.outputs] == [1, 2, 3]
+
+
+@pytest.mark.parametrize("mode", [True, False, -1, 2, "1", None])
+async def test_invalid_binding_mode_is_refused_before_configuration_or_upstream(mode):
+    custody, binding, loaded = Custody(), cp.Binding.issue(), []
+
+    def qualify():
+        loaded.append(True)
+        return configuration()
+
+    with pytest.raises(RuntimeError, match="identity mode"):
+        async with attached(
+            custody, binding, qualify=qualify,
+            binding_data={**binding.wire(), "trace_bookkeeping": mode},
+        ):
+            pass
+    assert loaded == custody.opened == custody.messages == []
 
 
 async def test_full_application_window_keeps_cancellation_and_server_responses_readable():
@@ -408,8 +449,14 @@ async def test_backend_admission_uses_incoming_physical_generation_and_caller_ro
     monkeypatch.setattr(backend, "BackendSession", Epoch)
     await backend.run_backend(server, request, None, None)
     assert loaded == [("fixture", tmp_path)] * 2
+    descriptor = backend.capability(server)["custody_backend"]
+    assert supports(descriptor) and supports(CONTRACT)
+    assert CHECKPOINT_TRACE_CAPABILITY in descriptor["capabilities"]
+    assert CHECKPOINT_TRACE_CAPABILITY not in CONTRACT["capabilities"]
     assert replies == [
-        {"ok": True, "contract": CONTRACT, "generation": "physical-new",
+        {"ok": True, "contract": descriptor, "generation": "physical-new",
          "runtime_root": str(root), "epoch": 2},
     ]
     assert server._attached == 0
+    (root / "current-version").write_text("replacement", encoding="utf-8")
+    assert backend.capability(server) == {}

@@ -63,8 +63,8 @@ second client against an older custodian. Explicit configuration references
 always keep those values semantically significant.
 
 Request-context negotiation does not upgrade the private checkpoint binding.
-That binding still uses the original complete identity. The optional receiver
-therefore declines custody when trace normalization would change the legacy
+Production custodians still issue the original complete identity. The optional
+receiver therefore declines custody when trace normalization would change the legacy
 checkpoint identity, using ordinary execution before effects. Qualifying that
 trace-sensitive binding across physical replacement remains an open #10486
 adoption item, not an incoming-installation gate. The configuration-consumption
@@ -125,6 +125,27 @@ HTTP, dynamic-auth and CLI sharing remain outside this bounded stdio slice.
 Pre-feature live wrappers do not acquire a new protocol retroactively.
 
 ## Internal backend epochs
+
+Capable physical backends add `checkpoint-trace-bookkeeping/1` to their existing
+`agent-mcp.connection-custody` descriptor. This is a provider expansion, not
+automatic caller adoption. The original three required custody capabilities,
+strict two-field binding, snapshot shape and hashing remain the legacy baseline.
+Only a caller that has qualified this optional backend capability may select
+`trace_bookkeeping: 1` in its private binding. The same explicit integer mode
+must accompany its checkpoint; snapshots cannot silently switch identity modes.
+Unknown modes, booleans and unrelated binding fields refuse before configuration
+or upstream preparation. Missing modes retain legacy behavior.
+
+The optional mode uses the existing execution-context normalization: only the
+three unreferenced bootstrap-trace fields are excluded from identity; explicit
+configuration references, credentials, other environment and cwd remain bound.
+Fields remain in the physical process environment. Contained backend-epoch
+controls cover changed diagnostics and return to an earlier diagnostic value
+without initialization replay; they are not physical replacement or rollback
+qualification. Custodian capability selection, native trace-varying
+keeper/backend replacement and supported provider rollback remain open before
+removing the optional launcher's pre-effect guard. No caller emits this mode
+by default, and no existing session's binding is rewritten.
 
 The backend entrypoint validates the existing private endpoint
 authentication, actual immutable launch generation, selected installation,
