@@ -678,6 +678,39 @@ def test_failed_child_termination_transfers_live_process_control(
     processes[100].close.assert_called_once()
 
 
+@pytest.mark.parametrize("child_exit_confirmed", [True, False])
+def test_interrupt_after_admission_cleans_up_and_preserves_process_control(
+    monkeypatch, broker_channel, tmp_path, child_exit_confirmed,
+):
+    processes, _ = broker_channel
+    original = broker.WindowsDaemonProcess
+
+    def process(number, args):
+        result = original(number, args)
+        if number == 100:
+            # Ctrl-C lands while waiting for the bootstrap after admission.
+            result.wait.side_effect = [KeyboardInterrupt(), 0]
+        elif number == 200 and not child_exit_confirmed:
+            result.wait.side_effect = subprocess.TimeoutExpired(args, 5)
+        return result
+
+    monkeypatch.setattr(broker, "WindowsDaemonProcess", process)
+    with pytest.raises(KeyboardInterrupt) as caught:
+        _launch(tmp_path)
+    failure = caught.value.daemon_spawn_failure
+    assert isinstance(failure, pu.DaemonSpawnError)
+    assert failure.admission_sent is True and failure.process_created is True
+    assert failure.cleanup_confirmed is child_exit_confirmed
+    processes[200].terminate.assert_called_once()
+    processes[100].close.assert_called_once()
+    if child_exit_confirmed:
+        processes[200].close.assert_called_once()
+        assert getattr(failure, "process", None) is None
+    else:
+        processes[200].close.assert_not_called()
+        assert failure.process is processes[200]
+
+
 @pytest.mark.parametrize("failure", ["lost-pid", "adoption"])
 def test_unadopted_staged_child_cleanup_is_not_proven_by_bootstrap_exit(
     monkeypatch, broker_channel, tmp_path, failure,

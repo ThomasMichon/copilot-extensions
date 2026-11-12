@@ -474,6 +474,7 @@ def spawn_brokered_daemon(
     stage = "activation"
     activation_detail = ""
     problems = []
+    interrupted: BaseException | None = None
     try:
         with socket.socket() as listener:
             listener.bind(("127.0.0.1", 0))
@@ -532,6 +533,11 @@ def spawn_brokered_daemon(
                 raise OSError("daemon broker did not finish successfully")
     except (OSError, ValueError, subprocess.SubprocessError):
         problems.append(stage)
+    except BaseException as error:
+        # Cancellation (KeyboardInterrupt, SystemExit) still runs the bounded
+        # cleanup below, then re-raises with the failure attached.
+        interrupted = error
+        problems.append(stage + "-interrupted")
     # Once staging is requested, bootstrap exit alone cannot prove that an
     # unknown child was reaped (its own cleanup may have failed).
     cleanup_confirmed = not (problems and staging_started and child is None)
@@ -566,6 +572,9 @@ def spawn_brokered_daemon(
         )
         if child_retained:
             failure.process = child
+        if interrupted is not None:
+            interrupted.daemon_spawn_failure = failure
+            raise interrupted
         raise failure from None
     if child is None:
         raise DaemonSpawnError("spawn_daemon: Windows lifetime broker did not return a child")
