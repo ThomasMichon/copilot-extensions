@@ -470,7 +470,7 @@ _UNPLANNED = object()
 
 def supervisor_plan(root: Path, *, profiles_only=False) -> SupervisorStartupPlan | ClassicStartupPlan | None:
     """Capture supervisor intent without starting a service or publishing a route."""
-    from . import __main__ as cli
+    from .supervise_registration_cli import build_profile_parser
     from . import remote_dispatch
     from .pool_source_snapshot import read_supervisor_declarations
     from .registrar_discovery import RegistrarSources, _parse_env_file
@@ -530,7 +530,7 @@ def supervisor_plan(root: Path, *, profiles_only=False) -> SupervisorStartupPlan
                 raise ValueError("classic supervisor profile name is unsupported")
             arguments = profile_arguments(values)
             try:
-                parsed = cli.build_parser().parse_args(arguments)
+                parsed = build_profile_parser().parse_args(arguments)
             except SystemExit as error:
                 raise ValueError("classic supervisor profile arguments are invalid") from error
             if not explicit_master and not parsed.label:
@@ -553,7 +553,7 @@ def supervisor_plan(root: Path, *, profiles_only=False) -> SupervisorStartupPlan
         master_default_interval="5", master_legacy=legacy,
     )
     try:
-        args = cli.build_parser().parse_args(argv)
+        args = build_profile_parser().parse_args(argv)
     except SystemExit as error:
         raise ValueError("Source supervisor profile arguments are invalid") from error
     if not math.isfinite(args.interval) or args.interval <= 0:
@@ -581,7 +581,7 @@ def ensure_supervisor(root: Path, *, plan=_UNPLANNED) -> dict:
     from .companion import process_start_token
     from .config import run_dir
     from .single_instance import is_locked, lock_path_for, read_holder_pid
-    from .supervisor_status_io import read_status, runtime_status_path
+    from .supervisor_status_io import completed_cycle_ready, read_status, runtime_status_path
     from .supervisor_source import effective_settings, read_prepared, spawn_candidate
     from .client_authority import supervisor_authority_target, target_cli_args
 
@@ -660,11 +660,7 @@ def ensure_supervisor(root: Path, *, plan=_UNPLANNED) -> dict:
                 birth and generation.get("start_token") == birth
                 and status.get("runtime_version") == __version__
                 and is_locked(lock) and read_holder_pid(lock) == pid
-                and type(status.get("cycle_id")) is int and status["cycle_id"] > 0
-                and type(status.get("updated_at")) in (int, float)
-                and type(status.get("cycle_started_at")) in (int, float)
-                and math.isfinite(status["updated_at"]) and math.isfinite(status["cycle_started_at"])
-                and status["updated_at"] >= status["cycle_started_at"]
+                and completed_cycle_ready(status)
             ):
                 prepared = read_prepared(root, __version__, scope, authority=authority, pid=pid, **criteria)
                 if prepared is not None and prepared["generation"]["pid"] == pid:
@@ -734,25 +730,26 @@ exit $LASTEXITCODE
 
 
 def command(args: argparse.Namespace) -> int:
-    from .coordinator_cli import _cmd_cutover
     from .install_paths import capture_service_environment
     from .installation_policy import windows_policy
 
     root = _path_name(require_selected_source())
-    policy = windows_policy(root, observe_supervisor=False)
+    policy = windows_policy(root, observe_supervisor=False, include_primary=True)
     prepare_scheduled_launchers(root, create=policy["windows_scheduled_task"] == "enabled")
     if policy["windows_scheduled_task"] in {"enabled", "absent"}:
-        policy = windows_policy(root, reconcile=True, observe_supervisor=False)
+        policy = windows_policy(root, reconcile=True, observe_supervisor=False, include_primary=True)
     captured = capture_service_environment(root)
     previous = dict(os.environ)
     try:
         os.environ.update(captured)
         plan = None
         if policy["start_supervisor"]:
-            primary_enabled = windows_policy(root)["start_supervisor"]
+            primary_enabled = policy["primary_start_supervisor"]
             plan = supervisor_plan(root) if primary_enabled else supervisor_plan(root, profiles_only=True)
         result = 0
         if policy["start_coordinator"]:
+            from .coordinator_cli import _cmd_cutover
+
             result = _cmd_cutover(
                 argparse.Namespace(json=True, health_timeout=60.0, drain_timeout=60.0, force=False, recover=False),
                 source_replacement=True, source_environment=captured,

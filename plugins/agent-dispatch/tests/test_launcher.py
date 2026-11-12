@@ -13,7 +13,7 @@ its very first log line -- the task "launched" but never bound a listener
 (observed fleet-wide on dev58/dev59 after the #2889 log tee was added). The
 serve invocation must drop to `Continue` so stderr is captured, not fatal.
 
-These tests read `install.ps1` as text and assert the safe shape, so the
+These tests read the packaged slot launcher as text and assert the safe shape, so the
 regression cannot silently return.
 """
 
@@ -28,16 +28,14 @@ INSTALL_PS1 = (
 
 
 def _launcher_serve_region() -> str:
-    text = INSTALL_PS1.read_text(encoding="utf-8")
-    # The serve invocation is the `& '$VenvPython' -m agent_dispatch serve ...`
-    # line inside the here-string that builds $launcherBody.
+    text = (
+        INSTALL_PS1.parent.parent / "src" / "agent_dispatch" / "service_launchers" / "coordinator.ps1"
+    ).read_text(encoding="utf-8")
     match = re.search(
         r"-m agent_dispatch serve[^\r\n]*", text
     )
-    assert match, "could not locate the serve invocation in install.ps1"
-    # Return the ~5 lines preceding + the serve line for context assertions.
-    start = text.rfind("\n", 0, match.start() - 400)
-    return text[start : match.end()]
+    assert match, "could not locate the serve invocation in the packaged launcher"
+    return text[:match.end()]
 
 
 def test_install_ps1_exists():

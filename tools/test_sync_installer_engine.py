@@ -67,12 +67,13 @@ def test_human_output_declarations_bind_real_packaged_entrypoints():
 @pytest.mark.parametrize("plugin", (
     "agent-mcp", "agent-machines", "agent-containers", "budget-guidance", "agent-worktrees",
 ))
-def test_native_cleanup_ships_its_engine_and_finite_process_supervisor(plugin: str) -> None:
+def test_native_cleanup_ships_its_engine_and_finite_process_supervisor(plugin: str, tmp_path) -> None:
     contract = sync_installer_engine.ier
     consumer = REPO / "plugins" / plugin
     assert consumer in contract.native_adopter_dirs(REPO)
+    candidate = _materialized_consumer(consumer, tmp_path, contract.STANDALONE_NATIVE_FILES)
     for name in contract.STANDALONE_NATIVE_FILES:
-        assert (consumer / "scripts" / name).read_bytes() == (
+        assert (candidate / "scripts" / name).read_bytes() == (
             REPO / "libs" / "installer-engine" / name
         ).read_bytes()
 
@@ -89,6 +90,19 @@ def test_native_machines_materializes_its_declared_retained_gui_bootstrap(tmp_pa
     launcher = scripts / "runtime_launcher.py"
     assert launcher.read_bytes() == (REPO / "libs" / "installer-engine" / launcher.name).read_bytes()
     assert not (tmp_path / "plugins" / "agent-containers" / "scripts" / launcher.name).exists()
+
+
+def _materialized_consumer(consumer: Path, tmp_path: Path, names) -> Path:
+    import materialize_installer_engine as materializer
+
+    candidate = tmp_path / consumer.name
+    candidate.mkdir()
+    log = materializer.materialize_derived_files(
+        candidate, canonical_root=REPO, copied_consumer=(consumer, candidate),
+        file_names=frozenset(names),
+    )
+    assert log and not any(line.startswith("SKIP") for line in log), log
+    return candidate
 
 
 @pytest.mark.parametrize("shell", ["pwsh", "powershell"])
@@ -795,12 +809,14 @@ def test_python_engine_ships_and_checks_all_owned_process_files(fake_repo, monke
 
 
 @pytest.mark.parametrize("plugin", ["agent-pull-requests", "agent-ssh", "agent-codespaces", "agent-bridge"])
-def test_first_use_input_freezer_uses_canonical_projection_owner(plugin):
+def test_first_use_input_freezer_uses_canonical_projection_owner(plugin, tmp_path):
     contract = sync_installer_engine.ier
     consumer = REPO / "plugins" / plugin
     assert consumer in contract.python_adopter_dirs(REPO)
-    for name in (*contract.PYTHON_FILES, *contract.SUPPORT_FILES):
-        assert (consumer / "scripts" / name).read_bytes() == (
+    names = (*contract.PYTHON_FILES, *contract.SUPPORT_FILES)
+    candidate = _materialized_consumer(consumer, tmp_path, names)
+    for name in names:
+        assert (candidate / "scripts" / name).read_bytes() == (
             REPO / "libs" / "installer-engine" / name
         ).read_bytes()
 

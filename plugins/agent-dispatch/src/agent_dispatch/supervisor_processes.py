@@ -280,7 +280,7 @@ def parse_windows_process_json(text: str) -> list[WindowsProcess]:
     return result
 
 
-def iter_windows_processes() -> list[WindowsProcess]:
+def iter_windows_processes(*, timeout: float = _ENUM_TIMEOUT_S) -> list[WindowsProcess]:
     """Read the Windows process inventory (best-effort)."""
 
     script = (
@@ -302,7 +302,7 @@ def iter_windows_processes() -> list[WindowsProcess]:
         capture_output=True,
         text=True,
         encoding="utf-8",
-        timeout=_ENUM_TIMEOUT_S,
+        timeout=timeout,
         check=False,
         **no_window_kwargs(),
     )

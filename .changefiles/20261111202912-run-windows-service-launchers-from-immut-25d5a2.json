@@ -1,0 +1,9 @@
+{
+  "comment": "Run Windows service launchers from immutable slots, retire only identity-qualified outgoing launcher holders on publication conflict, and preserve completed supervisor readiness through bounded native startup.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}
