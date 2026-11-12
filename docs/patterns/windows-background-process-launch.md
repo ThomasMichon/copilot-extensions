@@ -149,7 +149,8 @@ Use the WMI durable launch **only** when a process must outlive its launcher:
 3. a watchdog or supervisor restarting the processes it supervises;
 4. a CLI ensuring or starting its own backing daemon;
 5. the update front door queuing the requested update when the caller's Job
-   forbids breakaway.
+   denies breakaway (the probe's `ERROR_ACCESS_DENIED`); any other probe
+   failure, including a probe cleanup failure, is reported without queuing.
 
 Everything else keeps ordinary process creation and Jobs so the process
 hierarchy, timeouts and tree cleanup remain meaningful: a CLI calling another

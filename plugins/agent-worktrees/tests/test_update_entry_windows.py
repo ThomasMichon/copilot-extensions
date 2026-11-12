@@ -141,6 +141,41 @@ def test_update_preflight_reports_capturable_error_when_wmi_queue_is_blocked(
         process.stderr.close()
 
 
+@pytest.mark.parametrize("probe", [
+    "return 2;",
+    'throw new System.ComponentModel.Win32Exception(5, "Breakaway probe cleanup failed");',
+])
+def test_update_preflight_queues_through_wmi_only_when_breakaway_is_denied(
+    update_entry_case, native_powershell, monkeypatch, probe,
+):
+    """Another probe failure, even a cleanup failure carrying code 5, never queues through WMI."""
+    monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
+    tmp, home, _resolver = update_entry_case
+    entry, arguments = _job_preflight_entry(tmp, home, "global", "--detach")
+    queued = tmp / "wmi-called.txt"
+    captured = tmp / "captured-errors.txt"
+    harness = tmp / "probe-failure.ps1"
+    harness.write_text(
+        "Add-Type -TypeDefinition 'namespace CopilotExtensions { public static class "
+        f"UpdateBreakawayProbe {{ public static int Check(string e) {{ {probe} }} }} }}'\n"
+        f"function Invoke-CimMethod {{ Set-Content -LiteralPath {_quoted(queued)} x; throw 'reached' }}\n"
+        f"$forward = @({','.join(_quoted(value) for value in arguments)})\n"
+        f"& {_quoted(entry)} @forward 2> {_quoted(captured)}\n"
+        "exit $LASTEXITCODE\n", encoding="utf-8",
+    )
+    result = subprocess.run(
+        [native_powershell, "-NoProfile", "-File", str(harness)],
+        stdin=subprocess.DEVNULL, capture_output=True, timeout=120, **no_window_kwargs(),
+    )
+    raw = captured.read_bytes()
+    encoding = "utf-16" if raw.startswith((b"\xff\xfe", b"\xfe\xff")) else "utf-8-sig"
+    errors = " ".join(raw.decode(encoding, errors="replace").split())
+    assert result.returncode == 1, errors
+    assert "used only when the caller's Job denies breakaway" in errors
+    assert not queued.exists()
+    assert not list(tmp.glob("agent-update-*"))
+
+
 _QUEUED_BOOTSTRAP = r"""
 # Receipts for teardown, recorded first: this fixture and each ancestor up to the
 # WMI provider host, pinned by PID and creation time. A chain that does not end at

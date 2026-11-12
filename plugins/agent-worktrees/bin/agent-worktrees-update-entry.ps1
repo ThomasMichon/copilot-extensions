@@ -256,6 +256,9 @@ function Submit-AgentDurableUpdate([string]$Preflight) {
 }
 if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT -and
     $_updateArgs -cnotcontains '--supervised-debug') {
+    # Only a Job that denies breakaway (ERROR_ACCESS_DENIED) queues the update through WMI;
+    # a probe that cannot compile, start for another reason or clean up is reported instead.
+    $_breakawayDenied = $false
     try {
         if (-not ('CopilotExtensions.UpdateBreakawayProbe' -as [type])) {
             Add-Type -TypeDefinition @'
@@ -318,6 +321,7 @@ namespace CopilotExtensions {
         }
         $_breakawayError = [CopilotExtensions.UpdateBreakawayProbe]::Check((Get-Process -Id $PID).Path)
         if ($_breakawayError -ne 0) {
+            $_breakawayDenied = $_breakawayError -eq 5
             throw "Windows refused the required breakaway process (WinError $_breakawayError)."
         }
     } catch {
@@ -333,6 +337,10 @@ namespace CopilotExtensions {
                 ' No update was started or request submitted. Re-run in the execution host''s ' +
                 'explicit detached/outside-Job shell mode (for example async with detach=true). ' +
                 'Contained test mode does not use the durable WMI launch.')
+        } elseif (-not $_breakawayDenied) {
+            Write-AgentUpdateEntryError ($_preflightMessage +
+                ' No update was started or request submitted: the durable WMI launch is used only ' +
+                'when the caller''s Job denies breakaway.')
         } else {
             # The caller's Job forbids breakaway, so the update is queued through
             # WMI, whose process is outside every caller Job (see #12117).
