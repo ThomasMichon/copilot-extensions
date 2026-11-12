@@ -46,6 +46,14 @@ guarantee, with agent-worktrees as its repo-identity anchor. A worktree
 checkout's own directory name is a per-session, per-machine identifier that
 must never be adopted downstream as if it were the repo's registered name.
 
+A retained checkout registered in the receiving machine's local project store
+is local by that registration and its repository evidence, not by a historical
+hostname. Missing, invalid or incorrectly mapped optional machine topology must
+not prevent entering that checkout or settling its original local ownership.
+Host renames preserve worktree IDs, sessions, relationships and claim references;
+they do not require identity migration to make existing work usable. Explicit
+remote selection and new allocation retain their own execution-target checks.
+
 The resident agent-worktrees service maintains a flattened, attributable map of
 registered repository information, including each repository's resolved local
 root and management class. Consumers can obtain the whole map through one

@@ -473,10 +473,10 @@ def test_required_creation_writer_cli_invalid_input_refuses_before_connect(
 
     monkeypatch.setattr(sys, "stdin", io.StringIO(text))
     monkeypatch.setattr(core, "_get_client", lambda: pytest.fail("invalid writer must not connect"))
-    args = core.build_parser().parse_args([
-        "create", "example@local", *options, "--worktree-writer-file", "-",
-    ])
     with pytest.raises(SystemExit) as failure:
+        args = core.build_parser().parse_args([
+            "create", "example@local", *options, "--worktree-writer-file", "-",
+        ])
         session_targeting_cli._cmd_create(args)
     assert failure.value.code == 2
 
