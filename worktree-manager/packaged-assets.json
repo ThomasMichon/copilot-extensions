@@ -35,9 +35,11 @@
         "standalone_consumers.py", "build_python_artifacts.py", "build_toolchain_lock.py",
         "build_toolchain_queries.py", "artifact_source_build.py", "governed_feed_trust.py",
         "public_toolchain_source.py", "seasoned_public_feed.py", "seasoned_uv.py",
-        "promotion_python_artifacts.py", "promotion_bundle_members.py", "standalone_python_artifacts.py",
+        "promotion_python_artifacts.py", "artifact_bundle_validation.py",
+        "core_python_artifacts.py", "native_daemon_artifacts.py",
+        "promotion_bundle_members.py", "standalone_python_artifacts.py",
         "plugin_runtime_resources.py", "artifact_attestation.py", "runtime_wheel_inspection.py",
-        "runtime_profile.py", "runtime_profile_policy.py", "runtime_profile_release.py",
+        "runtime_profile.py", "runtime_profile_errors.py", "runtime_profile_policy.py", "runtime_profile_release.py",
         "runtime_profile_wheels.py", "runtime_source_lock.py", "runtime_feed_configuration.py"
       ]
     },

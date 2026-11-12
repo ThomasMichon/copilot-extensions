@@ -1,0 +1,21 @@
+{
+  "comment": "Refresh canonical retained runtime inputs used by source-qualified artifact construction.",
+  "changes": [
+    {
+      "plugin": "agent-remote-driver",
+      "type": "patch"
+    },
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    },
+    {
+      "plugin": "services/chat",
+      "type": "patch"
+    },
+    {
+      "plugin": "services/ssh",
+      "type": "patch"
+    }
+  ]
+}
