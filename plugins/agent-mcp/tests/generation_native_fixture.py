@@ -253,6 +253,17 @@ def build_runtimes(
                 "'backend_trace':__import__('os').environ.get("
                 "'COPILOT_EXTENSIONS_BOOT_TRACE_SHIM_START_MS')}}})+'\\n')",
             )
+            needle = '            self.state = "quiescing"\n            while self._settlers:'
+            assert body.count(needle) == 1
+            body = body.replace(
+                needle,
+                '            self.state = "quiescing"\n'
+                f"            with open({str(observations.with_suffix('.quiescing'))!r},'a') as witness:\n"
+                "                witness.write(__import__('json').dumps({"
+                "'backend_pid':__import__('os').getpid(),'epoch':self.epoch,"
+                "'accepted':len(self.accepted),'settlers':len(self._settlers)})+'\\n')\n"
+                "            while self._settlers:",
+            )
             needle = "    async def output(self, message):\n"
             assert body.count(needle) == 1
             backend.write_text(body.replace(
