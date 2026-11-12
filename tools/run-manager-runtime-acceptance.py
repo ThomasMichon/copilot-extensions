@@ -47,7 +47,7 @@ RUNTIME_INPUT_CONTROLS = (
 
 
 def _runtime_group(python: Path, sandbox: Path) -> int:
-    """Overlap disjoint controls with construction inside the caller's single Job."""
+    """Overlap disjoint fixture roots and input controls inside the caller's single Job."""
     native = REPO / "worktree-manager" / "tests" / "native" / "test_manager_runtime_install.py"
     assertions = [
         str(python), "-m", "pytest", "-q", "-p", "pytest_portfolio_guard",
@@ -56,18 +56,26 @@ def _runtime_group(python: Path, sandbox: Path) -> int:
     selection = " or ".join(RUNTIME_INPUT_CONTROLS)
     streams = {"stdin": subprocess.DEVNULL, "stdout": sys.stdout, "stderr": sys.stderr}
     print("Manager runtime: starting independent input controls and cold construction", flush=True)
-    controls = subprocess.Popen(
-        [*assertions, f"--basetemp={sandbox / 'input-controls'}", str(native), "-k", selection],
-        cwd=REPO, **streams, **no_window_kwargs(),
-    )
+    prepare = [str(python), "-I", "-B", str(native), "--prepare", str(sandbox)]
+    children = []
     try:
+        for command in (
+            [*assertions, f"--basetemp={sandbox / 'input-controls'}", str(native), "-k", selection],
+            [*prepare, "--prepare-step", "constructed"],
+            [*prepare, "--prepare-step", "legacy"],
+        ):
+            children.append(subprocess.Popen(command, cwd=REPO, **streams, **no_window_kwargs()))
+        for child in children[1:]:
+            result = child.wait()
+            if result:
+                return result
         prepared = subprocess.run(
-            [str(python), "-I", "-B", str(native), "--prepare", str(sandbox)],
+            [*prepare, "--prepare-step", "finish"],
             cwd=REPO, check=False, **streams, **no_window_kwargs(),
         )
         if prepared.returncode:
             return prepared.returncode
-        result = controls.wait()
+        result = children[0].wait()
         if result:
             return result
         print("Manager runtime: construction and input controls passed; running consumers", flush=True)
@@ -76,9 +84,10 @@ def _runtime_group(python: Path, sandbox: Path) -> int:
             cwd=REPO, check=False, **streams, **no_window_kwargs(),
         ).returncode
     finally:
-        if controls.poll() is None:
-            controls.terminate()
-        controls.wait(timeout=5)
+        for child in reversed(children):
+            if child.poll() is None:
+                child.terminate()
+            child.wait(timeout=5)
 
 
 def _installed_tty_complete(report: Path, expected: dict) -> bool:

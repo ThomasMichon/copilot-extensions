@@ -156,6 +156,24 @@ synthetic stores and native fixture owners.
   and emits the independent-control/construction and serial-consumer boundaries.
   A complete source-pinned native run remains required; no deadline is enlarged
   or failure waived.
+- The [first 403-case attempt](https://github.com/ThomasMichon/copilot-extensions/actions/runs/43245242812)
+  correctly refused its incomplete probe surface: the listed primary probes
+  passed, but the new ordinary-resume regression was missing from the explicit
+  capture-test re-exports. The export is corrected rather than reducing the
+  expected portfolio. Required source guards also required classifying the new
+  input-control process as caller-contained in the existing lifecycle census.
+  Neither correction changes product behavior or qualifies the failed capture.
+- The [fourth native lane](https://github.com/ThomasMichon/copilot-extensions/actions/runs/43245224029)
+  passed Linux seed, Linux entry/installed and Windows terminal/mux stages;
+  macOS was cancelled. Windows finished all seven input controls and genuine
+  construction, but the remaining 39 seconds admitted only seven of ten
+  consumers before the original group deadline. The coordinator now constructs
+  its disjoint fresh and legacy roots in separate processes, merges only
+  successful private reports, then prepares rollback and runs shared-root
+  consumers serially. All eight scheduling/failure controls and 24 existing
+  containment-wrapper controls pass. The actual capture export executes the
+  new permission regression (one pass, 402 deselected). Fresh complete native
+  qualification and canonical capture remain open.
 - A subsequent review found stale claim timing under write contention, a headed
   record fence held past confirmed creation and a preserved-seed checker that
   could reacquire its parent's sidecar. Preparation/claim now sample time after

@@ -347,6 +347,8 @@ from test_full_session_status_cli import (
     as test_writer_status_uses_negotiated_original_observation,
 )
 from test_creation_worktree_writer import (
+    test_ordinary_resume_preserves_completed_recovery_permission_hold
+    as test_ordinary_resume_preserves_completed_recovery_permission_hold,
     test_retained_recovery_resumes_same_native_once_without_prompt_drain
     as test_retained_recovery_resumes_same_native_once_without_prompt_drain,
     test_uncertain_retained_recovery_never_relaunches_or_falls_back

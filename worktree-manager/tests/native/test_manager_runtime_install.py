@@ -666,14 +666,29 @@ def test_same_package_generation_update_replaces_and_verifies_live_fixture_mux(c
                 process.wait(timeout=5)
 
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--prepare", type=Path, required=True)
-    destination = parser.parse_args().prepare
-    print("Manager acceptance: fresh bootstrap", flush=True)
-    data = {"constructed": _prepare_constructed(destination / "first")}
-    print("Manager acceptance: selected legacy repair", flush=True)
-    data["legacy"] = _prepare_legacy_repair(destination / "legacy")
+def _prepare(destination, step=None):
+    if step in (None, "constructed"):
+        print("Manager acceptance: fresh bootstrap", flush=True)
+        constructed = _prepare_constructed(destination / "first")
+        (destination / "constructed.json").write_text(json.dumps(constructed), encoding="utf-8")
+    if step in (None, "legacy"):
+        print("Manager acceptance: selected legacy repair", flush=True)
+        legacy = _prepare_legacy_repair(destination / "legacy")
+        (destination / "legacy.json").write_text(json.dumps(legacy), encoding="utf-8")
+    if step not in (None, "finish"):
+        return
+    data = {
+        key: json.loads((destination / f"{key}.json").read_text(encoding="utf-8"))
+        for key in ("constructed", "legacy")
+    }
     print("Manager acceptance: failed construction rollback", flush=True)
     data["failed"] = _prepare_failed_construction(destination / "failed", data["constructed"])
     (destination / "fixtures.json").write_text(json.dumps(data), encoding="utf-8")
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--prepare", type=Path, required=True)
+    parser.add_argument("--prepare-step", choices=("constructed", "legacy", "finish"))
+    args = parser.parse_args()
+    _prepare(args.prepare, args.prepare_step)

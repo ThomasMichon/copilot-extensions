@@ -9801,6 +9801,9 @@ The runtime contract overlaps its seven independent entrypoint/progress controls
 with genuine fixture construction inside that same contained group. It waits
 for both before running the remaining installed-runtime consumers serially;
 the selections are complementary and use separate pytest temporary directories.
+Fresh construction and archived-release repair run in separate processes with
+distinct fixture roots and output files. Both must succeed before the final
+rollback preparation reads their results; no shared-root mutation runs in parallel.
 Construction failure settles the input-control process, and a failed control
 cannot admit the installed-runtime consumers. The group and resource limits
 are unchanged. Fixtures are constructed before their consumers' unchanged
