@@ -11,6 +11,8 @@ PORTABLE_EXTRA = 'sys_platform != "win32" or platform_machine != "ARM64"'
 
 
 def manifests(root: Path) -> list[Path]:
+    from application_sources import declared_projects
+
     paths = set(root.glob("*/pyproject.toml"))
     paths.update(root.glob("libs/*/pyproject.toml"))
     for directory in ("plugins", "services"):
@@ -18,6 +20,10 @@ def manifests(root: Path) -> list[Path]:
             p for p in (root / directory).rglob("pyproject.toml")
             if not {"libs", ".venv", "node_modules", "__pycache__"} & set(p.relative_to(root).parts)
         )
+    paths.update(
+        contained_path(directory / "pyproject.toml", root)
+        for directory in declared_projects(root).values()
+    )
     return sorted(paths)
 
 

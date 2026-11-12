@@ -5329,7 +5329,7 @@
         "worktree-manager/scripts/versioned_runtime_source.py": "8f84d861afff2c33c8f78d68d0ae7378a1b7dc8d9642065595efb95fd40b0ca7",
         "tools/promotion_unit_tests/test_core_release_delivery_contract.py": "dbdc9b8156808e7e18f7dcf66fe6fff8957a85e4e8eeed7144e9af9a20a4527f",
         "tools/core_runtime_profile.py": "bd32966b50d92cb58651d7fdb0d07723679ea887730c2468928c9863b8f15390",
-        "tools/python_project_inventory.py": "c1392147b95b49a6b5e2ddc247d0592074aaba507faffab3101bb616428ec7ef",
+        "tools/python_project_inventory.py": "ea101d1c6f6f09a0cf3d4ae49f7c3f520118be2dbbe174c7b10694713215ff98",
         "tools/promotion_unit_tests/test_core_artifacts.py": "cd38a669c3543ebeca5b7513de78711f8cee6ec7fd4fb7c89f6346c7db3110b2",
         "tools/promotion_unit_tests/test_guarded_core_contract.py": "35e082a213b8caec7bacfb37ceeea790ef633814debcc724d9e5b4438cbd0530",
         "tools/promotion_unit_tests/test_core_profile_candidate.py": "fea38adc192a4bec13756d80e4d49082e8e61f04eca7a5ddddef8a8b35960817",
