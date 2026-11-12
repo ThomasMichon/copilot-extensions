@@ -28,6 +28,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import threading
 import time
 from pathlib import Path
 
@@ -67,6 +68,14 @@ def cache_enabled() -> bool:
     )
 
 
+def _path_exists(path: Path) -> bool:
+    try:
+        path.lstat()
+        return True
+    except FileNotFoundError:
+        return False
+
+
 class PersistentCache:
     """Fernet-encrypted on-disk ``(entry, field) -> value`` cache.
 
@@ -81,13 +90,66 @@ class PersistentCache:
             base = Path(os.environ[CACHE_DIR_ENV])
         else:
             base = default_cache_dir()
+        self._root_dir = base
+        self._base_dir = base
+        self._fernet = None  # lazy
+        self._available: bool | None = None
+        self._recovery = None
+        self._replacement_mutex = threading.RLock()
+        self._replacement_state = threading.local()
+        self._selection_mutex = threading.RLock()
+        self._store_pinned = False
+        self._replacement_lock_file = base / "credential-replacement.lock"
+        self._select_base(base)
+        from .cache_recovery import CacheSelectionRequired
+
+        with contextlib.suppress(CacheSelectionRequired):
+            self._refresh_selection()
+
+    def _select_base(self, base: Path) -> None:
+        if self._base_dir != base:
+            self._fernet = None
         self._base_dir = base
         self._cache_file = base / "credential-cache.enc"
         self._key_file = base / "credential-cache.key"
         self._lock_file = base / "credential-cache.lock"
-        self._replacement_lock_file = base / "credential-replacement.lock"
-        self._fernet = None  # lazy
-        self._available: bool | None = None
+
+    def _refresh_selection(self) -> None:
+        if not cache_enabled():
+            return
+        from .cache_recovery import require_source, selected_cache
+
+        with self._selection_guard():
+            if self._store_pinned:
+                if self._recovery is not None:
+                    require_source(self._root_dir, self._recovery)
+                return
+            base, recovery = selected_cache(self._root_dir)
+            if self._recovery is not None and (
+                recovery is None or recovery["source"] != self._recovery["source"]
+            ):
+                from .cache_dpapi import CacheProtectionError
+
+                raise CacheProtectionError("selected Vault changed during cache recovery")
+            self._recovery = recovery
+            self._select_base(base)
+
+    @contextlib.contextmanager
+    def _selection_guard(self):
+        if not self._selection_mutex.acquire(timeout=2.0):
+            raise TimeoutError("protected cache is busy")
+        try:
+            yield
+        finally:
+            self._selection_mutex.release()
+
+    def prepare(self) -> dict:
+        """Bound legacy adoption; only explicit population/setup calls this."""
+        from .cache_recovery import prepare_cache
+
+        result = prepare_cache(self._root_dir) if self.enabled else {"state": "disabled"}
+        self._refresh_selection()
+        return result
 
     # -- availability ------------------------------------------------------
 
@@ -117,7 +179,7 @@ class PersistentCache:
         from .cache_dpapi import MAGIC, CacheProtectionError, DpapiCacheCipher
 
         if IS_WINDOWS:
-            if self._cache_file.exists():
+            if _path_exists(self._cache_file):
                 with self._cache_file.open("rb") as stream:
                     native_cache = stream.read(len(MAGIC)) == MAGIC
                 if native_cache:
@@ -126,7 +188,7 @@ class PersistentCache:
             try:
                 from .protected_crypto import Fernet
             except ImportError as exc:
-                if self._cache_file.exists() or self._key_file.exists():
+                if _path_exists(self._cache_file) or _path_exists(self._key_file):
                     raise CacheProtectionError(
                         "legacy cache requires pycryptodomex; existing cache was not replaced"
                     ) from exc
@@ -139,19 +201,14 @@ class PersistentCache:
 
         if not readonly:
             self._base_dir.mkdir(parents=True, exist_ok=True)
-        if self._key_file.exists():
+        if _path_exists(self._key_file):
             blob = self._key_file.read_bytes()
             if kek.is_wrapped(blob):
                 if readonly and not IS_WINDOWS and blob.startswith(kek.WRAP_MAGIC + b"D"):
                     raise CacheProtectionError("cache key requires an unavailable Windows wrapping backend")
                 key = kek.unwrap_bytes(blob)
             else:
-                # Legacy plaintext key file -> migrate to a wrapped (DPAPI on
-                # Windows) blob bound to the OS user, best-effort.
                 key = blob.strip()
-                if not readonly:
-                    with contextlib.suppress(Exception):
-                        self._write_key(key)
         else:
             if readonly:
                 raise CacheProtectionError("existing cache key missing; cache was not replaced")
@@ -163,89 +220,148 @@ class PersistentCache:
     def _write_key(self, key: bytes) -> None:
         """Persist the Fernet key wrapped at rest (DPAPI per-user on Windows)."""
         from . import kek
+        import tempfile
 
-        self._key_file.write_bytes(kek.wrap_bytes(key))
-        if not IS_WINDOWS:
-            self._key_file.chmod(0o600)
+        wrapped = kek.wrap_bytes(key)
+        fd, temporary = tempfile.mkstemp(dir=str(self._base_dir), prefix=".cache-key-", suffix=".tmp")
+        try:
+            with os.fdopen(fd, "wb") as stream:
+                stream.write(wrapped)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, self._key_file)
+            if not IS_WINDOWS:
+                directory_fd = os.open(self._base_dir, os.O_RDONLY)
+                try:
+                    os.fsync(directory_fd)
+                finally:
+                    os.close(directory_fd)
+        finally:
+            with contextlib.suppress(OSError):
+                os.unlink(temporary)
 
     # -- atomic file I/O ---------------------------------------------------
 
     def _read_store(self, *, readonly: bool = False, strict: bool = False) -> dict:
-        if not self._cache_file.exists():
+        with self._selection_guard():
+            return self._read_selected_store(readonly=readonly, strict=strict)
+
+    def _read_selected_store(self, *, readonly: bool, strict: bool) -> dict:
+        self._refresh_selection()
+        if not _path_exists(self._cache_file):
             if strict:
                 from .cache_dpapi import CacheProtectionError, DpapiCacheCipher
 
-                if self._key_file.exists():
+                if _path_exists(self._key_file):
                     self._get_fernet(readonly=True)
                 elif self._fernet is not None and not isinstance(self._fernet, DpapiCacheCipher):
                     raise CacheProtectionError("cache key disappeared; cache was not replaced")
             return {"v": 1, "entries": {}}
-        if not self._key_file.exists():
+        if not _path_exists(self._key_file):
             from .cache_dpapi import MAGIC, CacheProtectionError
 
             with self._cache_file.open("rb") as stream:
                 native = stream.read(len(MAGIC)) == MAGIC
             if not IS_WINDOWS or not native:
                 raise CacheProtectionError("existing cache key missing; cache was not replaced")
-        f = self._get_fernet(readonly=True) if readonly else self._get_fernet()
-        if f is None or not self._cache_file.exists():
+        f = self._get_fernet(readonly=True)
+        if f is None or not _path_exists(self._cache_file):
             return {"v": 1, "entries": {}}
         try:
             plaintext = f.decrypt(self._cache_file.read_bytes())
             data = json.loads(plaintext)
             if (
                 not isinstance(data, dict) or data.get("v") != 1
-                or (strict and not isinstance(data.get("entries"), dict))
+                or not isinstance(data.get("entries"), dict)
             ):
-                from .cache_dpapi import CacheProtectionError, DpapiCacheCipher
+                from .cache_dpapi import CacheProtectionError
 
-                if strict or isinstance(f, DpapiCacheCipher):
-                    raise CacheProtectionError("unsupported protected cache schema")
-                return {"v": 1, "entries": {}}
+                raise CacheProtectionError("unsupported protected cache schema; not replaced")
             return data
         except Exception as exc:
-            from .cache_dpapi import CacheProtectionError, DpapiCacheCipher
+            from .cache_dpapi import CacheProtectionError
 
             if isinstance(exc, CacheProtectionError):
                 raise
-            if strict or isinstance(f, DpapiCacheCipher):
-                raise CacheProtectionError("Protected cache data is invalid; not replaced") from exc
-            return {"v": 1, "entries": {}}
+            raise CacheProtectionError("Protected cache data is invalid; not replaced") from exc
 
     @contextlib.contextmanager
-    def _file_lock(self, lock_file: Path):
-        self._base_dir.mkdir(parents=True, exist_ok=True)
-        with open(lock_file, "w") as lock_fd:
+    def _file_lock(self, lock_file: Path, *, readonly: bool = False):
+        from .ssh_key_files import _ordinary
+
+        if not readonly:
+            self._base_dir.mkdir(parents=True, exist_ok=True)
+        if _path_exists(lock_file):
+            _ordinary(lock_file, directory=False)
+        with open(lock_file, "r+b" if readonly else "a+b") as lock_fd:
+            deadline = time.monotonic() + 2.0
+            locked = False
             try:
-                if IS_WINDOWS:
-                    import msvcrt
+                while not locked:
+                    try:
+                        if IS_WINDOWS:
+                            import msvcrt
 
-                    msvcrt.locking(lock_fd.fileno(), msvcrt.LK_LOCK, 1)
-                else:
-                    import fcntl
+                            lock_fd.seek(0)
+                            msvcrt.locking(lock_fd.fileno(), msvcrt.LK_NBLCK, 1)
+                        else:
+                            import fcntl
 
-                    fcntl.flock(lock_fd, fcntl.LOCK_EX)
+                            fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        locked = True
+                    except (BlockingIOError, PermissionError):
+                        if time.monotonic() >= deadline:
+                            raise TimeoutError("protected cache is busy") from None
+                        time.sleep(0.02)
                 yield
             finally:
                 with contextlib.suppress(Exception):
-                    if not IS_WINDOWS:
+                    if locked and IS_WINDOWS:
+                        lock_fd.seek(0)
+                        msvcrt.locking(lock_fd.fileno(), msvcrt.LK_UNLCK, 1)
+                    elif locked:
                         import fcntl
 
                         fcntl.flock(lock_fd, fcntl.LOCK_UN)
 
     @contextlib.contextmanager
     def _store_lock(self):
-        with self._file_lock(self._lock_file):
-            yield
+        from .cache_recovery import require_coordinated
+
+        with self._selection_guard():
+            self._refresh_selection()
+            require_coordinated(self._root_dir, self._recovery)
+            with self._file_lock(self._lock_file):
+                selected = self._base_dir
+                self._refresh_selection()
+                if selected != self._base_dir:
+                    raise RuntimeError("protected cache selection changed; retry the operation")
+                self._store_pinned = True
+                try:
+                    yield
+                finally:
+                    self._store_pinned = False
 
     @contextlib.contextmanager
-    def replacement_lock(self):
+    def replacement_lock(self, *, readonly: bool = False):
         """Serialize a caller's complete credential replacement transaction."""
         if not self.enabled:
             yield
             return
-        with self._file_lock(self._replacement_lock_file):
-            yield
+        if not self._replacement_mutex.acquire(timeout=2.0):
+            raise TimeoutError("protected cache is busy")
+        try:
+            if getattr(self._replacement_state, "held", False):
+                yield
+                return
+            with self._file_lock(self._replacement_lock_file, readonly=readonly):
+                self._replacement_state.held = True
+                try:
+                    yield
+                finally:
+                    self._replacement_state.held = False
+        finally:
+            self._replacement_mutex.release()
 
     def _write_store_unlocked(self, store: dict) -> bool:
         f = self._get_fernet()
@@ -258,6 +374,14 @@ class PersistentCache:
         try:
             plaintext = json.dumps(store, separators=(",", ":")).encode()
             ciphertext = f.encrypt(plaintext)
+            from . import kek
+            from .cache_dpapi import DpapiCacheCipher
+
+            if not isinstance(f, DpapiCacheCipher) and _path_exists(self._key_file):
+                blob = self._key_file.read_bytes()
+                if not kek.is_wrapped(blob):
+                    with contextlib.suppress(OSError, RuntimeError, ValueError):
+                        self._write_key(blob.strip())
 
             fd, tmp_path = tempfile.mkstemp(
                 dir=str(self._base_dir), prefix=".cache-", suffix=".tmp"
@@ -355,10 +479,38 @@ class PersistentCache:
         """Read a cached value; readonly mode refuses migration and corrupt data."""
         if not self.enabled:
             return None
+        from .cache_recovery import require_coordinated
+
+        with self._selection_guard():
+            self._refresh_selection()
+            with (
+                self.replacement_lock(readonly=readonly)
+                if self._recovery else contextlib.nullcontext()
+            ):
+                require_coordinated(self._root_dir, self._recovery)
+                return self._get_value(
+                    entry, field, max_age_seconds, legacy_entry=legacy_entry, readonly=readonly,
+                )
+
+    def _get_value(
+        self, entry, field, max_age_seconds, *, legacy_entry, readonly,
+    ) -> str | None:
         store = (
             self._read_store(readonly=True, strict=True)
             if readonly else self._read_store()
         )
+        if not readonly and _path_exists(self._key_file):
+            from . import kek
+
+            if not kek.is_wrapped(self._key_file.read_bytes()):
+                # Only a successfully decoded, still-locked store may migrate its key.
+                with contextlib.suppress(OSError):
+                    with self._store_lock():
+                        self._read_store(readonly=True, strict=True)
+                        blob = self._key_file.read_bytes()
+                        if not kek.is_wrapped(blob):
+                            with contextlib.suppress(OSError, RuntimeError, ValueError):
+                                self._write_key(blob.strip())
         rec = self._field_record(store, entry, field, strict=readonly)
         if rec is None and legacy_entry and legacy_entry != entry:
             rec = self._field_record(store, legacy_entry, field, strict=readonly)
@@ -594,6 +746,43 @@ class PersistentCache:
         except Exception:
             return False
 
+    def recover_missing(
+        self, entry: str, field: str, value: str, generation: int | None = None,
+    ) -> bool:
+        """Insert a live recovery value only when no current record owns the field."""
+        if (
+            not self.enabled or not isinstance(value, str)
+            or generation is not None and (type(generation) is not int or generation < 0)
+        ):
+            return False
+        from .cache_recovery import require_source
+
+        try:
+            record = self._recovery
+            require_source(self._root_dir, record)
+            with self.replacement_lock(), self._store_lock():
+                require_source(self._root_dir, record)
+                store = self._read_store(readonly=True, strict=True)
+                entries = store["entries"]
+                if entry in entries:
+                    fields = entries[entry]
+                    if not isinstance(fields, dict):
+                        return False
+                    if field in fields:
+                        existing = self._field_record(store, entry, field, strict=True)
+                        return "rotation" not in existing
+                _, fields = self._fields_for_write(store, entry)
+                fields[field] = {
+                    "value": value,
+                    "cached_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                    "cached_at_epoch": time.time(),
+                    "generation": generation if generation is not None else 0,
+                }
+                require_source(self._root_dir, record)
+                return self._write_store_unlocked(store)
+        except (OSError, RuntimeError, ValueError):
+            return False
+
     def migrate_entry(
         self,
         source_entry: str,
@@ -653,6 +842,7 @@ class PersistentCache:
     def clear(self) -> bool:
         """Wipe the entire cache file. Safe when the file is absent."""
         try:
+            self._refresh_selection()
             if self._cache_file.exists():
                 self._cache_file.unlink()
             return True
@@ -661,7 +851,13 @@ class PersistentCache:
 
     def status(self) -> dict:
         """Return cache metadata (enabled, location, counts, staleness)."""
-        store = self._read_store()
+        self._refresh_selection()
+        readable = True
+        try:
+            store = self._read_store(readonly=True, strict=True)
+        except (OSError, RuntimeError, ValueError, ImportError):
+            readable = False
+            store = {"entries": {}}
         entries = store.get("entries", {})
         if not isinstance(entries, dict):
             entries = {}
@@ -694,6 +890,8 @@ class PersistentCache:
             "field_count": total_fields,
             "oldest": oldest,
             "newest": newest,
+            "readable": readable,
+            "recovery": self._recovery,
         }
 
 
