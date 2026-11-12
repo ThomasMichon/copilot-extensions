@@ -7,6 +7,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import time
 from types import ModuleType
 from typing import Any
 
@@ -253,6 +254,7 @@ def test_invalid_cli_is_bounded_and_sanitized(selected: Selected, extra: list[st
 
 @pytest.mark.parametrize("boundary,timeout", [
     ("filesystem", "0.1"), ("stdout", "0.1"), ("filesystem", None),
+    ("session-refusal-stdout", "0.1"), ("provider-refusal-stdout", "0.1"),
 ])
 def test_native_deadline_exits_the_only_collector(
     selected: Selected, boundary: str, timeout: str | None,
@@ -268,12 +270,16 @@ def test_native_deadline_exits_the_only_collector(
     else:
         code += "sys.stdout=type('Blocked',(),{'write':lambda *a:time.sleep(30)})();"
     code += "raise SystemExit(m.main(sys.argv[2:]))"
+    started = time.monotonic()
     result = subprocess.run(
         [sys.executable, "-I", "-c", code, str(SCRIPT),
-         "--session-state-root", str(root), "--session-id", SESSION,
+         "--session-state-root", str(root), "--session-id",
+         "invalid" if boundary == "session-refusal-stdout" else SESSION,
+         *(["--guidance", "../escape"] if boundary == "provider-refusal-stdout" else []),
          *(["--timeout", timeout] if timeout else [])],
         capture_output=True, timeout=10,
     )
+    assert time.monotonic() - started < (3 if timeout else 8)
     assert result.returncode == 124
     assert result.stdout == b"" and result.stderr == b""
 

@@ -235,6 +235,12 @@ def main(argv: list[str] | None = None) -> int:
         args = parser.parse_args(argv)
         if not 0.001 <= args.timeout <= MAX_SECONDS:
             raise Refusal("invalid-timeout")
+        remaining = args.timeout - (time.monotonic() - started)
+        if remaining <= 0:
+            os._exit(124)
+        shorter = threading.Timer(remaining, os._exit, args=(124,))
+        shorter.daemon = True
+        shorter.start()
         if not SESSION.fullmatch(args.session_id):
             raise Refusal("invalid-session-id")
         if len(args.guidance) > MAX_PROVIDERS or any(
@@ -242,12 +248,6 @@ def main(argv: list[str] | None = None) -> int:
         ):
             raise Refusal("invalid-provider")
         args.guidance = list(dict.fromkeys(args.guidance))
-        remaining = args.timeout - (time.monotonic() - started)
-        if remaining <= 0:
-            os._exit(124)
-        shorter = threading.Timer(remaining, os._exit, args=(124,))
-        shorter.daemon = True
-        shorter.start()
         collect(args, report)
     except Refusal as exc:
         report.gap(str(exc), "")
