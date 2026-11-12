@@ -189,14 +189,53 @@ def test_qualified_receiver_keeps_strict_owner_path_and_never_replays_unknown_st
     ordinary.assert_not_called()
 
 
-def test_lost_originating_owner_refuses_without_startup_or_unowned_fallback(monkeypatch, admitted):
+@pytest.mark.parametrize("context", ["eligible", "cwd", "selection", "optout", "sharing"])
+def test_lost_originating_owner_refuses_without_startup_or_unowned_fallback(
+    monkeypatch, admitted, tmp_path, context,
+):
+    if context == "cwd":
+        project = tmp_path / "project"
+        project.mkdir()
+        monkeypatch.chdir(project)
+    elif context == "selection":
+        monkeypatch.setattr(incoming, "require_selected", Mock(
+            side_effect=incoming.AdmissionRefused("selection changed"),
+        ))
+    elif context == "optout":
+        monkeypatch.setenv("AGENT_MCP_NO_SERVE", "1")
+    elif context == "sharing":
+        from agent_mcp import execution_context
+        monkeypatch.setattr(execution_context, "_identity", Mock(
+            side_effect=execution_context.SharingUnavailable("incompatible"),
+        ))
     monkeypatch.setattr(custody_lifetime, "_pin", Mock(
         side_effect=ProcessLookupError("origin exited"),
     ))
-    ordinary, startup = Mock(), Mock()
+    ordinary, startup = Mock(side_effect=Executed), Mock()
     monkeypatch.setattr(owner_entry.os, "execvpe", ordinary)
     monkeypatch.setattr(incoming, "ensure_current", startup)
     with pytest.raises(owner_entry.OwnerUnavailable, match="could not be pinned"):
+        owner_entry.run(admitted)
+    ordinary.assert_not_called()
+    startup.assert_not_called()
+
+
+@pytest.mark.parametrize("eligible", [False, True])
+def test_owner_death_during_preflight_cannot_execute_either_path(monkeypatch, admitted, eligible):
+    alive = [True]
+    monkeypatch.setattr(custody_lifetime, "_pin", lambda *_args: (
+        lambda: alive[0], lambda: None,
+    ))
+    from agent_mcp import cutover
+    def selected(_layout):
+        alive[0] = False
+        if not eligible:
+            raise incoming.AdmissionRefused("selection moved")
+    monkeypatch.setattr(cutover, "_require_selected", selected)
+    ordinary, startup = Mock(side_effect=Executed), Mock()
+    monkeypatch.setattr(owner_entry.os, "execvpe", ordinary)
+    monkeypatch.setattr(incoming, "ensure_current", startup)
+    with pytest.raises(owner_entry.OwnerUnavailable):
         owner_entry.run(admitted)
     ordinary.assert_not_called()
     startup.assert_not_called()

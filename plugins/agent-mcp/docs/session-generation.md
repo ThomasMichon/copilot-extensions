@@ -41,8 +41,10 @@ unsupported optional contract also retains ordinary behavior before effects.
 No application operation is retried after startup or intake. The existing
 explicit paired `bridge`/`forward` flags remain strict and never acquire this
 optional fallback. A lost or unverifiable originating owner also refuses rather
-than becoming an unowned ordinary call. Interpolated and already ownership-bound
-entries are not overridden.
+than becoming an unowned ordinary call. The receiver pins that owner before any
+context/fallback decision and rechecks the retained native observation immediately
+before either ordinary exec or adopted startup. Interpolated and already
+ownership-bound entries are not overridden.
 
 Unreferenced bootstrap-trace fields remain in the physical upstream environment
 but supporting peers exclude them from shared-context identity. The existing

@@ -21,7 +21,7 @@ def launch_environment() -> dict:
 
 
 def _qualify(request):
-    from . import custody_lifetime, execution_context, forward, incoming, sockio
+    from . import execution_context, forward, incoming, sockio
     from .__main__ import build_parser
     from .config import load_config
     from .cutover import _require_selected
@@ -50,27 +50,19 @@ def _qualify(request):
     if not target:
         raise SharingUnavailable("optional owner receiver requires an ordinary target")
     execution_context._identity(load_config(target, repository_root=Path.cwd()), "0" * 64)
-    try:
-        owner = custody_lifetime.SessionOwner(request["pid"], request["birth"])
-    except (OSError, ValueError) as error:
-        raise OwnerUnavailable("originating owner could not be pinned") from error
-    with owner:
-        _require_selected(layout)
+    _require_selected(layout)
     args.session_owner_pid, args.session_owner_birth = request["pid"], request["birth"]
     return args
 
 
-def run(request) -> int:
-    """Select optional custody before startup; never replay an accepted outcome."""
-    from .owner_bootstrap import ENTRY_CAPABILITY
+def _require_owner_alive(owner):
+    try:
+        owner.require_alive()
+    except (OSError, ValueError, RuntimeError) as error:
+        raise OwnerUnavailable("originating owner could not be verified alive") from error
 
-    declared = receiver({
-        "supported": True, "invocation_allowed": True, "entry": request.get("receiver"),
-        "contract": {"name": "agent-mcp.session-owner-handoff", "minimum": 1,
-                     "maximum": 1, "capabilities": [ENTRY_CAPABILITY]},
-    })
-    if declared is None:
-        raise ValueError("Invalid physical owner entry declaration")
+
+def _run_owned(request, declared, owner):
     environment = os.environ.copy()
     try:
         for key, value in declared["environment"].items():
@@ -80,19 +72,40 @@ def run(request) -> int:
                 os.environ[key] = value
         try:
             args = _qualify(request)
-        except OwnerUnavailable:
-            raise
         except (OSError, ValueError):
+            _require_owner_alive(owner)
             os.environ.clear()
             os.environ.update(environment)
             original = request["original"]
             os.execvpe(original[0], original, environment)
             raise RuntimeError("Ordinary MCP exec unexpectedly returned")
         # No fallback beyond this boundary: backend startup or intake may occur.
+        _require_owner_alive(owner)
         return args.func(args)
     finally:
         os.environ.clear()
         os.environ.update(environment)
+
+
+def run(request) -> int:
+    """Pin before any fallback decision and never replay an accepted outcome."""
+    from .custody_lifetime import SessionOwner
+    from .owner_bootstrap import ENTRY_CAPABILITY
+
+    declared = receiver({
+        "supported": True, "invocation_allowed": True, "entry": request.get("receiver"),
+        "contract": {"name": "agent-mcp.session-owner-handoff", "minimum": 1,
+                     "maximum": 1, "capabilities": [ENTRY_CAPABILITY]},
+    })
+    if declared is None:
+        raise ValueError("Invalid physical owner entry declaration")
+    try:
+        owner = SessionOwner(request["pid"], request["birth"])
+    except (OSError, ValueError) as error:
+        raise OwnerUnavailable("originating owner could not be pinned") from error
+    with owner:
+        _require_owner_alive(owner)
+        return _run_owned(request, declared, owner)
 
 
 def command(args) -> int:
