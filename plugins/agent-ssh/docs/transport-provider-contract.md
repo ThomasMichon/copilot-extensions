@@ -154,11 +154,15 @@ candidates):
    `.github/copilot/settings.json` (`extraKnownMarketplaces.<name>.source` with
    `source: directory` and a repo-relative `path`; plugin directories come from
    `<path>/.claude-plugin/marketplace.json` or
-   `<path>/.github/plugin/marketplace.json`, else `<path>/<plugin>`);
-3. installed plugins, `~/.copilot/installed-plugins/<marketplace>/<plugin>`.
+   `<path>/.github/plugin/marketplace.json`, else `<path>/<plugin>`). This tier
+   is consulted only when the repo root is covered by Copilot's own folder
+   trust (`trustedFolders` in `$COPILOT_HOME/config.json`, default
+   `~/.copilot/config.json`), so an untrusted checkout can never supply or
+   override an executable provider;
+3. installed plugins, `<copilot home>/installed-plugins/<marketplace>/<plugin>`.
 
-`--module <path to module.yaml>` overrides discovery (the `module` name must
-still match the declaration).
+`--module <path to module.yaml>` overrides discovery and is the explicit
+authorization path (the `module` name must still match the declaration).
 
 **Capabilities and entrypoints.** `capabilities.setup` / `capabilities.status`
 (booleans) enable `entrypoints.setup` / `entrypoints.status` (`posix` / `windows`

@@ -230,8 +230,43 @@ def _directory_marketplace_roots(repo_root: Path, plugin: str) -> list[Path]:
     return roots
 
 
+def _copilot_config_path(home: Path | None = None) -> Path:
+    if home is None and os.environ.get("COPILOT_HOME"):
+        return Path(os.environ["COPILOT_HOME"]) / "config.json"
+    return (home or Path.home()) / ".copilot" / "config.json"
+
+
+def _norm(path: Path | str) -> str:
+    return os.path.normcase(os.path.normpath(str(Path(path).expanduser().resolve())))
+
+
+def repository_trusted(repo_root: Path, home: Path | None = None) -> bool:
+    """Whether Copilot's own folder trust (``trustedFolders``) covers ``repo_root``.
+
+    Repository-declared marketplaces are only an executable provider source
+    once the operator has trusted that checkout, the same consent Copilot
+    requires before loading the repository's own settings.
+    """
+    try:
+        text = _copilot_config_path(home).read_text(encoding="utf-8")
+        lines = [line for line in text.splitlines() if not line.lstrip().startswith("//")]
+        folders = json.loads("\n".join(lines)).get("trustedFolders", [])
+    except (OSError, ValueError, UnicodeError, AttributeError):
+        return False
+    if not isinstance(folders, list):
+        return False
+    repo = _norm(repo_root)
+    for folder in folders:
+        if not isinstance(folder, str) or not folder:
+            continue
+        trusted = _norm(folder)
+        if repo == trusted or repo.startswith(trusted.rstrip(os.sep) + os.sep):
+            return True
+    return False
+
+
 def _installed_plugin_roots(plugin: str, home: Path | None = None) -> list[Path]:
-    base = (home or Path.home()) / ".copilot" / "installed-plugins"
+    base = _copilot_config_path(home).parent / "installed-plugins"
     try:
         markets = sorted(p for p in base.iterdir() if p.is_dir())
     except OSError:
@@ -259,14 +294,20 @@ def find_module(
 
     Tiers are searched in order (agent-ssh payload, calling repo's directory
     marketplaces, installed plugins); the first tier with any hit wins and
-    must contain exactly one distinct match.
+    must contain exactly one distinct match. Repository marketplaces are
+    consulted only when Copilot trusts the checkout (``trustedFolders``).
     """
     tiers: list[list[Path]] = []
     if driver.plugin == "agent-ssh":
         root = payload_root()
         tiers.append([root] if root is not None else [])
     repo_root = _git_toplevel(cwd)
-    tiers.append(_directory_marketplace_roots(repo_root, driver.plugin) if repo_root else [])
+    untrusted_repo = False
+    if repo_root and repository_trusted(repo_root, home):
+        tiers.append(_directory_marketplace_roots(repo_root, driver.plugin))
+    else:
+        untrusted_repo = bool(repo_root)
+        tiers.append([])
     tiers.append(_installed_plugin_roots(driver.plugin, home))
     for roots in tiers:
         hits: list[Path] = []
@@ -282,7 +323,14 @@ def find_module(
             raise DriverError(
                 f"driver {driver.label} is ambiguous: " + ", ".join(str(h) for h in hits)
             )
-    raise DriverError(f"driver module {driver.label} not found (transports/{driver.module}/module.yaml)")
+    note = (
+        "; repository marketplaces were skipped because the checkout is not a trusted Copilot folder"
+        if untrusted_repo
+        else ""
+    )
+    raise DriverError(
+        f"driver module {driver.label} not found (transports/{driver.module}/module.yaml){note}"
+    )
 
 
 def load_module(path: Path, driver: Driver) -> dict[str, Any]:
@@ -385,7 +433,7 @@ def validate_result(doc: Any, *, driver: Driver, machine: str) -> dict[str, Any]
             not isinstance(command, list)
             or not command
             or len(command) > MAX_COMMAND_ARGS
-            or any(not isinstance(arg, str) or len(arg) > MAX_TEXT for arg in command)
+            or any(not isinstance(arg, str) or len(arg) > MAX_TEXT or "\x00" in arg for arg in command)
             or not command[0]
         ):
             raise ValueError("auth request 'command' must be a non-empty argv list of strings")
@@ -473,8 +521,11 @@ def run_entrypoint(inv: Invocation, *, runner=bounded_runner, windows: bool | No
     except subprocess.SubprocessError as exc:
         # Includes OutputLimitExceeded: a stream overran its byte budget.
         return make_result("failed", f"driver {inv.verb} failed: {exc}"[:MAX_TEXT])
-    except OSError as exc:
-        return make_result("failed", f"cannot run driver {inv.verb}: {exc}")
+    except (OSError, ValueError) as exc:
+        return make_result("failed", f"cannot run driver {inv.verb}: {exc}"[:MAX_TEXT])
+    except RuntimeError as exc:
+        # The owned runner reports native execution/cleanup failures this way.
+        return make_result("failed", f"driver {inv.verb} failed: {exc}"[:MAX_TEXT])
     result = parse_result(done.stdout or b"", done.returncode, driver=inv.driver, machine=inv.machine)
     if result["state"] == "failed" and done.stderr:
         tail = (done.stderr if isinstance(done.stderr, str) else done.stderr.decode("utf-8", "replace"))
@@ -507,7 +558,7 @@ def run_auth_command(command: list[str], *, runner=subprocess.run, windows: bool
     except DriverError as exc:
         print(f"[FAIL] {exc}", file=sys.stderr)
         return 126
-    except OSError as exc:
+    except (OSError, ValueError) as exc:
         print(f"[FAIL] cannot run auth command {command[0]}: {exc}", file=sys.stderr)
         return 127
 

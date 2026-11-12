@@ -170,20 +170,45 @@ def _repo_with_directory_marketplace(tmp_path: Path, *, manifest=True) -> Path:
     return repo
 
 
+def _trust(home: Path, *folders: Path) -> Path:
+    (home / ".copilot").mkdir(parents=True, exist_ok=True)
+    (home / ".copilot" / "config.json").write_text(
+        "// managed by copilot\n" + json.dumps({"trustedFolders": [str(f) for f in folders]}),
+        encoding="utf-8",
+    )
+    return home
+
+
 @pytest.mark.parametrize("manifest", [True, False])
 def test_find_module_directory_marketplace(tmp_path, manifest):
     repo = _repo_with_directory_marketplace(tmp_path, manifest=manifest)
-    found = d.find_module(DRIVER, repo, home=tmp_path / "home", payload_root=lambda: None)
+    home = _trust(tmp_path / "home", repo)
+    found = d.find_module(DRIVER, repo, home=home, payload_root=lambda: None)
     sub = "providers/example" if manifest else "example-provider"
     assert found == (repo / "plugins-src" / sub / "transports" / "example" / "module.yaml").resolve()
 
 
 def test_directory_marketplace_wins_over_installed_copy(tmp_path):
     repo = _repo_with_directory_marketplace(tmp_path)
-    home = tmp_path / "home"
+    home = _trust(tmp_path / "home", tmp_path)
     _write_module(home / ".copilot" / "installed-plugins" / "local" / "example-provider")
     found = d.find_module(DRIVER, repo, home=home, payload_root=lambda: None)
     assert "plugins-src" in str(found)
+
+
+def test_untrusted_checkout_cannot_override_installed_provider(tmp_path):
+    repo = _repo_with_directory_marketplace(tmp_path)
+    home = _trust(tmp_path / "home", tmp_path / "elsewhere")
+    installed = home / ".copilot" / "installed-plugins" / "local" / "example-provider"
+    _write_module(installed)
+    found = d.find_module(DRIVER, repo, home=home, payload_root=lambda: None)
+    assert found == (installed / "transports" / "example" / "module.yaml").resolve()
+
+
+def test_untrusted_checkout_provider_is_not_discovered(tmp_path):
+    repo = _repo_with_directory_marketplace(tmp_path)
+    with pytest.raises(d.DriverError, match="not a trusted Copilot folder"):
+        d.find_module(DRIVER, repo, home=tmp_path / "home", payload_root=lambda: None)
 
 
 def test_find_module_installed_plugins_and_ambiguity(tmp_path):
@@ -263,6 +288,7 @@ def test_parse_result_auth_requests_optional_when_empty():
         (json.dumps(_result("ready", [_auth()])).encode(), 0),
         (json.dumps(_result("operator-action-required", [_auth(command="example-cli login")])).encode(), 2),
         (json.dumps(_result("operator-action-required", [_auth(command=["example-cli", 1])])).encode(), 2),
+        (json.dumps(_result("operator-action-required", [_auth(command=["example-cli", "a\x00b"])])).encode(), 2),
         (json.dumps(_result("operator-action-required", [{**_auth(), "machine": "laptop"}])).encode(), 2),
         (json.dumps(_result("operator-action-required", [{**_auth(), "driver": "other:example"}])).encode(), 2),
         (b"{" + b" " * (d.MAX_OUTPUT_BYTES + 1) + b"}", 0),
@@ -331,6 +357,14 @@ def test_output_overflow_is_failed(topology):
 
     result = d.run(_request(topology, verb="setup"), runner=_overflow, hostname="workstation")
     assert result["state"] == "failed" and d.exit_code(result) == 1
+
+
+def test_owned_runner_runtime_failure_is_failed(topology):
+    def _native_failure(argv, **kwargs):
+        raise RuntimeError("execution failed")
+
+    result = d.run(_request(topology, verb="setup"), runner=_native_failure, hostname="workstation")
+    assert result["state"] == "failed" and "execution failed" in result["detail"]
 
 
 def test_setup_apply_passes_flag(topology):
