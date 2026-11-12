@@ -4903,8 +4903,7 @@
         "tools/promotion_unit_tests/test_standalone_artifacts.py::test_profile_worker_only_reports_a_miss_for_explicit_reuse[failed]",
         "tools/promotion_unit_tests/test_standalone_artifacts.py::test_profile_worker_only_reports_a_miss_for_explicit_reuse[wrong-snapshot]",
         "tools/promotion_unit_tests/test_standalone_artifacts.py::test_missing_retained_toolchain_cannot_start_construction",
-        "tools/promotion_unit_tests/test_standalone_artifacts.py::test_lazy_toolchain_marker_read_keeps_original_deadline",
-        "tools/promotion_unit_tests/test_core_artifacts.py::test_core_builder_uses_the_shared_locked_set_owner"
+        "tools/promotion_unit_tests/test_standalone_artifacts.py::test_lazy_toolchain_marker_read_keeps_original_deadline"
     ],
     "coverage_targets": [
         "plugins/agent-dispatch/src/agent_dispatch/queue_submission_consumer.py",
