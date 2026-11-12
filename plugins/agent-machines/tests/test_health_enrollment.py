@@ -353,6 +353,32 @@ def test_confirmed_disabled_config_overrides_pending_enabled_replacement(case):
     assert native.calls == ["disable"]
 
 
+@pytest.mark.parametrize("after_effect", [False, True])
+def test_preview_recognizes_known_pending_replacement_definition(case, after_effect):
+    owner, desired, native, _, selection, installed = case
+    adopt(owner, desired)
+    selection[0] = installed("2.0")
+    call = native.call
+
+    def interrupt(operation, **fields):
+        if operation == "enable":
+            if after_effect:
+                call(operation, **fields)
+            native.refuse_read = True
+            raise RuntimeError("replacement response lost")
+        return call(operation, **fields)
+
+    native.call = interrupt
+    assert owner.converge()["status"] == "unknown"
+    native.refuse_read = False
+    native.call = call
+    preview = owner.configure(desired)
+    assert preview["status"] == "preview"
+    result = owner.configure(desired, apply=True, expected=preview["preview_token"])
+    assert result["status"] == ("recovered-candidate" if after_effect else "rolled-back")
+    assert owner.read()["pending"] is None
+
+
 @pytest.mark.parametrize("changed", ["store", "policy"])
 def test_recovering_old_configuration_does_not_claim_new_confirmation_was_applied(case, monkeypatch, capsys, changed):
     from agent_machines import cli_health

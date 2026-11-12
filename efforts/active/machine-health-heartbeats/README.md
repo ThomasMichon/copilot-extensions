@@ -1573,3 +1573,8 @@ The [owner comparison](architecture.md#owner-decision) explains this choice.
   `configuration-not-applied` and CLI exit 2, requiring a fresh preview.
   Changed-store and changed-policy CLI controls passed with the full 50-case
   enrollment unit packet.
+- Preview and recovery now share pending-definition ownership classification
+  for the recorded incumbent and candidate, including disabled forms. Interrupted
+  candidate definitions no longer block a legitimate preview as foreign;
+  unrelated definitions still refuse. Before/after-enable response-loss controls
+  passed with the full 52-case enrollment unit packet.

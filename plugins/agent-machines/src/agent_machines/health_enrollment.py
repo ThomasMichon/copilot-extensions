@@ -394,13 +394,27 @@ class Enrollment:
         if signature(native["xml"])["RegistrationInfo/Description"] != self.owner:
             raise slots.HealthError("foreign-or-drifted-health-task")
 
+    def _pending_owner(self, native, pending):
+        if not native["configured"]:
+            return None
+        actual = signature(native["xml"])
+        for record in (pending["candidate"], pending["before"]):
+            if record and actual in (signature(record["definition"]), signature(disabled(record["definition"]))):
+                if actual["RegistrationInfo/Description"] != self.owner:
+                    break
+                return record
+        raise slots.HealthError("health-task-recovery-conflict")
+
     def configure(self, desired, *, apply=False, expected=""):
         validate_desired(desired)
         if expected and not apply:
             raise slots.HealthError("confirmation-requires-apply")
         state = self.read()
         native = self.backend.call("read")
-        self._owned(native, state["confirmed"])
+        if state["pending"] is not None:
+            self._pending_owner(native, state["pending"])
+        else:
+            self._owned(native, state["confirmed"])
         self._policy(desired, native)
         self.selector(self.root)
         token = slots._digest({
@@ -603,15 +617,7 @@ class Enrollment:
                 slots._write(self.path, {**state, "pending": {**pending, "intent": intent}})
             raise slots.HealthError("native-health-task-cleanup-unconfirmed")
         before, candidate = pending["before"], pending["candidate"]
-        matched = None
-        if native["configured"]:
-            actual = signature(native["xml"])
-            for record in (candidate, before):
-                if record and actual in (signature(record["definition"]), signature(disabled(record["definition"]))):
-                    matched = record
-                    break
-            if matched is None:
-                raise slots.HealthError("health-task-recovery-conflict")
+        matched = self._pending_owner(native, pending)
         transaction = self.leases.begin_runtime_reference_transaction(self.root, REFERENCE)
         intent = (
             "remove" if remove or pending["intent"] == "remove"

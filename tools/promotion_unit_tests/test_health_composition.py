@@ -166,6 +166,10 @@ def test_installed_job_native_defaults_preserve_matching_but_not_changed_executi
         identity="selected-build", definition=lambda *_args, **_fields: xml,
     )
     owner._policy = owner.qualifier = lambda *_args: pytest.fail("unqualified cached action")
+    pending = {"candidate": {"definition": xml}, "before": None}
+    assert owner._pending_owner({"configured": True, "xml": enrollment.disabled(xml)}, pending) == pending["candidate"]
+    with pytest.raises(ValueError, match="recovery-conflict"):
+        owner._pending_owner({"configured": True, "xml": changed}, pending)
     with pytest.raises(ValueError, match="recovery-closure-changed"):
         owner._qualify_record({
             "version": "1.0", "identity": "selected-build", "definition": changed,

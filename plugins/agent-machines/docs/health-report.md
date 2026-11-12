@@ -436,7 +436,10 @@ original owner for further bounded cleanup; an exiting CLI cannot promise
 later handle recovery. That case needs explicit owner-led recovery, not a
 successful disable or permission to force-clear state.
 `converge` first reconciles the recorded exact task; it does not blindly repeat
-registration. Conflicting definitions refuse without overwrite. Failed
+registration. Preview and recovery recognize both definitions retained in a
+pending transaction, including their disabled forms, without misclassifying a
+known interrupted candidate as foreign. Native fences and runtime qualification
+still apply before effects. Conflicting definitions refuse without overwrite. Failed
 replacement restores a qualified known-good definition and reports rollback
 separately. Unsupported old code or policy drift cannot re-enable a rollback.
 `disable` and `remove` do not require collection-policy readiness: they settle
