@@ -62,6 +62,7 @@ $InstallDir='{tmp_path / "runtime"}'
 $LocalBin='{tmp_path / "bin"}'
 $VenvDir='{python.parent.parent}'
 $VenvPython='{python}'
+$SrcVersion='1.0'
 $script:RuntimeConstructionReuse=${str(reuse).lower()}
 $publishGlobalBinstubs=$false
 function Ensure-UvIndex {{}}
@@ -72,6 +73,8 @@ function New-SignedVenv {{ param($VenvDir,$VenvPython,$PythonVersion,$UvCommand,
 function Remove-ConsoleTrampolines {{ param($VenvDir) }}
 function Remove-LoggerTrampolines {{ param($VenvDir) }}
 function Invoke-VersionedActivate {{ Set-Content '{activated}' yes; $true }}
+function Test-LoggerRuntimeHealthy {{ Set-Content '{tmp_path / "health-checked"}' yes; $true }}
+function Deploy-ResolverHelpers {{ Set-Content '{tmp_path / "helpers-deployed"}' yes }}
 function Publish-PayloadSnapshot {{}}
 function Write-SyncTaskLauncher {{}}
 function Write-LoggerDeployManifest {{}}
@@ -100,6 +103,7 @@ PLUGIN_DIR='{payload}'
 INSTALL_DIR='{tmp_path / "runtime"}'
 LOCAL_BIN='{tmp_path / "bin"}'
 VENV='{python.parent.parent}'
+SRC_VERSION='1.0'
 PUBLISH_GLOBAL_BINSTUBS=0
 _RUNTIME_CONSTRUCTION_REUSE={int(reuse)}
 _assert_source_runtime() {{ :; }}
@@ -108,6 +112,8 @@ ensure_uv() {{ echo '{uv}'; }}
 _versioned_slot_clean() {{ :; }}
 new_signed_venv() {{ :; }}
 _versioned_activate() {{ echo yes > '{activated}'; }}
+_test_runtime_healthy() {{ echo yes > '{tmp_path / "health-checked"}'; }}
+deploy_runtime_helpers() {{ echo yes > '{tmp_path / "helpers-deployed"}'; }}
 publish_payload_snapshot() {{ :; }}
 ok() {{ :; }}
 warn() {{ :; }}
@@ -205,16 +211,26 @@ def _assert_batches(calls, sources):
 
 @pytest.mark.parametrize("ext", ["ps1", "sh"])
 @pytest.mark.parametrize("canonical", [False, True])
-@pytest.mark.parametrize("failure", ["", "bootstrap", "closure", "reuse"])
+@pytest.mark.parametrize("failure", ["", "bootstrap", "closure", "reuse", "reuse-selected"])
 @pytest.mark.timeout(150)
 def test_logger_two_batches_fail_stop_and_reuse(tmp_path, ext, canonical, failure):
     payload, sources = _sources(tmp_path, canonical)
+    if failure == "reuse-selected":
+        selected = tmp_path / "runtime" / "current-version"
+        selected.parent.mkdir()
+        selected.write_text("1.0\n", encoding="utf-8")
+        selected_before = (selected.read_bytes(), selected.stat().st_mtime_ns)
     result, calls, activated = _harness(
-        tmp_path, ext, payload, Path(sys.executable), failure=failure, reuse=failure == "reuse",
+        tmp_path, ext, payload, Path(sys.executable), failure=failure,
+        reuse=failure.startswith("reuse"),
     )
     assert bool(result.returncode) == (failure in ("bootstrap", "closure")), result.stdout + result.stderr
-    if failure == "reuse":
-        assert not calls and not activated.exists()
+    if failure.startswith("reuse"):
+        assert not calls and activated.exists() == (failure == "reuse")
+        if failure == "reuse-selected":
+            assert (selected.read_bytes(), selected.stat().st_mtime_ns) == selected_before
+            assert (tmp_path / "health-checked").is_file()
+            assert (tmp_path / "helpers-deployed").is_file()
     elif failure == "bootstrap":
         assert len(calls) == 1 and not activated.exists()
     else:
