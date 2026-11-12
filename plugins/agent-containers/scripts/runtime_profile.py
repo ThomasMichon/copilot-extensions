@@ -522,6 +522,7 @@ def provision(
                 )
                 return {
                     "profile": profile, "runtimeVersion": ready.slot.name,
+                    "payloadHash": ready.payload_hash,
                     "venv": str(ready.slot), "python": str(venv_python),
                     "reused": ready.reused, "runtimeSource": None,
                 }

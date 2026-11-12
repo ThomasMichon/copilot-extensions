@@ -184,6 +184,44 @@ def test_native_budget_wheel_update_reuses_and_preserves_commands(tmp_path: Path
     assert second != first, "the profile must participate in native generation selection"
     assert slot.is_dir(), "update must preserve the previous usable generation"
     assert configuration.read_text(encoding="utf-8") == "unconfigured: true\n"
+    selected = root / "versions" / second
+    completion = selected / ".install-complete.json"
+    origins = selected / ".runtime-input-origins.json"
+    manifest = json.loads((root / "deploy-manifest.json").read_text(encoding="utf-8-sig"))
+    assert manifest["source"]["content_hash"] == json.loads(completion.read_bytes())["payload_hash"]
+    publication = payload / "scripts" / "installation-context" / "plugin-publication-probe.ps1"
+    previous_probe = publication.read_bytes()
+    publication.write_text(
+        "[Console]::Error.WriteLine('fixture: reconcile admission reached'); exit 19\n",
+        encoding="utf-8",
+    )
+    saved = {path: path.read_bytes() for path in (completion, origins)}
+    try:
+        for fault in (None, "completion", "binding"):
+            for path, content in saved.items():
+                path.write_bytes(content)
+            if fault == "completion":
+                completion.unlink()
+            elif fault == "binding":
+                record = json.loads(saved[origins])
+                record["wheel_inputs"]["binding"]["backend"] = "changed"
+                origins.write_text(json.dumps(record), encoding="utf-8")
+            bootstrap = subprocess.run(
+                [host, "-NoProfile", "-NonInteractive", "-File",
+                 str(payload / "scripts" / "bootstrap-check.ps1")],
+                cwd=home, env=environment, capture_output=True, text=True,
+                timeout=30, creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+            if fault is None:
+                assert bootstrap.returncode == 0, bootstrap.stdout + bootstrap.stderr
+                assert "reconcile admission reached" not in bootstrap.stderr
+            else:
+                assert bootstrap.returncode == 3, bootstrap.stdout + bootstrap.stderr
+                assert "reconcile admission reached" in bootstrap.stderr
+    finally:
+        publication.write_bytes(previous_probe)
+        for path, content in saved.items():
+            path.write_bytes(content)
     payload.rename(payload.with_name("removed-input"))
     command = home / ".local" / "bin" / "budget-guidance.ps1"
     probe = subprocess.run(

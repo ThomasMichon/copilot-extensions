@@ -60,14 +60,19 @@ try {
             -Pattern '^\s*version\s*=' | Select-Object -First 1
         if (-not $versionLine) { throw 'The selected payload version is unavailable.' }
         $current = $versionLine.Line -replace '.*=\s*"([^"]+)".*', '$1'
-        $provisioned = Test-Path -LiteralPath (Join-Path $InstallDir '.venv')
-        $marker = Join-Path $InstallDir 'current-version'
-        if (-not $provisioned -and (Test-Path -LiteralPath $marker)) {
-            $selected = [IO.File]::ReadAllText($marker).Trim()
-            if ($selected -and ($selected -ceq $current -or $selected -ceq $runtimeVersion) -and (
-                (Test-Path -LiteralPath (Join-Path $InstallDir "versions\$selected\Scripts\python.exe")) -or
-                (Test-Path -LiteralPath (Join-Path $InstallDir "versions/$selected/bin/python"))
-            )) { $provisioned = $true }
+        if ($runtimeVersion -cmatch '\.profile\.[0-9a-f]{16}') {
+            . (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')
+            $provisioned = Test-NativeWheelRuntimeCurrent -Root $InstallDir -Payload $PluginDir -Plugin 'agent-ssh'
+        } else {
+            $provisioned = Test-Path -LiteralPath (Join-Path $InstallDir '.venv')
+            $marker = Join-Path $InstallDir 'current-version'
+            if (-not $provisioned -and (Test-Path -LiteralPath $marker)) {
+                $selected = [IO.File]::ReadAllText($marker).Trim()
+                if ($selected -and ($selected -ceq $current -or $selected -ceq $runtimeVersion) -and (
+                    (Test-Path -LiteralPath (Join-Path $InstallDir "versions\$selected\Scripts\python.exe")) -or
+                    (Test-Path -LiteralPath (Join-Path $InstallDir "versions/$selected/bin/python"))
+                )) { $provisioned = $true }
+            }
         }
         if ($provisioned -and $deployed -ceq $current) { Exit-SessionStart }
         $installerAction = 'provision'

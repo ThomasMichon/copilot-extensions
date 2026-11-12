@@ -955,6 +955,12 @@ $manifest = [ordered]@{
     runtime        = 'python'
 }
 if ($profileResult.runtimeSource) { $manifest['runtime_source'] = $profileResult.runtimeSource }
+if ($WheelProfile) {
+    if ($profileResult.payloadHash -cnotmatch '^[0-9a-f]{64}$') {
+        throw 'Native wheel construction returned no manifest content identity'
+    }
+    $manifest['source']['content_hash'] = $profileResult.payloadHash
+}
 $tmp = "$manifestPath.tmp"
 $manifest | ConvertTo-Json -Depth 4 | Set-Content -Path $tmp -Encoding UTF8
 Move-Item -Force -Path $tmp -Destination $manifestPath

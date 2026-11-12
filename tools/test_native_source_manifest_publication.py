@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 from pathlib import Path
 import shlex
@@ -15,17 +16,91 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def _publication_body(plugin: str, suffix: str) -> str:
-    installer = "init" if plugin in {"agent-machines", "agent-mcp"} else "install"
+    installer = "init" if plugin in {"agent-machines", "agent-mcp", "agent-containers"} else "install"
     text = (ROOT / "plugins" / plugin / "scripts" / f"{installer}.{suffix}").read_text(
         encoding="utf-8",
     )
     if plugin in {"agent-machines", "agent-mcp"}:
         start = text.index("# -- 5.")
         return text[start:text.index("# -- 6.", start)]
+    if plugin == "agent-containers":
+        start = text.index("# -- 5. Write deploy manifest")
+        return text[start:text.index("# -- Machine-local", start)]
+    if plugin == "budget-guidance":
+        start = text.index("$manifest = [ordered]@{")
+        return text[start:text.index("\n$prevEAP =", start)]
     marker = "$sourcePublication =" if suffix == "ps1" else 'SOURCE_FIELDS=""'
     end = "\n$prevEAP =" if suffix == "ps1" else "\necho ''"
     start = text.index(marker)
     return text[start:text.index(end, start)]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows native manifest producers")
+@pytest.mark.parametrize("plugin", ["agent-containers", "budget-guidance"])
+def test_native_wheel_manifest_publishes_completed_construction_hash(tmp_path, monkeypatch, plugin):
+    monkeypatch.syspath_prepend(str(ROOT / "libs" / "versioned-runtime"))
+    monkeypatch.syspath_prepend(str(ROOT / "libs" / "installer-engine"))
+    import install_source
+
+    shell = shutil.which("powershell.exe")
+    assert shell
+    payload, root = tmp_path / "payload", tmp_path / "runtime"
+    payload.mkdir()
+    (payload / "pyproject.toml").write_text(
+        f'[project]\nname="{plugin}"\nversion="1.2.3"\n', encoding="utf-8",
+    )
+    row = {
+        "name": plugin, "version": "1.2.3", "filename": plugin.replace("-", "_") + "-1.2.3-py3-none-any.whl",
+        "sha256": "sha256:" + "a" * 64, "selected_extras": [],
+    }
+    binding = {"wheels": [row]}
+    lock = "sha256:" + hashlib.sha256(json.dumps(
+        binding, sort_keys=True, separators=(",", ":"),
+    ).encode()).hexdigest()
+    generation, fingerprint = "1.2.3.profile." + lock[7:23], "b" * 64
+    slot = root / "versions" / generation
+    python = slot / "Scripts" / "python.exe"
+    python.parent.mkdir(parents=True)
+    python.touch()
+    receipt = {
+        "construction": "closed-wheels", "lock_id": lock, "binding": binding,
+        "distributions": {plugin: {key: row[key] for key in ("version", "filename", "sha256")}},
+    }
+    (slot / ".runtime-input-origins.json").write_text(json.dumps({
+        "schema": "installer-engine.frozen-input-origins", "version": 2,
+        "wheel_inputs": receipt, "local_packages": [plugin],
+    }))
+    install_source.engine.runtime.mark_complete(root, generation, payload_hash=fingerprint)
+    (root / "current-version").write_text(generation)
+
+    def quote(value):
+        return "'" + str(value).replace("'", "''") + "'"
+
+    harness = tmp_path / "manifest.ps1"
+    harness.write_text(
+        "$ErrorActionPreference='Stop'; $env:COMPUTERNAME='fixture'\n"
+        "function Write-Ok { param($Message) }\n"
+        "function Get-SourceKind { param($PluginPath) 'marketplace' }\n"
+        "function Test-SourceRuntimeUnchanged {}\n"
+        f"$InstallDir={quote(root)}; $PluginDir={quote(payload)}; $LinkDir={quote(slot)}\n"
+        f"$ManifestPath={quote(root / 'deploy-manifest.json')}; $SrcVersion={quote(generation)}\n"
+        "$kind='marketplace'; $ver='1.2.3'; $commit=$null; $branch=$null; $dirty=$false\n"
+        f"$NativeWheelSelection=@{{payload_hash={quote(fingerprint)}}}\n"
+        "$WheelProfile='selected.json'; $SourceSelected=$false; $SourceRuntimeIdentity=$null\n"
+        f"$profileResult=[pscustomobject]@{{runtimeVersion={quote(generation)}; profile='base'; "
+        f"runtimeSource=$null; payloadHash={quote(fingerprint)}}}\n"
+        + _publication_body(plugin, "ps1"),
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [shell, "-NoProfile", "-NonInteractive", "-File", str(harness)],
+        cwd=tmp_path, capture_output=True, text=True, timeout=30,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    manifest = json.loads((root / "deploy-manifest.json").read_text(encoding="utf-8-sig"))
+    assert manifest["source"]["content_hash"] == fingerprint
+    assert install_source.native_current(root, payload, plugin)
 
 
 @pytest.mark.parametrize("plugin", ["agent-ssh", "agent-machines", "agent-mcp"])

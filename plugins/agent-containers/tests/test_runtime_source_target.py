@@ -222,7 +222,7 @@ def test_native_wheel_provision_selects_and_retains_its_exact_profile(
             profiles._write_json(slot / ".runtime-input-origins.json", receipt)
             validate_candidate(slot)
             profiles.runtime.mark_complete(root, generation, payload_hash=fingerprint)
-        yield SimpleNamespace(slot=slot, reused=False)
+        yield SimpleNamespace(slot=slot, reused=False, payload_hash=fingerprint)
 
     monkeypatch.setattr(install_source, "wheel_inputs", inputs)
     monkeypatch.setattr(install_source, "wheel_selection", lambda *_a: {
@@ -237,6 +237,7 @@ def test_native_wheel_provision_selects_and_retains_its_exact_profile(
     )
     selected = profiles.select_execution(root)
     assert selected.runtime_version == result["runtimeVersion"] == generation
+    assert result["payloadHash"] == selected.payload_hash == fingerprint
     assert selected.profile == profile
     with profiles.retain_execution(root, selected, timeout=0) as (retained, descriptor):
         assert retained == selected

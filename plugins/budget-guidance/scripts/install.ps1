@@ -1221,7 +1221,10 @@ if ($SourceRuntimeIdentity) {
         $manifest[$property.Name] = $property.Value
     }
 }
-if ($NativeWheelSelection) { $manifest['runtime_version'] = $SrcVersion }
+if ($NativeWheelSelection) {
+    $manifest['runtime_version'] = $SrcVersion
+    $manifest['source']['content_hash'] = $NativeWheelSelection.payload_hash
+}
 $tmp = "$ManifestPath.tmp"
 $manifest | ConvertTo-Json -Depth 8 | Set-Content -Path $tmp -Encoding UTF8
 Move-Item -Force -Path $tmp -Destination $ManifestPath
