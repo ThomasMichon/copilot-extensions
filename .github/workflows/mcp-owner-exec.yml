@@ -77,7 +77,7 @@ jobs:
           path: ${{ runner.temp }}/mcp-owner-exec-${{ github.run_id }}
           if-no-files-found: warn
           retention-days: 7
-      - name: Exercise trace-varying physical backend replacement and rollback
+      - name: Exercise trace-varying physical and optional-receiver handover
         run: >-
           python tools/run-plugin-tests.py agent-mcp
           --test-file tests/test_generation_handover.py --allow-explicit-tiers
