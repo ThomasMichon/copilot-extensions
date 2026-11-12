@@ -35,6 +35,7 @@ on:
       - "plugins/agent-mcp/tests/test_generation_handover.py"
       - "plugins/agent-mcp/tests/generation_native_fixture.py"
       - "plugins/agent-mcp/tests/native/test_owner_exec_copilot.py"
+      - "plugins/agent-mcp/tests/native/test_generation_handover_copilot.py"
 
 permissions:
   contents: read
@@ -124,11 +125,12 @@ jobs:
           with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as output:
               output.write("COPILOT_NATIVE_TEST_EXECUTABLE=" + str(target) + "\n")
           PY
-      - name: Exercise actual offline native client configuration consumption
+      - name: Exercise actual offline native client consumption and physical handover
         run: >-
           python tools/run-plugin-tests.py agent-mcp
-          --allow-explicit-tiers --test-timeout 120
+          --allow-explicit-tiers --test-timeout 180 --timeout 240 --plugin-timeout 260
           --test-file tests/native/test_owner_exec_copilot.py
+          --test-file tests/native/test_generation_handover_copilot.py
           --junit-dir "${{ runner.temp }}/mcp-owner-copilot-${{ github.run_id }}"
       - name: Retain native client qualification
         if: always()

@@ -392,6 +392,10 @@ handover. Preserve held sessions and the separate pre-feature adoption hold.
     required CI and Windows/Linux source qualification. Promoted release and
     installed adoption remain open; the source packets do not establish a
     joined installed-client handover.
+    #12239 subsequently merged the
+    [joined optional-receiver source packet](journal/2026/11.10-explicit-owner-cli.md#joined-optional-receiver-source-composition).
+    Its controlled caller does not qualify actual Copilot handover or installed
+    acceptance.
   - [x] **Explicit-owner source merged:** #11935 landed at
     `c0eab0d952a37607f6cf7030ac1a77f377f98a74` after current-head automated
     approval, required CI and resolution of addressed findings. The source
@@ -503,6 +507,11 @@ withdrawal authorizes no GUI effect or change to the SDK's own admission rules.
   The optional receiver's old-running-custodian boundary subsequently passed
   mixed-version source controls through #12233. These separate source packets
   are not joined installed-consumer acceptance.
+  - [x] **Joined optional receiver source:** #12239 qualifies the actual
+    bootstrap and selected physical receiver with a controlled native Linux
+    caller through replacement, rollback and same-slot replacement, retaining
+    original caller/conduit identities and upstream state until EOF. Actual
+    Copilot handover and installed acceptance remain open.
 - [ ] Failed candidate health, changed owner/route/selection and an old
   generation's late cleanup cannot corrupt or retire the current generation.
 - [ ] EOF/disconnect and verified owner death settle exact client resources;

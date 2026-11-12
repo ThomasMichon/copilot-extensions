@@ -119,6 +119,30 @@ through `python tools/run-plugin-tests.py agent-mcp --test-file
 tests/test_generation_handover.py --allow-explicit-tiers --timeout 240
 --plugin-timeout 260 --test-timeout 180`.
 
+The separate Linux native packet
+`tests/native/test_generation_handover_copilot.py` uses actual offline Copilot,
+the same physical runtime constructor and the real optional receiver. A private
+upstream sends protocol `ping` requests; actual client replies must traverse
+replacement, rollback and same-slot replacement without replacing the native
+client, original conduit, keeper or upstream. Initial discovery pagination
+requires a client-generated follow-up cursor. Each later ping requires both
+a physical-backend send witness and the upstream's matching client reply;
+a deliberately withheld ping must produce no reply before release. It is then
+released and acknowledged before closing the client's input. Fresh round trips and identity
+checks also run after each predecessor exits. The copied receiver briefly holds
+before qualification so the private fixture can prepare its backend from the
+native client's actual semantic environment; production matching is unchanged.
+Fixture-only witnesses record physical interpreter/module and native lifetimes.
+This tests protocol traffic, not model-driven tool invocation or accepted mutations;
+it requires `COPILOT_NATIVE_TEST_EXECUTABLE` on a disposable runner. The existing
+path-gated `mcp-owner-exec` workflow supplies the pinned asset. A platform or asset
+skip is not qualification, and this source packet does not enable installed
+adoption or qualify Windows. Under the preserved runner containment, native
+client shutdown terminates the upstream with SIGTERM; the fixture records that
+exact exit boundary, single initialization and birth-matched cleanup. This is
+not graceful upstream-EOF qualification; controlled-caller cases cover that
+separately.
+
 An explicitly custody-bound single-stdio `BridgeSession` can export quiescent
 JSON data and reconstruct its decorator pipeline over a supplied retained
 transport. The private binding covers the logical custody session and the
