@@ -183,7 +183,7 @@ references where available, and a private writable report home.
 | `skills/triage-issue-backlog/references/` | Durable addenda/adapters, evidence, publication and continuity |
 | `skills/consolidate-issue-backlog/SKILL.md` | Finite bulk-consolidation runbook, distinct from individual triage |
 | `skills/consolidate-issue-backlog/assets/CHARTER.md` | Explicit target, eligibility, authority, read limits and closeout template |
-| `skills/consolidate-issue-backlog/assets/scenarios.json` | Synthetic receiving, unknown-effect and finite-target contract walkthroughs |
+| `skills/consolidate-issue-backlog/assets/scenarios.json` | Synthetic census, provenance, acquisition, receiving, recovery, ownership and finite-closeout walkthroughs |
 | `skills/consolidate-issue-backlog/references/` | Cohort/acquisition discipline, canonical receiving, dispositions and continuity |
 | `skills/managing-agent-topology/SKILL.md` | Portable conversational topology-dispatcher runbook |
 | `skills/managing-agent-topology/assets/` | Complete charter template, version-1 JSON Schema and synthetic topology |

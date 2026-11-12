@@ -1782,6 +1782,9 @@ selected engine can advertise `project_integration` in its versioned
 Manager registration but does not independently recover or install Manager;
 the project controller remains responsible for Manager readiness. Standalone
 integration retains its existing recovery behavior.
+This also applies to an existing configured project controller when no explicit
+suite-authority mode has been selected; delegation does not switch that mode.
+An explicit standalone selection is never treated as project delegation.
 
 On Windows, ordinary update entry points first test whether the current shell
 can create the breakaway process required for durable execution. Refusal exits
