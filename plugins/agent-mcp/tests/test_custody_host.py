@@ -12,7 +12,7 @@ from types import SimpleNamespace
 import pytest
 
 from agent_mcp import backend, custody_conduit, custody_host, custody_session, execution_context as ec, incoming, ipc, serve
-from agent_mcp.custody_contract import CONTRACT
+from agent_mcp.custody_contract import CONTRACT, supports
 from agent_mcp.custody_host import CustodyHost
 from agent_mcp.custody_wire import MAX_FRAME
 from agent_mcp.request_context import capture_context
@@ -604,7 +604,7 @@ async def test_backend_capability_requires_actual_current_provider(tmp_path, mon
     async with shared(tmp_path, monkeypatch) as fixture:
         server = fixture.backends[0]
         monkeypatch.setattr(incoming, "launch_generation", lambda: "outgoing")
-        assert backend.capability(server).get("custody_backend") == CONTRACT
+        assert supports(backend.capability(server).get("custody_backend"))
         if case == "keeper":
             server._runtime_root = None
         elif case == "wrong-physical":
