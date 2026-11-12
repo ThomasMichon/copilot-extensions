@@ -165,7 +165,7 @@ native qualification and activation need their existing separate admission.
   into the same core; preserve platform behavior and literal prompt/argument transport.
 - [x] Connect the launch-injected, scoped trusted extension to Session Host.
   Headed mode uses the common broker, not a second conversation or Bridge-only inbox.
-- [ ] Migrate Manager launch-session and Worktrees embody/copilot, plus existing
+- [x] Migrate Manager launch-session and Worktrees embody/copilot, plus existing
   local/remote adapters, to the selected core entrypoints.
 - [ ] Prove fresh/resume/reuse, detached/attached/new-window and no-mux behavior
   through the real callers without duplicate creation or seed replay.
@@ -229,6 +229,7 @@ this proposal's review gate.
 
 ## Journal
 
+- [2026-11-12 - Private mux creation merged; selected caller source migration complete](journal/2026/11.12%20private%20mux%20creation%20convergence.md)
 - [2026-11-12 - Recordless normalized caller converges on the core](journal/2026/11.12%20recordless%20caller%20core%20acceptance.md)
 - [2026-11-12 - Original-owner recovery store reviewed and merged](journal/2026/11.12%20original-owner%20recovery%20store.md)
 - [2026-11-12 - Recovery contract reviewed; original-owner store next](journal/2026/11.12%20recovery%20contract%20acceptance.md)
