@@ -35,8 +35,8 @@ def launch(command: list[str]) -> int:
 
     cwd = str(Path.cwd().resolve())
     agent_policy.require(cwd)
-    bind_execution_directory(command, cwd, ValueError)
     argv, session_id = selected
+    argv = bind_execution_directory(argv, cwd, ValueError)
     attempt = config.install_dir() / "launch-attempts" / uuid4().hex
     environment = os.environ.copy()
     environment.pop(launch_execution.NATIVE_HINT_ENV, None)

@@ -22,9 +22,10 @@ def test_recordless_handoff_preserves_argv_and_rechecks_policy(tmp_path, monkeyp
 
     def execute(argv, **kwargs):
         assert observed == [str(Path.cwd())]
-        assert kwargs["session_id"] == (identity[-1].split("=")[-1] if identity else argv[-1])
-        assert argv[:len(command)] == command
-        assert len(argv) == len(command) + (0 if identity else 2)
+        if identity:
+            assert kwargs["session_id"] == identity[-1].split("=")[-1]
+        expected = command + ([] if identity else ["--session-id", kwargs["session_id"]])
+        assert argv == [*expected, f"-C={kwargs['cwd']}"]
         assert kwargs["environment"].get(backend.launch_execution.NATIVE_HINT_ENV) is None
         attempt = kwargs["attempt_directory"]
         assert attempt.parent == tmp_path / "launch-attempts"
@@ -101,7 +102,10 @@ def test_matching_directory_and_selector_shaped_values_keep_original_argv(tmp_pa
     monkeypatch.setattr(backend.agent_policy, "require", observed.append)
     command = ["copilot", "-C", ".", "--model", "-C=not-a-directory", "--resume=selected"]
     def execute(argv, **kwargs):
-        assert argv == command and kwargs["cwd"] == str(tmp_path.resolve())
+        assert argv == [
+            "copilot", "--model", "-C=not-a-directory", "--resume=selected", f"-C={tmp_path.resolve()}",
+        ]
+        assert kwargs["cwd"] == str(tmp_path.resolve())
         kwargs["admit"]()
         return 0, True
     monkeypatch.setattr(caller, "execute", execute)

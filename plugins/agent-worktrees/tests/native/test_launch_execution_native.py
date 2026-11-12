@@ -218,6 +218,7 @@ def test_recordless_normalized_shell_reaches_real_retained_core(tmp_path, identi
     observed = json.loads(captured.read_text(encoding="utf-8"))
     argv = observed["args"]
     assert argv[:len(arguments)] == arguments and argv.count(seed) == 1
+    assert argv.count(f"-C={tmp_path.resolve()}") == 1
     assert argv.count("--plugin-dir") == 1
     assert (argv.count("--session-id") == 1) == (not identity)
     state_file = Path(observed["state"])
@@ -255,6 +256,60 @@ def test_recordless_powershell_selected_runtime_cannot_fall_back(tmp_path, resol
     ], cwd=tmp_path, env=environment, timeout=30, max_stdout_bytes=8192, max_stderr_bytes=8192)
     assert result.returncode != 0
     assert "Normalized Copilot runtime is unavailable; no backend started." in result.stderr
+
+
+@pytest.mark.parametrize("ambient", [False, True], ids=["absent", "conflicting"])
+def test_recordless_powershell_resolver_binds_selected_root_and_restores_ambient(tmp_path, ambient):
+    executable = shutil.which("pwsh")
+    if not executable:
+        pytest.skip("PowerShell unavailable")
+    scripts = Path(__file__).resolve().parents[2] / "scripts"
+    home, selected = tmp_path / "home", tmp_path / "selected"
+    legacy = home / ".agent-worktrees"
+    for root in (selected, legacy):
+        python = root / "versions" / "1.0" / "Scripts" / "python.exe"
+        python.parent.mkdir(parents=True)
+        python.touch()
+        (python.parent.parent / ".install-complete.json").write_text(json.dumps({
+            "version": "1.0", "completed_at": "fixture", "pid": 0,
+        }), encoding="utf-8")
+        (root / "current-version").write_text("1.0", encoding="utf-8")
+    (selected / "bin").mkdir()
+    shutil.copy2(scripts / "resolve-runtime.ps1", selected / "bin" / "resolve-runtime.ps1")
+    environment = {
+        key: value for key, value in os.environ.items()
+        if not key.startswith("COPILOT_EXTENSIONS_BOOT_TRACE")
+    }
+    environment.update(
+        HOME=str(home), USERPROFILE=str(home), AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT=str(selected),
+        COPILOT_EXTENSIONS_BOOT_TRACE_LOG_PATH=str(tmp_path / "trace.jsonl"),
+    )
+    if ambient:
+        environment["AGENT_RT_ROOT"] = str(legacy)
+    else:
+        environment.pop("AGENT_RT_ROOT", None)
+    driver = tmp_path / "resolve.ps1"
+    driver.write_text(
+        "$tokens=$null; $errors=$null\n"
+        "$ast=[Management.Automation.Language.Parser]::ParseFile($args[0],[ref]$tokens,[ref]$errors)\n"
+        "if ($errors.Count) { throw 'Setup parse failed' }\n"
+        "$fn=$ast.Find({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] "
+        "-and $n.Name -eq 'Get-SetupRuntimePython'},$true)\n"
+        ". ([scriptblock]::Create($fn.Extent.Text))\n"
+        "$RuntimePython=''\n"
+        "$python=Get-SetupRuntimePython\n"
+        "@{python=$python; root=$env:AGENT_RT_ROOT; present=(Test-Path Env:AGENT_RT_ROOT)} "
+        "| ConvertTo-Json -Compress\n",
+        encoding="utf-8",
+    )
+    result = run_caller_owned([
+        executable, "-NoProfile", "-NoLogo", "-File", str(driver), str(scripts / "default-setup.ps1"),
+    ], cwd=tmp_path, env=environment, timeout=30, max_stdout_bytes=8192, max_stderr_bytes=8192)
+    assert result.returncode == 0, result.stdout + result.stderr
+    observed = json.loads(result.stdout)
+    assert Path(observed["python"]) == selected / "versions" / "1.0" / "Scripts" / "python.exe"
+    assert observed["present"] is ambient
+    assert observed["root"] == (str(legacy) if ambient else None)
 
 
 def test_recordless_normalized_shell_rejects_execution_directory_override(tmp_path):

@@ -121,7 +121,16 @@ _awresolve="${AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT:-$HOME/.agent-worktrees}/bin/r
 if [[ -n "${AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT:-}" && -z "$RUNTIME_PYTHON" ]]; then
     AW_PY=""
 fi
-[ -f "$_awresolve" ] && . "$_awresolve"
+if [[ -f "$_awresolve" ]]; then
+    _aw_saved_root_set="${AGENT_RT_ROOT+x}"
+    _aw_saved_root="${AGENT_RT_ROOT-}"
+    if [[ -n "${AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT:-}" ]]; then
+        AGENT_RT_ROOT="$AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT"
+    fi
+    . "$_awresolve"
+    if [[ -n "$_aw_saved_root_set" ]]; then AGENT_RT_ROOT="$_aw_saved_root"; else unset AGENT_RT_ROOT; fi
+    unset _aw_saved_root_set _aw_saved_root
+fi
 _AW_PY="${RUNTIME_PYTHON:-${AW_PY:-}}"
 
 # -- Guarded setup configuration root ------------------------------------

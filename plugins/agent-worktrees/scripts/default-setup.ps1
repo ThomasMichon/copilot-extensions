@@ -113,6 +113,25 @@ if ($ExecutionDirectory) {
     $CopilotArgs = @('-C', $ExecutionDirectory) + $CopilotArgs
 }
 
+function Get-SetupRuntimePython {
+    if ($RuntimePython) { return $RuntimePython }
+    $runtimeRoot = if ($env:AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT) {
+        $env:AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT
+    } else { Join-Path $env:USERPROFILE '.agent-worktrees' }
+    $resolver = Join-Path $runtimeRoot 'bin\resolve-runtime.ps1'
+    if (-not (Test-Path -LiteralPath $resolver)) { return $null }
+    $previousRoot = $env:AGENT_RT_ROOT
+    $AwPy = $null
+    try {
+        if ($env:AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT) { $env:AGENT_RT_ROOT = $runtimeRoot }
+        . $resolver
+        return $AwPy
+    } finally {
+        if ($null -eq $previousRoot) { Remove-Item Env:AGENT_RT_ROOT -ErrorAction SilentlyContinue }
+        else { $env:AGENT_RT_ROOT = $previousRoot }
+    }
+}
+
 $nativeSetup = $null
 $nativeSetupExit = $null
 if ($LaunchSeedPreparation) {
@@ -187,14 +206,7 @@ if ($script:StdioMode) {
 # machine-local root, or validate an explicit caller-supplied root, before the
 # hook gets a chance to execute.
 if ($SetupHook -and -not $Recovery) {
-    $guardPython = $RuntimePython
-    if (-not $guardPython) {
-        $resolver = Join-Path $env:USERPROFILE '.agent-worktrees\bin\resolve-runtime.ps1'
-        if (Test-Path -LiteralPath $resolver) {
-            . $resolver
-            $guardPython = $AwPy
-        }
-    }
+    $guardPython = Get-SetupRuntimePython
     $guardPythonExecutable = $null
     if ($guardPython) {
         $isPath = [IO.Path]::IsPathRooted($guardPython) -or
@@ -323,19 +335,7 @@ Write-Host ''
 # setup failure earlier never falsely reports invocation. Best-effort and
 # detached, mirroring launch-session.ps1's Write-ActivityLog.
 function Invoke-CopilotInvokedLog {
-    $awPy = $RuntimePython
-    if (-not $awPy) {
-        # Honor a contextual/cell launch's validated runtime root (same
-        # precedence as launch-session.ps1) before the legacy per-user
-        # fallback, which may not exist for a cell-based install.
-        $runtimeRoot = if ($env:AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT) {
-            $env:AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT
-        } else {
-            Join-Path $env:USERPROFILE '.agent-worktrees'
-        }
-        $resolver = Join-Path $runtimeRoot 'bin\resolve-runtime.ps1'
-        if (Test-Path -LiteralPath $resolver) { . $resolver; $awPy = $AwPy }
-    }
+    $awPy = Get-SetupRuntimePython
     if (-not ($awPy -and (Test-Path -LiteralPath $awPy))) { return }
     try {
         $wtId = & $awPy -I -m agent_worktrees get worktree-id 2>$null
@@ -400,15 +400,7 @@ function Invoke-CopilotBackend {
             -not $nativeSetup -and $LeadingArgs.Count -eq 0 -and
             [IO.Path]::GetFileName($Executable) -in @('copilot', 'copilot.exe')
         ) {
-            $backendPython = $RuntimePython
-            if (-not $backendPython) {
-                $runtimeRoot = if ($env:AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT) {
-                    $env:AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT
-                } else { Join-Path $env:USERPROFILE '.agent-worktrees' }
-                $resolver = Join-Path $runtimeRoot 'bin\resolve-runtime.ps1'
-                $AwPy = $null
-                if (Test-Path -LiteralPath $resolver) { . $resolver; $backendPython = $AwPy }
-            }
+            $backendPython = Get-SetupRuntimePython
             if (-not $backendPython -and $env:AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT) {
                 throw 'Normalized Copilot runtime is unavailable; no backend started.'
             }

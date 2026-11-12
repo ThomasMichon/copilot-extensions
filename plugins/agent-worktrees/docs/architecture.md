@@ -842,6 +842,8 @@ An eligible fresh launch selects one identity; repository hosting policy is
 checked before core preparation and again through live-owner startup admission.
 Native directory overrides must match the caller's selected execution directory;
 an allowed caller cannot admit a different target through `-C`.
+The core receives directory-bound argv even on resume without an explicit `-C`,
+so historical session metadata cannot restore a different workspace.
 The installation's `launch-attempts/<operation>/` retains the copied runtime
 and native receipt without inventing a worktree record or using the anchor
 claim ledger as launch authority. This path adds no recovery or auth admission.
@@ -849,6 +851,8 @@ A missing/incompatible selected runtime or uncertain native receipt never
 replays the original command through a raw-backend fallback. Legacy direct
 script use with no Worktrees runtime selection retains its existing behavior;
 an explicitly selected installation with no usable resolver/runtime refuses.
+Resolver calls temporarily bind the explicit launch installation and restore
+the prior ambient runtime root before setup/backend execution.
 
 The selected POSIX provider separately advertises `posix-headed-env-v1` in
 `backend_execution_modes`. A copied seeded setup discovers it before
