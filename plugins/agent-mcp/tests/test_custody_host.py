@@ -7,7 +7,9 @@ import contextvars
 import json
 import os
 from pathlib import Path
+import socket
 import sys
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -297,6 +299,57 @@ async def test_optional_receiver_probes_actual_keeper_before_any_application_sta
                 await asyncio.to_thread(owner_entry._qualify, request)
         assert not fixture.host.sessions and fixture.host.attached == 0
         assert not fixture.pipelines and not fixture.upstreams
+
+
+@pytest.mark.parametrize("state", ["cold", "warm", "unreachable", "slow"])
+async def test_optional_keeper_probe_cost_and_pre_effect_boundary(
+    tmp_path, monkeypatch, record_testsuite_property, state,
+):
+    async with shared(tmp_path, monkeypatch) as fixture:
+        handle = fixture.host.socket_path
+        timeout = 2
+        error = None
+        reserved = None
+        if state == "cold":
+            handle = tmp_path / "cold" / "custody.sock"
+            error = OSError
+        elif state == "unreachable":
+            handle = tmp_path / "unreachable" / "custody.sock"
+            handle.parent.mkdir()
+            reserved = socket.socket()
+            reserved.bind(("127.0.0.1", 0))
+            ipc._endpoint_path(handle).write_text(json.dumps({
+                "port": reserved.getsockname()[1], "token": "private-unreachable-token",
+            }), encoding="utf-8")
+            error = OSError
+        elif state == "slow":
+            dispatch = fixture.host._dispatch
+            async def delayed(request):
+                if request.get("op") == "ping":
+                    await asyncio.sleep(timeout + 0.1)
+                return await dispatch(request)
+            monkeypatch.setattr(fixture.host, "_dispatch", delayed)
+            error = TimeoutError
+        started = time.perf_counter()
+        try:
+            if error is None:
+                await asyncio.to_thread(
+                    custody_conduit.probe, handle, fixture.root,
+                    required_trace_bookkeeping=1, timeout=timeout,
+                )
+            else:
+                with pytest.raises(error):
+                    await asyncio.to_thread(
+                        custody_conduit.probe, handle, fixture.root,
+                        required_trace_bookkeeping=1, timeout=timeout,
+                    )
+        finally:
+            record_testsuite_property(
+                f"optional_keeper_probe_{state}_seconds", time.perf_counter() - started,
+            )
+            if reserved is not None:
+                reserved.close()
+        assert not fixture.host.sessions and not fixture.pipelines and not fixture.upstreams
 
 
 @pytest.mark.parametrize("mode", [True, -1, 2, "1", None])

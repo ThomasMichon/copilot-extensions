@@ -77,6 +77,15 @@ cannot re-enable ordinary fallback after startup. Installed acceptance remains
 an open #10486 adoption item, not an incoming-installation gate. The
 configuration-consumption fixture does not establish installed reattachment.
 
+This adds one synchronous local connect/ping per trace-sensitive optional entry
+start, with a two-second protocol deadline and no steady-state message work.
+The existing attach revalidates the serving peer after startup instead of
+caching the earlier capability fact. The source host packet's
+`test_optional_keeper_probe_cost_and_pre_effect_boundary` records cold, warm,
+non-listening and slow-peer probe segments in JUnit properties. These isolated
+transport measurements are not complete native caller-launch latency or Linux
+AF_UNIX composition qualification.
+
 The session-only `--additional-mcp-config` overlay is a sealed anonymous file,
 read through the client's inherited Linux descriptor. Configuration and env
 values stay in the entry environment, not the bootstrap request or a persistent
