@@ -46,13 +46,14 @@ def _resolve_cli_module():
     ``runpy`` still sets the running module's ``__spec__.name`` to its real
     dotted name, so that recognizes the live copy; fall back to a normal
     dotted import (tests, or any other importer) only when neither is
-    already loaded.
+    already loaded. Early internal commands may run before the live core helpers
+    are defined; only a helper-initialized live module is authoritative then.
     """
     import sys as _sys
 
     live = _sys.modules.get("__main__")
     live_spec = getattr(live, "__spec__", None)
-    if live_spec is not None and live_spec.name == "agent_dispatch.__main__":
+    if live_spec is not None and live_spec.name == "agent_dispatch.__main__" and hasattr(live, "_client"):
         return live
     dotted = _sys.modules.get("agent_dispatch.__main__")
     if dotted is not None:

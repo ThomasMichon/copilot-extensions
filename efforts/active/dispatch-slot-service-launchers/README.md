@@ -316,3 +316,25 @@ claimed.
   redundant cleanup helper/tests. Requalify that reconciled tooling path before
   publication. Dispatch source and its completed native qualification are
   unchanged by this integration.
+
+### 2026-11-12 - Implementation review and real entrypoint coverage
+
+- The first implementation review found two real defects: an early command
+  selected the still-initializing live CLI module before its core helpers
+  existed, and first-line holder qualification missed the supervisor's actual
+  v1 marker. Require the live core helpers before selecting that module; otherwise
+  use the initialized import. Accept the exact supervisor v1 first line while
+  retaining legacy-header and custom-script refusal.
+- Header retirement controls now obtain the first line from the actual
+  supervisor writer, rather than a fabricated legacy header. Seven focused
+  resolver/header controls pass across both PowerShell hosts.
+- Add a real `python -m agent_dispatch` flow that starts a disposable coordinator
+  and then admits a real supervisor. Business methods, client access and CLI
+  helpers are not replaced; only host scheduling retains the existing absent-task
+  adapter. It passes in 41 seconds with generation/completion checks and strict
+  native cleanup. Its two startup operations retain their individual existing
+  60-second bounds; the original nine cases' deadlines are unchanged.
+- Dev has separately added closed-wheel installer inputs. Compose that
+  independent change and regenerate the affected human-output declaration,
+  rather than choosing either side's content hash. Refresh affected qualification,
+  required CI and review on the resulting head before merge.

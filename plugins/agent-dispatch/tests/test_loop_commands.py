@@ -109,3 +109,15 @@ def test_resolve_cli_module_falls_back_to_dotted_import_for_a_normal_importer(
     monkeypatch.setitem(sys.modules, "__main__", unrelated_main)
 
     assert _resolve_cli_module() is real_cli
+
+
+def test_early_entrypoint_without_core_helpers_uses_initialized_dotted_module(monkeypatch):
+    import sys
+    from agent_dispatch import __main__ as real_cli
+
+    pending = types.ModuleType("__main__")
+    pending.__spec__ = types.SimpleNamespace(name="agent_dispatch.__main__")
+    monkeypatch.setitem(sys.modules, "__main__", pending)
+    assert _resolve_cli_module() is real_cli
+    assert _resolve_cli_module()._client is real_cli._client
+    assert _resolve_cli_module()._emit is real_cli._emit

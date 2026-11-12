@@ -25,7 +25,7 @@ def quote(value):
 
 
 @contextmanager
-def application(tmp_path, shell, *, master=False, source=False):
+def application(tmp_path, shell, *, master=False, source=False, inert_business=True):
     root = tmp_path / "application"
     version = agent_dispatch.__version__
     if source:
@@ -43,10 +43,7 @@ def application(tmp_path, shell, *, master=False, source=False):
     )
     shutil.copytree(Path(agent_dispatch.__file__).parent, site / "agent_dispatch",
                     ignore=shutil.ignore_patterns("__pycache__"))
-    (site / "fixture_business.py").write_text("""
-import os,time,sys
-from pathlib import Path
-root=Path(os.environ['AGENT_DISPATCH_INSTALL_DIR'])
+    (site / "fixture_host_boundary.py").write_text("""
 from agent_procutil import owned_process
 original=owned_process.run_caller_owned
 def scheduling_boundary(command, **options):
@@ -55,6 +52,11 @@ def scheduling_boundary(command, **options):
         return original([*command[:-1],prefix+command[-1]],**options)
     return original(command,**options)
 owned_process.run_caller_owned=scheduling_boundary
+""")
+    (site / "fixture_business.py").write_text("""
+import os,time,sys
+from pathlib import Path
+root=Path(os.environ['AGENT_DISPATCH_INSTALL_DIR'])
 if os.environ.get('FIXTURE_SOURCE')=='1':
     from agent_dispatch import pool_source_snapshot,registrar_discovery
     cohort=lambda *args,**options: pool_source_snapshot.DeclarationRead((),True)
@@ -120,7 +122,9 @@ if '-m' in sys.argv and 'supervise' in sys.argv:
             supervisor_daemon.SupervisorDaemon.release_singleton=release
 """)
     (site / "fixture.pth").write_text(
-        "import site; site.addsitedir(" + repr(sysconfig.get_paths()["purelib"]) + "); import fixture_business\n",
+        "import site; site.addsitedir(" + repr(sysconfig.get_paths()["purelib"]) + ")"
+        + "; import fixture_host_boundary"
+        + ("; import fixture_business" if inert_business else "") + "\n",
     )
     (root / "current-version").write_text(version)
     if source:
@@ -150,6 +154,21 @@ if '-m' in sys.argv and 'supervise' in sys.argv:
         if not key.startswith(("AGENT_DISPATCH", "PYTHON"))
     }
     environment.update(AGENT_DISPATCH_INSTALL_DIR=str(root), AGENT_DISPATCH_RUN_DIR=str(root / "run"))
+    if not inert_business:
+        profile = root / "profile"
+        profile.mkdir()
+        environment.update(
+            HOME=str(profile), USERPROFILE=str(profile),
+            APPDATA=str(profile / "roaming"), LOCALAPPDATA=str(profile / "local"),
+            AGENT_DISPATCH_ROUTING_DIR=str(root / "routes"),
+            AGENT_DISPATCH_DB=str(root / "data" / "tasks.db"),
+            AGENT_DISPATCH_HOST="127.0.0.1",
+            AGENT_DISPATCH_TOKEN="disposable-data-token",
+            AGENT_DISPATCH_CONTROL_TOKEN="disposable-control-token",
+            AGENT_DISPATCH_GC_INTERVAL="0", AGENT_DISPATCH_SELF_UPDATE="0",
+        )
+        for key in ("COPILOT_PLUGIN_ROOT", "COPILOT_AGENT_SESSION_ID", "COPILOT_EXTENSIONS_CONTEXT"):
+            environment.pop(key, None)
     if master:
         environment.update(FIXTURE_MASTER="1", AGENT_DISPATCH_SUPERVISOR_SELF_UPDATE_POLL_S="1")
         (root / "supervisor.env").write_text(
@@ -183,8 +202,10 @@ Write-SupervisorLauncher|Out-Null
         )
         assert result.returncode == 0, result.stderr
     from agent_procutil.daemon_instances import REGISTRY_ENV, daemon_test_lifecycle
+    cleanup = []
     with daemon_test_lifecycle(
         owner="dispatch-scheduled-admission", registry_root=root / "native-custody",
+        cleanup_results=cleanup,
     ) as native:
         environment.update(native)
         environment[REGISTRY_ENV] = str(root / "native-custody")
@@ -195,6 +216,8 @@ Write-SupervisorLauncher|Out-Null
             (root / "release").touch()
             deadline = time.monotonic() + 30
             while time.monotonic() < deadline:
+                if not inert_business:
+                    break
                 from agent_dispatch.single_instance import is_locked, lock_path_for
                 from agent_dispatch.supervisor_lane_status import profile_scope
                 from agent_dispatch.supervisor_registration import supervisor_lease_scope
@@ -218,6 +241,8 @@ Write-SupervisorLauncher|Out-Null
                     child.terminate()  # Exact fixture control, not a worker or daemon inventory.
                     child.wait(timeout=2)
                     raise AssertionError("fixture admission control did not finish:\n" + diagnostics(root))
+    if not inert_business:
+        assert cleanup and all(item.status in {"settled", "missing"} for item in cleanup)
 
 
 def ensure_command(root, python):
@@ -270,6 +295,51 @@ def assert_completed_generation(status):
     assert cycle["completed_at"] <= time.time()
     assert cycle["generation"] == status["generation"]
     assert cycle["runtime_version"] == status["runtime_version"]
+
+
+@pytest.mark.timeout(150)
+def test_unmocked_source_entrypoints_admit_real_coordinator_and_supervisor(tmp_path):
+    from agent_dispatch.supervisor_registration import supervisor_lease_scope
+    from agent_dispatch.supervisor_status_io import read_status, runtime_status_path
+    from zdd import diagnostics as native_identity, routing
+
+    with application(tmp_path, None, master=True, source=True, inert_business=False) as (
+        root, python, environment, children,
+    ):
+        policy_path = root / "installation.json"
+        policy = json.loads(policy_path.read_text())
+        local = policy["installation"]["local"]
+        local.update(start_coordinator=True, start_supervisor=False)
+        policy_path.write_text(json.dumps(policy))
+        (root / "supervisor.env").write_text(
+            "AGENT_DISPATCH_SUPERVISE_MODE=serve\nAGENT_DISPATCH_SUPERVISE_MACHINE=fixture\n"
+            "AGENT_DISPATCH_SUPERVISE_EXTRA_ARGS=--no-declared\n",
+        )
+        command = [str(python), "-I", "-B", "-m", "agent_dispatch", "__source-start"]
+        # These are two real startup operations, each with its existing bound.
+        coordinator = launch(root, "unmocked-coordinator", command, environment, children)
+        try:
+            coordinator.wait(timeout=60)
+        except subprocess.TimeoutExpired:
+            pytest.fail("unmocked coordinator startup did not complete:\n" + diagnostics(root))
+        assert coordinator.returncode == 0, diagnostics(root)
+        assert json.loads((root / "unmocked-coordinator.out").read_text())["ok"] is True
+        endpoint = routing.Endpoint.from_dict(routing.read_table(root / "routes")["active"])
+        assert endpoint and native_identity.process_start_time(endpoint.pid) == endpoint.process_start_time
+        local.update(start_coordinator=False, start_supervisor=True)
+        policy_path.write_text(json.dumps(policy))
+        supervisor = launch(root, "unmocked-supervisor", command, environment, children)
+        try:
+            supervisor.wait(timeout=60)
+        except subprocess.TimeoutExpired:
+            pytest.fail("unmocked supervisor startup did not complete:\n" + diagnostics(root))
+        assert supervisor.returncode == 0, diagnostics(root)
+        scope = supervisor_lease_scope("fixture", "default")
+        status, error = read_status(runtime_status_path(scope, directory=root / "run"))
+        assert error is None, diagnostics(root)
+        assert_completed_generation(status)
+        assert status["generation"]["pid"] != endpoint.pid
+        assert not (root / "cycles").exists(), "business methods must not be replaced"
 
 
 @pytest.mark.parametrize("host", ["powershell.exe", "pwsh"])
