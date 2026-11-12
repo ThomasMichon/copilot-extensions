@@ -284,7 +284,7 @@ Supported built-in command groups:
 
 | Area | Commands |
 |------|----------|
-| Entries | `get`, `batch-get`, `has`, `search`, `list`/`ls`, `show`, `add`, `set-password`, `set-username`, `remove`/`rm`, `move`/`mv` |
+| Entries | `get`, `batch-get`, `has`, `search`, `list`/`ls`, `show`, `add`, `set-password`, `set-username`, `remove`/`rm`, `move`/`mv`, `copy`/`cp` |
 | Authenticated HTTP | `curl -- <supported curl arguments>` (explicit URL binding, no caller-visible credential) |
 | SSH keys | `import-key`, `export-key`, `ssh-key prepare --entry SSH/node-a`, `ssh-key install --entry SSH/node-a --directory <absolute-path>` |
 | Service | `ping`, `start`, `stop`, `lock`, `unlock` (`--terminal`/`--here`) |
@@ -293,6 +293,17 @@ Supported built-in command groups:
 | Persistent cache | `cache-populate`, `cache-status`, `cache-clear`, `cache-verify` |
 | Envelope KEK | `seal`, `unseal`, `kek-list` |
 | Shared owner key | `identity-key context --json`, `identity-key setup --entry Identity/PR-attribution` |
+
+Entry paths: a bare name (no `/`) is placed under the configured vault group,
+the default provisioning location. Any path containing `/` (a leading `/` names
+the KeePass root) is used as given and may address any group, for reads and for
+`add`, `set-password`, `set-username`, `move` and `copy`. `move` and `copy` take
+a destination group (existing, or ending in `/`) or a full destination entry
+path (rename), create missing parent groups, and refuse to overwrite an
+existing destination unless `-f` is passed. `copy` duplicates username,
+password, URL, notes and attachments; custom attributes, TOTP, tags, expiry and
+history are not copied. `remove` still requires `-f` for entries outside the
+configured group.
 
 ## Batch reads
 

@@ -1,0 +1,9 @@
+{
+  "comment": "Add copy/cp; move and copy accept a destination group or full entry path and work on explicit paths in any group without --force (--force now overwrites an existing destination)",
+  "changes": [
+    {
+      "plugin": "agent-vault",
+      "type": "patch"
+    }
+  ]
+}

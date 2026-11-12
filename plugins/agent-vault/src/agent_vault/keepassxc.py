@@ -256,6 +256,7 @@ class KeePassXCBackend:
         url: str | None = None,
         password: str | None = None,
         generate: bool = False,
+        notes: str | None = None,
     ) -> tuple[bool, str]:
         """Create a new KeePass entry. Returns (success, message)."""
         if not self._cli_path or not self.has_password(kpdb):
@@ -266,6 +267,8 @@ class KeePassXCBackend:
             args.extend(["-u", username])
         if url:
             args.extend(["--url", url])
+        if notes:
+            args.extend(["--notes", notes])
         if generate:
             args.append("-g")
         stdin = self._master_pass[kpdb] + "\n"
@@ -467,11 +470,133 @@ class KeePassXCBackend:
             return True, "Entry removed"
         return False, r.stderr.strip() or "keepassxc-cli rm failed"
 
-    def move_entry(self, kpdb: str, entry_path: str, dest_group: str) -> tuple[bool, str]:
-        """Move an entry to a different group. Returns (success, message)."""
-        r = self._run(kpdb, ["mv", "-q", kpdb, entry_path, dest_group])
+    def group_exists(self, kpdb: str, group_path: str) -> bool:
+        """Return True when ``group_path`` names an existing group."""
+        if not group_path.strip("/"):
+            return True
+        r = self._run(kpdb, ["ls", "-q", kpdb, group_path])
+        return bool(r and r.returncode == 0)
+
+    def _read_field_raw(self, kpdb: str, entry_path: str, attr: str) -> str | None:
+        r = self._run(kpdb, ["show", "-q", "-s", kpdb, entry_path, "-a", attr])
+        if r is None or r.returncode != 0:
+            return None
+        value = r.stdout
+        if value.endswith("\r\n"):
+            return value[:-2]
+        if value.endswith("\n"):
+            return value[:-1]
+        return value
+
+    def list_attachments(self, kpdb: str, entry_path: str) -> list[str] | None:
+        """Return attachment names for an entry, or None on failure."""
+        r = self._run(
+            kpdb, ["show", "-q", "--show-attachments", "-a", "Title", kpdb, entry_path],
+        )
+        if r is None or r.returncode != 0:
+            return None
+        names: list[str] = []
+        in_list = False
+        for line in r.stdout.splitlines():
+            if line.strip() == "Attachments:":
+                in_list = True
+                continue
+            if in_list and line.startswith("  ") and line.strip():
+                names.append(line[2:].rsplit(" (", 1)[0])
+        return names
+
+    def _split_path(self, entry_path: str) -> tuple[str, str]:
+        parent, _, title = entry_path.rstrip("/").rpartition("/")
+        return parent, title
+
+    def _rename_entry(self, kpdb: str, entry_path: str, title: str) -> tuple[bool, str]:
+        r = self._run(kpdb, ["edit", "-q", kpdb, entry_path, "-t", title])
         if r is None:
             return False, "CLI not available or vault locked"
         if r.returncode == 0:
+            return True, "Entry renamed"
+        return False, r.stderr.strip() or "keepassxc-cli edit failed"
+
+    def move_entry(self, kpdb: str, entry_path: str, dest_path: str) -> tuple[bool, str]:
+        """Move an entry to a full destination entry path, renaming if needed.
+
+        Missing destination parent groups are created. Returns (success, message).
+        """
+        src_parent, src_title = self._split_path(entry_path)
+        dest_parent, dest_title = self._split_path(dest_path)
+        same_parent = src_parent.strip("/") == dest_parent.strip("/")
+        if same_parent:
+            if src_title == dest_title:
+                return True, "Entry already at destination"
+            ok, msg = self._rename_entry(kpdb, entry_path, dest_title)
+            return (True, "Entry moved") if ok else (False, msg)
+        self._ensure_parent_groups(kpdb, dest_path)
+        group_arg = dest_parent or "/"
+        if src_title == dest_title:
+            r = self._run(kpdb, ["mv", "-q", kpdb, entry_path, group_arg])
+            if r is None:
+                return False, "CLI not available or vault locked"
+            if r.returncode == 0:
+                return True, "Entry moved"
+            return False, r.stderr.strip() or "keepassxc-cli mv failed"
+        # Rename in place first unless that would collide with a sibling, then
+        # move; otherwise move first and rename at the destination.
+        renamed_src = f"{src_parent}/{dest_title}" if src_parent else dest_title
+        if not self.has_entry(kpdb, renamed_src):
+            ok, msg = self._rename_entry(kpdb, entry_path, dest_title)
+            if not ok:
+                return False, msg
+            r = self._run(kpdb, ["mv", "-q", kpdb, renamed_src, group_arg])
+            if r is None or r.returncode != 0:
+                self._rename_entry(kpdb, renamed_src, src_title)
+                err = (r.stderr.strip() if r else "") or "keepassxc-cli mv failed"
+                return False, err
             return True, "Entry moved"
-        return False, r.stderr.strip() or "keepassxc-cli mv failed"
+        moved_src = f"{dest_parent}/{src_title}" if dest_parent else src_title
+        if self.has_entry(kpdb, moved_src):
+            return False, (
+                f"Cannot move and rename: both '{renamed_src}' and '{moved_src}' "
+                "already exist; move in two steps")
+        r = self._run(kpdb, ["mv", "-q", kpdb, entry_path, group_arg])
+        if r is None:
+            return False, "CLI not available or vault locked"
+        if r.returncode != 0:
+            return False, r.stderr.strip() or "keepassxc-cli mv failed"
+        ok, msg = self._rename_entry(kpdb, moved_src, dest_title)
+        if not ok:
+            return False, f"Entry moved to '{moved_src}' but rename failed: {msg}"
+        return True, "Entry moved"
+
+    def copy_entry(self, kpdb: str, entry_path: str, dest_path: str) -> tuple[bool, str]:
+        """Copy an entry to a new full entry path. Returns (success, message).
+
+        Copies the title (from ``dest_path``), username, password, URL, notes
+        and attachments. keepassxc-cli cannot write custom attributes, so those
+        (and TOTP, tags, expiry, icons and history) are not copied.
+        """
+        fields: dict[str, str] = {}
+        for attr in ("UserName", "Password", "URL", "Notes"):
+            value = self._read_field_raw(kpdb, entry_path, attr)
+            if value is None:
+                return False, f"Could not read {attr} from '{entry_path}'"
+            fields[attr] = value
+        attachments = self.list_attachments(kpdb, entry_path)
+        if attachments is None:
+            return False, f"Could not list attachments of '{entry_path}'"
+        ok, msg = self.add_entry(
+            kpdb, dest_path,
+            username=fields["UserName"] or None,
+            url=fields["URL"] or None,
+            password=fields["Password"] or None,
+            notes=fields["Notes"] or None,
+        )
+        if not ok:
+            return False, msg
+        for name in attachments:
+            data, emsg = self.export_attachment(kpdb, entry_path, name)
+            if data is None:
+                return False, f"Entry copied but attachment '{name}' export failed: {emsg}"
+            ok, imsg = self.import_attachment(kpdb, dest_path, name, data)
+            if not ok:
+                return False, f"Entry copied but attachment '{name}' import failed: {imsg}"
+        return True, "Entry copied"

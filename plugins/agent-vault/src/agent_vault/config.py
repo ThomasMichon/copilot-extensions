@@ -579,9 +579,10 @@ def within_group(entry: str, group: str | None) -> bool:
     """Whether a normalized entry falls within the resolved vault group.
 
     When no group is configured there is nothing to scope to, so every entry is
-    considered in-scope. Used to gate destructive operations (remove/move) so a
-    caller cannot delete or move an entry outside the active vault's group
-    without an explicit ``force``.
+    considered in-scope. Used to gate the destructive ``remove`` operation so a
+    caller cannot delete an entry outside the active vault's group without an
+    explicit ``force``. Non-destructive writes (add, move, copy) accept explicit
+    paths anywhere; the group is only the default location for bare names.
     """
     if not group:
         return True

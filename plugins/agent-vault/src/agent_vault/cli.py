@@ -1093,20 +1093,31 @@ def cmd_remove(args):
     return 1
 
 
-def cmd_move(args):
+def _relocate(args, action: str, default_message: str, timeout: float) -> int:
     if not _ensure_unlocked_service():
         return 1
 
-    request = {"action": "move", "entry": args.entry, "dest": args.dest}
+    request = {"action": action, "entry": args.entry, "dest": args.dest}
     if args.force:
         request["force"] = True
-    resp = send_command(request, timeout=10.0)
+    resp = send_command(request, timeout=timeout)
     if resp and resp.get("ok"):
-        print(resp.get("message", "Entry moved"))
+        message = resp.get("message", default_message)
+        if resp.get("dest"):
+            message = f"{message}: {resp.get('source', args.entry)} -> {resp['dest']}"
+        print(message)
         return 0
     error = resp.get("error", "unknown") if resp else "service unreachable"
     print(f"Error: {error}", file=sys.stderr)
     return 1
+
+
+def cmd_move(args):
+    return _relocate(args, "move", "Entry moved", timeout=30.0)
+
+
+def cmd_copy(args):
+    return _relocate(args, "copy", "Entry copied", timeout=60.0)
 
 
 def cmd_git_credential(args):
@@ -1760,12 +1771,26 @@ def _main(argv: list[str] | None = None):
                    help="Allow removing an entry outside the vault group")
     p.set_defaults(func=cmd_remove)
 
-    p = sub.add_parser("move", aliases=["mv"], help="Move an entry to another group")
+    _RELOCATE_DEST_HELP = (
+        "Destination group (existing group, or a path ending in '/') or full "
+        "destination entry path (rename). A bare name lands in the configured "
+        "group; any path containing '/' may address any group")
+
+    p = sub.add_parser("move", aliases=["mv"],
+                       help="Move or rename an entry (any group)")
     p.add_argument("entry", help="Entry path")
-    p.add_argument("dest", help="Destination group")
+    p.add_argument("dest", help=_RELOCATE_DEST_HELP)
     p.add_argument("-f", "--force", action="store_true",
-                   help="Allow moving an entry outside the vault group")
+                   help="Overwrite an existing destination entry")
     p.set_defaults(func=cmd_move)
+
+    p = sub.add_parser("copy", aliases=["cp"],
+                       help="Copy an entry to another group or entry path")
+    p.add_argument("entry", help="Entry path")
+    p.add_argument("dest", help=_RELOCATE_DEST_HELP)
+    p.add_argument("-f", "--force", action="store_true",
+                   help="Overwrite an existing destination entry")
+    p.set_defaults(func=cmd_copy)
 
     p = sub.add_parser("git-credential",
                        help="git credential helper (delegates allowlisted hosts to GCM)")

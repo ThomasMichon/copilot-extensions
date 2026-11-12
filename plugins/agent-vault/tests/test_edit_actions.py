@@ -1,4 +1,4 @@
-"""Tests for the entry edit/CRUD actions: list, show, set-username, remove, move."""
+"""Tests for the entry edit/CRUD actions: list, show, set-username, remove, move, copy."""
 
 from __future__ import annotations
 
@@ -162,11 +162,21 @@ def test_remove_out_of_group_allowed_with_force(unlocked, monkeypatch, kpdb):
 
 
 # ---------------------------------------------------------------------------
-# move / mv
+# move / mv and copy / cp  (explicit paths reach any group)
 # ---------------------------------------------------------------------------
 
 
-def test_move_in_group(unlocked, monkeypatch, kpdb):
+@pytest.fixture
+def fake_tree(unlocked, monkeypatch):
+    """Stub group/entry existence with simple in-memory sets."""
+    groups = {"Managed", "Managed/sub", "Other", "Archive"}
+    entries = {"Managed/x", "Other/x"}
+    monkeypatch.setattr(unlocked.cli, "group_exists", lambda db, g: g.strip("/") in groups)
+    monkeypatch.setattr(unlocked.cli, "has_entry", lambda db, e: e.strip("/") in entries)
+    return entries
+
+
+def test_move_in_group(unlocked, fake_tree, monkeypatch, kpdb):
     called = {}
     monkeypatch.setattr(
         unlocked.cli, "move_entry",
@@ -176,7 +186,7 @@ def test_move_in_group(unlocked, monkeypatch, kpdb):
         {"action": "mv", "entry": "Managed/x", "dest": "Managed/sub", "group": "Managed", "kpdb": kpdb}
     )
     assert resp["ok"] is True
-    assert called == {"entry": "Managed/x", "dest": "Managed/sub"}
+    assert called == {"entry": "Managed/x", "dest": "Managed/sub/x"}
 
 
 def test_move_requires_dest(unlocked, kpdb):
@@ -187,11 +197,83 @@ def test_move_requires_dest(unlocked, kpdb):
     assert "destination" in resp["error"].lower()
 
 
-def test_move_out_of_group_blocked_without_force(unlocked, monkeypatch, kpdb):
-    monkeypatch.setattr(unlocked.cli, "move_entry",
-                        lambda db, entry, dest: (_ for _ in ()).throw(AssertionError("must not move")))
+def test_move_out_of_group_explicit_path_needs_no_force(unlocked, fake_tree, monkeypatch, kpdb):
+    called = {}
+    monkeypatch.setattr(
+        unlocked.cli, "move_entry",
+        lambda db, entry, dest: called.update(entry=entry, dest=dest) or (True, "Entry moved"),
+    )
+    unlocked.cache[(kpdb, "Other/x", "password")] = "stale"
     resp = unlocked.handle_request(
-        {"action": "mv", "entry": "Other/x", "dest": "Managed", "group": "Managed", "kpdb": kpdb}
+        {"action": "mv", "entry": "Other/x", "dest": "Archive/renamed", "group": "Managed", "kpdb": kpdb}
+    )
+    assert resp["ok"] is True
+    assert called == {"entry": "Other/x", "dest": "Archive/renamed"}
+    assert (kpdb, "Other/x", "password") not in unlocked.cache
+
+
+def test_copy_happy_path_keeps_source_and_invalidates_dest(unlocked, fake_tree, monkeypatch, kpdb):
+    called = {}
+    monkeypatch.setattr(
+        unlocked.cli, "copy_entry",
+        lambda db, entry, dest: called.update(entry=entry, dest=dest) or (True, "Entry copied"),
+    )
+    monkeypatch.setattr(unlocked.cli, "remove_entry",
+                        lambda db, entry: (_ for _ in ()).throw(AssertionError("must not remove")))
+    unlocked.cache[(kpdb, "Managed/x", "password")] = "keep"
+    unlocked.cache[(kpdb, "Other/x2", "password")] = "stale"
+    resp = unlocked.handle_request(
+        {"action": "cp", "entry": "x", "dest": "Other/x2", "group": "Managed", "kpdb": kpdb}
+    )
+    assert resp["ok"] is True
+    assert resp["source"] == "Managed/x"
+    assert resp["dest"] == "Other/x2"
+    assert called == {"entry": "Managed/x", "dest": "Other/x2"}
+    assert unlocked.cache[(kpdb, "Managed/x", "password")] == "keep"
+    assert (kpdb, "Other/x2", "password") not in unlocked.cache
+
+
+def test_copy_refuses_existing_destination_without_force(unlocked, fake_tree, monkeypatch, kpdb):
+    monkeypatch.setattr(unlocked.cli, "copy_entry",
+                        lambda db, entry, dest: (_ for _ in ()).throw(AssertionError("must not copy")))
+    resp = unlocked.handle_request(
+        {"action": "copy", "entry": "Managed/x", "dest": "Other", "group": "Managed", "kpdb": kpdb}
     )
     assert resp["ok"] is False
-    assert "outside" in resp["error"].lower()
+    assert "already exists" in resp["error"]
+
+
+def test_copy_force_replaces_existing_destination(unlocked, fake_tree, monkeypatch, kpdb):
+    calls = []
+    monkeypatch.setattr(unlocked.cli, "remove_entry",
+                        lambda db, entry: calls.append(("rm", entry)) or (True, "Entry removed"))
+    monkeypatch.setattr(unlocked.cli, "copy_entry",
+                        lambda db, entry, dest: calls.append(("cp", entry, dest)) or (True, "Entry copied"))
+    resp = unlocked.handle_request(
+        {"action": "copy", "entry": "Managed/x", "dest": "Other/", "force": True,
+         "group": "Managed", "kpdb": kpdb}
+    )
+    assert resp["ok"] is True
+    assert calls == [("rm", "Other/x"), ("cp", "Managed/x", "Other/x")]
+
+
+def test_copy_bare_destination_name_lands_in_group(unlocked, fake_tree, monkeypatch, kpdb):
+    called = {}
+    monkeypatch.setattr(
+        unlocked.cli, "copy_entry",
+        lambda db, entry, dest: called.update(dest=dest) or (True, "Entry copied"),
+    )
+    resp = unlocked.handle_request(
+        {"action": "cp", "entry": "Other/x", "dest": "y", "group": "Managed", "kpdb": kpdb}
+    )
+    assert resp["ok"] is True
+    assert called["dest"] == "Managed/y"
+
+
+def test_bare_name_normalization_unchanged():
+    from agent_vault.config import normalize_entry
+
+    assert normalize_entry("x", "Managed") == "Managed/x"
+    assert normalize_entry("Managed/x", "Managed") == "Managed/x"
+    assert normalize_entry("Other/x", "Managed") == "Other/x"
+    assert normalize_entry("/x", "Managed") == "/x"
