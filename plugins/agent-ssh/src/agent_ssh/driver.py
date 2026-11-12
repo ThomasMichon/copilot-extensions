@@ -195,22 +195,42 @@ def _read_json(path: Path) -> Any:
         return None
 
 
+def _within(path: Path, base: Path) -> bool:
+    return path == base or base in path.parents
+
+
+def _repo_settings(repo_root: Path) -> tuple[Any, Any]:
+    """The committed and machine-local (``settings.local.json``) repo settings."""
+    folder = repo_root / ".github" / "copilot"
+    return _read_jsonc(folder / "settings.json"), _read_jsonc(folder / "settings.local.json")
+
+
 def _directory_marketplace_roots(repo_root: Path, plugin: str) -> list[tuple[str, Path]]:
-    settings = _read_json(repo_root / ".github" / "copilot" / "settings.json")
-    if not isinstance(settings, dict):
-        return []
-    markets = settings.get("extraKnownMarketplaces")
-    if not isinstance(markets, dict):
-        return []
+    """Directory marketplaces declared by the repo; ``settings.local.json`` overrides by name.
+
+    Committed declarations must stay inside the repository; the untracked,
+    operator-authored local override may point anywhere. A plugin's source
+    must stay inside its marketplace directory.
+    """
+    committed, local = _repo_settings(repo_root)
+    declared: dict[str, tuple[Any, bool]] = {}
+    for settings, is_local in ((committed, False), (local, True)):
+        markets = settings.get("extraKnownMarketplaces") if isinstance(settings, dict) else None
+        if isinstance(markets, dict):
+            for name, spec in markets.items():
+                declared[name] = (spec, is_local)
+    repo = repo_root.resolve()
     roots: list[tuple[str, Path]] = []
-    for name, spec in markets.items():
+    for name, (spec, is_local) in declared.items():
         source = spec.get("source") if isinstance(spec, dict) else None
         if not isinstance(source, dict) or source.get("source") != "directory":
             continue
         rel = source.get("path")
         if not isinstance(rel, str) or not rel:
             continue
-        base = (repo_root / rel).resolve()
+        base = (repo_root / Path(rel).expanduser()).resolve()
+        if not is_local and not _within(base, repo):
+            continue
         manifest = None
         for candidate in (
             base / ".claude-plugin" / "marketplace.json",
@@ -223,7 +243,7 @@ def _directory_marketplace_roots(repo_root: Path, plugin: str) -> list[tuple[str
             for entry in manifest["plugins"]:
                 if isinstance(entry, dict) and entry.get("name") == plugin:
                     src = entry.get("source")
-                    if isinstance(src, str) and src:
+                    if isinstance(src, str) and src and _within((base / src).resolve(), base):
                         roots.append((name, (base / src).resolve()))
         else:
             roots.append((name, (base / plugin).resolve()))
@@ -258,10 +278,14 @@ def _enabled_value(settings: Any, identity: str) -> bool | None:
 
 
 class _Activation:
-    """Effective ``<plugin>@<marketplace>`` activation (repo, then user, then inventory)."""
+    """Effective ``<plugin>@<marketplace>`` activation.
 
-    def __init__(self, home: Path | None, repo_settings: Any) -> None:
-        self.repo = repo_settings
+    Precedence: repo ``settings.local.json``, repo ``settings.json``, user
+    ``settings.json``, then the installed inventory record.
+    """
+
+    def __init__(self, home: Path | None, repo_settings: tuple[Any, Any] = (None, None)) -> None:
+        self.repo, self.local = repo_settings
         self.user = _read_jsonc(_copilot_home(home) / "settings.json")
         config = _read_jsonc(_copilot_config_path(home))
         records = config.get("installedPlugins") if isinstance(config, dict) else None
@@ -272,8 +296,11 @@ class _Activation:
                 self.inventory[key] = record.get("enabled", True) is not False
 
     def explicit(self, identity: str) -> bool | None:
-        value = _enabled_value(self.repo, identity)
-        return value if value is not None else _enabled_value(self.user, identity)
+        for layer in (self.local, self.repo, self.user):
+            value = _enabled_value(layer, identity)
+            if value is not None:
+                return value
+        return None
 
     def installed(self, identity: str) -> bool:
         value = self.explicit(identity)
@@ -337,8 +364,8 @@ def find_module(
     must contain exactly one distinct match. Repository marketplaces are
     consulted only when Copilot trusts the checkout (``trustedFolders``),
     and marketplace/installed candidates must be effectively enabled
-    (``enabledPlugins`` in repo then user settings, else the installed
-    inventory record).
+    (``enabledPlugins`` in repo local, repo, then user settings, else the
+    installed inventory record).
     """
     tiers: list[list[Path]] = []
     if driver.plugin == "agent-ssh":
@@ -347,8 +374,7 @@ def find_module(
     repo_root = _git_toplevel(cwd)
     trusted = bool(repo_root) and repository_trusted(repo_root, home)
     untrusted_repo = bool(repo_root) and not trusted
-    repo_settings = _read_json(repo_root / ".github" / "copilot" / "settings.json") if trusted else None
-    activation = _Activation(home, repo_settings)
+    activation = _Activation(home, _repo_settings(repo_root) if trusted else (None, None))
     disabled: list[str] = []
     directory: list[Path] = []
     if trusted:

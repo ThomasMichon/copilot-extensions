@@ -159,11 +159,15 @@ candidates):
    trust (`trustedFolders` in `$COPILOT_HOME/config.json`, default
    `~/.copilot/config.json`), so an untrusted checkout can never supply or
    override an executable provider, and only when `<plugin>@<marketplace>` is
-   explicitly enabled (`enabledPlugins` in the repo settings, else the user's
-   `<copilot home>/settings.json`);
+   explicitly enabled (`enabledPlugins` in the repo's untracked
+   `settings.local.json`, then `settings.json`, then the user's
+   `<copilot home>/settings.json`). `settings.local.json` may also redeclare a
+   marketplace by name (and point outside the repo); committed declarations
+   must resolve inside the repository, and a manifest plugin `source` must stay
+   inside its marketplace directory;
 3. installed plugins, `<copilot home>/installed-plugins/<marketplace>/<plugin>`,
    only when the copy is effectively active: an explicit `enabledPlugins`
-   value (repo, then user) wins, otherwise the `enabled` flag of its
+   value (repo local, repo, then user) wins, otherwise the `enabled` flag of its
    `installedPlugins` record in `config.json`. A copy with no inventory record
    is skipped.
 

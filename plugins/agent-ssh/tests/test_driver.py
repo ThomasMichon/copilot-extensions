@@ -219,6 +219,52 @@ def test_untrusted_checkout_provider_is_not_discovered(tmp_path):
         d.find_module(DRIVER, repo, home=tmp_path / "home", payload_root=lambda: None)
 
 
+def test_local_settings_disable_overrides_repository_enablement(tmp_path):
+    repo = _repo_with_directory_marketplace(tmp_path)
+    (repo / ".github" / "copilot" / "settings.local.json").write_text(
+        json.dumps({"enabledPlugins": {"example-provider@local": False}}), encoding="utf-8",
+    )
+    home = _copilot(tmp_path / "home", trusted=[repo], installed=[("local", True)])
+    with pytest.raises(d.DriverError, match="disabled"):
+        d.find_module(DRIVER, repo, home=home, payload_root=lambda: None)
+
+
+def test_local_settings_may_declare_out_of_repo_marketplace(tmp_path):
+    repo = _repo_with_directory_marketplace(tmp_path)
+    outside = tmp_path / "operator-market"
+    _write_module(outside / "example-provider")
+    (repo / ".github" / "copilot" / "settings.local.json").write_text(
+        json.dumps({"extraKnownMarketplaces": {"local": {"source": {"source": "directory", "path": str(outside)}}}}),
+        encoding="utf-8",
+    )
+    home = _copilot(tmp_path / "home", trusted=[repo])
+    assert "operator-market" in str(d.find_module(DRIVER, repo, home=home, payload_root=lambda: None))
+
+
+@pytest.mark.parametrize("escape", ["market", "plugin"])
+def test_committed_marketplace_cannot_escape_repository(tmp_path, escape):
+    repo = tmp_path / "repo"
+    (repo / ".github" / "copilot").mkdir(parents=True)
+    outside = tmp_path / "outside"
+    _write_module(outside / "example-provider")
+    path = "../outside" if escape == "market" else "./market"
+    (repo / ".github" / "copilot" / "settings.json").write_text(
+        json.dumps({"extraKnownMarketplaces": {"local": {"source": {"source": "directory", "path": path}}},
+                    "enabledPlugins": {"example-provider@local": True}}),
+        encoding="utf-8",
+    )
+    if escape == "plugin":
+        (repo / "market" / ".claude-plugin").mkdir(parents=True)
+        (repo / "market" / ".claude-plugin" / "marketplace.json").write_text(
+            json.dumps({"plugins": [{"name": "example-provider", "source": "../../outside/example-provider"}]}),
+            encoding="utf-8",
+        )
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    home = _copilot(tmp_path / "home", trusted=[repo])
+    with pytest.raises(d.DriverError):
+        d.find_module(DRIVER, repo, home=home, payload_root=lambda: None)
+
+
 def test_disabled_repository_provider_is_not_discovered(tmp_path):
     repo = _repo_with_directory_marketplace(tmp_path, enabled=False)
     home = _copilot(tmp_path / "home", trusted=[repo])
