@@ -25,6 +25,8 @@ _DRIVER_MODULES = (
     "headed/staging.py",
     "headed/launcher.py",
     "headed/receipt.py",
+    "headed/recovery.py",
+    "headed/recovery_codec.py",
     "headed/extension.mjs",
     "headed/acp-adapter.mjs",
     "headed/host-client.mjs",

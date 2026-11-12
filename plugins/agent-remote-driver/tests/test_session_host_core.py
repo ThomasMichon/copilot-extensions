@@ -57,6 +57,35 @@ def _relocate(tmp_path: Path, *, legacy: bool = False) -> Path:
     return relocated
 
 
+@pytest.mark.parametrize("legacy", [False, True])
+def test_relocated_compact_recovery_codec_roundtrips_complete_record(tmp_path, legacy):
+    archive = _relocate(tmp_path, legacy=legacy)
+    script = """
+import sys
+sys.path.insert(0, sys.argv[1])
+from agent_remote_driver.headed.recovery import RecoveryDescriptor, RecoveryRecord, RecoveryStep
+from agent_remote_driver.headed.recovery_codec import encode_recovery_record, decode_recovery_record
+descriptor = RecoveryDescriptor(
+    "owner", "worktree", "revision", "source", "source-revision", "same-conversation",
+    "environment", "boot", "scope", "incarnation", 1,
+)
+record = RecoveryRecord(
+    "operation", descriptor,
+    (RecoveryStep("retire_intent", "owner-evidence", ("unknown-action",)),),
+    ("native-connection-lost",),
+)
+restored = decode_recovery_record(encode_recovery_record(record))
+assert restored == record
+assert restored.unknown_effects == ("unknown-action",)
+assert restored.status()["effects_wired"] is False
+"""
+    result = subprocess.run(
+        [sys.executable, "-I", "-c", script, str(archive)], cwd=archive.parent,
+        capture_output=True, timeout=15, **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stderr.decode(errors="replace")
+
+
 async def _close_frontend(client):
     await asyncio.wait_for(client.close(), 3)
 
