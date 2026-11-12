@@ -88,7 +88,7 @@ def _require_no_owner_wake(
             ):
                 continue
             current = (
-                queue._wake_is_current(task, WakeOperation._from_row(row))
+                queue._wake_is_current(task, WakeOperation._from_row(row), conn=conn)
                 if table == "wake_outbox" else queue._run_waiter_wake_is_current(
                     conn, task, RunWaiterWakeOperation._from_row(row),
                 )
@@ -288,7 +288,7 @@ class QueueExecutionWakesMixin:
                 return WakeSendAdmission(row["execution_send"], False)
             task = self._fetch(conn, wake.task_id)
             current = (
-                self._wake_is_current(task, WakeOperation._from_row(row))
+                self._wake_is_current(task, WakeOperation._from_row(row), conn=conn)
                 if table == "wake_outbox"
                 else self._run_waiter_wake_is_current(conn, task, RunWaiterWakeOperation._from_row(row))
             )
@@ -313,7 +313,11 @@ class QueueExecutionWakesMixin:
                 raise TaskError("settled wake send is observation only; retain its transport history")
             if isinstance(wake, RunWaiterWakeOperation) and wake.sender == CLAIM_RELEASE_SENDER:
                 raise TaskError("claim-release bookkeeping must not request execution custody")
-            require_execution_admission(conn, task.id)
+            require_execution_admission(
+                conn, task.id, owner_wake=current_wake if table == "wake_outbox" else None,
+            )
+            from .queue_relevance_delivery import closeout_wake
+            local_closeout = table == "wake_outbox" and closeout_wake(conn, current_wake)
             local_recovery = isinstance(wake, WakeOperation) and wake.pool_recovery_revision is not None
             if local_recovery:
                 from .queue_pool_recovery import recovery_assignment, recovery_wake
@@ -326,15 +330,22 @@ class QueueExecutionWakesMixin:
             if provenance is None:
                 if execution_scope_qualified(conn, task.repo, task.source):
                     raise TaskError("qualified wake send requires coordinator provenance")
-                if not local_recovery:
+                if not local_recovery and not local_closeout:
                     return WakeSendAdmission(None, True)
-                identity = json.dumps({
-                    "protocol": "pool_recovery_wake/v1",
-                    "reservation_key": assignment["reservation_key"],
+                fields = {
+                    "protocol": "task_relevance_closeout/v1" if local_closeout else "pool_recovery_wake/v1",
+                    "reservation_key": (
+                        reservation["key"] if reservation else None
+                    ) if local_closeout else assignment["reservation_key"],
                     "recovery_revision": wake.pool_recovery_revision,
                     "outbox": table, "wake_id": wake.id, "delivery_token": wake.delivery_token,
                     "task_generation": task.generation, "owner_session_id": wake.owner_session_id,
-                }, sort_keys=True, separators=(",", ":"))
+                }
+                if local_closeout:
+                    fields["closeout_steer_id"] = conn.execute(
+                        "SELECT steer_id FROM task_relevance_closeouts WHERE task_id=?", (task.id,),
+                    ).fetchone()["steer_id"]
+                identity = json.dumps(fields, sort_keys=True, separators=(",", ":"))
                 conn.execute(
                     f"UPDATE {table} SET execution_send=?, execution_send_state='pending',"
                     " execution_send_detail='' WHERE id=?", (identity, wake.id),

@@ -103,9 +103,13 @@ def test_bound_closeout_keeps_original_owner_session_and_actual_lifecycle(q, sta
     before = q.get(t.id)
     result = report(q, t.id)
     assert result["decision"] == "closeout_pending"
-    assert q.get(t.id) == before
+    current = q.get(t.id)
+    assert replace(
+        current, wake_seq=before.wake_seq, wake_operation_id=before.wake_operation_id,
+        wake_status=before.wake_status,
+    ) == before
     assert result["owner_session_id"] == "original-native"
-    assert result["delivery"] == "pending_owner_closeout"
+    assert result["delivery"] == "pending"
     receipt = q.relevance_receipt(t.id, "closed-source")
     assert receipt["closeout"]["owner_session_id"] == "original-native"
     assert receipt["steer_consumed_at"] is None

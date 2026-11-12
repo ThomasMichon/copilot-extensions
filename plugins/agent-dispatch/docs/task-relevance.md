@@ -3,7 +3,7 @@
 The queue has an **internal, receiver-first** relevance operation:
 `reconcile_task_relevance`. It is not exposed through HTTP or CLI and no emitter,
 evaluator or periodic source calls it yet. Source adapters, registered-source
-admission, wake delivery and actual session/workspace closeout remain tracked by
+admission and actual session/workspace closeout remain tracked by
 the [active effort](../../../efforts/active/task-relevance-reconciliation/README.md).
 This is not an automatic task scrubber.
 
@@ -52,7 +52,8 @@ cleared. An independent hold is preserved.
 
 All other obsolete non-terminal work receives one durable closeout intent and
 one entry in the existing steering inbox. Its status, owner, native, generation
-and resource records stay unchanged. Subsequent reports share that closeout;
+and resource records stay unchanged. A known original owner/native receives one
+linked wake in the same transaction. Subsequent reports share that closeout;
 retries return the original acceptance without repeating the audit or steer.
 An accepted closeout blocks ordinary claim, spawn and execution admission,
 including recovery of the original goal. It survives reset and requeue.
@@ -63,17 +64,39 @@ Thus an older closure report cannot follow a newer accepted source observation
 using its old task snapshot. Domain adapters must additionally fence their own
 source revisions and reopened/new source episodes.
 
-## Deliberately pending effects
+## Original-owner delivery
 
-`closeout_pending` and `pending_owner_closeout` mean **intent retained**, not
-notification sent or resources finalized. `relevance_receipt` separates original
-acceptance from current steering consumption. Consuming a steer does not clear
-the closeout or prove native/workspace cleanup.
+The existing wake drainer sends the closeout prompt to the retained owner and
+native conversation. Busy/idle transport handling stays with Bridge. A suspended
+task remains suspended: the prompt tells its agent to take closeout steering,
+not run `start` or `resume`. Steering consumption selects the closeout instead
+of older goal instructions and does not restore a suspended execution lease.
+Submitted work can use its recorded `completed_by` worker and retained native
+without reassigning the task. Absent or changed ownership stays pending; this
+receiver never guesses a historical owner or creates a replacement agent.
 
-This slice does not wake suspended owners, select replacement agents, release
-reservations or delete files. A later source slice must connect closeout to the
-existing wake outbox and original-owner recovery, including unresolved transport
-outcomes and actual terminal lifecycle acknowledgement.
+Only the outbox row linked through the closeout's actual steer can pass its
+original-goal admission fence. Ordinary goal wakes, run waiters and forged or
+changed prompt objects cannot inherit this permission. Independent execution
+scope closure, qualified-runtime provenance, delivery token, generation, owner,
+native, retirement, cooling, transport custody and cold-pool lane gates still
+apply. An independent hold keeps the wake pending without spending attempts;
+clearing it does not resume the goal. Cold-body lane acquisition uses the
+existing publication owner, not a closeout capacity exemption.
+
+The original outbox keeps send identity even without a qualified execution
+scope. Pending/unknown transport outcomes are not replayed after restart.
+Supported original-native receipt reconciliation can settle acceptance without
+another send; a missing receipt is not proof of absence. A delivered wake may
+still be awaiting the agent's work.
+
+`closeout_pending` means **intent retained**, not resources finalized.
+`pending_owner_closeout` means no wake was linked to an available original
+owner/native. `relevance_receipt` separates immutable acceptance, current wake
+status and steering consumption. None proves actual session/workspace cleanup.
+Session conclusion, workspace disposition, recovery of cleared historical
+owners and externally registered relevance callers remain pending. This slice
+does not release reservations or delete files.
 
 No new wire contract or support capability is advertised. Existing clients and
 ordinary tasks retain their behavior. A prior receiver must not receive new

@@ -1,0 +1,9 @@
+{
+  "comment": "Deliver relevance closeout through original-owner steering and the durable wake outbox",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

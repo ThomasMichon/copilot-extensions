@@ -6,15 +6,38 @@ from . import bridge
 from .bridge_command_delivery import native_prompt, steering_prompt
 from .ordinary_agent_facts import identity, native_conflict
 from .ordinary_native_bindings import native_bindings
-from .queue import TaskQueue
+from .queue import TaskQueue, WakeOperation
 from .queue_records import SpawnReservation, SpawnState, Status, TaskError
 from .spawn_factories import _parse_fleet_body_handle, _parse_local_body_handle
 
 
-def _require_retained_owner(task, reservation: SpawnReservation, owner, owner_session_id):
+def _closeout_delivery(conn, task_id, owner, owner_session_id, key) -> bool:
+    from .queue_execution_handoff import require_execution_admission
+    from .queue_relevance import closeout_request
+    from .queue_relevance_delivery import closeout_wake
+    if closeout_request(conn, task_id) is None:
+        return False
+    row = conn.execute("SELECT * FROM wake_outbox WHERE id=? AND task_id=?", (key, task_id)).fetchone()
+    wake = WakeOperation._from_row(row) if row is not None else None
     if (
-        task is None or task.owner != owner or task.owner_session_id != owner_session_id
-        or task.status not in Status.OWNED or not owner_session_id
+        wake is None or not closeout_wake(conn, wake)
+        or (wake.owner, wake.owner_session_id) != (owner, owner_session_id)
+    ):
+        raise TaskError("closeout transport requires its original linked owner wake")
+    require_execution_admission(conn, task_id, owner_wake=wake)
+    return True
+
+
+def _require_retained_owner(task, reservation: SpawnReservation, owner, owner_session_id, *,
+                            closeout: bool = False):
+    if (
+        task is None or not (
+            task.owner == owner
+            or closeout and task.status == Status.SUBMITTED
+            and task.owner is None and task.completed_by == owner
+        ) or task.owner_session_id != owner_session_id
+        or not (task.status in Status.OWNED or closeout and task.status == Status.SUBMITTED)
+        or not owner_session_id
         or reservation.state not in {SpawnState.SPAWNED, SpawnState.COLD}
         or reservation.conversation_retired or reservation.release_requested
         or reservation.cooling_token is not None
@@ -43,6 +66,8 @@ def deliver_owner_wake(
     queue: TaskQueue, owner: str, owner_session_id: str | None, task_id: str,
     message: str | None, idempotency_key: str,
 ) -> bool:
+    with queue._connect() as conn:
+        closeout = _closeout_delivery(conn, task_id, owner, owner_session_id, idempotency_key)
     reservation = queue.latest_reservation(task_id)
     handle = reservation.session_handle if reservation else None
     hosted = reservation is not None and (
@@ -56,7 +81,7 @@ def deliver_owner_wake(
             idempotency_key=idempotency_key,
         )
     task = queue.get(task_id)
-    _require_retained_owner(task, reservation, owner, owner_session_id)
+    _require_retained_owner(task, reservation, owner, owner_session_id, closeout=closeout)
     bridge_id, native_id = _target_identity(reservation, task, owner)
     fleet = _parse_fleet_body_handle(handle)
     local = _parse_local_body_handle(handle)
@@ -76,7 +101,8 @@ def deliver_owner_wake(
             raise TaskError("hosted wake reservation is unavailable")
         current = SpawnReservation._from_row(row)
         current_task = queue._fetch(conn, task_id)
-        _require_retained_owner(current_task, current, owner, owner_session_id)
+        closeout = _closeout_delivery(conn, task_id, owner, owner_session_id, idempotency_key)
+        _require_retained_owner(current_task, current, owner, owner_session_id, closeout=closeout)
         if current_task.generation != task.generation or any(
             getattr(current, field) != getattr(reservation, field)
             for field in ("session_handle", "driver", "worktree", "allocation_project", "creating_host")
