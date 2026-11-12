@@ -2976,6 +2976,13 @@ sources, transferring owners or turning partial/planning gains into completion.
   #5665 handoff remains separate from documentary publication.
 - [ ] Verify and publish supported dispositions, preserving source versus
   release versus rollout distinctions and all active ownership.
+  The [later-receiving checkpoint](journal/2026/11.12-later-receiving-and-source-boundaries.md)
+  records two further verified finite source completions, eighteen oldest
+  contract assessments and five independent inflow retentions. It credits
+  #4055's already accepted diagnostic core and proposes two later direct
+  provider-specific alternatives under the same ROOT; separate reviewed
+  receiving/readback and source judgment remain. Its measured 909-open census
+  is 180 above the fixed whole target; no anticipated fold is counted.
   The [preserved-cache and oldest-contract checkpoint](journal/2026/11.12-preserved-cache-and-oldest-contracts.md)
   records three verified finite source completions and #3963's complete
   existing receiving route, with the same unlocked announcement discussion
