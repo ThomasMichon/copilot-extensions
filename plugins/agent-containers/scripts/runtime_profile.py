@@ -463,6 +463,10 @@ def provision(
                     raise RuntimeError("Completed Containers slot lacks its profile evidence")
                 else:
                     _write_json(evidence, expected)
+                _health(
+                    slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python"),
+                    profile, cwd=payload,
+                )
 
             with engine.numbered_candidate(
                 root, runtime_version, plugin=payload, uv=Path(uv), base_python=Path(python),
@@ -474,7 +478,6 @@ def provision(
                 venv_python = ready.slot / (
                     "Scripts/python.exe" if os.name == "nt" else "bin/python"
                 )
-                _health(venv_python, profile, cwd=payload)
                 inputs.verify()
                 _write_json(root / PROFILE_FILE, {
                     "schema": PROFILE_SCHEMA, "version": 1, "profile": profile,

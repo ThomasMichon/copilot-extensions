@@ -24,7 +24,7 @@ for name, wheel in (source_wheels or {}).items():
         assert not relative.is_absolute() and ".." not in relative.parts and \
             chr(92) not in member, "unsafe source wheel member"
         installed_file = pathlib.Path(distribution.locate_file(member)).resolve()
-        assert installed_file.is_relative_to(slot) and installed_file.stat().st_size <= 64 << 20 and \
+        assert resolved(installed_file).is_relative_to(slot) and installed_file.stat().st_size <= 64 << 20 and \
             hashlib.sha256(installed_file.read_bytes()).hexdigest() == digest, \
             f"{name} installed content differs from its source wheel: {member}"
 """

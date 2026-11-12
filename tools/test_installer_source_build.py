@@ -11,6 +11,7 @@ import subprocess
 import sys
 import threading
 import time
+import pathlib
 from types import SimpleNamespace
 
 import pytest
@@ -22,6 +23,32 @@ from test_installer_wheel_acquisition import CERTIFICATE, feeds as feeds  # noqa
 from wheel_input_fixture import wheel_bytes
 
 import installer_source_build as builds
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows native source-wheel paths")
+def test_source_wheel_content_accepts_native_paths(tmp_path):
+    from installer_engine_health import _SOURCE_WHEEL_CONTENT_CHECK
+
+    installed = tmp_path / "example_app.py"
+    installed.write_bytes(b"VALUE = 1\n")
+    native = Path("\\\\?\\" + str(installed))
+    distribution = SimpleNamespace(locate_file=lambda _member: native)
+    namespace = {
+        "source_wheels": {"example-app": {"files": {
+            installed.name: hashlib.sha256(installed.read_bytes()).hexdigest(),
+        }}},
+        "importlib": SimpleNamespace(metadata=SimpleNamespace(
+            distribution=lambda _name: distribution,
+        )),
+        "pathlib": pathlib,
+        "hashlib": hashlib,
+        "slot": tmp_path,
+        "resolved": lambda path: Path(str(path).removeprefix("\\\\?\\")),
+    }
+    exec(_SOURCE_WHEEL_CONTENT_CHECK, namespace)
+    installed.write_bytes(b"VALUE = 2\n")
+    with pytest.raises(AssertionError, match="installed content differs"):
+        exec(_SOURCE_WHEEL_CONTENT_CHECK, namespace)
 
 
 def test_source_phase_allowances_are_independent_and_report_the_expired_phase(monkeypatch, capsys):

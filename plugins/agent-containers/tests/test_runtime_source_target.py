@@ -6,7 +6,9 @@ import os
 import shutil
 import subprocess
 import sys
+from contextlib import contextmanager
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -124,6 +126,59 @@ def test_native_wheel_cli_passes_inputs_to_the_existing_provision_owner(
     assert json.loads(capsys.readouterr().out) == {"profile": "base"}
     assert calls[0]["wheel_profile"] == tmp_path / "profile.json"
     assert calls[0]["wheel_directory"] == tmp_path / "wheels"
+
+
+@pytest.mark.parametrize("reused", [False, True])
+@pytest.mark.parametrize("profile", ["base", "provider-exec"])
+def test_native_wheel_profile_health_gates_completion(
+    profiles, tmp_path, monkeypatch, reused, profile,
+):
+    import install_source
+
+    root, payload = tmp_path / "runtime", tmp_path / "payload"
+    slot = root / "versions" / "1.0.profile.fixture"
+    slot.mkdir(parents=True)
+    marker = slot / ".install-complete.json"
+    expected = {
+        "packageVersion": "1.0", "profile": profile, "payloadHash": "fixture",
+        "executionContract": profiles._execution_contract(),
+    }
+    if reused:
+        profiles._write_json(slot / profiles.PROFILE_FILE, expected)
+        marker.write_bytes(b"prior completion")
+    monkeypatch.setattr(profiles, "_select_target", lambda *_a: SimpleNamespace(
+        package_version="1.0", identity=None, profile=profile, runtime_version="1.0",
+    ))
+    monkeypatch.setattr(profiles.runtime, "is_complete", lambda *_a: marker.exists())
+
+    @contextmanager
+    def inputs(*_a):
+        yield SimpleNamespace(verify=lambda: None)
+
+    @contextmanager
+    def candidate(*_a, validate_candidate, **_kw):
+        validate_candidate(slot)
+        marker.write_bytes(b"new completion")
+        yield SimpleNamespace(slot=slot, reused=reused)
+
+    monkeypatch.setattr(install_source, "wheel_inputs", inputs)
+    monkeypatch.setattr(install_source, "wheel_selection", lambda *_a: {
+        "extras": ["provider-exec"] if profile == "provider-exec" else [],
+        "runtime_version": slot.name, "payload_hash": "fixture", "local_packages": [],
+    })
+    monkeypatch.setitem(sys.modules, "installer_engine", SimpleNamespace(numbered_candidate=candidate))
+
+    def reject(*_a, **_kw):
+        raise RuntimeError("profile health failed")
+
+    monkeypatch.setattr(profiles, "_health", reject)
+    with pytest.raises(RuntimeError, match="profile health failed"):
+        profiles.provision(
+            root, payload, python=sys.executable, uv="fixture",
+            wheel_profile=tmp_path / "profile.json", wheel_directory=tmp_path / "wheels",
+        )
+    assert marker.read_bytes() == b"prior completion" if reused else not marker.exists()
+    assert not (root / profiles.PROFILE_FILE).exists()
 
 
 def test_old_transaction_caller_cannot_ignore_required_profile_target(
