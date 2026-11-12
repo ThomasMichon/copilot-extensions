@@ -491,7 +491,7 @@ class QueueSteeringMixin:
         all_pending: bool = False,
         now: float | None = None,
     ) -> dict | list[dict] | None:
-        """Consume pending steering for a held task the worker owns."""
+        """Consume held-work steering or the original owner's closeout instruction."""
         ts = self._now(now)
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
@@ -499,24 +499,34 @@ class QueueSteeringMixin:
             if task is None:
                 conn.execute("COMMIT")
                 raise TaskError(f"no such task {task_id!r}")
-            if task.status not in Status.HELD:
+            from .queue_relevance import closeout_request
+            from .queue_relevance_delivery import closeout_owner_matches
+            closeout = closeout_request(conn, task_id)
+            if closeout is not None and (
+                not closeout_owner_matches(task, closeout) or task.hold_reason is not None
+            ):
+                raise TaskError("closeout steering requires its original unheld owner and generation")
+            if closeout is None and task.status not in Status.HELD:
                 conn.execute("COMMIT")
                 raise TaskError(f"cannot take a steer on a {task.status!r} task")
-            if task.owner != worker_id:
+            owner = closeout["owner"] if closeout is not None else task.owner
+            if owner != worker_id:
                 conn.execute("COMMIT")
-                raise TaskError(f"task {task_id!r} owned by {task.owner!r}, not {worker_id!r}")
+                raise TaskError(f"task {task_id!r} owned by {owner!r}, not {worker_id!r}")
             rows = conn.execute(
                 "SELECT id, ts, fields, sender FROM task_steer "
-                "WHERE task_id = ? AND taken = 0 ORDER BY id ASC"
+                "WHERE task_id = ? AND taken = 0"
+                + (" AND id = ?" if closeout is not None else "") + " ORDER BY id ASC"
                 + ("" if all_pending else " LIMIT 1"),
-                (task_id,),
+                (task_id, closeout["steer_id"]) if closeout is not None else (task_id,),
             ).fetchall()
             if not rows:
-                conn.execute(
-                    "UPDATE tasks SET lease_expires_at = ?, last_seen_at = ?,"
-                    " updated_at = ? WHERE id = ?",
-                    (ts + self.lease_seconds, ts, ts, task_id),
-                )
+                if task.status in Status.HELD:
+                    conn.execute(
+                        "UPDATE tasks SET lease_expires_at = ?, last_seen_at = ?,"
+                        " updated_at = ? WHERE id = ?",
+                        (ts + self.lease_seconds, ts, ts, task_id),
+                    )
                 conn.execute("COMMIT")
                 return [] if all_pending else None
             conn.executemany(
@@ -524,7 +534,8 @@ class QueueSteeringMixin:
                 [(ts, row["id"]) for row in rows],
             )
             conn.execute(
-                "UPDATE tasks SET lease_expires_at = ?, last_seen_at = ?,"
+                "UPDATE tasks SET lease_expires_at = CASE WHEN status IN ('claimed','started')"
+                " THEN ? ELSE lease_expires_at END, last_seen_at = ?,"
                 " updated_at = ? WHERE id = ?",
                 (ts + self.lease_seconds, ts, ts, task_id),
             )
@@ -578,8 +589,15 @@ class QueueSteeringMixin:
             ).fetchall()
         return [WakeOperation._from_row(row) for row in rows]
 
-    @staticmethod
-    def _wake_is_current(task: Task | None, wake: WakeOperation) -> bool:
+    def _wake_is_current(self, task: Task | None, wake: WakeOperation, *,
+                         conn: sqlite3.Connection | None = None) -> bool:
+        if conn is None:
+            with self._connect() as conn:
+                return self._wake_is_current(task, wake, conn=conn)
+        from .queue_relevance import closeout_request
+        from .queue_relevance_delivery import closeout_wake
+        if closeout_request(conn, wake.task_id) is not None:
+            return task is not None and closeout_wake(conn, wake)
         return bool(
             task is not None
             and (
@@ -672,6 +690,9 @@ class QueueSteeringMixin:
                     " AND (pool_recovery_revision IS NULL OR NOT EXISTS ("
                     " SELECT 1 FROM tasks held WHERE held.id=wake_outbox.task_id"
                     " AND (held.hold_reason IS NOT NULL OR held.awaiting_steer=1)))"
+                    " AND NOT EXISTS (SELECT 1 FROM task_relevance_closeouts c"
+                    " JOIN tasks held ON held.id=c.task_id"
+                    " WHERE c.task_id=wake_outbox.task_id AND held.hold_reason IS NOT NULL)"
                     " AND (execution_send_state = 'sent' OR ("
                     + wake_custody_clear_sql("wake_outbox") +
                     " AND NOT EXISTS (SELECT 1 FROM execution_admission_closures c"
@@ -685,7 +706,7 @@ class QueueSteeringMixin:
                     return None
                 wake = WakeOperation._from_row(row)
                 task = self._fetch(conn, wake.task_id)
-                if not self._wake_is_current(task, wake):
+                if not self._wake_is_current(task, wake, conn=conn):
                     conn.execute(
                         "UPDATE wake_outbox SET status = 'stale', updated_at = ?,"
                         " last_error = 'task fence advanced' WHERE id = ?"
@@ -762,7 +783,7 @@ class QueueSteeringMixin:
             task = self._fetch(conn, wake.task_id)
             from .queue_pool_recovery import recovery_wake
             managed_recovery = task is not None and recovery_wake(conn, task, wake.id)
-            if not self._wake_is_current(task, wake):
+            if not self._wake_is_current(task, wake, conn=conn):
                 status = "stale"
                 note = f"wake stale ({wake.id})"
                 params = (status, ts, "task fence advanced", wake.id)

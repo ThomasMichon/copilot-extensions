@@ -39,7 +39,7 @@ REQUEST_BURST = 128
 REQUEST_RATE = (MAX_REPLAYS - REQUEST_BURST) // (PROOF_AGE + 2 * CLOCK_SKEW + 1)
 REQUEST_HEADERS = frozenset({
     "accept", "accept-language", "content-type", "if-none-match", "if-modified-since",
-    "if-match", "if-unmodified-since",
+    "if-match", "if-unmodified-since", "x-agent-index-installation-id",
 })
 RESPONSE_HEADERS = frozenset({
     "content-type", "cache-control", "etag", "last-modified", "content-disposition",

@@ -14,7 +14,10 @@ import sys
 import time
 import uuid
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+_SCRIPTS = Path(__file__).resolve().parent
+if _SCRIPTS.name == "installer-engine" and _SCRIPTS.parent.name == "libs":
+    sys.path.insert(0, str(_SCRIPTS.parent / "versioned-runtime"))
+sys.path.insert(0, str(_SCRIPTS))
 import installer_engine as engine
 from installer_wheel_inputs import WheelLimits, inspect_archive
 from installer_wheel_snapshot import WheelReuseInputs, retain_wheel_inputs
@@ -51,6 +54,24 @@ class ProjectSource:
         ):
             raise ValueError("installation source has invalid repository provenance")
         return descriptor
+
+    @property
+    def composition(self) -> dict | None:
+        if "composition" not in self.record:
+            return None
+        composition = self.record["composition"]
+        if (
+            self.record.get("kind") != "source"
+            or not isinstance(composition, dict) or set(composition) != {"main_seed", "tree"}
+            or composition.get("main_seed") != self.record.get("main_head")
+            or any(
+                not isinstance(composition.get(key), str)
+                or re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", composition[key]) is None
+                for key in ("main_seed", "tree")
+            )
+        ):
+            raise ValueError("installation source has an invalid Git composition association")
+        return dict(composition)
 
 
 def _read(path: Path) -> dict:
@@ -123,7 +144,9 @@ def select_project(snapshot: Path, component: str) -> ProjectSource:
         or identity.source_tree != record["source_tree"]
     ):
         raise ValueError(f"{component} source differs from its immutable source association")
-    return ProjectSource(payload, identity, record, project_key)
+    selected = ProjectSource(payload, identity, record, project_key)
+    selected.composition
+    return selected
 
 
 def select(snapshot: Path) -> ProjectSource:
@@ -202,6 +225,7 @@ def wheel_inputs(
 def project_inputs(snapshot: Path, component: str, *, deadline: float | None = None):
     """Hold the prepared complete wheel set through canonical installed health."""
     selected = select_project(snapshot, component)
+    composition = selected.composition
     project = selected.project
     if "profile" not in project or "wheel_inputs" not in project:
         raise ValueError("installation source has first-party inputs only; prepare its native wheel profile")
@@ -222,6 +246,8 @@ def project_inputs(snapshot: Path, component: str, *, deadline: float | None = N
             raise ValueError("project source changed during installation")
         if observed.source_descriptor != selected.source_descriptor:
             raise ValueError("project repository provenance changed during installation")
+        if observed.composition != composition:
+            raise ValueError("project Git composition changed during installation")
 
 
 @contextmanager

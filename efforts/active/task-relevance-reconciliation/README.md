@@ -92,13 +92,17 @@ merged plan does not establish running adoption.
 - [ ] Add a coordinator-owned relevance report with durable request identity,
       source/registration scope and expected task revision or generation.
       Emitters and evaluators use the same transaction.
-- [ ] Inside that transaction, abandon only a task with no prior claim/start,
+- [x] Inside that transaction, abandon only a task with no prior claim/start,
       current assignment, native attachment, pending startup or retained
       resource obligation. Claim and preparation races must linearize with it.
-- [ ] Otherwise record closeout intent and steering for the existing owner.
+      Internal receiver and independent-process controls merged in #12281;
+      this does not qualify an emitter caller or live runtime.
+- [x] Otherwise record closeout intent and steering for the existing owner.
       Queue a wake when needed, retaining the original conversation, task
       generation and acknowledgement history. Do not mark cleanup complete
       merely because a notification was admitted.
+      The source receiver links one original-owner wake atomically; native
+      transport, pending/unknown outcomes and suspended steering use existing owners.
 - [ ] Preserve closeout intent through restart, owner recovery and requeue.
       Recovering an obsolete task must not restart its original work.
       Unknown or unavailable owner state remains visible for recovery.
@@ -135,8 +139,10 @@ merged plan does not establish running adoption.
 - [ ] Source closure before claim abandons without launching an agent.
 - [ ] Concurrent claim, reservation and workspace/native preparation cannot
       create a body after a successful unbound-abandon decision.
-- [ ] A previously claimed but now unassigned task does not become
+- [x] A previously claimed but now unassigned task does not become
       never-claimed merely because its current owner field is empty.
+      The source receiver checks durable assignment/resource history, including
+      reset-cleared mutable fields; source controls merged in #12281.
 - [ ] Busy, idle, suspended and temporarily unreachable owners receive
       durable closeout in the original conversation without duplicate work.
 - [ ] Restart, duplicate reports and lost responses preserve a single accepted
@@ -160,6 +166,46 @@ operator's explicit bulk reset; it must not inherit that reset's broad discard
 authority. Add no universal attestation layer or duplicate lifecycle engine.
 
 ## Journal
+
+### 2026-11-12 - Original-owner closeout delivery
+
+Connected closeout acceptance to the existing steer inbox and wake outbox in
+one transaction. Only its linked outbox row can pass the original-goal fence;
+ordinary sender, scope closure, custody, token, native and cold-pool capacity
+checks remain. Suspended closeout consumption does not start the goal or restore
+its lease. Submitted work uses the recorded submitting worker and native without
+reassigning the task. Unknown transport outcomes retain the existing original
+receipt-reconciliation path and never authorize replacement sends.
+The bounded isolated relevance, steering, wake, pool and native-transport
+selection passed 290 tests, with one existing detached-cleanup-only parameter
+skipped. These are source controls, not actual installed-runtime acceptance.
+The review correction applies the already-fenced submitting worker to both
+restricted native-target reads without changing stored task ownership. Its
+restricted/ordinary delivery and supervisor packet passed 184 selected controls.
+Closeout validity uses its durable steer/outbox link rather than the mutable
+latest ordinary wake summary, so a later event note cannot strand the accepted
+closeout. The affected linkage/admission packet passed 110 controls, with one
+existing detached-cleanup-only parameter skipped.
+
+Historical ownership that is absent or changed stays explicitly pending.
+External registered callers, periodic source evaluation, cohort stamps, actual
+session/workspace cleanup acknowledgement and runtime adoption remain open.
+
+### 2026-11-12 - Internal receiver approved and merged
+
+[PR #12281](https://github.com/ThomasMichon/copilot-extensions/pull/12281)
+merged as `abed2cbddb2230c0b0f560f8740081783dd947dd` after approval of the
+actual `9af3ebb770` head and required green checks. Review identified audit
+lookups without a usable task index; the correction covered audit, acquisition
+and send history and added an actual-query-plan control. The final focused
+relevance/query-plan/independent-process packet passed 24 cases; 229 selected
+controls were verified across scoped runs, not a full-plugin pass.
+
+Source reconciliation retained its pre-completion backup. The effort remains
+Active. The next slice is original-owner closeout delivery through the existing
+wake outbox, including suspended steering consumption without restarting the
+original goal. Registered callers, periodic evaluation, cohort attribution,
+actual cleanup acknowledgement and runtime compatibility/adoption remain open.
 
 ### 2026-11-12 - Architecture approved and merged
 
