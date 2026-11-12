@@ -1567,3 +1567,9 @@ The [owner comparison](architecture.md#owner-decision) explains this choice.
 - Win32 trailing-dot, trailing-space and default-stream aliases are normalized
   before file-resource effects, including when the reserved state does not yet
   exist. The focused real file-resource location/alias packet passed 15 cases.
+- Confirmation compares the settled desired state with the newly requested
+  store/policy after pending recovery. Recovering a previous configuration
+  cannot imply that the new confirmation was applied; mismatches return
+  `configuration-not-applied` and CLI exit 2, requiring a fresh preview.
+  Changed-store and changed-policy CLI controls passed with the full 50-case
+  enrollment unit packet.

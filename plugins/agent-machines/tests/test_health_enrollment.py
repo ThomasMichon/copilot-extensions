@@ -353,6 +353,44 @@ def test_confirmed_disabled_config_overrides_pending_enabled_replacement(case):
     assert native.calls == ["disable"]
 
 
+@pytest.mark.parametrize("changed", ["store", "policy"])
+def test_recovering_old_configuration_does_not_claim_new_confirmation_was_applied(case, monkeypatch, capsys, changed):
+    from agent_machines import cli_health
+
+    owner, desired, native, _, selection, installed = case
+    adopt(owner, desired)
+    selection[0] = installed("2.0")
+    call = native.call
+
+    def interrupt(operation, **fields):
+        if operation == "disable":
+            native.refuse_read = True
+            raise RuntimeError("replacement interrupted before effects")
+        return call(operation, **fields)
+
+    native.call = interrupt
+    assert owner.converge()["status"] == "unknown"
+    native.refuse_read = False
+    native.call = call
+    wanted = {**desired, "enabled": False}
+    if changed == "store":
+        wanted["store"] = str(owner.root / "new-store")
+    else:
+        wanted["policy_token"] = "d" * 64
+        monkeypatch.setattr(enrollment.health_run, "policy_preview", lambda *_args: ({}, "", "d" * 64))
+    preview = owner.configure(wanted)
+    monkeypatch.setattr(enrollment, "select", lambda **_fields: owner.installation)
+    monkeypatch.setattr(enrollment, "Enrollment", lambda *_args: owner)
+    assert cli_health.run_job(SimpleNamespace(
+        job_operation="configure", store_dir=Path(wanted["store"]), user_id=SID,
+        enabled=False, apply=True, expect=preview["preview_token"],
+    )) == 2
+    result = json.loads(capsys.readouterr().out)
+    assert result["status"] == "configuration-not-applied"
+    assert result["configuration_applied"] is False and not result["enabled"]
+    assert owner.read()["desired"] != wanted
+
+
 @pytest.mark.parametrize("surface", ["cli", "resource"])
 @pytest.mark.parametrize("confirmed", [False, True])
 def test_boundaries_retain_native_owner_through_bounded_cleanup(case, monkeypatch, capsys, surface, confirmed):

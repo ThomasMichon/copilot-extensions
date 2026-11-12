@@ -102,7 +102,7 @@ def run_job(args) -> int:
         if enrollment.settle_native_cleanup(owner):
             result["native_cleanup_unconfirmed"] = False
         print(json.dumps(result, separators=(",", ":"), allow_nan=False), flush=True)
-        return 2 if result["status"] in {"unknown", "rolled-back"} else 0
+        return 2 if result["status"] in {"unknown", "rolled-back", "configuration-not-applied"} else 0
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
         if not settlement_attempted:
             try:

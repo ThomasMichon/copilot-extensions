@@ -410,7 +410,14 @@ class Enrollment:
             return {**self._result("preview", native, state, changed=False), "preview_token": token}
         if not expected or not hmac.compare_digest(token, expected):
             raise slots.HealthError("enrollment-preview-changed")
-        return self.converge(desired=desired, expected_state=state, expected_native=native["digest"])
+        result = self.converge(desired=desired, expected_state=state, expected_native=native["digest"])
+        result["configuration_applied"] = (
+            None if result["recovery_required"] else self.read()["desired"] == desired
+        )
+        if result["configuration_applied"] is False and result["status"] not in {"unknown", "rolled-back"}:
+            result["status"] = "configuration-not-applied"
+            result["candidate_readiness"] = "rejected"
+        return result
 
     def converge(self, *, desired=None, expected_state=None, expected_native=None, remove=False):
         from agent_procutil.owned_process import OwnedCleanupError

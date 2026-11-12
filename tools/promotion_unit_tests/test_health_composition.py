@@ -173,6 +173,32 @@ def test_installed_job_native_defaults_preserve_matching_but_not_changed_executi
         }, {})
 
 
+def test_new_confirmation_does_not_promote_previous_configuration_recovery(owners):
+    module = owners[0]["health_enrollment"]
+    owner = object.__new__(module.Enrollment)
+    owner.root = ROOT
+    owner.owner = "urn:copilot-extensions:health-job:" + "a" * 64
+    old = {
+        "store": str(ROOT / "old-store"), "policy_token": "a" * 64,
+        "user_id": "S-1-5-21-1-2-3-1000", "enabled": False,
+    }
+    state = {**module.empty(), "desired": old}
+    owner.read = lambda: state
+    owner.backend = SimpleNamespace(call=lambda operation: {
+        "configured": False, "enabled": False, "instances": [], "digest": "absent",
+    })
+    owner._owned = owner._policy = lambda *_args: None
+    owner.selector = lambda *_args: None
+    owner.converge = lambda **_fields: {
+        "status": "disabled", "recovery_required": False, "changed": True,
+    }
+    wanted = {**old, "store": str(ROOT / "new-store")}
+    preview = owner.configure(wanted)
+    result = owner.configure(wanted, apply=True, expected=preview["preview_token"])
+    assert result["status"] == "configuration-not-applied"
+    assert result["configuration_applied"] is False and result["changed"] is True
+
+
 def test_installed_lifecycle_cli_uses_retained_manager_without_collector_readiness(owners, monkeypatch):
     modules, parser = owners
     enrollment = modules["health_enrollment"]

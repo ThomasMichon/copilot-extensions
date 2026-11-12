@@ -386,6 +386,13 @@ native task state too. A changed store, policy, account or before-state needs
 a new preview. No executable, interpreter, task XML or synchronized policy is
 accepted. Nothing enrolls by default; Linux enrollment is unsupported.
 
+When confirmation first has to recover an older pending operation, the result
+compares the settled desired state with the newly confirmed configuration.
+`configuration-not-applied` and exit 2 mean recovery completed but did not
+apply that requested store/policy; obtain a fresh preview rather than treating
+the previous configuration as the new one. `configuration_applied` is null
+while recovery remains unknown and false for a confirmed mismatch.
+
 The executing installation must already have an immutable numbered runtime,
 the retained GUI bootstrap and collection v1 `installed-job` support. Existing
 Windows installation construction retains those helpers with its normal slot
