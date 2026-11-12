@@ -452,12 +452,12 @@ def _cmd_cutover(
     # control-token) pin set only in service.env -- not in the triggering
     # process's own ambient environment -- is honored for the cutover/health-
     # check bind, not just for the replacement process's own spawn below.
-    from .install_paths import apply_service_env_overlay
+    from .install_paths import coordinator_service_environment
     runtime_root = policy_root
     captured_routing_dir = _config.routing_dir()
     effective_env = dict(os.environ if source_environment is None else source_environment)
     if source_environment is None:
-        apply_service_env_overlay(effective_env, runtime_root)
+        effective_env = coordinator_service_environment(effective_env, runtime_root)
     proposed_root = effective_env.get(INSTALL_DIR_ENV)
     if proposed_root != os.environ.get(INSTALL_DIR_ENV) and (
         not proposed_root or Path(proposed_root).expanduser() != policy_root
