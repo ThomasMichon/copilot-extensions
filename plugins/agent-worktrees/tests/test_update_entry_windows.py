@@ -142,6 +142,24 @@ def test_update_preflight_reports_capturable_error_when_wmi_queue_is_blocked(
 
 
 _QUEUED_BOOTSTRAP = r"""
+# Receipts for teardown, recorded first: this fixture and each ancestor up to the
+# WMI provider host, pinned by PID and creation time. A chain that does not end at
+# the provider host is not a queued submission and records nothing.
+$receipts = @(); $id = $PID; $childStart = [DateTime]::MaxValue; $viaWmi = $false
+while ($id -and $receipts.Count -lt 8) {
+    try { $p = [Diagnostics.Process]::GetProcessById([int]$id) } catch { break }
+    # The provider host runs as a service account: identify it before reading its times.
+    if ($p.ProcessName -ieq 'WmiPrvSE') { $viaWmi = $true; break }
+    try { $started = $p.StartTime.ToUniversalTime() } catch { break }
+    if ($started -gt $childStart) { break }
+    $receipts += @{ pid = [int]$id; created = ($started.Ticks - 621355968000000000) / 1e7 }
+    $childStart = $started
+    $id = [int](Get-CimInstance -ClassName Win32_Process -Filter "ProcessId=$id").ParentProcessId
+}
+if ($viaWmi) {
+    [IO.File]::WriteAllText($env:QUEUED_RECEIPTS + '.tmp', (ConvertTo-Json -Compress -InputObject @($receipts)))
+    [IO.File]::Move($env:QUEUED_RECEIPTS + '.tmp', $env:QUEUED_RECEIPTS)
+}
 Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
@@ -187,31 +205,64 @@ def _queued_update_case(update_entry_case, monkeypatch, *, exit_code=0):
     monkeypatch.setenv("QUEUED_PROOF", str(tmp / "queued.json"))
     monkeypatch.setenv("QUEUED_INJECTED", str(tmp / "injected.txt"))
     monkeypatch.setenv("QUEUED_EXIT", str(exit_code))
+    monkeypatch.setenv("QUEUED_RECEIPTS", str(tmp / "queued-receipts.json"))
     (tmp / "tools" / "git").unlink()
     return tmp, home
 
 
 def _reap_queued_submissions(tmp):
-    """Kill fixture-owned WMI submissions that a timed-out test left outside every Job."""
+    """Kill only the processes a queued fixture submission recorded as its own.
+
+    The fixture records PID and creation-time receipts for itself and its WMI
+    ancestors; each is re-verified through a newly opened handle, so a reused PID
+    or an unrelated process that merely mentions the scratch path is never touched.
+    """
     import psutil
 
-    marker = str(tmp)
+    receipts = tmp / "queued-receipts.json"
+    if not receipts.is_file():
+        return []
     ours = {os.getpid(), *(parent.pid for parent in psutil.Process().parents())}
     targets = []
-    for process in psutil.process_iter(["cmdline"]):
+    for receipt in json.loads(receipts.read_text(encoding="utf-8-sig")):
         try:
-            if process.pid not in ours and marker in " ".join(process.info["cmdline"] or ()):
-                targets.extend([process, *process.children(recursive=True)])
+            process = psutil.Process(int(receipt["pid"]))
+            if process.pid in ours or abs(process.create_time() - float(receipt["created"])) > 0.01:
+                continue
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             continue
-    # psutil verifies each process's creation time, so a reused PID is never killed.
+        targets.append(process)
+    # psutil re-checks the pinned creation time before signalling each process.
     for process in targets:
         try:
             process.kill()
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             pass
     psutil.wait_procs(targets, timeout=15)
+    return targets
 
+
+def test_queued_submission_teardown_spares_unrelated_processes_naming_the_scratch_path(tmp_path):
+    """Teardown acts on verified receipts only, never on a command-line match."""
+    import psutil
+
+    bystander = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(120)", str(tmp_path)],
+        stdin=subprocess.DEVNULL, **no_window_kwargs(),
+    )
+    try:
+        created = psutil.Process(bystander.pid).create_time()
+        (tmp_path / "queued-receipts.json").write_text(
+            json.dumps([{"pid": bystander.pid, "created": created - 5}]), encoding="utf-8",
+        )
+        assert _reap_queued_submissions(tmp_path) == []
+        assert bystander.poll() is None
+        (tmp_path / "queued-receipts.json").unlink()
+        assert _reap_queued_submissions(tmp_path) == []
+        assert bystander.poll() is None
+    finally:
+        bystander.kill()
+        bystander.wait(timeout=15)
 
 def _run_in_strict_job(command, tmp, timeout=180):
     from agent_procutil import spawn_sync_in_kill_on_close_job
@@ -301,6 +352,8 @@ def test_update_preflight_queues_detached_update_outside_strict_caller_job(
         proof = json.loads((tmp / "queued.json").read_text(encoding="utf-8-sig"))
         assert proof["in_job"] is False
         assert proof["args"] == ["--bootstrap-update", "update", "--project", "sample", "--detach"]
+        # The submission chain recorded its own teardown receipts.
+        assert json.loads((tmp / "queued-receipts.json").read_text(encoding="utf-8-sig"))
         assert len(list(tmp.glob("agent-update-queued-*/submission.log"))) == 1
     finally:
         if job is not None:
