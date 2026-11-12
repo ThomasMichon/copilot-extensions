@@ -12,7 +12,7 @@ existing agents, workspaces, task obligations and finite-task pool behavior.
 - **Repo:** copilot-extensions
 - **Created:** 2026-11-11
 - **Status:** Active
-- **Current slice:** Final capture imported; fresh review and exact-head required CI
+- **Current slice:** Rebased source capture, fresh review and exact-head required CI
 - **Vision:** [Agent topology](../../../visions/agent-fabric/agentic-factory/agent-topology/README.md)
 - **Umbrella issue:** #12171
 
@@ -143,6 +143,13 @@ synthetic stores and native fixture owners.
   It is isolated source-contract evidence, not installed-runtime, native Copilot,
   mux, remote authentication or live deployment qualification. Fresh review and
   required CI on the published head remain open.
+- Upstream moved before final CI and required a source reconciliation. Retained
+  the common immutable provenance chunks and both complete append-only suffixes;
+  current upstream capture bytes remain unchanged until the canonical recapture.
+  The only source-test conflict retains repair-source refusal and the copied
+  native-entry prerequisites from both branches. The installer declaration was
+  regenerated through its existing owner. The 389-case portfolio is unchanged,
+  but the combined source requires a fresh capture/replay before merge.
 
 ### 2026-11-11 - Native boundary review and CI qualification
 
