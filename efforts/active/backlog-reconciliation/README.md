@@ -2976,6 +2976,13 @@ sources, transferring owners or turning partial/planning gains into completion.
   #5665 handoff remains separate from documentary publication.
 - [ ] Verify and publish supported dispositions, preserving source versus
   release versus rollout distinctions and all active ownership.
+  The [preserved-cache and oldest-contract checkpoint](journal/2026/11.12-preserved-cache-and-oldest-contracts.md)
+  records three verified finite source completions and #3963's complete
+  existing receiving route, with the same unlocked announcement discussion
+  and every incumbent claim retained. Seventeen further whole contracts,
+  #11989's actual claim and #3511's configured-audit gap remain. The 911-open
+  census is 182 above the fixed target; no technical or parent completion
+  follows from tracking consolidation.
   The [source-completion and migration checkpoint](journal/2026/11.12-source-completions-and-migration-residuals.md)
   verifies #12272/#12276/#12117/#11798/#11803 as completed source requests while retaining
   #12280's independent checkout path and all 143 checklist entries across
