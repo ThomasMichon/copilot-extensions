@@ -9,8 +9,6 @@ needed to offer, inspect, accept, decline, and cancel an exact bundle safely.
 from __future__ import annotations
 
 import copy
-import os
-import stat
 import secrets
 from collections.abc import Callable
 from contextlib import ExitStack
@@ -185,48 +183,12 @@ def _bundle_from_dict(raw: object) -> ClaimBundle:
 
 
 def _load_registry_strict(path: Path, *, maximum_bytes: int | None = None) -> list[ClaimBundle]:
-    if not (os.path.lexists(path) if maximum_bytes is not None else path.exists()):
-        return []
-    try:
-        if maximum_bytes is None:
-            data = yaml.safe_load(tracking._read_text_with_retry(path))
-        else:
-            before = path.lstat()
-            if (
-                not stat.S_ISREG(before.st_mode)
-                or getattr(before, "st_file_attributes", 0) & 0x400
-                or before.st_size > maximum_bytes
-            ):
-                raise ClaimHandoffError("claim-handoff registry is redirected or exceeds its read budget")
-            with path.open("rb") as stream:
-                opened = os.fstat(stream.fileno())
-                raw = stream.read(maximum_bytes + 1)
-                after = os.fstat(stream.fileno())
-            named = path.lstat()
-            if (
-                len(raw) > maximum_bytes
-                or not all(os.path.samestat(before, item) for item in (opened, after, named))
-                or any((item.st_size, item.st_mtime_ns) != (before.st_size, before.st_mtime_ns)
-                       for item in (opened, after, named))
-            ):
-                raise ClaimHandoffError("claim-handoff registry changed during bounded inspection")
-            data = yaml.safe_load(raw)
-    except (OSError, UnicodeError, yaml.YAMLError) as exc:
-        raise ClaimHandoffError(
-            f"cannot read claim-handoff registry {path}: {exc}"
-        ) from exc
-    if not isinstance(data, dict) or data.get("version") != REGISTRY_VERSION:
-        raise ClaimHandoffError(f"invalid claim-handoff registry: {path}")
-    raw_bundles = data.get("bundles")
-    if not isinstance(raw_bundles, list):
-        raise ClaimHandoffError(f"invalid claim-handoff bundle list: {path}")
-    if maximum_bytes is not None and len(raw_bundles) > 10_000:
-        raise ClaimHandoffError("claim-handoff bundle inventory exceeds its read budget")
-    bundles = [_bundle_from_dict(raw) for raw in raw_bundles]
-    ids = [bundle.bundle_id for bundle in bundles]
-    if len(set(ids)) != len(ids):
-        raise ClaimHandoffError("claim-handoff registry contains duplicate bundle ids")
-    return bundles
+    from .claim_handoff_snapshot import load
+
+    return load(
+        path, maximum_bytes=maximum_bytes, version=REGISTRY_VERSION,
+        parse_bundle=_bundle_from_dict, error_type=ClaimHandoffError,
+    )
 
 
 def _save_registry(path: Path, bundles: list[ClaimBundle]) -> None:
