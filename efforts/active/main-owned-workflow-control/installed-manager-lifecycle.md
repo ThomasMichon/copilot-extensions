@@ -1940,6 +1940,46 @@ the testing reference and this journal; there is no new runtime command,
 configuration or policy. The pending exact-source CI is independent of these
 source controls and frozen earlier results.
 
+### November 11 - Verify the strict full consumer and address review
+
+Exact-source run 43148010946 attempt 1 at
+`e2d824d74d7881bdecf96bfce51550eff3712fd6` passes normal, repair and fresh.
+The actual fresh artifact binds the same candidate/source and tree, complete
+24-plugin runtime closure, all five lifecycle outcomes and original
+conversation continuity. Every stage returns zero. The result is written only
+after strict daemon cleanup and the second whole-payload comparison; no payload
+difference files exist. All six daemon instances settle, with no omitted or
+unsettled entry and no remaining tasks.
+
+The instrumented census performs 1,636 scans with zero errors; query-pipeline
+maximum is 464 ms and session creation 47 ms. It observes window/stop and closes
+its session. The declared 512-record list truncates, but polling and fatal-error
+enforcement continue afterward. This is a strict fresh-candidate observation,
+not proof that earlier intermittent CIM failures are repaired. Those historical
+failures, unavailable older artifacts and the original preparation-failure
+cause remain explicit limitations. CI 43147922441 also passes at exact `e2d824d`.
+
+The PR enters review with accurate current evidence and remaining boundaries.
+Copilot review 5868827517 names one blocking finding: selected-project readiness
+can expose Index's bare-name Git lookup to checkout-local commands on Windows
+or relative PATH entries. Preserve the selected context rather than undoing it.
+The reader now enumerates only absolute PATH directories and directory-qualified
+command candidates for implicit Git, Worktrees and PowerShell resolution.
+Windows suffixes explicitly follow PATHEXT, including Python 3.11's qualified
+lookup behavior. Explicit Worktrees command overrides and same-cell routing
+retain their existing precedence.
+
+Three focused cases place a marker-writing fake Git in the current directory,
+dot PATH and a relative tools directory. The actual probe still resolves the
+real repository without executing it. All 63 configuration-reader cases pass
+after correcting the first implementation's missing Windows suffix expansion
+and subsequent missing import; intermediate failures are not credited.
+F/E9 lint passes. README documents implicit versus explicit command selection.
+The existing Index patch changefile covers this review fix. It adds no command
+syntax, service, network lookup, new runtime or per-call child process.
+New-head CI, review and installed-consumer validation remain required; the
+successful `e2d824d` run is not silently relabeled.
+
 ### November 11 - Identify and stop snapshot-guidance payload bytecode
 
 Required CI 43069145815 is green at

@@ -4,6 +4,7 @@ import base64
 import importlib.util
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -32,6 +33,28 @@ def _repo(path: Path, *, requires_external: bool = False) -> Path:
         encoding="utf-8",
     )
     return path
+
+
+@pytest.mark.parametrize("relative", ("", ".", "tools"))
+def test_repository_probe_never_executes_checkout_local_git(tmp_path, monkeypatch, relative):
+    git = shutil.which("git")
+    assert git is not None
+    repo = _repo(tmp_path / "repo")
+    marker = tmp_path / "checkout-git-executed"
+    local = repo / relative if relative else repo
+    local.mkdir(exist_ok=True)
+    shadow = local / ("git.cmd" if os.name == "nt" else "git")
+    shadow.write_text(
+        f'@echo shadow>"{marker}"\r\n@exit /b 99\r\n' if os.name == "nt" else
+        f'#!/bin/sh\nprintf shadow > "{marker}"\nexit 99\n',
+        encoding="utf-8",
+    )
+    shadow.chmod(0o755)
+    monkeypatch.chdir(repo)
+    monkeypatch.setenv("PATH", relative + os.pathsep + str(Path(git).parent))
+    module = _module()
+    assert module._git_root(repo) == repo
+    assert not marker.exists()
 
 
 def _write_active(path: Path) -> Path:
