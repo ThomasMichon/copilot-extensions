@@ -69,6 +69,21 @@ def test_put_get_roundtrip(enabled_cache):
     assert PersistentCache().get("Aperture/HA", "password") == "portal-gun"
 
 
+def test_fence_refuses_stale_writes_after_relocation(enabled_cache):
+    c = get_cache()
+    assert c.put("Group/x", "password", "old", 100) is True
+    assert c.fence("Group/x", 200) is True
+    assert c.get("Group/x", "password") is None
+    # A client that read the old value before the move cannot write it back.
+    assert c.put("Group/x", "password", "old", 100) is True
+    assert c.put("Group/x", "password", "old") is True
+    assert c.reconcile_authoritative("Group/x", "password", "old", 150) is True
+    assert c.get("Group/x", "password") is None
+    # A read issued after the change is cached normally.
+    assert c.put("Group/x", "password", "new", 300) is True
+    assert PersistentCache().get("Group/x", "password") == "new"
+
+
 def test_get_rejects_non_object_record(enabled_cache, monkeypatch):
     persistent = get_cache()
     monkeypatch.setattr(

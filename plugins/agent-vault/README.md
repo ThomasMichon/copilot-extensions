@@ -300,10 +300,14 @@ the KeePass root) is used as given and may address any group, for reads and for
 `add`, `set-password`, `set-username`, `move` and `copy`. `move` and `copy` take
 a destination group (existing, or ending in `/`) or a full destination entry
 path (rename), create missing parent groups, and refuse to overwrite an
-existing destination unless `-f` is passed. `copy` duplicates username,
-password, URL, notes and attachments; custom attributes, TOTP, tags, expiry and
-history are not copied. `remove` still requires `-f` for entries outside the
-configured group.
+existing destination unless `-f` is passed. The result is staged under a
+temporary title and renamed into place, so a failed copy or move never deletes
+the existing destination. `copy` duplicates username, password, URL and
+attachments; custom attributes, TOTP, tags, expiry and history are not copied.
+Because keepassxc-cli only accepts notes and URLs as command-line arguments,
+`copy` refuses a source with notes (pass `--skip-notes` to copy without them)
+or a URL containing embedded credentials. `remove` still requires `-f` for
+entries outside the configured group.
 
 ## Batch reads
 

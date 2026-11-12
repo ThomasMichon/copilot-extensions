@@ -169,11 +169,26 @@ discards an entry.
 `move` and `copy` take a destination that is either a group (an existing group,
 or any path ending in `/`), which keeps the source title, or a full destination
 entry path, which renames. Missing destination parent groups are created. An
-existing destination entry is refused unless `--force` is given, in which case
-it is removed first (KeePassXC moves it to the recycle bin when one is enabled).
-`copy` duplicates title, username, password, URL, notes and attachments;
-keepassxc-cli cannot write custom attributes, so custom attributes, TOTP
-settings, tags, expiry, icons and history are not copied.
+existing destination entry is refused unless the CLI's `-f`/`--force` is given;
+the CLI sends it as the request field `overwrite: true`. The legacy request
+field `force` is ignored for `move` and `copy`, so an older client that sent it
+to bypass the former group guard cannot replace an entry by accident. The
+backend first stages the result under a unique temporary title (copy creates
+it in the destination group; move renames the source and then moves it), then
+removes the replaced destination (KeePassXC moves it to the recycle bin when
+one is enabled) and renames the staged entry into place. A failure before that
+point leaves the destination untouched and rolls the staged entry back.
+
+`copy` duplicates username, password, URL and attachments. keepassxc-cli
+cannot write custom attributes, so custom attributes, TOTP settings, tags,
+expiry, icons and history are not copied. It also accepts notes and URLs only
+as process arguments, which other local users may be able to observe, so `copy`
+refuses a source with notes unless `skip_notes` (`--skip-notes`) is set, and
+refuses a URL containing embedded credentials.
+
+After a move or copy the service fences the affected paths in the persistent
+cache: it drops the cached value and records a generation floor, so a client
+that read the entry before the change cannot write the stale value back.
 The unchanged pure group-boundary predicate lives beside entry normalization
 in `config.py`; the service retains its compatibility alias.
 

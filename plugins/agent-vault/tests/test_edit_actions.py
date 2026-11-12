@@ -180,7 +180,7 @@ def test_move_in_group(unlocked, fake_tree, monkeypatch, kpdb):
     called = {}
     monkeypatch.setattr(
         unlocked.cli, "move_entry",
-        lambda db, entry, dest: called.update(entry=entry, dest=dest) or (True, "Entry moved"),
+        lambda db, entry, dest, **kw: called.update(entry=entry, dest=dest) or (True, "Entry moved"),
     )
     resp = unlocked.handle_request(
         {"action": "mv", "entry": "Managed/x", "dest": "Managed/sub", "group": "Managed", "kpdb": kpdb}
@@ -201,7 +201,7 @@ def test_move_out_of_group_explicit_path_needs_no_force(unlocked, fake_tree, mon
     called = {}
     monkeypatch.setattr(
         unlocked.cli, "move_entry",
-        lambda db, entry, dest: called.update(entry=entry, dest=dest) or (True, "Entry moved"),
+        lambda db, entry, dest, **kw: called.update(entry=entry, dest=dest) or (True, "Entry moved"),
     )
     unlocked.cache[(kpdb, "Other/x", "password")] = "stale"
     resp = unlocked.handle_request(
@@ -216,7 +216,7 @@ def test_copy_happy_path_keeps_source_and_invalidates_dest(unlocked, fake_tree, 
     called = {}
     monkeypatch.setattr(
         unlocked.cli, "copy_entry",
-        lambda db, entry, dest: called.update(entry=entry, dest=dest) or (True, "Entry copied"),
+        lambda db, entry, dest, **kw: called.update(entry=entry, dest=dest) or (True, "Entry copied"),
     )
     monkeypatch.setattr(unlocked.cli, "remove_entry",
                         lambda db, entry: (_ for _ in ()).throw(AssertionError("must not remove")))
@@ -235,7 +235,7 @@ def test_copy_happy_path_keeps_source_and_invalidates_dest(unlocked, fake_tree, 
 
 def test_copy_refuses_existing_destination_without_force(unlocked, fake_tree, monkeypatch, kpdb):
     monkeypatch.setattr(unlocked.cli, "copy_entry",
-                        lambda db, entry, dest: (_ for _ in ()).throw(AssertionError("must not copy")))
+                        lambda db, entry, dest, **kw: (_ for _ in ()).throw(AssertionError("must not copy")))
     resp = unlocked.handle_request(
         {"action": "copy", "entry": "Managed/x", "dest": "Other", "group": "Managed", "kpdb": kpdb}
     )
@@ -243,25 +243,146 @@ def test_copy_refuses_existing_destination_without_force(unlocked, fake_tree, mo
     assert "already exists" in resp["error"]
 
 
-def test_copy_force_replaces_existing_destination(unlocked, fake_tree, monkeypatch, kpdb):
+def test_copy_overwrite_replaces_existing_destination(unlocked, fake_tree, monkeypatch, kpdb):
     calls = []
     monkeypatch.setattr(unlocked.cli, "remove_entry",
-                        lambda db, entry: calls.append(("rm", entry)) or (True, "Entry removed"))
+                        lambda db, entry: (_ for _ in ()).throw(AssertionError("backend owns removal")))
     monkeypatch.setattr(unlocked.cli, "copy_entry",
-                        lambda db, entry, dest: calls.append(("cp", entry, dest)) or (True, "Entry copied"))
+                        lambda db, entry, dest, **kw: calls.append((entry, dest, kw)) or (True, "Entry copied"))
     resp = unlocked.handle_request(
-        {"action": "copy", "entry": "Managed/x", "dest": "Other/", "force": True,
+        {"action": "copy", "entry": "Managed/x", "dest": "Other/", "overwrite": True,
          "group": "Managed", "kpdb": kpdb}
     )
     assert resp["ok"] is True
-    assert calls == [("rm", "Other/x"), ("cp", "Managed/x", "Other/x")]
+    assert calls == [("Managed/x", "Other/x", {"replace": True, "skip_notes": False})]
+
+
+@pytest.mark.parametrize("action", ["move", "copy"])
+def test_legacy_force_does_not_overwrite(unlocked, fake_tree, monkeypatch, kpdb, action):
+    # Older clients sent force=true to bypass the former group-scope guard.
+    boom = lambda *a, **kw: (_ for _ in ()).throw(AssertionError("must not relocate"))  # noqa: E731
+    monkeypatch.setattr(unlocked.cli, "copy_entry", boom)
+    monkeypatch.setattr(unlocked.cli, "move_entry", boom)
+    resp = unlocked.handle_request(
+        {"action": action, "entry": "Managed/x", "dest": "Other", "force": True,
+         "group": "Managed", "kpdb": kpdb}
+    )
+    assert resp["ok"] is False
+    assert "already exists" in resp["error"]
+
+
+class _FakeKeePass:
+    """Minimal in-memory stand-in for the keepassxc-cli backend primitives."""
+
+    def __init__(self, backend, monkeypatch, entries, *, fail_add=False):
+        self.entries = entries
+        self.removed = []
+        monkeypatch.setattr(backend, "has_entry", lambda db, e: e in self.entries)
+        monkeypatch.setattr(backend, "_read_field_raw",
+                            lambda db, e, attr: self.entries[e].get(attr, ""))
+        monkeypatch.setattr(backend, "list_attachments", lambda db, e: [])
+        monkeypatch.setattr(backend, "remove_entry", self.remove)
+        monkeypatch.setattr(backend, "_rename_entry", self.rename)
+        monkeypatch.setattr(backend, "_ensure_parent_groups", lambda db, e: None)
+        monkeypatch.setattr(
+            backend, "add_entry",
+            lambda db, e, **kw: (False, "add failed") if fail_add else self.add(e, kw),
+        )
+
+    def add(self, path, kw):
+        self.entries[path] = {"UserName": kw.get("username") or "",
+                              "Password": kw.get("password") or ""}
+        return True, "Entry created"
+
+    def remove(self, db, path):
+        self.removed.append(path)
+        self.entries.pop(path)
+        return True, "Entry removed"
+
+    def rename(self, db, path, title):
+        parent = path.rpartition("/")[0]
+        self.entries[f"{parent}/{title}"] = self.entries.pop(path)
+        return True, "Entry renamed"
+
+
+def test_backend_copy_stages_before_replacing(monkeypatch, kpdb):
+    from agent_vault.keepassxc import KeePassXCBackend
+
+    backend = KeePassXCBackend()
+    fake = _FakeKeePass(backend, monkeypatch, {
+        "A/x": {"UserName": "u", "Password": "new"},
+        "B/x": {"UserName": "u", "Password": "old"},
+    })
+    ok, msg = backend.copy_entry(kpdb, "A/x", "B/x", replace=True)
+    assert ok, msg
+    assert fake.entries["B/x"]["Password"] == "new"
+    assert fake.entries["A/x"]["Password"] == "new"
+    assert fake.removed == ["B/x"]
+    assert sorted(fake.entries) == ["A/x", "B/x"]
+
+
+def test_backend_copy_failure_keeps_existing_destination(monkeypatch, kpdb):
+    from agent_vault.keepassxc import KeePassXCBackend
+
+    backend = KeePassXCBackend()
+    fake = _FakeKeePass(backend, monkeypatch, {
+        "A/x": {"Password": "new"}, "B/x": {"Password": "old"},
+    }, fail_add=True)
+    ok, _ = backend.copy_entry(kpdb, "A/x", "B/x", replace=True)
+    assert not ok
+    assert fake.entries["B/x"]["Password"] == "old"
+    assert fake.removed == []
+
+
+def test_backend_copy_refuses_notes_unless_skipped(monkeypatch, kpdb):
+    from agent_vault.keepassxc import KeePassXCBackend
+
+    backend = KeePassXCBackend()
+    fake = _FakeKeePass(backend, monkeypatch, {"A/x": {"Password": "p", "Notes": "private"}})
+    ok, msg = backend.copy_entry(kpdb, "A/x", "B/y")
+    assert not ok and "notes" in msg
+    assert "B/y" not in fake.entries
+    ok, msg = backend.copy_entry(kpdb, "A/x", "B/y", skip_notes=True)
+    assert ok, msg
+    assert fake.entries["B/y"]["Password"] == "p"
+
+
+def test_backend_copy_refuses_url_credentials(monkeypatch, kpdb):
+    from agent_vault.keepassxc import KeePassXCBackend
+
+    backend = KeePassXCBackend()
+    _FakeKeePass(backend, monkeypatch, {"A/x": {"URL": "https://user:pw@example.com/"}})
+    ok, msg = backend.copy_entry(kpdb, "A/x", "B/y")
+    assert not ok and "URL" in msg
+
+
+def test_backend_move_rename_across_groups_avoids_sibling_collisions(monkeypatch, kpdb):
+    from agent_vault.keepassxc import KeePassXCBackend
+
+    backend = KeePassXCBackend()
+    fake = _FakeKeePass(backend, monkeypatch, {
+        "A/x": {"Password": "src"}, "A/y": {"Password": "a-y"}, "B/x": {"Password": "b-x"},
+    })
+
+    def fake_run(db, args):
+        assert args[:2] == ["mv", "-q"]
+        src, group = args[3], args[4]
+        fake.entries[f"{group}/{src.rpartition('/')[2]}"] = fake.entries.pop(src)
+        return type("R", (), {"returncode": 0, "stderr": ""})()
+
+    monkeypatch.setattr(backend, "_run", fake_run)
+    ok, msg = backend.move_entry(kpdb, "A/x", "B/y")
+    assert ok, msg
+    assert fake.entries == {
+        "A/y": {"Password": "a-y"}, "B/x": {"Password": "b-x"}, "B/y": {"Password": "src"},
+    }
 
 
 def test_copy_bare_destination_name_lands_in_group(unlocked, fake_tree, monkeypatch, kpdb):
     called = {}
     monkeypatch.setattr(
         unlocked.cli, "copy_entry",
-        lambda db, entry, dest: called.update(dest=dest) or (True, "Entry copied"),
+        lambda db, entry, dest, **kw: called.update(dest=dest) or (True, "Entry copied"),
     )
     resp = unlocked.handle_request(
         {"action": "cp", "entry": "Other/x", "dest": "y", "group": "Managed", "kpdb": kpdb}

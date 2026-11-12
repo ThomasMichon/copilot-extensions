@@ -140,7 +140,8 @@ provisioning location. A path containing `/` (or starting with `/` for the
 KeePass root) addresses any group, so `add`, `move` and `copy` work anywhere
 without `-f`. `move`/`copy` accept a destination group (existing, or ending in
 `/`) or a full entry path to rename; `-f` overwrites an existing destination.
-`copy` does not carry custom attributes, TOTP, tags, expiry or history.
+`copy` does not carry custom attributes, TOTP, tags, expiry or history, and
+refuses a source with notes unless `--skip-notes` is passed.
 `remove` still requires `-f` outside the configured group.
 
 ### SSH keys
