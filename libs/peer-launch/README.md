@@ -201,6 +201,11 @@ The disposable native process control qualifies selection, exact argv and
 environment rebinding using a synthetic peer module, not credential or setup
 readiness. Actual Vault/SSH, logon and enrollment qualification remain separate.
 
+On Windows the final peer child receives its selected interpreter as an explicit
+executable. Paths beyond `MAX_PATH` use the corresponding extended DOS or UNC
+spelling without rewriting argv, changing the selected runtime, adding a shell,
+or detaching the child. Existing short-path spellings remain unchanged.
+
 Bridge uses this boundary for `handoff-check`'s `agent-worktrees
 handoffs-check` call. Because `--execute` mutates predecessor state, a
 validated owner with no same-cell worktrees peer is genuine absence
@@ -227,3 +232,6 @@ Windows windowlessness. CodeSpaces `-k worktrees_peer` covers every converted
 adapter without duplicating the process matrix. Both run through
 [`tools/run-plugin-tests.py`](../../tools/run-plugin-tests.py); see
 [`TESTING.md`](../../TESTING.md).
+The explicit Dispatch `tests/native/test_peer_long_paths.py` extends those
+same fixtures with real Windows long-path dynamic/pinned launches and exact
+argument, stdin/stdout/stderr and exit-status checks.
