@@ -7,7 +7,7 @@ exclude-newer = "7 days"
 
 [project]
 name = "agent-worktrees"
-version = "1.26.24-dev1"
+version = "1.26.25-dev1"
 description = "Worktree isolation system for concurrent Copilot CLI sessions"
 readme = "README.md"
 license = "MIT"
@@ -16,6 +16,7 @@ authors = [
     { name = "Thomas Michon" }
 ]
 dependencies = [
+    "agent-pr-filters",
     "agent-configuration-layers",
     "pyyaml>=6.0.3",
     "packaging>=23",
@@ -40,6 +41,7 @@ dependencies = [
 ]
 
 [tool.uv.sources]
+agent-pr-filters = { path = "libs/pr-filters" }
 agent-copilot-driver-core = { path = "libs/copilot-driver-core" }
 agent-configuration-layers = { path = "libs/configuration-layers" }
 agent-repository-policy = { path = "libs/repository-policy" }

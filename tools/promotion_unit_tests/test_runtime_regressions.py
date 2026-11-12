@@ -359,6 +359,8 @@ def test_comment_origin_routing_does_not_borrow_ambient_project():
         (["update", "--recover-for-repair"], True),
         (["pr-watch", "diff", "example/project", "7", "--json"], True),
         (["pr-watch", "difference", "example/project", "7", "--json"], False),
+        (["pr-watch", "population", "--contract", "--json"], True),
+        (["pr-watch", "populations", "--contract", "--json"], False),
     ],
 )
 def test_other_project_routing_contracts_are_preserved(argv, allowed):
