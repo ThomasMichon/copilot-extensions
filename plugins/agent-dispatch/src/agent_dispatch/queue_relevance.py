@@ -88,6 +88,12 @@ def _custody(conn: sqlite3.Connection, task: Task) -> list[str]:
 class QueueRelevanceMixin:
     @staticmethod
     def _migrate_task_relevance(conn: sqlite3.Connection) -> None:
+        for name, table, columns in (
+            ("idx_task_events_task", "task_events", "task_id, id"),
+            ("idx_acquisition_receipts_task", "acquisition_receipts", "task_id"),
+            ("idx_execution_send_task", "execution_send_custody", "task_id"),
+        ):
+            conn.execute(f"CREATE INDEX IF NOT EXISTS {name} ON {table}({columns})")
         conn.execute(
             "CREATE TABLE IF NOT EXISTS task_relevance_requests ("
             "task_id TEXT NOT NULL, request_id TEXT NOT NULL, request_json TEXT NOT NULL,"

@@ -230,3 +230,26 @@ def test_needed_does_not_silently_clear_accepted_closeout(q):
     assert report(q, t.id, verdict="needed", request_id="source-reopened")["decision"] == "closeout_pending"
     assert q.relevance_snapshot(t.id)["closeout"] == accepted
     assert len(q.steer_log(t.id)) == 1
+
+
+def test_actual_relevance_history_queries_are_indexed_by_task(q, monkeypatch):
+    t = task(q)
+    queries = []
+    connect = q._connect
+
+    def traced_connection():
+        conn = connect()
+        conn.set_trace_callback(queries.append)
+        return conn
+
+    monkeypatch.setattr(q, "_connect", traced_connection)
+    q.relevance_snapshot(t.id)
+    history = [
+        query for query in queries
+        if query.startswith("SELECT ") and "WHERE task_id=" in query
+    ]
+    assert history
+    with connect() as conn:
+        for query in history:
+            plan = conn.execute("EXPLAIN QUERY PLAN " + query).fetchall()
+            assert any("task_id=?" in row["detail"] for row in plan), (query, list(map(dict, plan)))
