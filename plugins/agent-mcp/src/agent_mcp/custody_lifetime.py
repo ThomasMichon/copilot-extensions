@@ -75,6 +75,13 @@ class SessionOwner:
         self._thread = None
         self._closed = False
 
+    def require_alive(self):
+        """Recheck the retained native pin before accepting a new execution path."""
+        if self._closed:
+            raise RuntimeError("MCP session owner observation is closed")
+        if not self._alive():
+            raise ProcessLookupError("MCP session owner exited before execution")
+
     def start(self, on_death):
         if self._closed or self._thread is not None:
             raise RuntimeError("MCP session owner observation is closed or already started")
