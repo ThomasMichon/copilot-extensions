@@ -343,7 +343,9 @@ handover. Preserve held sessions and the separate pre-feature adoption hold.
     merged at `59a739fce374514aaec89b65957c17a5bf6b2b29`; its
     [source-pinned query qualification](journal/2026/11.10-explicit-owner-cli.md#discovery-provider-qualification-and-merge)
     passed. Caller discovery/capture integration and rollback adoption remain
-    open.
+    open. #12306 corrects the live Windows declaration to retain explicit-pair
+    support without advertising the Linux-only optional receiver; promoted
+    release and installed adoption of that correction remain separate.
   - [ ] **Windows controlled caller:** expand and qualify the optional
     physical receiver before emitting Windows caller overlays. Capture the
     actual native client's PID/birth from its creation handle before execution;
@@ -351,7 +353,9 @@ handover. Preserve held sessions and the separate pre-feature adoption hold.
     admission callback. Qualify private handoff lifetime, delayed MCP start
     after launcher exit, original stdio, rollback and exact cleanup without a
     new per-client supervisor. Native handle retention is an explicit
-    qualification obligation, not a documented client guarantee.
+    qualification obligation, not a documented client guarantee. A
+    [bounded native retention proof and realization sequence](journal/2026/11.10-explicit-owner-cli.md#windows-native-retention-proof-and-next-realization)
+    now establish feasibility, not provider support or caller adoption.
   - [x] **Explicit Linux exec caller:** capture the exec owner's native pair
     and pass a sealed, session-only overlay for explicitly named configured
     entries, with actual-start discovery bound to a physical optional receiver.
