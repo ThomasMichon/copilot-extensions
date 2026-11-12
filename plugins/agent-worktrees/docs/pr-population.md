@@ -64,6 +64,9 @@ not multiplied by their count.
   missing, malformed or unavailable labels mean `null`.
 * `publication`: native boolean `isDraft`, normalized to `draft`/`published`.
 
+Native project/repository response names are checked with ADO's case-insensitive
+name semantics; facts retain the exact admitted slug for common filter evaluation.
+
 **Group predicates are explicitly unsupported**, including reviewer group IDs:
 this driver has no membership-evidence owner and does not fabricate expansion.
 Group selectors refuse before credential acquisition. A group or malformed

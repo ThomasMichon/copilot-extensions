@@ -123,7 +123,10 @@ def _read(url, credentials, deadline):
     body, separator, status = result.stdout.rpartition("\n")
     if not separator or status != "200" or len(body.encode("utf-8")) > MAX_BYTES:
         raise ProviderError("population read unavailable")
-    return json.loads(body)
+    try:
+        return json.loads(body)
+    except (ValueError, RecursionError):
+        raise ProviderError("population returned invalid bounded JSON") from None
 
 
 def _instant(value):
@@ -178,8 +181,14 @@ def _page(value, repo):
         native_repo = row.get("repository")
         native_project = native_repo.get("project") if isinstance(native_repo, dict) else None
         if not isinstance(native_project, dict) or (
-            repository not in (native_repo.get("name"), native_repo.get("id"))
-            or project not in (native_project.get("name"), native_project.get("id"))
+            repository.casefold() not in {
+                value.casefold() for value in (native_repo.get("name"), native_repo.get("id"))
+                if isinstance(value, str)
+            }
+            or project.casefold() not in {
+                value.casefold() for value in (native_project.get("name"), native_project.get("id"))
+                if isinstance(value, str)
+            }
         ):
             raise ValueError("population member outside repository scope")
         seen.add(row["pullRequestId"])

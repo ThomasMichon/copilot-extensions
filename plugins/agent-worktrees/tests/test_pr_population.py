@@ -185,12 +185,22 @@ def test_label_failure_preserves_candidate_and_does_not_invent_empty_tags(monkey
      "unavailable", 0, []),
     ([{"value": [], "count": 1}], "unavailable", 0, []),
     ([page([row(), row()])], "unavailable", 0, []),
+    (["[" * 10000 + "0" + "]" * 10000], "unavailable", 0, []),
+    ([page([row()]), "[" * 10000 + "0" + "]" * 10000], "partial", 1, [7]),
+    ([page([row()]), page([]), "[" * 10000 + "0" + "]" * 10000], "partial", 2, [7]),
 ])
 def test_failed_partial_empty_and_out_of_scope_pages(monkeypatch, replies, outcome, pages, numbers):
     result, calls, _ = observe(monkeypatch, replies)
     assert result["outcome"] == outcome and result["pages"] == pages
     assert [member["number"] for member in result["pulls"]] == numbers
     assert len(calls) <= len(replies)
+
+
+def test_ado_stored_name_casing_preserves_the_admitted_repository_slug(monkeypatch):
+    native = row(repository={"name": "REPOSITORY", "project": {"name": "PROJECT"}})
+    result, _, _ = observe(monkeypatch, [page([native]), page([]), page([])])
+    assert result["outcome"] == "complete"
+    assert result["repo"] == result["pulls"][0]["facts"]["repo"] == REPO
 
 
 def test_caps_are_total_across_branches_and_never_complete(monkeypatch):
