@@ -335,6 +335,15 @@ async def test_actual_native_client_responds_through_replacement_and_rollback(
                     for line in replies.read_text(encoding="utf-8").splitlines()
                 )
                 retained_identities()
+                observations.with_suffix(".release").write_text("release", encoding="utf-8")
+
+                async def released_reply() -> bool:
+                    return any(
+                        reply.get("id") == dropped and reply.get("result") == {}
+                        for reply in map(json.loads, replies.read_text(encoding="utf-8").splitlines())
+                    )
+
+                await fixture.eventually(released_reply)
                 record_testsuite_property("actual_native_client", str(executable.name))
                 record_testsuite_property("physical_generations", json.dumps({
                     label: generation for label, (generation, _) in slots.items()
@@ -347,7 +356,7 @@ async def test_actual_native_client_responds_through_replacement_and_rollback(
                         await session
                 if client is not None:
                     if client.returncode is None:
-                        client.terminate()
+                        client.stdin.close()
                     await asyncio.wait_for(client.wait(), 10)
                     diagnostic = await asyncio.wait_for(stderr, 5)
                     if sys.exc_info()[0] is not None:
@@ -362,6 +371,11 @@ async def test_actual_native_client_responds_through_replacement_and_rollback(
                                 print(path.name + ":", path.read_text(
                                     encoding="utf-8", errors="replace",
                                 )[-8000:])
+                    else:
+                        async def upstream_settled() -> bool:
+                            return receipt.is_file()
+
+                        await fixture.eventually(upstream_settled)
                 for handle in handles:
                     with contextlib.suppress(OSError):
                         await fixture.shutdown(handle)

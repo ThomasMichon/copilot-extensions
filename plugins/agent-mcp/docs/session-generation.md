@@ -127,7 +127,8 @@ replacement, rollback and same-slot replacement without replacing the native
 client, original conduit, keeper or upstream. Initial discovery pagination
 requires a client-generated follow-up cursor. Each later ping requires both
 a physical-backend send witness and the upstream's matching client reply;
-a deliberately dropped ping must produce no reply. Fresh round trips and identity
+a deliberately withheld ping must produce no reply before release. It is then
+released and acknowledged before graceful input EOF. Fresh round trips and identity
 checks also run after each predecessor exits. The copied receiver briefly holds
 before qualification so the private fixture can prepare its backend from the
 native client's actual semantic environment; production matching is unchanged.

@@ -262,7 +262,9 @@ def build_runtimes(
                 "        if (message.get('method')=='ping' and drop.is_file()\n"
                 "            and message.get('id')==drop.read_text()):\n"
                 f"            __import__('pathlib').Path({str(observations.with_suffix('.dropped'))!r}).write_text(message['id'])\n"
-                "            return\n",
+                "            async with asyncio.timeout(5):\n"
+                f"                while not __import__('pathlib').Path({str(observations.with_suffix('.release'))!r}).is_file():\n"
+                "                    await asyncio.sleep(.02)\n",
             ), encoding="utf-8")
         package = source.payload_package_version(payload, "agent-mcp")
         digest = source.assembly_hash(payload)
