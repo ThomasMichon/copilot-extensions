@@ -210,8 +210,9 @@ def test_receiver_applies_payload_wrapper_delta_before_qualifying_and_startup(mo
 
 
 @pytest.mark.parametrize("referenced", [False, True])
-def test_receiver_does_not_adopt_unqualified_legacy_checkpoint_trace_context(
-    monkeypatch, admitted, referenced,
+@pytest.mark.parametrize("keeper", ["legacy", "capable", "cold"])
+def test_receiver_selects_trace_binding_only_after_live_keeper_preflight(
+    monkeypatch, admitted, referenced, keeper,
 ):
     from agent_mcp import config, execution_context
     for key in (
@@ -228,18 +229,66 @@ def test_receiver_does_not_adopt_unqualified_legacy_checkpoint_trace_context(
         cfg.server.env["EXPLICIT_TRACE"] = "${COPILOT_EXTENSIONS_BOOT_TRACE_SHIM_START_MS}"
     monkeypatch.setattr(config, "load_config", lambda *_args, **_kwargs: cfg)
     monkeypatch.setattr(execution_context, "_identity", context_identity)
+    def probe(*_args, **kwargs):
+        assert kwargs == {"required_trace_bookkeeping": 1}
+        if keeper == "legacy":
+            raise execution_context.SharingUnavailable("legacy keeper")
+        if keeper == "cold":
+            raise custody_launch.sockio.HostUnreachableError("fixture keeper absent")
+    checked = Mock(side_effect=probe)
+    monkeypatch.setattr(custody_launch, "probe_conduit", checked)
     ordinary, adopted = Mock(side_effect=Executed), Mock()
+    startup = Mock()
     monkeypatch.setattr(owner_entry.os, "execvpe", ordinary)
     monkeypatch.setattr(custody_launch, "run_adopted", adopted)
-    if referenced:
+    monkeypatch.setattr(incoming, "ensure_current", startup)
+    if referenced or keeper != "legacy":
         assert owner_entry.run(admitted) == 0
         adopted.assert_called_once()
+        assert adopted.call_args.kwargs == {
+            "owner_pid": 42, "owner_birth": "native:1",
+            **({"required_trace_bookkeeping": 1} if not referenced else {}),
+        }
         ordinary.assert_not_called()
     else:
         with pytest.raises(Executed):
             owner_entry.run(admitted)
         ordinary.assert_called_once()
         adopted.assert_not_called()
+    assert checked.call_count == int(not referenced)
+    startup.assert_not_called()
+
+
+@pytest.mark.parametrize("error_type", [OSError, ValueError])
+def test_trace_keeper_preflight_failure_falls_back_before_any_startup(
+    monkeypatch, admitted, error_type,
+):
+    from agent_mcp import execution_context
+    monkeypatch.setattr(execution_context, "_identity", Mock(side_effect=["legacy", "normalized"]))
+    monkeypatch.setattr(custody_launch, "probe_conduit", Mock(side_effect=error_type("unqualified")))
+    ordinary, startup, adopted = Mock(side_effect=Executed), Mock(), Mock()
+    monkeypatch.setattr(owner_entry.os, "execvpe", ordinary)
+    monkeypatch.setattr(incoming, "ensure_current", startup)
+    monkeypatch.setattr(custody_launch, "run_adopted", adopted)
+    baseline = os.environ.copy()
+    with pytest.raises(Executed):
+        owner_entry.run(admitted)
+    ordinary.assert_called_once_with("original-wrapper", admitted["original"], baseline)
+    startup.assert_not_called()
+    adopted.assert_not_called()
+
+
+def test_trace_keeper_replacement_after_preflight_never_replays_ordinary(monkeypatch, admitted):
+    from agent_mcp import execution_context
+    monkeypatch.setattr(execution_context, "_identity", Mock(side_effect=["legacy", "normalized"]))
+    monkeypatch.setattr(custody_launch, "probe_conduit", Mock())
+    adopted = Mock(side_effect=execution_context.SharingUnavailable("keeper changed after startup"))
+    ordinary = Mock()
+    monkeypatch.setattr(custody_launch, "run_adopted", adopted)
+    monkeypatch.setattr(owner_entry.os, "execvpe", ordinary)
+    assert owner_entry.run(admitted) == 1
+    assert adopted.call_args.kwargs["required_trace_bookkeeping"] == 1
+    ordinary.assert_not_called()
 
 
 def test_qualified_receiver_keeps_strict_owner_path_and_never_replays_unknown_startup(

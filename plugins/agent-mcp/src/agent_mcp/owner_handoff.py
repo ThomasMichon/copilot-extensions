@@ -42,6 +42,8 @@ def run(target: str, args: argparse.Namespace) -> int:
         custody_launch.run_adopted(
             forward._serve_handle(getattr(args, "socket", None)),
             forward._abs_bridge_ref(target), owner_pid=pid, owner_birth=birth,
+            **({"required_trace_bookkeeping": 1}
+               if getattr(args, "checkpoint_trace_bookkeeping", 0) == 1 else {}),
         )
     except (OSError, ValueError) as exc:
         print(f"agent-mcp: explicit session custody refused: {exc}", file=sys.stderr)

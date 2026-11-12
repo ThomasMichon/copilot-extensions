@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from agent_mcp import custody_launch as launch, incoming
-from agent_mcp.custody_contract import CONTRACT
+from agent_mcp.custody_contract import CONTRACT, backend_descriptor
 from agent_mcp.execution_context import SharingUnavailable
 from .test_custody_conduit import Connection
 
@@ -54,6 +54,33 @@ def test_existing_keeper_uses_admitted_root_and_separate_namespace(admitted):
         "fixture", fixture.root, {},
     )]
     assert not fixture.spawns and all(item.closed for item in fixture.backend_connections)
+
+
+def test_required_trace_binding_rejects_legacy_backend_before_keeper_attach(admitted):
+    with pytest.raises(SharingUnavailable, match="backend cannot enforce"):
+        launch.attach(
+            admitted.handle, "fixture", admitted.admission, required_trace_bookkeeping=1,
+        )
+    assert not admitted.calls and not admitted.spawns
+    assert all(item.closed for item in admitted.backend_connections)
+
+
+@pytest.mark.parametrize("cold", [False, True])
+def test_required_trace_binding_survives_existing_and_cold_keeper_paths(admitted, monkeypatch, cold):
+    admitted.reply["custody_backend"] = backend_descriptor()
+    attempts = []
+    def attach(*args, **kwargs):
+        attempts.append(kwargs)
+        if cold and len(attempts) == 1:
+            raise launch.sockio.HostUnreachableError("fixture keeper absent")
+        return admitted.client
+    monkeypatch.setattr(launch, "attach_conduit", attach)
+    assert launch.attach(
+        admitted.handle, "fixture", admitted.admission, required_trace_bookkeeping=1,
+    ) is admitted.client
+    assert len(attempts) == 1 + cold
+    assert all(item["required_trace_bookkeeping"] == 1 for item in attempts)
+    assert len(admitted.spawns) == int(cold)
 
 
 @pytest.mark.parametrize("case", ["legacy", "stale", "foreign", "draining", "unselected"])
