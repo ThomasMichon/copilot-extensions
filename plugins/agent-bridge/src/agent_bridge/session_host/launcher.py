@@ -16,7 +16,8 @@ from agent_remote_driver.session_host.launcher import (  # noqa: F401
 
 
 def launch_session_host(
-    child_argv: list[str], *, acquisition_launch: Any = None, **kwargs: Any,
+    child_argv: list[str], *, acquisition_launch: Any = None,
+    retained_recovery: Any = None, **kwargs: Any,
 ) -> HostHandle:
     """Retain original operation custody while the core owns actual execution."""
     from ..portable_policy import selected_context
@@ -32,8 +33,17 @@ def launch_session_host(
         ):
             raise RuntimeCustodyError("Local Host launch requires its original local owner")
         acquisition_launch.require_current()
+    if retained_recovery is not None:
+        from ..retained_session_recovery import RetainedRecovery
+
+        if (
+            type(retained_recovery) is not RetainedRecovery or acquisition_launch is not None
+            or kwargs.get("session_id", "") != retained_recovery.session_id
+        ):
+            raise ValueError("Retained Host launch requires its original native recovery owner")
+        retained_recovery.require_current(check_task=False)
     return _core.launch_session_host(
-        child_argv, acquisition_launch=acquisition_launch,
+        child_argv, acquisition_launch=retained_recovery or acquisition_launch,
         policy_context=selected_context(), **kwargs,
     )
 

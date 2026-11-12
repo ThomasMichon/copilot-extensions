@@ -22,6 +22,15 @@ def _encoded(value: object) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
 
 
+def _assignment_snapshot(relationship: dict) -> dict:
+    snapshot = copy.deepcopy(relationship)
+    participant = snapshot.get("native_participant")
+    if isinstance(participant, dict):
+        participant.pop("bridge_session_id", None)
+        participant.pop("native_session_id", None)
+    return snapshot
+
+
 @dataclass(frozen=True)
 class StandingCharterDeclaration:
     namespace: str
@@ -43,6 +52,33 @@ class StandingCharterDeclaration:
 
 
 class QueueStandingChartersMixin:
+    def retain_standing_native_participant(self, request: dict, participant: dict) -> dict:
+        """Retain the original native journal with its assignment, not a second registry."""
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            task = self._fetch(conn, request["task_id"])
+            row = latest_relationship(conn, request["task_id"])
+            value = json.loads(row["task_relationship"]) if row is not None else {}
+            if (
+                task is None or task.kind != STANDING_KIND
+                or value.get("request") != request or row["id"] != request["event_id"]
+            ):
+                raise TaskError("standing native participant lost its original assignment")
+            previous = value.get("native_participant")
+            if previous is not None:
+                if not isinstance(previous, dict) or any(
+                    previous.get(key) != participant.get(key)
+                    for key in ("version", "journal_key", "bridge_installation", "writer_requirement")
+                ):
+                    raise TaskError("standing native participant changed its original journal")
+                if previous == participant:
+                    return copy.deepcopy(previous)
+            conn.execute(
+                "UPDATE task_events SET task_relationship=? WHERE id=?",
+                (_encoded({**value, "native_participant": participant}), row["id"]),
+            )
+            return copy.deepcopy(participant)
+
     def _require_standing_source(self, conn: sqlite3.Connection, repo: str) -> None:
         if self._producer_scope_row(conn, repo=repo, source=STANDING_KIND) is not None:
             raise TaskError("standing declaration source requires managed producer authority")
@@ -176,8 +212,14 @@ class QueueStandingChartersMixin:
 
     def standing_attachment_supported(self) -> bool:
         """Whether the selected writer can later accept and release what it reserves."""
-        supported = getattr(self._relationship_writer, "standing_attachment_supported", None)
+        supported = getattr(self._standing_writer(), "standing_attachment_supported", None)
         return callable(supported) and supported() is True
+
+    def _standing_writer(self):
+        return (
+            self._standing_relationship_writer
+            if self._standing_relationship_writer is not None else self._relationship_writer
+        )
 
     def reserve_standing_charter(
         self, task_id: str, workspace: AssignmentWorkspace, *,
@@ -188,7 +230,7 @@ class QueueStandingChartersMixin:
             raise TaskError("standing reservation requires its original workspace identity")
         if type(expected_revision) is not int or expected_revision < 1:
             raise TaskError("standing reservation requires a positive revision")
-        if self._relationship_writer is not None and not self.standing_attachment_supported():
+        if self._standing_writer() is not None and not self.standing_attachment_supported():
             raise TaskError("selected relationship owner cannot admit a standing attachment")
         ts = self._now(now)
         with self._connect() as conn:
@@ -377,7 +419,7 @@ class QueueStandingChartersMixin:
             task, retained, replayed, reaccepting = inspect(conn)
             if replayed:
                 return task
-        admit = getattr(self._relationship_writer, "admit_standing", None)
+        admit = getattr(self._standing_writer(), "admit_standing", None)
         if not callable(admit):
             raise TaskError("selected relationship owner cannot admit a standing attachment")
         with admit(retained["request"], task.standing_charter["declaration"], head) as admission:
@@ -399,7 +441,12 @@ class QueueStandingChartersMixin:
                 current, relationship, replayed, still_reaccepting = inspect(conn)
                 if replayed:
                     return current
-                if relationship != retained or still_reaccepting != reaccepting:
+                if (
+                    _assignment_snapshot(relationship) != _assignment_snapshot(retained)
+                    or still_reaccepting != reaccepting
+                    or isinstance(relationship.get("native_participant"), dict)
+                    and relationship["native_participant"].get("native_session_id") != head["session_id"]
+                ):
                     raise TaskError("standing relationship changed during native admission")
                 from .acquisition_receipts import validate_start
 
@@ -510,7 +557,7 @@ class QueueStandingChartersMixin:
             conn.execute("BEGIN")
             result, retained, release, replayed = inspect(conn)
         if not replayed:
-            observe = getattr(self._relationship_writer, "inspect_conclusion", None)
+            observe = getattr(self._standing_writer(), "inspect_conclusion", None)
             if not callable(observe):
                 raise TaskError("selected relationship owner cannot confirm a native conclusion")
             receipt = observe(copy.deepcopy(retained["request"]), copy.deepcopy(conclusion))

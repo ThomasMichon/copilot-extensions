@@ -9,11 +9,10 @@ import logging
 import time
 from typing import TYPE_CHECKING, Any
 
-from fastapi import APIRouter, Body, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
 from .. import elevated
-from ..acquisition_contract import AcquisitionRefused
 from ..attention_wait import (
     AttentionHistoryChangedError,
     AttentionTokenError,
@@ -27,7 +26,6 @@ from ..models import (
     CursorInfo,
     DelegatedResultSnapshot,
     ResyncSessionResponse,
-    ResumeSessionRequest,
     SessionInfo,
     SessionListResponse,
     SessionStatus,
@@ -72,6 +70,9 @@ from .relationships import (  # noqa: F401 -- preserved public route imports
     inspect_relationship, relationship_verification, start_remote_session,
     router as relationship_router,
 )
+from .session_resume import (  # noqa: F401 -- preserved public route imports
+    inspect_retained_recovery, resume_session, router as resume_router,
+)
 
 if TYPE_CHECKING:
     from ..session_manager import Session, SessionManager
@@ -82,6 +83,7 @@ router = APIRouter(prefix="/api/v1/sessions", tags=["sessions"])
 router.include_router(prompt_router)
 router.include_router(answer_router)
 router.include_router(relationship_router)
+router.include_router(resume_router)
 
 # Sentinel cursor key for callers with no caller_id -- keeps delivery_cursors'
 # primary key non-null while giving anonymous callers a shared resume point.
@@ -1468,36 +1470,6 @@ async def interrupt_turn(session_id: str, request: Request):
         session = await mgr.interrupt_turn(session_id)
     except KeyError:
         raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
-    return _session_info(session)
-
-
-@router.post("/{session_id}/resume", response_model=SessionInfo)
-async def resume_session(
-    session_id: str, request: Request, body: ResumeSessionRequest | None = Body(default=None),
-):
-    """Resume a stopped session by spawning a new agent process."""
-    mgr: SessionManager = request.app.state.session_manager
-    try:
-        session = await mgr.resume_session(
-            session_id,
-            **({"worktree_writer": body.worktree_writer} if body and body.worktree_writer else {}),
-        )
-    except AcquisitionRefused as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except DaemonDrainingError as exc:
-        raise HTTPException(status_code=503, detail=str(exc))
-    except KeyError:
-        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
-    except ValueError as exc:
-        raise HTTPException(status_code=409, detail=str(exc))
-    except ProviderTargetRefreshError as exc:
-        raise HTTPException(
-            status_code=502,
-            detail=ProviderTargetRefreshError.public_message,
-        ) from exc
-    except RuntimeError as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
-
     return _session_info(session)
 
 

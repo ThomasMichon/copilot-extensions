@@ -993,10 +993,12 @@ class BridgeClient(StatusClientMixin, PromptClientMixin, AnswerClientMixin, Sess
         *,
         request_timeout: float | None = None,
         worktree_writer: dict[str, Any] | None = None,
+        retained_recovery: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """POST /api/v1/sessions/{id}/resume"""
         return super().resume_session(
             session_id, request_timeout=request_timeout, worktree_writer=worktree_writer,
+            retained_recovery=retained_recovery,
         )
 
     def resume_worktree(

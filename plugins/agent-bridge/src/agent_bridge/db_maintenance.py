@@ -7,13 +7,18 @@ class _MaintenanceMixin:
     """Garbage collection and size-management helpers."""
 
     def gc_retained_relationship_session_ids(self) -> set[str]:
-        """Keep original handles until their relationship closeout is confirmed."""
+        """Keep original handles until relationship or recovery settlement."""
+        retained = {
+            row["id"] for row in self.execute_read(
+                f"SELECT id FROM sessions WHERE ({self._retained_recovery_held_predicate()})"
+            )
+        }
         if not self.execute_read(
             "SELECT 1 FROM sqlite_master "
             "WHERE type='table' AND name='remote_acp_relationships'"
         ):
-            return set()
-        return {
+            return retained
+        return retained | {
             row["session_id"] for row in self.execute_read(
                 "SELECT session_id FROM remote_acp_relationships WHERE phase != 'closed'"
             )
@@ -36,6 +41,7 @@ class _MaintenanceMixin:
             "AND runtime_custody_json IS NULL "
             "AND NOT EXISTS (SELECT 1 FROM turns WHERE turns.session_id=sessions.id "
             "AND turns.runtime_custody_json IS NOT NULL) "
+            f"AND NOT ({self._retained_recovery_held_predicate()}) "
             "AND updated_at < ? ORDER BY updated_at",
             (*statuses, cutoff_ts),
         )

@@ -122,12 +122,16 @@ def manual_recovery_stop_token(manager: SessionManager, session_id: str) -> str 
 
 
 @contextmanager
-def recovery_admission(manager: SessionManager, session_id: str) -> Iterator[None]:
+def recovery_admission(
+    manager: SessionManager, session_id: str, *, automatic: bool = False,
+) -> Iterator[None]:
     """Serialize native recovery with drain and count until its admission settles."""
     held = _recovery_admission.get()
     if held is not None and held.active and held.task is asyncio.current_task():
         if held.manager is not manager or held.session_id != session_id:
             raise ValueError("native recovery admission belongs to another session")
+        if automatic and not held.automatic:
+            raise ColdRecoveryStoppedError("Automatic recovery cannot reuse a manual admission")
         _assert_recovery_current(manager, session_id)
         yield
         return
@@ -142,10 +146,11 @@ def recovery_admission(manager: SessionManager, session_id: str) -> Iterator[Non
     ):
         raise ValueError("automatic cold recovery belongs to another task/session")
     stop_token = _stop_token(manager, session_id)
-    if origin is not None and stop_token is not None:
+    automatic = automatic or origin is not None
+    if automatic and stop_token is not None:
         raise ColdRecoveryStoppedError("Automatic cold recovery is durably stopped")
     held = _RecoveryAdmission(
-        manager, session_id, asyncio.current_task(), stop_token, origin is not None,
+        manager, session_id, asyncio.current_task(), stop_token, automatic,
     )
     token = _recovery_admission.set(held)
     manager._active_acquisitions = getattr(manager, "_active_acquisitions", 0) + 1

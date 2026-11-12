@@ -424,10 +424,14 @@ def test_executing_cli_disclosure_matches_actual_parser(
                 "version": 1, "capabilities": ["keyed-worktree-writer"],
             },
             "agent-bridge.status": {
-                "version": 1, "capabilities": ["health-json", "exact-session-worktree-writer"],
+                "version": 1, "capabilities": [
+                    "health-json", "exact-session-worktree-writer", "retained-native-recovery",
+                ],
             },
             "agent-bridge.resume": {
-                "version": 1, "capabilities": ["exact-worktree-target", "keyed-worktree-writer"],
+                "version": 1, "capabilities": [
+                    "exact-worktree-target", "keyed-worktree-writer", "retained-native-recovery",
+                ],
             },
             "bridge-session-current-requests-v1": {
                 "version": 1, "capabilities": ["observe-session-current-requests"],

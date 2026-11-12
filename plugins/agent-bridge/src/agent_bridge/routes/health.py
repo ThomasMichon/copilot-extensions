@@ -84,6 +84,7 @@ async def health(request: Request) -> dict:
             CREATION_WRITER_CAPABILITY: 1,
             CREATION_WRITER_RESUME_CAPABILITY: 1,
             CREATION_WRITER_INSPECTION_CAPABILITY: 1,
+            "retained_native_session_recovery": 1,
             LIVE_QUESTION_ANSWERS_CAPABILITY: 1,
             LIVE_DELIVERY_OBSERVATION_CAPABILITY: 1,
             MUX_QUESTION_ANSWERS_CAPABILITY: 1,

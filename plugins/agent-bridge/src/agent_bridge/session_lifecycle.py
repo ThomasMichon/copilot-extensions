@@ -358,11 +358,26 @@ class _SessionLifecycleMixin:
             await self.end_session(session_id, force=force)
 
     async def end_session(self, session_id: str, *, force: bool = False) -> None:
-        """Serialize Codespace deletion with the original admission/release."""
+        """Serialize deletion with native recovery and Codespace admission/release."""
         session_id = self._resolve_ref(session_id) or session_id
         session = self._sessions.get(session_id)
         if session is None:
             raise KeyError(f"Session {session_id} not found")
+        from .runtime_custody import RuntimeCustodyError
+        from .creation_worktree_writer import JOURNAL_KEY
+
+        if self._db.retained_recovery_held(session_id):
+            raise RuntimeCustodyError("Retained recovery requires outcome reconciliation before teardown")
+        if (
+            session.target.type == "local" and session.target.worktree_id
+            and (session.target.venue or {}).get(JOURNAL_KEY)
+        ):
+            from .acquisition_executor import executor
+            with executor(self._db, f"retained-recovery:{session.target.worktree_id}"):
+                if self._db.retained_recovery_held(session_id):
+                    raise RuntimeCustodyError("Retained recovery requires outcome reconciliation before teardown")
+                await self._end_session_owned(session_id, force=force)
+            return
         if self._is_codespace_target(session.target):
             async with session._codespace_ownership_lock:
                 if self._sessions.get(session_id) is not session:

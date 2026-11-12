@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import time
+import asyncio
+import json
+import sqlite3
 from unittest.mock import MagicMock
 
 import pytest
@@ -26,6 +29,99 @@ def _mk(db: Database, sid: str, status: str, updated_at: float) -> None:
 
 
 class TestDbGcPrimitives:
+    @pytest.mark.parametrize("state", ["preparing", "unknown"])
+    def test_successor_recovery_journal_retains_original_handle(self, tmp_db, tmp_path, state):
+        from agent_bridge import creation_writer_schema
+        from agent_bridge.creation_worktree_writer import JOURNAL_KEY
+        from agent_bridge.transport import SpawnTarget
+        from agent_bridge.runtime_custody import RuntimeCustodyError
+
+        now = time.time()
+        manager = SessionManager(tmp_db, retention=RetentionConfig(vacuum=False))
+        for sid in ("predecessor", "successor", "unrelated"):
+            _mk(tmp_db, sid, "stopped", now - 10 * 86400)
+        for sid, key in (("successor", "original-key"), ("unrelated", "other-key")):
+            target = SpawnTarget(
+                type="local", project="fixture", worktree_id="shared-worktree",
+                cwd=str(tmp_path), venue={JOURNAL_KEY: key},
+            )
+            tmp_db.update_session_target(sid, target.to_json(), str(tmp_path))
+        tmp_db.execute_write(
+            "INSERT INTO workspace_embodiments "
+            "(key_digest,facts_digest,state,session_id,creation_recoveries_json) "
+            "VALUES ('original-key','original-facts','allocated','predecessor',?)",
+            (json.dumps({"original": {"request": {}, "state": state}}),),
+        )
+        original_guard = tmp_db.execute_read(
+            "SELECT sql FROM sqlite_master WHERE name='creation_recovery_session_retained'"
+        )[0]["sql"]
+        tmp_db.execute_write("DROP TRIGGER creation_recovery_lineage_retained")
+        with tmp_db._runtime_transaction(write=True) as conn:
+            creation_writer_schema.ensure_schema(conn)
+            creation_writer_schema.validate_schema(conn)
+        assert tmp_db.execute_read(
+            "SELECT sql FROM sqlite_master WHERE name='creation_recovery_session_retained'"
+        )[0]["sql"] == original_guard
+        assert tmp_db.gc_eligible_session_ids(["stopped"], now) == ["unrelated"]
+        with pytest.raises(sqlite3.IntegrityError, match="retained"):
+            tmp_db.execute_write("DELETE FROM sessions WHERE id='successor'")
+        assert manager.gc(now=now)["pruned"] == ["unrelated"]
+        restarted = SessionManager(tmp_db, retention=RetentionConfig(vacuum=False))
+        retained = restarted.get_session("successor")
+        assert retained is not None
+        assert tmp_db.retained_recovery_held("successor")
+        with pytest.raises(RuntimeCustodyError, match="outcome reconciliation"):
+            asyncio.run(restarted.end_session("successor", force=True))
+        assert restarted.get_session("successor") is retained
+        with pytest.raises(RuntimeCustodyError, match="outcome reconciliation"):
+            tmp_db.delete_session("successor")
+
+    @pytest.mark.parametrize("status", ["stopped", "ended"])
+    @pytest.mark.parametrize("state", [
+        "preparing", "invoking", "unknown", "complete", "not-started", "malformed", "gate-only",
+    ])
+    def test_retained_recovery_survives_selection_deletion_startup_and_periodic_gc(
+        self, tmp_db, status, state,
+    ):
+        from agent_bridge.runtime_custody import RuntimeCustodyError
+
+        manager = SessionManager(tmp_db, retention=RetentionConfig(vacuum=False))
+        now = time.time()
+        _mk(tmp_db, "retained", status, now - 10 * 86400)
+        raw = (
+            '{"original":"opaque"}' if state == "malformed" else
+            None if state == "gate-only" else
+            json.dumps({"original": {"request": {}, "state": state}})
+        )
+        tmp_db.execute_write(
+            "INSERT INTO workspace_embodiments "
+            "(key_digest,facts_digest,state,session_id,creation_recoveries_json) "
+            "VALUES ('original-key','original-facts','allocated','retained',?)", (raw,),
+        )
+        if state == "gate-only":
+            from agent_bridge.acquisition_store import AcquisitionStore
+
+            AcquisitionStore(tmp_db)
+            tmp_db.execute_write(
+                "INSERT INTO acquisition_launch_gates VALUES "
+                "('original-worktree','original-recovery','cli','retained','native','retained-recovery')"
+            )
+        held = state not in {"complete", "not-started"}
+        assert ("retained" in tmp_db.gc_eligible_session_ids([status], now)) is not held
+        if held:
+            with pytest.raises(RuntimeCustodyError, match="outcome reconciliation"):
+                tmp_db.delete_session("retained")
+            with pytest.raises(sqlite3.IntegrityError, match="retained"):
+                tmp_db.execute_write("DELETE FROM sessions WHERE id=?", ("retained",))
+            assert tmp_db.get_session("retained") is not None
+        result = manager.gc(now=now)
+        assert ("retained" in result["pruned"]) is not held
+        assert (tmp_db.get_session("retained") is not None) is held
+        if held:
+            restarted = SessionManager(tmp_db, retention=RetentionConfig(vacuum=False))
+            assert restarted.get_session("retained") is not None
+            assert "retained" not in restarted.gc(now=now)["pruned"]
+
     def test_eligible_ids_filters_status_and_age(self, tmp_db: Database) -> None:
         now = time.time()
         old = now - 10 * 86400  # 10 days

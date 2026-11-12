@@ -81,6 +81,7 @@ def run_resume(
     cli: bool = False,
     worktree_only: bool = False,
     worktree_writer: dict[str, Any] | None = None,
+    retained_recovery: dict[str, Any] | None = None,
 ) -> None:
     """Implementation of ``agent-bridge resume`` with singleton fallback.
 
@@ -176,6 +177,7 @@ def run_resume(
                 target,
                 request_timeout=startup_request_timeout(resume=True),
                 **({"worktree_writer": worktree_writer} if worktree_writer is not None else {}),
+                **({"retained_recovery": retained_recovery} if retained_recovery is not None else {}),
             )
             if worktree_writer is not None and (
                 result.get("session_id") != target
@@ -188,15 +190,22 @@ def run_resume(
                     reason="resume_response_unconfirmed",
                 )
             status = result.get("status", "")
+            held_recovery = retained_recovery is not None and (
+                result.get("retained_recovery", {}).get("state") != "complete"
+            )
             if as_json:
                 json_out({
                     **result,
                     "session_id": result.get("session_id") or target,
                     "status": status,
-                    "verb": "resumed",
+                    "verb": "recovery-inspected" if held_recovery else "resumed",
                 })
             else:
-                print(f"[OK] Session {target} resumed ({status})")
+                if held_recovery:
+                    outcome = result.get("retained_recovery", {}).get("state", "unknown")
+                    print(f"[HELD] Session {target} recovery outcome: {outcome}; original operation retained")
+                else:
+                    print(f"[OK] Session {target} resumed ({status})")
             return
         except BridgeClientError as exc:
             if exc.status != 404 or worktree_writer is not None:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import subprocess
 import sys
 import argparse
+import os
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -15,6 +16,8 @@ from agent_worktrees import launch_admission, launch_seed_exec
 from agent_worktrees import session_liveness
 from agent_worktrees import resolve_cli
 from agent_worktrees.sessions import LiveVerdict
+from agent_worktrees.retained_native_resume import ENVIRONMENT_KEY
+import json
 
 pytestmark = pytest.mark.contract("agent_worktrees.native_resume_admission")
 
@@ -126,6 +129,118 @@ def test_native_record_becoming_finalizing_after_planning_refuses_execution(owne
     assert launch_seed_exec.launch(
         path, planned[planned.index("--") + 1:], admission_only=True,
         native_resume_session="native-original",
+    ) == 3
+    spawn.assert_not_called()
+
+
+def retained_guard(record):
+    return {
+        "version": 1, "operation_id": "original-recovery",
+        "writer": {
+            "version": 1, "identity": {
+                "installation_root": "retained-owner", "runtime_generation": "a" * 32,
+            },
+            "creation_nonce": "retained-nonce", "worktree_id": record.worktree_id,
+            "worktree_path": record.worktree_path, "project": "example",
+        },
+        "head": {"session_id": "native-original", "revision": 7},
+    }
+
+
+@pytest.mark.parametrize("change", [
+    {"creation_nonce": "another-nonce"}, {"head_revision": 8},
+    {"repo": "another-project"}, {"worktree_id": "another-workspace"},
+    {"worktree_path": "another-path"},
+])
+def test_retained_recovery_checks_original_pairing_at_process_creation(owner, monkeypatch, change):
+    from agent_worktrees import resource_relationship
+
+    path, record = owner
+    record.repo, record.creation_nonce, record.head_revision = "example", "retained-nonce", 7
+    guard = retained_guard(record)
+    monkeypatch.setattr(resource_relationship, "writer_identity", lambda: guard["writer"]["identity"])
+    monkeypatch.setenv(ENVIRONMENT_KEY, json.dumps(guard))
+    for key, value in change.items():
+        setattr(record, key, value)
+    spawn = Mock()
+    monkeypatch.setattr(launch_seed_exec.subprocess, "Popen", spawn)
+    assert launch_seed_exec.launch(
+        path, ["copilot", "--acp", "--stdio"],
+        admission_only=True, native_resume_session="native-original",
+    ) == 3
+    spawn.assert_not_called()
+
+
+def test_retained_recovery_fence_preserves_original_exact_native_launch(owner, monkeypatch):
+    from agent_worktrees import resource_relationship
+
+    path, record = owner
+    record.repo, record.creation_nonce, record.head_revision = "example", "retained-nonce", 7
+    guard = retained_guard(record)
+    monkeypatch.setattr(resource_relationship, "writer_identity", lambda: guard["writer"]["identity"])
+    monkeypatch.setenv(ENVIRONMENT_KEY, json.dumps(guard))
+    spawn = Mock(return_value=SimpleNamespace(wait=lambda: 0))
+    monkeypatch.setattr(launch_seed_exec.subprocess, "Popen", spawn)
+    assert launch_seed_exec.launch(
+        path, ["copilot", "--acp", "--stdio"],
+        admission_only=True, native_resume_session="native-original",
+    ) == 0
+    spawn.assert_called_once()
+    assert ENVIRONMENT_KEY not in spawn.call_args.kwargs["env"]
+    assert json.loads(os.environ[ENVIRONMENT_KEY]) == guard
+
+
+def test_native_head_record_writer_is_excluded_through_process_creation_not_wait(owner, monkeypatch):
+    path, _record = owner
+    real_popen = subprocess.Popen
+    code = (
+        "import sys; from pathlib import Path; from agent_worktrees import tracking\n"
+        "try:\n"
+        " with tracking._RecordLock(Path(sys.argv[1]), timeout=0, require_sidecar=True): pass\n"
+        "except TimeoutError: sys.exit(7)\n"
+    )
+    phases = []
+
+    def writer(phase):
+        result = subprocess.run(
+            [sys.executable, "-c", code, str(path)], capture_output=True,
+            timeout=10, **no_window_kwargs(),
+        )
+        phases.append(phase)
+        assert result.returncode == (0 if phase == "wait" else 7), result.stderr.decode(errors="replace")
+        return 0
+
+    prepare = launch_seed_exec._prepare
+
+    def preparing(*args, **kwargs):
+        result = prepare(*args, **kwargs)
+        writer("validated")
+        return result
+
+    def spawn(argv, **kwargs):
+        if argv[0] != "copilot":
+            return real_popen(argv, **kwargs)
+        writer("process-creation")
+        return SimpleNamespace(wait=lambda: writer("wait"))
+
+    monkeypatch.setattr(launch_seed_exec, "_prepare", preparing)
+    monkeypatch.setattr(launch_seed_exec.subprocess, "Popen", spawn)
+    assert launch_seed_exec.launch(
+        path, ["copilot", "--acp", "--stdio"],
+        admission_only=True, native_resume_session="native-original",
+    ) == 0
+    assert phases == ["validated", "process-creation", "wait"]
+
+
+@pytest.mark.parametrize("raw", ["{", "null", "[]", '{"version":2}'])
+def test_unrecognized_retained_recovery_never_degrades_to_ordinary_launch(owner, monkeypatch, raw):
+    path, _record = owner
+    monkeypatch.setenv(ENVIRONMENT_KEY, raw)
+    spawn = Mock()
+    monkeypatch.setattr(launch_seed_exec.subprocess, "Popen", spawn)
+    assert launch_seed_exec.launch(
+        path, ["copilot", "--acp", "--stdio"],
+        admission_only=True, native_resume_session="native-original",
     ) == 3
     spawn.assert_not_called()
 

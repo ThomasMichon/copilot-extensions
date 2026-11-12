@@ -283,6 +283,23 @@ class HostIndex:
             existed = self._records.pop(session_id, None) is not None
         return existed
 
+    def release_exited_local(self, expected: HostRecord) -> bool:
+        """Settle only this exact local Host record after both original processes exited."""
+        from zdd.process_exit import observe_original_exit
+
+        with self._locked_reload():
+            current = self._records.get(expected.session_id)
+            if current != expected or current.boundary != "local":
+                return False
+            for name in ("host", "child"):
+                birth = current.extra.get(f"{name}_process_start")
+                if not isinstance(birth, str) or not birth or not observe_original_exit(
+                    getattr(current, f"{name}_pid"), birth,
+                ):
+                    return False
+            del self._records[expected.session_id]
+        return True
+
     def set_resume_flag(self, session_id: str, value: bool) -> bool:
         """Mark (or clear) a session to receive a 'Resume' nudge on reattach.
 

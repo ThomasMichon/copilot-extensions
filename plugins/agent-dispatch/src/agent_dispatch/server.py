@@ -106,6 +106,10 @@ def build_app(cfg: Config | None = None, *, replay_consumer_factory=None):
         relationship_writer=relationship_writer,
         relationship_authority=cfg.relationship_authority,
     )
+    if cfg.relationship_admission is None and cfg.relationship_authority is None:
+        from .assignment_local_standing import LocalStandingRelationshipWriter
+
+        queue._standing_relationship_writer = LocalStandingRelationshipWriter(queue)
     app = create_app(
         queue, token=cfg.token, control_token=cfg.control_token,
         sweep_interval=cfg.sweep_interval,

@@ -113,6 +113,11 @@ def test_cold_stop_migration_preserves_ambiguous_legacy_dormancy(tmp_path: Path)
         )
     db.close()
     with sqlite3.connect(path) as conn:
+        from agent_bridge.inbox_custody import schema_triggers
+
+        # v28 predates these guards; retaining current guards would not model that migration.
+        for name in schema_triggers():
+            conn.execute(f"DROP TRIGGER IF EXISTS {name}")
         conn.execute("ALTER TABLE sessions DROP COLUMN cold_recovery_stop_token")
         conn.execute("UPDATE schema_version SET version=28")
     before = path.read_bytes()
