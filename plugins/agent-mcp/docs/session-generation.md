@@ -128,7 +128,7 @@ client, original conduit, keeper or upstream. Initial discovery pagination
 requires a client-generated follow-up cursor. Each later ping requires both
 a physical-backend send witness and the upstream's matching client reply;
 a deliberately withheld ping must produce no reply before release. It is then
-released and acknowledged before graceful input EOF. Fresh round trips and identity
+released and acknowledged before closing the client's input. Fresh round trips and identity
 checks also run after each predecessor exits. The copied receiver briefly holds
 before qualification so the private fixture can prepare its backend from the
 native client's actual semantic environment; production matching is unchanged.
@@ -137,7 +137,11 @@ This tests protocol traffic, not model-driven tool invocation or accepted mutati
 it requires `COPILOT_NATIVE_TEST_EXECUTABLE` on a disposable runner. The existing
 path-gated `mcp-owner-exec` workflow supplies the pinned asset. A platform or asset
 skip is not qualification, and this source packet does not enable installed
-adoption or qualify Windows.
+adoption or qualify Windows. Under the preserved runner containment, native
+client shutdown terminates the upstream with SIGTERM; the fixture records that
+exact exit boundary, single initialization and birth-matched cleanup. This is
+not graceful upstream-EOF qualification; controlled-caller cases cover that
+separately.
 
 An explicitly custody-bound single-stdio `BridgeSession` can export quiescent
 JSON data and reconstruct its decorator pipeline over a supplied retained

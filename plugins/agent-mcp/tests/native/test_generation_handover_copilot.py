@@ -8,6 +8,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import signal
 import sys
 from typing import Callable
 
@@ -133,7 +134,7 @@ async def test_actual_native_client_responds_through_replacement_and_rollback(
     actor, upstream = tmp_path / "actor.py", tmp_path / "upstream.py"
     actor.write_text(fixture.ACTOR, encoding="utf-8")
     upstream.write_text(UPSTREAM, encoding="utf-8")
-    trigger, receipt = tmp_path / "refresh", tmp_path / "upstream-eof.json"
+    trigger, receipt = tmp_path / "refresh", tmp_path / "upstream-exit.json"
     replies = tmp_path / "client-replies.jsonl"
     observations = tmp_path / "responses.jsonl"
     caller_context = tmp_path / "caller-context.json"
@@ -410,6 +411,9 @@ async def test_actual_native_client_responds_through_replacement_and_rollback(
         assert identity_state(*keeper_identity) == "dead"
         assert identity_state(*conduit_identity) == "dead"
         assert all(identity_state(pid, birth) == "dead" for pid, birth in identities)
-        assert json.loads(receipt.read_text(encoding="utf-8")) == {
-            "pid": upstream_identity[0], "initialized": 1, "boundary": "stdin-eof",
+        exit_receipt = json.loads(receipt.read_text(encoding="utf-8"))
+        assert exit_receipt == {
+            "pid": upstream_identity[0], "initialized": 1,
+            "boundary": f"signal-{signal.SIGTERM}",
         }
+        record_testsuite_property("contained_native_upstream_exit", exit_receipt["boundary"])
