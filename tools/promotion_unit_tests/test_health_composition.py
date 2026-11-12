@@ -246,7 +246,7 @@ def test_file_resource_classification_keeps_enrollment_consent_local(owners, mon
     home = VirtualPath(ROOT / "fixture-home")
     selected = VirtualPath(ROOT / "selected-install")
     monkeypatch.setattr(module, "Path", VirtualPath)
-    monkeypatch.setattr(module, "os", SimpleNamespace(environ={"AGENT_RT_ROOT": str(selected)}))
+    monkeypatch.setattr(module, "os", SimpleNamespace(name="nt", environ={"AGENT_RT_ROOT": str(selected)}))
     for root in (
         home / ".agent-machines", selected,
         home / ".copilot-extensions" / "marketplaces" / "example" / "plugins" / "agent-machines",
@@ -256,6 +256,8 @@ def test_file_resource_classification_keeps_enrollment_consent_local(owners, mon
     assert not module.is_enrollment_state(home / "ordinary.json")
     assert not module.is_enrollment_state(home / "health-job.json")
     assert module.is_enrollment_state(home / "alias.json")
+    for suffix in (".", " ", "::$DATA"):
+        assert module.is_enrollment_state(home / (module.ENROLLMENT_STATE + suffix))
 
 
 @pytest.mark.parametrize("outcome,expected", [("unsupported", 2), ("failed", 2), ("timeout", 124), ("cleanup", 125)])

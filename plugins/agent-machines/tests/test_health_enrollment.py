@@ -4,6 +4,7 @@ from contextlib import contextmanager, nullcontext
 import copy
 import hashlib
 import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
 import sys
@@ -627,6 +628,22 @@ def test_generic_file_resources_cannot_adopt_local_collection(tmp_path, monkeypa
         SimpleNamespace(home=home, repo_paths={}), False,
     )
     assert result.ok and json.loads(ordinary.read_text()) == {"ordinary": True}
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Win32 filename alias semantics")
+@pytest.mark.parametrize("suffix", [".", " ", "::$DATA"])
+def test_file_resources_cannot_use_win32_aliases_for_local_consent(tmp_path, suffix):
+    from agent_machines.resources import HANDLERS, ResolvedResource
+
+    target = tmp_path / "custom-install" / (enrollment.STATE + suffix)
+    result = HANDLERS["file"].apply(
+        ResolvedResource("file", "consent-alias", (str(target),), {
+            "path": str(target), "format": "json", "strategy": "enforce",
+            "content": {"schema": enrollment.SCHEMA, "desired": {"enabled": True}},
+        }), SimpleNamespace(home=tmp_path, repo_paths={}), False,
+    )
+    assert result.status == "blocked"
+    assert not (target.parent / enrollment.STATE).exists()
 
 
 def test_native_omitted_enabled_default_can_be_disabled(case):

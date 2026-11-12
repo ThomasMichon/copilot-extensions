@@ -1564,3 +1564,6 @@ The [owner comparison](architecture.md#owner-decision) explains this choice.
   Unrelated generic filenames remain available. The final enrollment/resource/
   native withdrawal selection passed 214 cases; the actor-free packet and
   runner controls passed 42.
+- Win32 trailing-dot, trailing-space and default-stream aliases are normalized
+  before file-resource effects, including when the reserved state does not yet
+  exist. The focused real file-resource location/alias packet passed 15 cases.

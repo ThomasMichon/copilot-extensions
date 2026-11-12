@@ -14,9 +14,13 @@ from .resources import (
 
 def is_enrollment_state(target: Path) -> bool:
     """Reserve native local-consent state from ordinary file resources."""
-    return Path(target.name) == Path(ENROLLMENT_STATE) or (
-        Path(target.resolve().name) == Path(ENROLLMENT_STATE)
-    )
+    def reserved(path):
+        name = path.name
+        if os.name == "nt":
+            name = name.partition(":")[0].rstrip(" .").casefold()
+        return name == ENROLLMENT_STATE
+
+    return reserved(target) or reserved(target.resolve())
 
 
 class HealthJobResourceHandler(ResourceHandler):

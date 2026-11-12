@@ -4809,7 +4809,7 @@
         "tools/promotion_unit_tests/test_local_finalize.py::test_cleanup_requires_positive_local_branch_observation[remote]"
     ],
     "sources": {
-        "tools/promotion_unit_tests/test_health_composition.py": "9935c770e12f08e5a61e1325bbf5fa49fd65b126dba44b98bb7cfc0247958f7b",
+        "tools/promotion_unit_tests/test_health_composition.py": "1bd3298570a9c6051ce747ce200cca1805d9e1de9bc290b365bba2527ba16a8f",
         "plugins/agent-machines/tests/native/health_task_desktop.py": "742086a0c8ded805f6e9e2b519009b2d31872e936752f6e08051ba973a1c2d84",
         "plugins/agent-machines/src/agent_machines/cli_health.py": "282c294281319df55d12b287fd36f1f08b45241dbd32b13541c0fa5390e80cd7",
         "plugins/agent-machines/src/agent_machines/health_jobs.py": "eba051e3cce7717543b7e805ea308833618ac1d1535a300c31bd386e97323af9",
@@ -5501,7 +5501,7 @@
         "plugins/agent-machines/src/agent_machines/health_job.py": "69f6b2ffd86adc4c8d262b6a42c59c9036e7d8eef88e6433f2b8fdc29cdbf1ca",
         "plugins/agent-machines/src/agent_machines/health_task_native.py": "62c20ca8136f9858335171118200b88ae25906745834b3bcfa804ae381638269",
         "libs/installer-engine/runtime_launcher.py": "0cd1ac9fd75cff85f605345ec958fabc70f59796343b798aceec253ecc0b7cde",
-        "plugins/agent-machines/src/agent_machines/resource_health_job.py": "7cf82714d6385b0c9fb26ae734cbe32c0a5457c8af882585a60ebf6cf3a11114"
+        "plugins/agent-machines/src/agent_machines/resource_health_job.py": "fd1ce6396b8a3ab3dc034001a2d135427350ab56de092416a7d53876244e4dd7"
     },
     "coverage_targets": [
         "plugins/agent-machines/src/agent_machines/resource_health_job.py",

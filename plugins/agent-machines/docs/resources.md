@@ -84,7 +84,8 @@ unknown-outcome custody and status. This job is not the self-update watchdog.
 
 Ordinary `file` resources cannot write the reserved
 `agent-machines.health.enrollment.json` local consent/recovery filename,
-regardless of installation location, including custom roots and resolved aliases.
+regardless of installation location, including custom roots, resolved aliases
+and Win32 trailing-dot/space or default-stream filename aliases.
 This applies to JSON, text and managed-block strategies;
 use the dedicated lifecycle rather than manufacturing opt-in with a package.
 Unrelated file resources are unchanged. This restriction is not a sandbox for
