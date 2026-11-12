@@ -177,7 +177,7 @@ def test_current_bootstrap_uses_its_driver_to_install_a_legacy_source(snapshot, 
         "--root", str(snapshot / "installed"), "--install-source", str(snapshot),
         "--", "update", "--supervised-debug",
     ]) == 23
-    assert observed == [SCRIPTS.parent]
+    assert observed == [Path(installer.__file__).resolve().parents[1]]
     assert not (selected.payload / "scripts").exists()
 
 

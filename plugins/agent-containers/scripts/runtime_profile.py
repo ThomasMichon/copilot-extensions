@@ -72,6 +72,7 @@ def _unique_object(pairs: list[tuple[str, object]]) -> dict:
 
 
 def _read_json(path: Path) -> dict:
+    path = runtime._leases._native_path(path)
     if path.is_symlink() or not path.is_file():
         raise RuntimeError(f"Profile must be an ordinary JSON file: {path}")
     value = json.loads(
@@ -83,6 +84,7 @@ def _read_json(path: Path) -> dict:
 
 
 def _write_json(path: Path, value: dict) -> None:
+    path = runtime._leases._native_path(path)
     if path.exists():
         if _read_json(path) == value:
             return
