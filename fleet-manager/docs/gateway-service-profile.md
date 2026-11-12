@@ -388,6 +388,10 @@ reporting the empty transmitted body's length as the corresponding asset size.
 
 ### Opt-in caller-aware handler
 
+The optional [account-source adapter](gateway-account-source.md) composes an
+existing account custodian with this channel without a second broker or cache.
+It preserves source capabilities and does not relabel account tokens as scoped.
+
 An SDK embedding can select `handler=HandlerBinding(fleet, gateway, handle)`
 instead of `backend_origin`. These choices are mutually exclusive. The trusted
 async handler receives an immutable `ServiceRequest` with the checked method,
