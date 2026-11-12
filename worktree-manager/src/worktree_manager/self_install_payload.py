@@ -231,7 +231,11 @@ def _copy_payload_unsafe(
     # imports this module for _copy_payload/_copy_payload_unsafe, so these
     # names are only resolvable once self_install.py has finished defining
     # them (guaranteed true by the time any CALL here actually happens).
-    from .self_install import _SLOT_KEY_FILES, _mark_slot_complete
+    from .self_install import _SLOT_KEY_FILES, _mark_slot_complete, _runtime_installer
+
+    if os.name == "nt":
+        native = _runtime_installer().engine._native_retained_path
+        payload_dir, slot = Path(native(payload_dir)), Path(native(slot))
 
     if payload_dir.is_symlink():
         # symlinks=True on the copytree below only protects symlinks
