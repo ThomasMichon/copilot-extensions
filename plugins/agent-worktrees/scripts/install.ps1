@@ -3372,6 +3372,16 @@ function Deploy-GlobalBinstub {
     if ((Get-Variable PythonRuntimeHelpersPublished -Scope Script -ValueOnly -ErrorAction SilentlyContinue) -eq $true) { return }
     Assert-SourceRuntime
     Ensure-InstallDir $LocalBin
+    foreach ($name in @(
+        'update_controller_probe.py',
+        'installation-context\shell-caller-owned.ps1',
+        'installation-context\daemon_instance_runtime.pyz'
+    )) {
+        $src = Join-Path $ScriptDir $name
+        $dst = Join-Path $BinDir $name
+        Ensure-InstallDir (Split-Path -Parent $dst)
+        Publish-RuntimeFile $src $dst
+    }
     foreach ($name in @('agent-worktrees-update-entry.sh', 'agent-worktrees-update-entry.ps1', 'agent-worktrees-update-json.awk', 'agent-worktrees.ps1', 'agent-worktrees.cmd', 'agent-worktrees')) {
         $src = Join-Path $PluginDir "bin\$name"
         if ($name -eq 'agent-worktrees-update-json.awk') {

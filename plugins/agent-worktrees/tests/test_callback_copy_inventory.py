@@ -2,10 +2,13 @@
 from __future__ import annotations
 
 from pathlib import Path
+import sys
 
 import pytest
 
 from test_source_python_publication import (
+    CALLBACK_TIMEOUT,
+    admitted,
     native_hosts,
     publication_case as shared_publication_case,
     publication_transform as default_publication_transform,
@@ -14,6 +17,39 @@ from test_source_install_transactions import _function, _ps, _run, _sh
 
 publication_case = shared_publication_case
 publication_transform = default_publication_transform
+
+
+@pytest.mark.parametrize("publication_case", ["legacy"], indirect=True)
+@pytest.mark.parametrize(("shell", "executable"), native_hosts())
+@pytest.mark.parametrize("scope", ["resolvers", "wrappers"])
+@pytest.mark.timeout(90)
+def test_native_global_probe_assets_publish_without_snapshot_marker(
+    publication_case, shell, executable, scope, monkeypatch,
+):
+    driver, root, slot, owner, content, _identity = publication_case
+    expected = (
+        "update_controller_probe.py",
+        "installation-context/shell-caller-owned.ps1",
+        "installation-context/daemon_instance_runtime.pyz",
+    )
+    bindings = driver.helper_publication.declared_copies(content, root, scope, shell, False)
+    for relative in expected:
+        assert any(
+            Path(item["source"]) == content / "scripts" / relative
+            and Path(item["target"]) == root / "bin" / relative
+            for item in bindings
+        )
+    with admitted(driver, root, owner, content, monkeypatch) as (governance, _lease):
+        with driver.runtime.retention_custody(root, slot.name, payload_hash="candidate") as (_slot, descriptor):
+            publication = driver._publish_helpers(
+                governance, {"shell": shell, "executable": executable, "scope": scope},
+                content, slot, descriptor, timeout=CALLBACK_TIMEOUT,
+                base_python=Path(sys._base_executable),
+            )
+            for relative in expected:
+                assert (root / "bin" / relative).read_bytes() == (content / "scripts" / relative).read_bytes()
+            assert not (root / "payload-dir").exists()
+            publication.keep()
 
 
 @pytest.mark.parametrize("publication_case", ["legacy"], indirect=True)
