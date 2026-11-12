@@ -37,7 +37,7 @@ _WAIT_OBJECT_0 = 0
 _WAIT_TIMEOUT = 0x102
 
 _LAUNCHER = """
-import json, subprocess, sys, time
+import json, os, subprocess, sys, time
 from pathlib import Path
 import agent_procutil
 from agent_procutil._daemon_instance_identity import _windows_birth
@@ -64,7 +64,9 @@ try:
     }
 except agent_procutil.DaemonSpawnError as error:
     result = {"daemon_spawn_error": str(error)}
-Path(spec["result"]).write_text(json.dumps(result), encoding="utf-8")
+pending = Path(spec["result"] + ".tmp")
+pending.write_text(json.dumps(result), encoding="utf-8")
+os.replace(pending, spec["result"])
 time.sleep(120)
 """
 
