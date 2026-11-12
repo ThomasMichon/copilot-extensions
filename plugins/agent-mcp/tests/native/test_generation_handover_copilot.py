@@ -225,6 +225,7 @@ async def test_actual_native_client_rediscovers_through_replacement_and_rollback
                 entries = home / "entries.json"
                 entries.write_text(json.dumps({"mcpServers": {"physical-fixture": {
                     "type": "local", "command": str(python),
+                    "cwd": str(workspace),
                     "args": ["-I", "-m", "agent_mcp", "bridge", "--config", str(config)],
                     "tools": ["*"],
                 }}}), encoding="utf-8")
