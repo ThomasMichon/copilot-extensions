@@ -128,6 +128,31 @@ def test_recordless_normalized_bash_handoff_runs_after_setup(tmp_path, exit_code
     ]
 
 
+@pytest.mark.parametrize("resolver", ["missing", "empty"])
+def test_recordless_bash_selected_runtime_cannot_fall_back(tmp_path, resolver):
+    root = tmp_path / "selected"
+    if resolver == "empty":
+        (root / "bin").mkdir(parents=True)
+        (root / "bin" / "resolve-runtime.sh").write_text("AW_PY=''\n", encoding="utf-8", newline="\n")
+    marker, native = tmp_path / "raw-backend", tmp_path / "copilot"
+    native.write_text(
+        '#!/usr/bin/env bash\nprintf raw > "$FIXTURE_RAW"\n', encoding="utf-8", newline="\n",
+    )
+    native.chmod(0o700)
+    environment = {
+        **os.environ, "HOME": _shell_path(tmp_path),
+        "AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT": _shell_path(root),
+        "AW_PY": _shell_path(native), "FIXTURE_RAW": _shell_path(marker),
+    }
+    result = run_caller_owned([
+        _bash(), "--noprofile", "--norc", _shell_path(SCRIPT.parent / "default-setup.sh"),
+        "--machine", "fixture", "--copilot-path", _shell_path(native),
+    ], cwd=tmp_path, env=environment, timeout=30, max_stdout_bytes=8192, max_stderr_bytes=8192)
+    assert result.returncode == 3, result.stdout + result.stderr
+    assert "Normalized Copilot runtime is unavailable; no backend started." in result.stderr
+    assert not marker.exists()
+
+
 @pytest.mark.parametrize("application", [False, True], ids=["legacy", "application"])
 def test_finite_phase_streams_exact_reply_and_returns_provider_status(tmp_path: Path, application) -> None:
     root = tmp_path / "runtime"

@@ -13,6 +13,7 @@ from agent_procutil import no_window_kwargs
 from . import agent_policy, config, launch_execution
 from .launch_seed_exec import _interactive_console
 from .launch_seed_native import _headed_command
+from .process_launcher import bind_execution_directory
 
 
 def launch(command: list[str]) -> int:
@@ -32,8 +33,9 @@ def launch(command: list[str]) -> int:
 
     from agent_remote_driver.headed.caller import execute
 
-    cwd = str(Path.cwd())
+    cwd = str(Path.cwd().resolve())
     agent_policy.require(cwd)
+    bind_execution_directory(command, cwd, ValueError)
     argv, session_id = selected
     attempt = config.install_dir() / "launch-attempts" / uuid4().hex
     environment = os.environ.copy()

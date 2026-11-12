@@ -118,6 +118,9 @@ fi
 # resolve-runtime.sh (and RUNTIME_PYTHON derived from it) is used, not a
 # possibly-nonexistent legacy path.
 _awresolve="${AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT:-$HOME/.agent-worktrees}/bin/resolve-runtime.sh"
+if [[ -n "${AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT:-}" && -z "$RUNTIME_PYTHON" ]]; then
+    AW_PY=""
+fi
 [ -f "$_awresolve" ] && . "$_awresolve"
 _AW_PY="${RUNTIME_PYTHON:-${AW_PY:-}}"
 
@@ -265,8 +268,9 @@ _exec_copilot_backend() {
             --invoke --record "$LAUNCH_SEED_RECORD" --seed-id "$LAUNCH_SEED_ID" \
             "${attempt_args[@]}" -- "$@" "${COPILOT_ARGS[@]}"
     fi
-    if [[ $# -eq 1 && -n "$_AW_PY" && ( "${1##*/}" == copilot || "${1##*/}" == copilot.exe ) ]]; then
-        if [[ ! -x "$_AW_PY" ]]; then
+    if [[ $# -eq 1 && -n "$_AW_PY${AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT:-}" &&
+          ( "${1##*/}" == copilot || "${1##*/}" == copilot.exe ) ]]; then
+        if [[ -z "$_AW_PY" || ! -x "$_AW_PY" ]]; then
             printf 'Normalized Copilot runtime is unavailable; no backend started.\n' >&2
             exit 3
         fi

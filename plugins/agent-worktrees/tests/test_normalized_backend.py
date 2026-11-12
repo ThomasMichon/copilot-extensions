@@ -79,6 +79,36 @@ def test_repository_refusal_precedes_any_recordless_core_preparation(monkeypatch
         backend.launch(["copilot"])
 
 
+@pytest.mark.parametrize("form", ["separate", "equals"])
+def test_native_directory_cannot_redirect_an_allowed_caller_to_a_denied_repo(tmp_path, monkeypatch, form):
+    allowed, denied = tmp_path / "allowed", tmp_path / "denied"
+    for path in (allowed, denied):
+        (path / ".git").mkdir(parents=True)
+    policy = denied / ".agent-worktrees" / "config.yaml"
+    policy.parent.mkdir()
+    policy.write_text("expose_agent: false\n", encoding="utf-8")
+    monkeypatch.chdir(allowed)
+    monkeypatch.setattr(caller, "execute", lambda *_a, **_kw: pytest.fail("redirected launch"))
+    directory = ["-C", str(denied)] if form == "separate" else [f"-C={denied}"]
+    with pytest.raises(ValueError, match="directory must match"):
+        backend.launch(["copilot", *directory, "--resume=selected"])
+
+
+def test_matching_directory_and_selector_shaped_values_keep_original_argv(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(backend.config, "install_dir", lambda: tmp_path)
+    observed = []
+    monkeypatch.setattr(backend.agent_policy, "require", observed.append)
+    command = ["copilot", "-C", ".", "--model", "-C=not-a-directory", "--resume=selected"]
+    def execute(argv, **kwargs):
+        assert argv == command and kwargs["cwd"] == str(tmp_path.resolve())
+        kwargs["admit"]()
+        return 0, True
+    monkeypatch.setattr(caller, "execute", execute)
+    assert backend.launch(command) == 0
+    assert observed == [str(tmp_path.resolve())] * 2
+
+
 @pytest.mark.parametrize("outcome", ["uncertain", "unknown", "unsupported"])
 def test_selected_failure_never_replays_the_direct_backend(tmp_path, monkeypatch, capsys, outcome):
     monkeypatch.setattr(backend.config, "install_dir", lambda: tmp_path)

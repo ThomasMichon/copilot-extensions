@@ -406,7 +406,11 @@ function Invoke-CopilotBackend {
                     $env:AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT
                 } else { Join-Path $env:USERPROFILE '.agent-worktrees' }
                 $resolver = Join-Path $runtimeRoot 'bin\resolve-runtime.ps1'
+                $AwPy = $null
                 if (Test-Path -LiteralPath $resolver) { . $resolver; $backendPython = $AwPy }
+            }
+            if (-not $backendPython -and $env:AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT) {
+                throw 'Normalized Copilot runtime is unavailable; no backend started.'
             }
             if ($backendPython) {
                 if (-not (Test-Path -LiteralPath $backendPython -PathType Leaf)) {

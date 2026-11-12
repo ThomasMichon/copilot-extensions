@@ -232,6 +232,66 @@ def test_recordless_normalized_shell_reaches_real_retained_core(tmp_path, identi
     print(f"recordless-selected-core-seconds={time.monotonic() - started:.3f}")
 
 
+@pytest.mark.parametrize("resolver", ["missing", "empty"])
+def test_recordless_powershell_selected_runtime_cannot_fall_back(tmp_path, resolver):
+    executable = shutil.which("pwsh")
+    if not executable:
+        pytest.skip("PowerShell unavailable")
+    root = tmp_path / "selected"
+    if resolver == "empty":
+        (root / "bin").mkdir(parents=True)
+        (root / "bin" / "resolve-runtime.ps1").write_text("$AwPy=$null\n", encoding="utf-8")
+    native = tmp_path / ("copilot.exe" if os.name == "nt" else "copilot")
+    native.touch()
+    native.chmod(0o700)
+    environment = {
+        **os.environ, "PATH": str(Path(executable).parent), "HOME": str(tmp_path),
+        "USERPROFILE": str(tmp_path), "AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT": str(root),
+    }
+    script = Path(__file__).resolve().parents[2] / "scripts" / "default-setup.ps1"
+    result = run_caller_owned([
+        executable, "-NoProfile", "-NoLogo", "-File", str(script),
+        "-Machine", "fixture", "-CopilotPath", str(native),
+    ], cwd=tmp_path, env=environment, timeout=30, max_stdout_bytes=8192, max_stderr_bytes=8192)
+    assert result.returncode != 0
+    assert "Normalized Copilot runtime is unavailable; no backend started." in result.stderr
+
+
+def test_recordless_normalized_shell_rejects_execution_directory_override(tmp_path):
+    executable = shutil.which("pwsh")
+    if not executable:
+        pytest.skip("PowerShell unavailable")
+    allowed, denied = tmp_path / "allowed", tmp_path / "denied"
+    for path in (allowed, denied):
+        (path / ".git").mkdir(parents=True)
+    policy = denied / ".agent-worktrees" / "config.yaml"
+    policy.parent.mkdir()
+    policy.write_text("expose_agent: false\n", encoding="utf-8")
+    native = tmp_path / ("copilot.exe" if os.name == "nt" else "copilot")
+    native.touch()
+    native.chmod(0o700)
+    environment = {
+        key: value for key, value in os.environ.items()
+        if not key.startswith(("COPILOT_EXTENSIONS_", "AGENT_WORKTREES_"))
+        and key not in {"COPILOT_PLUGIN_ROOT", "COPILOT_PLUGIN_STAGED_FROM"}
+    }
+    environment.update(
+        HOME=str(tmp_path), USERPROFILE=str(tmp_path), AGENT_HOME=str(tmp_path),
+        PATH=str(Path(executable).parent), COPILOT_EXTENSIONS_TEST_CONTAINED="1",
+        AGENT_WORKTREES_STATUS_MONITOR="0",
+    )
+    script = Path(__file__).resolve().parents[2] / "scripts" / "default-setup.ps1"
+    result = run_caller_owned([
+        executable, "-NoProfile", "-NoLogo", "-File", str(script), "-Machine", "fixture",
+        "-CopilotPath", str(native), "-RuntimePython", sys.executable,
+        "-ExecutionDirectory", str(denied),
+        "-NativeArgumentsJson", '{"args":["--resume=selected"]}',
+    ], cwd=allowed, env=environment, timeout=30, max_stdout_bytes=8192, max_stderr_bytes=8192)
+    assert result.returncode == 3, result.stdout + result.stderr
+    assert "launch directory must match" in result.stderr
+    assert not list(tmp_path.rglob("headed.json"))
+
+
 @pytest.mark.parametrize("interruption", [None, "seed-claimed", "process-spawned", "finish"])
 def test_real_daemon_and_backend_keep_two_exact_handoffs_separate(tmp_path, interruption):
     script = textwrap.dedent(_SETUP + """
