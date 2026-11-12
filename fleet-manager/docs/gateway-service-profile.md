@@ -356,7 +356,9 @@ request/response bodies and unsupported forwarding refuse explicitly.
 Request and response content encoding must be absent or one exact `identity` field;
 duplicate encoding fields refuse rather than hiding another encoding.
 Request credentials, cookies, client identity headers and hop-by-hop metadata are not
-forwarded. Backend response headers use a narrow allowlist; authentication and
+forwarded. `X-Agent-Index-Installation-Id` is an allowlisted caller precondition,
+not an identity assertion; the selected account-source handler checks it before
+acquisition. Backend response headers use a narrow allowlist; authentication and
 cookies are not passed through.
 Backend 3xx responses other than `304 Not Modified` refuse before downstream
 headers: namespace-aware redirect destinations are not supported or silently

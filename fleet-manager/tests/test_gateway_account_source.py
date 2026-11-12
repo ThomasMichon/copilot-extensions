@@ -15,6 +15,7 @@ from fleet_manager.gateway_service_handler import CallerContext, ServiceRequest
 
 
 CAPABILITY = "synthetic-source-capability-not-a-real-secret"
+PIN = {"X-Agent-Index-Installation-Id": "source-installation"}
 FIELDS = {
     "source": "repo-a", "account": "account-a", "recipient": "worker-a",
     "host": "github.com", "action": "get-github-token",
@@ -31,22 +32,22 @@ class Source:
         return self.result
 
 
-def handler(source):
+def handler(source, *, installation="source-installation"):
     return AccountSourceHandler(
         source, fleet="fleet-a", gateway="gateway-a", slot="service-a",
-        installation="source-installation",
+        installation=installation,
         grants=(AccountSourceGrant("caller-a", **FIELDS),),
     )
 
 
 def request(value=None, *, principal="caller-a", method="POST",
-            target="/source-credentials", raw=None, **context):
+            target="/source-credentials", raw=None, headers=tuple(PIN.items()), **context):
     return ServiceRequest(
         CallerContext(**{
             "fleet": "fleet-a", "gateway": "gateway-a", "slot": "service-a",
             "principal": principal, "expires_at": int(time.time()) + 3600, **context,
         }),
-        method, target, (),
+        method, target, headers,
         raw if raw is not None else json.dumps(
             {**FIELDS, "capability": CAPABILITY} if value is None else value,
         ).encode(),
@@ -203,6 +204,21 @@ def test_disconnect_before_scheduled_acquisition_never_calls_source(monkeypatch)
     monkeypatch.setattr("fleet_manager.gateway_account_source.asyncio.wait_for", close_before_start)
     response = asyncio.run(handler(source).handle(value))
     assert response.status == 503
+    assert source.calls == []
+
+
+@pytest.mark.parametrize("pins", [
+    (), (("X-Agent-Index-Installation-Id", "foreign"),),
+    (("X-Agent-Index-Installation-Id", "source-installation"),
+     ("x-agent-index-installation-id", "source-installation")),
+])
+def test_missing_mismatched_or_duplicate_installation_pin_never_acquires(pins):
+    from dataclasses import replace
+
+    source = Source()
+    value = replace(request(), headers=pins)
+    response = asyncio.run(handler(source).handle(value))
+    assert response.status == 409
     assert source.calls == []
 
 

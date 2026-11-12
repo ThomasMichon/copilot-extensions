@@ -9,7 +9,7 @@ from pathlib import Path
 
 from fleet_manager.gateway_account_source import LEASE_CONTRACT
 from gateway_service_transport_fixtures import eventually, running
-from test_gateway_account_source import CAPABILITY, FIELDS, handler
+from test_gateway_account_source import CAPABILITY, FIELDS, PIN, handler
 from test_gateway_service_handler import connect_handler
 
 
@@ -51,7 +51,7 @@ def test_real_source_request_renewal_denial_loss_and_reconnect(tmp_path, monkeyp
     async def scenario():
         async with running(tmp_path) as rig:
             await connect_handler(rig, handler(source).handle)
-            async with await rig.request("/api/health") as response:
+            async with await rig.request("/api/health", headers=PIN) as response:
                 support = await response.json()
                 assert response.status == 200 and calls == []
                 assert support["source_credentials_contract"] == {
@@ -61,7 +61,7 @@ def test_real_source_request_renewal_denial_loss_and_reconnect(tmp_path, monkeyp
 
             async def acquire(expected=200, **changes):
                 async with await rig.request(
-                    "/api/source-credentials", "POST", json={**value, **changes},
+                    "/api/source-credentials", "POST", json={**value, **changes}, headers=PIN,
                 ) as response:
                     assert response.status == expected
                     assert response.headers["Cache-Control"] == "no-store"
@@ -120,6 +120,7 @@ def test_source_request_lost_after_dispatch_is_not_replayed_to_replacement(tmp_p
             await connect_handler(rig, handler(source).handle)
             pending = asyncio.create_task(rig.request(
                 "/api/source-credentials", "POST", json={**FIELDS, "capability": CAPABILITY},
+                headers=PIN,
             ))
             try:
                 await asyncio.wait_for(entered.wait(), 3)
@@ -132,6 +133,7 @@ def test_source_request_lost_after_dispatch_is_not_replayed_to_replacement(tmp_p
                 assert len(source.calls) == 1 and replacement.calls == []
                 async with await rig.request(
                     "/api/source-credentials", "POST", json={**FIELDS, "capability": CAPABILITY},
+                    headers=PIN,
                 ) as response:
                     assert response.status == 200
                     assert (await response.json())["token"] == "synthetic-token"
@@ -139,5 +141,34 @@ def test_source_request_lost_after_dispatch_is_not_replayed_to_replacement(tmp_p
             finally:
                 pending.cancel()
                 await asyncio.gather(pending, return_exceptions=True)
+
+    asyncio.run(scenario())
+
+
+def test_installation_replacement_between_health_and_post_never_acquires(tmp_path):
+    from test_gateway_account_source import Source
+
+    async def scenario():
+        async with running(tmp_path) as rig:
+            first, replacement = Source(), Source()
+            await connect_handler(rig, handler(first).handle)
+            async with await rig.request("/api/health", headers=PIN) as response:
+                assert response.status == 200
+                assert (await response.json())["installationId"] == PIN["X-Agent-Index-Installation-Id"]
+            await connect_handler(rig, handler(replacement, installation="replacement").handle)
+            for pin in ({}, PIN):
+                async with await rig.request(
+                    "/api/source-credentials", "POST",
+                    json={**FIELDS, "capability": CAPABILITY}, headers=pin,
+                ) as response:
+                    assert response.status == 409
+                    assert await response.json() == {"error": "source-installation-mismatch"}
+            assert first.calls == replacement.calls == []
+            async with await rig.request(
+                "/api/source-credentials", "POST", json={**FIELDS, "capability": CAPABILITY},
+                headers={"X-Agent-Index-Installation-Id": "replacement"},
+            ) as response:
+                assert response.status == 200
+            assert len(replacement.calls) == 1
 
     asyncio.run(scenario())

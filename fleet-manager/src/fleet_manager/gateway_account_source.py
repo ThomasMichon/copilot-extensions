@@ -18,6 +18,7 @@ from .gateway_service_handler import HandlerBinding, ServiceRequest, ServiceResp
 from .planning import PlanError, decode
 
 LEASE_CONTRACT = "credential-relay.account-source-lease/v1"
+INSTALLATION_HEADER = "x-agent-index-installation-id"
 _FIELDS = frozenset({"source", "account", "recipient", "host", "action"})
 _LEASE_FIELDS = frozenset({"lease_contract", "lease_id", "lease_issued_at", "lease_expires_at"})
 
@@ -100,13 +101,18 @@ class AccountSourceHandler:
         selected = tuple(grant for grant in self._grants if grant.principal == context.principal)
         if not selected:
             return _error(403, "source-caller-denied")
+        pins = [value for name, value in request.headers if name.lower() == INSTALLATION_HEADER]
         if request.method == "GET" and request.target == "/health" and request.body == b"":
+            if pins and pins != [self._installation]:
+                return _error(409, "source-installation-mismatch")
             return _json(200, {
                 "installationId": self._installation,
                 "source_credentials_contract": {"lease_contract": LEASE_CONTRACT, "exchange": "http/v1"},
             })
         if request.method != "POST" or request.target != "/source-credentials":
             return _error(404, "source-route-unavailable")
+        if pins != [self._installation]:
+            return _error(409, "source-installation-mismatch")
         try:
             if type(request.body) is not bytes or not 0 < len(request.body) <= 16384:
                 raise ValueError

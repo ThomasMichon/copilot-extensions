@@ -74,6 +74,12 @@ invalid, expired or regressed-clock leases are refused. None of these fields
 attests token expiry, downscoping, native execution authority or permission to
 resume an interrupted action. Pin `installationId` to the selected serving
 handler; a package version or reachable channel does not establish support.
+Every POST must carry exactly one matching `X-Agent-Index-Installation-Id`.
+This caller precondition crosses the channel as an allowlisted header, not
+identity or authorization. Missing, mismatched and duplicate pins refuse before
+acquisition. Discovery may omit the pin; a supplied pin must match. A previous
+channel implementation that strips the header causes pre-acquisition refusal,
+never a pin-less downgrade.
 
 Responses are `no-store`. Request bodies are limited to 16 KiB, use strict
 duplicate/nonfinite/unknown-field rejection and are never logged by the adapter.
