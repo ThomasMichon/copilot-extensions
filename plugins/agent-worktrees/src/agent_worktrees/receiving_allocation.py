@@ -29,14 +29,21 @@ def _require_ordinary_parent(record: tracking.WorktreeRecord) -> None:
     from . import config as cfg, tracking
     from .checkout_relocation_plan import read_record
 
-    allocation.qualified_ref(record.owner_ref)
     owner = tracking.parse_claim_ref(record.owner_ref)
+    if (
+        owner is None or not owner.is_qualified or owner.canonical() != record.owner_ref
+        or not all(allocation._component(part) for part in (
+            owner.machine, owner.project, owner.worktree_id, *([owner.session] if owner.session else []),
+        ))
+        or any(part in {".", ".."} or ":" in part for part in (owner.project, owner.worktree_id))
+    ):
+        raise ValueError("ordinary creator requires an exact qualified worktree reference")
     if owner is None or not owner.is_qualified or owner.machine != record.execution_machine:
         raise ValueError("ordinary owned record has no proven local creator")
     path = cfg.tracking_dir(owner.project) / f"{owner.worktree_id}.yaml"
     try:
         parent = read_record(path)
-    except yaml.YAMLError as error:
+    except (yaml.YAMLError, KeyError, TypeError) as error:
         raise ValueError("ordinary creator ledger is malformed") from error
     if (parent.execution_machine, parent.repo, parent.worktree_id) != (
         owner.machine, owner.project, owner.worktree_id,
@@ -47,6 +54,7 @@ def _require_ordinary_parent(record: tracking.WorktreeRecord) -> None:
     if (
         len(claims) != 1 or claims[0].state not in {"at-rest", "released"}
         or claims[0].metadata_opaque or claims[0].has_producer
+        or any(claim.metadata_opaque for claim in parent.resources)
         or tracking.claim_handoff_reservation(parent, claims[0])
     ):
         raise ValueError("ordinary creator responsibility is missing, unsettled or requires its original producer")
@@ -355,7 +363,13 @@ def preserve(
 ) -> None:
     """Generic and stale writers cannot forge, erase or roll back receiving custody."""
     if current is not None and not current.receiving_allocation_present:
-        recover_missing(current, path.parent)
+        from .checkout_relocation_state import owns
+
+        if owns(path):
+            if has_retained_receiving_operation(current, path.parent):
+                raise ValueError("relocation cannot recover missing original receiving metadata")
+        else:
+            recover_missing(current, path.parent)
     authorized = str(path.resolve()) in _writing.get()
     if current is not None and current.receiving_allocation_present:
         if current.status in {"finalized", "archived"} and (

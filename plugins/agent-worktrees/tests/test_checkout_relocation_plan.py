@@ -282,6 +282,7 @@ def test_generic_owned_ordinary_record_is_not_a_missing_receiving_receipt(planni
 def test_ordinary_owner_reaches_existing_execution_authority_without_recovery(planning_record, monkeypatch):
     fixture = planning_record
     _ordinary_owned(fixture)
+    monkeypatch.setattr(cfg, "detect_platform", lambda: "windows")
     record, _, _ = relocation._receiving_admission(fixture.ledger, fixture.config)
     monkeypatch.setattr(relocation.execution_spaces, "require_current_execution_space", lambda *_: None)
 
@@ -299,6 +300,29 @@ def test_generic_creator_reference_is_exact_before_ledger_lookup(planning_record
     fixture.ledger.write_text(json.dumps(fixture.data), encoding="utf-8")
     with pytest.raises(ValueError, match="exact qualified worktree reference"):
         relocation.plan(fixture.identity, str(fixture.destination), fixture.config)
+
+
+def test_native_owner_recheck_also_revalidates_generic_creator_responsibility(planning_record, monkeypatch):
+    fixture = planning_record
+    parent = _ordinary_owned(fixture)
+    record, _, _ = relocation._receiving_admission(fixture.ledger, fixture.config)
+
+    def native_owner(candidate, *, strict):
+        assert candidate.yaml_path == fixture.ledger and strict
+        return SimpleNamespace(active=False, probes_ok=True)
+
+    def cwd_owner(path):
+        assert path == record.worktree_path
+        return None
+
+    monkeypatch.setattr(relocation.sessions, "verify_worktree_active", native_owner)
+    monkeypatch.setattr(relocation.procs, "checkout_retirement_blocker", cwd_owner)
+    relocation._stopped(record, Path(record.worktree_path))
+    data = json.loads(parent.read_text())
+    data["resources"][0]["state"] = "active"
+    parent.write_text(json.dumps(data))
+    with pytest.raises(ValueError, match="responsibility is missing, unsettled"):
+        relocation._stopped(record, Path(record.worktree_path))
 
 
 @pytest.mark.parametrize("journal", ["receiving", "busy", "malformed", "unsupported"])
@@ -335,7 +359,7 @@ def test_known_or_unreadable_original_receiving_evidence_still_refuses_purely(pl
         connection.close()
 
 
-@pytest.mark.parametrize("condition", ["unsettled", "opaque-producer", "oversized", "malformed"])
+@pytest.mark.parametrize("condition", ["unsettled", "opaque-producer", "oversized", "malformed", "missing-field", "opaque-peer"])
 def test_unsettled_or_native_producer_is_not_reclassified_as_generic_ordinary(planning_record, condition):
     fixture = planning_record
     parent = _ordinary_owned(fixture)
@@ -350,13 +374,35 @@ def test_unsettled_or_native_producer_is_not_reclassified_as_generic_ordinary(pl
             relocation.plan(fixture.identity, str(fixture.destination), fixture.config)
         return
     data = json.loads(parent.read_text())
+    if condition == "missing-field":
+        del data["branch"]
+        parent.write_text(json.dumps(data))
+        with pytest.raises(ValueError, match="creator ledger is malformed"):
+            relocation.plan(fixture.identity, str(fixture.destination), fixture.config)
+        return
     if condition == "unsettled":
         data["resources"][0]["state"] = "active"
+    elif condition == "opaque-peer":
+        data["resources"].append({"kind": None, "ref": data["resources"][0]["ref"], "state": "active"})
     else:
         data["resources"][0]["producer"] = {"namespace": "unknown", "version": 99}
     parent.write_text(json.dumps(data))
     with pytest.raises(ValueError, match="responsibility is missing, unsettled"):
         relocation.plan(fixture.identity, str(fixture.destination), fixture.config)
+
+
+@pytest.mark.parametrize("identity,session", [("creator", "original-session"), ("@anchor", None), ("@anchor", "original-session")])
+def test_generic_creator_forms_preserve_original_reference(planning_record, identity, session):
+    fixture = planning_record
+    parent = _ordinary_owned(fixture)
+    data = json.loads(parent.read_text())
+    data["worktree_id"] = identity
+    parent.unlink()
+    parent.with_name(identity + ".yaml").write_text(json.dumps(data))
+    fixture.data["owner_ref"] = f"fixture/sample/{identity}" + (f"#{session}" if session else "")
+    fixture.ledger.write_text(json.dumps(fixture.data), encoding="utf-8")
+    record, proof, _ = relocation._receiving_admission(fixture.ledger, fixture.config)
+    assert proof is None and record.owner_ref == fixture.data["owner_ref"]
 
 
 def test_literal_workspace_lookup_does_not_enumerate_unrelated_session_artifacts(tmp_path, monkeypatch):

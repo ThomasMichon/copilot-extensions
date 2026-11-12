@@ -92,6 +92,14 @@ def _identity(record) -> dict:
 
 
 def _stopped(record, checkout: Path) -> None:
+    if (
+        not getattr(record, "receiving_allocation_present", False)
+        and getattr(record, "owner_ref", None) and getattr(record, "creation_nonce", None)
+    ):
+        from .receiving_allocation import has_retained_receiving_operation
+
+        if has_retained_receiving_operation(record, record.yaml_path.parent):
+            raise ValueError("missing original receiving proof during owner revalidation")
     verdict = sessions.verify_worktree_active(record, strict=True)
     if not verdict.probes_ok or verdict.active:
         raise ValueError("relocation requires confirmed inactive session/process owners")

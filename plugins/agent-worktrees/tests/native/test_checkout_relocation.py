@@ -200,6 +200,16 @@ def test_generic_owned_ordinary_component_move_preserves_original_parent_respons
     )
     tracking.save_record(fixture.record)
     parent_before = parent_path.read_bytes()
+    journal = records.parent / "workspace-creation.sqlite3"
+    connection = sqlite3.connect(journal)
+    connection.execute("CREATE TABLE creations(key_digest TEXT,version INTEGER,facts TEXT,status TEXT,worktree TEXT)")
+    connection.execute("INSERT INTO creations VALUES(?,?,?,?,?)", (
+        "unrelated", 1, "{}", "terminal", json.dumps({"worktree": {"id": "unrelated"}}),
+    ))
+    connection.commit()
+    connection.close()
+    journal_before = journal.read_bytes()
+    journal.chmod(0o444)
     assert _plan(fixture)["phase"] == "planned"
     assert _move(fixture)["phase"] == "complete"
     current = tracking.load_record(fixture.record.yaml_path)
@@ -208,7 +218,7 @@ def test_generic_owned_ordinary_component_move_preserves_original_parent_respons
     assert current.worktree_path == str(fixture.destination)
     assert not current.receiving_allocation_present
     assert parent_path.read_bytes() == parent_before
-    assert not (records.parent / "workspace-creation.sqlite3").exists()
+    assert journal.read_bytes() == journal_before
     assert (fixture.destination / "tracked.txt").read_bytes() == b"original\0content\n"
 
 
@@ -831,7 +841,7 @@ def test_read_only_plan_never_recovers_receipts_or_creates_owner_sidecars(checko
         str(path.relative_to(checkout.home)): path.read_bytes()
         for path in cfg.tracking_dir("sample").rglob("*") if path.is_file()
     }
-    with pytest.raises(execution_spaces.ExecutionSpaceError, match="read-only proof"):
+    with pytest.raises(execution_spaces.ExecutionSpaceError, match="receiving allocation inspection is unproven"):
         _plan(checkout)
     after = {
         str(path.relative_to(checkout.home)): path.read_bytes()

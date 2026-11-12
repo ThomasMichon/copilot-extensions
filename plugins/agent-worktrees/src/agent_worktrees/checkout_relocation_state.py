@@ -100,8 +100,12 @@ def owner(ledger: Path):
         _owners.reset(token)
 
 
+def owns(ledger: Path) -> bool:
+    return str(ledger.resolve()) in _owners.get()
+
+
 def require_idle(ledger: Path) -> None:
-    if str(ledger.resolve()) in _owners.get():
+    if owns(ledger):
         return
     data = read(ledger)
     if data is None:

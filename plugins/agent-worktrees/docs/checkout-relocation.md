@@ -155,6 +155,17 @@ All ordinary inactivity, follow-up, Git, immutable-creation-receipt and
 publication checks still apply. Pure planning remains unconfirmed for native
 liveness, and explicit apply performs fresh admission rather than reusing a
 classification as clearance.
+The same bounded generic-parent classification is repeated at the existing
+owner rechecks before publication and source retirement; a newly unsettled
+creator claim cannot reuse earlier admission.
+The existing relocation-owner context also keeps record rebinding non-recovering:
+an unrelated, unindexed original database is not upgraded by the record saver.
+Generic parents may be ordinary worktrees or retained anchors, including an
+original session qualifier. Their stored reference is preserved verbatim;
+that qualifier is historical provenance, not a live-session clearance.
+Any opaque parent resource keeps responsibility ambiguous, even beside an
+otherwise matching settled claim. Malformed parent mappings produce a
+structured refusal rather than escaping as a parser traceback.
 
 ## First receiving current-location revision
 
