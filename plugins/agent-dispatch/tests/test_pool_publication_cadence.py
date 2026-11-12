@@ -86,6 +86,35 @@ def _tick(owner: Any) -> Any:
     return asyncio.run(owner.source.maintain(timeout=5))
 
 
+@pytest.mark.parametrize(("enabled", "interval", "expected"), [
+    (True, 30.0, 5.0), (False, 30.0, 30.0), (True, 1.0, 1.0),
+])
+def test_actual_master_loop_renews_before_legacy_poll_interval(
+    owners: Any, enabled: bool, interval: float, expected: float,
+) -> None:
+    daemon = owners.daemon
+    daemon.pool_publication_enabled = enabled
+    daemon.poll_interval = interval
+    sleeps = []
+    snapshots = []
+    daemon.sleep = sleeps.append
+    _tick(owners)
+
+    def observe(_summary: Any) -> None:
+        snapshots.append(owners.queue.pool_catalog_snapshot())
+        if len(snapshots) == 3:
+            raise KeyboardInterrupt
+
+    assert daemon.serve(single_instance=False, on_cycle=observe) == 0
+    assert sleeps == [expected, expected]
+    assert daemon.poll_interval == interval
+    if enabled:
+        assert snapshots[-1].configured_ready
+        assert snapshots[-1].scopes[0].revision > snapshots[-2].scopes[0].revision
+    else:
+        assert snapshots[-1].scopes == ()
+
+
 def test_actual_scope_cadence_enrolls_publishes_renews_and_observes_overrides(owners: Any) -> None:
     trusted = owners.base / "profiles"
     trusted.mkdir()

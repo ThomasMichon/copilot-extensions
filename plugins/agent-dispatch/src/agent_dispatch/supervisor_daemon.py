@@ -2136,7 +2136,8 @@ class SupervisorDaemon(BoundedReconciliation):
                 if once:
                     break
                 try:
-                    self.sleep(self.poll_interval)
+                    interval = min(self.poll_interval, 5.0) if self.pool_publication_enabled else self.poll_interval
+                    self.sleep(interval)
                 except KeyboardInterrupt:
                     break
         finally:
