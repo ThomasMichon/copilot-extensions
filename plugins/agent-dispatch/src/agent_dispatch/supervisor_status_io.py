@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import time
 from pathlib import Path
@@ -28,9 +29,43 @@ def write_runtime_status(scope: str, summary) -> None:
     for key in ("owner", "lane_readiness"):
         if key in (previous or {}):
             payload[key] = previous[key]
+    payload["completed_cycle"] = {
+        "cycle_id": payload["cycle_id"], "started_at": payload["cycle_started_at"],
+        "completed_at": payload["updated_at"], "generation": payload["generation"],
+        "runtime_version": __version__,
+    }
     temporary = path.with_suffix(f".{os.getpid()}.tmp")
     temporary.write_text(json.dumps(payload), encoding="utf-8")
     os.replace(temporary, path)
+
+
+def completed_cycle_ready(payload: dict) -> bool:
+    cycle = payload.get("completed_cycle")
+    if "completed_cycle" not in payload:
+        cycle = {
+            "cycle_id": payload.get("cycle_id"), "started_at": payload.get("cycle_started_at"),
+            "completed_at": payload.get("updated_at"),
+        }
+    elif (
+        not isinstance(cycle, dict) or cycle.get("generation") != payload.get("generation")
+        or cycle.get("runtime_version") != payload.get("runtime_version")
+    ):
+        return False
+    if "completed_cycle" in payload and (
+        type(payload.get("cycle_id")) is not int or type(cycle.get("cycle_id")) is not int
+        or payload["cycle_id"] < cycle["cycle_id"]
+        or (payload.get("updated_at") is not None and (
+            type(payload["updated_at"]) not in (int, float) or not math.isfinite(payload["updated_at"])
+        ))
+    ):
+        return False
+    started, completed = cycle.get("started_at"), cycle.get("completed_at")
+    return (
+        type(cycle.get("cycle_id")) is int and cycle["cycle_id"] > 0
+        and type(started) in (int, float) and type(completed) in (int, float)
+        and math.isfinite(started) and math.isfinite(completed)
+        and started <= completed <= time.time()
+    )
 
 
 def runtime_status_path(scope: str, *, directory: Path | None = None) -> Path:

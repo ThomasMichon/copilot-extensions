@@ -9,6 +9,21 @@ from .delegated_waiter_contract import CALLBACK_COMMAND
 
 
 def dispatch(argv: list[str]) -> int | None:
+    if argv[:2] == ["supervise", "serve"] and "--source-candidate" in argv and not any(
+        name.startswith("AGENT_DISPATCH_TASK_") for name in os.environ
+    ):
+        from .supervise_registration_cli import build_profile_parser
+
+        args = build_profile_parser().parse_args(argv)
+        return args.func(args)
+    if argv[:1] == ["__source-start"] and not any(
+        name.startswith("AGENT_DISPATCH_TASK_") for name in os.environ
+    ):
+        from .source_start import command
+
+        parser = argparse.ArgumentParser(prog="agent-dispatch __source-start", allow_abbrev=False)
+        parser.add_argument("--json", action="store_true")
+        return command(parser.parse_args(argv[1:]))
     if argv[:1] == ["telemetry"] and not any(
         name.startswith("AGENT_DISPATCH_TASK_") for name in os.environ
     ):

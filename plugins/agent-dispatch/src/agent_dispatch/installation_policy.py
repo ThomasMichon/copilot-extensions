@@ -22,8 +22,13 @@ def ensure_coordinator_command(args) -> int:
     return 0 if has_live_local_coordinator() else 1
 
 
-def windows_policy(root: Path, *, reconcile=False, observe_supervisor=True, supervisor_profile=None) -> dict:
+def windows_policy(
+    root: Path, *, reconcile=False, observe_supervisor=True,
+    supervisor_profile=None, include_primary=False,
+) -> dict:
     default = {"windows_scheduled_task": "preserve", "start_coordinator": True, "start_supervisor": True}
+    if include_primary:
+        default["primary_start_supervisor"] = True
     if os.name != "nt":
         return default
     selector = os.environ.get("AGENT_DISPATCH_INSTALLATION_CONFIG")
@@ -73,6 +78,10 @@ if($policy.start_coordinator){
  if($task -and $task.State -eq 'Disabled'){$policy.start_coordinator=$false}
 }
 """
+    if include_primary:
+        command += f"$primary=$policy.start_supervisor; if($primary){{$task=Get-DispatchNativeTask {quote(supervisor)} -Root $root; "
+        command += "if($task -and $task.State -eq 'Disabled'){$primary=$false}}; "
+        command += "$policy['primary_start_supervisor']=$primary; "
     if observe_supervisor:
         command += f"if($policy.start_supervisor){{$task=Get-DispatchNativeTask {quote(observed_supervisor)} -Root $root; "
         command += "if($task -and $task.State -eq 'Disabled'){$policy.start_supervisor=$false}}; "
@@ -90,6 +99,7 @@ if($policy.start_coordinator){
         or policy["windows_scheduled_task"] not in {"preserve", "enabled", "absent"}
         or type(policy["start_coordinator"]) is not bool
         or type(policy["start_supervisor"]) is not bool
+        or (include_primary and type(policy["primary_start_supervisor"]) is not bool)
     ):
         raise RuntimeError("Dispatch scheduling owner returned an invalid policy")
     return policy

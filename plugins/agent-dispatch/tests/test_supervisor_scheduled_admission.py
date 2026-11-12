@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 import json
+import math
 import os
 from pathlib import Path
 import shutil
@@ -256,8 +257,19 @@ def diagnostics(root):
     return json.dumps(native) + "\n" + "\n".join(
         str(path.relative_to(root)) + ":\n" + path.read_text(errors="replace")
         for path in root.rglob("*")
-        if path.is_file() and (path.suffix in {".log", ".out", ".err", ".jsonl"} or path.name.endswith(".status.json"))
+        if path.is_file() and (path.suffix in {".log", ".out", ".err", ".jsonl"} or path.name.endswith(".status.json")
+                               or path.parent.name == "supervisor-candidates")
     )
+
+
+def assert_completed_generation(status):
+    cycle = status["completed_cycle"]
+    assert 0 < cycle["cycle_id"] <= status["cycle_id"]
+    assert math.isfinite(cycle["completed_at"]) and math.isfinite(cycle["started_at"])
+    assert cycle["completed_at"] >= cycle["started_at"]
+    assert cycle["completed_at"] <= time.time()
+    assert cycle["generation"] == status["generation"]
+    assert cycle["runtime_version"] == status["runtime_version"]
 
 
 @pytest.mark.parametrize("host", ["powershell.exe", "pwsh"])
@@ -448,8 +460,8 @@ def test_actual_installer_source_supervisor_callback_preserves_supported_primary
             "legacy_env": False, "no_declared": True,
         }
         status, error = read_status(runtime_status_path(scope, directory=root / "run"))
-        assert error is None and status["cycle_id"] > 0
-        assert status["updated_at"] >= status["cycle_started_at"]
+        assert error is None
+        assert_completed_generation(status)
         assert status["generation"]["pid"] == prepared["generation"]["pid"]
 
 
@@ -472,8 +484,8 @@ def test_repeated_actual_installer_callbacks_reconfigure_bound_primary_without_d
 
         def current():
             status, error = read_status(runtime_status_path(scope, directory=root / "run"))
-            assert error is None and status["cycle_id"] > 0
-            assert status["updated_at"] >= status["cycle_started_at"]
+            assert error is None, diagnostics(root)
+            assert_completed_generation(status)
             prepared = read_prepared(root, version, scope, pid=status["generation"]["pid"])
             assert prepared is not None
             return prepared
@@ -578,18 +590,16 @@ while not (r/'release').exists(): time.sleep(.02)
         assert control.returncode == 0, diagnostics(root)
         status_path = runtime_status_path(scope, directory=root / "run")
         status, error = read_status(status_path)
-        # Admission can finish while the next cycle is publishing its progress.
-        # Observe a completed cycle within the original shared deadline.
+        from agent_dispatch.supervisor_status_io import completed_cycle_ready
+
         while time.monotonic() < deadline and (
             error is not None or not isinstance(status, dict)
-            or not isinstance(status.get("updated_at"), (int, float))
-            or not isinstance(status.get("cycle_started_at"), (int, float))
-            or status["updated_at"] < status["cycle_started_at"]
+            or not completed_cycle_ready(status)
         ):
             time.sleep(.02)
             status, error = read_status(status_path)
-        assert error is None and status["cycle_id"] > 0
-        assert status["updated_at"] >= status["cycle_started_at"]
+        assert error is None
+        assert_completed_generation(status)
         assert status["generation"]["pid"] == produced["pid"]
         record = read_prepared(root, (root / "current-version").read_text(), scope, pid=produced["pid"])
         assert record is not None

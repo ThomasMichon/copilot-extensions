@@ -91,7 +91,8 @@ if($script:Removed -ne 0 -or $script:Tasks.Count){throw 'missing task recreated'
 
 @pytest.mark.skipif(os.name != "nt", reason="native Source policy consumer")
 @pytest.mark.parametrize("state", ["Ready", "Disabled"])
-def test_enabled_source_reconcile_preserves_existing_custom_tasks(tmp_path, monkeypatch, state):
+@pytest.mark.parametrize("include_primary", [False, True])
+def test_enabled_source_reconcile_preserves_existing_custom_tasks(tmp_path, monkeypatch, state, include_primary):
     from agent_dispatch import installation_policy
     from agent_dispatch.install_paths import installation_suffix
     from agent_procutil import owned_process
@@ -120,9 +121,13 @@ function Stop-ScheduledTask {throw 'policy reconciliation must not stop a task'}
         return original([*command[:-1], prefix + command[-1]], **options)
 
     monkeypatch.setattr(owned_process, "run_caller_owned", scheduler_boundary)
-    result = installation_policy.windows_policy(tmp_path, reconcile=True)
+    result = installation_policy.windows_policy(
+        tmp_path, reconcile=True, observe_supervisor=not include_primary, include_primary=include_primary,
+    )
     assert result["start_coordinator"] is True
-    assert result["start_supervisor"] is (state != "Disabled")
+    assert result["start_supervisor"] is (include_primary or state != "Disabled")
+    if include_primary:
+        assert result["primary_start_supervisor"] is (state != "Disabled")
     assert result["windows_scheduled_task"] == "enabled"
 
 

@@ -92,6 +92,10 @@ def _write_supervisor_cycle_start(
         }
     else:
         payload.pop("lane_readiness", None)
+    if any((previous or {}).get(key) != payload.get(key) for key in (
+        "generation", "runtime_version", "lane_readiness",
+    )):
+        payload.pop("completed_cycle", None)
     temporary = path.with_suffix(f".{os.getpid()}.tmp")
     temporary.write_text(json.dumps(payload), encoding="utf-8")
     os.replace(temporary, path)
