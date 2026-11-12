@@ -2,7 +2,7 @@ $ErrorActionPreference = 'Stop'
 $env:PYTHONUTF8 = '1'
 $forwardArgs = @($args)
 $configurationEntry = $forwardArgs.Count -gt 0 -and $forwardArgs[0] -ceq 'installation-configuration'
-$healthRunEntry = $forwardArgs.Count -gt 1 -and $forwardArgs[0] -ceq 'health' -and $forwardArgs[1] -cin @('run', 'prepare-job')
+$healthRunEntry = $forwardArgs.Count -gt 1 -and $forwardArgs[0] -ceq 'health' -and $forwardArgs[1] -cin @('run', 'prepare-job', 'job')
 $readOnlyRuntimeEntry = $configurationEntry -or $healthRunEntry
 
 $payloadRoot = [Environment]::GetEnvironmentVariable(

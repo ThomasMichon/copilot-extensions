@@ -15,6 +15,8 @@ def supported(arguments: list[str], purelib: Path) -> bool:
     """Read support from the executing slot, without importing provider code."""
     if arguments[:2] == ["health", "prepare-job"]:
         operation = "prepare-job"
+    elif arguments[:2] == ["health", "job"]:
+        operation = "installed-job"
     elif arguments[:2] == ["health", "run"]:
         operation = "apply" if "--apply" in arguments[2:] else "preview"
     else:

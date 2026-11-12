@@ -61,6 +61,14 @@ STANDALONE_NATIVE_ADOPTERS = (
     "plugins/agent-containers", "plugins/budget-guidance", "plugins/agent-worktrees",
 )
 STANDALONE_NATIVE_FILES = (*FILES, *SUPPORT_FILES)
+STANDALONE_NATIVE_EXTRA_FILES = {
+    "plugins/agent-machines": ("runtime_launcher.py",),
+}
+
+
+def native_files(consumer: Path, repo: Path) -> tuple[str, ...]:
+    relative = consumer.relative_to(repo).as_posix()
+    return (*STANDALONE_NATIVE_FILES, *STANDALONE_NATIVE_EXTRA_FILES.get(relative, ()))
 
 
 def standalone_python_adopter_dirs(repo: Path) -> tuple[Path, ...]:

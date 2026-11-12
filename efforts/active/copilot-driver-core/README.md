@@ -179,7 +179,8 @@ native qualification and activation need their existing separate admission.
   agents or schedules; unknown state is not an empty pending set.
 - [ ] Review and qualify uncertainty-preserving crash recovery through the
   original lifecycle owner, without treating clean SDK detach as a prerequisite
-  or relaxing scope settlement, authorization and no-replay gates.
+  or relaxing scope settlement, authorization and no-replay gates; begin with
+  the [original-owner admission binding](implementation.md#original-owner-recovery-admission-binding).
 - [ ] Qualify ordinary/hoisted receiving, supported skew/rollback, endpoint and
   process identity, exact cleanup and measured cold/warm readiness.
 - [ ] Establish independent POSIX owner-death custody and native Linux/pod
@@ -228,6 +229,9 @@ this proposal's review gate.
 
 ## Journal
 
+- [2026-11-12 - Recordless normalized caller converges on the core](journal/2026/11.12%20recordless%20caller%20core%20acceptance.md)
+- [2026-11-12 - Original-owner recovery store reviewed and merged](journal/2026/11.12%20original-owner%20recovery%20store.md)
+- [2026-11-12 - Recovery contract reviewed; original-owner store next](journal/2026/11.12%20recovery%20contract%20acceptance.md)
 - [2026-11-11 - Portable mux receiving converges on the common core](journal/2026/11.11%20portable%20mux%20core%20acceptance.md)
 - [2026-11-11 - Uncertainty-preserving crash recovery proposed](journal/2026/11.11%20uncertainty-preserving%20recovery.md)
 - [2026-11-11 - Refactor source history](journal/2026/11.11%20refactor%20source%20history.md)

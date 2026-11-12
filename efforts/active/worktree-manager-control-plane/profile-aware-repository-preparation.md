@@ -196,6 +196,14 @@ exception or automatic reclassification.
 
 ## Journal
 
+- 2026-11-12: A first-touch setup callback lost its caller's disabled-bytecode
+  policy because Python isolated mode ignores `PYTHONDONTWRITEBYTECODE`.
+  The selected-engine argv now carries `-B` only when the caller's effective
+  policy disables writes. Native Windows source controls passed both cold
+  callback policies and the existing selected-engine trust/preparation flow
+  (four passed, one POSIX-only skip). Runtime install contracts and focused
+  Python lint passed. POSIX execution, source review/release and the distinct
+  complete caller qualification remain open; no installed runtime was changed.
 - 2026-11-11: Review of #12142 found that a declaration below a hash-excluded
   payload directory could evade full-plan invalidation. The full-mode digest
   now binds parsed script-owner metadata independently, while retaining the

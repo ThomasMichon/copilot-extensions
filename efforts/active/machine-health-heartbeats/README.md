@@ -1473,3 +1473,108 @@ The [owner comparison](architecture.md#owner-decision) explains this choice.
   Source merge, release availability, installed adoption and live connectivity
   remain separate evidence. No production task, service or carrier was changed
   by this merge.
+- #12059 merged as `1375dcef5d46f7f2148c7d0c5f52fa5ca4ad4d0f` after
+  current-head Copilot approval with no findings, green required checks and no
+  open threads, using the same authorized Maintainer CODEOWNER exception.
+  The installed Windows enrollment amendment and current delivery lane are
+  reviewed; this is not implementation or deployment evidence.
+- Continue with the configuration-owned enrollment implementation and its real
+  installed-closure/replacement/rollback consumer flow. Keep the parent Active;
+  broader carrier/preferences, Linux and actual host activation remain open.
+
+### 2026-11-11 - Installed enrollment implementation and first native proof
+- Implemented local preview/confirmation, installed collection support
+  qualification, create-disabled/readback/enable, matching no-op, reversible
+  replacement, disable and removal under the existing runtime-reference owner.
+  The declared `health-job` resource only converges a prior local opt-in.
+- The finite installed GUI root no longer depends on a checkout or replaceable
+  marketplace payload. The canonical retained bootstrap binds the exact build
+  identity and Windows virtual environment before site imports.
+- Focused native fixtures proved two calendar cycles, immutable build-input
+  removal, matching convergence, replacement and rollback, failed-replacement
+  restoration, successor execution and exact task/reference cleanup. Windows
+  default-field/UTC serialization and observer sharing/settlement races found
+  during qualification now have focused controls. Visual attendance was not
+  required. Forty-nine focused consent/schema controls passed as well.
+- Declaration/materialization and source checks remain part of the unpublished
+  implementation gate. These are isolated fixture results, not release,
+  production enrollment, actual hourly host results or peer access evidence.
+  The parent remains Active; no production task, service or carrier was changed.
+- Final source checks passed for install contract, headless launch,
+  documentation consistency, lint and module size; all 41 existing enforced
+  typing projects passed on both targets without expanding admission.
+- Recovery now compares cached actions with the qualified selected runtime's
+  definition before any rollback enable. Lifecycle management uses its
+  executing retained manager independently of current collector readiness.
+  Focused unit/actor-free controls and the native CLI flow verify refusal of an
+  unsupported collector while retaining safe disable/removal; native cleanup
+  settled every fixture task and retained consumer lease.
+- Withdrawal recovery retains removal intent after a failed native deletion;
+  it never restores an enabled incumbent. Repeated absence converges without
+  mutation once task, adoption and references are cleared. Disabled enrollment
+  retains an enabled trigger and changes only the task-level setting, so
+  interrupted disable recovers without replacement. CLI/resource boundaries
+  report subprocess timeout/cleanup failures without clearing recovery state.
+  The focused native withdrawal plus unit packet passed 21 cases, and the
+  actor-free packet plus runner controls passed 41.
+- A broader replacement rerun reached its unchanged test deadline while
+  observing successor completion, before the new withdrawal assertions. The
+  exact abandoned fixture task was identity-checked, removed and read back.
+  Changed withdrawal behavior was then isolated under the original bounds;
+  this does not promote the timed-out rerun into a passing result.
+- Pending recovery now persists replace/disable/remove intent independently of
+  the definitions retained for ownership. Removal during pending replacement
+  survives interruption, and disable recovery stops and reads back the exact
+  owned task without collector readiness, refusing settlement with live
+  instances. Failed disabled configuration follows the same no-enabled-rollback
+  rule. Before/after-effect controls, native pre-effect disable interruption and
+  deletion recovery passed; the focused unit suite passed 25 cases and the
+  native-plus-unit selection passed 25 before the final additional unit case.
+- Native mutations now fence their unsettled phase in the existing pending
+  record before launch. Unconfirmed cleanup retains the original native
+  retry/callback owner; later lifecycle owners cannot mutate until its confirmed
+  settlement. Withdrawal may tighten recorded intent while fenced, without
+  claiming completion. Late-enable and successor-owner controls pass.
+  Initial disabled-registration failure reports rollback instead of successful
+  enrollment, and confirmed disabled configuration overrides pending enabled
+  replacement intent. The focused native/unit packet passed 30 cases; the
+  actor-free packet and runner controls passed 41.
+- CLI/resource boundaries retain the original native cleanup owner through one
+  bounded settlement attempt before returning; successful cleanup clears only
+  its native fence, never blindly replays the operation. Failed settlement
+  preserves the fence and error. The boundary controls cover both confirmed
+  and unconfirmed cleanup on both surfaces; all 33 focused unit cases passed.
+- Native shutdown disables future admission and waits for the installed finite
+  root's normal child-Job settlement result, rather than force-stopping the root
+  and treating an empty scheduler list as tree termination. Unknown/crash/
+  native-timeout outcomes remain fenced. An actual delayed collector control
+  proved its final write and normal result precede successful disable, followed
+  by exact task/lease cleanup. Fresh COM readback preserves the intended Enabled
+  change while detecting all other definition drift during bounded waiting.
+- Ordinary file-resource convergence now reserves health enrollment consent/
+  recovery state in selected, legacy and canonical cell installations, closing
+  the generic JSON adoption path while preserving unrelated file behavior.
+  This is a built-in convergence restriction, not a sandbox for arbitrary
+  filesystem-authorized code. The enrollment/resource packet passed 210 cases;
+  actor-free classification and existing composition/runner controls passed 42.
+- A non-selected custom-install control reproduced the discovery-based
+  reservation gap. Enrollment now uses the product-namespaced
+  `agent-machines.health.enrollment.json` filename, reserved independently of
+  installation location and resolved aliases without inventory scans.
+  Unrelated generic filenames remain available. The final enrollment/resource/
+  native withdrawal selection passed 214 cases; the actor-free packet and
+  runner controls passed 42.
+- Win32 trailing-dot, trailing-space and default-stream aliases are normalized
+  before file-resource effects, including when the reserved state does not yet
+  exist. The focused real file-resource location/alias packet passed 15 cases.
+- Confirmation compares the settled desired state with the newly requested
+  store/policy after pending recovery. Recovering a previous configuration
+  cannot imply that the new confirmation was applied; mismatches return
+  `configuration-not-applied` and CLI exit 2, requiring a fresh preview.
+  Changed-store and changed-policy CLI controls passed with the full 50-case
+  enrollment unit packet.
+- Preview and recovery now share pending-definition ownership classification
+  for the recorded incumbent and candidate, including disabled forms. Interrupted
+  candidate definitions no longer block a legitimate preview as foreign;
+  unrelated definitions still refuse. Before/after-enable response-loss controls
+  passed with the full 52-case enrollment unit packet.

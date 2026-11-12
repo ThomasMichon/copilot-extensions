@@ -602,6 +602,11 @@ plugins/agent-ssh/
 - **dtssh host/client setup:** `skills/setting-up-ssh-host/SKILL.md` and
   `skills/setting-up-ssh-client/SKILL.md`.
 - **Key handling:** `skills/sharing-ssh-keys/SKILL.md`.
+- **Per-machine driver setup:** `agent-ssh setup [--apply] [--interactive]` and
+  `agent-ssh status` run the `machines.yaml` `ssh.driver` module's setup/status
+  entrypoints; unattended runs never prompt and report `auth_requests` (the input
+  to an operator auth queue) instead. See `docs/transport-provider-contract.md`
+  § *Driver setup and status*.
 - **Failures:** start with `skills/troubleshooting-devtunnel-ssh/SKILL.md`.
 
 ## Writing a transport

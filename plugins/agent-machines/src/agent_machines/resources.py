@@ -1075,6 +1075,13 @@ class FileResourceHandler(ResourceHandler):
                 "skip",
                 skipped_reason=f"could not resolve path '{d['path']}' (unknown repo anchor)",
             )
+        from .resource_health_job import is_enrollment_state
+
+        if is_enrollment_state(target):
+            return ResourceResult(
+                self.TYPE, resolved.id, False, dry_run, "blocked",
+                blocked_reason="local health-job consent is reserved to the health-job lifecycle",
+            )
         strategy = d.get("strategy", "enforce")
         exists = target.exists()
 
@@ -1817,6 +1824,7 @@ def _build_handlers() -> dict[str, ResourceHandler]:
     from .resource_git_config import GitConfigResourceHandler
     from .resource_power import PowerSettingResourceHandler
     from .resource_self_update import SelfUpdateResourceHandler
+    from .resource_health_job import HealthJobResourceHandler
 
     return {
         "package": PackageResourceHandler(),
@@ -1825,6 +1833,7 @@ def _build_handlers() -> dict[str, ResourceHandler]:
         "feature": FeatureResourceHandler(),
         "power-setting": PowerSettingResourceHandler(),
         "self-update": SelfUpdateResourceHandler(),
+        "health-job": HealthJobResourceHandler(),
         "fleet-update": FleetUpdateResourceHandler(),
         "copilot-cli-update": CopilotCliUpdateResourceHandler(),
         "gh-account": GhAccountResourceHandler(),

@@ -1991,7 +1991,7 @@ function Invoke-VersionedMarkComplete {
     if ($PayloadHash -and $PayloadHash -ne $actualHash) {
         throw 'Payload changed during construction; completion refused'
     }
-    Complete-RuntimeConstruction -PayloadHash $actualHash -RetainHelpers:([bool]$NativeWheelSelection)
+    Complete-RuntimeConstruction -PayloadHash $actualHash -RetainHelpers
     return $true
 }
 # === end install-contract:v4 marker/toss helpers ===

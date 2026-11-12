@@ -451,6 +451,7 @@
       "m:transports/stdio.py::StdioTransport.start::create_subprocess_exec": 1,
       "w:__main__.py::_start_project_session_hook::Popen": 1,
       "w:launch_seed_exec.py::_launch::Popen": 1,
+      "w:normalized_backend.py::launch::Popen": 1,
       "w:launch_seed_posix.py::execute::fork": 2,
       "cd:mux_creation.py::run_session::Popen": 1,
       "w:mux_link.py::InProcessRuntime.start::start_server": 1,

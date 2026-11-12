@@ -266,7 +266,10 @@ def test_completion_accepts_ancestor_alias_without_following_slot_alias(tmp_path
 
 @pytest.mark.timeout(60)
 @pytest.mark.parametrize("publisher", ["plugin", "embedded-toolkit"])
-def test_real_constructed_environment_launches_with_its_published_identity(tmp_path, publisher):
+@pytest.mark.parametrize("gui", [False, True])
+def test_real_constructed_environment_launches_with_its_published_identity(tmp_path, publisher, gui):
+    if gui and os.name != "nt":
+        pytest.skip("physical Windows GUI interpreter")
     root = tmp_path / "runtime"
     slot = runtime.slot(root, "2.0")
     environment = slot / ".venv"
@@ -276,6 +279,10 @@ def test_real_constructed_environment_launches_with_its_published_identity(tmp_p
     owner = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(owner)
     owner._runtime_component("versioned_runtime_construction").retain_helpers(slot, complete=False)
+    shutil.copyfile(
+        LIBRARY.parents[1] / "libs/installer-engine/runtime_launcher.py",
+        slot / ".runtime-bootstrap/runtime_launcher.py",
+    )
     if publisher == "embedded-toolkit":
         source = source.parent / "_runtime_admission/libs/versioned-runtime/versioned_runtime.py"
         spec = importlib.util.spec_from_file_location("_embedded_completion_owner", source)
@@ -287,7 +294,9 @@ def test_real_constructed_environment_launches_with_its_published_identity(tmp_p
     )
     sentinel = tmp_path / "executed"
     (site / "completion_fixture.py").write_text(
-        "from pathlib import Path\n"
+        "import sys\nfrom pathlib import Path\n"
+        f"assert Path(sys.prefix).samefile({str(environment)!r})\n"
+        f"assert Path(sys.executable).samefile({str(environment / ('Scripts/python.exe' if os.name == 'nt' else 'bin/python'))!r})\n"
         f"Path({str(sentinel)!r}).write_text('ran')\n",
     )
     if os.name != "nt":
@@ -304,12 +313,15 @@ def test_real_constructed_environment_launches_with_its_published_identity(tmp_p
     python = environment / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     command = [
         str(python), "-I", "-S", "-B", str(slot / ".runtime-bootstrap/runtime_launcher.py"),
+        *(["--gui-runtime"] if gui else []),
         "--runtime-identity", identity, "-m", "completion_fixture",
     ]
+    executable = str(Path(sys.base_prefix) / "pythonw.exe") if gui else str(python)
+    command[0] = executable
 
     def invoke():
         return subprocess.run(
-            command, executable=str(python), capture_output=True, text=True, timeout=15,
+            command, executable=executable, capture_output=True, text=True, timeout=15,
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
 
@@ -317,11 +329,19 @@ def test_real_constructed_environment_launches_with_its_published_identity(tmp_p
     assert completed.returncode == 0, completed.stdout + completed.stderr
     assert sentinel.read_text() == "ran"
     sentinel.unlink()
+    if gui:
+        wrong_host = subprocess.run(
+            [str(python), *command[1:]], executable=str(python),
+            capture_output=True, text=True, timeout=15, creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+        assert wrong_host.returncode != 0
+        assert not sentinel.exists()
     generation = slot / ".runtime-bootstrap/runtime-generation"
     generation.write_text(("b" if not identity.startswith("b" * 32) else "c") * 32)
     refused = invoke()
     assert refused.returncode != 0
-    assert "build identity changed" in refused.stderr
+    if not gui:
+        assert "build identity changed" in refused.stderr
     assert not sentinel.exists()
 
 

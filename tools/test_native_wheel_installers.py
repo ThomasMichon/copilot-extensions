@@ -56,6 +56,10 @@ def test_incomplete_wheel_input_refuses_before_native_effects(tmp_path, plugin, 
 @pytest.mark.skipif(os.name != "nt", reason="Windows native bootstrap readiness")
 @pytest.mark.parametrize("plugin", ["agent-ssh", "budget-guidance"])
 def test_native_bootstrap_validates_evidence_but_keeps_ordinary_presence(tmp_path, monkeypatch, plugin):
+    assert_native_bootstrap(tmp_path, monkeypatch, plugin)
+
+
+def assert_native_bootstrap(tmp_path, monkeypatch, plugin):
     monkeypatch.syspath_prepend(str(ROOT / "libs" / "versioned-runtime"))
     monkeypatch.syspath_prepend(str(ROOT / "libs" / "installer-engine"))
     import install_source
@@ -94,7 +98,7 @@ def test_native_bootstrap_validates_evidence_but_keeps_ordinary_presence(tmp_pat
         HOME=str(home), USERPROFILE=str(home), AGENT_SSH_NO_SELFPROVISION="1",
         COPILOT_EXTENSIONS_TEST_CONTAINED="1",
     )
-    for fault in (None, "completion", "binding", "ordinary"):
+    for fault in (None, "completion", "binding", "ordinary", "different-generation"):
         generation = version if fault == "ordinary" else native_version
         slot = root / "versions" / generation
         python = slot / "Scripts" / "python.exe"
@@ -116,7 +120,7 @@ def test_native_bootstrap_validates_evidence_but_keeps_ordinary_presence(tmp_pat
         }))
         (root / "current-version").write_text(generation)
         (root / "deploy-manifest.json").write_text(json.dumps({
-            "runtime_version": generation,
+            "runtime_version": "0.0.0" if fault == "different-generation" else generation,
             "source": {"version": version, "plugin": plugin, "path": str(payload), "content_hash": "b" * 64},
         }))
         result = subprocess.run(
@@ -125,7 +129,7 @@ def test_native_bootstrap_validates_evidence_but_keeps_ordinary_presence(tmp_pat
             cwd=home, env=environment, capture_output=True, text=True,
             timeout=30, creationflags=subprocess.CREATE_NO_WINDOW,
         )
-        invalid = fault in {"completion", "binding"}
+        invalid = fault in {"completion", "binding", "different-generation"}
         expected = 3 if invalid and plugin == "budget-guidance" else 0
         message = "bootstrap deferred" if plugin == "agent-ssh" else "reconcile admission reached"
         assert result.returncode == expected, result.stdout + result.stderr

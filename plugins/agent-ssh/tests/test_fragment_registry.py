@@ -1268,6 +1268,9 @@ def test_verify_network_failure_does_not_reclassify_active_fragment(
         calls.append(command)
         return SimpleNamespace(returncode=1)
 
+    # Exercise the subprocess probe path on every host; the Windows probe
+    # path is covered by its own owned-process tests.
+    monkeypatch.setattr("agent_ssh.probe.IS_WINDOWS", False)
     monkeypatch.setattr("agent_ssh.probe.subprocess.run", unreachable)
     assert main(["verify", "--config-d", str(config_d), "host-a"]) == 1
     output = capsys.readouterr().out

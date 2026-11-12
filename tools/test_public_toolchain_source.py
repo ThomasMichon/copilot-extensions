@@ -31,6 +31,54 @@ PINS = {"setuptools": "84.0.0", "wheel": "0.46.0", "packaging": "25.0"}
 HASHES = {name: ("a" * 64,) for name in PINS}
 
 
+@pytest.mark.parametrize("deadline", [135.0, 180.0])
+def test_public_toolchain_metadata_shares_the_caller_deadline(monkeypatch, deadline):
+    import seasoned_public_feed as feed
+
+    now, timeouts = [100.0], []
+    monkeypatch.setattr(feed.time, "monotonic", lambda: now[0])
+
+    def run(command, *, timeout, **options):
+        assert command[-3:] == [
+            "--fetch-deadline", str(deadline), "https://example.invalid/" + tuple(PINS)[len(timeouts)],
+        ]
+        timeouts.append(timeout)
+        now[0] += 20
+        return subprocess.CompletedProcess(command, 0, b"metadata fixture", b"")
+
+    def resolve(name, **options):
+        assert options["fetch"]("https://example.invalid/" + name) == b"metadata fixture"
+        return SeasonedPublicRelease(PINS[name], HASHES[name])
+
+    monkeypatch.setattr(feed.subprocess, "run", run)
+    monkeypatch.setattr(public, "resolve_seasoned_public_release", resolve)
+    if deadline == 135:
+        with pytest.raises(btl.ArtifactBuildError, match="deadline"):
+            public.resolve_public_source(tuple(PINS), 7, deadline=deadline)
+        assert timeouts == [35, 15]
+    else:
+        assert public.resolve_public_source(tuple(PINS), 7, deadline=deadline).packages == PINS
+        assert timeouts == [80, 60, 40]
+
+
+def test_toolchain_lock_forwards_public_metadata_deadline(tmp_path, monkeypatch):
+    import time
+
+    deadline = time.monotonic() + 60
+
+    def resolve(packages, age, **options):
+        assert packages == btl._LOCKED_TOOLCHAIN_PACKAGES
+        assert age == 7
+        assert options == {"deadline": deadline}
+        raise public.ArtifactBuildError("metadata boundary reached")
+
+    monkeypatch.setattr(btl, "resolve_public_source", resolve)
+    with pytest.raises(public.ArtifactBuildError, match="metadata boundary reached"):
+        btl.resolve_toolchain_lock(
+            tmp_path / "toolchain", source_policy="seasoned-public", deadline=deadline,
+        )
+
+
 @pytest.mark.parametrize(
     "workflow",
     sorted(path.name for path in (Path(__file__).resolve().parents[1] / ".github" / "workflows").glob("*.yml")),
