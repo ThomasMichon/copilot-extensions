@@ -92,6 +92,14 @@ def _identity(record) -> dict:
 
 
 def _stopped(record, checkout: Path) -> None:
+    if (
+        not getattr(record, "receiving_allocation_present", False)
+        and getattr(record, "owner_ref", None) and getattr(record, "creation_nonce", None)
+    ):
+        from .receiving_allocation import has_retained_receiving_operation
+
+        if has_retained_receiving_operation(record, record.yaml_path.parent):
+            raise ValueError("missing original receiving proof during owner revalidation")
     verdict = sessions.verify_worktree_active(record, strict=True)
     if not verdict.probes_ok or verdict.active:
         raise ValueError("relocation requires confirmed inactive session/process owners")
@@ -155,6 +163,25 @@ def _strict_glob(root: Path, pattern: str):
             raise
         if not stat.S_ISDIR(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
             raise ValueError("operational reference directory is redirected or unsupported")
+        part = parts[depth]
+        if part not in {"", ".", ".."} and Path(part).name == part and not any(char in part for char in "*?["):
+            path = directory / part
+            try:
+                item = path.lstat()
+            except FileNotFoundError:
+                if not os.path.samestat(info, directory.lstat()):
+                    raise ValueError("operational reference directory changed during inspection")
+                continue
+            if not os.path.samestat(info, directory.lstat()):
+                raise ValueError("operational reference directory changed during inspection")
+            if depth == len(parts) - 1:
+                yield path
+            else:
+                if stat.S_ISLNK(item.st_mode) or getattr(item, "st_file_attributes", 0) & 0x400:
+                    raise ValueError("operational reference directory is redirected")
+                if stat.S_ISDIR(item.st_mode):
+                    pending.append((path, depth + 1))
+            continue
         with os.scandir(directory) as entries:
             for entry in entries:
                 seen += 1
@@ -419,7 +446,10 @@ def _receiving_admission(ledger: Path, config):
         proof = inspect_receiving(passive, config)
         return passive, proof, receiving_owner(ledger, proof)
     elif passive.owner_ref and passive.creation_nonce:
-        raise ValueError("read-only proof cannot recover missing receiving allocation metadata; inspect through its owner")
+        from .receiving_allocation import has_retained_receiving_operation
+
+        if has_retained_receiving_operation(passive, ledger.parent):
+            raise ValueError("read-only proof cannot recover missing receiving allocation metadata; inspect through its owner")
     return passive, None, nullcontext()
 
 
