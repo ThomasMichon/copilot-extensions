@@ -4,7 +4,7 @@ from __future__ import annotations
 
 
 def select_read(argv):
-    if argv[:2] == ["pr-watch", "inventory"] and not any(
+    if len(argv) >= 2 and argv[0] == "pr-watch" and argv[1] in ("inventory", "population") and not any(
         arg in ("--project", "-p") or arg.startswith("--project=") for arg in argv
     ):
         return lambda: _run_read(tuple(argv[1:]))
