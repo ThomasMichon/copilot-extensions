@@ -96,11 +96,12 @@ def qualify_supplier_context(
             spec["cwd"] = qualify(spec.get("cwd"))
         if "command" in spec:
             spec["command"] = qualify_command(spec["command"], emitter=True)
-        side_load = spec.get("side_load")
-        if isinstance(side_load, Mapping) and "command" in side_load:
-            spec["side_load"] = {
-                **side_load, "command": qualify_command(side_load["command"], emitter=True),
-            }
+        for key in ("side_load", "relevance"):
+            companion = spec.get(key)
+            if isinstance(companion, Mapping) and "command" in companion:
+                spec[key] = {
+                    **companion, "command": qualify_command(companion["command"], emitter=True),
+                }
         if "worker_identity_cwd" in spec:
             spec["worker_identity_cwd"] = qualify(spec["worker_identity_cwd"])
         loop = spec.get("repository_issue_loop")

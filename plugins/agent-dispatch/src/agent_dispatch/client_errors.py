@@ -46,3 +46,11 @@ class DispatchUpgradeRequired(DispatchError):
 
     def __init__(self, detail: str):
         super().__init__(426, detail)
+
+
+class RelevanceNotSent(DispatchError):
+    """A relevance preflight failed before the client invoked POST."""
+
+
+class RelevanceUpgradeNotSent(DispatchUpgradeRequired, RelevanceNotSent):
+    """Unsupported relevance preflight, preserving the upgrade-required contract."""

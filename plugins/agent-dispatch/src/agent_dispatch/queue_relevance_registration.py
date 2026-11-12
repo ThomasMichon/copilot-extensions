@@ -34,6 +34,7 @@ class EffectiveRelevanceSources:
 class ResolvedRelevanceScope:
     scope: tuple[str, str, str]
     effective_revision: str | None = None
+    emitter_spec_revision: str | None = None
 
 
 RelevanceAdmission = Callable[[sqlite3.Connection, RelevanceRegistration], EffectiveRelevanceSources]
@@ -125,7 +126,11 @@ def resolve_registration(
             raise TaskError("relevance evaluator does not match this emitter's repo/evaluator scope")
     elif reg["kind"] != RegistrationKind.EMITTER or reg["id"] != emitter["id"]:
         raise TaskError("relevance registration does not match this finite task's source")
-    return ResolvedRelevanceScope((task.repo, task.source, task.origin_ref), effective_revision)
+    from .task_relevance_contract import emitter_spec_revision
+
+    return ResolvedRelevanceScope(
+        (task.repo, task.source, task.origin_ref), effective_revision, emitter_spec_revision(spec),
+    )
 
 
 def _local_active(reg: dict, selector: RelevanceRegistration) -> bool:
