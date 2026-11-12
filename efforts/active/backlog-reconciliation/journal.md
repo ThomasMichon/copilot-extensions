@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-12 - Accepted Manager receiving and canonical residuals](journal/2026/11.12-accepted-manager-and-canonical-residuals.md)
+
 - [2026-11-12 - Manager containment and verified receiving](journal/2026/11.12-manager-containment-and-verified-receiving.md)
 
 - [2026-11-12 - Later receiving and finite source boundaries](journal/2026/11.12-later-receiving-and-source-boundaries.md)
