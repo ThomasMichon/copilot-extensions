@@ -1,0 +1,9 @@
+{
+  "comment": "Add passive original-owner recovery admission inspection without source or native effects",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

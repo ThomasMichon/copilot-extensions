@@ -11,7 +11,8 @@ import pytest
 
 from agent_remote_driver.headed.recovery import RecoveryDescriptor, RecoveryRecord, RecoveryStep
 from agent_remote_driver.headed.recovery_codec import encode_recovery_record
-from agent_worktrees import config as cfg, launch_recovery_store as state, tracking, tracking_write
+from agent_worktrees import config as cfg, launch_execution, launch_recovery_store as state
+from agent_worktrees import tracking, tracking_write
 
 
 _CHILD = """
@@ -37,6 +38,32 @@ while not Path(gate).exists():
         raise TimeoutError("fixture barrier did not open")
     time.sleep(0.01)
 print(json.dumps({"committed": store.compare_and_swap(record.descriptor, 0, record)}))
+"""
+
+_INSPECT_CHILD = """
+import json
+from pathlib import Path
+import sys
+from agent_remote_driver.headed.recovery_codec import decode_recovery_record
+from agent_worktrees import launch_execution, launch_recovery_admission as admission, tracking_write
+path, raw, launch_id = sys.argv[1:]
+record = decode_recovery_record(raw.encode("utf-8"))
+binding = admission.RecoveryBinding(
+    record.descriptor, launch_execution.Correlation("a" * 32, "b" * 32), launch_id,
+    admission.SourceSelection("target", "account", "recipient", "route", "controller-1"), object(),
+)
+class Lease:
+    def remaining_seconds(self):
+        return 30
+def refuse(*args, **kwargs):
+    raise AssertionError("passive inspector attempted a write")
+tracking_write.dispatch = refuse
+inspector = admission.RecoveryAdmissionInspector(Path(path), binding, record.operation_id)
+observation = admission.RecoveryObservation(binding, "approved", 1, Lease())
+first = inspector.inspect(record.descriptor, record.operation_id, "retire_intent", 1, observation)
+second = inspector.inspect(record.descriptor, record.operation_id, "retire_intent", 1, observation)
+assert first == second
+print(json.dumps(first))
 """
 
 
@@ -134,3 +161,36 @@ def test_new_caller_uses_live_resident_capability_and_complete_record(journal, m
         assert not store.compare_and_swap(descriptor, 0, candidate)
     finally:
         server.close()
+
+
+def test_fresh_inspector_reopens_real_owner_state_without_writes(journal, monkeypatch):
+    record, descriptor = journal
+    monkeypatch.setattr(state.locks, "read_lock", lambda *_: None)
+    execution = launch_execution.Execution(
+        record.yaml_path, launch_execution.Correlation("a" * 32, "b" * 32),
+    )
+    execution.append("execution-requested")
+    retained = RecoveryRecord(
+        "same-operation", descriptor,
+        (RecoveryStep("retire_intent", "retained-intent", ("external-work",)),),
+    )
+    store = state.WorktreeRecoveryStore(record.yaml_path)
+    assert store.compare_and_swap(descriptor, 0, retained)
+    directory = record.yaml_path.parent
+    before = {item: item.read_bytes() for item in directory.rglob("*") if item.is_file()}
+    completed = subprocess.run(
+        [
+            sys.executable, "-c", _INSPECT_CHILD, str(record.yaml_path),
+            encode_recovery_record(retained).decode("utf-8"), execution.subject["operation_id"],
+        ],
+        stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=20,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert completed.returncode == 0, completed.stderr
+    result = json.loads(completed.stdout)
+    assert result["classification"] == "candidate"
+    assert result["effects_wired"] is False
+    assert result["native_recovery"] == "unqualified"
+    assert result["unknown_effects"] == ["external-work"]
+    assert {item: item.read_bytes() for item in directory.rglob("*") if item.is_file()} == before
+    assert state.WorktreeRecoveryStore(record.yaml_path).load(descriptor) == retained
