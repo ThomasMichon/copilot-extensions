@@ -4457,7 +4457,7 @@ def test_execution_acquisition_original_selection_is_observed_without_replay(
 
 
 @pytest.mark.parametrize("failure", ["sources", "presence", "registry"])
-def test_execution_acquisition_errors_preserve_original_outcome_and_type_only(
+def test_execution_acquisition_errors_preserve_local_config_and_type_only_diagnostics(
     execution_acquisition_sources, failure,
 ):
     from dropin_registry import ScanAuthority
@@ -4465,20 +4465,13 @@ def test_execution_acquisition_errors_preserve_original_outcome_and_type_only(
 
     source = execution_acquisition_sources
     source.state.failure = failure
-    if failure == "registry":
-        report = source.load()
-        assert report.value.machine == "fixture"
-        observations = report.observations
-        expected_type = "FileNotFoundError"
-    else:
-        error = PermissionError if failure == "sources" else ValueError
-        with acquisition.capture_config_observations() as observations:
-            with pytest.raises(error):
-                cfg.load_config(
-                    Path("machine.yaml"), include_knowledge_preferences=False,
-                    include_control_plane_related_pr=False,
-                )
-        expected_type = error.__name__
+    report = source.load()
+    assert report.value.machine == "fixture"
+    assert report.authority is ScanAuthority.INDETERMINATE and report.reusable is False
+    observations = report.observations
+    expected_type = {
+        "sources": "PermissionError", "presence": "ValueError", "registry": "FileNotFoundError",
+    }[failure]
     assert "private execution" not in repr(observations)
     assert any(o.stage == "execution-machine" and o.authority is ScanAuthority.INDETERMINATE
                and any(f.detail == expected_type for f in o.findings) for o in observations)

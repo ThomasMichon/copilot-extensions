@@ -417,6 +417,7 @@ def cmd_doctor(args) -> int:
         "checked": 0, "found": 0, "report_only": True,
         "other_execution_spaces": 0, "items": [],
     }
+    local_registration = {"checked": 0, "local": 0, "unproven": 0, "identity_preserved": True, "items": []}
     gc_result = {"count": 0, "removed_dirs": 0, "removed_rows": 0, "ids": []}
     misaligned = []
     orphaned = []
@@ -478,6 +479,7 @@ def cmd_doctor(args) -> int:
             )
 
         records = tracking.list_records(tracking_dir)
+        local_registration = health.audit_local_registration(records)
         retirement_holds = health.audit_retirement_holds(records)
 
         for record in health.find_stale_head_caches(records):
@@ -574,6 +576,7 @@ def cmd_doctor(args) -> int:
         "stale_active": {"found": len(stale_active), "fixed": stale_active_fixed,
                          "items": [f.as_dict() for f in stale_active]},
         "retirement_holds": retirement_holds,
+        "local_registration": local_registration,
         "empty_sessions": gc_result,
         "misaligned": {"count": len(misaligned), "worktrees": misaligned},
         "orphaned_handoffs": {
@@ -641,6 +644,13 @@ def _render_doctor_report(
             print(f"      - {finding['file']} [{mark}] {finding['error']}")
     else:
         print("  \u2713 Tracking records parse cleanly")
+
+    local = report.get("local_registration", {})
+    if local.get("checked"):
+        print(
+            f"  Local checkout authority: {local['local']} proven, "
+            f"{local['unproven']} unproven; historical identities preserved"
+        )
 
     backfill = report["backfill"]
     if applied:

@@ -2409,7 +2409,15 @@ then exercises a prestarted keeper and the internal launcher's real startup.
 The original conduit and upstream survive a physical backend change,
 authenticated outgoing retirement and supported rollback. Two clients share
 one keeper; actual interpreter prefix, module path, backend PID, mutation and
-initialization counts are asserted. Native Windows and POSIX source runs pass.
+initialization counts are asserted. Launch diagnostics now vary independently
+for every actual keeper, backend and conduit; observed backend traces must
+match admission-bound launch inputs while the original upstream trace stays
+unchanged through update, capable rollback and same-slot process replacement.
+The current trace-varying Windows source run passes; earlier constant-environment
+POSIX qualification does not qualify this expanded packet. The path-gated
+`mcp-owner-exec.yml` source workflow runs its Linux selection separately from
+required unit-only CI. Unsupported-capability rollback and existing legacy
+binding preservation have focused connector controls.
 The fixture uses contained,
 leased instance ownership and exact cleanup, not host credentials, installed
 services, desktop observation or a production-lifetime claim. It is not part
@@ -7120,7 +7128,8 @@ template or changed input still rejects admission.
 An exact node whitelist deselects other cases before execution and restores manifest
 order. Missing or duplicate admitted nodes reject collection before execution.
 Nine execution-acquisition controls in `test_related_acquisition.py` exercise
-the original selection and absence paths, fatal source/presence failures,
+the original selection and absence paths, retained config with failed
+acquisition observations for optional source/presence failures,
 suppressed registry failures, self-restoring callbacks and argument-time
 rebinding, including an opaque absent-registry fallback with a self-restoring
 resolver. Synthetic source, resolver and registry boundaries retain probe

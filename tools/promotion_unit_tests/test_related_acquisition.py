@@ -1869,22 +1869,20 @@ def test_execution_acquisition_original_decision_and_selected_callbacks(api, mon
         return value
 
     api.stub("config", INREPO_CONFIG_DIRNAME=".agent-worktrees",
-             detect_platform=platform, detect_machine=fallback)
+             detect_platform=platform, detect_machine=fallback,
+             yaml=SimpleNamespace(YAMLError=RuntimeError))
     api.load("config_sources")
     api.stub("state_root", config_source_anchors=sources)
     monkeypatch.setattr(Path, "is_file", is_file)
     with api.config.capture_config_observations() as observations:
         api.config.full_load_started()
-        if mode in ("source-failure", "presence-failure"):
-            error = PermissionError if mode == "source-failure" else ValueError
-            with pytest.raises(error):
-                api.config.execution_config(value, "fixture", {"machine": "fixture"}, {})
-        else:
-            result = api.config.execution_config(value, "fixture", {"machine": "fixture"}, {})
-            assert result.machine == (
-                "fixture" if mode.startswith("absent") or mode == "registry-failure" else "selected"
-            )
-            assert result.default_repo is value.default_repo
+        result = api.config.execution_config(value, "fixture", {"machine": "fixture"}, {})
+        assert result.machine == (
+            "fixture" if mode.startswith("absent") or mode in (
+                "source-failure", "presence-failure", "registry-failure",
+            ) else "selected"
+        )
+        assert result.default_repo is value.default_repo
     expected = ["sources"]
     if mode != "source-failure":
         expected.append(("file", roots[0] / ".agent-worktrees" / "machines.yaml"))

@@ -17,6 +17,10 @@ def ensure_record_trusted(record: tracking.WorktreeRecord, config: Config | None
         "finalizing", "complete", "completed", "finalized", "archived",
     }:
         raise permissions.FolderTrustError("Refusing folder trust for a terminal managed worktree")
+    from . import retained_checkout
+
+    if retained_checkout.is_local(record, config):
+        return permissions.ensure_trusted_folder(record.worktree_path)
     actual = cfg.detect_platform()
     if record.platform != actual or config.platform != actual:
         raise ExecutionSpaceError("Folder trust requires the current native execution platform")
