@@ -1,6 +1,10 @@
 # Dot-sourced before runtime resolution by the installed and payload front doors.
 $_awUpdateHandled = $false
 $_awUpdateDiagnostic = $false
+# Consumed here so the queued update's descendants never inherit the marker;
+# a later, unrelated update must still be able to queue itself.
+$_awDurableUpdateShell = $env:AGENT_WORKTREES_INTERNAL_DURABLE_UPDATE -ceq '1'
+Remove-Item Env:AGENT_WORKTREES_INTERNAL_DURABLE_UPDATE -ErrorAction SilentlyContinue
 $_awUpdateStandalone = $null -ne [Environment]::GetEnvironmentVariable(
     'AGENT_WORKTREES_INTERNAL_UPDATE_PAYLOAD'
 )
@@ -104,11 +108,11 @@ namespace CopilotExtensions {
     [CopilotExtensions.UpdateScratchDirectory]::Create($path, $security.GetSecurityDescriptorBinaryForm())
     return $path
 }
-function Wait-AgentQueuedSubmission($ProcessId, [DateTime]$SubmittedAt, [string]$ExitFile) {
+function Wait-AgentQueuedSubmission($ProcessId, [DateTime]$SubmittedAt, [string]$ExitFile, [string]$Identity) {
     # Returns the submission's exit code, or $null when it reported none. The
     # code the submission records before exiting is the only result; the process
     # is watched only to stop waiting once it ends without recording one,
-    # so a reused PID can neither delay the result nor supply its own code.
+    # and a reused PID, which lacks the submission's command line, is never waited on.
     $recordedCode = {
         # Published by an atomic rename, so the name never refers to a partial
         # write; still read share-tolerantly and retry on any transient failure.
@@ -128,6 +132,13 @@ function Wait-AgentQueuedSubmission($ProcessId, [DateTime]$SubmittedAt, [string]
         $process = [Diagnostics.Process]::GetProcessById([int]$ProcessId)
         $null = $process.Handle
         if ($process.StartTime -lt $SubmittedAt) { $process = $null }
+        if ($null -ne $process) {
+            # The open handle pins the PID, so its command line names the process
+            # still being watched; only the submission's carries its unique log path.
+            $commandLine = [string](Get-CimInstance -ClassName Win32_Process `
+                -Filter "ProcessId=$([int]$ProcessId)" -ErrorAction Stop).CommandLine
+            if (-not $Identity -or -not $commandLine.Contains($Identity)) { $process = $null }
+        }
     } catch { $process = $null }
     $deadline = [DateTime]::UtcNow.AddMinutes(5)
     while ($true) {
@@ -207,7 +218,7 @@ function Submit-AgentDurableUpdate([string]$Preflight) {
         "(process $($created.ProcessId)); submission output: $out; submission log: $log"
     # With --json, stdout carries only the submission's own JSON document.
     if (-not $asJson) { Write-Host $notice }
-    $exitCode = Wait-AgentQueuedSubmission $created.ProcessId $submittedAt $exitFile
+    $exitCode = Wait-AgentQueuedSubmission $created.ProcessId $submittedAt $exitFile $out
     # The submission may still be closing its redirected outputs; read them
     # without requiring exclusive access.
     $read = { param($path)
@@ -313,7 +324,7 @@ namespace CopilotExtensions {
         $_preflightMessage = "[agent-worktrees] Update launch preflight failed: $($_.Exception.Message)"
         $_queuedRc = 1
         $_queuedUpdateJson = $null
-        if ($env:AGENT_WORKTREES_INTERNAL_DURABLE_UPDATE -ceq '1') {
+        if ($_awDurableUpdateShell) {
             Write-AgentUpdateEntryError ($_preflightMessage +
                 ' The durable outside-Job update shell is itself contained; no update was started.')
         } elseif ($env:COPILOT_EXTENSIONS_TEST_CONTAINED -ceq '1') {

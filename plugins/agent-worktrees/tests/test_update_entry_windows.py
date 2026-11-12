@@ -191,7 +191,29 @@ def _queued_update_case(update_entry_case, monkeypatch, *, exit_code=0):
     return tmp, home
 
 
-def _run_in_strict_job(command, timeout=180):
+def _reap_queued_submissions(tmp):
+    """Kill fixture-owned WMI submissions that a timed-out test left outside every Job."""
+    import psutil
+
+    marker = str(tmp)
+    ours = {os.getpid(), *(parent.pid for parent in psutil.Process().parents())}
+    targets = []
+    for process in psutil.process_iter(["cmdline"]):
+        try:
+            if process.pid not in ours and marker in " ".join(process.info["cmdline"] or ()):
+                targets.extend([process, *process.children(recursive=True)])
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+    # psutil verifies each process's creation time, so a reused PID is never killed.
+    for process in targets:
+        try:
+            process.kill()
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+    psutil.wait_procs(targets, timeout=15)
+
+
+def _run_in_strict_job(command, tmp, timeout=180):
     from agent_procutil import spawn_sync_in_kill_on_close_job
 
     process, job = spawn_sync_in_kill_on_close_job(
@@ -208,6 +230,7 @@ def _run_in_strict_job(command, timeout=180):
         process.wait(timeout=15)
         process.stdout.close()
         process.stderr.close()
+        _reap_queued_submissions(tmp)
 
 
 def test_queued_update_keeps_typographic_quotes_as_data_and_json_on_stdout(
@@ -217,7 +240,7 @@ def test_queued_update_keeps_typographic_quotes_as_data_and_json_on_stdout(
     entry, _ = _job_preflight_entry(tmp, home, "global", "--detach")
     arguments = ["--project", _HOSTILE_PROJECT, "update", "--detach", "--json"]
     code, stdout, stderr = _run_in_strict_job(
-        [native_powershell, "-NoProfile", "-File", str(entry), *arguments],
+        [native_powershell, "-NoProfile", "-File", str(entry), *arguments], tmp,
     )
     assert code == 0, stdout + stderr
     assert json.loads(stdout) == {"request_id": "queued-req-7", "state": "pending"}
@@ -234,7 +257,7 @@ def test_queued_update_reports_a_failed_submission_even_with_a_request_id(
     tmp, home = _queued_update_case(update_entry_case, monkeypatch, exit_code=1)
     entry, arguments = _job_preflight_entry(tmp, home, "global", "--detach")
     code, stdout, stderr = _run_in_strict_job(
-        [native_powershell, "-NoProfile", "-File", str(entry), *arguments],
+        [native_powershell, "-NoProfile", "-File", str(entry), *arguments], tmp,
     )
     output = " ".join((stdout + stderr).split())
     assert code == 1, output
@@ -285,6 +308,7 @@ def test_update_preflight_queues_detached_update_outside_strict_caller_job(
         process.wait(timeout=15)
         process.stdout.close()
         process.stderr.close()
+        _reap_queued_submissions(tmp)
 
 
 def _check_supported_breakaway_entry(root, native_powershell, front):
@@ -1574,18 +1598,21 @@ $definition = $ast.Find({ param($node)
     $node -is [Management.Automation.Language.FunctionDefinitionAst] -and
     $node.Name -eq 'Wait-AgentQueuedSubmission' }, $true)
 . ([scriptblock]::Create($definition.Extent.Text))
-$result = Wait-AgentQueuedSubmission ([int]$env:SUBMISSION_PID) ([DateTime]::Parse($env:SUBMITTED_AT)) $env:EXIT_FILE
+$result = Wait-AgentQueuedSubmission ([int]$env:SUBMISSION_PID) ([DateTime]::Parse($env:SUBMITTED_AT)) $env:EXIT_FILE $env:IDENTITY
 if ($null -eq $result) { 'none' } else { "code=$result" }
 """
 
 
-@pytest.mark.parametrize("case", ["exited", "reused", "late-reuse", "unreported", "reuse-unreported"])
+@pytest.mark.parametrize(
+    "case", ["exited", "reused", "late-reuse", "unreported", "reuse-unreported", "live-reuse", "pending"],
+)
 def test_queued_submission_that_exits_before_it_is_opened_reports_its_recorded_code(
     tmp_path, native_powershell, case,
 ):
     """A fast-exiting submission is judged by its recorded exit code, never a reused PID."""
     exit_file = tmp_path / "submission.exit"
-    if case not in ("unreported", "reuse-unreported"):
+    identity = str(tmp_path / "submission.out")
+    if case not in ("unreported", "reuse-unreported", "live-reuse", "pending"):
         exit_file.write_text("3", encoding="utf-8")
     submitted_at = time.strftime("%Y-%m-%dT%H:%M:%S")
     unrelated = None
@@ -1595,13 +1622,22 @@ def test_queued_submission_that_exits_before_it_is_opened_reports_its_recorded_c
             capture_output=True, text=True, check=True, **no_window_kwargs(),
         )
         submission_pid = int(finished.stdout.strip())
-    elif case in ("late-reuse", "reuse-unreported"):
+    elif case == "pending":
+        # The genuine submission, identified by its command line, records its code later.
+        record = f"Start-Sleep 2; [IO.File]::WriteAllText('{exit_file}', '3'); exit 0 # {identity}"
+        unrelated = subprocess.Popen(
+            [native_powershell, "-NoProfile", "-Command", record],
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            **no_window_kwargs(),
+        )
+        submission_pid = unrelated.pid
+    elif case in ("late-reuse", "reuse-unreported", "live-reuse"):
         # An unrelated process that took the PID after the submission was queued;
         # its own exit, even a successful one, is never the submission's result.
         time.sleep(1.5)
         unrelated = subprocess.Popen(
             [native_powershell, "-NoProfile", "-Command",
-             "Start-Sleep 120; exit 9" if case == "late-reuse" else "Start-Sleep 3; exit 0"],
+             "Start-Sleep 3; exit 0" if case == "reuse-unreported" else "Start-Sleep 120; exit 9"],
             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             **no_window_kwargs(),
         )
@@ -1615,6 +1651,7 @@ def test_queued_submission_that_exits_before_it_is_opened_reports_its_recorded_c
         SUBMISSION_PID=str(submission_pid),
         SUBMITTED_AT=submitted_at,
         EXIT_FILE=str(exit_file),
+        IDENTITY=identity,
     )
     try:
         started = time.monotonic()
@@ -1628,6 +1665,20 @@ def test_queued_submission_that_exits_before_it_is_opened_reports_its_recorded_c
             unrelated.kill()
             unrelated.wait(timeout=15)
     assert result.returncode == 0, result.stdout + result.stderr
-    expected = "none" if case in ("unreported", "reuse-unreported") else "code=3"
+    expected = "none" if case in ("unreported", "reuse-unreported", "live-reuse") else "code=3"
     assert result.stdout.strip().splitlines()[-1] == expected, result.stdout + result.stderr
     assert elapsed < 30, "a reused PID must never be waited on"
+
+def test_durable_update_marker_is_consumed_and_never_inherited(native_powershell):
+    """Descendants of a queued update never see its marker, so later updates can still queue."""
+    script = (
+        "$env:AGENT_WORKTREES_INTERNAL_DURABLE_UPDATE = '1'\n"
+        f". '{PLUGIN / 'bin' / 'agent-worktrees-update-entry.ps1'}' status\n"
+        "\"shell=$_awDurableUpdateShell inherited=$([bool]$env:AGENT_WORKTREES_INTERNAL_DURABLE_UPDATE)\"\n"
+    )
+    result = subprocess.run(
+        [native_powershell, "-NoProfile", "-NonInteractive", "-Command", script],
+        capture_output=True, text=True, timeout=60, **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.strip().splitlines()[-1] == "shell=True inherited=False"
