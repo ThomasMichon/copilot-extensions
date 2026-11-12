@@ -89,6 +89,8 @@ _AGENT_WORKTREES_ENV_SCRUB = frozenset({
     "PYTHONPATH",
     "VIRTUAL_ENV",
     "__PYVENV_LAUNCHER__",
+    "AGENT_DISPATCH_CONTROL_TOKEN",
+    "AGENT_DISPATCH_TOKEN",
 })
 
 #: Memoized result of :func:`powershell_host`'s ``PATH`` resolution.
@@ -127,7 +129,7 @@ def agent_worktrees_environment() -> dict[str, str]:
     return {
         key: value
         for key, value in os.environ.items()
-        if key not in _AGENT_WORKTREES_ENV_SCRUB
+        if key.upper() not in _AGENT_WORKTREES_ENV_SCRUB
     }
 
 #: Slot-interpreter subpaths, POSIX then Windows (matches

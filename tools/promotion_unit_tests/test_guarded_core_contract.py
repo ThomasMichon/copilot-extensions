@@ -510,17 +510,81 @@ def test_guarded_compile_rechecks_retained_inputs_without_actors(tmp_path, monke
         requirements.write_text("changed\n")
 
 
+@pytest.mark.parametrize("change", [
+    "incompatible-metadata", "incompatible-added", "incompatible-removed",
+    "compatible-metadata", "compatible-added", "compatible-removed",
+    "incompatible-malformed",
+])
+def test_guarded_final_recheck_uses_the_validated_native_candidate_set(monkeypatch, change):
+    entries = [
+        {"filename": f"fixture-1.0-{tag}.whl", "url": f"/{tag}.whl",
+         "hashes": {"sha256": DIGEST}, "upload-time": "2020-01-01T00:00:00Z"}
+        for tag in ("py3-none-any", "cp1-cp1-any")
+    ]
+
+    class Client:
+        def __init__(self, *_args):
+            pass
+
+        def request(self, location, *_args, **_kwargs):
+            headers = SimpleNamespace(get_content_type=lambda: "application/vnd.pypi.simple.v1+json")
+            return SimpleNamespace(headers=headers, close=lambda: None), location, []
+
+        def read(self, *_args):
+            content = json.dumps({
+                "meta": {"api-version": "1.1"}, "name": "fixture", "files": entries,
+            }).encode()
+            return content, hashlib.sha256(content).hexdigest(), len(content)
+
+    monkeypatch.setattr(guard.acquisition, "_Client", Client)
+    monkeypatch.setattr(guard.acquisition, "_tls_context", lambda _record: object())
+    index = _guarded_index(entries)
+    monkeypatch.setattr(guard, "sys_tags", lambda: iter(index.compatible_tags))
+    feed = SimpleNamespace(index_url="https://example.invalid/simple")
+    index._project = lambda name: guard._fetch_project(
+        feed, name, index.limits, index.deadline, None, None,
+    )
+    index.page("fixture")
+    request = {
+        "feed": {"identity": "sha256:" + DIGEST, "index_url": feed.index_url, "headers": []},
+        "limits": asdict(index.limits), "wheel_limits": asdict(index.wheel_limits),
+        "target_tags": [str(tag) for tag in index.compatible_tags],
+        "deadline": index.deadline, "control_bytes": 0, "tls": {},
+        "projects": {"fixture": index.projects["fixture"]["identity"]},
+    }
+    guard._verify_worker(request)
+    position = 1 if change.startswith("incompatible-") else 0
+    if change.endswith("-added"):
+        entries.append({**entries[position], "filename": entries[position]["filename"].replace("1.0", "2.0")})
+    elif change.endswith("-removed"):
+        entries.pop(position)
+    else:
+        entries[position]["hashes"] = {"sha256": "bad" if change.endswith("-malformed") else "b" * 64}
+        entries[position]["upload-time"] = "2021-01-01T00:00:00Z"
+
+    if change in {"incompatible-metadata", "incompatible-added", "incompatible-removed"}:
+        guard._verify_worker(request)
+    else:
+        with pytest.raises(ValueError):
+            guard._verify_worker(request)
+
+
 @pytest.mark.parametrize(
     "old,current", [("b" * 64, "c" * 64), (None, "b" * 64), ("b" * 64, None)],
     ids=["changed", "appeared", "disappeared"],
 )
 def test_guarded_final_index_recheck_refuses_changed_evidence(monkeypatch, old, current):
+    index = _guarded_index([])
+    monkeypatch.setattr(guard, "sys_tags", lambda: iter(index.compatible_tags))
     request = {
         "feed": {"identity": "sha256:" + "a" * 64, "index_url": "https://example.invalid/simple", "headers": []},
         "limits": asdict(_limits()), "deadline": time.monotonic() + 30, "control_bytes": 0,
         "tls": {}, "projects": {"fixture": old},
+        "wheel_limits": asdict(index.wheel_limits),
+        "target_tags": [str(tag) for tag in guard.sys_tags()],
     }
     monkeypatch.setattr(guard.acquisition, "_tls_context", lambda _record: object())
+    monkeypatch.setattr(guard, "_target_project", lambda project, *_args: project)
     monkeypatch.setattr(
         guard, "_fetch_project", lambda *_args, **_kwargs: None if old is None else ([], "", "", old),
     )
@@ -529,4 +593,18 @@ def test_guarded_final_index_recheck_refuses_changed_evidence(monkeypatch, old, 
         guard, "_fetch_project", lambda *_args, **_kwargs: None if current is None else ([], "", "", current),
     )
     with pytest.raises(ValueError):
+        guard._verify_worker(request)
+
+
+def test_guarded_final_recheck_refuses_a_different_native_target(monkeypatch):
+    index = _guarded_index([])
+    monkeypatch.setattr(guard, "sys_tags", lambda: iter(index.compatible_tags))
+    request = {
+        "feed": {"identity": "sha256:" + DIGEST, "index_url": "https://example.invalid/simple", "headers": []},
+        "limits": asdict(index.limits), "wheel_limits": asdict(index.wheel_limits),
+        "target_tags": [], "deadline": index.deadline,
+    }
+    monkeypatch.setattr(guard, "_fetch_project", lambda *_a, **_k: pytest.fail("unexpected feed access"))
+
+    with pytest.raises(ValueError, match="native interpreter"):
         guard._verify_worker(request)

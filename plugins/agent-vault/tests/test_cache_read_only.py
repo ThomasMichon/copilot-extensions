@@ -66,18 +66,18 @@ def test_batch_cache_protection_failure_preserves_order_and_legacy_get(
     if failure != "missing-key":
         key_file.write_bytes(key)
     if failure in ("wrapped-key", "unavailable-wrapping"):
-        module = ModuleType("cryptography.fernet")
+        module = ModuleType("agent_vault.protected_crypto")
         module.Fernet = lambda _key: pytest.fail("invalid wrapping reached encryption")
-        monkeypatch.setitem(sys.modules, "cryptography.fernet", module)
+        monkeypatch.setitem(sys.modules, "agent_vault.protected_crypto", module)
     if failure == "protection-error":
 
         class UnavailableCipher:
             def decrypt(self, _value):
                 raise CacheProtectionError("private-protection-diagnostic")
 
-        module = ModuleType("cryptography.fernet")
+        module = ModuleType("agent_vault.protected_crypto")
         module.Fernet = lambda _key: UnavailableCipher()
-        monkeypatch.setitem(sys.modules, "cryptography.fernet", module)
+        monkeypatch.setitem(sys.modules, "agent_vault.protected_crypto", module)
     monkeypatch.setattr(cache_module, "get_cache", lambda: cache)
     monkeypatch.setattr(
         cli, "ensure_service",
@@ -110,7 +110,6 @@ def test_batch_cache_protection_failure_preserves_order_and_legacy_get(
         assert key_file.read_bytes() == key
     expected_error = {
         "wrapped-key": kek.KekError,
-        "unavailable-wrapping": AttributeError,
     }.get(failure, CacheProtectionError)
     with pytest.raises(expected_error):
         cli.cmd_get(SimpleNamespace(entry="Example/one", field="password"))
@@ -122,7 +121,7 @@ def test_readonly_legacy_key_is_never_rewrapped(monkeypatch, tmp_path):
     monkeypatch.setattr(cache_module, "IS_WINDOWS", False)
     monkeypatch.setenv("AGENT_VAULT_CACHE", "1")
     monkeypatch.setenv("AGENT_VAULT_CACHE_DIR", str(tmp_path))
-    module = ModuleType("cryptography.fernet")
+    module = ModuleType("agent_vault.protected_crypto")
 
     class FixtureFernet:
         def __init__(self, key):
@@ -135,7 +134,7 @@ def test_readonly_legacy_key_is_never_rewrapped(monkeypatch, tmp_path):
             }).encode()
 
     module.Fernet = FixtureFernet
-    monkeypatch.setitem(sys.modules, "cryptography.fernet", module)
+    monkeypatch.setitem(sys.modules, "agent_vault.protected_crypto", module)
     (tmp_path / "credential-cache.enc").write_bytes(b"fixture-ciphertext")
     key_file = tmp_path / "credential-cache.key"
     key_file.write_bytes(b"fixture-wrapping-key")
@@ -158,8 +157,8 @@ def test_readonly_corrupt_legacy_store_never_becomes_missing(monkeypatch, tmp_pa
         def decrypt(self, value):
             raise ValueError("fixture-backend-diagnostic")
 
-    module = ModuleType("cryptography.fernet")
+    module = ModuleType("agent_vault.protected_crypto")
     module.Fernet = lambda _key: BrokenCipher()
-    monkeypatch.setitem(sys.modules, "cryptography.fernet", module)
+    monkeypatch.setitem(sys.modules, "agent_vault.protected_crypto", module)
     with pytest.raises(CacheProtectionError, match="invalid; not replaced"):
         cache.get("Identity/x", readonly=True)

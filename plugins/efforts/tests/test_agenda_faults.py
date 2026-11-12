@@ -19,6 +19,15 @@ from test_agenda_store import (
 )
 
 
+def symlink(link: Path, target: Path, *, directory: bool = False) -> None:
+    try:
+        link.symlink_to(target, target_is_directory=directory)
+    except OSError as exc:
+        if sys.platform == "win32" and getattr(exc, "winerror", None) == 1314:
+            pytest.skip("native symlink creation requires Windows privilege")
+        raise
+
+
 def test_publisher_timeout_is_pending_and_process_is_settled(
     home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -301,7 +310,8 @@ def test_relative_home_retains_symlink_ancestor_and_traversal_refusal(
 ) -> None:
     before = STORE.read(home)
     link = home.parent / f"{home.name}-linked"
-    link.symlink_to(home, target_is_directory=True)
+    if path_kind != "traversal":
+        symlink(link, home, directory=True)
     monkeypatch.chdir(home.parent)
     relative = (Path(link.name) if path_kind == "link" else
                 Path(link.name) / "descendant" if path_kind == "ancestor" else
@@ -378,7 +388,7 @@ def test_no_native_identity_is_inferred_from_environment(
 
 def test_request_file_cannot_be_symlink(home: Path, capsys: pytest.CaptureFixture[str]) -> None:
     link = home / "request-link.json"
-    link.symlink_to(home / "missing-request")
+    symlink(link, home / "missing-request")
     assert CLI.main(["update", "--state-home", str(home), "--request", str(link)]) == 2
     assert "unsafe symlink" in capsys.readouterr().err
 

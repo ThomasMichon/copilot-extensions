@@ -21,7 +21,7 @@ Keep Copilot content delivery independent and establish one consented, bounded
 source-maintenance flow. Source merges do not qualify native lifecycle, release
 or installed adoption.
 
-**Finite-scope amendment: proposed, pending normal review.** The consolidated
+**Finite-scope amendment: reviewed in #11708.** The consolidated
 Plan and global Validation Plan below replace duplicated acceptance inventories,
 not the operator's original request or later refinements. The
 [scope and evidence dispositions](finite-scope.md) retain the prior public
@@ -100,7 +100,7 @@ service-supervision ownership changes.
 
 ## Coordination
 
-The [proposed scope amendment](finite-scope.md) consolidates the parent completion
+The [reviewed scope amendment](finite-scope.md) consolidates the parent completion
 gate. Historical #2822/#4010/#4015/#4058/#5353 intake and the
 [retained keeper/selector record](retained-source-selector.md) remain public
 provenance and requirement sources, not a second recursive checklist. Their
@@ -134,6 +134,15 @@ Independent, non-overlapping app slices may proceed concurrently, including
 contributors from other operators. The [contributor handoff](wheel-first-contributors.md#contributing-from-another-agent-or-operator)
 defines discovery/claim, evidence and publication steps. Existing ownership
 and review gates remain; this is not a second effort or a global merge queue.
+
+**Qualification decision (2026-11-06):** where should the remaining MCP native
+case run when the shared host has a live candidate whose ownership is unknown?
+The default is the same existing case on an admitted isolated Windows lane at
+the final integration PR tree, retaining its resource envelope and the #9716
+refusal. Verify lane support first; otherwise record CI capacity as a blocker.
+Do not add another fixture family or repeat the unchanged local case. The
+single integration PR, review and release follow the approved existing-case
+slice; production cutover remains separately approved.
 
 ## Context
 
@@ -476,17 +485,18 @@ disposable scope while preserving config and durable data.
 
 ## Plan
 
-**Proposed consolidated acceptance.** Review this amendment before executing
-against its reduced gate. Existing checked foundations below retain only their
+**Reviewed consolidated acceptance (#11708).** Existing checked foundations below retain only their
 recorded evidence; the open rows are finite work, not new completion claims.
 The [disposition map](finite-scope.md) identifies replaced gate families and
 preserves the complete pre-amendment record.
 
 ### Incremental source-install integration
 
-- [ ] S1: Complete the next independent deadline and Git-isolation source
+- [x] S1: Complete the next independent deadline and Git-isolation source
   increments, keeping each bug class, affected canonical copies and focused
-  regressions together under the existing owners.
+  regressions together under the existing owners. Deadline acquisition merged
+  in #12195; canonical local composition, Main-version seeding and Git isolation
+  merged in #12219. These source increments do not qualify installed adoption.
 - [ ] S2: Verify combined replacement coverage against preserved #11121 source
   before superseding its implementation; retain its history and ten-review-round
   limit. A small diff or passing review alone is not replacement completeness.
@@ -610,9 +620,10 @@ adoption. Other completed source slices remain credited in the
 
 ### Completion and scope control
 
-- [ ] C1: Obtain normal review of this proposed scope amendment before retiring
+- [x] C1: Obtain normal review of this proposed scope amendment before retiring
   a prior acceptance gate; preserve original request/refinement capture and
   record dispositions without marking retired criteria passed or closing issues.
+  Reviewed in #11708; this is documentary scope-review credit only.
 - [ ] C2: Resolve the direct Plan and global Validation against attributable
   source, release and authorized installed evidence. Keep explicit remaining
   adopter holds visible; neither paper consolidation nor a source merge makes
@@ -626,10 +637,11 @@ bounds; add only missing, directly relevant qualification through already
 authorized owners and lanes. Linked historical checklists are evidence and
 independent objectives, not recursively imported completion gates.
 
-- [ ] V1: Review the finite scope and requirement-to-evidence dispositions against
+- [x] V1: Review the finite scope and requirement-to-evidence dispositions against
   the unchanged Guiding Intent and original/later request record. Preserve every
   necessary installation outcome and separately owned adopter condition without
-  converting documentary retirement into a technical pass.
+  converting documentary retirement into a technical pass. Review merged in
+  #11708; technical rows below remain open.
 - [ ] V2: Record a finite addressed inventory of installed commands/services,
   roles/profiles, global roots, configuration/data and relevant protected
   dependencies. No uninstalled optional role, every runtime root or unrelated
@@ -714,6 +726,70 @@ onto one branch.
 
 ## Journal
 
+- [2026-11-12 - Composition delivered and complete preparation integration](journal/2026/11.12%20complete-preparation.md)
+- [2026-11-11 - Bounded public metadata acquisition delivered](journal/2026/11.11%20bounded-metadata-acquisition.md)
+
+### 2026-11-06 - Integration review deadline and CI corrections
+
+PR #11121's public metadata fetch now interrupts its owned response socket at
+the caller's header/body deadline, including continuously streamed status/header
+lines, body bytes and partial chunk framing. Its HTTP/HTTPS response parser
+starts that bound before header parsing, not only after `urlopen` returns.
+Each bounded watchdog is canceled and joined on exit. Containers' operating
+documentation now distinguishes version-one target/profile declarations from
+the required V2 complete-application packet and selected-application currentness.
+
+The launch census records the two adopted native installer drivers and the
+Manager recovery spawn's current function. The unit manifest binds the exact
+canonical Python assets materialized by the existing Manager-provider test;
+unit effect restrictions are unchanged. The Windows nonzero-CIM-owner fixture
+explicitly selects and witnesses the CIM fallback instead of depending on the
+native token-owner path failing for a synthetic PID.
+
+Contained deadline/selection controls passed 79 cases; packaged-provider and
+Windows CIM controls passed 86 cases, with cleanup verified in both runs.
+After reconciling the branch with current Dev and extending the same deadline
+controls to actual trickled status/header parsing plus an on-time response,
+the combined selection passed all 168 cases with verified cleanup.
+The next CI attempt exposed two admitted files whose local Windows CRLF bytes
+differed from their canonical LF Git blobs. Their source bindings now use the
+committed bytes; exact-byte verification and unit effect restrictions remain
+unchanged. No host Git configuration or unrelated source was rewritten.
+The response now owns one watchdog from construction through close, including
+redirect-handler reads and read-error settlement; HTTP error responses also
+close that owner. Actual 301/302/303/307/308 streaming redirects, ordinary
+streaming/framing, successful redirects and HTTP rejection are covered with
+explicit watchdog cleanup checks. The focused feed/collector packet passes
+101 cases, Manager identity controls pass 11 and payload-local toolkit controls
+pass three, with verified cleanup.
+
+The payload guard exposed an independent coupling from source acquisition
+through read-only payload discovery into Manager's installer adapter. Resource
+discovery now lives in the existing runtime-identity owner, with compatibility
+exports retained. The canonical generator synchronizes the Worktrees admission
+toolkit; all thirteen payload manifests, the four source AST guards and thirteen
+install contracts pass. The coverage verifier now names a bounded set of tests
+missing production call coverage without changing acceptance. Identifying and
+correcting the actual full-packet coverage failure remains required; focused
+assertion success is not accepted full-packet evidence.
+An explicit Linux diagnostic run on that published head identified all four
+missing call contexts: the two portfolio-CLI cases and two elapsed-budget
+refusals call already admitted source-preparation modules that were omitted
+from production measurement. Both modules are now explicit coverage targets;
+no case, byte binding or effect restriction is removed. Those four functional
+controls pass, as do fourteen profile-association controls. Post-reconciliation
+Worktrees inventory/copy controls pass 63 cases with three explicit platform
+skips, with verified cleanup. Full exact-head Linux packet verification remains
+the acceptance gate. Historical journal count phrases now describe their
+recorded adopter selection rather than claim today's complete plugin roster.
+The broader historical workflow test selection still encounters the
+[previously recorded non-enrolled recipe gap](https://github.com/ThomasMichon/copilot-extensions/issues/1303#issuecomment-6627995884)
+and [retired-workflow fixture failures](https://github.com/ThomasMichon/copilot-extensions/issues/6237#issuecomment-6282693571).
+Those results are not a full-portfolio pass or authority to restore retired
+required jobs. Exact-head independent review, required CI, source merge,
+promotion, the outstanding isolated MCP capacity gate and separately authorized
+installed adoption remain open. No host runtime or production state changed.
+
 ### 2026-10-30 - Proposed combined-trigger admission case
 
 Added unchecked direct #5353 Plan/local AND actual global Validation and
@@ -796,6 +872,8 @@ the new guide/matrix's exact local paths/anchors pass. Runtime unit, clean-room
 and live-venue reruns are inapplicable to this documentation-only slice; the
 matrix retains their outstanding application gates instead of implying a pass.
 
+- [2026-11-02 - composed source association](journal/2026/11.02%20composition-association.md). Canonical Main-seeded snapshot/profile association and native copied-application CWD correction; complete reuse and whole-flow acceptance remain open.
+- [2026-11-02 - historical selector publication](journal/2026/11.02%20selector-publication.md). Bounded Manager I/O-only correction; whole-flow and installed acceptance remain open.
 - [2026-11-01 - finite source merge and separately prepared non-UI validation](../lean-runtime-dependencies/journal/2026/11.01%20non-ui-process-safety.md). Phase 4a/4b, native replacement and installed adoption remain open.
 
 ### 2026-10-28 - Fresh-default installation and recognizer manifests

@@ -79,6 +79,54 @@ def test_exhausted_remaining_budget_refuses_before_launch(monkeypatch):
         source()
 
 
+def test_lower_acquisition_limit_counts_failed_attempts_and_refuses_before_spawn(monkeypatch):
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 1 if len(calls) == 1 else 0,
+                                           json.dumps(envelope()), "")
+
+    monkeypatch.setattr(pr_credential_command, "run_caller_owned", run)
+    source = command_source(json.dumps([sys.executable]), max_acquisitions=2)
+    with pytest.raises(ObservationCredentialError, match="command unavailable"):
+        source()
+    assert source().forge.repository == "owner/repository"
+    with pytest.raises(ObservationCredentialError, match="acquisition limit exhausted"):
+        source()
+    assert len(calls) == 2
+
+
+@pytest.mark.parametrize("limit", [0, -1, 65, True, 1.5, "2"])
+def test_invalid_acquisition_limit_refuses_before_command_selection(monkeypatch, limit):
+    monkeypatch.setattr(pr_credential_command.Path, "is_file",
+                        lambda *_: pytest.fail("invalid limit selected command"))
+    with pytest.raises(ValueError, match="acquisition limit"):
+        command_source(json.dumps([sys.executable]), max_acquisitions=limit)
+
+
+def test_lower_limit_without_typed_source_refuses_before_configuration(monkeypatch, capsys):
+    from agent_worktrees import pr_read_context
+    monkeypatch.setattr(pr_read_context, "load_read_config",
+                        lambda *_: pytest.fail("configuration accessed"))
+    assert pr_cli.cmd_pr_watch_dispatch([
+        "snapshot", "owner/repository", "7", "--max-credential-requests", "2", "--json",
+    ]) == 2
+    captured = capsys.readouterr()
+    assert "requires --credential-command" in captured.out + captured.err
+
+
+@pytest.mark.parametrize("limit", ["0", "65"])
+def test_native_parser_invalid_lower_limit_refuses_before_configuration(monkeypatch, limit):
+    from agent_worktrees import pr_read_context
+    monkeypatch.setattr(pr_read_context, "load_read_config",
+                        lambda *_: pytest.fail("configuration accessed"))
+    assert pr_cli.cmd_pr_watch_dispatch([
+        "snapshot", "owner/repository", "7", "--max-credential-requests", limit,
+        "--credential-command", json.dumps([sys.executable]), "--json",
+    ]) == 2
+
+
 def test_explicit_enclosing_owner_preserves_scope_and_shared_deadline(monkeypatch):
     observed = []
     budget = OwnedExecutionBudget.from_timeout(3, cleanup_reserve=.5)
@@ -198,8 +246,10 @@ def test_unconfirmed_cleanup_retains_the_original_process_custody(monkeypatch):
 
 
 @pytest.mark.timeout(60)
-@pytest.mark.parametrize("failure", [None, "disconnect", "scope"])
-def test_real_snapshot_child_renews_command_per_native_request(tmp_path, failure):
+@pytest.mark.parametrize("failure,budget", [
+    (None, None), (None, 2), ("disconnect", None), ("scope", None),
+])
+def test_real_snapshot_child_renews_command_per_native_request(tmp_path, failure, budget):
     helper = tmp_path / "credential.py"
     counter = tmp_path / "acquisitions"
     requested = tmp_path / "requests"
@@ -231,7 +281,8 @@ def test_real_snapshot_child_renews_command_per_native_request(tmp_path, failure
         "from agent_worktrees.providers import github\n"
         f"counter=pathlib.Path({str(counter)!r})\n"
         f"requested=pathlib.Path({str(requested)!r})\n"
-        "def run(argv, *, env):\n"
+        "def run(argv, *, env, **bounds):\n"
+        "    assert bounds.get('max_stdout_bytes',1048576) <= 1048576\n"
         "    expected='synthetic-command-'+counter.read_text()\n"
         "    assert env['GH_TOKEN']==env['GITHUB_TOKEN']==expected\n"
         "    assert not any('synthetic-command-' in part for part in argv)\n"
@@ -251,13 +302,18 @@ def test_real_snapshot_child_renews_command_per_native_request(tmp_path, failure
     )
     # This outer fixture includes cold SDK/venv startup and multiple helpers.
     # It is separate from the per-helper work-deadline controls above.
+    budget_args = ["--max-credential-requests", str(budget)] if budget is not None else []
     result = run_caller_owned(
         [sys.executable, str(native), "snapshot", "owner/repository", "7", "--config", str(config),
-         "--credential-command", json.dumps([sys.executable, str(helper)]), "--json"],
+         "--credential-command", json.dumps([sys.executable, str(helper)]), "--json", *budget_args],
         timeout=45, max_stdout_bytes=65536, max_stderr_bytes=8192,
     )
     assert "synthetic-command-" not in result.stdout + result.stderr
-    if failure:
+    if budget is not None:
+        assert result.returncode != 0
+        assert counter.read_text() == "2"
+        assert requested.read_text().splitlines() == ["request", "request"]
+    elif failure:
         assert result.returncode != 0
         assert counter.read_text() == "2" and requested.read_text().splitlines() == ["request"]
     else:

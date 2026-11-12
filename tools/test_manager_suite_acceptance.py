@@ -27,6 +27,81 @@ adapter_runner = importlib.util.module_from_spec(_ADAPTER_SPEC)
 _ADAPTER_SPEC.loader.exec_module(adapter_runner)
 
 
+@pytest.mark.parametrize("outcome", (
+    "success", "controls", "constructed", "legacy", "finish", "assertions", "exception", "launch",
+))
+def test_runtime_inputs_overlap_construction_and_settle_before_consumers(tmp_path, monkeypatch, outcome):
+    calls = []
+    children = []
+
+    class Controls:
+        returncode = None
+
+        def __init__(self, label):
+            self.label = label
+            self.settled = False
+
+        def wait(self, **kwargs):
+            calls.append(("settle:" if kwargs else "wait:") + self.label)
+            self.returncode = int(outcome == self.label)
+            self.settled = True
+            return self.returncode
+
+        def poll(self):
+            return self.returncode
+
+        def terminate(self):
+            calls.append("terminate:" + self.label)
+            self.returncode = -1
+
+    def launch(command, **kwargs):
+        assert kwargs["stdout"] is sys.stdout and kwargs["stderr"] is sys.stderr
+        if "--prepare-step" in command:
+            label = command[-1]
+            assert command[-3:] == [str(tmp_path), "--prepare-step", label]
+        else:
+            label = "controls"
+            assert "--timeout=30" in command
+            assert "-p" in command and "pytest_portfolio_guard" in command
+            assert command[-2:] == ["-k", " or ".join(adapter_runner.RUNTIME_INPUT_CONTROLS)]
+            assert f"--basetemp={tmp_path / 'input-controls'}" in command
+        calls.append("launch:" + label)
+        if outcome == "launch" and label == "legacy":
+            raise OSError("construction failed")
+        child = Controls(label)
+        children.append(child)
+        return child
+
+    def run(command, **kwargs):
+        assert kwargs["stdout"] is sys.stdout and kwargs["stderr"] is sys.stderr
+        if "--prepare" in command:
+            assert calls[:5] == [
+                "launch:controls", "launch:constructed", "launch:legacy", "wait:constructed", "wait:legacy",
+            ]
+            assert command[-2:] == ["--prepare-step", "finish"]
+            calls.append("finish")
+            if outcome == "exception":
+                raise OSError("construction failed")
+            return SimpleNamespace(returncode=int(outcome == "finish"))
+        assert calls[-2:] == ["finish", "wait:controls"]
+        assert "--timeout=30" in command and "pytest_portfolio_guard" in command
+        assert command[-1] == f"not ({' or '.join(adapter_runner.RUNTIME_INPUT_CONTROLS)})"
+        assert f"--basetemp={tmp_path / 'assertions'}" in command
+        calls.append("assertions")
+        return SimpleNamespace(returncode=int(outcome == "assertions"))
+
+    monkeypatch.setattr(adapter_runner.subprocess, "Popen", launch)
+    monkeypatch.setattr(adapter_runner.subprocess, "run", run)
+    if outcome in {"exception", "launch"}:
+        with pytest.raises(OSError, match="construction failed"):
+            adapter_runner._runtime_group(Path(sys.executable), tmp_path)
+    else:
+        assert adapter_runner._runtime_group(Path(sys.executable), tmp_path) == int(outcome != "success")
+    assert all(child.settled for child in children)
+    assert ("assertions" in calls) is (outcome in {"success", "assertions"})
+    assert ("finish" in calls) is (outcome not in {"constructed", "legacy", "launch"})
+
+
 def _adapter_report(path, fault=None):
     root = ET.Element("testsuite")
     for node in adapter_runner._application_adapter_nodes():

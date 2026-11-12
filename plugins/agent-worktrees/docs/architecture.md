@@ -651,6 +651,74 @@ boundary, not universal filesystem interception: custom launch commands and
 legacy setup scripts remain responsible for entering through
 `agent-worktrees config-root` before writing concrete setup configuration.
 
+### Actor-free recovery journal
+
+`launch_recovery_store.WorktreeRecoveryStore` adapts the standalone Driver
+core's complete recovery-record contract to the existing tracking writer.
+It is a bookkeeping provider, not an installed recovery controller or native
+admission path. No production launch caller invokes it yet.
+
+Construction takes a canonical, registered worktree-record path, not a path
+derived from a recovery descriptor. The descriptor's `owner_ref` must be that
+record's qualified execution-machine/project/worktree claim reference;
+`worktree_ref` is its worktree ID. The journal additionally binds the immutable
+worktree creation nonce. All eleven descriptor fields are exact keys. Source,
+lease and native-incarnation references are historical assertions, not proof
+of current authority or whole-scope settlement.
+
+The version-1 `launch_recovery_compare_and_swap` tracking-write verb uses the
+same registered implementation in the resident and pre-send direct fallback.
+Its receiver rechecks the canonical record and receiving execution-space
+authority under the strict record lock. An older resident does not advertise
+this verb; the existing pre-send fallback uses the current implementation.
+After possible admission, a failed acknowledgement stays ambiguous: reread
+the same original operation, never select another writer or replay an effect.
+
+One `launch-recovery.json` in the worktree's external launch-state directory
+retains complete versioned core records. Revision zero reserves absence;
+each CAS appends exactly one phase, preserves the prior step prefix and holds,
+and forbids operation-ID reuse across descriptors in that worktree store.
+The commit flushes the temporary file, publishes through the existing
+write-through/namespace durability helper, then acknowledges. Unknown effects
+remain in the complete history after restored observation. Read-only status
+does not create directories or lock files, renew authority or clear holds.
+Unsupported/corrupt state and the 64-record/2-MiB store limit refuse without
+repair, eviction or truncation. No reset or deletion API is supplied.
+
+Actor-free and contained fresh-process CAS controls cover this persistence
+contract. They do not qualify native retirement, restoration, automatic
+recovery, source-lease enforcement or live rollout. Those remain separate
+original-owner/provider integration gates.
+
+`launch_recovery_admission.RecoveryAdmissionInspector` adds passive inspection
+over that store and the actual original launch-execution journal. Its caller
+supplies an independently retained `RecoveryBinding`: exact descriptor, launch
+correlation/operation, approved source-selection references, original
+`OwnerIntent` snapshot and opaque native owner handle. The snapshot is captured
+at the original launch, not recaptured when an inspector is constructed or
+reopened. Construction and inspection compare it with canonical owner state;
+closed owners, including `orphaned`, and opaque/unsupported provider bindings
+are refused. Provider snapshots are immutable serialized values, not mutable
+dataclass references. Inspection matches all request/current binding fields,
+requires the exact durable intent/revision, and rereads owner/journal/store
+state after checking the supplied lease's conservative remaining lifetime.
+Restoration candidates additionally need the recorded newer authority revision
+and an owner-supplied settlement observation. Opaque lease IDs are not authority
+revisions. Changed, missing, revoked or ambiguous inputs remain held, unknown
+or marked for same-operation reconciliation; prior holds and unknown work
+are not cleared.
+
+The inspector invokes only the retained lease's local `remaining_seconds()`
+reader. It never acquires a grant, installs credentials, writes intent,
+dispatches a native operation or reconstructs a lost custody handle.
+`candidate` means supplied owned inputs match, not that a real source/controller
+was verified or a provider scope independently settled. Every result keeps
+`effects_wired: false`, `native_recovery: unqualified` and `replay: never`.
+Neither a result nor a reconstructed inspector is an admission certificate.
+No ordinary caller, observer, CLI or RPC is wired to it. Actual current-source
+verification, final-boundary serialization, durable provider reacquisition and
+native recovery qualification remain unimplemented.
+
 ### Launch-owned pane assets and current boundary handlers
 
 Windows Picker and `sessions.mux_new_session` creators coordinate through
@@ -790,6 +858,33 @@ backend PID and finishes the seed. Receipt uncertainty keeps the handoff and
 actual wait; it does not restore or replay. Custom/intermediary commands,
 ACP and unselected sessions retain their existing Python execution paths.
 Full caller convergence is still in progress.
+
+Recordless normalized setup (including anchor launches) invokes the same
+retained headed core at its final backend handoff, after environment priming
+and setup hooks. The setup script calls its selected Worktrees runtime's
+internal `normalized_backend` entrypoint only for a direct `copilot` executable;
+custom providers and `gh copilot` retain their existing shell invocation.
+The entrypoint uses the same native argument selection as recorded launches,
+preserving explicit resume, preferences and literal input. Unselected ACP,
+AHP, help and ambiguous/remote modes keep their original native invocation.
+An eligible fresh launch selects one identity; repository hosting policy is
+checked before core preparation and again through live-owner startup admission.
+Native directory overrides must match the caller's selected execution directory;
+an allowed caller cannot admit a different target through `-C`.
+The core receives directory-bound argv even on resume without an explicit `-C`,
+so historical session metadata cannot restore a different workspace.
+The installation's `launch-attempts/<operation>/` retains the copied runtime
+and native receipt without inventing a worktree record or using the anchor
+claim ledger as launch authority. This path adds no recovery or auth admission.
+The existing private-directory primitives create caller-owned attempt parents,
+attempts and runtime directories before bundle construction, independent of umask;
+unsafe existing paths refuse instead of being chmod-repaired or reused.
+A missing/incompatible selected runtime or uncertain native receipt never
+replays the original command through a raw-backend fallback. Legacy direct
+script use with no Worktrees runtime selection retains its existing behavior;
+an explicitly selected installation with no usable resolver/runtime refuses.
+Resolver calls temporarily bind the explicit launch installation and restore
+the prior ambient runtime root before setup/backend execution.
 
 The selected POSIX provider separately advertises `posix-headed-env-v1` in
 `backend_execution_modes`. A copied seeded setup discovers it before

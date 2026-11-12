@@ -237,7 +237,7 @@ def test_owner_refs_and_native_session_claims_use_execution_key(tmp_path: Path) 
     )
     assert claims_owner._owner_dict("project", record, claim)["qualified_ref"] == expected
     assert tracking_producer_write._response(record, claim)["owner"] == expected
-    assert tracking_relationship_write._response(record, claim)["owner"] == expected
+    assert tracking_relationship_write._response(record, claim, {})["owner"] == expected
     claim.producer = None
     record.resources = [claim]
     assert native_restart_claims.original_session_only(record, "session")
@@ -358,6 +358,7 @@ def test_forced_tuple_cleanup_requires_receiving_registry_before_legacy_fallback
     before = path.read_bytes()
     monkeypatch.setattr(cleanup_gc_cli, "_hosted_session_blocks_cleanup", lambda _record: False)
     monkeypatch.setattr(cleanup_gc_cli.sessions, "scan_sessions_fast", lambda _records: None)
+    monkeypatch.setattr(cleanup_gc_cli.sessions, "_list_mux_sessions", lambda: set())
     monkeypatch.setattr(cleanup_gc_cli, "_build_active_paths", lambda *_a: set())
     reaped = []
     result = cleanup_gc_cli._revalidate_cleanup_safety(

@@ -65,6 +65,12 @@ def _unwrap(plan: dict) -> dict:
     return json.loads(out.stdout)
 
 
+def _shell_interpreter_refresh() -> str:
+    source = _LAUNCH_SCRIPT.read_text(encoding="utf-8")
+    start = source.index('    if [[ "${CMD_ARRAY[1]:-}" == "-m" &&')
+    return source[start:source.index("    # Patch a stale", start)]
+
+
 def test_nested_plan_unwraps_to_launch():
     nested = {
         "worktree": {"id": "wt-1"},
@@ -156,13 +162,13 @@ def test_shell_pane_environment_preserves_literal_values_and_ahp_exclusions(
         "COPILOT_CLI_ENABLED_FEATURE_FLAGS=selected-features",
         "SETUP_LOG='log with spaces'; LAUNCH_ID=fixture-launch",
         flags,
-        "tmux() {",
+        "capture_pane_args() {",
         '  "$PYTHON" -c \'import json,os,sys; print(json.dumps({'
         '"argv":sys.argv[1:],"exported":{k:os.environ[k] for k in '
         'json.loads(sys.argv[1])}}))\' "$JSON_KEYS" "$@"',
         "}",
         f"JSON_KEYS={shlex.quote(json.dumps(list(selected)))}",
-        'tmux "${TMUX_ENV_FLAGS[@]}"',
+        'capture_pane_args "${TMUX_ENV_FLAGS[@]}"',
     ])
     environment = dict(os.environ)
     environment.pop("BASH_ENV", None)
@@ -312,9 +318,7 @@ def test_seed_interpreter_refresh_preserves_native_hosts(tmp_path, command):
             creationflags=subprocess.CREATE_NO_WINDOW,
         )
     else:
-        source = _LAUNCH_SCRIPT.read_text(encoding="utf-8")
-        start = source.index('    if [[ "$_PENDING_NEW_SEED" == "1" &&')
-        refresh = source[start:source.index("    aw_assert_cold_resume", start)]
+        refresh = _shell_interpreter_refresh()
         code = "\n".join([
             "set -euo pipefail",
             "CMD_ARRAY=(" + shlex.join(command) + ")",
@@ -349,9 +353,7 @@ def test_shell_refreshes_only_the_inner_python_owner(
         "--", executable, "-m", "agent_worktrees.launch_seed_exec",
         "--record", "/private/fixture.yaml", "--admission-only", "--", "copilot",
     ]
-    source = _LAUNCH_SCRIPT.read_text(encoding="utf-8")
-    start = source.index('    if [[ "$_PENDING_NEW_SEED" == "1" &&')
-    refresh = source[start:source.index("    aw_assert_cold_resume", start)]
+    refresh = _shell_interpreter_refresh()
     code = "\n".join([
         "set -euo pipefail",
         "CMD_ARRAY=(" + shlex.join(command) + ")",

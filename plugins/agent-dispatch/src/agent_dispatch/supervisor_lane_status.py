@@ -16,7 +16,7 @@ import sys
 import time
 
 from . import __version__
-from .supervisor_status_io import read_status, runtime_status_path
+from .supervisor_status_io import completed_cycle_ready, read_status, runtime_status_path
 
 PROFILE_ENV = "AGENT_DISPATCH_SUPERVISOR_PROFILE"
 GENERATION_ENV = "AGENT_DISPATCH_SUPERVISOR_PROFILE_GENERATION"
@@ -111,6 +111,7 @@ class LaneStatus:
         self.profile_generation = generation or hashlib.sha256(profile.read_bytes()).hexdigest()
         self.cycle = 0
         self.started = None
+        self.completed_cycle = None
         self.registered = False
         self.artifact_identity = None
 
@@ -158,6 +159,13 @@ class LaneStatus:
                 "registry_root": str(receipt.registry_root), "birth": birth_identity(os.getpid()),
             },
         }
+        if completed is not None:
+            self.completed_cycle = {
+                "cycle_id": self.cycle, "started_at": self.started, "completed_at": completed,
+                "generation": record["generation"], "runtime_version": __version__,
+            }
+        if self.completed_cycle is not None:
+            record["completed_cycle"] = self.completed_cycle
         self.path.parent.mkdir(parents=True, exist_ok=True)
         # Keep the artifact's native file identity stable while publishing.
         # A partial concurrent read is unavailable, never readiness.
@@ -323,28 +331,24 @@ def observation(root: Path, profile: Path, arguments: list[str]) -> dict | None:
         or details.get("profile_generation") != hashlib.sha256(profile.read_bytes()).hexdigest()
     ):
         return {"status": "incumbent", "pid": pid, "native_observed": True}
-    started, completed = payload.get("cycle_started_at"), payload.get("updated_at")
-    ready = (
-        type(payload.get("cycle_id")) is int and payload["cycle_id"] > 0
-        and type(started) in (int, float) and type(completed) in (int, float)
-        and math.isfinite(started) and math.isfinite(completed)
-        and started <= completed <= time.time()
-    )
+    ready = completed_cycle_ready(payload)
     return {"status": "ready" if ready else "starting", "pid": pid, "native_observed": True}
 
 
 def master_observation(root: Path, arguments: list[str]) -> dict | None:
     from agent_procutil.daemon_instances import inspect_instances
     from agent_procutil._daemon_instance_identity import identity_state
-    from . import __main__ as cli
+    from .supervise_registration_cli import build_profile_parser
     from .companion import process_start_token
     from .config import run_dir
     from .single_instance import is_locked, lock_path_for, read_holder_pid
     from .supervisor_registration import registration_scope, supervisor_lease_scope
 
-    args = cli.build_parser().parse_args(arguments)
+    args = build_profile_parser().parse_args(arguments)
     scope = supervisor_lease_scope(*registration_scope(args))
     lock = lock_path_for(run_dir(), scope)
+    if not lock.exists():
+        return None
     if not is_locked(lock):
         return None
     payload, error = read_status(runtime_status_path(scope))
@@ -382,13 +386,7 @@ def master_observation(root: Path, arguments: list[str]) -> dict | None:
             and details.get("settings_identity") != settings_identity(arguments))
     ):
         return {"status": "incumbent", "pid": pid}
-    started, completed = payload.get("cycle_started_at"), payload.get("updated_at")
-    ready = (
-        type(payload.get("cycle_id")) is int and payload["cycle_id"] > 0
-        and type(started) in (int, float) and type(completed) in (int, float)
-        and math.isfinite(started) and math.isfinite(completed)
-        and started <= completed <= time.time()
-    )
+    ready = completed_cycle_ready(payload)
     return {"status": "ready" if ready else "starting", "pid": pid}
 
 
@@ -424,10 +422,10 @@ def ensure(root: Path, profile: Path, arguments: list[str], *, timeout=60.0, gen
     from .procutil import resolve_own_runtime_python, spawn_dispatch_daemon
     from .single_instance import SingleInstance, lock_path_for
     from .config import run_dir
-    from . import __main__ as cli
+    from .supervise_registration_cli import build_profile_parser
 
     require_selected_runtime(root)
-    parsed = cli.build_parser().parse_args(arguments)
+    parsed = build_profile_parser().parse_args(arguments)
     if (
         parsed.command != "supervise" or getattr(parsed, "once", False)
         or getattr(parsed, "no_single_instance", False)

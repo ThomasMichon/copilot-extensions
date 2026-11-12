@@ -406,8 +406,9 @@ def test_manifest_binding_preserves_selected_installation_mode(publication_case,
 
 
 @pytest.mark.parametrize("authority", ["source", "retained", "unattributed"])
+@pytest.mark.parametrize("application", [False, True])
 def test_legacy_release_owns_command_publication_before_cutover(
-    publication_case, monkeypatch, authority,
+    publication_case, monkeypatch, authority, application,
 ):
     from agent_worktrees import status_monitor_cutover as cutover
 
@@ -437,7 +438,7 @@ def test_legacy_release_owns_command_publication_before_cutover(
         shutil.copytree(content / "scripts", bootstrap)
         monkeypatch.setattr(sys.modules[driver.Governance.__module__], "SCRIPTS", bootstrap)
         owner = bootstrap
-    monkeypatch.setattr(sys, "prefix", str(slot))
+    monkeypatch.setattr(sys, "prefix", str(slot / ".venv" if application else slot))
     expected = driver.Governance(root, owner).signature()
     modes = load(content / "scripts/runtime_install_modes.py", "release_custody_modes")
     monkeypatch.setattr(modes, "lifecycle", driver)

@@ -517,6 +517,14 @@ materializes a standalone snapshot with both installer-engine files and all
 declared local libraries; local-checkout stamps use content-addressed snapshot
 identities over the materialized tree. Unchanged stamps reuse one snapshot,
 while source, engine or library edits publish a new immutable identity.
+Ordinary runtime admission also fingerprints the complete package and transitive
+declared local-source graph through the canonical construction helper, including
+executable-source edits without version changes. It uses the existing bootstrap
+TOML parser rather than requiring an additional installed dependency. Missing or
+invalid inputs refuse before construction. Exact healthy completed inputs reuse
+without rewriting completion; conflicting or unverified completed content,
+including historical metadata-only hashes, refuses even under force. Select a
+distinct qualified generation rather than retrofitting a completed slot.
 Windows runtime builds use the snapshot's own dependency-policy helper for
 both the library pre-installs and the selected package extras. This attributes
 the copied sources without widening the caller's trusted roots or relaxing

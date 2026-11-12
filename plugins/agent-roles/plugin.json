@@ -1,6 +1,6 @@
 {
   "name": "agent-roles",
-  "description": "Sustained role charters over existing owners: fleet monitoring, pull-request review, scoped issue triage and portable topology dispatch with a versioned assignment contract and offline reports. No task queue, daemon, scheduler, launcher or grant of authority, and no required companion plugin.",
+  "description": "Sustained role charters over existing owners: fleet monitoring and maintenance, pull-request review, scoped issue triage and portable topology dispatch with a versioned assignment contract and offline reports. No task queue, daemon, scheduler, launcher or grant of authority, and no required companion plugin.",
   "version": "0.1.0-dev1",
   "runtimeScope": "none",
   "author": {
@@ -13,6 +13,7 @@
     "agent-roles",
     "charter",
     "fleet-monitor",
+    "fleet-maintenance",
     "task-master",
     "progress",
     "steering",

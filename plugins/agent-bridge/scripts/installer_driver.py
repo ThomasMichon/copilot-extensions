@@ -15,6 +15,11 @@ SCRIPTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPTS))
 NATIVE_ENV = "COPILOT_EXTENSIONS_NATIVE_INSTALLER"
 SOURCE_SELECTION_ENV = "COPILOT_EXTENSIONS_NATIVE_INSTALL_SOURCE_SELECTION"
+WHEEL_SELECTION_ENV = "COPILOT_EXTENSIONS_NATIVE_WHEEL_SELECTION"
+WHEEL_FIELDS = (
+    ("wheel_profile", "-WheelProfile"), ("wheel_directory", "-WheelDirectory"),
+    ("wheel_python", "-WheelPython"), ("wheel_uv", "-WheelUv"),
+)
 RECIPES = {
     "agent-bridge": frozenset({"Repair", "RequireGracefulCutover", "NonInteractive", "ZeroDowntime", "Purge", "DryRun"}),
     "agent-codespaces": frozenset({"Force", "DryRun", "Repair"}),
@@ -72,6 +77,7 @@ CONTEXT_KEYS = (
     "CE_UPDATE_AUTH",
     "COPILOT_EXTENSIONS_RUNTIME_SOURCE_TARGET",
     SOURCE_SELECTION_ENV,
+    WHEEL_SELECTION_ENV,
 )
 TRANSIENT_KEYS = (
     NATIVE_ENV, "COPILOT_EXTENSIONS_COMMAND_LIFECYCLE", "COPILOT_PLUGIN_INSTALL_STAGED",
@@ -220,6 +226,30 @@ def native_arguments(args) -> list[str]:
         *("-" + option for option in sorted(options)),
     ]
     install_source = getattr(args, "install_source", None)
+    wheel_values = [getattr(args, name, None) for name, _flag in WHEEL_FIELDS]
+    if any(value is not None for value in wheel_values):
+        if (
+            install_source is not None or not all(wheel_values)
+            or args.action not in {"install", "update", "init", "provision"}
+            or any(not Path(value).is_absolute() for value in wheel_values)
+            or Path(args.wheel_python).resolve(strict=True) != Path(sys.executable).resolve(strict=True)
+        ):
+            raise ValueError("Closed wheels require one complete native input and its selected interpreter")
+        from install_source import wheel_inputs, wheel_selection
+
+        with wheel_inputs(args.wheel_profile, args.wheel_directory) as inputs:
+            selection = json.dumps(
+                wheel_selection(args.payload, args.plugin, inputs),
+                sort_keys=True, separators=(",", ":"),
+            )
+        previous = getattr(args, "wheel_selection", None) or os.environ.get(WHEEL_SELECTION_ENV)
+        if previous is not None and previous != selection:
+            raise ValueError("Native wheel selection changed after driver admission")
+        args.wheel_selection = selection
+        for name, flag in WHEEL_FIELDS:
+            arguments.extend([flag, str(getattr(args, name))])
+    elif os.environ.get(WHEEL_SELECTION_ENV):
+        raise ValueError("Native wheel selection requires its explicit installation input")
     if "Repair" in options and install_source is None:
         raise ValueError("Native repair requires its explicit installation source")
     if "Serve" in options and install_source is None:
@@ -285,6 +315,7 @@ def cell_arguments(args) -> list[str]:
             "snapshot-prepare", "snapshot-stamp", "slot-provision", "slot-complete",
         }
         or args.options or getattr(args, "retained_runtime", None)
+        or any(getattr(args, name, None) is not None for name, _flag in WHEEL_FIELDS)
         or getattr(args, "install_source", None) is not None
         or getattr(args, "retained_runtime_sha256", None)
         or Path(args.cell_context).absolute() != args.root / "install.json"
@@ -319,13 +350,14 @@ def _settle(wait):
             continue
 
 
-def admit_broker_removal(args) -> None:
+def admit_broker_removal(args, *, controller_custody=None) -> None:
     from installer_engine_uninstall import cleanup
 
     profile = args.payload / "scripts" / "uninstall-profile.json"
     cleanup(
         args.payload, args.plugin, args.root, str(args.shell),
         profile=profile if profile.is_file() else None, check_consumers=True,
+        **({"controller_custody": controller_custody} if args.plugin == "agent-vault" else {}),
     )
 
 
@@ -366,7 +398,7 @@ def execute(args) -> int:
                 raise ValueError("Broker removal requires the owning uninstall action")
             from update_driver.windows_broker import remove
 
-            admit_broker_removal(args)
+            admit_broker_removal(args, controller_custody=owner)
             owner.assert_owned()
             remove(args.root)
             return 0
@@ -376,6 +408,8 @@ def execute(args) -> int:
         environment[NATIVE_ENV] = args.plugin
         if getattr(args, "source_selection", None) is not None:
             environment[SOURCE_SELECTION_ENV] = args.source_selection
+        if getattr(args, "wheel_selection", None) is not None:
+            environment[WHEEL_SELECTION_ENV] = args.wheel_selection
         if getattr(args, "cell_context", None) is not None:
             command = [sys.executable, "-I", "-B", str(args.payload / "scripts" / "cell_install.py"), *arguments]
         else:
@@ -423,6 +457,10 @@ def foreground(args, driver) -> int:
     ]
     if getattr(args, "install_source", None) is not None:
         command.extend(["--install-source", str(args.install_source)])
+    for name, _flag in WHEEL_FIELDS:
+        value = getattr(args, name, None)
+        if value is not None:
+            command.extend(["--" + name.replace("_", "-"), str(value)])
     for option in args.options:
         command.extend(["--option", option])
     for name, flag in CELL_FIELDS:
@@ -438,6 +476,8 @@ def foreground(args, driver) -> int:
     context.update(selectors)
     if getattr(args, "source_selection", None) is not None:
         context[SOURCE_SELECTION_ENV] = args.source_selection
+    if getattr(args, "wheel_selection", None) is not None:
+        context[WHEEL_SELECTION_ENV] = args.wheel_selection
     request = driver.enqueue(
         driver.RequestSpec(
             "plugin-native-install", request_arguments(args), project=str(args.root.resolve()),
@@ -471,6 +511,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--retained-runtime", type=Path)
     parser.add_argument("--retained-runtime-sha256")
     parser.add_argument("--install-source", type=Path)
+    for name, _flag in WHEEL_FIELDS:
+        parser.add_argument("--" + name.replace("_", "-"), type=Path)
     for name, _flag in CELL_FIELDS:
         parser.add_argument(
             "--" + name.replace("_", "-"),

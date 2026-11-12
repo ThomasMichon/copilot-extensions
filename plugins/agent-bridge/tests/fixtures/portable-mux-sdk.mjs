@@ -2,17 +2,23 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { createConnection } from "node:net";
 import { createInterface } from "node:readline";
 import { pathToFileURL } from "node:url";
 import vm from "node:vm";
 
 const config = JSON.parse(process.argv[2]);
+const transport = createConnection({ host: "127.0.0.1", port: config.carrierPort });
+await new Promise((resolve, reject) => {
+  transport.once("connect", resolve);
+  transport.once("error", reject);
+});
 const sid = process.env.AGENT_BRIDGE_NATIVE_SESSION_ID;
 const driverRoot = process.env.AGENT_BRIDGE_REMOTE_DRIVER_ROOT;
 const bridgeRoot = process.env.AGENT_BRIDGE_RECEIVING_PLUGIN_ROOT;
-const lines = createInterface({ input: process.stdin });
+const lines = createInterface({ input: transport });
 const replies = new Map(), handlers = [], events = [], timers = [];
-const emit = (value) => process.stdout.write(JSON.stringify(value) + "\n");
+const emit = (value) => transport.write(JSON.stringify(value) + "\n");
 let sequence = 0, driver, closing = false;
 lines.on("line", async (line) => {
   const value = JSON.parse(line);
@@ -27,7 +33,9 @@ lines.on("line", async (line) => {
     driver.cleanupDescriptor();
     driver.driverServer.server.closeAllConnections();
     await driver.driverServer.close();
-    emit({ stopped: true });
+    const closed = new Promise((resolve) => transport.once("close", resolve));
+    transport.end(JSON.stringify({ stopped: true }) + "\n");
+    await closed;
     process.exit(0);
   }
   const resolve = replies.get(value.id);
@@ -114,9 +122,15 @@ async function load(path, tail = "") {
   return new vm.Script(`(async () => {\n${linked}\n${tail}\n})()`, { filename: path })
     .runInContext(context);
 }
+const headed = JSON.parse(process.env.COPILOT_DRIVER_HEADED_CLIENT);
+assert.equal(headed.sessionId, sid);
+emit({ stage: "loading common headed extension" });
+await load(join(dirname(headed.client), "extension.mjs"));
+emit({ stage: "loading driver extension" });
 driver = await load(
   join(driverRoot, "extensions", "agent-remote-driver", "extension.mjs"),
   "return { driverServer, cleanupDescriptor };",
 );
+emit({ stage: "loading bridge extension" });
 await load(join(bridgeRoot, "extensions", "agent-bridge", "extension.mjs"));
 emit({ ready: true, sessionId: sid, pid: process.pid });

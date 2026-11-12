@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import errno
-from contextlib import nullcontext
+from contextlib import ExitStack, nullcontext
 import os
 from pathlib import Path
 import select
@@ -159,7 +159,7 @@ def execute(
         isinstance(argument, str) and "\0" not in argument for argument in command
     ):
         raise ValueError("POSIX exec requires a literal backend command")
-    environment = _backend_environment(backend_environment_fd) if backend_environment_fd is not None else os.environ
+    environment = _backend_environment(backend_environment_fd) if backend_environment_fd is not None else os.environ.copy()
     _execution, saved = native._load(record, correlation, operation_id)
     if any(event["phase"] == "process-spawned" for event in saved["events"]):
         raise ValueError("Backend spawn was already observed; do not replay it")
@@ -244,6 +244,9 @@ def execute(
                 record, correlation, operation_id, admission_only=True,
                 preserve_seed_id=preserve_seed_id, native_resume_session=native_resume_session,
             ) if admission_only else nullcontext():
+                from .retained_native_resume import ENVIRONMENT_KEY
+
+                environment.pop(ENVIRONMENT_KEY, None)
                 os.execvpe(command[0], command, environment)
         except OSError:
             cleaning = True
@@ -300,14 +303,23 @@ def execute_headed(
         raise ValueError("Backend spawn was already observed; do not replay it")
     completion = _completion_file(record, completion_file)
     attempt = record.parent / "launch-attempts" / correlation.attempt_id / operation_id
+    head_fence = ExitStack()
     try:
         def spawned(pid: int, birth: str) -> None:
-            native.spawned(record, correlation, operation_id, pid=pid, process_start_time=birth)
+            # The core has already verified the distinct native-child receipt.
+            try:
+                native.spawned(record, correlation, operation_id, pid=pid, process_start_time=birth)
+            finally:
+                head_fence.close()
 
         with native.admission(
             record, correlation, operation_id, admission_only=True,
             preserve_seed_id=preserve_seed_id, native_resume_session=native_resume_session,
+            head_fence=head_fence,
         ) if admission_only else nullcontext() as check:
+            from .retained_native_resume import ENVIRONMENT_KEY
+
+            environment.pop(ENVIRONMENT_KEY, None)
             code, certain = execute_core(
                 argv, session_id=session_id, attempt_directory=attempt,
                 state_file=attempt / "headed.json", cwd=os.getcwd(), environment=environment,
@@ -327,4 +339,5 @@ def execute_headed(
             pass
         return code
     finally:
+        head_fence.close()
         os.close(completion)

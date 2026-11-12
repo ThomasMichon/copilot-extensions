@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 import tempfile
 
 import installer_engine as engine
@@ -39,12 +39,22 @@ def _preparation_asset_group(
         and isinstance(declaration["groups"], list) and 1 <= len(declaration["groups"]) <= 32
     ):
         groups = declaration["groups"]
+    elif (
+        declaration["version"] == 2
+        and set(declaration) == {"schema", "version", "canonicalDir", "payloadDir", "files"}
+        and declaration.get("canonicalDir") == "."
+        and declaration.get("payloadDir") == "scripts/runtime-source-tools"
+    ):
+        groups = [declaration]
     else:
         raise ValueError("Unsupported Manager source preparation assets")
 
-    def relative(value):
+    def relative(value, *, allow_root=False):
+        if allow_root and value == ".":
+            return Path(".")
         if (
             not isinstance(value, str) or not value or "\\" in value or ":" in value
+            or Path(value).is_absolute() or PureWindowsPath(value).drive
             or any(part in {"", ".", ".."} for part in value.split("/"))
         ):
             raise ValueError("Invalid Manager source preparation asset name")
@@ -56,17 +66,22 @@ def _preparation_asset_group(
     for group in groups:
         if not isinstance(group, dict) or not isinstance(group.get("files"), list) or not group["files"]:
             raise ValueError("Unsupported Manager source preparation assets")
-        canonical_directory = relative(group.get("canonicalDir"))
+        canonical_directory = relative(group.get("canonicalDir"), allow_root=not legacy)
         destination_directory = relative(group.get("payloadDir"))
         for name in group["files"]:
             member = relative(name)
             if legacy and member.name != name:
                 raise ValueError("Invalid Manager source preparation asset name")
             target = destination_directory / member
-            if target in targets or target in directories or any(parent in targets for parent in target.parents):
+            key = target.as_posix()
+            parents = [parent.as_posix() for parent in target.parents]
+            if not legacy or os.name == "nt":
+                key = key.casefold()
+                parents = [parent.casefold() for parent in parents]
+            if key in targets or key in directories or any(parent in targets for parent in parents):
                 raise ValueError("Duplicate Manager source preparation asset name or overlapping targets")
-            targets.add(target)
-            directories.update(target.parents)
+            targets.add(key)
+            directories.update(parents)
             if (payload / target).is_file():
                 continue
             source = payload.parent / canonical_directory / member

@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import importlib
+import hashlib
 import json
 import os
 import shutil
 import subprocess
 import sys
+from contextlib import contextmanager
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -87,6 +90,200 @@ def test_fresh_target_plan_does_not_create_the_runtime_root(profiles, prepared, 
     root = tmp_path / "missing"
     assert _plan(profiles, root, prepared)["profile"] == "base"
     assert not root.exists()
+
+def test_source_planning_cli_does_not_forward_native_wheel_keywords(
+    profiles, prepared, tmp_path, monkeypatch, capsys,
+):
+    root = tmp_path / "runtime"
+    payload, identity = prepared
+    expected = _plan(profiles, root, prepared)
+    monkeypatch.setattr(sys, "argv", [
+        "runtime_profile.py", "--root", str(root), "--payload", str(payload), "--plan-source",
+        "--expected-source-version", identity.runtime_version,
+        "--expected-source-identity", json.dumps(profiles.source.manifest_fields(identity), sort_keys=True),
+    ])
+    assert profiles.main() == 0
+    assert json.loads(capsys.readouterr().out) == expected
+    assert not root.exists()
+
+
+def test_native_wheel_cli_passes_inputs_to_the_existing_provision_owner(
+    profiles, tmp_path, monkeypatch, capsys,
+):
+    calls = []
+
+    def provision(root, payload, **options):
+        calls.append(options)
+        return {"profile": "base"}
+
+    monkeypatch.setattr(profiles, "provision", provision)
+    monkeypatch.setattr(sys, "argv", [
+        "runtime_profile.py", "--root", str(tmp_path / "runtime"),
+        "--payload", str(tmp_path / "payload"), "--python", sys.executable,
+        "--uv", str(tmp_path / "uv"), "--wheel-profile", str(tmp_path / "profile.json"),
+        "--wheel-directory", str(tmp_path / "wheels"),
+    ])
+    assert profiles.main() == 0
+    assert json.loads(capsys.readouterr().out) == {"profile": "base"}
+    assert calls[0]["wheel_profile"] == tmp_path / "profile.json"
+    assert calls[0]["wheel_directory"] == tmp_path / "wheels"
+
+
+@pytest.mark.parametrize("isolated", [False, True], ids=["safe-path", "isolated"])
+def test_staged_native_wheels_load_owned_helpers_before_input_admission(tmp_path, isolated):
+    payload = tmp_path / "payload"
+    scripts = payload / "scripts"
+    scripts.mkdir(parents=True)
+    for helper in SCRIPTS.glob("*.py"):
+        shutil.copyfile(helper, scripts / helper.name)
+    (payload / "pyproject.toml").write_text('version = "1.0.0"\n', encoding="utf-8")
+    profile = tmp_path / "profile.json"
+    profile.write_text('{"wheels":[]}\n', encoding="utf-8")
+    wheels = tmp_path / "wheels"
+    wheels.mkdir()
+    foreign = tmp_path / "foreign"
+    foreign.mkdir()
+    for name in ("install_source", "installer_engine"):
+        (foreign / f"{name}.py").write_text(
+            "raise AssertionError('loaded an ambient wheel helper')\n", encoding="utf-8",
+        )
+    root = tmp_path / "runtime"
+    result = subprocess.run(
+        [sys.executable, *(["-I"] if isolated else []), "-B", str(scripts / "runtime_profile.py"),
+         "--root", str(root), "--payload", str(payload), "--python", sys.executable,
+         "--uv", str(tmp_path / "uv"), "--wheel-profile", str(profile),
+         "--wheel-directory", str(wheels)],
+        cwd=foreign, env={**os.environ, "PYTHONSAFEPATH": "1", "PYTHONPATH": str(foreign)},
+        capture_output=True, text=True, timeout=30,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert result.returncode != 0
+    assert "project requires a complete bounded wheel profile" in result.stderr, result.stderr
+    assert "ModuleNotFoundError" not in result.stderr
+    assert "ambient wheel helper" not in result.stderr
+    assert not root.exists()
+
+
+@pytest.mark.parametrize("reused", [False, True])
+@pytest.mark.parametrize("profile", ["base", "provider-exec"])
+def test_native_wheel_profile_health_gates_completion(
+    profiles, tmp_path, monkeypatch, reused, profile,
+):
+    install_source = profiles.runtime._runtime_component("install_source")
+
+    root, payload = tmp_path / "runtime", tmp_path / "payload"
+    slot = root / "versions" / "1.0.profile.fixture"
+    slot.mkdir(parents=True)
+    marker = slot / ".install-complete.json"
+    expected = {
+        "packageVersion": "1.0", "profile": profile, "payloadHash": "fixture",
+        "executionContract": profiles._execution_contract(),
+    }
+    if reused:
+        profiles._write_json(slot / profiles.PROFILE_FILE, expected)
+        marker.write_bytes(b"prior completion")
+    monkeypatch.setattr(profiles, "_select_target", lambda *_a: SimpleNamespace(
+        package_version="1.0", identity=None, profile=profile, runtime_version="1.0",
+    ))
+    monkeypatch.setattr(profiles.runtime, "is_complete", lambda *_a: marker.exists())
+
+    @contextmanager
+    def inputs(*_a):
+        yield SimpleNamespace(verify=lambda: None)
+
+    @contextmanager
+    def candidate(*_a, validate_candidate, **_kw):
+        validate_candidate(slot)
+        marker.write_bytes(b"new completion")
+        yield SimpleNamespace(slot=slot, reused=reused)
+
+    monkeypatch.setattr(install_source, "wheel_inputs", inputs)
+    monkeypatch.setattr(install_source, "wheel_selection", lambda *_a: {
+        "extras": ["provider-exec"] if profile == "provider-exec" else [],
+        "runtime_version": slot.name, "payload_hash": "fixture", "local_packages": [],
+    })
+    monkeypatch.setattr(install_source.engine, "numbered_candidate", candidate)
+
+    def reject(*_a, **_kw):
+        raise RuntimeError("profile health failed")
+
+    monkeypatch.setattr(profiles, "_health", reject)
+    with pytest.raises(RuntimeError, match="profile health failed"):
+        profiles.provision(
+            root, payload, python=sys.executable, uv="fixture",
+            wheel_profile=tmp_path / "profile.json", wheel_directory=tmp_path / "wheels",
+        )
+    assert marker.read_bytes() == b"prior completion" if reused else not marker.exists()
+    assert not (root / profiles.PROFILE_FILE).exists()
+
+
+@pytest.mark.parametrize("profile", ["base", "provider-exec"])
+def test_native_wheel_provision_selects_and_retains_its_exact_profile(
+    profiles, tmp_path, monkeypatch, profile,
+):
+    install_source = profiles.runtime._runtime_component("install_source")
+
+    root, payload = tmp_path / "r", tmp_path / "p"
+    extras = ["provider-exec"] if profile == "provider-exec" else []
+    binding = {"wheels": [{"name": "agent-containers", "selected_extras": extras}]}
+    lock = "sha256:" + hashlib.sha256(json.dumps(
+        binding, sort_keys=True, separators=(",", ":"),
+    ).encode()).hexdigest()
+    generation = "1.0.profile." + lock[7:23]
+    fingerprint = "a" * 64
+    receipt = {
+        "schema": "installer-engine.frozen-input-origins", "version": 2,
+        "packages": {"agent-containers": "file:///inspected.whl"}, "extras": extras,
+        "wheel_inputs": {
+            "construction": "closed-wheels", "lock_id": lock, "binding": binding,
+            "distributions": {"agent-containers": {"version": "1.0"}},
+        },
+    }
+    monkeypatch.setattr(profiles, "_select_target", lambda *_a: SimpleNamespace(
+        package_version="1.0", identity=None, profile=profile, runtime_version="1.0",
+    ))
+
+    @contextmanager
+    def inputs(*_a):
+        yield SimpleNamespace(verify=lambda: None)
+
+    @contextmanager
+    def candidate(*_a, validate_candidate, **_kw):
+        with profiles.runtime.construction_lease(root, generation):
+            slot = profiles.runtime.slot(root, generation)
+            python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+            python.parent.mkdir(parents=True, exist_ok=True)
+            python.write_bytes(b"fixture interpreter")
+            profiles._write_json(slot / ".runtime-input-origins.json", receipt)
+            validate_candidate(slot)
+            profiles.runtime.mark_complete(root, generation, payload_hash=fingerprint)
+        yield SimpleNamespace(slot=slot, reused=False, payload_hash=fingerprint)
+
+    monkeypatch.setattr(install_source, "wheel_inputs", inputs)
+    monkeypatch.setattr(install_source, "wheel_selection", lambda *_a: {
+        "extras": extras, "runtime_version": generation,
+        "payload_hash": fingerprint, "local_packages": ["agent-containers"],
+    })
+    monkeypatch.setattr(install_source.engine, "numbered_candidate", candidate)
+    monkeypatch.setattr(profiles, "_health", lambda *_a, **_kw: None)
+    result = profiles.provision(
+        root, payload, python=sys.executable, uv="fixture",
+        wheel_profile=tmp_path / "profile.json", wheel_directory=tmp_path / "wheels",
+    )
+    selected = profiles.select_execution(root)
+    assert selected.runtime_version == result["runtimeVersion"] == generation
+    assert result["payloadHash"] == selected.payload_hash == fingerprint
+    assert selected.profile == profile
+    with profiles.retain_execution(root, selected, timeout=0) as (retained, descriptor):
+        assert retained == selected
+        os.fstat(descriptor)
+    receipt["extras"] = [] if extras else ["provider-exec"]
+    profiles._write_json(selected.python.parent.parent / ".runtime-input-origins.json", receipt)
+    with pytest.raises(RuntimeError, match="wheel receipt conflicts"):
+        profiles.select_execution(root)
+    with pytest.raises(RuntimeError, match="wheel receipt conflicts"):
+        with profiles.retain_execution(root, selected, timeout=0):
+            pytest.fail("changed receipt cannot retain execution")
 
 
 def test_old_transaction_caller_cannot_ignore_required_profile_target(

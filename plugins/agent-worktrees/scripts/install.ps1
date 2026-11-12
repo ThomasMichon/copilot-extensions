@@ -69,7 +69,11 @@ param(
     [string]$Owner,
     [switch]$RemoveConfig,
     [switch]$Force,
-    [switch]$ZeroDowntime
+    [switch]$ZeroDowntime,
+    [string]$WheelProfile,
+    [string]$WheelDirectory,
+    [string]$WheelPython,
+    [string]$WheelUv
 )
 
 Set-StrictMode -Version Latest
@@ -81,6 +85,15 @@ if ($env:COPILOT_EXTENSIONS_HUMAN_UTF8 -eq '1') {
     }
     . (Join-Path $PSScriptRoot 'installer-human-output.ps1')
 }
+
+if ($WheelProfile -or $WheelDirectory -or $WheelPython -or $WheelUv) {
+    if (-not $WheelProfile -or -not $WheelDirectory -or -not $WheelPython -or -not $WheelUv -or
+        $InstallSource -or $Action -notin @('install', 'update', 'provision', 'repair')) {
+        throw 'Closed wheels require profile, directory, Python and UV for an independent installation'
+    }
+    $BootstrapPython = $WheelPython
+}
+
 
 $NativeScriptRoot = $PSScriptRoot
 if ($Action -eq 'publish-runtime-helpers' -and
@@ -103,8 +116,8 @@ if (-not $env:AGENT_WORKTREES_INSTALL_DEADLINE_SEC -and -not $env:COPILOT_PLUGIN
 if ($InstallSource -and $Action -notin @('install', 'update', 'provision', 'repair')) {
     throw '-InstallSource selects only installation, update, provisioning or independent repair.'
 }
-if ($PSBoundParameters.ContainsKey('InputTimeout') -and -not $InstallSource) {
-    throw '-InputTimeout requires -InstallSource.'
+if ($PSBoundParameters.ContainsKey('InputTimeout') -and -not ($InstallSource -or $WheelProfile)) {
+    throw '-InputTimeout requires an explicit installation input.'
 }
 
 function Resolve-InstallerProjectName {
@@ -406,6 +419,10 @@ print(json.dumps(sys.executable, ensure_ascii=True))
         if ($RuntimeOnly) { $driverArguments += '--runtime-only' }
         if ($BootstrapPython) { $driverArguments += @('--bootstrap-python', $BootstrapPython) }
         if ($InstallSource) { $driverArguments += @('--install-source', $InstallSource) }
+        if ($WheelProfile) {
+            $driverArguments += @('--wheel-profile', $WheelProfile, '--wheel-directory', $WheelDirectory,
+                '--wheel-python', $WheelPython, '--wheel-uv', $WheelUv)
+        }
         if ($PSBoundParameters.ContainsKey('InputTimeout')) {
             $driverArguments += @('--input-timeout', $InputTimeout.ToString([Globalization.CultureInfo]::InvariantCulture))
         }
@@ -2740,6 +2757,23 @@ function Deploy-Package {
         }
     }
 
+    # Shared PR filter semantics must resolve locally, never from an index.
+    $prFiltersDir = Join-Path $PluginDir 'libs\pr-filters'
+    if (-not (Test-Path (Join-Path $prFiltersDir 'pyproject.toml'))) {
+        $prFiltersDir = Join-Path $PluginDir '..\..\libs\pr-filters'
+    }
+    if (-not (Test-Path (Join-Path $prFiltersDir 'pyproject.toml'))) {
+        Write-ServiceErr "Required pr-filters library source is unavailable"
+        $ErrorActionPreference = $prevEAP
+        return $false
+    }
+    $libRes = Invoke-VenvPackageInstall -VenvPython $VenvPython -PkgName 'agent-pr-filters' -PkgDir $prFiltersDir
+    if ($libRes.ExitCode -ne 0) {
+        Write-ServiceErr "pr-filters library install failed (exit $($libRes.ExitCode))"
+        $ErrorActionPreference = $prevEAP
+        return $false
+    }
+
     $installRes = Invoke-VenvPackageInstall -VenvPython $VenvPython -PkgName 'agent-worktrees' -PkgDir $PluginDir
     $rc = $installRes.ExitCode
     $ErrorActionPreference = $prevEAP
@@ -3092,13 +3126,13 @@ function Deploy-VenvAndPackage {
 }
 
 function Deploy-PythonRuntime {
-    $base = Get-SignedBasePython
+    $base = if ($WheelProfile) { $WheelPython } else { Get-SignedBasePython }
     if (-not $base) { $base = Get-BootstrapPython -ExcludeVenvDir }
     if (-not $base) {
         throw 'The Python-owned installer requires a base Python 3.11+ outside the target slot.'
     }
-    $uvPath = Get-ApplicationPath -Name @('uv')
-    if ($Action -in @('repair', 'dev', 'dev-release') -or -not (Test-Path -LiteralPath (Join-Path $VenvDir '.install-complete.json'))) {
+    $uvPath = if ($WheelProfile) { $WheelUv } else { Get-ApplicationPath -Name @('uv') }
+    if (-not $WheelProfile -and ($Action -in @('repair', 'dev', 'dev-release') -or -not (Test-Path -LiteralPath (Join-Path $VenvDir '.install-complete.json')))) {
         if (-not (Ensure-Uv)) { throw 'Runtime construction requires uv.' }
         Ensure-UvIndex
         $uvPath = Get-ApplicationPath -Name @('uv')
@@ -3112,12 +3146,13 @@ function Deploy-PythonRuntime {
     Ensure-InstallDir $resultDir
     $resultPath = Join-Path $resultDir ("result-$PID-" + [Guid]::NewGuid().ToString('N') + '.json')
     $modeArgs = @()
-    if ($Action -eq 'update' -and $env:AGENT_WORKTREES_TARGETED_UPDATE -ne '1') { $modeArgs += '--recover-adopted-manager' }
+    if (-not $WheelProfile -and $Action -eq 'update' -and $env:AGENT_WORKTREES_TARGETED_UPDATE -ne '1') { $modeArgs += '--recover-adopted-manager' }
     if ($Action -in @('repair', 'dev', 'dev-release')) { $modeArgs = @('--mode', $Action) }
     $runtimeInputs = if ($Action -in @('repair', 'dev', 'dev-release')) { $RuntimeInputPlugin } else { $PluginDir.ToString() }
     if ($Owner) { $modeArgs += @('--owner', $Owner) }
     if ($InstallSource) { $modeArgs += @('--install-source', $InstallSource) }
-    if ($InstallSource) {
+    if ($WheelProfile) { $modeArgs += @('--wheel-profile', $WheelProfile, '--wheel-directory', $WheelDirectory) }
+    if ($InstallSource -or $WheelProfile) {
         $modeArgs += @('--input-timeout', $InputTimeout.ToString([Globalization.CultureInfo]::InvariantCulture))
     }
     if ($Action -ne 'dev-release') {
@@ -3337,6 +3372,16 @@ function Deploy-GlobalBinstub {
     if ((Get-Variable PythonRuntimeHelpersPublished -Scope Script -ValueOnly -ErrorAction SilentlyContinue) -eq $true) { return }
     Assert-SourceRuntime
     Ensure-InstallDir $LocalBin
+    foreach ($name in @(
+        'update_controller_probe.py',
+        'installation-context\shell-caller-owned.ps1',
+        'installation-context\daemon_instance_runtime.pyz'
+    )) {
+        $src = Join-Path $ScriptDir $name
+        $dst = Join-Path $BinDir $name
+        Ensure-InstallDir (Split-Path -Parent $dst)
+        Publish-RuntimeFile $src $dst
+    }
     foreach ($name in @('agent-worktrees-update-entry.sh', 'agent-worktrees-update-entry.ps1', 'agent-worktrees-update-json.awk', 'agent-worktrees.ps1', 'agent-worktrees.cmd', 'agent-worktrees')) {
         $src = Join-Path $PluginDir "bin\$name"
         if ($name -eq 'agent-worktrees-update-json.awk') {
@@ -4539,9 +4584,9 @@ switch ($Action) {
             exit 0
         }
         Write-V3Manifest
-        if (-not $InstallSource) { Deploy-CopilotPlugin }
+        if (-not ($InstallSource -or $WheelProfile)) { Deploy-CopilotPlugin }
         Deploy-GlobalBinstub
-        if (-not $InstallSource) { Ensure-CopilotExperimental }
+        if (-not ($InstallSource -or $WheelProfile)) { Ensure-CopilotExperimental }
         Assert-PathIncludes $LocalBin
         Remove-LegacyBinstubs
         Reconcile-Binstubs

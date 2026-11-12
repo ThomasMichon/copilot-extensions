@@ -1,0 +1,121 @@
+{
+  "example_only": true,
+  "description": "Synthetic static-contract walkthroughs, not executable decisions, provider effects or model/live qualification.",
+  "cases": [
+    {
+      "id": "incomplete-receiver",
+      "given": "An authorized consolidation source requires both a selected-platform fix and independent acceptance. The proposed receiver retains the fix but omits the acceptance obligation.",
+      "expected": "Keep the source open. Retain the missing acceptance clause and obtain required receiving acceptance before separately deciding source retirement; a thematic link or partial mapping is insufficient.",
+      "required_guidance": {
+        "SKILL.md": [
+          "Map every unique source requirement and literal AND/OR choice to a direct receiving clause or retained gap.",
+          "The receiver must be actionable, not a title, graph link or \"see source\" escape."
+        ],
+        "references/acceptance-and-continuity.md": [
+          "Required plan review precedes dependent publication.",
+          "Then make the source-specific disposition judgment separately."
+        ]
+      }
+    },
+    {
+      "id": "partial-enumeration",
+      "given": "The selected provider reports more issue pages, but enumeration ends early. The visible page has no qualified text sources and a discovery index supplies only snippets.",
+      "expected": "Retain incomplete coverage and an unknown complete count. Neither the empty qualified prefix nor a snippet authorizes broader intake, a zero-backlog claim or target completion.",
+      "required_guidance": {
+        "SKILL.md": [
+          "Partial enumeration is unknown, not zero.",
+          "Resolve actual authorship and source admission before opening report text."
+        ],
+        "references/cohorts-and-acquisition.md": [
+          "A discovery snippet is not automatically an admitted source."
+        ]
+      }
+    },
+    {
+      "id": "eligibility-and-event-policy",
+      "given": "An issue's creator qualifies under the adopted policy, but an editor of authored discussion does not. A separate metadata-only subscription event has an actor outside that policy.",
+      "expected": "Qualify the complete authored discussion before rendering it. Apply a non-text event exception only if the adopted policy actually supplies it; do not extend it to outside-authored text or infer mutation authority from roster membership.",
+      "required_guidance": {
+        "SKILL.md": [
+          "A metadata-only event actor is not automatically a text author; any exception needs the adopted event-type/source rule, not a blanket bot exemption.",
+          "Roster membership is an eligibility input, not mutation or custody authority."
+        ],
+        "references/cohorts-and-acquisition.md": [
+          "Do not generalize a narrow event exception into access to bot or outside-authored text.",
+          "Complete pagination is part of qualification, not evidence that every included object may be rendered."
+        ]
+      }
+    },
+    {
+      "id": "spent-and-unknown-acquisitions",
+      "given": "A reactivated campaign has a spent source allowance and an actual whole-source refusal. A new researcher proposes another pin or excerpt; part of the old acquisition history is unavailable.",
+      "expected": "Preserve the spent allowance and whole-source refusal, and keep unavailable consumption unknown rather than zero. Reuse admissible unchanged evidence without obtaining an alternate copy, excerpt or reconstructed held source.",
+      "required_guidance": {
+        "SKILL.md": [
+          "A new worker, context, URL or revision does not renew spent limits or release a whole-source hold."
+        ],
+        "references/cohorts-and-acquisition.md": [
+          "Unknown history is unknown consumption.",
+          "A different researcher, pin, copy or URL cannot reset it.",
+          "Respect an actual whole-source refusal: no alternate copy, excerpt, diff reconstruction or index reuse around that refusal."
+        ]
+      }
+    },
+    {
+      "id": "retained-owner-and-resource",
+      "given": "Every unresolved source requirement is accepted by a canonical receiver. Separately, an existing contributor owns implementation and a native resource, with an explicit same-claim release condition.",
+      "expected": "Adjudicate authorized redundant tracking independently. Do not appoint an implementer, resume that contributor, release the native resource or treat receiving acceptance as satisfaction of the same-claim condition.",
+      "required_guidance": {
+        "references/acceptance-and-continuity.md": [
+          "Tracking consolidation does not appoint an implementer, resume a parked effort or transfer execution/resources.",
+          "An explicit open-token or same-claim release condition remains binding until its rightful owner resolves it."
+        ],
+        "SKILL.md": [
+          "Separate attempt, delivery, authored content, receiving acceptance, issue disposition and resource release."
+        ]
+      }
+    },
+    {
+      "id": "unknown-write-outcome",
+      "given": "The authorized publisher times out after sending a comment. The provider may have accepted it, while the local effect ledger has no result. A later read may instead verify the original post despite failed bookkeeping.",
+      "expected": "Reconcile the original effect through its existing owner and identity without replay. If the original post is verified, repair bookkeeping rather than posting again; neither outcome transfers resource custody.",
+      "required_guidance": {
+        "SKILL.md": [
+          "Unknown mutation outcomes require reconciliation, not blind replay.",
+          "A verified remote effect with failed bookkeeping must not be repeated."
+        ],
+        "references/acceptance-and-continuity.md": [
+          "Reconcile a timeout through the existing owner under its original identity; do not replay a possibly successful write."
+        ]
+      }
+    },
+    {
+      "id": "inflow-and-excluded-denominator",
+      "given": "A synthetic whole-queue campaign targets 50 open issues. Its last complete count is 52, including five ineligible records. Three closures and two arrivals would yield 51, but no new complete census has yet verified that state.",
+      "expected": "Do not declare the target reached or omit the five ineligible records. Obtain a fresh complete census including arrivals and report campaign closures separately from external departures; even a verified count of 51 remains above 50.",
+      "required_guidance": {
+        "SKILL.md": [
+          "Keep the whole denominator visible when it governs the target; ineligible issues do not disappear from that count."
+        ],
+        "references/cohorts-and-acquisition.md": [
+          "Do not subtract campaign closures from an old census and call it current.",
+          "Distinguish campaign-attributable reductions from unrelated departures and campaign-created receivers."
+        ]
+      }
+    },
+    {
+      "id": "target-met-closeout-pending",
+      "given": "A fresh complete census verifies the synthetic target of 50 whole open issues. The final reviewed journal and an owned publication obligation remain unresolved.",
+      "expected": "Stop extra cohorts and side quests, but retain the unfinished parent and its remaining journal, review and own-resource obligations. A verified numerical checkpoint is not full closeout.",
+      "required_guidance": {
+        "SKILL.md": [
+          "At the verified finite target, stop extra cohorts and side quests.",
+          "Complete the charter's remaining final journal, review and own-resource obligations rather than declaring success from the count alone."
+        ],
+        "references/acceptance-and-continuity.md": [
+          "Do not close an effort from a phase, PR or count alone"
+        ]
+      }
+    }
+  ]
+}

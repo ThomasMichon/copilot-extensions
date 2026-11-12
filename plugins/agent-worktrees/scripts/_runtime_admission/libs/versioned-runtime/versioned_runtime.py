@@ -107,6 +107,8 @@ construction_lease = _leases.construction_lease
 _publication_lease = _leases._publication_lease
 _cleanup_lease = _leases._cleanup_lease
 _kernel_lease = _leases._kernel_lease
+_norm_version = _leases.normalize_version
+_normalize_windows_extended_path = _leases.normalize_windows_extended_path
 
 
 CURRENT_LINK = "current"
@@ -166,7 +168,7 @@ def current_link(root: Path, link_name: str = CURRENT_LINK) -> Path:
 
 def list_versions(root: Path) -> list[str]:
     """Installed version directory names, sorted (newest-looking last)."""
-    vroot = versions_root(root)
+    vroot = _leases._native_path(versions_root(root))
     if not vroot.is_dir():
         return []
     names = [p.name for p in vroot.iterdir() if p.is_dir()]
@@ -301,12 +303,13 @@ def slot_python(root: Path, version: str) -> Path | None:
         return None
     vdir = version_dir(root, version)
     nested = vdir / ".venv"
-    if _is_link(nested):
+    native = _runtime_component("versioned_runtime_construction").native_path
+    if _is_link(native(nested)):
         return None
     for environment in (nested, vdir):
         for sub in SLOT_PYTHON_SUBPATHS:
             p = environment / sub
-            if p.is_file():
+            if native(p).is_file():
                 return p
     return None
 
@@ -742,12 +745,6 @@ def _pid_cmdline_argv0(pid: int) -> str | None:
     return argv0 or None
 
 
-def _norm_version(v: str) -> str:
-    """Normalize a version string for matching (the recorded PEP 440 form
-    ``0.4.0.dev287`` vs the dir name ``0.4.0-dev287``)."""
-    return v.replace("-", ".").replace("_", ".")
-
-
 def _slot_of_path(path: str | None, versions_abs: str, versions: set[str]) -> str | None:
     """The version dir name a path lies under (``<versions>/<v>/...``), or None.
 
@@ -758,16 +755,16 @@ def _slot_of_path(path: str | None, versions_abs: str, versions: set[str]) -> st
     if not path:
         return None
     try:
-        p = os.path.normcase(os.path.abspath(path))
+        p = os.path.normcase(str(_leases._native_path(Path(os.path.abspath(path)))))
+        base = os.path.normcase(str(_leases._native_path(Path(versions_abs))))
     except (OSError, ValueError):
         return None
-    base = os.path.normcase(versions_abs)
     if not base.endswith(os.sep):
         base += os.sep
     if not p.startswith(base):
         return None
     first = p[len(base):].split(os.sep, 1)[0]
-    return first if first in versions else None
+    return next((version for version in versions if os.path.normcase(version) == first), None)
 
 
 def _recorded_live_versions(root: Path, versions: set[str]) -> set[str]:
@@ -990,6 +987,7 @@ def gc(root: Path, keep: list[str] | None = None,
     removed via :func:`_remove_slot` as the exact reparse-point entry, never
     traversing the junction target.
     """
+    root = _leases._native_path(root)
     removed: list[str] = []
     for v in _gc_candidate_versions(root):
         with _cleanup_lease(root, v) as admitted:
@@ -1282,7 +1280,9 @@ def is_complete(root: Path, version: str, *, expect_hash: str | None = None) -> 
     to rebuild: use admission to distinguish unpublished construction from
     content conflict or distinct-generation health repair.
     """
-    if not version_dir(root, version).is_dir():
+    if not _runtime_component("versioned_runtime_construction").native_path(
+        version_dir(root, version),
+    ).is_dir():
         return False
     m = read_marker(root, version)
     if m is None:
@@ -1327,6 +1327,8 @@ def mark_complete(root: Path, version: str, *, payload_hash: str | None = None,
         raise ValueError("mutable dev version must be named 'dev'")
     vdir = version_dir(root, version)
     dest = marker_path(root, version)
+    native = _runtime_component("versioned_runtime_construction").native_path
+    storage, destination = native(vdir), native(dest)
     with _kernel_lease(root, version, kind="retention", shared=True):
         with _publication_lease(root):
             if is_dev_generation(version):
@@ -1335,7 +1337,7 @@ def mark_complete(root: Path, version: str, *, payload_hash: str | None = None,
                 if read_dev_claim(root, strict=True) is None:
                     raise RuntimeError("completion publication requires an explicit dev claim")
                 try:
-                    slot_stat = os.lstat(vdir)
+                    slot_stat = os.lstat(storage)
                 except FileNotFoundError:
                     pass
                 else:
@@ -1350,11 +1352,11 @@ def mark_complete(root: Path, version: str, *, payload_hash: str | None = None,
                         f"completion publication refused: {version}: {decision}; "
                         "use a new version/distinct repair generation or claimed dev slot"
                     )
-            vdir.mkdir(parents=True, exist_ok=True)
+            storage.mkdir(parents=True, exist_ok=True)
             require_immutable_environment(vdir)
             if version != DEV_VERSION and not is_dev_generation(version):
-                _runtime_component("versioned_runtime_publication").prepare_retained_generation(vdir)
-            fd, name = tempfile.mkstemp(prefix=dest.name + ".tmp-", dir=vdir)
+                _runtime_component("versioned_runtime_publication").prepare_retained_generation(storage)
+            fd, name = tempfile.mkstemp(prefix=dest.name + ".tmp-", dir=storage)
             tmp = Path(name)
             try:
                 with os.fdopen(fd, "w", encoding="utf-8") as fh:
@@ -1362,10 +1364,10 @@ def mark_complete(root: Path, version: str, *, payload_hash: str | None = None,
                     fh.flush()
                     os.fsync(fh.fileno())
                 if version == DEV_VERSION:
-                    os.replace(tmp, dest)
+                    os.replace(tmp, destination)
                 else:
                     try:
-                        os.link(tmp, dest)
+                        os.link(tmp, destination)
                     except FileExistsError:
                         if check_admission(root, version, payload_hash=payload_hash) != ADMIT_REUSE:
                             raise RuntimeError(
@@ -1385,6 +1387,7 @@ def toss_incomplete(root: Path, link_name: str = CURRENT_LINK) -> list[str]:
     also protect incomplete slots. Admission and rechecks remain held through
     deletion. Returns the tossed version names.
     """
+    root = _leases._native_path(root)
     tossed: list[str] = []
     for v in list_versions(root):
         with _cleanup_lease(root, v) as admitted:
@@ -1513,15 +1516,6 @@ ADMIT_CONSTRUCT = "construct"
 ADMIT_HEALTH_REPAIR_REQUIRED = "health-repair-required"
 
 
-def _normalize_windows_extended_path(target: str) -> str:
-    """Normalize extended drive and UNC prefixes, preserving ordinary target names."""
-    if target.startswith("\\\\?\\UNC\\"):
-        return "\\\\" + target[len("\\\\?\\UNC\\"):]
-    if target.startswith("\\\\?\\"):
-        return target[4:]
-    return target
-
-
 def fingerprint_source(paths, *, on_progress=None, file_hashes=None, on_file=None) -> str:
     """Fingerprint complete source inputs through the shipped stdlib component."""
     return _runtime_component("versioned_runtime_source").fingerprint_source(
@@ -1614,7 +1608,8 @@ def check_admission(root: Path, version: str, *, payload_hash: str | None) -> st
     plain pathname open followed by an ``fstat()`` identity check against
     what was probed, narrowing (never fully closing) the same window.
     """
-    vdir = version_dir(root, version)
+    native = _runtime_component("versioned_runtime_construction").native_path
+    vdir = native(version_dir(root, version))
     try:
         vdir_lstat = os.lstat(vdir)
     except FileNotFoundError:
@@ -1632,7 +1627,7 @@ def check_admission(root: Path, version: str, *, payload_hash: str | None) -> st
 
     nofollow = getattr(os, "O_NOFOLLOW", 0)
     dir_fd_supported = os.open in os.supports_dir_fd
-    marker_file = marker_path(root, version)
+    marker_file = native(marker_path(root, version))
     vdir_fd = None
     marker_fd = None
     try:

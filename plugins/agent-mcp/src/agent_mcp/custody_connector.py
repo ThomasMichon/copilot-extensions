@@ -10,7 +10,7 @@ from pathlib import Path
 
 from . import execution_context, incoming, ipc, sockio
 from .checkpoint import Binding
-from .custody_contract import CONTRACT, MAX_SEQUENCE, supports
+from .custody_contract import CONTRACT, MAX_SEQUENCE, supports, supports_trace_binding
 from .custody_wire import MAX_FRAME
 from .request_context import capture_context, supports_context
 
@@ -52,6 +52,7 @@ class BackendConnector:
         self.timeout = timeout
         self.generation = None
         self.signature = None
+        self.checkpoint_trace_bookkeeping = 0
         self.context = capture_context(bridge)
         self._binding = Binding.issue()
         self._identity = self._binding.identity(cfg)
@@ -133,6 +134,10 @@ class BackendConnector:
                 raise incoming.AdmissionRefused("backend publication changed during admission")
             self.generation = generation
             self.signature = signature
+            self.checkpoint_trace_bookkeeping = int(
+                supports_trace_binding(reply.get("custody_backend"))
+                and supports_trace_binding(ack.get("contract"))
+            )
             return reader, writer
         except BaseException:
             await ipc.aclose_writer(writer)

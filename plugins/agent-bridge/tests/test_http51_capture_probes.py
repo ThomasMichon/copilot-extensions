@@ -16,6 +16,7 @@ import test_live_questions as live_question_controls
 import test_runtime_serving as serving_controls
 import test_live_inbox_runtime as inbox_controls
 import test_native_send_admission as native_controls
+import test_gc as gc_controls
 from fastapi.testclient import TestClient
 
 host_status_api = host_status.api
@@ -25,6 +26,45 @@ captured = serving_controls.captured
 installation = inbox_controls.installation
 serving = inbox_controls.serving
 native_send = native_controls.native_send
+
+
+@pytest.mark.parametrize("status", ["stopped", "ended"])
+@pytest.mark.parametrize("state", [
+    "preparing", "invoking", "unknown", "complete", "not-started", "malformed", "gate-only",
+])
+def test_retained_recovery_gc_preserves_original_inspection_handles(tmp_db, status, state):
+    gc_controls.TestDbGcPrimitives().test_retained_recovery_survives_selection_deletion_startup_and_periodic_gc(
+        tmp_db, status, state,
+    )
+
+
+@pytest.mark.parametrize("state", ["preparing", "unknown"])
+def test_successor_recovery_journal_retains_original_handle(tmp_db, tmp_path, state):
+    gc_controls.TestDbGcPrimitives().test_successor_recovery_journal_retains_original_handle(
+        tmp_db, tmp_path, state,
+    )
+
+
+@pytest.mark.parametrize("query", ["retained", "eligible"])
+@pytest.mark.parametrize("pending", [False, True])
+def test_retention_query_work_scales_with_history(tmp_db, query, pending):
+    gc_controls.TestDbGcPrimitives().test_retention_query_work_scales_with_history(tmp_db, query, pending)
+
+
+@pytest.mark.parametrize("state", ["complete", "not-started"])
+@pytest.mark.parametrize("malformed", [
+    "missing-request", "extra-field", "invalid-request", "different-operation",
+])
+def test_malformed_terminal_recovery_retains_original_and_successor(tmp_db, state, malformed):
+    gc_controls.TestDbGcPrimitives().test_malformed_terminal_recovery_retains_original_and_successor(
+        tmp_db, state, malformed,
+    )
+
+
+def test_existing_v44_database_prepares_retained_recovery_without_rewriting_guards(tmp_db):
+    gc_controls.TestDbGcPrimitives().test_existing_v44_database_prepares_retained_recovery_without_rewriting_guards(
+        tmp_db,
+    )
 
 
 def test_host_status_coalesced_flow(host_status_api, tmp_db):
@@ -247,6 +287,8 @@ from test_plugin_readiness import (
 from test_portable_mux_joined import (
     test_bridge_provider_receiver_and_extensions_share_one_conversation
     as test_bridge_provider_receiver_and_extensions_share_one_conversation,
+    test_carrier_failures_settle_owned_tree_and_streams
+    as test_carrier_failures_settle_owned_tree_and_streams,
 )
 from test_receiving_bundle import (
     test_provider_owner_uses_the_actual_client_interface
@@ -305,6 +347,22 @@ from test_full_session_status_cli import (
     as test_writer_status_uses_negotiated_original_observation,
 )
 from test_creation_worktree_writer import (
+    test_ordinary_resume_preserves_completed_recovery_permission_hold
+    as test_ordinary_resume_preserves_completed_recovery_permission_hold,
+    test_retained_recovery_resumes_same_native_once_without_prompt_drain
+    as test_retained_recovery_resumes_same_native_once_without_prompt_drain,
+    test_uncertain_retained_recovery_never_relaunches_or_falls_back
+    as test_uncertain_retained_recovery_never_relaunches_or_falls_back,
+    test_retained_recovery_round_trips_through_actual_http_native_owner
+    as test_retained_recovery_round_trips_through_actual_http_native_owner,
+    test_native_stop_race_retains_hold_and_records_no_native_entry
+    as test_native_stop_race_retains_hold_and_records_no_native_entry,
+    test_retained_recovery_denies_unconfirmed_native_owners_before_invocation
+    as test_retained_recovery_denies_unconfirmed_native_owners_before_invocation,
+    test_retained_recovery_cli_negotiates_and_never_replays_native_request
+    as test_retained_recovery_cli_negotiates_and_never_replays_native_request,
+    test_terminal_creation_writer_remains_inspectable_without_reopening
+    as test_terminal_creation_writer_remains_inspectable_without_reopening,
     test_required_creation_resume_refuses_changed_custody_before_effect
     as test_required_creation_resume_refuses_changed_custody_before_effect,
     test_required_creation_writer_cli_carries_requirement_to_actual_client
@@ -346,6 +404,12 @@ from test_creation_worktree_writer import (
     as test_keyed_creation_registration_failure_retains_native_and_dormancy,
     test_keyed_creation_uses_actual_retained_serializer_and_preserves_claim
     as test_keyed_creation_uses_actual_retained_serializer_and_preserves_claim,
+)
+from test_retained_host_recovery import (
+    test_real_host_boundary_retains_stop_and_uncertain_custody
+    as test_real_host_boundary_retains_stop_and_uncertain_custody,
+    test_retained_recovery_cannot_enter_while_exact_session_end_is_active
+    as test_retained_recovery_cannot_enter_while_exact_session_end_is_active,
 )
 
 from test_creation_writer_resume import (
@@ -430,6 +494,7 @@ def test_http51_capture_actual_observations(
     observed["retained_workspace_creation_writer_inspection"] = (
         health["capabilities"]["retained_workspace_creation_writer_inspection"]
     )
+    observed["retained_native_session_recovery"] = health["capabilities"]["retained_native_session_recovery"]
     assert set(health["worktree_record_writer"]) == {"installation_root", "runtime_generation"}
     args, _ = _command(native_send, monkeypatch, api=api)
     args.func(args)

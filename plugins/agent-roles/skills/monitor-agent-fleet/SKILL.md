@@ -147,6 +147,12 @@ If sources conflict, preserve the conflict and mark inferred purpose with
 confidence. Missing/rewound agenda data does not erase confirmed external work.
 Never fix an observed worker's plan to make it match the analyst's inference.
 
+For an exceptional selected-session instruction/guidance diagnosis, use the
+[bounded toolbox reader](references/selected-session-reader.md). It lists before
+reading explicit providers, enforces input/output/enumeration/deadline limits,
+and reports missed data as coverage gaps. Do not reconstruct shell collectors
+or read guidance bodies on every monitoring cycle.
+
 When a correction repeats existing guidance or a long-running owner may have
 missed a relevant change, assess the [guidance delta](references/guidance-delta.md).
 Separate semantic guidance lag from unrelated Git commits, installed payloads

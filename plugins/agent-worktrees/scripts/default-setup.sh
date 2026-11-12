@@ -38,6 +38,7 @@ LAUNCH_NATIVE_RESUME_SESSION=""
 LAUNCH_ATTEMPT_ID=""
 LAUNCH_RESOLUTION_ID=""
 LAUNCH_PARENT_ID=""
+# Bash 3.2 needs guarded expansion of empty arrays under nounset.
 COPILOT_ARGS=()
 native_value_option() {
     case "$1" in
@@ -87,7 +88,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 if [[ -n "$EXECUTION_DIRECTORY" ]]; then
-    COPILOT_ARGS=(-C "$EXECUTION_DIRECTORY" "${COPILOT_ARGS[@]}")
+    COPILOT_ARGS=(-C "$EXECUTION_DIRECTORY" ${COPILOT_ARGS[@]+"${COPILOT_ARGS[@]}"})
 fi
 
 # In --stdio (ACP) mode, stdout is the JSON-RPC channel; keep all human-facing
@@ -118,7 +119,19 @@ fi
 # resolve-runtime.sh (and RUNTIME_PYTHON derived from it) is used, not a
 # possibly-nonexistent legacy path.
 _awresolve="${AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT:-$HOME/.agent-worktrees}/bin/resolve-runtime.sh"
-[ -f "$_awresolve" ] && . "$_awresolve"
+if [[ -n "${AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT:-}" && -z "$RUNTIME_PYTHON" ]]; then
+    AW_PY=""
+fi
+if [[ -f "$_awresolve" ]]; then
+    _aw_saved_root_set="${AGENT_RT_ROOT+x}"
+    _aw_saved_root="${AGENT_RT_ROOT-}"
+    if [[ -n "${AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT:-}" ]]; then
+        AGENT_RT_ROOT="$AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT"
+    fi
+    . "$_awresolve"
+    if [[ -n "$_aw_saved_root_set" ]]; then AGENT_RT_ROOT="$_aw_saved_root"; else unset AGENT_RT_ROOT; fi
+    unset _aw_saved_root_set _aw_saved_root
+fi
 _AW_PY="${RUNTIME_PYTHON:-${AW_PY:-}}"
 
 # -- Guarded setup configuration root ------------------------------------
@@ -242,7 +255,7 @@ _exec_copilot_backend() {
         case $- in *x*) set +x ;; esac
         set +a
         local code=0
-        aw_native_setup_backend "$@" "${COPILOT_ARGS[@]}" || code=$?
+        aw_native_setup_backend "$@" ${COPILOT_ARGS[@]+"${COPILOT_ARGS[@]}"} || code=$?
         exit "$code"
     fi
     if [[ -n "$LAUNCH_SEED_RECORD" ]]; then
@@ -263,9 +276,17 @@ _exec_copilot_backend() {
         fi
         exec "$LAUNCH_SEED_RUNTIME_PYTHON" -I -m agent_worktrees.launch_seed_exec \
             --invoke --record "$LAUNCH_SEED_RECORD" --seed-id "$LAUNCH_SEED_ID" \
-            "${attempt_args[@]}" -- "$@" "${COPILOT_ARGS[@]}"
+            ${attempt_args[@]+"${attempt_args[@]}"} -- "$@" ${COPILOT_ARGS[@]+"${COPILOT_ARGS[@]}"}
     fi
-    exec "$@" "${COPILOT_ARGS[@]}"
+    if [[ $# -eq 1 && -n "$_AW_PY${AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT:-}" &&
+          ( "${1##*/}" == copilot || "${1##*/}" == copilot.exe ) ]]; then
+        if [[ -z "$_AW_PY" || ! -x "$_AW_PY" ]]; then
+            printf 'Normalized Copilot runtime is unavailable; no backend started.\n' >&2
+            exit 3
+        fi
+        exec "$_AW_PY" -I -m agent_worktrees.normalized_backend -- "$@" ${COPILOT_ARGS[@]+"${COPILOT_ARGS[@]}"}
+    fi
+    exec "$@" ${COPILOT_ARGS[@]+"${COPILOT_ARGS[@]}"}
 }
 
 if [[ -n "$COPILOT_PATH_OVERRIDE" ]]; then

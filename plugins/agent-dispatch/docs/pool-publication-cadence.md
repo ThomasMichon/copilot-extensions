@@ -18,6 +18,11 @@ retains those separate integration and adoption gates.
 `server.build_app` passes its actual `RegistrarSources` to `CoordinatorPoolSource`.
 Only the selected coordinator projects the whole configured cohort. It uses
 the existing liveness-GC iteration, not another loop, timer, service or executor.
+Installed coordinator bootstrap, deployment and source reconciliation select
+the installation's `registrar/` unless its `service.env` explicitly sets
+`AGENT_DISPATCH_REGISTRAR_DIR`. A named supervisor's inherited registrar override
+does not select the shared coordinator's cohort. Direct foreground `serve`
+continues to honor its explicit process configuration.
 An enabled positive GC interval, configured control authority and the actual
 active-route callback are required. Construction and reads still write nothing;
 the first eligible GC iteration performs maintenance.
@@ -68,8 +73,15 @@ work. Only the existing safe-discard operation can supersede an original
 never-posted or definitively rejected request; live futures, unacknowledged
 success and ambiguous POSTs remain retained.
 
-The regular five-second master cadence renews the provider's thirty-second
-publication freshness through new requests, not replay. Initial declaration
+With publication enabled, the existing master's normal idle wait is capped at
+five seconds even when a legacy launcher supplies a longer polling interval.
+Shorter polling intervals remain unchanged. The configured interval still
+governs existing restart backoff; publication-disabled masters, source withdrawal
+and governance backoff retain their prior timing. This uses the same reconcile
+loop, not an additional timer or worker, and does not change child worker polling.
+The cadence renews the provider's thirty-second publication freshness through
+new requests, not replay; slow or failed reconciliation can still withhold
+freshness rather than extend a stale publication. Initial declaration
 mirroring can change the coordinator registration fence and withhold the first
 attempt; a later fresh attempt enrolls, then publishes. Incomplete effective
 definitions never become a valid subset. In particular, legacy direct worker

@@ -763,6 +763,8 @@ class _LazyVersionAction(argparse.Action):
 
 def build_parser() -> argparse.ArgumentParser:
     from .owner_capabilities import command as owner_capabilities
+    from .owner_exec import command as owner_exec
+    from .owner_entry import command as owner_entry
     from .owner_handoff import add_arguments as add_owner_arguments
 
     _h = "bridge name under ~/"
@@ -796,6 +798,20 @@ def build_parser() -> argparse.ArgumentParser:
         "session-owner-capabilities",
         help="inspect selected-runtime owner handoff support without startup",
     ).set_defaults(func=owner_capabilities)
+
+    p_owner_entry = sub.add_parser(
+        "session-owner-entry", help="optional physical owner receiver (internal overlay entry)",
+    )
+    p_owner_entry.add_argument("request", help="session-only launch request")
+    p_owner_entry.set_defaults(func=owner_entry)
+
+    p_owner_exec = sub.add_parser(
+        "exec-client", help="opt in selected MCP entries at a native Linux client exec boundary",
+    )
+    p_owner_exec.add_argument("--mcp-config", required=True, help="explicit MCP entry configuration")
+    p_owner_exec.add_argument("--server", action="append", required=True, help="server name to adopt")
+    p_owner_exec.add_argument("client", nargs=argparse.REMAINDER, help="native copilot command after --")
+    p_owner_exec.set_defaults(func=owner_exec)
 
     p_validate = sub.add_parser("validate", help="validate a bridge config")
     p_validate.add_argument("name", help="bridge name or path to a config file")

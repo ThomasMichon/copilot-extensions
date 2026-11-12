@@ -1,6 +1,10 @@
 # Dot-sourced before runtime resolution by the installed and payload front doors.
 $_awUpdateHandled = $false
 $_awUpdateDiagnostic = $false
+# Consumed here so the queued update's descendants never inherit the marker;
+# a later, unrelated update must still be able to queue itself.
+$_awDurableUpdateShell = $env:AGENT_WORKTREES_INTERNAL_DURABLE_UPDATE -ceq '1'
+Remove-Item Env:AGENT_WORKTREES_INTERNAL_DURABLE_UPDATE -ErrorAction SilentlyContinue
 $_awUpdateStandalone = $null -ne [Environment]::GetEnvironmentVariable(
     'AGENT_WORKTREES_INTERNAL_UPDATE_PAYLOAD'
 )
@@ -42,8 +46,219 @@ if (@($_updateArgs | Where-Object {
         '--request-status', '--recovery-status', '--recover-after-restart', '--recover-for-repair') -or
     $_.StartsWith('--request-status=')
 }).Count) { return }
+function Write-AgentUpdateEntryError([string]$Message) {
+    # A PowerShell error record, unlike [Console]::Error, honors 2>/*> redirection and transcripts.
+    Write-Error -Message $Message -ErrorAction Continue
+}
+function New-UpdateScratchDirectory([string]$Prefix = 'agent-update-') {
+    $base = if ($env:AGENT_SCRATCH_ROOT) { $env:AGENT_SCRATCH_ROOT } else { [IO.Path]::GetTempPath() }
+    $prefix = $Prefix + [DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss') + '-'
+    if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
+        $path = & mktemp -d (Join-Path $base ($prefix + 'XXXXXX'))
+        if ($LASTEXITCODE -ne 0) { throw 'Private update scratch creation failed.' }
+        return $path
+    }
+    if (-not ('CopilotExtensions.UpdateScratchDirectory' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+namespace CopilotExtensions {
+    public static class UpdateScratchDirectory {
+        [StructLayout(LayoutKind.Sequential)]
+        private struct SecurityAttributes {
+            public int Length;
+            public IntPtr Descriptor;
+            [MarshalAs(UnmanagedType.Bool)] public bool InheritHandle;
+        }
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, ExactSpelling = true, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool CreateDirectoryW(string path, ref SecurityAttributes attributes);
+        public static void Create(string path, byte[] descriptor) {
+            var pinned = GCHandle.Alloc(descriptor, GCHandleType.Pinned);
+            try {
+                var attributes = new SecurityAttributes {
+                    Length = Marshal.SizeOf(typeof(SecurityAttributes)),
+                    Descriptor = pinned.AddrOfPinnedObject(),
+                    InheritHandle = false
+                };
+                if (!CreateDirectoryW(path, ref attributes))
+                    throw new Win32Exception(Marshal.GetLastWin32Error());
+            } finally { pinned.Free(); }
+        }
+    }
+}
+'@
+    }
+    $user = [Security.Principal.WindowsIdentity]::GetCurrent().User
+    $security = [Security.AccessControl.DirectorySecurity]::new()
+    $security.SetOwner($user)
+    $security.SetAccessRuleProtection($true, $false)
+    $inheritance = [Security.AccessControl.InheritanceFlags]::ContainerInherit -bor
+        [Security.AccessControl.InheritanceFlags]::ObjectInherit
+    foreach ($sid in @($user,
+        [Security.Principal.SecurityIdentifier]::new('S-1-5-18'),
+        [Security.Principal.SecurityIdentifier]::new('S-1-5-32-544'))) {
+        $security.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new(
+            $sid, [Security.AccessControl.FileSystemRights]::FullControl,
+            $inheritance, [Security.AccessControl.PropagationFlags]::None,
+            [Security.AccessControl.AccessControlType]::Allow))
+    }
+    $path = Join-Path $base ($prefix + [guid]::NewGuid().ToString('N'))
+    [CopilotExtensions.UpdateScratchDirectory]::Create($path, $security.GetSecurityDescriptorBinaryForm())
+    return $path
+}
+function Wait-AgentQueuedSubmission($ProcessId, [DateTime]$SubmittedAt, [string]$ExitFile, [string]$Identity) {
+    # Returns the submission's exit code, or $null when it reported none. The
+    # code the submission records before exiting is the only result; the process
+    # is watched only to stop waiting once it ends without recording one,
+    # and a reused PID, which lacks the submission's command line, is never waited on.
+    $recordedCode = {
+        # Published by an atomic rename, so the name never refers to a partial
+        # write; still read share-tolerantly and retry on any transient failure.
+        if (-not (Test-Path -LiteralPath $ExitFile -PathType Leaf)) { return $null }
+        $text = $null
+        try {
+            $stream = [IO.File]::Open($ExitFile, [IO.FileMode]::Open, [IO.FileAccess]::Read,
+                [IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete)
+            try { $text = (New-Object IO.StreamReader($stream)).ReadToEnd() } finally { $stream.Dispose() }
+        } catch { return $null }
+        $recorded = 0
+        if ([int]::TryParse($text.Trim(), [ref]$recorded)) { return $recorded }
+        return $null
+    }
+    $process = $null
+    try {
+        $process = [Diagnostics.Process]::GetProcessById([int]$ProcessId)
+        $null = $process.Handle
+        if ($process.StartTime -lt $SubmittedAt) { $process = $null }
+        if ($null -ne $process) {
+            # The open handle pins the PID, so its command line names the process
+            # still being watched; only the submission's carries its unique log path.
+            $commandLine = [string](Get-CimInstance -ClassName Win32_Process `
+                -Filter "ProcessId=$([int]$ProcessId)" -ErrorAction Stop).CommandLine
+            if (-not $Identity -or -not $commandLine.Contains($Identity)) { $process = $null }
+        }
+    } catch { $process = $null }
+    $deadline = [DateTime]::UtcNow.AddMinutes(5)
+    while ($true) {
+        $code = & $recordedCode
+        if ($null -ne $code) {
+            # Recorded as its last act; allow it a bounded moment to close its outputs.
+            if ($null -ne $process) { $null = $process.WaitForExit(5000) }
+            return $code
+        }
+        if ($null -eq $process -or [DateTime]::UtcNow -ge $deadline) { return $null }
+        if ($process.WaitForExit(250)) {
+            # A missing record is reported as no result: the watched PID may have
+            # been reused, so its exit code is never taken as the submission's.
+            return (& $recordedCode)
+        }
+    }
+}
+function Submit-AgentDurableUpdate([string]$Preflight) {
+    # WMI durable launch is reserved for work that must outlive its launcher;
+    # here the queued update itself. Nothing is inherited, so the environment,
+    # directory and logs are passed explicitly.
+    $hint = 'WMI process creation may be blocked by policy, for example the Microsoft Defender ' +
+        'ASR rule ''Block process creations originating from PSExec and WMI commands''.'
+    $forward = @($_originalUpdateArgs | Where-Object { $_ -cne '--wait' })
+    $logDirectory = $null
+    if ($forward -cnotcontains '--detach') { $forward += '--detach' }
+    $asJson = $forward -ccontains '--json'
+    try {
+        $logDirectory = New-UpdateScratchDirectory 'agent-update-queued-'
+        $out = Join-Path $logDirectory 'submission.out'
+        $log = Join-Path $logDirectory 'submission.log'
+        # The submission records its own exit code, so a submission that exits
+        # before its process can be opened is still reported accurately.
+        $exitFile = Join-Path $logDirectory 'submission.exit'
+        if ($logDirectory -match '["%!^&|<>]') { throw 'The update log path is not safe for redirection.' }
+        # The caller, arguments and exit path travel as base64 JSON data, never as
+        # PowerShell source, so no quote character (ASCII or typographic) can end a literal.
+        $payload = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes((ConvertTo-Json -Compress -InputObject @{
+            caller = [string]$_awUpdateCaller; args = [string[]]$forward; exit = [string]$exitFile })))
+        $script = "`$ErrorActionPreference = 'Continue'`n`$ProgressPreference = 'SilentlyContinue'`n" +
+            "`$env:AGENT_WORKTREES_INTERNAL_DURABLE_UPDATE = '1'`n" +
+            "`$spec = ConvertFrom-Json ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('$payload')))`n" +
+            "`$forward = [string[]]@(`$spec.args)`n& ([string]`$spec.caller) @forward`n" +
+            "`$code = if (`$null -eq `$LASTEXITCODE) { 0 } else { `$LASTEXITCODE }`n" +
+            "[IO.File]::WriteAllText([string]`$spec.exit + '.tmp', [string]`$code)`n" +
+            "[IO.File]::Move([string]`$spec.exit + '.tmp', [string]`$spec.exit)`nexit `$code`n"
+        $shell = (Get-Process -Id $PID).Path
+        $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($script))
+        $command = "`"$env:ComSpec`" /d /s /c `"`"$shell`" -NoProfile -NonInteractive " +
+            "-ExecutionPolicy Bypass -OutputFormat Text -EncodedCommand $encoded > `"$out`" 2> `"$log`"`""
+        $environment = @(Get-ChildItem Env: | Where-Object {
+            $_.Name -and -not $_.Name.StartsWith('=') -and $_.Name -cne 'MSYS2_ARG_CONV_EXCL'
+        } | ForEach-Object { "$($_.Name)=$($_.Value)" })
+        $startup = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{
+            ShowWindow = [uint16]0
+            EnvironmentVariables = [string[]]$environment
+        }
+        $submittedAt = [DateTime]::Now.AddSeconds(-2)
+        $created = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{
+            CommandLine = $command
+            CurrentDirectory = (Get-Location).ProviderPath
+            ProcessStartupInformation = $startup
+        }
+    } catch {
+        if ($logDirectory) { Remove-Item -LiteralPath $logDirectory -Recurse -Force -ErrorAction SilentlyContinue }
+        Write-AgentUpdateEntryError ("$Preflight Queuing the update through WMI failed: " +
+            "$($_.Exception.Message) $hint No update was started or request submitted.")
+        return 1
+    }
+    if ($created.ReturnValue -ne 0) {
+        Remove-Item -LiteralPath $logDirectory -Recurse -Force -ErrorAction SilentlyContinue
+        Write-AgentUpdateEntryError ("$Preflight WMI Win32_Process.Create returned " +
+            "$($created.ReturnValue). $hint No update was started or request submitted.")
+        return 1
+    }
+    $notice = "$Preflight The update was queued outside the caller's Job through WMI " +
+        "(process $($created.ProcessId)); submission output: $out; submission log: $log"
+    # With --json, stdout carries only the submission's own JSON document.
+    if (-not $asJson) { Write-Host $notice }
+    $exitCode = Wait-AgentQueuedSubmission $created.ProcessId $submittedAt $exitFile $out
+    # The submission may still be closing its redirected outputs; read them
+    # without requiring exclusive access.
+    $read = { param($path)
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return '' }
+        $stream = [IO.File]::Open($path, [IO.FileMode]::Open, [IO.FileAccess]::Read,
+            [IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete)
+        try { (New-Object IO.StreamReader($stream)).ReadToEnd() } finally { $stream.Dispose() }
+    }
+    $stdout = & $read $out
+    $stderr = & $read $log
+    $request = $null
+    if ($asJson) {
+        try { $request = [string](ConvertFrom-Json $stdout -ErrorAction Stop).request_id } catch {}
+        # Returned to the caller's scope: output here would become the return value.
+        if ($stdout) { Set-Variable -Name _queuedUpdateJson -Value $stdout.TrimEnd() -Scope 1 }
+    } else {
+        if ($stdout) { Write-Host $stdout.TrimEnd() }
+        if ($stderr) { Write-Host $stderr.TrimEnd() }
+    }
+    if (-not $request -and ($stderr + "`n" + $stdout) -match 'Update request ([A-Za-z0-9._-]+)') {
+        $request = $Matches[1]
+    }
+    if ($exitCode -eq 0 -and $request) {
+        if (-not $asJson) {
+            Write-Host ("Update request $request submitted. Check it with: " +
+                "agent-worktrees update --request-status $request")
+        }
+        return 0
+    }
+    $state = if ($null -eq $exitCode) { 'did not report a result' } else { "exited $exitCode" }
+    $detail = if ($request) { "for request $request; check it with: agent-worktrees update --request-status $request" } else { 'without a request id' }
+    Write-AgentUpdateEntryError ("$(if ($asJson) { "$notice " })[agent-worktrees] The queued update " +
+        "submission $state $detail. See $out and $log.")
+    return 1
+}
 if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT -and
     $_updateArgs -cnotcontains '--supervised-debug') {
+    # Only a Job that denies breakaway (ERROR_ACCESS_DENIED) queues the update through WMI;
+    # a probe that cannot compile, start for another reason or clean up is reported instead.
+    $_breakawayDenied = $false
     try {
         if (-not ('CopilotExtensions.UpdateBreakawayProbe' -as [type])) {
             Add-Type -TypeDefinition @'
@@ -106,19 +321,35 @@ namespace CopilotExtensions {
         }
         $_breakawayError = [CopilotExtensions.UpdateBreakawayProbe]::Check((Get-Process -Id $PID).Path)
         if ($_breakawayError -ne 0) {
+            $_breakawayDenied = $_breakawayError -eq 5
             throw "Windows refused the required breakaway process (WinError $_breakawayError)."
         }
     } catch {
-        [Console]::Error.WriteLine(
-            "[agent-worktrees] Update launch preflight failed: $($_.Exception.Message) " +
-            'No update was started or request submitted. Re-run in the execution host''s ' +
-            'explicit detached/outside-Job shell mode (for example async with detach=true). ' +
-            'Plain async execution or update --detach does not remove an enclosing Job. ' +
-            'Do not retry in the same bounded shell.'
-        )
-        if ($_awUpdateStandalone) { exit 1 }
+        $_preflightMessage = "[agent-worktrees] Update launch preflight failed: $($_.Exception.Message)"
+        $_queuedRc = 1
+        $_queuedUpdateJson = $null
+        if ($_awDurableUpdateShell) {
+            Write-AgentUpdateEntryError ($_preflightMessage +
+                ' The durable outside-Job update shell is itself contained; no update was started.')
+        } elseif ($env:COPILOT_EXTENSIONS_TEST_CONTAINED -ceq '1') {
+            # Contained test mode never escapes through WMI, matching spawn_daemon.
+            Write-AgentUpdateEntryError ($_preflightMessage +
+                ' No update was started or request submitted. Re-run in the execution host''s ' +
+                'explicit detached/outside-Job shell mode (for example async with detach=true). ' +
+                'Contained test mode does not use the durable WMI launch.')
+        } elseif (-not $_breakawayDenied) {
+            Write-AgentUpdateEntryError ($_preflightMessage +
+                ' No update was started or request submitted: the durable WMI launch is used only ' +
+                'when the caller''s Job denies breakaway.')
+        } else {
+            # The caller's Job forbids breakaway, so the update is queued through
+            # WMI, whose process is outside every caller Job (see #12117).
+            $_queuedRc = Submit-AgentDurableUpdate -Preflight $_preflightMessage
+            if ($_queuedUpdateJson) { Write-Output $_queuedUpdateJson }
+        }
+        if ($_awUpdateStandalone) { exit $_queuedRc }
         $_awUpdateHandled = $true
-        $global:LASTEXITCODE = 1
+        $global:LASTEXITCODE = $_queuedRc
         return
     }
 }
@@ -177,6 +408,13 @@ if (-not $_probeExcluded -and $_probePossible -and $_awUpdateCaller) {
     $_probeWorker = if ($_probePayload) {
         Join-Path $_probePayload 'scripts\update_controller_probe.py'
     } else { '' }
+    if (-not $_awUpdatePayload -and (
+        -not $_probeHelper -or -not (Test-Path -LiteralPath $_probeHelper -PathType Leaf) -or
+        -not $_probeWorker -or -not (Test-Path -LiteralPath $_probeWorker -PathType Leaf)
+    )) {
+        $_probeHelper = Join-Path $_runtimeRoot 'bin\installation-context\shell-caller-owned.ps1'
+        $_probeWorker = Join-Path $_runtimeRoot 'bin\update_controller_probe.py'
+    }
     $_controller = ''
     if ($_probeHelper -and (Test-Path -LiteralPath $_probeHelper -PathType Leaf) -and
         (Test-Path -LiteralPath $_probeWorker -PathType Leaf)) {
@@ -279,64 +517,6 @@ if ($_updateRepo -cmatch '^https://github\.com/([A-Za-z0-9._-]+)/([A-Za-z0-9._-]
     if ($_updateRef -cmatch '^[A-Za-z0-9._/][A-Za-z0-9._/-]*$') {
         $_updateUrl = "https://raw.githubusercontent.com/$_updateSlug/$_updateRef/worktree-manager/bootstrap.ps1"
     }
-}
-function New-UpdateScratchDirectory {
-    $base = if ($env:AGENT_SCRATCH_ROOT) { $env:AGENT_SCRATCH_ROOT } else { [IO.Path]::GetTempPath() }
-    $prefix = 'agent-update-' + [DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss') + '-'
-    if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
-        $path = & mktemp -d (Join-Path $base ($prefix + 'XXXXXX'))
-        if ($LASTEXITCODE -ne 0) { throw 'Private update scratch creation failed.' }
-        return $path
-    }
-    if (-not ('CopilotExtensions.UpdateScratchDirectory' -as [type])) {
-        Add-Type -TypeDefinition @'
-using System;
-using System.ComponentModel;
-using System.Runtime.InteropServices;
-namespace CopilotExtensions {
-    public static class UpdateScratchDirectory {
-        [StructLayout(LayoutKind.Sequential)]
-        private struct SecurityAttributes {
-            public int Length;
-            public IntPtr Descriptor;
-            [MarshalAs(UnmanagedType.Bool)] public bool InheritHandle;
-        }
-        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, ExactSpelling = true, SetLastError = true)]
-        [return: MarshalAs(UnmanagedType.Bool)]
-        private static extern bool CreateDirectoryW(string path, ref SecurityAttributes attributes);
-        public static void Create(string path, byte[] descriptor) {
-            var pinned = GCHandle.Alloc(descriptor, GCHandleType.Pinned);
-            try {
-                var attributes = new SecurityAttributes {
-                    Length = Marshal.SizeOf(typeof(SecurityAttributes)),
-                    Descriptor = pinned.AddrOfPinnedObject(),
-                    InheritHandle = false
-                };
-                if (!CreateDirectoryW(path, ref attributes))
-                    throw new Win32Exception(Marshal.GetLastWin32Error());
-            } finally { pinned.Free(); }
-        }
-    }
-}
-'@
-    }
-    $user = [Security.Principal.WindowsIdentity]::GetCurrent().User
-    $security = [Security.AccessControl.DirectorySecurity]::new()
-    $security.SetOwner($user)
-    $security.SetAccessRuleProtection($true, $false)
-    $inheritance = [Security.AccessControl.InheritanceFlags]::ContainerInherit -bor
-        [Security.AccessControl.InheritanceFlags]::ObjectInherit
-    foreach ($sid in @($user,
-        [Security.Principal.SecurityIdentifier]::new('S-1-5-18'),
-        [Security.Principal.SecurityIdentifier]::new('S-1-5-32-544'))) {
-        $security.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new(
-            $sid, [Security.AccessControl.FileSystemRights]::FullControl,
-            $inheritance, [Security.AccessControl.PropagationFlags]::None,
-            [Security.AccessControl.AccessControlType]::Allow))
-    }
-    $path = Join-Path $base ($prefix + [guid]::NewGuid().ToString('N'))
-    [CopilotExtensions.UpdateScratchDirectory]::Create($path, $security.GetSecurityDescriptorBinaryForm())
-    return $path
 }
 $_updateGitRouting = @('GIT_DIR', 'GIT_WORK_TREE', 'GIT_COMMON_DIR', 'GIT_INDEX_FILE',
     'GIT_PREFIX', 'GIT_OBJECT_DIRECTORY', 'GIT_ALTERNATE_OBJECT_DIRECTORIES')

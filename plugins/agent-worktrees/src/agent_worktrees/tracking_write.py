@@ -215,11 +215,13 @@ _VERB_MODULES: tuple[str, ...] = (
     "agent_worktrees.launch_attempt",
     "agent_worktrees.launch_execution",
     "agent_worktrees.launch_native_observation",
+    "agent_worktrees.launch_recovery_store",
 )
 
 # Finite native boundaries need only their canonical writer, not every CLI verb.
 _DIRECT_VERB_MODULES = {
     "launch_attempt_execution": "agent_worktrees.launch_execution",
+    "launch_recovery_compare_and_swap": "agent_worktrees.launch_recovery_store",
     **dict.fromkeys((
         "launch_seed_stage", "launch_seed_take", "launch_seed_restore",
         "launch_seed_finish", "launch_seed_remove",

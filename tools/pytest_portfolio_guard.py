@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import sys
 import typing as _typing
 from pathlib import Path
 
@@ -128,7 +129,22 @@ def validate_declaration(tier: str | None, effects: set[str]) -> str | None:
     return None
 
 
+def configure_temp_links(config: pytest.Config, *, platform: str = sys.platform) -> None:
+    """Keep pytest's optional current links out of Windows cleanup traversal."""
+    if platform != "win32":
+        return
+    import _pytest.pathlib
+    import _pytest.tmpdir
+
+    patch = pytest.MonkeyPatch()
+    patch.setattr(_pytest.pathlib, "_force_symlink", lambda *_args, **_kwargs: None)
+    if hasattr(_pytest.tmpdir, "_force_symlink"):
+        patch.setattr(_pytest.tmpdir, "_force_symlink", lambda *_args, **_kwargs: None)
+    config.add_cleanup(patch.undo)
+
+
 def pytest_configure(config: pytest.Config) -> None:
+    configure_temp_links(config)
     config.addinivalue_line(
         "markers",
         "coverage_auditability(classification, dependencies=()): auditable or "

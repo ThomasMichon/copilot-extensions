@@ -38,6 +38,34 @@ bus/cgroup lifetime and authoritative cleanup. Their separate
 
 ## Select the evidence first
 
+The opt-in native receiving relocation case
+`tests/native/test_checkout_relocation_staging.py::test_live_cross_volume_receiving_uses_existing_native_owners`
+uses the canonical Worktrees runner with `--allow-explicit-tiers`. Explicit
+`RELOCATION_LIVE_ENROLLMENT` names a private JSON input containing newly owned
+`primary` and `second` directories on different volumes, the existing
+`native_data_dir`, and an approved `native_ports` integer list. Optional
+`evidence` names the caller's retained proof file. These are fixture inputs,
+not service/runtime-root overrides; ordinary runner isolation remains enabled.
+The caller must separately authorize existing-server observations (which can
+refresh activity), private fixture creation and exact cleanup. The case never
+starts or stops a mux server, limits checkout data to 1 MiB, preserves pure-plan
+refusal and uses real live admission rather than a stopped-owner test double.
+It records the actual Driver registration observations made during admission
+and requires nonempty native coverage for this existing-server qualification;
+an empty inventory is not evidence that the authenticated query path ran.
+Missing enrollment skips; a skip is not qualification. Retain external fixture
+roots and recovery evidence on failure instead of broadening cleanup. The
+enrolled anchor, creation database and relocation journal live in a fresh
+persistent directory under `second`, outside runner temporary storage. That
+state is removed only after every synthetic linked checkout and fixture root
+has been cleaned successfully; a failing case retains the original recovery
+state with its external copies.
+
+The contained runner suppresses only pytest's optional `*current` temporary
+directory convenience links on Windows. RedirectionGuard may permit creating
+such a link but refuse pytest's later cleanup traversal. Native symlink APIs,
+symlink-specific tests, fixture cleanup and containment remain unchanged.
+
 This page is a reference catalog, not a sequential checklist. Read the lane
 needed for the changed behavior; optional packets below do not all become
 prerequisites for one contribution.
@@ -1301,7 +1329,32 @@ Bridge's opt-in `--test-file tests/test_portable_mux_joined.py
 provider, support archive/receiver, extracted Bridge and standalone-driver
 extensions, SQLite retained handoff and driver HTTP route. It proves one
 admitted/consumed send and same-conversation rejoin, with a duplicate-loadout
-refusal. Provider process/SSH/forwards, the native mux, SDK and the
+refusal. It executes the copied compact headed core and its launch-bound
+extension in real processes, with a synthetic native parent/SDK worker and
+independently checked Host/native/extension identities and child settlement.
+Its constructor- and stop-timeout controls settle the owned process tree,
+listener and streams before propagating failure. POSIX observation keeps the
+Host unreaped until its group settles; Windows retains the owned Job.
+Fault actors use the same synthetic Node worker shape as the joined fixture,
+not additional Python producer roles in the capture provenance.
+`tests/test_receiving_mux.py` additionally runs the copied core declaration
+after removing its construction archive, rejects incompatible core support
+before prerequisite/registration/mux effects, and preserves unknown/reuse
+semantics without a legacy fallback. It also refuses experimental opt-out
+before fresh launch effects while retaining compatibility with existing
+opted-out sessions. Private-socket creation now enters the selected core's
+finite `--mux-create-private` operation; focused Driver
+`tests/test_mux_creation_cli.py` controls cover one literal dispatch, refusal,
+lost results and forbidden default-server joins. The relocated-core process
+control in `tests/test_session_host_core.py` uses a synthetic mux response and
+platform selector, not native POSIX qualification. The joined fixture likewise
+keeps its remote mux/platform edge synthetic while executing the real copied
+headed core; direct receiver-side creation is forbidden.
+`tests/test_receiving_bundle.py` rejects a poisoned shared
+core cache and verifies exact retry payload bytes across private core rebuilds;
+Driver's `tests/test_session_host_core.py` checks reproducible current and
+compatibility archives after cache eviction.
+Provider process/SSH/forwards, the native mux, SDK and the
 POSIX-to-private-scratch carrier remain synthetic. Separate focused enrollment,
 readiness and producer controls preserve ordinary remote refusal, original
 reservation/attempt and predecessor CAS, readiness-only polling, operation-bound
@@ -2211,6 +2264,16 @@ Codespaces and the native Logger batch controls execute actual UV; Logger's
 offline first-use package-effects/backend fixture remains synthetic.
 MCP/Dispatch controls retain source-closure, reinstall, extras, cutoff, retry
 and exact-exit checks through their fixture UV capture.
+The same Linux/Windows steps select the complete
+`agent-dispatch --test-file tests/test_installer_input_fingerprint.py` packet
+separately, without a node filter. Its twelve T2 filesystem/process cases use
+real shells and synthetic packages to check source/dependency sensitivity,
+unchanged reuse and immutable refusal. Windows' six POSIX-shell skips are not
+execution evidence; Linux must qualify that route separately. These cases are
+not actor-free promotion units, installed-service proof or Python 3.10/bootstrap
+selection qualification. The scope regression in
+`tools/test_standalone_qualification.py` protects both routes and exclusion from
+the positive actor-free inventory. Routing is not a recorded passing run.
 The thirty-minute jobs and twenty-minute Logger packet allowance include existing
 preparation and cleanup costs, not a production installer deadline or speed
 claim. Pair this selector with `source_cache=true` for the ordinary constructor's
@@ -2354,7 +2417,23 @@ then exercises a prestarted keeper and the internal launcher's real startup.
 The original conduit and upstream survive a physical backend change,
 authenticated outgoing retirement and supported rollback. Two clients share
 one keeper; actual interpreter prefix, module path, backend PID, mutation and
-initialization counts are asserted. Native Windows and POSIX source runs pass.
+initialization counts are asserted. Launch diagnostics now vary independently
+for every actual keeper, backend and conduit; observed backend traces must
+match admission-bound launch inputs while the original upstream trace stays
+unchanged through update, capable rollback and same-slot process replacement.
+The trace-varying Windows and POSIX source packets pass. The path-gated
+`mcp-owner-exec.yml` source workflow runs its Linux selection separately from
+required unit-only CI. Unsupported-capability rollback and existing legacy
+binding preservation have focused connector controls.
+The focused `test_custody_conduit.py` and `test_custody_host.py` controls also
+exercise running-keeper capability selection through the real socket seam:
+old-host refusal before attach, capable-host/legacy-backend refusal before
+preparation, exact mode acknowledgment, malformed modes, baseline compatibility
+and required-mode handover with the original upstream. This does not qualify
+optional-launcher adoption or remove its pre-effect guard.
+The same controls distinguish pre-attach capability refusal from terminal
+post-attach outcomes, including a bad mode acknowledgment after actual upstream
+startup, lost/malformed replies and caller-context drift.
 The fixture uses contained,
 leased instance ownership and exact cleanup, not host credentials, installed
 services, desktop observation or a production-lifetime claim. It is not part
@@ -3398,6 +3477,25 @@ disconnected no-op. Passing this control is not positive auth recovery or
 qualification of another pinned native runtime; unexpected SDK EOF remains
 an independent hold.
 
+The actor-free Driver file `tests/test_headed_recovery.py` exercises the additive
+Python crash-candidate and recovery reducer with a fixture-owned SQLite CAS
+adapter. Reopening after retire/resume intent, duplicate/conflicting operations,
+changed bindings, stale authority, missing settlement and lost commit
+acknowledgements preserve the original transition and unknown effects.
+Restored observation does not clear legacy EOF holds or claim completed work.
+The source provides no production store or process/credential/launch callbacks;
+this packet is not native recovery, deployment or platform settlement evidence.
+Select it through `tools/run-plugin-tests.py agent-remote-driver --test-file
+tests/test_headed_recovery.py`. Existing native/required packet selection is
+unchanged.
+
+`tests/test_headed_recovery_codec.py` roundtrips complete recovery histories at
+every phase, including lost resume acknowledgement and unresolved effects after
+observation restoration. It rejects malformed/oversized/version-skewed records,
+duplicate/unknown/missing fields, invalid Unicode/types and invalid history
+without repair. Its owner-store status fixture fails on any write. These are
+actor-free source controls, not production journal admission or native recovery.
+
 The explicit T3 file `tests/native/test_native_pending_work.py` qualifies
 nonempty client-task and schedule snapshots through the selected native CLI.
 One control registers a client task, observes the same task as running, idle
@@ -3893,6 +3991,17 @@ or settings publication. Portable controls retain POSIX layout. It uses no
 live Copilot, feed, service, runtime deployment, OS policy or shared cache.
 Native cases skip outside Windows; this is not hosted unit-only CI admission.
 
+The collected-source fixtures `test_source_native_owner.py`,
+`test_source_profile_native.py` and `test_source_simple_native.py` use committed
+account-isolated inputs and the existing complete-application provider. POSIX
+isolation covers canonical libraries and copied bootstrap/API lookups before
+the fixture commit; changing `HOME` alone is not sufficient. Their assertions
+use application construction, `.venv`, completion and success evidence rather
+than treating a legacy deployment manifest as application currentness. The
+source-only controls in `tools/test_native_application_fixture.py` substitute
+Git and construction actors; they do not qualify a native build or installer.
+Native scenarios retain their existing separate execution gates and budgets.
+
 The opt-in `installation-context-acceptance.yml` admitted-source jobs also run
 `tools/test_manager_source_install.py` and `tools/test_manager_source_native.py`.
 Profiles, refusal controls and Manager reuse run in disjoint partitions on
@@ -4190,8 +4299,11 @@ homes. Native source calls do not pass a profile override. The fixture reuses
 the existing copied-account adapter on POSIX; production OS-profile resolution
 is unchanged. Its synthetic source receipt is not merged-source provenance.
 
-The 270-second item and finite child/install bounds remain inside the existing
-bounded runner. Short fixture names avoid Windows native-extension DLL path
+The base case uses a shared 360-second work deadline, 380-second child and
+400-second item limit; provider-exec retains 230/250/270 seconds respectively.
+Both remain inside the existing bounded runner, with unchanged assertions and
+cleanup. These qualification envelopes are not install-performance targets.
+Short fixture names avoid Windows native-extension DLL path
 limits; no production root or system setting changes. This is opt-in, not a
 new required CI matrix, fleet/role enablement, full portfolio rollout, production
 data-format compatibility or performance qualification. Companion unit controls
@@ -4641,14 +4753,79 @@ The copied Python fixture follows the typed passwd accessors; its existing
 POSIX/Windows regression checks quoted homes and unchanged original SDK bytes.
 The PowerShell transport uses the already-redirected Python SDK resolution.
 
+The three migrated native source fixtures also request complete preparation
+again before installation and require its original snapshot and unchanged
+completion record. A fail-only guard forbids fresh construction on that repeat.
+The profile and service-less programs retain their original shared deadline;
+the global-owner fixture uses its existing isolated subprocess environment.
+That fixture queries the actual installed owner's native interpreter and uses
+it for complete preparation and reuse, then checks the prepared target
+environment before installation. The pytest/bootstrap interpreter is not an
+implicit deployment target, and the offline constructor's interpreter-match
+and no-download guards remain unchanged.
+`tools/test_native_application_fixture.py` qualifies that fixture guard and its
+failure propagation with substituted providers. Static compilation of the
+embedded programs is not native execution or proof of a configured-feed hit.
+
 `tools/test_installer_dependency_policy.py` checks that copied configuration
 loads its sibling argument grammar even with a foreign ambient module, and
 refuses a missing sibling. The real application handoff and changed-wheel,
 installed-content and origin controls in `tools/test_local_install_source.py`
 exercise that companion loading through staged nested environments.
 
-The same file's `application_adapter` refusal controls check the explicit prepared
-downstream composition API. Four controls stop changed selection,
+The complete-application orchestration controls in that file substitute the
+profile process while exercising its real CLI and readback inside a held
+toolchain context. They reject parent imports of Packaging/the profile module,
+foreign target markers, changed source records, incomplete profiles and foreign
+worker maps. Build controls retain pre-publication source checks and check
+workspace mutation after the profile continuation. These source/actor controls
+do not establish an actual cold-interpreter bootstrap or native feed/backend
+qualification.
+The isolated provider-entry control additionally runs the actual `-I -B`
+CLI help entry from a poisoned working directory and `PYTHONPATH`, requiring
+its own sibling tools without preparing an environment or contacting a feed.
+The Windows scratch-Git control in `tools/test_promote_release.py` disables
+the fixture repository's long-path setting, then checks out and stages a file
+beyond 260 characters through the canonical promotion helper. Cleanup and the
+unchanged repository configuration are checked too. Use the existing short-path
+test-directory owner so Git's separate administrative-directory limit does not
+mask the long-file behavior; no host configuration is changed.
+
+The toolchain controls in `tools/test_build_python_artifacts.py` also exercise
+reuse-only resolution: a matching retained environment is queried again;
+absent, partial, unmarked and foreign-source/interpreter slots cannot create
+staging or provision a replacement. The source orchestration controls retain
+the same complete-application toolchain beyond compact Windows source cleanup,
+including deep output paths, while preserving standalone first-party lifetime.
+These are substituted-process/path controls, not native retained-environment
+or automatic complete-output reuse qualification.
+
+Complete-output reuse controls exercise the existing source/wheel/profile
+validators without constructing an environment. They reject changed complete
+bytes and, even with refreshed custody digests, changed wheel/application
+semantics; incompatible target, extras, policy or toolchain; and incoming-source
+mutation. Provider/CLI actors distinguish cache misses from worker failures,
+timeouts, foreign maps and late source changes, forbid cold-parent Packaging
+imports, and prevent construction replay. Transport controls accept one
+same-root sibling completion but reject foreign or mixed preparation roots.
+Stable-base selection is checked independently of the caller's venv path.
+These source/actor controls do not establish native retained-toolchain survival,
+an actual configured-feed cache hit, installed update behavior or performance.
+
+The cold-selection controls in
+`plugins/agent-worktrees/tests/test_python_runtime_install.py` reject installed
+process-helper imports while exercising the vendored SDK's current/LKG
+selection for direct and nested environments, plus an empty installation.
+Their coupled construction controls retain canonical contained-driver context;
+running them outside that context is not permission to bypass driver custody.
+
+`worktree-manager/tests/test_bootstrap_source.py` checks the cold Dev adapter's
+complete-input context, original repair SDK and driver source-digest ordering.
+Input-exit failures cannot repeat installation or dispatch the requested
+command. These substituted-actor controls do not qualify a real cold bootstrap.
+
+The `application_adapter` packet in `tools/test_local_install_source.py` qualifies the explicit prepared
+downstream composition API. Four refusal controls stop changed selection,
 missing application, mismatched construction and Manager-native ownership
 before construction. `tools/test_application_adapter_journey.py` retains the
 contained synthetic application journey: real UV
@@ -6542,7 +6719,77 @@ later header cannot poison a previously pending selector retry. Existing strict
 receipt/parser and pending-withdrawal suites still cover malformed legacy proof;
 the new constructor must not repair it.
 
+## Public toolchain metadata deadlines
+
+The public toolchain resolver accepts the caller's monotonic deadline without
+changing governed-feed selection, seasoning, or hash requirements. All package
+metadata requests share that deadline. Response status, headers, redirects and
+body reads cannot extend it by continuing to deliver bytes. Deadline-bound
+requests use a finite, isolated Python child so DNS, address attempts and proxy
+CONNECT negotiation share the same budget; expiration kills and waits for that
+request child rather than abandoning a resolver thread. Calls without a deadline
+retain their in-process fetch behavior.
+
+`tools/test_seasoned_public_feed.py` exercises finite and trickling responses,
+including chunk framing, redirects and HTTP errors, over fixture-owned local
+sockets. It checks timer/thread and request-child settlement as well as deadline
+failure, including stalled DNS and trickling HTTPS proxy negotiation.
+`tools/test_public_toolchain_source.py` checks shared-budget exhaustion and
+forwarding through the existing toolchain-lock owner. These socket/thread tests
+are separate from the actor-free promotion-unit packet; they do not establish
+native installer, private-feed or installed maintenance qualification.
+
+### Source-only local composition
+
+`tools/test_promote_release.py` includes real-Git local-composition fixtures:
+exact committed source despite staged edits, Main plugin/standalone/library
+version retention without bump allocation, pending changefile preservation,
+foreign repository/index isolation, repeatable output and scratch settlement
+on selection failure. These fixture-owned process tests remain separate from
+the actor-free promotion packet. `test_source_objects.py` in that packet
+checks raw-blob batching, Git-environment filtering and delegation/cleanup
+through substituted existing owners. Neither packet qualifies installed
+publication, native maintenance or application adoption.
+`tools/test_local_runtime_promotion.py` adds real-Git escaping-symlink fixtures
+for Linux's native checkout semantics, covering manifests, parents, standalone
+versions, fallbacks, templates, the catalog and changefile directories/files.
+Actor-free preflight cases cover all version destinations before any write.
+
+### Complete local application preparation and reuse
+
+Run `tools/test_local_install_reuse.py` with the existing bounded test runner
+for real first-party wheel/profile bytes, unchanged complete reuse, and changed
+source, composition, wheel, application, target, extras, policy or toolchain
+refusals. These fixtures neither build another wheel nor install an application.
+The small preparation batch, worker-failure-versus-cache-miss and retained
+toolchain/deadline controls live in `promotion_unit_tests/test_standalone_artifacts.py`.
+Source-object controls also exercise the caller budget inherited by canonical
+Git operations and the scratch-cleanup reserve inside that same deadline.
+
+`test_copied_application_qualifies_after_the_prepared_source_is_removed` in
+`tools/test_local_install_source.py` separately invokes a real copied application.
+Its Windows-only marker-sensitive case omits a dependency in the native profile
+and verifies offline locking/execution do not introduce a cross-target marker
+branch. Windows preparation currently requires a standard CPython target;
+unsupported interpreter variants refuse before emitting the application.
+These source fixtures do not qualify installed service/continuity outcomes.
+The separate installer-child executable-spelling failure remains tracked in
+[issue #12253](https://github.com/ThomasMichon/copilot-extensions/issues/12253);
+do not report its installation cases as passing preparation evidence.
+
 ## Unit-only promotion packet
+
+The actor-free health composition packet also admits installed Windows
+enrollment preview/installation binding, native default normalization,
+GUI-environment binding, collection support loss, finite-root result/timeout/
+cleanup propagation and exact native request framing. Storage, runtime,
+process and scheduler owners are substituted; required CI registers no task
+and starts no child. The opt-in
+`tests/native/test_health_windows_enrollment.py` packet separately proves closed
+installed inputs, actual CLI selection, two calendar cycles, matching no-op,
+replacement/rollback, failed replacement with restored dependencies, successor
+execution and lease-settled withdrawal. Those native results are not production
+hourly publication, carrier delivery or another platform's qualification.
 
 The actor-free `test_health_composition.py` packet executes the existing domain
 age projection, normal report/parser and SVG composition. Substituted storage
@@ -6936,7 +7183,8 @@ invalid historical tag and native-compatible candidate parity with UV,
 single-project histories above the offered-candidate cap, bounded multi-project
 indexes and retained unsafe/tag-budget refusal,
 configured-feed redirects, credential isolation, explicit redirect refusal,
-late index and source rechecks, retained inputs,
+late index and source rechecks, target-incompatible metadata churn with
+compatible candidate and malformed-record refusal controls, retained inputs,
 one-download selected wheels, tampered retained bytes, shared budgets, sanitized
 admission refusals and Windows owned-worker timeout cleanup. Actor-free
 projection, candidate-witness, recheck, safe resolver-stop and isolated-worker
@@ -7014,7 +7262,8 @@ template or changed input still rejects admission.
 An exact node whitelist deselects other cases before execution and restores manifest
 order. Missing or duplicate admitted nodes reject collection before execution.
 Nine execution-acquisition controls in `test_related_acquisition.py` exercise
-the original selection and absence paths, fatal source/presence failures,
+the original selection and absence paths, retained config with failed
+acquisition observations for optional source/presence failures,
 suppressed registry failures, self-restoring callbacks and argument-time
 rebinding, including an opaque absent-registry fallback with a self-restoring
 resolver. Synthetic source, resolver and registry boundaries retain probe
@@ -7160,6 +7409,15 @@ Actor-free POSIX watcher controls supply their synthetic signal constant along
 with their mocked OS calls, so collection/execution does not require the host
 platform to expose POSIX-only signal constants. This does not qualify native
 POSIX process retirement on Windows.
+
+`tools/promotion_unit_tests/test_manager_activation.py` exercises the actual
+Manager activation acknowledgment validator without processes or sockets.
+Its seven exact nodes accept only the selected incoming generation's startup
+or already-ready acknowledgment, and reject predecessor, integer-success,
+failed-start, absent-predecessor and wrong-route replies. The existing packet
+adds its source/test hashes and production call coverage without changing
+actor restrictions or the budget. Real passive readiness and one-way
+publication remain in the Manager adapter and native acceptance lanes.
 
 `tools/test_promotion_version_allocation.py` exercises actual Git composition
 from landed Main: unlanded aliases do not change versions, dependency/checkout
@@ -9674,10 +9932,24 @@ may remain owned by unresolved processes; it is not ordinary failed-test debris.
 Run `python -m pytest -q tools/test_run_plugin_tests.py -k manager_acceptance_`
 through the bounded test supervisor for the focused wrapper controls. They inject
 the unsettled-process error without creating a genuinely unreaped process.
-Fixtures are constructed before pytest's unchanged 30-second item checks;
+The runtime contract overlaps its seven independent entrypoint/progress controls
+with genuine fixture construction inside that same contained group. It waits
+for both before running the remaining installed-runtime consumers serially;
+the selections are complementary and use separate pytest temporary directories.
+Fresh construction and archived-release repair run in separate processes with
+distinct fixture roots and output files. Both must succeed before the final
+rollback preparation reads their results; no shared-root mutation runs in parallel.
+Construction failure settles the input-control process, and a failed control
+cannot admit the installed-runtime consumers. The group and resource limits
+are unchanged. Fixtures are constructed before their consumers' unchanged
+30-second item checks;
 no constructor, dependency policy, package health or failed-selection assertion
-is mocked. The assertions run through `run-plugin-tests.py` with explicit
-`tests/native/test_manager_runtime_install.py` selection. The ordinary Manager
+is mocked. The native owner prepares the test interpreter through
+`run-plugin-tests.py` and retains its admission lease. Assertions use that same
+interpreter with the portfolio/command guard, isolated state roots and explicit
+native-file selection under the existing process-tree supervisor; they do not
+rebuild a second test-tool environment inside the timed product-construction
+group. The ordinary Manager
 suite does not recurse into that prepared native lane. Report both ordinary
 orchestration/assembly units and this cold native acceptance before publishing
 a Manager installation change; neither is a substitute for the other.
@@ -9942,6 +10214,14 @@ Retained mux shell callbacks have a separate, independently contained contract:
 ```text
 python tools/run-manager-runtime-acceptance.py --root .validation --contract callbacks
 ```
+
+The `runtime`, `callbacks` and `source` contracts accept optional
+`--main-seed <40-hex Main commit>` to pin composed inputs when the tracked Main
+ref advances. Evidence records the exact source, seed and composed tree; malformed
+or inapplicable pins refuse before preparation. This does not allocate versions
+or replace the canonical promotion owner. Windows callback preparation records
+only token-user/default-owner comparison booleans and installed SDK hashes.
+Raw SID values are not persisted or printed, and ownership admission is unchanged.
 
 This does not replace or split the original ten runtime checks. Each contract
 keeps the existing 300-second aggregate budget and 30-second pytest item limit.

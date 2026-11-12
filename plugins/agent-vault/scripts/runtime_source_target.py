@@ -5,10 +5,10 @@ from __future__ import annotations
 import argparse
 import json
 import os
-from pathlib import Path
 import re
 import stat
 import sys
+from pathlib import Path
 
 SCRIPTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPTS))
@@ -42,8 +42,8 @@ def document(root: Path, selection: dict) -> dict:
 
 
 def current(root: Path, payload: Path, package_version: str) -> bool:
-    from runtime_profile import _unique_object
     import versioned_runtime_source as source
+    from runtime_profile import _unique_object
 
     expected = selected(root, payload)
     pin = os.environ.get(source.SOURCE_PIN_ENV)
@@ -51,13 +51,27 @@ def current(root: Path, payload: Path, package_version: str) -> bool:
         raise ValueError("Source identity differs from the update transaction selection")
     manifest_path = root / "deploy-manifest.json"
     marker = root / "current-version"
-    if expected["package_version"] != package_version or not manifest_path.is_file() or not marker.is_file():
+    if (
+        expected["package_version"] != package_version
+        or not manifest_path.is_file() or not marker.is_file()
+    ):
         return False
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"), object_pairs_hook=_unique_object)
+    manifest = json.loads(
+        manifest_path.read_text(encoding="utf-8"), object_pairs_hook=_unique_object,
+    )
     if not isinstance(manifest, dict) or not isinstance(manifest.get("source"), dict):
         raise ValueError("Vault deployment metadata must name its source")
     fields = expected["source_identity"]
     version = expected["runtime_version"]
+    if (
+        fields is None and expected["profile"] == "base"
+        and isinstance(manifest.get("runtime_version"), str)
+        and re.search(r"\.profile\.[0-9a-f]{16}", manifest["runtime_version"])
+    ):
+        from install_source import native_current
+
+        if native_current(root, payload, "agent-vault"):
+            version = manifest["runtime_version"]
     if (
         manifest["source"].get("version") != package_version
         or manifest.get("runtime_profile", "base") != expected["profile"]
@@ -162,4 +176,4 @@ if __name__ == "__main__":
         raise SystemExit(main())
     except (ValueError, RuntimeError, OSError) as error:
         print(str(error), file=sys.stderr)
-        raise SystemExit(2)
+        raise SystemExit(2) from None

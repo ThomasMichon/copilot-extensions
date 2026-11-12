@@ -25,6 +25,13 @@ are not created. Nothing opens a browser or sends network traffic.
   lifecycle records contribute only closed-vocabulary counts. Their explicit
   `ts` is epoch milliseconds, not nanoseconds. Abandoned tasks are not silently
   called transport errors, and lifecycle records do not acquire a duration.
+- Bridge's normalized conversation and tool-call transitions have separate
+  `bridge-conversation` and `bridge-tool` count groups. Outcomes are observed
+  target-state labels, not unique turns/tools or verified work verdicts;
+  producer terminalization can label a tool completed without its result.
+  Cancellation is not a transport error. Unknown event/state combinations
+  remain unsupported, and identifiers, cursors, tool details and content are
+  discarded. These records never acquire latency or availability semantics.
 - Other schemas, malformed/partial records, missing timing, future timestamps
   and expired data have explicit coverage counters. Unknown raw fields,
   identifiers, routing metadata, messages and exception text are not copied.
@@ -173,7 +180,7 @@ only the selected local listener check; an explicit older hour within the
 168-hour window exports retained services only, never present-time probes.
 Run the two explicit commands to obtain current health and previous-hour
 telemetry, or use the separately approved one-shot operation below.
-Native periodic enrollment is not implemented. An early/current-hour export from the separate report command
+Windows enrollment is a separate explicit local lifecycle below. An early/current-hour export from the separate report command
 remains its existing bounded snapshot, not a complete-hour total.
 
 Collection holds a nonblocking OS-backed run lock, uses a 45-second admission
@@ -226,7 +233,7 @@ Missing, wrong or changed approval refuses before effects; a token without
 `--apply` also refuses. Keep this local policy and approval outside synchronized
 report data. They authorize neither service changes nor carrier writes.
 Both payload entry points select an already provisioned runtime read-only for
-`health run`, including apply, and `health prepare-job`. A missing runtime refuses with the existing
+`health run`, including apply, `health prepare-job` and `health job`. A missing runtime refuses with the existing
 launcher failure status before calling an installer, stamping diagnostics or
 creating runtime/store state; use the normal setup owner separately.
 
@@ -274,7 +281,7 @@ Independently installed callers must first qualify the exact selected Machines
 runtime's packaged `agent_machines/health-collection-v1.json` declaration:
 
 ```json
-{"schema":"agent-machines.health.collection","version":1,"operations":["preview","apply","prepare-job"]}
+{"schema":"agent-machines.health.collection","version":1,"operations":["preview","apply","prepare-job","installed-job"]}
 ```
 
 This declaration is separate from the package version and from service-export
@@ -355,8 +362,9 @@ termination behavior are **not qualified by rendering these definitions**.
 
 `registered: false`, `enabled: false` and
 `qualification: native-scheduler-not-qualified` are preparation results, not
-queries of an existing task. Registration/enrollment is deliberately absent.
-Before a future owner registers anything, it must verify the actual interactive
+queries of an existing task. This preparation command never registers anything;
+use the installed Windows lifecycle below, not hand-registration of this XML.
+Enrollment verifies the actual interactive
 identity, current installation selection, policy adoption, existing-definition
 conflicts and the native first/reconcile, two-cycle unattended launch, overlap,
 late-wake, deadline/storage and exact-cleanup gates in the reviewed local
@@ -366,6 +374,119 @@ active console or RDP session. Record its unavailable/inconclusive reason; do
 not require operator attendance or block publication, CI or enrollment on its
 absence. Automated GUI/console-state, result and complete-tree cleanup controls
 remain independent requirements; unobserved is not a visual pass.
+
+## Installed Windows enrollment
+
+```text
+agent-machines health job configure --store-dir <absolute-v2-store> --user-id <interactive-Windows-SID> --enabled
+agent-machines health job configure --store-dir <absolute-v2-store> --user-id <interactive-Windows-SID> --enabled --apply --expect <preview-token>
+agent-machines health job status
+agent-machines health job converge
+agent-machines health job disable
+agent-machines health job remove
+```
+
+Configure previews the exact local store/policy, interactive account and enabled
+intent. `--apply --expect` adopts that preview locally; omitting `--enabled`
+adopts a disabled task. The confirmation binds existing local configuration and
+native task state too. A changed store, policy, account or before-state needs
+a new preview. No executable, interpreter, task XML or synchronized policy is
+accepted. Nothing enrolls by default; Linux enrollment is unsupported.
+
+When confirmation first has to recover an older pending operation, the result
+compares the settled desired state with the newly confirmed configuration.
+`configuration-not-applied` and exit 2 mean recovery completed but did not
+apply that requested store/policy; obtain a fresh preview rather than treating
+the previous configuration as the new one. `configuration_applied` is null
+while recovery remains unknown and false for a confirmed mismatch.
+
+The executing installation must already have an immutable numbered runtime,
+the retained GUI bootstrap and collection v1 `installed-job` support. Existing
+Windows installation construction retains those helpers with its normal slot
+completion owner. The scheduler calls the slot-local retention bootstrap under
+the physical GUI base interpreter, binding its exact generation/completion
+identity before site imports. The installed finite root owns a bounded retained
+runtime child directly; it never consults a checkout, replaceable marketplace
+payload, PowerShell dispatcher, PATH, provisioning or update action.
+The installed virtual environment still depends on its installation-managed
+base Python; this feature does not install or remove that interpreter.
+
+Convergence first reads the exact owned native task and qualifies collection
+preview against its selected installed runtime. Fresh registration is disabled
+and read back before enabling. Matching registration is not rewritten or run,
+so convergence does not reset cadence. Replacement/rollback stops only the
+owned task, verifies settlement, switches a disabled definition, revalidates
+policy and reads back the enabled state. Existing runtime-reference custody
+protects old/new dependencies until native and state settlement; no new pin
+store, collector, watchdog or retry scheduler is introduced.
+
+Local desired/confirmed state and a bounded recovery record live under that
+installation's `agent-machines.health.enrollment.json`. An unknown effect retains dependency custody.
+The recovery record explicitly retains replace/disable/remove intent before
+native effects. Removal supersedes a pending replacement; failed or interrupted
+withdrawal cannot recover an enabled incumbent. Disable recovery uses exact
+owned stop/readback without collector-policy readiness, and cannot settle while
+owned instances remain.
+Each native mutation first persists an unsettled fence in that same recovery
+record. Confirmed native cleanup clears it; unconfirmed cleanup retains the
+original process owner's retry/callback and refuses further mutations, even
+from a later CLI process. A withdrawal request may tighten recorded intent while
+fenced, but cannot claim success or stop a different mutator. Only the original
+cleanup owner's confirmed settlement clears this fence; task readback alone
+does not prove a paused native mutator has exited.
+CLI and resource boundaries retain the native cleanup owner through one
+ten-second settlement attempt, including callback delivery, before returning.
+Confirmed cleanup clears the fence but does not replay the unknown operation;
+the next lifecycle request reconciles it normally. Failed settlement remains
+an explicit error with the fence preserved. In-process callers retain the
+original owner for further bounded cleanup; an exiting CLI cannot promise
+later handle recovery. That case needs explicit owner-led recovery, not a
+successful disable or permission to force-clear state.
+`converge` first reconciles the recorded exact task; it does not blindly repeat
+registration. Preview and recovery recognize both definitions retained in a
+pending transaction, including their disabled forms, without misclassifying a
+known interrupted candidate as foreign. Native fences and runtime qualification
+still apply before effects. Conflicting definitions refuse without overwrite. Failed
+replacement restores a qualified known-good definition and reports rollback
+separately. Unsupported old code or policy drift cannot re-enable a rollback.
+`disable` and `remove` do not require collection-policy readiness: they settle
+only the owned task. Removal releases its references after confirmed absence,
+withdraws local adoption and preserves policy/history and unrelated tasks.
+Native shutdown disables future launches and waits for the finite installed
+root to complete its own child-Job settlement. It does not force-stop the root
+and infer descendant exit from an empty scheduler list. Only normal root
+results that attest settlement (or a never-run task) permit completion; a
+native crash, cleanup-unknown result or bounded wait expiry preserves an
+unknown outcome and retained dependencies. The shutdown helper reserves cleanup
+inside a 60-second caller budget, with at most 50 seconds of native waiting.
+Lifecycle control uses its executing immutable manager; collection convergence
+separately qualifies the current collector. After an incompatible collector
+rollback, the installation owner's retained capable manager can still perform
+status, disable and removal without invoking the unsupported collector.
+
+For normal declared machine-state convergence, a requirement package may add
+`resources: [{type: health-job, state: present, platforms: [windows]}]`.
+That resource only converges an existing local opt-in; it cannot supply
+collection settings or grant adoption. `state: absent` withdraws it. Local
+product-namespaced consent/recovery filename is reserved against ordinary `file`
+resources at every installation location, including custom roots and resolved aliases, so a
+generic package JSON write cannot create this local opt-in. This protects the
+built-in convergence path, not arbitrary scripts with full filesystem authority.
+Runtime replacement retains the old registration's dependencies until this same owner
+refreshes it; never delete slots independently to force convergence.
+
+Results distinguish adopted/configured/enabled, native state/instances,
+last execution/result, candidate readiness, rollback and recovery-required
+facts. Last/next execution times use native scheduled-task information rather
+than guessing a timezone for COM's unspecified-kind dates. Unavailable timing
+metadata is null and does not block exact disable/removal; native result and
+instance settlement still apply.
+Successful registration is not evidence that an hourly collection ran.
+The explicit native installed-enrollment test uses deleted build inputs,
+two accelerated calendar cycles, replacement, rollback and withdrawal.
+Desktop observation remains optional; actual hourly host results, inbound
+access, service cohorts and carrier delivery retain their separate gates.
+
 Listener-only recollection replaces only `local_listener`; retained SSH,
 session and other unselected domains keep their exact evidence and source
 timestamps. The record boundary also refuses changes to those domains.

@@ -145,6 +145,73 @@ def test_daemon_bookkeeping_is_not_caller_authority_but_explicit_use_is(monkeypa
     assert execution_context._identity(cfg, key) != explicit
 
 
+@pytest.mark.parametrize("name", [
+    "COPILOT_EXTENSIONS_BOOT_TRACE", "COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN",
+    "COPILOT_EXTENSIONS_BOOT_TRACE_SHIM_START_MS",
+])
+def test_trace_fields_remain_physical_but_only_explicit_use_changes_context(monkeypatch, name):
+    cfg = BridgeConfig(server=ServerSpec(type="stdio", command=["unused"]), auth=AuthSpec())
+    key = execution_context.descriptor()["key"]
+    monkeypatch.setenv(name, "first-launch")
+    first = execution_context._identity(cfg, key, trace_bookkeeping=True)
+    monkeypatch.setenv(name, "second-launch")
+    assert execution_context.inherited_environment(cfg)[name] == "second-launch"
+    assert execution_context._identity(cfg, key, trace_bookkeeping=True) == first
+    cfg.server.env["EXPLICIT_TRACE"] = "${" + name + "}"
+    explicit = execution_context._identity(cfg, key, trace_bookkeeping=True)
+    monkeypatch.setenv(name, "third-launch")
+    assert execution_context._identity(cfg, key, trace_bookkeeping=True) != explicit
+
+
+@pytest.mark.parametrize("declared", [False, True])
+def test_context_peer_selects_declared_trace_mode_and_preserves_legacy_baseline(monkeypatch, declared):
+    cfg = BridgeConfig(server=ServerSpec(type="stdio", command=["unused"]), auth=AuthSpec())
+    peer = execution_context.descriptor()
+    if not declared:
+        peer.pop("trace_bookkeeping")
+    monkeypatch.setenv("COPILOT_EXTENSIONS_BOOT_TRACE_SHIM_START_MS", "first")
+    request = execution_context.fields_for_peer(cfg, {"execution_context": peer})
+    context = request["execution_context"]
+    assert context.get("trace_bookkeeping", 0) == int(declared)
+    assert context["digest"] == execution_context._identity(
+        cfg, peer["key"], trace_bookkeeping=declared,
+    )
+    monkeypatch.setenv("COPILOT_EXTENSIONS_BOOT_TRACE_SHIM_START_MS", "second")
+    if declared:
+        assert execution_context.load_config(
+            "fixture", request, lambda *_args, **_kwargs: cfg, repository_root=Path.cwd(),
+        ) is cfg
+    else:
+        with pytest.raises(execution_context.SharingUnavailable):
+            execution_context.load_config(
+                "fixture", request, lambda *_args, **_kwargs: cfg, repository_root=Path.cwd(),
+            )
+
+
+def test_old_caller_request_is_still_accepted_by_new_context_provider(monkeypatch):
+    cfg = BridgeConfig(server=ServerSpec(type="stdio", command=["unused"]), auth=AuthSpec())
+    peer = execution_context.descriptor()
+    monkeypatch.setenv("COPILOT_EXTENSIONS_BOOT_TRACE_SHIM_START_MS", "legacy")
+    request = {"execution_context": {
+        "contract": peer["contract"], "digest": execution_context._identity(cfg, peer["key"]),
+    }}
+    assert execution_context.load_config(
+        "fixture", request, lambda *_args, **_kwargs: cfg, repository_root=Path.cwd(),
+    ) is cfg
+
+
+@pytest.mark.parametrize("mode", [True, "1", 2])
+def test_unsupported_trace_identity_mode_refuses_before_config_loader(mode):
+    peer = execution_context.descriptor()
+    request = {"execution_context": {
+        "contract": peer["contract"], "digest": "unused", "trace_bookkeeping": mode,
+    }}
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("unsupported identity mode cannot load configuration")
+    with pytest.raises(execution_context.SharingUnavailable, match="unsupported"):
+        execution_context.load_config("fixture", request, forbidden, repository_root=Path.cwd())
+
+
 @pytest.mark.parametrize("platform,reference,significant", [
     ("nt", "agent_mcp_install_dir", True),
     ("posix", "agent_mcp_install_dir", False),
@@ -268,7 +335,8 @@ def test_installed_context_request_does_not_transfer_credentials(monkeypatch):
     })
     monkeypatch.setattr("agent_mcp.config.load_config", lambda bridge, **kwargs: cfg)
     fields = execution_context.request_fields("private", "bridge")
-    assert set(fields["execution_context"]) == {"contract", "digest"}
+    assert set(fields["execution_context"]) == {"contract", "digest", "trace_bookkeeping"}
+    assert fields["execution_context"]["trace_bookkeeping"] == 1
     assert "fixture-private-value" not in json.dumps(fields)
 
 

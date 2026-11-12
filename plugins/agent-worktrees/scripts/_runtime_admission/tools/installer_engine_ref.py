@@ -39,7 +39,7 @@ _NATIVE_BEGIN = "# native-executable:begin"
 _NATIVE_END = "# native-executable:end"
 PYTHON_FILES = (
     "installer_engine.py", "installer_engine_health.py", "runtime_launcher.py", "installer_driver.py",
-    "install_source.py",
+    "install_source.py", "runtime_application_install.py",
     "installer_wheel_inputs.py",
     "installer_wheel_snapshot.py",
     "installer_wheel_acquisition.py",
@@ -53,20 +53,22 @@ PYTHON_ADOPTERS = (
     "agent-worktrees", "agent-vault", "agent-pull-requests", "agent-ssh",
     "agent-codespaces", "agent-logger", "agent-bridge",
     "agent-dispatch", "agent-mcp", "agent-index",
+    "budget-guidance", "agent-machines", "agent-containers",
 )
 STANDALONE_PYTHON_ADOPTERS = ("worktree-manager", "libs/update-driver")
 STANDALONE_NATIVE_ADOPTERS = (
     "libs/update-driver", "plugins/agent-mcp", "plugins/agent-machines",
     "plugins/agent-containers", "plugins/budget-guidance", "plugins/agent-worktrees",
 )
-STANDALONE_NATIVE_FILES = (
-    "installer-engine.ps1", "installer-engine.sh", "installer_engine_process.py",
-    "installer_engine_uninstall.py", "installer_engine_uninstall_darwin.py",
-    "installer_engine_uninstall_windows.py",
-    "installer_engine_footprint.py",
-    "installer_engine_uninstall_controllers.py",
-    "installer_engine_commands.py", "installer_engine_stop.py",
-)
+STANDALONE_NATIVE_FILES = (*FILES, *SUPPORT_FILES)
+STANDALONE_NATIVE_EXTRA_FILES = {
+    "plugins/agent-machines": ("runtime_launcher.py",),
+}
+
+
+def native_files(consumer: Path, repo: Path) -> tuple[str, ...]:
+    relative = consumer.relative_to(repo).as_posix()
+    return (*STANDALONE_NATIVE_FILES, *STANDALONE_NATIVE_EXTRA_FILES.get(relative, ()))
 
 
 def standalone_python_adopter_dirs(repo: Path) -> tuple[Path, ...]:
@@ -137,7 +139,7 @@ def human_output_entrypoint(consumer: Path) -> Path:
     )
 
 
-def human_output_declaration(script: Path) -> dict:
+def human_output_declaration(script: Path, *, initializer_sha256: str | None = None) -> dict:
     helper = script.parent / HUMAN_HELPER
     text = script.read_text(encoding="utf-8")
     if text.count(HUMAN_SOURCE_LINE) != 1:
@@ -151,15 +153,22 @@ def human_output_declaration(script: Path) -> dict:
         # replacement for PowerShell's signature/execution-policy enforcement.
         return hashlib.sha256(path.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
 
+    if initializer_sha256 is not None and (
+        not isinstance(initializer_sha256, str)
+        or re.fullmatch(r"[0-9a-f]{64}", initializer_sha256) is None
+    ):
+        raise ValueError(f"{script}: invalid human-output initializer digest")
     return {
         "version": 1, "encoding": "utf-8", "entrypoint": script.name,
         "entrypoint_sha256": digest(script), "initializer": HUMAN_HELPER,
-        "initializer_sha256": digest(helper),
+        "initializer_sha256": digest(helper) if initializer_sha256 is None else initializer_sha256,
     }
 
 
-def human_output_json(script: Path) -> str:
-    return json.dumps(human_output_declaration(script), indent=2) + "\n"
+def human_output_json(script: Path, *, initializer_sha256: str | None = None) -> str:
+    return json.dumps(
+        human_output_declaration(script, initializer_sha256=initializer_sha256), indent=2,
+    ) + "\n"
 
 
 def native_executable_config(canonical_dir: Path) -> str | None:

@@ -1,0 +1,9 @@
+{
+  "comment": "Load complete provider sibling tools under isolated Python",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

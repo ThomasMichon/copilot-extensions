@@ -337,10 +337,87 @@ handover. Preserve held sessions and the separate pre-feature adoption hold.
     [source-pinned CLI packet](journal/2026/11.10-explicit-owner-cli.md#qualification-and-merge-follow-up)
     passed. Selected-runtime discovery, controlled production launcher capture
     and automatic adoption remain separate work.
-  - [ ] **Selected-runtime discovery provider:** report owner-handoff support
+  - [x] **Selected-runtime discovery provider:** report owner-handoff support
     from the actual physical selected executable without MCP startup, and
-    qualify both selected and stale-slot queries across replacement. Caller
-    discovery/capture integration and rollback adoption remain open.
+    qualify both selected and stale-slot queries across replacement. #12052
+    merged at `59a739fce374514aaec89b65957c17a5bf6b2b29`; its
+    [source-pinned query qualification](journal/2026/11.10-explicit-owner-cli.md#discovery-provider-qualification-and-merge)
+    passed. Caller discovery/capture integration and rollback adoption remain
+    open.
+  - [x] **Explicit Linux exec caller:** capture the exec owner's native pair
+    and pass a sealed, session-only overlay for explicitly named configured
+    entries, with actual-start discovery bound to a physical optional receiver.
+    Preserve probe-only self-provisioning inhibition, cold-context fallback
+    before effects and strict existing paired CLI semantics. Qualify actual
+    Copilot consumption against an ordinary same-environment baseline,
+    separately from the synthetic native-exec fixture. Preserve
+    ordinary selection for unsupported entries and leave Windows capture,
+    default caller adoption and installed acceptance open.
+    #12192 merged at `5a9594df3a03a5294db2bcaa6182dbf8cba93fcd` after
+    current-head approval, required CI and the exact-source Linux/native
+    configuration-consumption packet. This closes the bounded source producer,
+    not trace-sensitive checkpoint adoption or the parent lifetime boundary.
+    All 18 affected non-changefile blobs are present byte-for-byte on Main
+    `d6a55e39950de6cd40204f8c9ff581dd7b547308` (MCP `0.2.241-dev1`);
+    this is released source, not installed or productive adoption.
+  - [ ] **Trace-sensitive checkpoint adoption:** qualify the private binding
+    across physical replacement and rollback when launch diagnostics differ,
+    without silently changing legacy identities. Conditional optional-receiver
+    admission must preserve ordinary execution against unsupported running
+    keepers before startup and require the selected mode through the complete
+    attach path. This is separate from request-context negotiation and actual
+    configuration consumption.
+    Provider expansion accepts an explicitly selected trace-bookkeeping mode
+    and advertises it from the actual backend; legacy custodians and bindings
+    remain unchanged. #12222 merged the provider expansion at
+    `938a59d60efc3f263245b241784d3c5e31869c01` after exact-head approval and
+    required CI. Release and optional-launcher adoption remain required before
+    removing that guard.
+    #12224 merged conditional custodian selection at
+    `8418036f427ca65b7977c4a598512cc418112f91` after current-head approval,
+    required CI and trace-varying physical source qualification on Windows and
+    Linux. This qualifies the internal connector/custodian path, not the
+    optional launcher's old-running-custodian boundary or installed adoption.
+    #12226 merged running-keeper enforcement at
+    `912d19227b259d7f5902362d362f45df9b445c45` after current-head approval,
+    required CI and mixed-version socket controls. The live keeper's ping
+    declares enforcement separately from backend support, and its acknowledgment
+    confirms the selected binding mode. Post-attach failures are terminal, not
+    pre-effect fallback signals. Conditional optional-receiver selection now
+    probes that running provider before startup, passes the strict requirement
+    through cold/existing attach and independently checks backend support.
+    #12233 merged that optional-receiver boundary and the tightly coupled
+    native constructor comparison correction at
+    `6ae73d5d3883312a2fe30c33dd53706f5e31618a` after current-head approval,
+    required CI and Windows/Linux source qualification. Promoted release and
+    installed adoption remain open; the source packets do not establish a
+    joined installed-client handover.
+    #12239 subsequently merged the
+    [joined optional-receiver source packet](journal/2026/11.10-explicit-owner-cli.md#joined-optional-receiver-source-composition).
+    Its controlled caller does not qualify actual Copilot handover or installed
+    acceptance.
+    #12242 now qualifies the joined actual offline Copilot protocol path through
+    three private physical handovers and post-retirement exchanges. See the
+    [native-client source result](journal/2026/11.10-explicit-owner-cli.md#actual-native-client-source-result).
+    Installed adoption and production lifetime remain open; the source tool
+    qualification follows below.
+    #12247 qualifies four actual native tool executions and result consumption
+    with a bounded loopback canned provider, initially and after all three
+    predecessor exits. #12249 subsequently qualifies three accepted native
+    tool calls while each predecessor is actually quiescing, followed by fresh
+    incoming traffic. #12252 adds an accepted invocation whose real result
+    transport fails during quiescence: custody remains uncertain/fenced, the
+    affected conduit exits, the native client reports an error without replay,
+    and outcome observers stay active through shutdown. This qualifies the
+    bounded negative source case, not recovery of the lost result or continued
+    use of that failed MCP session. Installed adoption and production lifetime
+    remain open. See the
+    [tool-consumption slice](journal/2026/11.10-explicit-owner-cli.md#actual-native-tool-consumption-prepared).
+    Main `0bf2f14e6a035bf91ed441be02dc81c64f3b5432` releases MCP
+    `0.2.250-dev1`: all 78 package tree entries match the qualified source,
+    except the independently checked fallback-version stamp; the constructor
+    correction also matches. This verifies released implementation bytes, not
+    installation, the latest test-only PR's promotion or running acceptance.
   - [x] **Explicit-owner source merged:** #11935 landed at
     `c0eab0d952a37607f6cf7030ac1a77f377f98a74` after current-head automated
     approval, required CI and resolution of addressed findings. The source
@@ -442,6 +519,48 @@ withdrawal authorizes no GUI effect or change to the SDK's own admission rules.
 - [ ] Exercise current/prior peers, supported rollback and a pre-feature peer
   lacking reattachment. Unsupported support is explicit; live legacy clients
   are preserved rather than forcibly migrated.
+- [ ] Trace-varying physical keeper/backend generations retain compatible
+  checkpoint identity through update and rollback, with no upstream
+  reinitialization or replay. Constant-environment composed controls do not
+  qualify this case; until qualified, optional adoption refuses before effects.
+  - [x] **Internal conditional custody source:** two Windows cases and two
+  Linux cases qualify trace-varying physical replacement, capable rollback
+  and same-slot process replacement with original upstream state preserved.
+  The optional receiver's old-running-custodian boundary subsequently passed
+  mixed-version source controls through #12233. These separate source packets
+  are not joined installed-consumer acceptance.
+  - [x] **Joined optional receiver source:** #12239 qualifies the actual
+    bootstrap and selected physical receiver with a controlled native Linux
+    caller through replacement, rollback and same-slot replacement, retaining
+    original caller/conduit identities and upstream state until EOF. Actual
+    Copilot handover and installed acceptance remain open.
+  - [x] **Joined actual native-client source:** #12242 qualifies actual offline
+    Linux Copilot through the optional receiver across replacement, rollback
+    and same-slot replacement, including post-retirement ping/reply traffic,
+    original client/conduit/keeper/upstream native identities and exact cleanup.
+    Contained shutdown is SIGTERM, not graceful upstream EOF. This does not
+    qualify installed/default adoption, model-driven tool calls, accepted
+    mutations or production caller lifetime.
+  - [x] **Actual native tool consumption source:** #12247 adds four unique
+    synthetic tool actions generated by a credential-free loopback provider.
+    Actual Copilot consumes the real results and returns ACP completions across
+    all three post-retirement handovers. Exact-source native execution and
+    retained-identity cleanup pass; in-flight/unknown outcomes and installed
+    adoption remain open.
+  - [x] **Actual accepted/in-flight native source:** #12249 requires a
+    copied-backend witness that actual quiescence has started with accepted
+    work and settlers still pending before each held call is released.
+    Seven actual tool results and three in-flight transitions pass on the
+    corrected exact source, with single initialization and exact cleanup.
+    This does not qualify unknown delivery outcomes or installed adoption.
+  - [x] **Actual unknown native-delivery source:** #12252 qualifies one
+    upstream-accepted call with lost result delivery during real quiescence.
+    The real keeper records uncertain/fenced state with the accepted nonce;
+    the native client reports an error, the affected conduit exits, and the
+    invocation occurs exactly once through cleanup. Provider and ACP outcome
+    observers remain active through bounded client shutdown. Exact EOF and one
+    initialization are verified. This is terminal no-replay qualification,
+    not result recovery, session resumability or installed acceptance.
 - [ ] Failed candidate health, changed owner/route/selection and an old
   generation's late cleanup cannot corrupt or retire the current generation.
 - [ ] EOF/disconnect and verified owner death settle exact client resources;

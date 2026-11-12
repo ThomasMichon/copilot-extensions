@@ -302,6 +302,19 @@ details, not additional operator quotations or live deployment authority.
 
 ## Plan
 
+### Driver-aware filter definitions and owned population demand
+
+The accepted generic expansion is specified in
+[filter subscriptions](filter-subscriptions.md), bounded claim #12159.
+It composes the existing #11783 cache/observer/service rather than replacing
+its implementation or authorizing production activation.
+
+- [x] Review and land the filter/subscription contract before implementing it
+  (#12161; approved current head and green required CI).
+- [ ] Deliver the linked expression, driver, demand/storage and actual
+  service/client slices with their complete validation plan; source completion
+  does not close the parent service/fleet or live-provider acceptance.
+
 ### First integrated repository cache and event milestone
 
 - [ ] Deliver [M1's serial standalone discovery/projection/query/subscription stages](repository-cache-events-m1.md#serial-implementation-roster), then separately qualify authorized read-only live shadow; retain all broader outcomes.

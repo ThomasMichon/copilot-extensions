@@ -1,5 +1,21 @@
 # Backlog Reconciliation
 
+## Goal
+
+Make the open backlog represent distinct, unfinished outcomes rather than
+historical reports, duplicated plans, or already-completed work. Preserve
+explored ideas and every unresolved acceptance obligation while reducing issue
+fragmentation. This campaign performs research and tracker maintenance only;
+it does not implement fixes, change product behavior, or declare deployment.
+
+The current research authorization is:
+
+> Allowed means standing pre-clearance for the research your backlog-consolidation effort needs - read originals/discussions, metadata, rosters as required to make each disposition, without per-batch caps or per-issue allowance requests. Stop stacking conditions onto asks; keep driving to target. Only destructive/irreversible actions, new credentials/spend, or admin bypass remain operator-gated.
+
+The fixed whole-queue target and the Plan and Validation Plan remain the
+completion gate. Standing research authorization does not transfer other
+owners' resources or bypass repository review, eligibility, privacy or safety.
+
 - **Slug:** `backlog-reconciliation`
 - **Repo:** copilot-extensions
 - **Branch(es):** Independent documentation-only campaign checkpoints
@@ -11,11 +27,30 @@
 
 ## Guiding Intent
 
+This is the original guiding intent, retained alongside the current Goal:
+
 Make the open backlog represent distinct, unfinished outcomes rather than
 historical reports, duplicated plans, or already-completed work. Preserve
 explored ideas and every unresolved acceptance obligation while reducing issue
 fragmentation. This campaign performs research and tracker maintenance only;
 it does not implement fixes, change product behavior, or declare deployment.
+
+### Current research authority
+
+The standing authorization in Goal supersedes historical per-issue and
+per-batch original/discussion, metadata and roster acquisition ceilings and
+other quota-only research gates and allowance-renewal requests. Fetch the
+evidence needed for a disposition; reuse unchanged admitted evidence when
+useful, without turning its absence or unknown historical counters into
+another permission request.
+
+Retain past attempts, failures, refusals and unknown consumption as history,
+not as proof of unused allowances or retrospective compliance. A restriction
+derived only from an old research quota is not a permanent source hold.
+Genuine explicit owner/operator holds, source/resource custody, author and
+editor qualification, requirement preservation and normal publication gates
+remain. Choose finite research assignments for coordination, not as new
+operator-imposed research caps. The campaign remains research/tracker-only.
 
 ## Participants
 
@@ -216,6 +251,18 @@ claimed Phase 1, conditional-trigger and source-specific handoff gates survive.
 
 ## Request
 
+### Current research amendment - 2026-11-12
+
+The [current Goal](#goal) preserves the operator's standing research
+pre-clearance verbatim. It supersedes per-issue/per-batch research allowances
+and renewal questions, including the intervening narrower original-discussion
+allowance. Historical request wording and actual consumption remain below and
+in dated journals; neither is rewritten as unused budget or retrospective
+compliance. The research/tracker-only objective, fixed checkpoint and genuine
+ownership, eligibility and safety boundaries remain.
+
+### Historical requests
+
 Operator request, with identifying organizational references redacted:
 
 > While agent-dispatch remains broken, and automated tasks are not working, act as a long-running backlog and issue scribber for copilot-extensions. There are over 1000 issues upstream, and many are likely stale. Start oldest-first, and determine whether each issue is still relevant, has been fixed, superseded, etc. Process in batches, 10-20 at a time, and farm out to sub-agents to do research. Leverage [the semantic] index of commits, pull requests, and source code.
@@ -294,6 +341,15 @@ another party's issue as a duplicate. This is a public summary, not a copy of
 the non-public approval conversation.
 
 ## Plan
+
+The [next twenty-primary checkpoint](journal/2026/11.12-oldest-contracts-and-finite-delivery.md)
+records three source completions, one accepted tracking fold and sixteen
+retained oldest contracts. It corrects the campaign's overreading of #3367's
+historical remaining-ask statement as a numeric-tracker veto, credits #3418's
+released wait leaf and #3581's completed full-title lane, and retains #3511's
+configured whole-current-tree validation gap without inventing history erasure.
+The complete 915-open census remains 186 above the fixed target; all parent
+Plan/Validation and actual custody gates remain unresolved.
 
 The [worker-witness and safe Resume study](<journal/2026/11.08 worker-witness-and-safe-resume.md>)
 preserves the independent retirement witness, claimed native acceptance and
@@ -2920,6 +2976,18 @@ sources, transferring owners or turning partial/planning gains into completion.
   #5665 handoff remains separate from documentary publication.
 - [ ] Verify and publish supported dispositions, preserving source versus
   release versus rollout distinctions and all active ownership.
+  The [preserved-cache and oldest-contract checkpoint](journal/2026/11.12-preserved-cache-and-oldest-contracts.md)
+  records three verified finite source completions and #3963's complete
+  existing receiving route, with the same unlocked announcement discussion
+  and every incumbent claim retained. Seventeen further whole contracts,
+  #11989's actual claim and #3511's configured-audit gap remain. The 911-open
+  census is 182 above the fixed target; no technical or parent completion
+  follows from tracking consolidation.
+  The [source-completion and migration checkpoint](journal/2026/11.12-source-completions-and-migration-residuals.md)
+  verifies #12272/#12276/#12117/#11798/#11803 as completed source requests while retaining
+  #12280's independent checkout path and all 143 checklist entries across
+  #11891/#11892/#11893. Its 918-open census remains above the fixed target;
+  source completion establishes neither installed adoption nor parent completion.
   The [roadmap follow-through register](roadmap-follow-through.md) records
   #8733/#7650/#8802/#9072/#9413/#7940/#7408/#9332 finite completions,
   #8796's exact retained claim
@@ -3097,6 +3165,12 @@ sources, transferring owners or turning partial/planning gains into completion.
   [Current slice qualification](roadmap-current-qualification.md) records
   independently admitted source residuals and planned prerequisites without
   transferring their owners or importing unrelated completion gates.
+  The [oldest-cohort refresh](roadmap-oldest-cohort-refresh.md) adds 72 current
+  source/ownership assessments, four concrete finite residual candidates and
+  the verified same-canonical #1323 plan materialization. It records #1838's
+  named intake into #6476 and verified non-actionable retirement, not a fix.
+  Existing keepers,
+  actual parks and withdrawn experiments remain distinguished.
   #9426 publishes those twelve bounded qualifications and the three-arrival
   inflow delta; this broader identification/selection item remains open.
 - [ ] Produce an evidence-backed prerequisite graph and sequencing plan for a
@@ -3106,7 +3180,7 @@ sources, transferring owners or turning partial/planning gains into completion.
   routes nine retired tracking identities to their audited receiving slices
   and leaves #9377 explicitly unqualified. Historical relationship counts,
   scoped alternatives, actual owners and all completion gates remain unchanged.
-- [ ] _(Agent-recommended)_ Run larger, disjoint research waves, initially
+- [x] _(Agent-recommended)_ Run larger, disjoint research waves, initially
   four sets of 50 issues, reusing unchanged admitted evidence and refreshing
   changed source/refinements rather than restarting the entire corpus.
   The [first 200-issue proposal](roadmap-wave-1.md) accounts for 169 researched
@@ -3115,7 +3189,10 @@ sources, transferring owners or turning partial/planning gains into completion.
   assessments without a new code-audit phase. The [third-wave
   proposal](roadmap-wave-3.md) adds 200 further assignments with no new
   product-code audit. The [fourth-wave proposal](roadmap-wave-4.md) adds the
-  frozen census's remaining 82 identities; later inflow remains open.
+  frozen census's remaining 82 identities. The larger-wave method is delivered,
+  with the later 72-identity refresh demonstrating continuing delta use.
+  New inflow and changed acceptance remain open under Phase 2's graph
+  maintenance and whole-queue refresh items; this does not complete them.
 - [ ] _(Agent-recommended)_ Integrate the
   [stabilization roadmap](stabilization-roadmap.md), including per-issue
   coverage, provisional decisions, priority rationale and wave exit criteria,
@@ -3132,6 +3209,21 @@ sources, transferring owners or turning partial/planning gains into completion.
   normal publication flow.
 
 ## Validation Plan
+
+The [twenty-primary follow-through](journal/2026/11.12-oldest-contracts-and-finite-delivery.md)
+distinguishes actual source fulfillment from #3367's planned, unchecked
+receiving clauses. All four dispositions have fresh qualification and exact
+public/provider readback. The original source owner's words, campaign-generated
+judgments and bounded contributor scope remain distinct; no generic
+implementation, native, acknowledgment or historical-erasure gate is added.
+
+The [source-completion checkpoint](journal/2026/11.12-source-completions-and-migration-residuals.md)
+retains #12272's independently read existing real-exec CI evidence, #12276's
+publication controls and #12117's scoped durable-launch source/test crosswalk,
+with separately attributed author-reported native validation.
+All five completed dispositions have verified public acknowledgments
+and provider states. The three migration inventories are not 143 independently
+demonstrated defects; their complete migration/proof obligations remain open.
 
 The [five canonical tracking folds](<journal/2026/11.09 canonical-reliability-cohort.md>)
 have exact live acknowledgment readbacks, unchanged source assignees and

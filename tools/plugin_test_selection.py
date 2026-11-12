@@ -20,6 +20,7 @@ EXTERNAL_TEST_ROOTS = {
     "plugin-activation": Path("libs/plugin-activation"),
     "ssh-manager": Path("libs/ssh-manager"),
     "venue-copilot": Path("libs/venue-copilot"),
+    "pr-filters": Path("libs/pr-filters"),
 }
 SOURCE_ONLY_TEST_TARGETS = frozenset({"installation-context"})
 _CODESPACES_NATIVE_FILE = Path("tests") / "test_installer_engine_adoption.py"

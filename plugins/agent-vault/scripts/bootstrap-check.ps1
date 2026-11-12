@@ -70,10 +70,11 @@ try {
         } catch [IO.DirectoryNotFoundException] {
         }
         $sourceSelected = $sourcePresent -or (Test-Path Env:COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN)
+        $wheelSelected = $deployment.runtime_version -cmatch '\.profile\.[0-9a-f]{16}'
         $expectedRuntime = $current
-        if ($profilePresent -or $sourceSelected) {
+        if ($profilePresent -or $sourceSelected -or $wheelSelected) {
             . (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')
-            $minimumMinor = if ($profilePresent) { 11 } else { 10 }
+            $minimumMinor = if ($profilePresent -or $wheelSelected) { 11 } else { 10 }
             $profilePython = Resolve-NativeBootstrapPython -MinimumMinor $minimumMinor
             if (-not $profilePython) { throw 'Vault source/profile inspection requires a bootstrap Python interpreter.' }
             [void](Invoke-Hidden -FilePath $profilePython -ArgList @(

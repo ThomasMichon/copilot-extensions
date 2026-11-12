@@ -34,7 +34,10 @@ def no_ambient_git_identity(monkeypatch):
 
 
 def _git(args: list[str], cwd: Path, check: bool = True) -> str:
-    result = subprocess.run(["git", *args], cwd=str(cwd), capture_output=True, text=True)
+    result = subprocess.run(
+        ["git", *args], cwd=str(cwd), capture_output=True, text=True,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
     if check and result.returncode != 0:
         raise RuntimeError(f"git {' '.join(args)} failed: {result.stderr}")
     return result.stdout.strip()
@@ -109,6 +112,149 @@ def test_promote_reports_no_change_when_dev_matches_main(repo: Path):
     report = pr.promote(repo=repo, dev_ref="dev", main_ref="main", push=False)
     assert report["promoted"] is False
     assert "no content change" in report["reason"]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows Git long-path checkout")
+def test_scratch_git_handles_long_paths_without_changing_repository_configuration(repo: Path):
+    from native_test_paths import native_test_path
+
+    relative = Path("native") / ("x" * 80) / ("y" * 80) / "input.txt"
+    original = native_test_path(repo / relative)
+    original.parent.mkdir(parents=True)
+    original.write_text("committed fixture\n", encoding="utf-8")
+    commit = _commit(repo, "Long native checkout fixture")
+    _git(["config", "core.longpaths", "false"], repo)
+    configuration = repo / ".git" / "config"
+    before = configuration.read_bytes()
+    scratch = pr.add_scratch_worktree(commit, repo=repo)
+    try:
+        retained = native_test_path(scratch / relative)
+        assert len(str(scratch / relative)) > 260
+        assert retained.read_text(encoding="utf-8") == "committed fixture\n"
+        retained.write_text("staged fixture\n", encoding="utf-8")
+        pr._git(["add", "--", relative.as_posix()], cwd=scratch)
+        assert pr._git(["show", ":" + relative.as_posix()], cwd=scratch) == "staged fixture"
+        assert original.read_text(encoding="utf-8") == "committed fixture\n"
+    finally:
+        pr.remove_scratch_worktree(scratch, repo=repo)
+    assert not native_test_path(scratch).exists()
+    assert configuration.read_bytes() == before
+    assert _git(["config", "--get", "core.longpaths"], repo) == "false"
+
+
+def test_local_composition_uses_exact_inputs_and_main_versions(
+    repo: Path, tmp_path: Path, monkeypatch,
+) -> None:
+    import local_runtime_promotion as local
+    from installer_engine_ref import PYTHON_FILES, SUPPORT_FILES
+
+    _write_standalone(repo, "worktree-manager", "0.4.0-dev8")
+    canonical = repo / "libs/installer-engine"
+    canonical.mkdir(parents=True)
+    for name in (*PYTHON_FILES, *SUPPORT_FILES):
+        (canonical / name).write_text("# synthetic canonical asset\n", encoding="utf-8")
+    library = repo / "libs/shared"
+    library.mkdir()
+    (library / "pyproject.toml").write_text(
+        '[project]\nname = "shared"\nversion = "0.3.0-dev8"\n', encoding="utf-8",
+    )
+    _write_plugin(repo, "demo-plugin", "0.9.0-dev8")
+    _write_marketplace(repo, {"demo-plugin": "0.9.0-dev8"})
+    main = _commit(repo, "shipped versions")
+    _git(["checkout", "-q", "dev"], repo)
+    _write_standalone(repo, "worktree-manager", "0.1.0-dev1")
+    library.mkdir(parents=True)
+    (library / "pyproject.toml").write_text(
+        '[project]\nname = "shared"\nversion = "0.1.0-dev1"\n', encoding="utf-8",
+    )
+    canonical.mkdir()
+    for name in (*PYTHON_FILES, *SUPPORT_FILES):
+        (canonical / name).write_text("# synthetic canonical asset\n", encoding="utf-8")
+    _write_changefile(repo, "pending.json", "demo-plugin", "patch")
+    (repo / "tools/accumulate_bumps.py").write_text(
+        "raise RuntimeError('candidate tools must not execute')\n", encoding="utf-8",
+    )
+    (repo / "README.md").write_text("committed source\n", encoding="utf-8")
+    source = _commit(repo, "selected development source")
+    (repo / "README.md").write_text("unrelated staged work\n", encoding="utf-8")
+    _git(["add", "README.md"], repo)
+    tracked = _git(["ls-files"], repo).splitlines()
+    original = {name: (repo / name).read_bytes() for name in tracked}
+    original_index = (repo / ".git/index").read_bytes()
+    refs = _git(["show-ref"], repo)
+    worktrees = _git(["worktree", "list", "--porcelain"], repo)
+    foreign = tmp_path / "foreign"
+    foreign.mkdir()
+    _git(["init", "-q"], foreign)
+    (foreign / "sentinel").write_bytes(b"untouched\n")
+    _commit(foreign, "foreign source")
+    foreign_index = (foreign / ".git/index").read_bytes()
+    selected = []
+
+    def select_inputs(scratch: Path) -> tuple[str, ...]:
+        selected.append(scratch)
+        assert (scratch / "README.md").read_text(encoding="utf-8") == "committed source\n"
+        assert not (scratch / ".changefiles/pending.json").exists()
+        return ("README.md", "plugins/demo-plugin/plugin.json")
+
+    with monkeypatch.context() as environment:
+        environment.setenv("GIT_DIR", str(foreign / ".git"))
+        environment.setenv("GIT_WORK_TREE", str(foreign))
+        environment.setenv("GIT_INDEX_FILE", str(foreign / ".git/index"))
+        environment.setenv("GIT_CONFIG_COUNT", "1")
+        environment.setenv("GIT_CONFIG_KEY_0", "core.bare")
+        environment.setenv("GIT_CONFIG_VALUE_0", "true")
+        composed = local.compose(repo, source_commit=source, main_seed=main, select_inputs=select_inputs)
+
+    assert composed.source_commit == source and composed.main_seed == main
+    assert composed.export_paths == ("README.md", "plugins/demo-plugin/plugin.json")
+    assert json.loads(_git([
+        "show", f"{composed.tree}:plugins/demo-plugin/plugin.json",
+    ], repo))["version"] == "0.9.0-dev8"
+    for name, version in (("worktree-manager", "0.4.0-dev8"), ("libs/shared", "0.3.0-dev8")):
+        assert f'version = "{version}"' in _git([
+            "show", f"{composed.tree}:{name}/pyproject.toml",
+        ], repo)
+    assert ".changefiles/pending.json" not in _git(["ls-tree", "-r", "--name-only", composed.tree], repo)
+    assert selected and all(not path.exists() for path in selected)
+    assert _git(["show-ref"], repo) == refs
+    assert _git(["worktree", "list", "--porcelain"], repo) == worktrees
+    assert _git(["rev-parse", "HEAD"], repo) == source
+    assert (repo / ".git/index").read_bytes() == original_index
+    assert {name: (repo / name).read_bytes() for name in tracked} == original
+    assert (foreign / ".git/index").read_bytes() == foreign_index
+    assert (foreign / "sentinel").read_bytes() == b"untouched\n"
+    assert local.compose(repo, source_commit=source, main_seed=main).tree == composed.tree
+
+
+def test_local_composition_cleans_scratch_after_selection_failure(repo: Path) -> None:
+    import local_runtime_promotion as local
+
+    source = _git(["rev-parse", "dev"], repo)
+    before = _git(["worktree", "list", "--porcelain"], repo)
+
+    def fail(_scratch: Path) -> tuple[str, ...]:
+        raise ValueError("selected closure refused")
+
+    with pytest.raises(ValueError, match="selected closure refused"):
+        local.compose(repo, source_commit=source, main_seed=source, select_inputs=fail)
+    assert _git(["worktree", "list", "--porcelain"], repo) == before
+    assert _git(["status", "--porcelain"], repo) == ""
+
+
+@pytest.mark.parametrize("kind", ["source", "seed", "unavailable"])
+def test_local_composition_refuses_unpinned_or_unavailable_commits(
+    repo: Path, monkeypatch, kind: str,
+) -> None:
+    import local_runtime_promotion as local
+
+    source = _git(["rev-parse", "dev"], repo)
+    monkeypatch.setattr(pr, "add_scratch_worktree", lambda *a, **k: pytest.fail("scratch created"))
+    with pytest.raises(pr.PromotionError, match="requires an exact|cannot resolve"):
+        local.compose(
+            repo, source_commit="dev" if kind == "source" else source,
+            main_seed="main" if kind == "seed" else "0" * 40 if kind == "unavailable" else source,
+        )
 
 
 def test_promotion_freezes_both_copy_owners_and_imports_exact_candidate(repo: Path, tmp_path: Path):
@@ -1231,6 +1377,11 @@ def test_promote_syncs_instruction_projections_after_a_version_bump(tmp_path: Pa
     marker = rendered.partition("<!-- copilot-extension-instruction-projection ")[2].partition(" -->")[0]
     assert json.loads(marker)["pluginVersion"] == "0.1.1-dev1"
     assert f"[owner: {plugin}@0.1.0-dev1]" not in rendered
+    fallback = _git([
+        "show", f"{commit}:.github/copilot/context-fallbacks/{plugin}/demo-note.md",
+    ], root)
+    assert f"[owner: {plugin}@0.1.1-dev1]" in fallback
+    assert f"[owner: {plugin}@0.1.0-dev1]" not in fallback
 
 
 def test_promote_projection_sync_is_a_noop_without_customizing_copilot(repo: Path):

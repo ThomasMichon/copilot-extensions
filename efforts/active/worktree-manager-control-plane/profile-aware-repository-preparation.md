@@ -1,6 +1,6 @@
 # Profile-aware repository preparation
 
-- **Status:** Active; provider candidate implemented, source qualification and publication in progress.
+- **Status:** Active; provider merged and released, dependent caller adoption and full first-touch qualification remain open.
 - **Parent:** [Worktree Manager control plane](README.md), Phase 5.
 - **Coordination:** #11989; source participant `sluggish-gasket`.
 - **Scope:** Native dependency preparation only. #356/#8545 retain broader
@@ -35,7 +35,7 @@ runtime-install convergence stays with #7028 and its existing owners.
 check/apply/check sequence. That route must not be changed into implicit
 managed-project adoption.
 
-`plugin_preparation.observe` currently reads active user/checkout declarations.
+At planning time, `plugin_preparation.observe` read active user/checkout declarations.
 The profile contributor stages tool choices only through its registered-project
 owner. Consequently, an unstaged profile's dependencies are absent from the
 preparation census. Acquiring only the visible subset cannot establish complete
@@ -48,7 +48,8 @@ Extend `prepare-plugin-payloads` with explicit `--include-tool-profile`
 semantics, leaving the ordinary invocation unchanged. Keep observation and
 explicit apply in the existing operation and its plan-digest protocol; do not
 add another preparation daemon, installer or repository/global overlay writer.
-This option is proposed syntax, not current supported runtime behavior.
+This reviewed option is now released; installed runtimes still require explicit
+capability negotiation rather than a source-version assumption.
 
 The selected repository's existing profile declaration and schema determine
 the additional dependency input. Reuse its native parser/source validation,
@@ -96,13 +97,13 @@ plugin or successful repository setup.
 ## Plan
 
 - [x] Land this proposal through the normal review and required CI gates.
-- [ ] Extend the existing profile/preparation owner and native acquisition
+- [x] Extend the existing profile/preparation owner and native acquisition
   composition; preserve ordinary observation and activation behavior.
-- [ ] Add the provider's explicit result semantics and actual-parser
+- [x] Add the provider's explicit result semantics and actual-parser
   compatibility/refusal controls before a dependent caller migrates.
-- [ ] Update the owning operation's reference documentation and affected tests.
+- [x] Update the owning operation's reference documentation and affected tests.
   Add the normal plugin changefile; do not hand-edit versions.
-- [ ] Qualify native dependency preparation and catalog consumption in
+- [x] Qualify native dependency preparation and catalog consumption in
   disposable state, then publish the provider through review, CI and release.
 - [ ] Retain complete first-touch setup and upgrade/rollback controls as the
   dependent caller's adoption gate after provider expansion; this provider
@@ -110,15 +111,75 @@ plugin or successful repository setup.
 - [ ] Record the source/release result and return caller adoption to its
   existing owner. Installed-host rollout remains separately authorized.
 
+## Bounded readiness prerequisite
+
+A complete native caller reached payload acquisition and baseline restoration,
+then required-module admission refused with
+`required selection needs a complete enabled-owner inventory`. The activation
+census itself was complete. An optional script-only module carried
+`owner-readonly-protocol-not-declared` because native repair obtains runtime
+ownership and provisioning inhibition only from `payload-invocation.json`.
+
+The [installer/readiness pattern](../../../docs/patterns/installer-readiness-modules.md#bounded-attributable-invocation)
+explicitly permits script-only declarations without that generated-command
+manifest. Requiring a plugin to invent a Python module or generated launcher
+would contradict that independence boundary. Ignoring the owner's refusal or
+removing it from the required census would instead weaken admission.
+
+The next bounded source proposal is explicit installer-runtime ownership for
+script-only producers, consumed by the existing repair admission:
+
+- A producer may name a contained `installer-runtime.json` through its plugin
+  manifest's `installerRuntime` field. The version-one
+  `copilot-extensions.installer-runtime` object declares only its dedicated
+  home-relative runtime root and no-self-provision environment variable.
+  It does not declare another executable, installer, readiness operation,
+  service, activation writer or package-construction mechanism.
+- Retain the existing `payload-invocation.json` path unchanged. Refuse an
+  ambiguous dual declaration, unknown schema/fields, unsafe or linked path,
+  invalid root/environment name and changed declaration before effects.
+  A producer with neither protocol remains refused; older consumers retain
+  their current pre-effect refusal instead of guessing support.
+- Feed the declared runtime root into the same complete ownership census,
+  same-cell/mode decision, duplicate-writer refusal and plan digest. Preserve
+  the current ordinary-versus-core mutation gate, payload/source identity,
+  read-only provisioning inhibition and exact interpreter/action binding.
+  Do not bypass an unresolved or foreign runtime claim.
+- Keep actual installer and probe selection in the existing module manifest.
+  The producer's read-only script must honor its no-provision contract.
+  Optional classification is not permission to hide a broken owner.
+
+This closes the existing script-only module contract and installer independence
+intent; it is not a new runtime framework or permission to deploy. Required
+modules on undeclared platforms remain unsupported and unsatisfied. Platform
+support belongs to each producer's real installer/runtime, not a consumer
+exception or automatic reclassification.
+
+### Prerequisite plan and validation
+
+- [x] Review and land this amendment before implementation.
+- [x] Add the bounded ownership reader to existing native repair admission;
+  document its exact producer contract and fail-closed old-consumer behavior.
+- [x] Test a real script-only fixture alongside a required owner, incomplete
+  and ambiguous declarations, duplicate runtime writers, changed plans and
+  ordinary/core refusal. No installer/probe may run before admission.
+- [x] Retain a control proving an unsupported required platform remains
+  unsatisfied. Do not repair first-touch qualification by dropping that gate.
+- [ ] Exercise the actual CLI with a cold disposable HOME and independently
+  acquired payload sources. Preserve all original failed observations and
+  source/publication identities; source correction needs a distinct run.
+- [ ] Publish through normal focused tests, source gates, exact-head CI,
+  accepted review and release, then return to the complete caller proof.
+
 ## Validation Plan
 
-- [ ] Focused unit controls: absent/valid/invalid profile, complete dependency
+- [x] Focused unit controls: absent/valid/invalid profile, complete dependency
   census, explicit false/conflicting settings, malformed/source-escaping input,
   changed plan and marketplace/source mismatch. No acquisition on refusal.
 - [ ] Real process controls: unchanged old caller/new provider; new caller/new
   provider; strict old-provider refusal; absent result discriminator; rollback
   to an unsupported provider without an active-only fallback.
-- [ ] Simple consumer: actual native preparation of a synthetic reference-only
+- [x] Simple consumer: actual native preparation of a synthetic reference-only
   Git checkout with dependencies only in its profile. Observe, explicitly apply
   and re-observe through the real operation, not a mocked acquisition success.
 - [ ] Fresh-environment consumer: new HOME and disjoint checkout roots, no
@@ -130,11 +191,60 @@ plugin or successful repository setup.
 - [ ] Exercise the available authorized external/native lane separately from
   portable source tests. Record actual platform, source and skipped-tier reason;
   neither synthetic success nor a source merge proves installed-host rollout.
-- [ ] Run affected source checks, exact-head required CI and accepted review.
+- [x] Run affected source checks, exact-head required CI and accepted review.
   Keep #356/#8545 and parent effort acceptance open after this finite slice.
 
 ## Journal
 
+- 2026-11-12: A first-touch setup callback lost its caller's disabled-bytecode
+  policy because Python isolated mode ignores `PYTHONDONTWRITEBYTECODE`.
+  The selected-engine argv now carries `-B` only when the caller's effective
+  policy disables writes. Native Windows source controls passed both cold
+  callback policies and the existing selected-engine trust/preparation flow
+  (four passed, one POSIX-only skip). Runtime install contracts and focused
+  Python lint passed. POSIX execution, source review/release and the distinct
+  complete caller qualification remain open; no installed runtime was changed.
+- 2026-11-11: Review of #12142 found that a declaration below a hash-excluded
+  payload directory could evade full-plan invalidation. The full-mode digest
+  now binds parsed script-owner metadata independently, while retaining the
+  existing generated-command digest behavior. Normal and readiness-only
+  excluded-directory regressions join the final 34-control passing packet;
+  persistent PATH remained unchanged. One older-protocol apply exceeded its
+  original 20-second fixture parent limit. The final functional fixture uses
+  a 30-second apply bound and 60-second whole-test observer, without changing
+  production action or runner aggregate limits. This is not a pass of the
+  earlier timing bound. Updated exact-head review and CI remain required.
+- 2026-11-11: The focused ownership packet passed 32 controls, including actual
+  installed-console first touch for both protocols and both selection forms.
+  A distinct prior-reader process loaded the exact accepted pre-change source
+  and refused the new producer before apply effects. The existing required
+  unsupported-platform control remains satisfied as a negative.
+  Initial tests exposed a compound fixture's excessive native work, an
+  incorrect observation-status assertion and an outer observer shorter than
+  its unchanged child deadlines; those test issues were corrected. A broad
+  file run exhausted its unchanged 900-second aggregate and is not a full pass.
+  One functional pass was separately rejected for persistent user-PATH drift;
+  no writer was attributed and no rollback was attempted. A distinct focused
+  run passed the containment guard with matching independent before/after PATH
+  hashes. Complete caller qualification and provider publication remain open.
+- 2026-11-11: Readiness amendment #12128 merged as
+  `f4d72a34fe242928aae3cb3814adfb705a2c630d` after exact-head Copilot approval
+  and successful required CI. Implementation now adds the bounded script-only
+  ownership reader inside existing repair admission. Validation, provider
+  publication/release and the distinct complete caller run remain open; the
+  original first-touch refusal remains a failed observation.
+
+- 2026-11-11: Provider #12007 merged as
+  `c0f5eccf8bb9eb0361b26cc7515c3320a4481bda` after exact-head Copilot approval,
+  all review threads resolved and successful required CI. The frozen provider
+  packet passed 101 controls. Promotion run `42960204584` subsequently
+  succeeded; the actual `main` preparation blob
+  `9fe680c937872e7b849f53c141f95654137683c6` matches the accepted source.
+  An earlier installed-Manager TTY failure and promotion refusal remain
+  recorded separately; a later success is not a rewritten earlier result.
+  Source publication/release is not installed-host rollout. Full first-touch
+  setup, caller skew/rollback, complete preservation and adoption gates remain
+  open with the existing caller owner; the broader parent is not complete.
 - 2026-11-10: Reserved #11989 after checking existing setup coordination and
   the adjacent knowledge-acquisition PR. This proposal precedes runtime changes;
   no installation, activation, adoption or rollout has been performed.

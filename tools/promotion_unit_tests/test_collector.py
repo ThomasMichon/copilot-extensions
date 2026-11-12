@@ -156,8 +156,11 @@ def test_no_production_call_is_rejected_by_the_collector_and_packet_verifier(tmp
         return real_pytest_main(arguments, **kwargs)
 
     monkeypatch.setattr(pytest, "main", scoped_collection)
-    with pytest.raises(UnitEvidenceError, match="production call coverage"):
+    with pytest.raises(UnitEvidenceError, match="production call coverage") as rejected:
         RUNNER.main()
+    assert "missing=3" in str(rejected.value)
+    assert all(node in str(rejected.value) for node in manifest["nodes"])
+    assert "omitted=0" in str(rejected.value)
     with pytest.raises(UnitEvidenceError, match="production call coverage"):
         verify_packet(
             output, expected_source_sha="a" * 40,

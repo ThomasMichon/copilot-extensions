@@ -9,9 +9,24 @@ from .client_worktree_restart import _Base
 
 
 class SessionStartClientMixin(_Base):
+    def inspect_retained_recovery(self, session_id: str, operation_id: str) -> dict[str, Any]:
+        from urllib.parse import quote
+        from .client_protocol_floor import protocol_floored_request
+        from .retained_session_recovery import CAPABILITY
+        from .protocol import PLUGIN_READINESS_PROTOCOL_VERSION
+
+        send = protocol_floored_request(
+            self, PLUGIN_READINESS_PROTOCOL_VERSION, capabilities={CAPABILITY: 1},
+        )
+        return send(
+            "GET", f"/api/v1/sessions/{quote(session_id, safe='')}/retained-recovery/"
+            f"{quote(operation_id, safe='')}",
+        ) or {}
+
     def resume_session(
         self, session_id: str, *, request_timeout: float | None = None,
         worktree_writer: dict[str, Any] | None = None,
+        retained_recovery: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         from .startup_observation import current
 
@@ -29,6 +44,21 @@ class SessionStartClientMixin(_Base):
             send = protocol_floored_request(
                 self, PLUGIN_READINESS_PROTOCOL_VERSION, capabilities={RESUME_CAPABILITY: 1},
             )
+        if retained_recovery is not None:
+            from .models import RetainedRecoveryRequest
+            from .client_protocol_floor import protocol_floored_request
+            from .retained_session_recovery import CAPABILITY
+            from .protocol import PLUGIN_READINESS_PROTOCOL_VERSION
+
+            if worktree_writer is None:
+                raise ValueError("Retained recovery requires its original Worktrees writer")
+            body = ({**body[0], "retained_recovery": RetainedRecoveryRequest.model_validate(
+                retained_recovery,
+            ).model_dump()},)
+            send = protocol_floored_request(
+                self, PLUGIN_READINESS_PROTOCOL_VERSION,
+                capabilities={RESUME_CAPABILITY: 1, CAPABILITY: 1},
+            )
         observation = current()
         if observation is not None and not observation.clock.ready:
             return observation.request(
@@ -42,6 +72,7 @@ class SessionStartClientMixin(_Base):
         return send(
             "POST", f"/api/v1/sessions/{session_id}/resume", *body,
             request_timeout=request_timeout,
+            **({"allow_retry": False} if retained_recovery is not None else {}),
         ) or {}
 
     def start_session(

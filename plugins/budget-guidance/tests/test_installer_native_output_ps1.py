@@ -27,12 +27,15 @@ def _quote(value: str | Path) -> str:
 
 
 def _producer_setup(directory: Path) -> str:
-    for name in ("installer-human-output.ps1", "versioned_runtime_native.ps1"):
+    for name in ("installer-human-output.ps1", "versioned_runtime_native.ps1", "installer-engine.ps1"):
         shutil.copyfile(INSTALLER.parent / name, directory / name)
     text = INSTALLER.read_text(encoding="utf-8")
     start = text.index("Set-StrictMode -Version 2.0")
     end = text.index("# === install-contract:test-persistent-environment", start)
-    return text[start:end]
+    return (
+        "$WheelProfile = $WheelDirectory = $WheelPython = $WheelUv = ''\n"
+        "$NativeWheelSelection = $null\n" + text[start:end]
+    )
 
 
 def _run(

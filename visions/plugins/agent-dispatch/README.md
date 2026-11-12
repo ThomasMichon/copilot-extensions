@@ -7,7 +7,7 @@
 - **Scope:** branch (a per-plugin vision under the
   [agent-fabric](../../agent-fabric/README.md) branch)
 - **Status:** Draft
-- **Last revised:** 2026-11-03
+- **Last revised:** 2026-11-12
 - **Reality docs:** [`docs/architecture.md`](../../../docs/architecture.md) ·
   the plugin's `plugins/agent-dispatch/` (skill `agent-dispatch`, `pick-and-claim`)
 
@@ -326,6 +326,11 @@ not scripting an emitter — is simply the caller in this same sentence: the
 manual path is not a special mode, it is *this* path, walked by a person instead
 of a domain's automation. Closing that loop is what the **monitor** and
 **submission review** primitives below exist for.
+
+The companion also reconsiders source relevance before execution. Emitters can
+report a closed backing object, and periodic evaluation can revisit eligible
+unbound tasks without waiting for an execution event. Both use the same
+ownership-aware reconciliation boundary described below.
 
 ### The monitor — a suspend's resolution handler
 Just as an **evaluator** is the emitter's companion handler for a task's
@@ -682,6 +687,28 @@ what makes *emitters-and-evaluators* a genuine two-way seam for a domain data
 source: the domain polls in (discovers and emits), and the layer hands back what
 became of it, so the domain never has to invent its own per-domain
 polling-by-dedup-key reconciliation just to learn an id it itself caused to exist.
+
+### task-relevance-reconciliation
+
+A source-backed task does not remain runnable merely because no agent has
+started it. Its emitter or companion evaluator can report that its backing
+object no longer needs the work. Dispatch decides atomically against claiming
+and startup whether the task has never acquired an agent or resource custody.
+Only that resource-free case can retire without an agent closeout.
+
+Once an agent has claimed the work, source obsolescence becomes a durable
+closeout instruction to that owner. Live steering or queued wake-and-steer
+delivery preserves its conversation and responsibility for session and
+workspace disposition. A missing current owner, admitted notification or
+terminal task row is not evidence that closeout occurred.
+
+Periodic reconsideration belongs to the existing registered evaluator and
+supervisor. Age can make an unbound task eligible for evaluation; it cannot
+establish obsolescence. Incomplete source reads, changed source episodes and
+foreign producers never silently authorize abandonment. Task, emitter, pool,
+session and workspace relationships remain inspectable through their owning
+layers, distinguishing original allocation from later reuse without inventing
+legacy provenance.
 
 ### bounded-concurrency-wide-charters
 The pool of concurrently embodied workers is **capped** — a deliberate ceiling

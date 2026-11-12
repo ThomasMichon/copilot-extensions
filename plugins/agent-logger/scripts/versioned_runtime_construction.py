@@ -68,8 +68,16 @@ def publish_source_snapshot(
         return snapshot
 
 
+def native_path(path: Path) -> Path:
+    value = os.path.abspath(path)
+    if os.name == "nt" and not value.startswith("\\\\?\\"):
+        value = "\\\\?\\UNC\\" + value[2:] if value.startswith("\\\\") else "\\\\?\\" + value
+    return Path(value)
+
+
 def read_completion(path: Path, *, object_pairs_hook: Callable) -> object:
     """Reject unusable completion evidence without blocking on a pipe or device."""
+    path = native_path(path)
     info = path.lstat()
     if (
         not stat.S_ISREG(info.st_mode) or info.st_nlink != 1
@@ -173,7 +181,7 @@ def retention_custody(
         timeout=timeout, poll_interval=poll_interval,
     ) as descriptor:
         vdir = version_dir(root, version)
-        if require_installed and (not vdir.is_dir() or is_link(vdir)):
+        if require_installed and (not native_path(vdir).is_dir() or is_link(native_path(vdir))):
             raise FileNotFoundError(f"ordinary runtime slot not installed: {vdir}")
         if payload_hash is not None:
             decision = check_admission(root, version, payload_hash=payload_hash)
@@ -191,22 +199,16 @@ def require_immutable_environment(
     but their installed packages and path hooks must not refer outside the slot.
     Historical published slots are diagnosed, never repaired by this check.
     """
-    base = slot.resolve()
-
-    def native(path: Path) -> Path:
-        value = os.path.abspath(path)
-        if os.name == "nt" and not value.startswith("\\\\?\\"):
-            value = "\\\\?\\UNC\\" + value[2:] if value.startswith("\\\\") else "\\\\?\\" + value
-        return Path(value)
+    base = native_path(slot).resolve()
 
     def text_lines(path: Path) -> list[str]:
         try:
-            return native(path).read_text(encoding="utf-8-sig").splitlines()
+            return native_path(path).read_text(encoding="utf-8-sig").splitlines()
         except UnicodeError as exc:
             raise error_type(f"Invalid installed text metadata: {path}") from exc
 
     def ordinary(path: Path) -> None:
-        info = native(path).lstat()
+        info = native_path(path).lstat()
         if (
             not (stat.S_ISREG(info.st_mode) or stat.S_ISDIR(info.st_mode))
             or getattr(info, "st_file_attributes", 0) & 0x400
@@ -215,13 +217,13 @@ def require_immutable_environment(
 
     environments = [slot]
     nested = slot / ".venv"
-    if os.path.lexists(nested):
+    if os.path.lexists(native_path(nested)):
         ordinary(nested)
         environments.append(nested)
     sites = []
     for environment in environments:
         config = environment / "pyvenv.cfg"
-        if os.path.lexists(config):
+        if os.path.lexists(native_path(config)):
             ordinary(config)
             for line in text_lines(config):
                 key, separator, value = line.partition("=")
@@ -232,15 +234,15 @@ def require_immutable_environment(
         sites.append(environment / "Lib" / "site-packages")
         for name in ("lib", "lib64"):
             library = environment / name
-            if os.path.lexists(library):
-                if not library.resolve().is_relative_to(base):
+            if os.path.lexists(native_path(library)):
+                if not native_path(library).resolve().is_relative_to(base):
                     raise error_type(f"Installed library path escapes its runtime: {library}")
-                sites.extend(library.glob("python*/site-packages"))
+                sites.extend(native_path(library).glob("python*/site-packages"))
     seen = set()
     for site in sites:
-        if not os.path.lexists(site):
+        if not os.path.lexists(native_path(site)):
             continue
-        resolved = site.resolve()
+        resolved = native_path(site).resolve()
         if not resolved.is_relative_to(base):
             raise error_type(f"Installed site-packages escapes its runtime: {site}")
         ordinary(site)
@@ -251,8 +253,8 @@ def require_immutable_environment(
         def walk_error(error: OSError) -> None:
             raise error
 
-        for directory, directories, files in os.walk(native(site), onerror=walk_error):
-            parent = site / Path(directory).relative_to(native(site))
+        for directory, directories, files in os.walk(native_path(site), onerror=walk_error):
+            parent = site / Path(directory).relative_to(native_path(site))
             for name in directories + files:
                 path = parent / name
                 ordinary(path)
@@ -262,7 +264,7 @@ def require_immutable_environment(
                 path = parent / name
                 if name.casefold() == "direct_url.json" and parent.name.casefold().endswith(".dist-info"):
                     try:
-                        origin = read_json(native(path))
+                        origin = read_json(native_path(path))
                     except ValueError as exc:
                         raise error_type(f"Invalid installed origin metadata: {path}") from exc
                     if not isinstance(origin, dict) or not isinstance(origin.get("dir_info", {}), dict):
@@ -284,22 +286,22 @@ def require_immutable_environment(
                         ):
                             continue
                         if name == "_virtualenv.pth" and line == "import _virtualenv":
-                            if (site / "_virtualenv.py").is_file():
+                            if native_path(site / "_virtualenv.py").is_file():
                                 continue
                         if name == "distutils-precedence.pth" and line == (
                             "import os; var = 'SETUPTOOLS_USE_DISTUTILS'; "
                             "enabled = os.environ.get(var, 'local') == 'local'; "
                             "enabled and __import__('_distutils_hack').add_shim();"
-                        ) and (site / "_distutils_hack" / "__init__.py").is_file():
+                        ) and native_path(site / "_distutils_hack" / "__init__.py").is_file():
                             continue
                         if (
                             name == "pywin32.pth" and line == "import pywin32_bootstrap"
-                            and (site / "win32" / "lib" / "pywin32_bootstrap.py").is_file()
-                            and (site / "pywin32_system32").is_dir()
+                            and native_path(site / "win32" / "lib" / "pywin32_bootstrap.py").is_file()
+                            and native_path(site / "pywin32_system32").is_dir()
                         ):
                             continue
                         raise error_type(f"Unverified executable installed path hook: {path}")
-                    if not (site / line).resolve().is_relative_to(base):
+                    if not native_path(site / line).resolve().is_relative_to(base):
                         raise error_type(f"Installed path hook escapes its runtime: {path}")
 
 
@@ -811,7 +813,12 @@ function script:Start-RuntimeConstruction {
           [string]$PayloadHash, [string]$LinkName, [string]$DevOwner = '',
           [string]$Footprint = '', [string]$Plugin = '', [string]$InstallSource = '',
           [string]$Payload = '', [string]$UvCommand = '', [string]$HealthModule = '',
+          [string]$WheelProfile = '', [string]$WheelDirectory = '',
+          [switch]$NestedEnvironment,
           [switch]$Repair)
+    if (($InstallSource -and $WheelProfile) -or ([bool]$WheelProfile -ne [bool]$WheelDirectory)) {
+        throw 'Select one complete Source or closed-wheel input'
+    }
     if ($script:RuntimeConstructionSession) {
         if ($script:RuntimeConstructionSession.Key -ne "$Root/$Version" -or
             $script:RuntimeConstructionSession.Process.HasExited) {
@@ -841,19 +848,22 @@ function script:Start-RuntimeConstruction {
     $psi.FileName = $base
     $argv = @('-I', '-B', $Helper, '--root', $Root, '--link-name', $LinkName,
               'construction-session', $Version, '--payload-hash', $PayloadHash)
-    if ($InstallSource) {
+    if ($InstallSource -or $WheelProfile) {
         if ($DevOwner -or $Footprint -or -not $Payload -or -not $Plugin -or
             -not $UvCommand -or -not $HealthModule) {
-            throw 'Source wheel construction requires its complete independent native input'
+            throw 'Wheel construction requires its complete independent native input'
         }
         $argv = @('-I', '-B', (Join-Path (Split-Path -Parent $Helper) 'install_source.py'),
-            '--native-session', '--install-source', $InstallSource, '--component', $Plugin,
+            '--native-session', '--component', $Plugin,
             '--payload', $Payload, '--root', $Root, '--uv', $UvCommand, '--base-python', $base,
             '--health-module', $HealthModule, '--expected-runtime-version', $Version,
             '--expected-payload-hash', $PayloadHash)
+        if ($InstallSource) { $argv += @('--install-source', $InstallSource) }
+        else { $argv += @('--wheel-profile', $WheelProfile, '--wheel-directory', $WheelDirectory) }
         if ($Repair) { $argv += '--repair' }
+        if ($NestedEnvironment) { $argv += '--nested-environment' }
     } else {
-        if ($Payload -or $UvCommand -or $HealthModule -or $Repair) {
+        if ($Payload -or $UvCommand -or $HealthModule -or $Repair -or $NestedEnvironment) {
             throw 'Source construction arguments require an installation-source snapshot'
         }
         if ($DevOwner) { $argv += @('--dev-owner', $DevOwner) }
@@ -881,7 +891,7 @@ function script:Start-RuntimeConstruction {
     $reuse = $admission.admission -eq 'reuse'
     $selected = $Version
     $construction = $null
-    if ($InstallSource) {
+    if ($InstallSource -or $WheelProfile) {
         $versionMatches = $admission.version -ceq $Version
         if ($Repair) {
             $versionMatches = $admission.version -cmatch (

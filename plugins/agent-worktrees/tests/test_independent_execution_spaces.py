@@ -257,10 +257,11 @@ def test_explicit_registration_preserves_key_and_grouping_only_metadata(tmp_path
 
 
 @pytest.mark.parametrize("owner", ["workstation", "workstation-wsl"])
-def test_nonlocal_or_legacy_owner_never_looks_up_current_ledger(owner, scoped_config, monkeypatch):
+def test_unproven_owner_never_acquires_a_local_ledger(owner, scoped_config, monkeypatch, tmp_path):
+    local_project = tmp_path / "absent-project"
     monkeypatch.setattr(
         cfg, "project_dir",
-        lambda project: pytest.fail("nonlocal identity accessed local owner ledger"),
+        lambda project: local_project,
     )
     path, worktree_id, error = claims_cli._resolve_owner_ref_record_path(
         f"{owner}/project/wt-parent", scoped_config,
@@ -268,6 +269,7 @@ def test_nonlocal_or_legacy_owner_never_looks_up_current_ledger(owner, scoped_co
     assert path is None
     assert worktree_id == "wt-parent"
     assert error
+    assert not local_project.exists()
 
 
 def test_true_same_registered_space_resolves_its_local_ledger(scoped_config, tmp_path, monkeypatch):
@@ -592,7 +594,7 @@ def test_parent_record_authority_is_rechecked_before_settlement(
     (parent_dir / "worktrees" / "wt-parent.yaml").write_text("{}", encoding="utf-8")
     monkeypatch.setattr(cfg, "project_dir", lambda project: parent_dir)
     monkeypatch.setattr(tracking, "_RecordLock", lambda *args, **kwargs: nullcontext())
-    monkeypatch.setattr(tracking, "load_record", lambda path: parent)
+    monkeypatch.setattr(tracking, "load_record", lambda path, **kwargs: parent)
     monkeypatch.setattr(
         tracking, "settle_resource_claim",
         lambda *args, **kwargs: pytest.fail("foreign parent ledger was mutated"),
@@ -1022,7 +1024,7 @@ def test_project_authority_uses_requested_repo_anchor(scoped_config, tmp_path, m
 
     monkeypatch.setattr(cfg, "load_machines_yaml", registry)
     record = SimpleNamespace(
-        repo="project", machine="workstation-wsl", platform="wsl", worktree_id="wt-other",
+        repo="project", machine="workstation-wsl", platform=cfg.detect_platform(), worktree_id="wt-other",
         owner_ref=None,
     )
     with pytest.raises(execution_spaces.ExecutionSpaceError, match="different execution space"):
@@ -1262,7 +1264,9 @@ def test_forced_cleanup_rechecks_fresh_authority_inside_sidecar_lock(
     monkeypatch.setattr(tracking, "_RecordLock", raced_lock)
     original_load = tracking.load_record
 
-    def fresh_load(path):
+    def fresh_load(path, **kwargs):
+        if kwargs.get("copy_result") is False:
+            return original_load(path, **kwargs)
         assert locked
         return original_load(path)
 
@@ -1687,7 +1691,10 @@ def test_resume_reports_raced_authority_rejection_as_structured_error(
     args = SimpleNamespace(json=True, base=False, dry_run=False, bare_resume=False)
     if json_mode:
         reads = iter([record, fresh])
-        monkeypatch.setattr(tracking, "load_record", lambda *args: next(reads))
+        monkeypatch.setattr(
+            tracking, "load_record",
+            lambda *args, **kwargs: record if kwargs.get("copy_result") is False else next(reads),
+        )
         monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
         monkeypatch.setattr(module, "_relocate_active_project_for_worktree", lambda *args: False)
         monkeypatch.setattr(module.worktree_identity, "_resolve_worktree_id", lambda value: value)
@@ -1701,7 +1708,7 @@ def test_resume_reports_raced_authority_rejection_as_structured_error(
         assert module._resolve_json_mode(state) == 3
         assert "cross-space" in json.loads(capfd.readouterr().out)["error"]
     else:
-        monkeypatch.setattr(tracking, "load_record", lambda *args: fresh)
+        monkeypatch.setattr(tracking, "load_record", lambda *args, **kwargs: fresh)
         monkeypatch.setattr(module, "_dispatch_validate_profile_assignment_config", lambda *args: None)
         plans = []
         monkeypatch.setattr(module, "_emit_plan", plans.append)

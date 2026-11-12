@@ -1,0 +1,9 @@
+{
+  "comment": "Use receiving local checkout authority across hostname and optional topology drift without migrating retained identities.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

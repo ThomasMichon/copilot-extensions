@@ -42,6 +42,11 @@ def capabilities() -> dict:
         "recovery": "forward",
         "cancel_before_publication": _native_supported(),
         "scope": "completed-sessionless-unpaired-plain-linked-checkout",
+        "live_admission": {
+            "schema": "agent-worktrees.checkout-live-admission", "version": 1,
+            "check_live": _native_supported(), "activity_refresh": True,
+            "apply_rechecks": True,
+        },
         "receiving_location": {
             "schema": state.RECEIVING_SCHEMA, "version": 1, "revisions": 1,
             "scope": "finalized-sessionless-unpaired-same-project-settled-origin",
@@ -87,7 +92,15 @@ def _identity(record) -> dict:
 
 
 def _stopped(record, checkout: Path) -> None:
-    verdict = sessions.verify_worktree_active(record)
+    if (
+        not getattr(record, "receiving_allocation_present", False)
+        and getattr(record, "owner_ref", None) and getattr(record, "creation_nonce", None)
+    ):
+        from .receiving_allocation import has_retained_receiving_operation
+
+        if has_retained_receiving_operation(record, record.yaml_path.parent):
+            raise ValueError("missing original receiving proof during owner revalidation")
+    verdict = sessions.verify_worktree_active(record, strict=True)
     if not verdict.probes_ok or verdict.active:
         raise ValueError("relocation requires confirmed inactive session/process owners")
     blocker = procs.checkout_retirement_blocker(str(checkout))
@@ -150,6 +163,25 @@ def _strict_glob(root: Path, pattern: str):
             raise
         if not stat.S_ISDIR(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
             raise ValueError("operational reference directory is redirected or unsupported")
+        part = parts[depth]
+        if part not in {"", ".", ".."} and Path(part).name == part and not any(char in part for char in "*?["):
+            path = directory / part
+            try:
+                item = path.lstat()
+            except FileNotFoundError:
+                if not os.path.samestat(info, directory.lstat()):
+                    raise ValueError("operational reference directory changed during inspection")
+                continue
+            if not os.path.samestat(info, directory.lstat()):
+                raise ValueError("operational reference directory changed during inspection")
+            if depth == len(parts) - 1:
+                yield path
+            else:
+                if stat.S_ISLNK(item.st_mode) or getattr(item, "st_file_attributes", 0) & 0x400:
+                    raise ValueError("operational reference directory is redirected")
+                if stat.S_ISDIR(item.st_mode):
+                    pending.append((path, depth + 1))
+            continue
         with os.scandir(directory) as entries:
             for entry in entries:
                 seen += 1
@@ -414,7 +446,10 @@ def _receiving_admission(ledger: Path, config):
         proof = inspect_receiving(passive, config)
         return passive, proof, receiving_owner(ledger, proof)
     elif passive.owner_ref and passive.creation_nonce:
-        raise ValueError("read-only proof cannot recover missing receiving allocation metadata; inspect through its owner")
+        from .receiving_allocation import has_retained_receiving_operation
+
+        if has_retained_receiving_operation(passive, ledger.parent):
+            raise ValueError("read-only proof cannot recover missing receiving allocation metadata; inspect through its owner")
     return passive, None, nullcontext()
 
 
@@ -471,7 +506,8 @@ def move(worktree_id: str, destination: str, config) -> dict:
         if report["phase"] == "prepared":
             if stage.exists():
                 raise ValueError("stage creation outcome is uncertain; original retained for inspection")
-            stage.mkdir(mode=0o700)
+            # Windows must inherit the admitted parent's ACL; Python 3.13 special-cases 0700.
+            stage.mkdir(mode=0o777 if os.name == "nt" else 0o700)
             report["phase"] = "copying"
             state.write(ledger, report)
         if report["phase"] == "copying":
@@ -488,6 +524,7 @@ def move(worktree_id: str, destination: str, config) -> dict:
                 _sessionless(target)
                 if _digest(source) != report["fingerprint"]:
                     raise ValueError("original copy changed after copying; source retained")
+                _stopped(record, source)
                 durability.replace(stage, target, existing=False)
             if stage.exists() or not target.is_dir() or _digest(target) != report["fingerprint"]:
                 raise ValueError("destination publication is ambiguous; retain original move custody")

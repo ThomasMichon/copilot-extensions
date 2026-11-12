@@ -40,6 +40,12 @@ def _ps1_text() -> str:
     return INSTALL_PS1.read_text(encoding="utf-8")
 
 
+def _service_text(role: str) -> str:
+    return (
+        INSTALL_PS1.parent.parent / "src" / "agent_dispatch" / "service_launchers" / f"{role}.ps1"
+    ).read_text(encoding="utf-8")
+
+
 def test_install_sh_exists():
     assert INSTALL_SH.is_file(), f"missing {INSTALL_SH}"
 
@@ -208,10 +214,10 @@ def test_serve_mode_supports_explicit_machine_scope():
     # documented in the shipped supervisor.env template
     assert "AGENT_DISPATCH_SUPERVISE_MACHINE=" in sh
 
-    ps1 = _ps1_text()
+    ps1 = _service_text("supervisor")
     assert "'AGENT_DISPATCH_SUPERVISE_MACHINE'" in ps1  # parsed from the env file
-    assert "@('--machine', `$sMachine)" in ps1
-    assert "AGENT_DISPATCH_SUPERVISE_MACHINE=" in ps1
+    assert "@('--machine', $sMachine)" in ps1
+    assert "AGENT_DISPATCH_SUPERVISE_MACHINE=" in _ps1_text()
 
 
 def test_shipped_env_defaults_to_no_labels():
@@ -316,16 +322,16 @@ class TestWindowsSupervisorInstall:
         assert "Substring(0, 12).ToLowerInvariant()" in text
 
     def test_supervise_invocation_is_all_repos_scoped(self):
-        text = _ps1_text()
+        text = _service_text("supervisor")
         assert "'supervise', '--all-repos'" in text, (
             "the Windows supervisor launcher must run `supervise --all-repos` so "
             "it does not silently filter every task out (the lane gotcha)"
         )
 
     def test_launcher_refuses_label_less_run(self):
-        text = _ps1_text()
+        text = _service_text("supervisor")
         # The launcher guards on an empty label set and exits EX_CONFIG (78).
-        assert "if (-not `$haveLabel)" in text
+        assert "if (-not $haveLabel)" in text
         assert "exit 78" in text, (
             "the Windows launcher must exit non-zero (EX_CONFIG) rather than "
             "embody everything when no opt-in label is configured"
@@ -348,8 +354,8 @@ class TestWindowsSupervisorInstall:
         tasks -- cross-platform parity with the systemd path."""
         text = _ps1_text()
         assert (
-            "'supervise', 'serve', '--legacy-env', '--interval', `$interval"
-            in text
+            "'supervise', 'serve', '--legacy-env', '--interval', $interval"
+            in _service_text("supervisor")
         )
         assert "function Get-SupervisorMode" in text
         idx = text.index("function Install-SupervisorTaskInstance")
@@ -421,7 +427,8 @@ class TestWindowsSupervisorInstall:
     def test_windows_launchers_export_install_dir(self):
         text = _ps1_text()
         assert "$env:AGENT_DISPATCH_INSTALL_DIR = $InstallDir" in text
-        assert "`$env:AGENT_DISPATCH_INSTALL_DIR = '" in text
+        for role in ("coordinator", "supervisor"):
+            assert "$env:AGENT_DISPATCH_INSTALL_DIR = $InstallDir" in _service_text(role)
 
     def test_launchers_survive_a_locked_log(self):
         """A busy/locked ``*-service.log`` must never block startup.
@@ -434,23 +441,23 @@ class TestWindowsSupervisorInstall:
         WRITABLE log -- the canonical file, else a version+pid-aware fallback -- and
         never let a banner-write failure be fatal.
         """
-        text = _ps1_text()
+        text = _service_text("coordinator") + _service_text("supervisor")
         # Both launchers define + use the writable-log resolver.
         assert text.count("function Resolve-WritableLog") == 2, (
             "both the coordinator and supervisor launchers must resolve a writable "
             "log so a locked log can't block startup"
         )
-        assert "Resolve-WritableLog (Join-Path `$PSScriptRoot 'serve-service.log')" in text
-        assert "Resolve-WritableLog (Join-Path `$PSScriptRoot 'supervise-service.log')" in text
+        assert "Resolve-WritableLog (Join-Path $InstallDir 'serve-service.log')" in text
+        assert "Resolve-WritableLog (Join-Path $InstallDir 'supervise-service.log')" in text
         # The fallback is version- and pid-aware (never contends).
-        assert "-`$ver-`$PID.log" in text, (
+        assert "-$ver-$PID.log" in text, (
             "the fallback log path must be version+pid aware so it never contends"
         )
         # The old fatal pattern -- a bare banner Out-File to a fixed path -- is gone.
         assert "'serve-service.log'\n" not in text
         assert (
-            "\"[`$(Get-Date -Format o)] agent-dispatch coordinator launch "
-            "(host=`$pinned port=`$portShown)\" |\n    Out-File" not in text
+            "\"[$(Get-Date -Format o)] agent-dispatch coordinator launch "
+            "(host=$pinned port=$portShown)\" |\n    Out-File" not in text
         ), "the coordinator banner write must be wrapped, not a bare fatal Out-File"
 
     def test_versioned_activate_gates_migration_stop_on_real_venv_path(self):

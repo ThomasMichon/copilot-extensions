@@ -635,7 +635,7 @@ continue to work unchanged.
 |------------|-------------|
 | `resolve` | Interactive picker -- select or create a worktree, emit JSON launch plan. `--new` creates + launches a **muxed interactive** session (refused without a TTY). `--codename <name>` selects an existing worktree by its assigned public-safe codename, as an alternative to `--worktree-id` (effort `pr-attribution-codenames`); resolved locally first, then via a cross-machine SSH scan (Phase 3) -- a match on a different machine fails closed (reports the machine, does not attempt a remote launch) |
 | `create` | Create a worktree **programmatically** -- no launch, no mux; prints id + path (add `--json`). The path for agents and daemons. Assigns the new worktree a random, public-safe **codename** (`codename.wordlist_path` configures a repo-declared vocabulary; falls back to a built-in neutral one) -- surfaced in the JSON output and usable later as an alternate lookup key via `list`/`resolve --codename` |
-| `move` | Read-only inactive-checkout relocation plan; `--apply` transfers and rebinds a qualified checkout within the declared ordinary/receiving scope, `--abort` cancels before publication. Discover the selected runtime with `get checkout-relocation` first; receiving continuity does not qualify native inactivity. See [supported scope, original-operation recovery and mixed-root authority](checkout-relocation.md); not general inactive-session/WIP migration or finalization. |
+| `move` | Pure inactive-checkout inspection by default; `--check-live` explicitly enters bounded live admission and owner locks without copying or journaling, `--apply` transfers and rebinds a qualified checkout, `--abort` cancels before publication. Discover the selected runtime and additive live-admission capability with `get checkout-relocation` first. Live queries can refresh mux activity; apply always rechecks. See [scope, effects and original-operation recovery](checkout-relocation.md); not general inactive-session/WIP migration or finalization. |
 | `push-changes` | Push worktree changes to remote default branch (squash, rebase, push). Aborts if the pre-squash fails (`--allow-unsquashed` to opt into individual commits) |
 | `finalize` | Validate the branch's content is on upstream; for a merged PR with a missing cached head SHA, use a fresh provider-observed head only after the provider confirms the merge, and keep refusing when its boundary remains unverifiable; prune the worktree/branch only when idle (deferred while a session is live). The creating agent owns child cleanup; `--abandon` is refused without an operator-directed `--handoff-to <recipient-or-flow>`, recorded on each re-homed obligation |
 | `mark-complete` | Manual recovery -- set tracking status flag only (hidden from help) |
@@ -1782,6 +1782,9 @@ selected engine can advertise `project_integration` in its versioned
 Manager registration but does not independently recover or install Manager;
 the project controller remains responsible for Manager readiness. Standalone
 integration retains its existing recovery behavior.
+This also applies to an existing configured project controller when no explicit
+suite-authority mode has been selected; delegation does not switch that mode.
+An explicit standalone selection is never treated as project delegation.
 
 On Windows, ordinary update entry points first test whether the current shell
 can create the breakaway process required for durable execution. Refusal exits
@@ -2212,20 +2215,23 @@ retired, and rollback never authorizes replay as a broader suite update.
 #### Prepared-source suite input
 
 The executing engine's inventory additionally advertises
-`runtime_sources: {schema: "copilot-extensions.prepared-runtime-sources", version: 1}`
-when it supports a complete prepared-source portfolio. This declaration belongs
+`runtime_sources: {schema: "copilot-extensions.prepared-runtime-sources", version: 2}`
+when it supports a complete prepared-application portfolio. This declaration belongs
 to that exact provider, not to the currently installed marketplace payload.
 Older inventory readers may ignore the additive field. A caller must establish
 this support before sending `update --no-manager --runtime-sources <JSON>`;
 missing, malformed or unsupported declarations require an explicit provider
 upgrade, never a marketplace fallback or an effectful trial/replay.
 
-The JSON packet has exactly `schema`, integer `version: 1` and a nonempty
-`sources` object keyed by plugin identifier. Each record contains an absolute
-prepared `payload` directory and `identity`, the canonical
-`{runtime_source: <complete source document>, runtime_version: <slot>}` selection
-from source preparation. All records must identify the same full source commit
-and tree. Duplicate fields, unknown request fields and relative/missing inputs
+The JSON packet has exactly `schema`, integer `version: 2`, `source` and a nonempty
+`sources` object keyed by plugin identifier. `source` records the acquired
+`commit`, `tree` and `main_seed`. Each runtime record contains an absolute
+complete `snapshot` directory and its installed-owner `profile` selection
+(or `null` for an unprofiled application). Snapshots must include the associated
+first-party artifacts, complete wheel profile, retained wheels and emitted
+application. All records must identify the acquired source and one exact
+composition, or its declared finalized Main form without Dev composition.
+Duplicate fields, unknown request fields and relative/missing inputs
 are refused. Keep prepared generations available through queued execution and
 retry; the packet is stored in the existing durable request argv, not read from
 a mutable pointer or inherited environment.
@@ -2246,15 +2252,24 @@ and installation root, but consume the matching prepared artifact. Every
 eligible runtime must have exactly one source record; missing, unexpected,
 inactive or now-gated selections block the whole runtime portfolio before any
 installer or local integration runs. Owner validation, exact source pinning,
-selected/completed-slot currentness, native lifecycle, retry and outcome handling
-are retained. Profile-qualified sources additionally use the
-[installed owner's target contract](../../agent-containers/docs/runtime-source-target.md):
-the actual target is separate from the original source pin and is revalidated
-before every attempt. Inventory advertises this support through additive
-`runtime_sources.target_contract: {schema: "copilot-extensions.runtime-source-target", version: 1}`.
-An old engine or missing/conflicting owner planner requires tooling upgrade,
-never profile substitution. Queued source records remain exactly `payload` and
-`identity`. Omitting the option retains ordinary marketplace runtime delivery.
+selected/completed-slot currentness and outcome handling are retained. The existing
+executor invokes the admitted source's canonical `install_application` entry;
+it does not run the old shell installer or replay a failed application as a
+legacy install. `--force` selects a distinct repair generation. Currentness requires
+the selected application's matching source/construction declaration, hash-qualified
+completion, slot-local interpreter, success receipt and last-known-good selector;
+a legacy deploy manifest cannot certify or veto it. Application callbacks retain
+their setup/start and serving-state ownership.
+
+Inventory's `runtime_sources.application_profiles` records each profile owner's
+read-only selection or explicit query error. Manager uses those exact extras
+when preparing the complete portfolio, and the engine re-reads the owner before
+planning and execution. Missing required profile support requires a tooling upgrade,
+never profile substitution. Raw packet V1 belongs to the explicitly retired
+pre-wheel boundary; it is refused rather than adapted. Use the
+[standalone force-fresh migration](../../../visions/installer/README.md#legacy-force-fresh-installation)
+when the installed provider cannot support V2. Omitting the option retains
+ordinary marketplace runtime delivery.
 This suite-only input cannot combine with target/authentication/inspection or
 recovery operations and never delegates to an older Manager. The
 [Manager caller](../../../worktree-manager/README.md#independent-runtime-source-acquisition)

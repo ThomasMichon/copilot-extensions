@@ -1,5 +1,8 @@
 # Agent Worktrees
 
+Read-only [selected PR populations](docs/pr-population.md) use the existing
+native observation credential boundary; inventory and snapshot defaults remain unchanged.
+
 Copilot CLI plugin for worktree-isolated sessions. Every Copilot CLI
 session gets its own git worktree -- no branch conflicts, no stale state,
 no stepping on parallel sessions.
@@ -209,6 +212,13 @@ for its bounded scope and remaining takeover/foundation limitations.
 `--no-manager` selects the standalone updater but still queues it.
 `--supervised-debug` uses the same exclusive authority under foreground
 supervision, never a second installation writer.
+
+The installed global front door probes a configured project controller before
+Manager bootstrap. Native installation publishes the existing probe worker and
+its finite-process helpers under `~/.agent-worktrees/bin/`, alongside the
+runtime resolvers. This keeps controller routing independent of the legacy
+`payload-dir` snapshot marker. Payload-local commands retain their own helpers;
+older or unconfigured runtimes retain the existing Manager fallback.
 
 `update --inventory --json` advertises
 `project_controller_delegation` version 1 only when the running engine and
@@ -960,6 +970,8 @@ standalone-behavior changes.
 | Skill | Description |
 |-------|-------------|
 | [worktree](skills/worktree/SKILL.md) | Worktree lifecycle -- creation, finalization, cleanup, safety rules |
+| [finalizing-worktrees](skills/finalizing-worktrees/SKILL.md) | Focused closeout entrypoint; completion/disposition versus physical removal |
+| [cleaning-worktrees](skills/cleaning-worktrees/SKILL.md) | Explicit cleanup-pass entrypoint; retained children, history and owner-qualified removal |
 | [git-collaboration](skills/git-collaboration/SKILL.md) | Pull-forward and shared feature-branch git primitives |
 | [service-lifecycle](skills/service-lifecycle/SKILL.md) | Service installer patterns -- deploy, update, status |
 | [copilot-extensions-setup](skills/copilot-extensions-setup/SKILL.md) | Bootstrap agent-worktrees and optional sibling plugins |

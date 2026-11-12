@@ -117,6 +117,12 @@ mcp-servers:
 For setup steps use the bundled **`agent-mcp`** skill; for per-machine tuning of
 an existing bridge use **`customizing-bridges`**.
 
+The explicit Linux `exec-client` command can bind selected, already configured
+MCP entries to the native client's own exec identity. It is not enabled by
+installation or ordinary bridge startup. See the
+[eligible caller and qualification limits](docs/session-generation.md#explicit-linux-client-exec)
+before opting in.
+
 The literal `mcp-servers.command` above is deliberate. Copilot starts the stdio
 server from repository-committed, machine-portable frontmatter that has no
 plugin-root interpolation contract and may run before or independently of
@@ -547,6 +553,14 @@ Both **directions** of the bridge are dual-era:
   (`ttlMs`/`cacheScope`), and rejects an unsupported modern version with the
   standard error. A proxying (`http`/`stdio`) bridge is a transparent pass-through:
   the client's own negotiation flows end-to-end to the upstream.
+
+One-shot sessions, including each request-routed target, prepare a copy of the
+outgoing request for their own negotiated upstream era. Legacy targets remove
+the modern protocol-version, client-info and client-capabilities metadata;
+modern targets stamp the upstream's selected version and bridge identity.
+Downstream metadata cannot override that selection. Unrelated metadata such as
+progress tokens and tracing fields remains intact, without modifying the
+caller's original request or changing credential injection.
 
 Set the era per bridge with **`server.protocol`**:
 

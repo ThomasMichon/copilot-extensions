@@ -279,7 +279,8 @@ class Governance:
     def _retained_bootstrap(self) -> bool:
         if self.context:
             return False
-        slot = Path(sys.prefix).resolve()
+        environment = Path(sys.prefix).resolve()
+        slot = environment.parent if environment.name == ".venv" else environment
         if (
             slot.parent != self.root / "versions"
             or self.payload != slot / ".runtime-bootstrap"

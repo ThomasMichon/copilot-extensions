@@ -11,6 +11,21 @@ CONTRACT = {
     "capabilities": ["quiescent-checkpoint", "retained-upstream", "exclusive-epoch"],
 }
 
+CHECKPOINT_TRACE_CAPABILITY = "checkpoint-trace-bookkeeping/1"
+
+
+def backend_descriptor() -> dict:
+    """Expand backend readers without changing the legacy custody baseline."""
+    return {
+        **CONTRACT,
+        "capabilities": [*CONTRACT["capabilities"], CHECKPOINT_TRACE_CAPABILITY],
+    }
+
+
+def host_descriptor() -> dict:
+    """Declare enforcement support, not the current backend's selected mode."""
+    return backend_descriptor()
+
 
 def supports(value) -> bool:
     return (
@@ -22,3 +37,7 @@ def supports(value) -> bool:
         and isinstance(value.get("capabilities"), list)
         and all(capability in value["capabilities"] for capability in CONTRACT["capabilities"])
     )
+
+
+def supports_trace_binding(value) -> bool:
+    return supports(value) and CHECKPOINT_TRACE_CAPABILITY in value["capabilities"]

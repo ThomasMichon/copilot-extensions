@@ -5,7 +5,10 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import os
 import sqlite3
+import stat
+import time
 import yaml
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -20,6 +23,153 @@ if TYPE_CHECKING:
     from . import config as cfg, tracking
 
 _writing: ContextVar[frozenset[str]] = ContextVar("receiving_allocation_writes", default=frozenset())
+
+
+def _require_ordinary_parent(record: tracking.WorktreeRecord) -> None:
+    from . import config as cfg, tracking
+    from .checkout_relocation_plan import read_record
+
+    owner = tracking.parse_claim_ref(record.owner_ref)
+    if (
+        owner is None or not owner.is_qualified or owner.canonical() != record.owner_ref
+        or not all(allocation._component(part) for part in (
+            owner.machine, owner.project, owner.worktree_id, *([owner.session] if owner.session else []),
+        ))
+        or any(part in {".", ".."} or ":" in part for part in (owner.project, owner.worktree_id))
+    ):
+        raise ValueError("ordinary creator requires an exact qualified worktree reference")
+    if owner is None or not owner.is_qualified or owner.machine != record.execution_machine:
+        raise ValueError("ordinary owned record has no proven local creator")
+    path = cfg.tracking_dir(owner.project) / f"{owner.worktree_id}.yaml"
+    try:
+        parent = read_record(path)
+    except (yaml.YAMLError, KeyError, TypeError) as error:
+        raise ValueError("ordinary creator ledger is malformed") from error
+    if (parent.execution_machine, parent.repo, parent.worktree_id) != (
+        owner.machine, owner.project, owner.worktree_id,
+    ):
+        raise ValueError("ordinary creator ledger identity is unproven")
+    ref = tracking.format_claim_ref(record.execution_machine, record.repo, record.worktree_id)
+    claims = [claim for claim in parent.resources if claim.kind == "worktree" and claim.ref == ref]
+    if (
+        len(claims) != 1 or claims[0].state not in {"at-rest", "released"}
+        or claims[0].metadata_opaque or claims[0].has_producer
+        or any(claim.metadata_opaque for claim in parent.resources)
+        or claims[0].handoff_bundle
+    ):
+        raise ValueError("ordinary creator responsibility is missing, unsettled or requires its original producer")
+    from . import claim_handoffs
+
+    if claim_handoffs.active_bundle_for_claim(
+        tracking.format_claim_ref(parent.execution_machine, parent.repo, parent.worktree_id),
+        claims[0].ref, maximum_bytes=1024 * 1024,
+    ):
+        raise ValueError("ordinary creator responsibility is handoff-reserved")
+
+
+@contextmanager
+def _original_snapshot_lock(stream, path: Path):
+    if os.name != "nt":
+        raise ValueError("original receiving classification requires qualified native locking")
+    import msvcrt
+
+    before = os.fstat(stream.fileno())
+    # SQLite's pending, reserved and shared lock bytes lie beyond database data.
+    stream.seek(0x40000000)
+    try:
+        msvcrt.locking(stream.fileno(), msvcrt.LK_NBRLCK, 512)
+    except OSError as error:
+        raise ValueError("original receiving classification is busy") from error
+    try:
+        yield
+        try:
+            named = path.lstat()
+        except FileNotFoundError as error:
+            raise ValueError("original receiving classification changed during inspection") from error
+        if not os.path.samestat(before, named) or (
+            before.st_size, before.st_mtime_ns
+        ) != (named.st_size, named.st_mtime_ns):
+            raise ValueError("original receiving classification changed during inspection")
+    finally:
+        stream.seek(0x40000000)
+        msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 512)
+
+
+def has_retained_receiving_operation(
+    record: tracking.WorktreeRecord, records: Path, *, lock_snapshot: bool = True,
+) -> bool:
+    """Classify a journal-backed receipt hint without recovery or index upgrades."""
+    if not record.owner_ref or not record.creation_nonce:
+        return False
+    if not lock_snapshot:
+        return _classify_retained_receiving_operation(record, records)
+    path = records.parent / "workspace-creation.sqlite3"
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        _require_ordinary_parent(record)
+        return False
+    if not stat.S_ISREG(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
+        raise ValueError("original receiving classification is redirected or unsupported")
+    stream = path.open("rb")
+    with stream, _original_snapshot_lock(stream, path):
+        return _classify_retained_receiving_operation(record, records)
+
+
+def _classify_retained_receiving_operation(record: tracking.WorktreeRecord, records: Path) -> bool:
+    path = records.parent / "workspace-creation.sqlite3"
+    try:
+        before = path.lstat()
+    except FileNotFoundError:
+        _require_ordinary_parent(record)
+        return False
+    sidecars = ("-journal", "-wal", "-shm")
+    if (
+        not stat.S_ISREG(before.st_mode) or path.is_symlink()
+        or getattr(before, "st_file_attributes", 0) & 0x400
+        or before.st_size > 16 * 1024 * 1024
+        or any(os.path.lexists(str(path) + suffix) for suffix in sidecars)
+    ):
+        raise ValueError("original receiving classification is busy, redirected or unsupported")
+    with path.open("rb") as stream:
+        header = stream.read(20)
+    if header[:16] != b"SQLite format 3\x00" or header[18:20] != b"\x01\x01":
+        raise ValueError("original receiving classification requires a quiescent rollback journal")
+    try:
+        connection = sqlite3.connect(path.resolve().as_uri() + "?mode=ro&immutable=1", uri=True, timeout=1)
+    except sqlite3.Error as error:
+        raise ValueError("original receiving classification is unavailable or malformed") from error
+    deadline = time.monotonic() + 3
+    connection.set_progress_handler(lambda: int(time.monotonic() > deadline), 1000)
+    try:
+        rows = connection.execute(
+            "SELECT version,json_type(facts,'$.receiving_allocation') FROM creations WHERE ("
+            "json_extract(worktree,'$.id')=? OR json_extract(worktree,'$.worktree.id')=? OR ("
+            "json_extract(facts,'$.receiving_allocation.origin')=? AND ("
+            "json_extract(worktree,'$.creation_nonce')=? OR json_extract(worktree,'$.worktree.creation_nonce')=?))) LIMIT 2",
+            (record.worktree_id, record.worktree_id, record.owner_ref, record.creation_nonce, record.creation_nonce),
+        ).fetchall()
+    except sqlite3.Error as error:
+        raise ValueError("original receiving classification is unavailable or malformed") from error
+    finally:
+        connection.close()
+    after = path.lstat()
+    if (
+        not os.path.samestat(before, after)
+        or (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns)
+        or any(os.path.lexists(str(path) + suffix) for suffix in sidecars)
+    ):
+        raise ValueError("original receiving classification changed during inspection")
+    from . import creation_requests
+
+    if any(row[0] != creation_requests.SCHEMA_VERSION for row in rows):
+        raise ValueError("original receiving classification has an unsupported version")
+    if len(rows) > 1:
+        raise ValueError("original receiving classification is ambiguous")
+    receiving = any(row[1] is not None for row in rows)
+    if not receiving:
+        _require_ordinary_parent(record)
+    return receiving
 
 
 @dataclass(frozen=True)
@@ -130,12 +280,18 @@ def parsed_receipt(record: tracking.WorktreeRecord) -> ReceivingAllocation:
     return admission
 
 
-def require_record(record: tracking.WorktreeRecord, config: cfg.Config) -> None:
+def require_record(
+    record: tracking.WorktreeRecord, config: cfg.Config, *, local_record: bool = False,
+) -> None:
     """Prove the local creation journal; no origin connection or linked phase needed."""
     from . import creation_requests
 
     admission = parsed_receipt(record)
-    admission.require_current(config)
+    if local_record:
+        if admission.target["project"] != config.repo_name:
+            raise ValueError("receiving allocation does not select this local project")
+    else:
+        admission.require_current(config)
     row = creation_requests.inspect(config, admission.key)
     if row is None or row["status"] not in {"pending", "complete", "terminal"}:
         raise ValueError("receiving allocation has no retained creation operation")
@@ -175,7 +331,9 @@ def _require_retained_finality(
         raise ValueError("receiving allocation is concluded; reopening or downgrading requires new ownership")
 
 
-def recover_missing(record: tracking.WorktreeRecord, records: Path) -> bool:
+def recover_missing(
+    record: tracking.WorktreeRecord, records: Path, *, upgrade_journal: bool = True,
+) -> bool:
     """Old writers may omit a field, but cannot create journal-backed provenance."""
     from . import creation_requests
 
@@ -196,6 +354,8 @@ def recover_missing(record: tracking.WorktreeRecord, records: Path) -> bool:
                 row[1] == creation_requests.RECEIVING_IDENTITY_INDEX
                 for row in connection.execute("PRAGMA index_list(creations)")
             ):
+                if not upgrade_journal:
+                    return False
                 # Legacy journals are upgraded once, never scanned on every
                 # ordinary record save. New creation writers install the index.
                 upgrade = creation_requests._connection(path)
@@ -256,7 +416,13 @@ def preserve(
 ) -> None:
     """Generic and stale writers cannot forge, erase or roll back receiving custody."""
     if current is not None and not current.receiving_allocation_present:
-        recover_missing(current, path.parent)
+        from .checkout_relocation_state import owns
+
+        if owns(path):
+            if has_retained_receiving_operation(current, path.parent):
+                raise ValueError("relocation cannot recover missing original receiving metadata")
+        else:
+            recover_missing(current, path.parent)
     authorized = str(path.resolve()) in _writing.get()
     if current is not None and current.receiving_allocation_present:
         if current.status in {"finalized", "archived"} and (

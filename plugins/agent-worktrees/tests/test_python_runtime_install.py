@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import builtins
 import hashlib
 import json
 import os
@@ -42,6 +43,40 @@ def test_driver_governance_uses_current_scripts(driver):
     scripts = Path(__file__).resolve().parents[1] / "scripts"
     assert Path(governance.__file__).resolve().parent == scripts
     assert governance.SCRIPTS == scripts
+
+
+def test_native_release_entry_retains_inputs_without_a_source_association(driver, tmp_path, monkeypatch):
+    import install_source
+
+    held = []
+    wheels = object()
+
+    @contextmanager
+    def retain(profile, directory, **_options):
+        assert profile == tmp_path / "profile.json" and directory == tmp_path / "wheels"
+        held.append(wheels)
+        try:
+            yield wheels
+        finally:
+            held.pop()
+
+    def install(root, plugin, **options):
+        assert held == [wheels]
+        assert options["native_wheel_inputs"] is wheels
+        assert "wheel_inputs" not in options
+        return {"installed": True}
+
+    monkeypatch.setattr(install_source, "wheel_inputs", retain)
+    monkeypatch.setattr(driver, "install", install)
+    result = tmp_path / "result.json"
+    assert driver.main([
+        "--root", str(tmp_path / "runtime"), "--plugin", str(tmp_path / "payload"),
+        "--payload", str(tmp_path / "payload"), "--uv", str(tmp_path / "uv"),
+        "--base-python", sys.executable, "--result", str(result),
+        "--wheel-profile", str(tmp_path / "profile.json"),
+        "--wheel-directory", str(tmp_path / "wheels"),
+    ]) == 0
+    assert not held and json.loads(result.read_text()) == {"installed": True}
 
 
 def test_application_preparation_uses_wheel_assets_without_rewriting_wheel(
@@ -91,8 +126,9 @@ def test_application_preparation_uses_wheel_assets_without_rewriting_wheel(
 @pytest.mark.parametrize("legacy_paths", [
     False, pytest.param(True, marks=pytest.mark.skipif(os.name != "nt", reason="Windows MAX_PATH")),
 ])
+@pytest.mark.parametrize("frozen_provenance", [False, True])
 def test_application_preparation_retains_its_source_without_a_payload(
-    tmp_path, monkeypatch, legacy_paths,
+    tmp_path, monkeypatch, legacy_paths, frozen_provenance,
 ):
     import agent_worktrees
     from agent_worktrees import runtime_candidate as candidate
@@ -107,7 +143,10 @@ def test_application_preparation_retains_its_source_without_a_payload(
     shutil.copytree(source_scripts / "installation-context", scripts / "installation-context")
     (slot / ".runtime-bootstrap").mkdir()
     (slot / "application.json").write_text("{}", encoding="utf-8")
-    source = {"plugin": "agent-worktrees", "package_version": "1.2.3", "source_commit": "a" * 40}
+    source = {
+        "schema": "copilot-extensions.runtime-source", "version": 1,
+        "plugin": "agent-worktrees", "package_version": "1.2.3", "source_commit": "a" * 40,
+    }
     (slot / "runtime-source.json").write_text(json.dumps(source), encoding="utf-8")
     immutable = package / "_build_info.py"
     immutable.write_bytes(b"immutable wheel\n")
@@ -125,7 +164,17 @@ def test_application_preparation_retains_its_source_without_a_payload(
 
         monkeypatch.setattr(os, "scandir", legacy_scandir)
         assert len(str(scripts / "installation-context")) > 260
-    candidate.prepare_runtime_candidate()
+    provenance = None
+    if frozen_provenance:
+        from agent_worktrees import update_stage
+
+        monkeypatch.setattr(update_stage, "fingerprint", lambda _path: "frozen-payload-fingerprint")
+        provenance = {
+            "version": "1.2.3", "commit": source["source_commit"], "branch": "source",
+            "source": "source:" + source["source_commit"],
+            "deployment_source": json.dumps(source), "frozen_plugin": str(tmp_path / "inputs"),
+        }
+    candidate.prepare_runtime_candidate(provenance)
     record = json.loads((slot / ".runtime-bootstrap" / "build-info.json").read_text())
     assert record["commit"] == source["source_commit"]
     assert json.loads(record["deployment_source"]) == source
@@ -252,6 +301,38 @@ def _frozen_native_runtime_source(plugin: Path, owned: Path) -> Iterator[tuple[P
     assert run("status", "--porcelain", "--untracked-files=no") == ""
 
 
+@pytest.mark.parametrize("application", [False, True])
+@pytest.mark.parametrize("selection", ["current-version", "last-known-good"])
+def test_selected_runtime_uses_generation_not_nested_environment(
+    driver, tmp_path, monkeypatch, application, selection,
+):
+    tmp_path = Path(driver.engine._native_retained_path(tmp_path))
+    slot = tmp_path / "versions" / "2.0+source.fixture.profile.fixture"
+    environment = slot / ".venv" if application else slot
+    python = environment / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    python.parent.mkdir(parents=True)
+    python.write_bytes(b"fixture interpreter, never executed")
+    driver.runtime.mark_complete(tmp_path, slot.name, payload_hash="fixture")
+    (tmp_path / selection).write_text(slot.name + "\n")
+    importer = builtins.__import__
+    def cold_import(name, *args, **kwargs):
+        if name == "agent_procutil" or name.startswith("agent_procutil."):
+            pytest.fail("raw bootstrap borrowed an installed process-helper package")
+        return importer(name, *args, **kwargs)
+    monkeypatch.setattr(builtins, "__import__", cold_import)
+    assert driver._selected(tmp_path) == slot.name
+
+
+def test_empty_runtime_selection_needs_no_installed_process_helper(driver, tmp_path, monkeypatch):
+    importer = builtins.__import__
+    def cold_import(name, *args, **kwargs):
+        if name == "agent_procutil" or name.startswith("agent_procutil."):
+            pytest.fail("genesis selection imported a not-yet-installed dependency")
+        return importer(name, *args, **kwargs)
+    monkeypatch.setattr(builtins, "__import__", cold_import)
+    assert driver._selected(tmp_path) is None
+
+
 @pytest.mark.parametrize("vendored", [False, True])
 def test_native_runtime_source_keeps_repository_metadata_outside_frozen_packages(
     tmp_path, vendored,
@@ -289,6 +370,54 @@ def _slot(driver, root, version):
     python.write_bytes(b"interpreter")
     driver.runtime.mark_complete(root, version, payload_hash="previous")
     return slot
+
+
+@pytest.mark.parametrize("separator", [".", "+"])
+@pytest.mark.parametrize("same_profile", [False, True])
+def test_native_wheel_update_keeps_selected_repair_for_full_candidate_admission(
+    driver, tmp_path, monkeypatch, separator, same_profile,
+):
+    from types import SimpleNamespace
+
+    root, plugin = tmp_path / "runtime", tmp_path / "payload"
+    plugin.mkdir()
+    (plugin / "pyproject.toml").write_text('[project]\nname="agent-worktrees"\nversion="1.0"\n')
+    version = "1.0.profile." + "a" * 16
+    previous = ("1.0.profile." + ("a" if same_profile else "b") * 16) + separator + "repair." + "c" * 32
+    slot = _slot(driver, root, previous)
+    (root / "current-version").write_text(previous)
+    manifest = {"runtime_version": previous, "venv": str(slot)}
+
+    @contextmanager
+    def held(**_options):
+        yield
+
+    monkeypatch.setattr(driver, "Governance", lambda requested, payload: SimpleNamespace(
+        root=requested, payload=payload, held=held,
+        helper=SimpleNamespace(read_deployment_manifest=lambda _path: manifest),
+    ))
+    monkeypatch.setattr(driver, "_source_provenance", lambda *_args: {})
+    wheels = object()
+    options = {"wheel_inputs": wheels, "local_packages": ("agent-worktrees",), "extras": ()}
+    monkeypatch.setattr(driver.install_driver, "native_construction_options", lambda *_args: (version, options))
+
+    class CandidateAdmissionReached(Exception):
+        pass
+
+    def candidate(requested, generation, **arguments):
+        assert requested == root
+        assert generation == (previous if same_profile else version)
+        assert arguments["wheel_inputs"] is wheels
+        assert arguments["reuse_generations"] is False
+        assert arguments["health_callable"] == "verify_runtime_candidate"
+        raise CandidateAdmissionReached
+
+    monkeypatch.setattr(driver.engine, "numbered_candidate", candidate)
+    with pytest.raises(CandidateAdmissionReached):
+        driver.install(
+            root, plugin, payload=plugin, uv=tmp_path / "uv", base_python=Path(sys.executable),
+            native_wheel_inputs=wheels,
+        )
 
 
 @pytest.mark.parametrize("tampered", [False, True])

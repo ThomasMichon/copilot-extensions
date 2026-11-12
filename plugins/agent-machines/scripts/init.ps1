@@ -39,7 +39,11 @@ param(
     [string]$RuntimeVersion,
     [string]$MaintenanceToken,
     [switch]$Force,
-    [Parameter(DontShow)][switch]$CellWatchdogChild
+    [Parameter(DontShow)][switch]$CellWatchdogChild,
+    [string]$WheelProfile,
+    [string]$WheelDirectory,
+    [string]$WheelPython,
+    [string]$WheelUv
 )
 
 Set-StrictMode -Version 2.0
@@ -51,6 +55,15 @@ if ($env:COPILOT_EXTENSIONS_HUMAN_UTF8 -eq '1') {
     }
     . (Join-Path $PSScriptRoot 'installer-human-output.ps1')
 }
+
+if ($WheelProfile -or $WheelDirectory -or $WheelPython -or $WheelUv) {
+    if (-not $WheelProfile -or -not $WheelDirectory -or -not $WheelPython -or -not $WheelUv -or
+        $Action -notin @('install', 'init', 'provision') -or $Context) {
+        throw 'Closed wheels require profile, directory, Python and UV for install, init or provision'
+    }
+}
+$NativeWheelSelection = $null
+
 
 # === install-contract:v4 payload-copy -- keep byte-identical across plugins ===
 function Copy-InstallerStageDirectory {
@@ -998,6 +1011,10 @@ function Get-GitInfo {
 
 $PackageVersion = $SrcVersion
 Initialize-SourceRuntime
+if ($WheelProfile) {
+    Initialize-NativeWheelRuntime -Python $WheelPython -Profile $WheelProfile `
+        -Directory $WheelDirectory -Payload $PluginDir -Plugin 'agent-machines' -Root $InstallDir
+}
 if ($cellSlotAction) {
     $script:SelectedPayloadHash = Get-CellPayloadIdentity
     if ($env:AGENT_MACHINES_EXPECTED_PAYLOAD_HASH -and
@@ -1615,6 +1632,7 @@ function Remove-ConsoleTrampolines {
 # anything else (a git checkout) => local.
 # === install-contract:v4 marker/toss helpers (#935) ===
 function Get-BootstrapPython {
+    if ($WheelProfile) { return $WheelPython }
     <# A python to run the stdlib-only versioned_runtime.py helper (#935).
        Prefers the freshly-built slot venv python ($VenvDir, present at
        mark-complete before the link is swapped), then the active link's
@@ -1640,6 +1658,12 @@ function Get-PayloadHash(
     [long]$MaxPathBytes = 4096,
     [long]$MaxContentBytes = 4294967296
 ) {
+    if ($NativeWheelSelection) {
+        return (Get-NativeWheelSelection -Python $WheelPython `
+            -Helper (Join-Path $PSScriptRoot 'install_source.py') -Profile $WheelProfile `
+            -Directory $WheelDirectory -Payload $PluginDir -Plugin 'agent-machines' `
+            -Expected $NativeWheelSelection).payload_hash
+    }
     if ($SourceRuntimeIdentity) {
         Assert-SourceRuntimeIdentity
         return ($SourceRuntimeIdentity | ConvertFrom-Json).runtime_source.assembly_hash
@@ -1948,9 +1972,15 @@ function Invoke-VersionedSlotClean {
         if ($LASTEXITCODE -ne 0) { throw 'Canonical construction adapter is unavailable' }
         Invoke-Expression $helpers
     }
+    $wheelOptions = Get-NativeWheelConstructionOptions -Profile $WheelProfile `
+        -Directory $WheelDirectory -Payload $PluginDir -Plugin 'agent-machines' `
+        -Uv $WheelUv -HealthModule 'agent_machines' -Repair:$Force
     $script:RuntimeConstructionReuse = Start-RuntimeConstruction `
         -Python $py -Helper $vr -Root $InstallDir -Version $SrcVersion `
-        -PayloadHash (Get-PayloadHash) -LinkName (Split-Path -Leaf $LinkDir)
+        -PayloadHash (Get-PayloadHash) -LinkName (Split-Path -Leaf $LinkDir) @wheelOptions
+    if ($NativeWheelSelection) {
+        Set-NativeWheelRuntimeVersion -Root $InstallDir -Version $script:RuntimeConstructionSession.Version
+    }
     Assert-SourceRuntimeIdentity
 }
 
@@ -1961,7 +1991,7 @@ function Invoke-VersionedMarkComplete {
     if ($PayloadHash -and $PayloadHash -ne $actualHash) {
         throw 'Payload changed during construction; completion refused'
     }
-    Complete-RuntimeConstruction -PayloadHash $actualHash
+    Complete-RuntimeConstruction -PayloadHash $actualHash -RetainHelpers
     return $true
 }
 # === end install-contract:v4 marker/toss helpers ===
@@ -2374,8 +2404,8 @@ if (-not (Test-Path $PkgSrcDir)) {
 $hasWinget = $null -ne (Get-Command winget -ErrorAction SilentlyContinue)
 
 # Find a Python interpreter (skip Windows Store aliases that aren't real)
-$pythonCmd = $null
-foreach ($candidate in @('python', 'python3', 'py')) {
+$pythonCmd = if ($WheelProfile) { $WheelPython } else { $null }
+foreach ($candidate in $(if ($WheelProfile) { @() } else { @('python', 'python3', 'py') })) {
     $found = Get-Command $candidate -ErrorAction SilentlyContinue
     if ($found) {
         $prevEAP = $ErrorActionPreference
@@ -2399,7 +2429,7 @@ if (-not $pythonCmd) {
 Write-Ok "Python: $pythonCmd"
 
 # Check for uv -- install via winget if missing
-if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
+if (-not $WheelProfile -and -not (Get-Command uv -ErrorAction SilentlyContinue)) {
     if ($hasWinget) {
         Write-Step 'uv not found -- installing via winget...'
         $prevEAP = $ErrorActionPreference
@@ -2690,6 +2720,7 @@ if ($CellMode) {
     $manifest = [ordered]@{
         schema_version = 3
         service        = 'agent-machines'
+        runtime_version = $SrcVersion
         deployed_at    = (Get-Date -Format 'o')
         deployed_by    = "$($env:COMPUTERNAME.ToLower())-windows"
         source         = [ordered]@{

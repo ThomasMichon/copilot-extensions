@@ -1,0 +1,9 @@
+{
+  "comment": "Keep opt-in pool publication on a five-second maximum normal master idle wait without changing worker polling or restart backoff",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

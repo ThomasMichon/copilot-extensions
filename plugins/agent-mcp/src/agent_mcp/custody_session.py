@@ -8,10 +8,11 @@ import inspect
 import json
 
 from .auth import build_injector
-from .checkpoint import Binding, data_copy
+from .checkpoint import Binding, CheckpointRefused, data_copy
 from .custody_contract import CONTRACT, MAX_APPLICATION, MAX_CONTROL, supports
 from .custody_state import CapacityUnavailable, CustodyState, MAX_OUTPUT_BYTES
 from .custody_wire import Peer
+from .execution_context import SharingUnavailable
 from .transports import build_transport
 
 
@@ -37,10 +38,14 @@ class CustodySession:
     arbitrary reader/writer here is not endpoint or physical-generation proof.
     """
 
-    def __init__(self, cfg, write_to_client, *, transport=None):
+    def __init__(self, cfg, write_to_client, *, transport=None, required_trace_bookkeeping=0):
+        if type(required_trace_bookkeeping) is not int or required_trace_bookkeeping not in (0, 1):
+            raise CheckpointRefused("required checkpoint identity mode is invalid")
         self.cfg, self.write_to_client = cfg, write_to_client
+        self._required_trace_bookkeeping = required_trace_bookkeeping
         self.binding = Binding.issue()
         self.identity = self.binding.identity(cfg)
+        self._binding_selected = False
         self.state = CustodyState()
         self.transport = transport
         self._opened = False
@@ -185,6 +190,22 @@ class CustodySession:
             raise
         self._changed.set()
 
+    def _select_binding(self, connect):
+        mode = getattr(connect, "checkpoint_trace_bookkeeping", 0)
+        if type(mode) is not int or mode not in (0, 1):
+            raise CheckpointRefused("backend checkpoint identity support is invalid")
+        if self._required_trace_bookkeeping and not mode:
+            raise SharingUnavailable("backend cannot provide the required checkpoint identity mode")
+        if not self._binding_selected:
+            if self.binding.identity(self.cfg) != self.identity:
+                raise CheckpointRefused("custody context changed before initial preparation")
+            if mode:
+                self.binding = Binding(self.binding.session, self.binding.key, mode)
+                self.identity = self.binding.identity(self.cfg)
+            self._binding_selected = True
+        if self.binding.trace_bookkeeping and not mode:
+            raise CheckpointRefused("backend cannot import the selected checkpoint identity mode")
+
     async def prepare(self, connect, snapshot=None):
         """Allocate custody's epoch before requesting authenticated streams."""
         attachment = self.state.prepare()
@@ -193,9 +214,10 @@ class CustodySession:
             reader, writer = await connect(attachment.epoch)
             link = Link(self, attachment, reader, writer)
             self._links[attachment] = link
+            self._select_binding(connect)
             result = await link.peer.request(
                 "prepare", epoch=attachment.epoch, contract=CONTRACT,
-                binding={"session": self.binding.session, "key": self.binding.key},
+                binding=self.binding.wire(),
                 checkpoint=snapshot,
             )
             if (

@@ -156,6 +156,72 @@ def test_complete_native_move_preserves_bytes_git_identity_and_operational_permi
         tracking.save_record(fixture.record)
 
 
+def test_generic_owned_ordinary_component_move_preserves_original_parent_responsibility(checkout, monkeypatch):
+    fixture = checkout
+    stopped = relocation._stopped
+
+    def fixture_admission(record, path):
+        allowed = {fixture.source, fixture.destination}
+        journal = move_state.read(fixture.record.yaml_path)
+        if (
+            journal and journal["source"] == str(fixture.source)
+            and journal["destination"] == str(fixture.destination) and journal.get("stage")
+        ):
+            allowed.add(fixture.source.with_name(
+                fixture.source.name + ".retiring-" + Path(journal["stage"]).name.rsplit("-", 1)[1],
+            ))
+        if (
+            record.yaml_path == fixture.record.yaml_path
+            and record.creation_nonce == fixture.record.creation_nonce
+            and Path(path) in allowed
+        ):
+            return
+        stopped(record, path)
+
+    # This component control qualifies the new owned fixture, not host absence.
+    monkeypatch.setattr(relocation, "_stopped", fixture_admission)
+    records = fixture.record.yaml_path.parent
+    parent_checkout = fixture.source.parent / "original-creator"
+    git_ops.create_worktree(
+        str(fixture.anchor), str(parent_checkout), "worktree/original-creator", "HEAD",
+    )
+    parent = tracking.create_new_record(
+        "original-creator", "worktree/original-creator", str(parent_checkout),
+        "sample", fixture.record.machine, fixture.record.platform, records,
+    )
+    child_ref = tracking.format_claim_ref(
+        fixture.record.execution_machine, fixture.record.repo, fixture.record.worktree_id,
+    )
+    parent.resources = [tracking.ResourceClaim(kind="worktree", ref=child_ref, state="at-rest")]
+    tracking.save_record(parent)
+    parent_path = parent.yaml_path
+    fixture.record.owner_ref = tracking.format_claim_ref(
+        fixture.record.execution_machine, fixture.record.repo, "original-creator",
+    )
+    tracking.save_record(fixture.record)
+    parent_before = parent_path.read_bytes()
+    journal = records.parent / "workspace-creation.sqlite3"
+    connection = sqlite3.connect(journal)
+    connection.execute("CREATE TABLE creations(key_digest TEXT,version INTEGER,facts TEXT,status TEXT,worktree TEXT)")
+    connection.execute("INSERT INTO creations VALUES(?,?,?,?,?)", (
+        "unrelated", 1, "{}", "terminal", json.dumps({"worktree": {"id": "unrelated"}}),
+    ))
+    connection.commit()
+    connection.close()
+    journal_before = journal.read_bytes()
+    journal.chmod(0o444)
+    assert _plan(fixture)["phase"] == "planned"
+    assert _move(fixture)["phase"] == "complete"
+    current = tracking.load_record(fixture.record.yaml_path)
+    assert current.owner_ref == fixture.record.owner_ref
+    assert current.creation_nonce == fixture.record.creation_nonce
+    assert current.worktree_path == str(fixture.destination)
+    assert not current.receiving_allocation_present
+    assert parent_path.read_bytes() == parent_before
+    assert journal.read_bytes() == journal_before
+    assert (fixture.destination / "tracked.txt").read_bytes() == b"original\0content\n"
+
+
 @pytest.mark.parametrize("readonly", [False, True])
 def test_copy_interruption_fences_launch_and_retries_original_operation(checkout, monkeypatch, readonly):
     if readonly and os.name == "nt":
@@ -409,9 +475,9 @@ def test_refusals_leave_original_and_no_journal(checkout, monkeypatch, blocker):
     if blocker == "dirty":
         (checkout.source / "tracked.txt").write_bytes(b"dirty")
     elif blocker == "session":
-        monkeypatch.setattr(sessions, "verify_worktree_active", lambda _: sessions.LiveVerdict(active=True))
+        monkeypatch.setattr(sessions, "verify_worktree_active", lambda _, **kw: sessions.LiveVerdict(active=True))
     elif blocker == "unknown":
-        monkeypatch.setattr(sessions, "verify_worktree_active", lambda _: sessions.LiveVerdict(probes_ok=False))
+        monkeypatch.setattr(sessions, "verify_worktree_active", lambda _, **kw: sessions.LiveVerdict(probes_ok=False))
     elif blocker == "open-pr":
         record.prs = [tracking.PRRecord(state="open")]
         tracking.save_record(record)
@@ -775,7 +841,7 @@ def test_read_only_plan_never_recovers_receipts_or_creates_owner_sidecars(checko
         str(path.relative_to(checkout.home)): path.read_bytes()
         for path in cfg.tracking_dir("sample").rglob("*") if path.is_file()
     }
-    with pytest.raises(execution_spaces.ExecutionSpaceError, match="read-only proof"):
+    with pytest.raises(execution_spaces.ExecutionSpaceError, match="receiving allocation inspection is unproven"):
         _plan(checkout)
     after = {
         str(path.relative_to(checkout.home)): path.read_bytes()

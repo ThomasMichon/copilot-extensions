@@ -31,24 +31,72 @@ engine = install_source.engine
 
 
 @pytest.mark.parametrize("abi,target", [
-    ("win32", "i686-pc-windows-msvc"),
-    ("win_amd64", "x86_64-pc-windows-msvc"),
-    ("win_arm64", "aarch64-pc-windows-msvc"),
+    ("win32", "x86"),
+    ("win_amd64", "x86_64"),
+    ("win_arm64", "aarch64"),
 ])
-def test_emitted_launchers_follow_interpreter_abi_not_host_machine(tmp_path, abi, target):
+@pytest.mark.parametrize("implementation", [None, "cpython"])
+def test_emitted_launchers_follow_interpreter_abi_not_host_machine(
+    tmp_path, abi, target, implementation,
+):
+    from packaging.markers import Marker
+
     wheel = tmp_path / "fixture_app-1.0.0-py3-none-any.whl"
     wheel.write_bytes(b"fixture")
+    environment = {
+        "sys_platform": "win32", "platform_machine": "AMD64", "python_full_version": "3.13.0",
+        **({"implementation_name": implementation} if implementation is not None else {}),
+    }
+    original = dict(environment)
     application = emit(
         tmp_path / "application", distribution="fixture-app", version="1.0.0",
         requires_python=">=3.13", commands={"fixture-app": "fixture_app:main"},
         wheels={"fixture-app": wheel},
-        target_environment={
-            "sys_platform": "win32", "platform_machine": "AMD64", "python_full_version": "3.13.0",
-        },
+        target_environment=environment,
         target_tags=[f"cp313-cp313-{abi}", "py3-none-any"],
     )
-    for name in ("fixture-app.ps1", "fixture-app.cmd", "fixture-app.sh"):
-        assert target in (application / name).read_text(encoding="utf-8")
+    assert (application / ".python-version").read_text(encoding="utf-8") == (
+        f"{implementation or 'cpython'}-3.13.0-windows-{target}-none\n"
+    )
+    for name in ("fixture-app.ps1", "fixture-app.cmd", "fixture-app.sh",
+                 "install.ps1", "install.cmd", "install.sh"):
+        launcher = (application / name).read_text(encoding="utf-8")
+        assert f"cpython-3.13.0-windows-{target}-none" in launcher
+        assert "--python-platform" not in launcher
+    constraints = next(
+        line.removeprefix("environments = ")
+        for line in (application / "pyproject.toml").read_text(encoding="utf-8").splitlines()
+        if line.startswith("environments = ")
+    )
+    assert json.loads(constraints) == ["sys_platform == 'win32' and platform_machine == 'AMD64'"]
+    marker = Marker(json.loads(constraints)[0])
+    assert marker.evaluate({"sys_platform": "win32", "platform_machine": "AMD64"})
+    assert not marker.evaluate({"sys_platform": "win32", "platform_machine": "aarch64"})
+    assert not marker.evaluate({"sys_platform": "linux", "platform_machine": "AMD64"})
+    assert environment == original
+
+
+def test_linux_application_keeps_plain_python_request_and_exact_marker_constraints(tmp_path):
+    wheel = tmp_path / "fixture_app-1.0.0-py3-none-any.whl"
+    wheel.write_bytes(b"fixture")
+    environment = {
+        "sys_platform": "linux", "platform_machine": "aarch64", "python_full_version": "3.13.0",
+        "implementation_name": "pypy",
+    }
+    original = dict(environment)
+    application = emit(
+        tmp_path / "application", distribution="fixture-app", version="1.0.0",
+        requires_python=">=3.13", commands={"fixture-app": "fixture_app:main"},
+        wheels={"fixture-app": wheel}, target_environment=environment, target_tags=["py3-none-any"],
+    )
+    assert (application / ".python-version").read_text(encoding="utf-8") == "3.13.0\n"
+    assert "sys_platform == 'linux' and platform_machine == 'aarch64'" in (
+        application / "pyproject.toml"
+    ).read_text(encoding="utf-8")
+    for name in ("fixture-app.ps1", "fixture-app.cmd", "fixture-app.sh",
+                 "install.ps1", "install.cmd", "install.sh"):
+        assert "--python-platform" not in (application / name).read_text(encoding="utf-8")
+    assert environment == original
 
 
 @pytest.mark.parametrize("tags", [None, ["py3-none-any"], ["cp313-cp313-win32", "cp313-cp313-win_amd64"]])
@@ -59,6 +107,71 @@ def test_windows_application_refuses_missing_or_ambiguous_interpreter_abi(tmp_pa
             requires_python=">=3.13", commands={"fixture-app": "fixture_app:main"}, wheels={},
             target_environment={"sys_platform": "win32", "platform_machine": "AMD64"},
             target_tags=tags,
+        )
+    assert not (tmp_path / "application").exists()
+
+
+@pytest.mark.parametrize("damage", [
+    "none", "missing", "extra", "bytes", "directory", "deadline", "permission",
+])
+def test_application_wheel_copy_damage_requires_distinct_repair_not_deadline_replay(
+    tmp_path, monkeypatch, damage,
+):
+    from installer_wheel_inputs import WheelDeadlineError
+    content = b"fixture wheel bytes"
+    wheels = tmp_path / "wheels"
+    if damage != "missing":
+        wheels.mkdir()
+        path = wheels / "fixture.whl"
+        if damage == "directory":
+            path.mkdir()
+        else:
+            path.write_bytes(b"damaged" if damage == "bytes" else content)
+        if damage == "extra":
+            (wheels / "unexpected.whl").write_bytes(content)
+    inputs = SimpleNamespace(
+        distributions=[("fixture", "1.0", "fixture.whl", "sha256:" + hashlib.sha256(content).hexdigest())],
+        deadline=0 if damage == "deadline" else time.monotonic() + 30,
+    )
+    if damage == "permission":
+        def denied(_path):
+            raise PermissionError("fixture permission denied")
+        monkeypatch.setattr(sys.modules[engine.verify_application_wheels.__module__], "_open", denied)
+    if damage == "none":
+        engine.verify_application_wheels(inputs, tmp_path)
+    else:
+        failure = {
+            "deadline": WheelDeadlineError, "permission": PermissionError,
+        }.get(damage, engine.HealthRepairRequired)
+        with pytest.raises(failure):
+            engine.verify_application_wheels(inputs, tmp_path)
+
+
+@pytest.mark.parametrize("variant", ["cp313d", "cp313t"])
+def test_windows_application_refuses_variants_even_with_standard_compatibility_tags(tmp_path, variant):
+    with pytest.raises(ValueError, match="standard CPython target"):
+        emit(
+            tmp_path / "application", distribution="fixture-app", version="1.0.0",
+            requires_python=">=3.13", commands={"fixture-app": "fixture_app:main"}, wheels={},
+            target_environment={
+                "sys_platform": "win32", "platform_machine": "AMD64",
+                "python_full_version": "3.13.0", "implementation_name": "cpython",
+            },
+            target_tags=[f"cp313-{variant}-win_amd64", "cp313-cp313-win_amd64", "py3-none-any"],
+        )
+    assert not (tmp_path / "application").exists()
+
+
+def test_windows_application_refuses_non_cpython_target(tmp_path):
+    with pytest.raises(ValueError, match="standard CPython target"):
+        emit(
+            tmp_path / "application", distribution="fixture-app", version="1.0.0",
+            requires_python=">=3.13", commands={"fixture-app": "fixture_app:main"}, wheels={},
+            target_environment={
+                "sys_platform": "win32", "platform_machine": "AMD64",
+                "python_full_version": "3.13.0", "implementation_name": "pypy",
+            },
+            target_tags=["cp313-cp313-win_amd64", "py3-none-any"],
         )
     assert not (tmp_path / "application").exists()
 
@@ -78,7 +191,11 @@ def install_transaction(tmp_path, monkeypatch):
     }
     (slot / "application.json").write_text(json.dumps(record), encoding="utf-8")
     monkeypatch.setattr(runtime_application_install.sys, "prefix", str(slot / ".venv"))
+    actual_is_complete = engine.runtime.is_complete
     monkeypatch.setattr(engine.runtime, "is_complete", lambda *args, **kwargs: True)
+    monkeypatch.setattr(
+        runtime_application_install, "_resources", lambda _slot: (engine.runtime, engine),
+    )
 
     @contextmanager
     def qualified(*_, **_kwargs):
@@ -92,15 +209,126 @@ def install_transaction(tmp_path, monkeypatch):
     return SimpleNamespace(
         root=root, slot=slot, global_bin=root / "global", record=record,
         publication=engine.runtime._runtime_component("versioned_runtime_publication"),
+        actual_is_complete=actual_is_complete,
     )
 
 
-@pytest.mark.parametrize("phase", ["setup", "publication"])
+@pytest.mark.parametrize("ending", [b"\n", b"\r\n"])
+@pytest.mark.parametrize("changed", [
+    None, "current-version", "last-known-good", "command", "receipt", "completion",
+])
+def test_publication_current_requires_complete_selected_receipt_and_all_commands(
+    install_transaction, monkeypatch, ending, changed,
+):
+    fixture = install_transaction
+    fixture.record["commands"].append("fixture-alias")
+    fixture.record["setup"] = []
+    fixture.record["start"] = []
+    (fixture.slot / "application.json").write_text(json.dumps(fixture.record), encoding="utf-8")
+    monkeypatch.setattr(engine.runtime, "is_complete", fixture.actual_is_complete)
+    marker = engine.runtime.mark_complete(
+        fixture.root, fixture.slot.name,
+        payload_hash=fixture.record["construction"]["payload_hash"],
+    )
+    fixture.global_bin.mkdir()
+    commands = {}
+    for name in fixture.record["commands"]:
+        commands.update(global_binstubs(
+            name, fixture.record["root_environment"], fixture.record["default_directory"],
+            root=fixture.root,
+        ))
+    for name, content in commands.items():
+        (fixture.global_bin / name).write_bytes(content.encode("utf-8"))
+    selectors = [fixture.root / name for name in ("current-version", "last-known-good")]
+    for path in selectors:
+        path.write_bytes(fixture.slot.name.encode("utf-8") + ending)
+    receipt = fixture.slot / "install-success.json"
+    receipt.write_bytes(json.dumps({
+        "state": "installed", "version": fixture.slot.name,
+    }, sort_keys=True).encode("utf-8") + b"\n")
+    if changed in {"current-version", "last-known-good"}:
+        (fixture.root / changed).write_bytes(b"another-generation\n")
+    elif changed == "command":
+        (fixture.global_bin / "fixture-alias.cmd").write_bytes(b"changed secondary command\n")
+    elif changed == "receipt":
+        receipt.write_bytes(b'{"state":"installed","version":"another-generation"}\n')
+    elif changed == "completion":
+        content = json.loads(marker.read_bytes())
+        content["payload_hash"] = "another-payload"
+        marker.write_text(json.dumps(content), encoding="utf-8")
+    watched = [*selectors, receipt, marker, *(fixture.global_bin / name for name in commands)]
+    before = {path: (path.read_bytes(), path.stat().st_mtime_ns) for path in watched}
+
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("publication proof must not execute callbacks or publish")
+
+    monkeypatch.setattr(runtime_application_install, "_run", forbidden)
+    monkeypatch.setattr(runtime_application_install, "_write", forbidden)
+    monkeypatch.setattr(fixture.publication, "publish_selectors", forbidden)
+    assert runtime_application_install._publication_current(
+        fixture.slot, fixture.record, global_bin=fixture.global_bin,
+    ) is (changed is None)
+    if changed is None:
+        assert runtime_application_install.install(
+            fixture.slot, stage=False, global_bin=fixture.global_bin,
+        ) == {"state": "installed", "slot": str(fixture.slot)}
+    assert {path: (path.read_bytes(), path.stat().st_mtime_ns) for path in watched} == before
+
+
+@pytest.mark.parametrize("setup,start,arguments", [
+    ([], [], ()),
+    (["--setup"], [], ()),
+    ([], ["--start"], ()),
+    (["--setup"], ["--start"], ()),
+    (["--setup"], [], ("--config", "fixture")),
+    ([], ["--start"], ("--config", "fixture")),
+])
+def test_current_publication_reenters_configuration_and_readiness_owners(
+    install_transaction, monkeypatch, setup, start, arguments,
+):
+    fixture = install_transaction
+    fixture.record.update(setup=setup, start=start)
+    (fixture.slot / "application.json").write_text(json.dumps(fixture.record), encoding="utf-8")
+    calls = []
+
+    def owner(_record, command, root, slot):
+        assert root == fixture.root and slot == fixture.slot
+        if command:
+            calls.append(tuple(command))
+
+    monkeypatch.setattr(runtime_application_install, "_run", owner)
+    expected = {"state": "installed", "slot": str(fixture.slot)}
+    assert runtime_application_install.install(
+        fixture.slot, stage=False, global_bin=fixture.global_bin,
+    ) == expected
+    assert runtime_application_install._publication_current(
+        fixture.slot, fixture.record, global_bin=fixture.global_bin,
+    )
+    calls.clear()
+    assert runtime_application_install.install(
+        fixture.slot, stage=False, global_bin=fixture.global_bin, arguments=arguments,
+    ) == expected
+    assert calls == [
+        tuple([*callback, *arguments]) for callback in (setup, start) if callback
+    ], f"setup={setup!r} start={start!r} arguments={arguments!r} owner_calls={calls!r}"
+
+
+@pytest.mark.parametrize("existing", [False, True])
+@pytest.mark.parametrize("phase", ["setup", "launcher", "publication"])
 def test_install_transaction_before_start_failure_restores_prior_state(
-    install_transaction, monkeypatch, phase,
+    install_transaction, monkeypatch, phase, existing,
 ):
     fixture = install_transaction
     starts = []
+    previous = {}
+    if existing:
+        fixture.global_bin.mkdir()
+        for name in global_binstubs(
+            fixture.record["name"], fixture.record["root_environment"],
+            fixture.record["default_directory"], root=fixture.root,
+        ):
+            previous[name] = b"unrecognized old launcher: " + name.encode() + b"\r\n"
+            (fixture.global_bin / name).write_bytes(previous[name])
 
     def command(_record, arguments, _root, _slot):
         if arguments == ["--setup"]:
@@ -112,6 +340,18 @@ def test_install_transaction_before_start_failure_restores_prior_state(
     if phase == "setup":
         fixture.record["setup"] = ["--setup"]
         (fixture.slot / "application.json").write_text(json.dumps(fixture.record), encoding="utf-8")
+    elif phase == "launcher":
+        write = runtime_application_install._write
+        failed = False
+
+        def partial_launchers(path, content):
+            nonlocal failed
+            if path.name.endswith(".ps1") and not failed:
+                failed = True
+                raise RuntimeError("launcher refused")
+            write(path, content)
+
+        monkeypatch.setattr(runtime_application_install, "_write", partial_launchers)
     else:
         def partial_publication(root, version, *_):
             (root / "current-version").write_bytes((version + "\n").encode())
@@ -123,7 +363,101 @@ def test_install_transaction_before_start_failure_restores_prior_state(
     assert starts == []
     assert (fixture.root / "current-version").read_bytes() == b"1.0\n"
     assert (fixture.root / "last-known-good").read_bytes() == b"0.9\n"
-    assert not tuple(fixture.global_bin.glob("*"))
+    assert {
+        path.name: path.read_bytes() for path in fixture.global_bin.glob("*")
+        if path.name != ".publication-leases"
+    } == previous
+    assert not (fixture.slot / "install-success.json").exists()
+
+
+@pytest.mark.parametrize("with_start", [False, True])
+def test_install_replaces_all_declared_old_launchers_without_incumbent_provenance(
+    install_transaction, monkeypatch, with_start,
+):
+    fixture = install_transaction
+    fixture.record["commands"].append("fixture-alias")
+    fixture.record["start"] = ["--start"] if with_start else []
+    (fixture.slot / "application.json").write_text(json.dumps(fixture.record), encoding="utf-8")
+    commands = {}
+    for name in fixture.record["commands"]:
+        commands.update(global_binstubs(
+            name, fixture.record["root_environment"],
+            fixture.record["default_directory"], root=fixture.root,
+        ))
+    fixture.global_bin.mkdir()
+    for name in commands:
+        (fixture.global_bin / name).write_bytes(b"unknown legacy launcher\n")
+    unrelated = fixture.global_bin / "another-command"
+    unrelated.write_bytes(b"unrelated command\n")
+    data = fixture.root / "application.db"
+    data.write_bytes(b"preserved application state")
+    starts = []
+
+    def command(_record, arguments, root, slot):
+        if arguments:
+            assert (root / "current-version").read_text().strip() == slot.name
+            assert all((fixture.global_bin / name).read_bytes() == text.encode()
+                       for name, text in commands.items())
+            starts.append(arguments)
+
+    monkeypatch.setattr(runtime_application_install, "_run", command)
+    result = runtime_application_install.install(
+        fixture.slot, stage=False, global_bin=fixture.global_bin,
+    )
+    assert result["state"] == "installed"
+    assert starts == ([["--start"]] if with_start else [])
+    assert all((fixture.global_bin / name).read_bytes() == text.encode()
+               for name, text in commands.items())
+    assert (fixture.root / "current-version").read_bytes() == b"2.0\n"
+    assert (fixture.root / "last-known-good").read_bytes() == b"2.0\n"
+    assert (fixture.slot / "install-success.json").is_file()
+    assert unrelated.read_bytes() == b"unrelated command\n"
+    assert data.read_bytes() == b"preserved application state"
+
+
+def test_install_replacement_preserves_launcher_changed_during_setup(
+    install_transaction, monkeypatch,
+):
+    fixture = install_transaction
+    fixture.global_bin.mkdir()
+    command = fixture.global_bin / "fixture-app"
+    command.write_bytes(b"old launcher\n")
+    calls = []
+
+    def setup(_record, arguments, _root, _slot):
+        calls.append(arguments)
+        command.write_bytes(b"concurrent replacement\n")
+
+    monkeypatch.setattr(runtime_application_install, "_run", setup)
+    with pytest.raises(RuntimeError, match="launcher changed before publication"):
+        runtime_application_install.install(fixture.slot, stage=False, global_bin=fixture.global_bin)
+    assert len(calls) == 1
+    assert command.read_bytes() == b"concurrent replacement\n"
+    assert [path for path in fixture.global_bin.iterdir() if path.name != ".publication-leases"] == [command]
+    assert (fixture.root / "current-version").read_bytes() == b"1.0\n"
+    assert (fixture.root / "last-known-good").read_bytes() == b"0.9\n"
+    assert not (fixture.slot / "install-success.json").exists()
+
+
+@pytest.mark.parametrize("kind", ["directory", "oversized"])
+def test_install_replacement_refuses_nonordinary_or_unbounded_launcher(
+    install_transaction, monkeypatch, kind,
+):
+    fixture = install_transaction
+    fixture.global_bin.mkdir()
+    command = fixture.global_bin / "fixture-app"
+    if kind == "directory":
+        command.mkdir()
+    else:
+        command.write_bytes(b"x" * 65537)
+    calls = []
+    monkeypatch.setattr(runtime_application_install, "_run", lambda *_: calls.append(True))
+    with pytest.raises(RuntimeError, match="not an ordinary file"):
+        runtime_application_install.install(fixture.slot, stage=False, global_bin=fixture.global_bin)
+    assert not calls
+    assert command.is_dir() if kind == "directory" else command.stat().st_size == 65537
+    assert (fixture.root / "current-version").read_bytes() == b"1.0\n"
+    assert (fixture.root / "last-known-good").read_bytes() == b"0.9\n"
     assert not (fixture.slot / "install-success.json").exists()
 
 
@@ -177,8 +511,9 @@ def test_install_transaction_unknown_start_retains_selection_not_last_good(
 
 
 @pytest.mark.parametrize("reply_lost", [False, True])
+@pytest.mark.parametrize("changed_selection", [False, True])
 def test_install_transaction_unknown_start_preserves_concurrent_selector_winner(
-    install_transaction, monkeypatch, reply_lost,
+    install_transaction, monkeypatch, reply_lost, changed_selection,
 ):
     fixture = install_transaction
     winner = b"concurrent owner's command\n"
@@ -186,8 +521,9 @@ def test_install_transaction_unknown_start_preserves_concurrent_selector_winner(
     def start(_record, arguments, root, _slot):
         if not arguments:
             return
-        (root / "current-version").write_bytes(b"3.0\n")
-        (root / "last-known-good").write_bytes(b"2.9\n")
+        if changed_selection:
+            (root / "current-version").write_bytes(b"3.0\n")
+            (root / "last-known-good").write_bytes(b"2.9\n")
         (fixture.global_bin / "fixture-app.cmd").write_bytes(winner)
         if reply_lost:
             raise RuntimeError("lost startup reply")
@@ -195,8 +531,12 @@ def test_install_transaction_unknown_start_preserves_concurrent_selector_winner(
     monkeypatch.setattr(runtime_application_install, "_run", start)
     with pytest.raises(RuntimeError, match="startup outcome is unknown"):
         runtime_application_install.install(fixture.slot, stage=False, global_bin=fixture.global_bin)
-    assert (fixture.root / "current-version").read_bytes() == b"3.0\n"
-    assert (fixture.root / "last-known-good").read_bytes() == b"2.9\n"
+    assert (fixture.root / "current-version").read_bytes() == (
+        b"3.0\n" if changed_selection else b"2.0\n"
+    )
+    assert (fixture.root / "last-known-good").read_bytes() == (
+        b"2.9\n" if changed_selection else b"0.9\n"
+    )
     assert (fixture.global_bin / "fixture-app.cmd").read_bytes() == winner
     assert not (fixture.slot / "install-success.json").exists()
 
@@ -273,6 +613,90 @@ def test_failed_update_recovers_before_another_installer_can_commit(
     assert (fixture.root / "last-known-good").read_text().strip() == winner
     assert all((fixture.global_bin / name).read_bytes() == text.encode("utf-8")
                for name, text in commands.items())
+
+
+def test_shared_launchers_serialize_recovery_across_distinct_installation_roots(
+    install_transaction, monkeypatch, tmp_path,
+):
+    fixture = install_transaction
+    commands = global_binstubs(
+        fixture.record["name"], fixture.record["root_environment"],
+        fixture.record["default_directory"], root=fixture.root,
+    )
+    fixture.global_bin.mkdir()
+    for name in commands:
+        (fixture.global_bin / name).write_bytes(b"old shared launcher\n")
+    other = tmp_path / "other" / "versions" / "3.0"
+    (other / ".venv").mkdir(parents=True)
+    (other / ".venv/pyvenv.cfg").write_text("fixture", encoding="utf-8")
+    record = {**fixture.record, "start": []}
+    (other / "application.json").write_text(json.dumps(record), encoding="utf-8")
+    program = """
+import contextlib,json,pathlib,sys
+library,runtime_library,slot,commands=map(pathlib.Path,sys.argv[1:])
+sys.path[:0]=[str(library),str(runtime_library)]
+import runtime_application_install as app
+import versioned_runtime as runtime
+from runtime_application_binstubs import global_binstubs
+from types import SimpleNamespace
+sys.prefix=str(slot/'.venv')
+runtime.is_complete=lambda *a,**k:True
+@contextlib.contextmanager
+def qualified(*a,**k):
+    yield runtime,lambda:None
+app._qualified=qualified
+app._load=lambda *a:SimpleNamespace(global_binstubs=global_binstubs)
+app._run=lambda *a:None
+lease=runtime._publication_lease
+@contextlib.contextmanager
+def entered(root):
+    with lease(root):
+        print('contending',flush=True)
+        yield
+runtime._publication_lease=entered
+print(json.dumps(app.install(slot,stage=False,global_bin=commands)),flush=True)
+"""
+    children = []
+    write = runtime_application_install._write
+
+    def fail_after_competitor_enters(path, content):
+        if path.name.endswith(".ps1"):
+            raise RuntimeError("launcher refused")
+        if not children:
+            child = subprocess.Popen(
+                [sys.executable, "-I", "-B", "-c", program,
+                 str(Path(runtime_application_install.__file__).parent),
+                 str(Path(engine.runtime.__file__).parent), str(other),
+                 str(fixture.global_bin)],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+            )
+            children.append(child)
+            assert child.stdout.readline().strip() == "contending", child.communicate(timeout=5)
+            with pytest.raises(subprocess.TimeoutExpired):
+                child.wait(timeout=1)
+        write(path, content)
+
+    monkeypatch.setattr(runtime_application_install, "_write", fail_after_competitor_enters)
+    monkeypatch.setattr(runtime_application_install, "_run", lambda *_: None)
+    try:
+        with pytest.raises(RuntimeError, match="launcher refused"):
+            runtime_application_install.install(fixture.slot, stage=False, global_bin=fixture.global_bin)
+        child, = children
+        output, error = child.communicate(timeout=10)
+        assert child.returncode == 0, output + error
+        assert json.loads(output)["state"] == "installed"
+    finally:
+        for child in children:
+            if child.poll() is None:
+                child.kill()
+                child.communicate(timeout=5)
+    expected = global_binstubs(
+        record["name"], record["root_environment"], record["default_directory"], root=other.parent.parent,
+    )
+    assert all((fixture.global_bin / name).read_bytes() == text.encode("utf-8")
+               for name, text in expected.items())
+    assert (fixture.root / "current-version").read_bytes() == b"1.0\n"
 
 
 def test_install_without_start_commits_one_update_after_unlocked_verification(
@@ -960,12 +1384,24 @@ def test_generated_install_verifies_actual_long_repair_slot(application, host_na
 def test_retention_bootstrap_uses_the_completed_application_environment(
     application, foreign_interpreter,
 ):
+    import runtime_launcher
+
     root, slot, caller, environment = application
     environment["UV_PYTHON"] = sys.executable
     extension = ".cmd" if os.name == "nt" else ".sh"
     installed = invoke(slot / ("install" + extension), [], caller, environment)
     assert installed.returncode == 0, installed.stdout + installed.stderr
     completion = (slot / engine.runtime.COMPLETE_MARKER).read_bytes()
+    identity = runtime_launcher.runtime_identity(slot)
+    metadata = (
+        slot / engine.runtime.COMPLETE_MARKER,
+        slot / ".runtime-bootstrap" / "runtime-generation",
+    )
+    before = {path: (path.read_bytes(), path.stat().st_mtime_ns) for path in metadata}
+    reused = invoke(slot / ("install" + extension), [], caller, environment)
+    assert reused.returncode == 0, reused.stdout + reused.stderr
+    assert runtime_launcher.runtime_identity(slot) == identity
+    assert {path: (path.read_bytes(), path.stat().st_mtime_ns) for path in metadata} == before
     python = sys.executable if foreign_interpreter else str(engine.runtime.slot_python(root, slot.name))
     interpreters = [python]
     if os.name == "nt" and not foreign_interpreter:
@@ -973,7 +1409,8 @@ def test_retention_bootstrap_uses_the_completed_application_environment(
     for python in interpreters:
         result = subprocess.run(
             [python, "-I", "-S", "-B", "-X", "utf8",
-             str(slot / ".runtime-bootstrap" / "runtime_launcher.py"), "-m", "fixture_app", "--fail"],
+             str(slot / ".runtime-bootstrap" / "runtime_launcher.py"),
+             "--runtime-identity", identity, "-m", "fixture_app", "--fail"],
             executable=python, cwd=caller, env=environment,
             capture_output=True, text=True, encoding="utf-8", timeout=30,
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,

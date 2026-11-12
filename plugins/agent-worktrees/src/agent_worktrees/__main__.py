@@ -147,6 +147,7 @@ _PROJECT_ARG_SLUGS = front_door_cli._PROJECT_ARG_SLUGS
 _PROJECT_CHDIR_VERBS = front_door_cli._PROJECT_CHDIR_VERBS
 _chdir_verb_for = front_door_cli._chdir_verb_for
 _resolve_project_checkout = front_door_cli._resolve_project_checkout
+_caller_project_worktree = front_door_cli._caller_project_worktree
 _worktrees_verbs = front_door_cli._worktrees_verbs
 _canonical_slug = front_door_cli._canonical_slug
 _sibling_binstub = front_door_cli._sibling_binstub
@@ -6309,9 +6310,9 @@ def main(argv: list[str] | None = None, *, publication: object | None = None) ->
         parser.parse_args(args_list[1:])
         if args_list[0] == "__source-setup":
             return inst.setup_application()
-        from .status_monitor_cutover import start_application
+        from .runtime_deployment import start_published_application
 
-        return start_application()
+        return start_published_application()
 
     # Policy inspection must not resolve/adopt a project or prepare runtime state.
     policy_args = front_door_cli.policy_invocation(args_list)
@@ -6472,7 +6473,7 @@ def main(argv: list[str] | None = None, *, publication: object | None = None) ->
     if args_list[0] == "pr-watch":
         from . import pr_cli
         if not (len(args_list) >= 4 and args_list[1] in ("snapshot", "status", "threads", "diff")
-                and "/" in args_list[2] and not args_list[2].startswith("-")) and args_list[1:2] != ["inventory"]:
+                and "/" in args_list[2] and not args_list[2].startswith("-")) and args_list[1:2] not in (["inventory"], ["population"]):
             _ensure_cluster_loaded()
         try:
             return pr_cli.cmd_pr_watch_dispatch(args_list[1:])

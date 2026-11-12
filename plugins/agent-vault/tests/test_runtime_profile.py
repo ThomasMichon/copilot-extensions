@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import builtins
 import importlib.util
 import json
 import os
@@ -108,14 +109,18 @@ def test_profile_file_cannot_redirect_writes(profile, tmp_path):
     assert target.read_text() == "retained"
 
 
-def test_bootstrap_currentness_requires_matching_profile_and_actual_slot(profile, payload, tmp_path):
+def test_bootstrap_currentness_requires_matching_profile_and_actual_slot(
+    profile, payload, tmp_path,
+):
     profile.persist_profile(tmp_path, "ssh")
     slot = tmp_path / "versions" / "1.2.3+ssh"
     python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     python.parent.mkdir(parents=True)
     python.write_bytes(b"interpreter metadata fixture")
     (tmp_path / "current-version").write_text(slot.name)
-    manifest = {"source": {"version": "1.2.3"}, "runtime_profile": "ssh", "runtime_version": slot.name}
+    manifest = {
+        "source": {"version": "1.2.3"}, "runtime_profile": "ssh", "runtime_version": slot.name,
+    }
     (tmp_path / "deploy-manifest.json").write_text(json.dumps(manifest))
     assert profile.current(tmp_path, "1.2.3", payload)
     assert not profile.current(tmp_path, "1.2.4", payload)
@@ -193,6 +198,29 @@ def test_legacy_currentness_preserves_unselected_base(profile, payload, tmp_path
     (root / "deploy-manifest.json").write_text(json.dumps({"source": {"version": "1.2.3"}}))
     assert profile.current(root, "1.2.3", payload)
     assert not (root / profile.PROFILE_FILE).exists()
+
+
+def test_pinned_legacy_base_currentness_does_not_import_the_native_installer(
+    profile, payload, tmp_path, monkeypatch,
+):
+    root = tmp_path / "runtime"
+    python = root / "versions" / "1.2.3" / (
+        "Scripts/python.exe" if os.name == "nt" else "bin/python"
+    )
+    python.parent.mkdir(parents=True)
+    python.touch()
+    (root / "current-version").write_text("1.2.3")
+    (root / "deploy-manifest.json").write_text(json.dumps({"source": {"version": "1.2.3"}}))
+    monkeypatch.setenv("COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN", "{}")
+    original = builtins.__import__
+
+    def without_native_installer(name, *args, **kwargs):
+        if name == "install_source":
+            raise ModuleNotFoundError("Native installer requires Python 3.11's tomllib")
+        return original(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", without_native_installer)
+    assert profile.current(root, "1.2.3", payload)
 
 
 def test_native_driver_retains_profile_through_request_handoff(profile, monkeypatch, tmp_path):

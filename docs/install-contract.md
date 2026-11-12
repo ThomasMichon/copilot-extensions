@@ -114,6 +114,65 @@ They distinguish environment staging, candidate readiness, activation and
 release; they do not claim that every app already implements the target flow.
 Existing plugin-native installation remains supported during the migration.
 
+Complete-application publication uses the existing path-scoped launcher leases
+in addition to the installation root's selector lease. Installations sharing a
+command directory serialize comparison, replacement and rollback; startup
+completion rechecks those commands under the same path custody. Canonical local
+composition discards inherited Git selectors, while intentionally supplied
+temporary-index overrides remain local to their owning operation.
+
+Worktrees' source-application startup completes its deployment manifest through
+the original command owner's existing lifecycle publication lease, after monitor
+readiness. Its Source/profile identity remains separate from legacy payload
+fingerprints, which remain unknown when unavailable. Failed startup or changed
+selection leaves the reservation incomplete. Reusing the same completed,
+owner-validated selection does not rewrite deployment evidence or acquire new
+management authority. This bounded publication path does not establish the
+whole-set replacement or installed-adopter acceptance above. Legacy development
+release uses its retained lifecycle bootstrap without first discovering a removed
+payload. Its retained-owner check recognizes both direct-slot and nested `.venv`
+interpreters, preserving completion and command-ownership validation. Namespaced
+release still resolves its authorized installed payload.
+
+## Native closed-wheel inputs
+
+The Windows native recipes accept `WheelProfile`, `WheelDirectory`,
+`WheelPython` and `WheelUv` together for installation/update/provisioning
+(`init` where that is the recipe's existing action). Manager's Python entry
+uses the corresponding `--wheel-profile`, `--wheel-directory`,
+`--wheel-python` and `--wheel-uv` options.
+
+These are construction inputs, not release/feed approval or a Source
+association. The caller admits the selected release, complete dependency
+closure, actual target and applicable local restrictions. A Source-qualified
+payload still requires its real `--install-source` association; raw wheel
+inputs cannot replace or manufacture it.
+
+The complete profile and inspected wheel bytes participate in the immutable
+generation and payload hash. Construction is offline, no-index, no-deps,
+no-build and hash-required. The existing native owner retains the candidate
+through health, activation, command/manifest publication and settlement;
+service cutover, task policy, disabled holds, data and recovery keep their
+existing owners. MCP keeps its nested environment; Manager remains independent.
+Bootstrap readiness recognizes the completed profile generation rather than
+mistaking it for package-version drift. Package comparisons strip the generated
+profile suffix; recovery still requires an exact current/last-known-good
+selection instead of choosing a dependency profile by hash order.
+
+Unchanged startup reads the existing selector, bounded constructor receipt,
+deployment manifest, completion marker and interpreter presence. The package
+identity, exact profile/closure, selected extras and manifest construction hash
+must agree with that completed generation. Each observation rereads this evidence:
+changed or missing evidence, package/profile changes and Source-qualified payloads
+invalidate the hint. It does not enumerate or hash payload/dependency trees, prove
+serving health, or admit construction from a receipt. Explicit installation still
+checks the actual retained payload/wheel bytes and installed health, including when
+reusing the selected healthy `.repair` or `+repair` generation.
+
+Unsupported native capability/dependency profiles may use only the caller's
+permitted ordinary fallback. A failed native installation or changed retained
+input is an actual failure, not permission to hide it with a source rebuild.
+
 ## Manager first-party artifact and retained hosts
 
 Manager's wheel-first target embeds its selected in-process first-party library
@@ -227,6 +286,13 @@ The collected updater uses Containers'
 to retain this independent profile dimension through planning, pinned execution
 and selected/completed-slot currentness, without changing the original source
 receipt or the installation's owner/data root.
+
+For Worktrees, the collected complete-application adapter runs the existing
+installed candidate preparation and full-health callbacks inside the engine's
+construction stage, before its completion marker. Environment synchronization
+alone does not prepare the external build-provenance record. The later
+application install can then reuse completed construction without skipping that
+required preparation or rewriting immutable wheel members.
 
 Source-qualified generations require an exact `current-version` or
 `last-known-good` selector. If neither resolves and source-qualified slots exist,
@@ -2592,7 +2658,9 @@ Confirmed-exited candidates retain their original snapshot rooting and ancestry
 for descendant discovery, but are omitted from returned live observations.
 A disappeared observation is omitted only after native process absence/exit
 confirmation; live unknown, ambiguous and changed-identity observations still
-refuse inspection. The existing native birth check and retirement pins remain
+refuse inspection. A nonzero CIM owner-query result receives that same native
+exit confirmation; a live failure still refuses with PID and result diagnostics.
+The existing native birth check and retirement pins remain
 separate, and the census never signals a process.
 
 Candidate ownership uses a query-only native process/token handle when
@@ -3559,6 +3627,13 @@ from the admitted artifact. Execution holds the existing owner's managed
 `command_binding.py --run-lifecycle` custody, including on the same artifact's
 module install fallback. This does not create an installation cell, data root,
 new driver, or a public alternative installation command.
+
+Validated complete applications use that owner's existing deferred-runtime
+lifecycle admission. The owner checks, management lease and inherited ticket
+remain enforced, but no unfinished legacy-manifest reservation is written:
+the application installer owns its selectors and completion receipt while the
+original command binding remains intact. Legacy native publishers below still
+complete their ordinary manifest publication.
 
 SSH, Machines and MCP's native publications under that transaction pin pass their
 unbound schema-3 manifest to the original installed owner's existing
@@ -4594,7 +4669,11 @@ delivery policy, including public-index refusal and cross-origin credential
 isolation. Explicit nonempty download-origin restrictions still constrain
 artifact destinations.
 Native non-index selection settings and first-party exclusions remain in
-force. The observed project indexes are rechecked after selected-wheel
+force. Initial selection and final readback share entry validation and the
+same native tag projection. The recheck binds all compatible candidate records
+and their metadata, plus the index's transport identity; changes to incompatible
+wheels do not invalidate that selection. Malformed incompatible entries still
+refuse readback. The observed project indexes are rechecked after selected-wheel
 acquisition and source validation while the delivery is held; source is
 validated again afterward. The index check is a snapshot, not a lock on
 subsequent feed changes. The mode
@@ -5113,14 +5192,25 @@ The installed callback executes from its physical flat or nested slot, checks
 its installation root and selected generation, and never invokes the outgoing
 installer to stop or remove the incumbent.
 
-`tools/local_install_source.py` freezes one full Git commit, materializes its
-declared resources and builds associated first-party wheels without consuming
-changefiles or changing package versions. Archive text conversion uses LF
-unless repository attributes explicitly select another EOL; Windows snapshot
-inputs use native filesystem paths. On Windows, construction uses a compact
-disposable copy of the selected build inputs and a toolchain; the copy must
-match the retained inputs, which are checked again before the record is
-published. Its default selects Manager only.
+`tools/local_install_source.py` freezes one full Git commit and builds associated
+first-party wheels. For a source selection with `--main-head`, it consumes the
+canonical version-preserving local composition, archives that Git tree without
+materializing it again, and leaves the selected source's changefiles untouched.
+On Windows, the canonical promotion owner's Git calls enable
+`core.longpaths=true` for that command only, including scratch checkout,
+staging and removal. They do not rewrite repository or global configuration.
+The snapshot retains the original `source_commit`/`source_tree`, the selected
+`main_head`, and `composition` containing `main_seed` and the composed `tree`.
+The prepared native-profile snapshot preserves that association; installation
+checks that it does not change while its exact wheel inputs are held.
+An unseeded source selection retains its historical materialization behavior;
+`--finalized-main` retains the existing Main-ancestry check. Neither local path
+allocates package versions or publishes a release. Its default selects Manager only.
+Archive text conversion uses LF unless repository attributes explicitly select
+another EOL; Windows snapshot inputs use native filesystem paths. On Windows,
+construction uses a compact disposable copy of the selected build inputs and
+a toolchain; the copy must match the retained inputs, which are checked again
+before the record is published.
 Repeated `--project` options select a bounded set, such as
 `--project standalone:worktree-manager --project agent-worktrees`; `--suite`
 is a separate, explicit portfolio-wide choice. A first-party-only snapshot is
@@ -5132,9 +5222,8 @@ release controller. Its existing toolchain owner accepts an optional absolute
 `uv` executable and monotonic `deadline` for governed preparation. Interpreter
 discovery, environment creation, retained installation and version readback
 share the caller's remaining budget, checked before publication and success.
-The caller still owns process-tree containment. Public toolchain discovery does
-not yet support this bounded entry and refuses before requests; existing callers
-without a deadline retain their prior policy and behavior. These preparation
+The caller still owns process-tree containment. Existing callers without a
+deadline retain their prior policy and behavior. These preparation
 primitives do not change Manager's ordinary bootstrap or source routing.
 
 Manager wheels also carry an explicit, non-routing complete-profile provider.
@@ -5163,6 +5252,166 @@ contained relative roots, link refusal and no-overwrite publication. All groups
 are preflighted before copying. Version-one declarations and the separate
 legacy source-only preparer remain supported; a single-group-only receiver
 refuses a multi-group declaration instead of silently omitting resources.
+The canonical build-toolchain API accepts an explicit `uv` executable and an
+optional monotonic `deadline`. Interpreter selection, environment creation,
+retained dependency preflight/execution, installed-version verification and
+lazy marker queries share that deadline; public metadata requests retain their
+existing per-request ceiling within the same remaining budget. An expired
+candidate is not published over an occupied toolchain. Default callers retain
+their existing source policy and invocation. `reuse_only=True` retains the same
+source/interpreter provenance and installed-package queries but refuses a
+missing environment before allocating staging or provisioning a replacement.
+This API support alone does not
+qualify a packaged complete-input provider or ordinary Manager routing.
+Local source construction and the existing plugin, standalone and core artifact
+owners also accept the selected UV/deadline. They pass them to the same locked
+toolchain and wheel constructor, checking expiry before starting construction
+and before publishing the completed artifact/source manifest. Default callers
+retain their previous invocation. An explicitly expired zero source deadline
+is not replaced by a fresh default budget.
+
+Packaged resources may use `copilot-extensions.packaged-assets` version 2 to
+declare exact, portable relative file paths under one `canonicalDir`, including
+`.` for the repository root. Materialization preserves those paths beneath
+`payloadDir`; it checks every source and destination before copying any member,
+rejecting traversal, links, aliases, file/directory conflicts and occupied
+outputs. Version 1 remains basename-only. A standalone consumer's declared
+canonical inputs participate in its changefile/bump calculation.
+Manager wheels and their static validator also retain `.toml`, `.txt` and
+`.lock` metadata specifically under `scripts/runtime-source-tools/`, including
+the sdist resource path. These layout primitives alone do not declare or qualify
+a complete preparation/install execution path.
+Manager's own `packaged-assets.json` declares the bounded toolkit file set,
+including the canonical construction/profile owners, fixed source-identity
+fragments, trusted build selectors and instruction-projection renderer. Its
+wheel preserves their repository-relative layout. The provider uses Manager's
+declared Python 3.11+ interpreter and runtime dependencies, including explicit
+`packaging`; it does not depend on checkout imports or provision a parallel
+tooling environment. Backend builds still use the existing locked toolchain.
+The installed raw-preparer caller recognizes this nested resource layout as
+well as the prior flat layout without changing its receipt protocol. Complete
+application preparation uses those same packaged owners; configured-source
+routing remains separate work.
+
+`local_install_source.prepare_applications` admits one clean merged source and
+composes it once with the selected Main seed. It first checks prior completed
+outputs through the existing validators; a valid hit returns that unchanged
+snapshot/wheel/profile portfolio. Otherwise it builds the explicitly selected
+first-party projects once and calls the existing complete-profile owner for
+each component. One selected UV executable and monotonic deadline cover the
+portfolio. Component extras are explicit inputs to that same profile owner.
+The complete-profile worker borrows the same locked build-toolchain interpreter
+while its workspace remains held, including the compact Windows workspace.
+The cold parent needs no ambient Packaging installation. The worker checks its
+actual native marker environment against the selected parent interpreter and
+binds its source-record inspection to the parent's exact record. Existing
+source checks run before exposing build inputs and again after profile work;
+the completed application map is not published until that lifetime settles.
+This adds no second tooling environment or dependency policy.
+Containers and Machines ship the same canonical Python source-application SDK
+alongside their native initializers through the existing installer-engine
+adopter fan-out. Prepared-application validation does not substitute their
+legacy native installers or change their existing profile and host contracts.
+For development-source complete applications, that same full canonical Git
+tree is archived, but extraction writes only the existing selected build-input
+closure and project-roster/core-selection metadata. Every archive member still
+receives path/type validation, and excluded members cannot hide colliding paths.
+Selected payload/dependency bytes and the recorded composition tree are unchanged;
+this is an export-footprint optimization, not another builder, cache or source
+approval. Ordinary source-composition CLI calls and finalized Main exports keep
+their full-tree behavior.
+The provider CLI explicitly loads sibling tools from its own script directory
+under isolated Python (`-I`); neither the caller's working directory nor
+`PYTHONPATH` supplies those modules.
+Complete-application preparation retains this same toolchain at
+`inputs/build-tools`, including on Windows after the compact source workspace
+settles. Standalone first-party builds keep their previous workspace lifetime.
+Retaining the toolchain does not itself select prior application outputs or
+qualify their native reuse.
+Construction and reuse select the running interpreter's stable base executable
+through the same canonical toolchain resolver, rather than keying the toolchain
+to a replaceable Manager venv path. The profile worker still verifies the actual
+native target against the invoking interpreter.
+The process interface accepts `--application-extras` as a JSON object mapping
+selected component names to extra-name lists. The Manager transport forwards
+that explicit selection unchanged; invalid, duplicate or unselected extra
+inputs fail before source admission. Installed profile policy remains with the
+component owner, not the preparer or Manager.
+The CLI selects this mode with `--prepare-applications --branch dev`,
+`--main-head <full-commit>`, repeated `--project` selections, `--uv` and
+`--timeout`; Main selections use `--branch main` without reseeding finalized
+versions. It never acquires a different source. It returns each owner's completed
+`snapshot` path, not the first-party
+build directory. After all profiles complete, it rechecks their source,
+composition, repository provenance, locked application and construction
+associations, then checks source admission again before writing
+`applications.json`. Failure leaves no completed portfolio receipt.
+That completion record binds the snapshot map and complete output bytes with
+the existing runtime fingerprint primitive. It establishes local byte custody,
+not source, feed or release approval. Reuse examines at most 4,096 direct sibling
+attempts and validates at most 32 matching completions, without a second index,
+cache root or identity. The same retained toolchain must pass current
+feed/interpreter provenance and installed-package queries in reuse-only mode.
+The canonical worker then checks the freshly composed source, original build
+toolchain, artifact closure and actual wheels; native target, selected extras
+and current profile-source policy; complete profile closure; locked application
+construction; and unchanged completion bytes before and after validation.
+It neither constructs another environment nor resolves a profile, invokes a
+backend or regenerates an application on a valid hit. Missing, damaged or
+incompatible prior outputs permit fresh preparation without modifying them.
+Worker timeout, unexpected failure, a foreign returned map or a changed incoming
+source remains an error, not permission to replay construction.
+Focused substituted-actor controls cover this orchestration; they do not
+qualify actual backend/profile execution, ordinary updater routing or rollout.
+Manager's preparation transport invokes this packaged provider once for the
+selected portfolio, carrying the frozen Main seed and absolute monotonic
+`--deadline`. Its existing installer process owner retains and settles the child
+tree; no detached worker or second executor is introduced. Provider progress is
+stderr-only so stdout remains one bounded snapshot-map receipt. Manager refuses
+missing tooling, UV, Main metadata, unexpected components, foreign snapshot
+paths and late receipts. A reused portfolio must have one preparation parent
+directly under the same applications root and the same per-component layout;
+mixed-preparation maps refuse. This transport does not itself install an application
+or establish runtime-generation retention; callers retain their existing source
+custody. Ordinary suite routing remains a separate consumer.
+
+Manager's independent Dev self-update consumes this complete snapshot through
+the same native input context used by `runtime_install.py --install-source`.
+Acquisition settles and revalidates before installation; retained source/wheel
+inputs then span the existing Manager installer, publication and cutover owner.
+The default config/data root and independent service policy remain unchanged.
+Explicit-profile dry-runs require the requested lock and local-package selection,
+not merely a source-equivalent selected generation. A changed input detected on
+context exit reports failure without replaying installation. The standalone
+Dev bootstrap now enters that same complete-input context after checking its
+declared process helper. Its original payload remains the source-digest and
+repair-ownership subject; the acquired payload and application go to the
+existing installer without changing its root or executor. Input custody settles
+before requested-command dispatch. Raw attributed Dev payloads require explicit
+complete `--install-source` inputs instead of falling back to raw construction.
+Main/custom-ref transport and recovery-only entries retain their existing paths.
+Actual cold-bootstrap and installed-host qualification remain open.
+
+Worktrees' raw source lifecycle reads the selected generation through its
+already-vendored versioned-runtime SDK before process-helper packages are
+installed. Both direct-slot and nested application `.venv` interpreters are
+checked against that SDK's slot resolver; inspecting an empty or existing
+installation does not import an ambient `agent_procutil` package.
+
+`--reuse-install-source <absolute-prior-snapshot>` selects existing first-party
+inputs instead of provisioning a build toolchain or running first-party backends.
+The source commit/tree, Main seed, composed tree and repository provenance must
+match. Each selected project's source identity, complete artifact/source closure,
+build policy and seasoning, native compatibility tags and actual wheel bytes are
+checked through the existing validators. Wheel inputs remain held during copying,
+and the selected prior record is rechecked before returning a new snapshot.
+Missing, changed, corrupt or incompatible explicit inputs refuse without silently
+falling back to a build. Omission preserves normal construction.
+
+This first-party-only switch is distinct from the complete-application reuse
+above, not release-index discovery or new approval authority. It does not reuse or
+approve a native dependency profile; complete that profile through its existing
+owner before runtime installation.
 
 `tools/local_install_profile.py --prepare-profile` completes one selected
 component's native dependency closure through the existing configured-feed
@@ -5293,7 +5542,15 @@ Select the API from the exact admitted immutable source, not an installed
 module with the same name. That module's `APPLICATION_INSTALL_CONTRACT` declares
 `copilot-extensions.prepared-application-install` version one. Missing or unknown
 support means this optional adapter is unavailable; never attempt installation
-and then replay through a guessed legacy path. No new CLI syntax is introduced.
+and then replay through a guessed legacy path.
+
+The same module exposes `--install-application` for process-bound consumers.
+It requires `--install-source`, `--component`, `--payload`, `--root`, `--uv`,
+`--base-python`, `--health-module`, `--expected-runtime-version` and
+`--expected-payload-hash`; `--repair` selects a distinct repair generation.
+Application-owned setup/start arguments follow a literal `--` separator.
+The CLI forwards to this existing API and emits its JSON result, without an
+alternate constructor, activation path or legacy retry fallback.
 
 The adapter retains wheel and candidate/process custody through setup,
 publication and startup, and requires the application's successful installation
@@ -5305,8 +5562,18 @@ startup outcome for application-owned reconciliation; it never infers that a
 failed callback had no effects.
 The selected and completed-slot application declarations must also agree before
 callbacks execute. Changed setup/start/command declarations refuse reuse and
-require an explicitly selected distinct repair generation; completed slots are
-never rewritten to fit new declarations.
+select a distinct repair generation; completed slots are never rewritten to fit
+new declarations. Ordinary application installation makes at most one such
+construction retry when an existing candidate has a classified content or
+health repair requirement. Retained incoming inputs are checked again before
+that attempt, using the same acquisition/construction deadline. A healthy
+selected repair generation for the same source/profile can be reused.
+Malformed incumbent selection metadata is not an admission requirement.
+Explicit `--repair` starts directly with a distinct generation and does not
+add another repair attempt. Fresh-construction failures, changed incoming
+inputs, deadlines and actual permission/I/O failures remain failures.
+The retry surrounds candidate entry only: setup, publication, startup and
+retention-exit failures never replay application execution.
 Application callbacks still own service readiness, irreversible effects and
 partial-transition recovery. A thrown exception is not proof of no effects and
 does not authorize replay. This entry neither acquires/authenticates source nor

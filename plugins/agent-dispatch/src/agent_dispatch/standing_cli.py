@@ -107,6 +107,29 @@ def register_standing_commands(sub: argparse._SubParsersAction) -> None:
     _add_workspace(release)
     release.set_defaults(func=_cmd_release)
 
+    grant = commands.add_parser(
+        "recovery-grant", allow_abbrev=False,
+        help="delegate bounded recovery of an accepted pairing; never staff or launch",
+    )
+    grant.add_argument("task_id")
+    _add_revision(grant, "expected_generation")
+    _add_workspace(grant)
+    grant.add_argument("--owner-session-id", required=True)
+    grant.add_argument("--grant-id", required=True)
+    grant.add_argument("--authority-ref", required=True)
+    grant.add_argument("--expires-at", type=float, required=True, help="absolute Unix expiry time")
+    grant.add_argument("--max-attempts", type=_revision, required=True)
+    grant.set_defaults(func=_cmd_recovery_grant)
+
+    revoke = commands.add_parser(
+        "recovery-revoke", allow_abbrev=False,
+        help="revoke future recovery without discarding pending effects",
+    )
+    revoke.add_argument("task_id")
+    _add_revision(revoke)
+    revoke.add_argument("--grant-id", required=True)
+    revoke.set_defaults(func=_cmd_recovery_revoke)
+
     for action, summary in _LIFECYCLE.items():
         lifecycle = commands.add_parser(action, allow_abbrev=False, help=summary)
         lifecycle.add_argument("task_id")
@@ -171,5 +194,21 @@ def _cmd_release(args: argparse.Namespace) -> int:
 def _cmd_lifecycle(args: argparse.Namespace) -> int:
     return _mutate(
         args, "change_standing_lifecycle", args.task_id, args.standing_action,
+        expected_revision=args.expected_revision,
+    )
+
+
+def _cmd_recovery_grant(args: argparse.Namespace) -> int:
+    return _mutate(
+        args, "grant_standing_recovery", args.task_id, _workspace(args),
+        expected_revision=args.expected_revision, expected_generation=args.expected_generation,
+        owner_session_id=args.owner_session_id, grant_id=args.grant_id,
+        authority_ref=args.authority_ref, expires_at=args.expires_at, max_attempts=args.max_attempts,
+    )
+
+
+def _cmd_recovery_revoke(args: argparse.Namespace) -> int:
+    return _mutate(
+        args, "revoke_standing_recovery", args.task_id, grant_id=args.grant_id,
         expected_revision=args.expected_revision,
     )

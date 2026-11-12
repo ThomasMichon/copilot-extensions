@@ -74,6 +74,26 @@ settles only the unused local handoff and attaches without creating a pane.
 Manager retains terminal attachment, options, UI, status and original native
 admission. This finite operation does not wait for Copilot to exit.
 
+The standalone Host front door also advertises `mux_creation` with
+`posix-private-create-v1` on POSIX. Its exact `--mux-create-private` invocation
+reads at most 1 MiB of JSON text containing `version: 1`, an absolute native
+TMux `binary`, absent private `socket`, `session`, canonical `cwd` and literal
+child `command`. It creates only that socket/session and returns the same
+creation contract with `status: created` and native `incarnation`/`pane`.
+Pre-dispatch refusal returns `rejected`; any unconfirmed dispatch returns
+`unknown`, both exiting 3 without echoing commands or diagnostics. There is
+no default-server join, retry, cleanup or caller journal. This stdlib receiving
+closure does not load the optional Windows creation-lease dependency.
+
+Portable Bridge receiving selects that operation from its copied executable
+before prerequisite, registration or mux effects. Bridge retains its original
+attempt lock, digest, private socket identity and reuse observation. An older
+core without the operation refuses a fresh attempt before effects; an already
+created attempt still reuses its original incarnation without requiring a new
+core. Unknown creation never falls back to direct TMux or replays the child.
+Existing default-mux creation syntax and legacy Host entrypoints are unchanged;
+no compatibility retirement or native POSIX qualification is implied.
+
 ### Finite PSMux observation
 
 `agent_remote_driver.mux_observation` owns native PSMux reads for Driver
@@ -266,6 +286,64 @@ Missing/invalid observation, native input, closed/uncontrolled state,
 pending/sending/outstanding work, connection loss or cleanup uncertainty
 cannot be cleared by a lease. These remain held or terminally unavailable.
 Ordinary lost-controller recovery remains unsupported.
+
+`headed.auth_child.AuthPaneChild.native_scope` exposes an opaque in-process
+identity only after the original native Popen handle and required Job have
+been captured. Keep it with that exact retained child object.
+`scope_settled(original_token)` returns `True` only after owned whole-Job
+confirmation, native process wait and successful Job close; it returns `None`
+for missing/foreign identity or failed/incomplete cleanup. Neither callable
+polls, waits, confirms, terminates or acquires a source. Retirement progress
+and partial confirmation are insufficient. This live-only token does not
+publish environment/boot/conversation identity, a complete recovery descriptor,
+post-loss reacquisition or current source authority. It does not wire a
+recovery consumer or change the POSIX receiver refusal.
+
+### Effect-free crash-recovery bookkeeping
+
+The additive Python `headed.recovery` interface exports diagnostic crash
+candidates and records original-owner recovery transitions. It does not add
+a CLI/wire operation, canonical journal, observer, native recovery provider or
+automatic recovery. `AuthWaitReceiver.crash_candidate(descriptor, ...)` reads
+existing status without changing authorization, holds, incarnation or grants.
+Missing observation remains unknown; silence or a candidate never authorizes
+retirement. Nonces and credentials are not exported.
+
+An immutable `RecoveryDescriptor` binds the original owner/worktree, descriptor
+and source revisions, conversation, environment, boot, scope, incarnation and
+lease revision. The original owner supplies a `RecoveryStore` with durable
+atomic compare-and-swap, one record per exact descriptor and unique operation
+IDs across descriptors. No production store adapter or lifecycle effect
+callback is provided. A store's evidence references are assertions requiring
+owner admission, not independently verified settlement or authorization.
+
+`record_recovery_step` requires an exact store revision and records
+`retire_intent`, `settled`, `resume_intent`, then `observation_restored`.
+Resume intent records a newer authority revision; restored observation names
+a different native incarnation of the same conversation. Duplicate identical
+steps return the retained record, including after an acknowledgement is lost;
+conflicting IDs, bindings, evidence or revisions refuse without retrying.
+Old EOF/control holds and unknown-effect references remain sticky even after
+observation is recorded as restored. No step proves idle or completed work,
+clears the legacy receiver's refusal, resends a prompt, or executes an effect.
+All status remains native-recovery-unqualified and reconciliation-required.
+Actual provider settlement, current admission and native seedless history
+restoration need separate qualification before any owner wires recovery.
+
+`headed.recovery_codec.encode_recovery_record` and `decode_recovery_record`
+exchange the complete typed record, not its lossy `status()` projection.
+The UTF-8 JSON envelope has exactly `contract` (`copilot-driver.headed-recovery-record`),
+integer `version` (1) and `record`. All descriptor/step fields, including null
+optional step fields, are required; unknown or duplicate fields, unsupported
+versions, incorrect types, invalid Unicode, floating-point/non-finite values,
+invalid history and records over 262144 bytes refuse without repair or truncation.
+No authorization/capability flags are serialized. Canonical encoding retains
+the operation, exact binding, complete ordered history, holds and unknown effects.
+`load_recovery_status(store, descriptor)` reads that exact binding without CAS
+or any effects. Missing records remain unknown, not settled or absent sessions.
+Neither codec availability nor successful decoding establishes store/native
+admission. The compact receiving archive includes these pure modules but adds
+no recovery command, provider or capability advertisement.
 
 See the [ACP WS boundary](../../plugins/agent-remote-driver/docs/session-host-websocket.md).
 The compact dependency-free receiving archive supports TCP only. Tests stay

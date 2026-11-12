@@ -42,12 +42,51 @@ from . import tracking
 _LOG = logging.getLogger(__name__)
 
 
-def _record_platform_conflicts(record: tracking.WorktreeRecord) -> bool:
+def _record_execution_conflicts(record: tracking.WorktreeRecord, owner: tracking.ClaimRef, config) -> bool:
     actual = cfg.detect_platform()
     conflict = record.platform != actual
     if conflict:
         _LOG.warning("Claimant record platform conflicts with the actual execution context")
+    elif owner.machine and owner.machine != record.execution_machine:
+        alias = None
+        if getattr(record, "machine_identity", None) is None and owner.is_qualified:
+            alias = legacy_wsl_record_locality.resolve_legacy_wsl_owner_ref(owner, config)
+        if alias is None or record.yaml_path is None or alias.resolve() != record.yaml_path.resolve():
+            _LOG.warning("Claimant record execution owner conflicts with its qualified reference")
+            conflict = True
     return conflict
+
+
+def _claimant_is_local(parsed: tracking.ClaimRef, config) -> bool | None:
+    from . import retained_checkout
+    from .execution_spaces import require_current_execution_space
+
+    if parsed.is_qualified and retained_checkout.resolve_owner(parsed, config) is not None:
+        return True
+    require_current_execution_space(config)
+    if not parsed.machine or parsed.machine.casefold() == config.machine.casefold():
+        return True
+    if legacy_wsl_record_locality.resolve_legacy_wsl_owner_ref(parsed, config) is not None:
+        return True
+    return None if machine_identity.is_local_machine(parsed.machine, config) else False
+
+
+def _confirmed_record_death(record, config) -> bool | None:
+    from . import retained_checkout
+    from .execution_spaces import project_record_config
+
+    try:
+        if getattr(config, "repo_name", record.repo) != record.repo:
+            config = project_record_config(record)
+        match = retained_checkout.recorded_branch_matches(record, config)
+        retained = (Path(record.worktree_path) / ".git").exists()
+    except (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError, cfg.yaml.YAMLError):
+        return None
+    if match is False or match is None and retained:
+        _LOG.warning("Claimant checkout branch/metadata is unproven for its recorded incarnation")
+        return None
+    return False
+
 
 #: Escape hatch: set truthy to disable cross-machine SSH probing entirely, so a
 #: cross-machine owner always degrades to ``None`` (spare) without a network
@@ -170,16 +209,11 @@ def local_claimant_alive(owner_ref: str) -> bool | None:
         return None
     try:
         config = cfg.load_config()
-        this_machine = config.machine
+        if not config.machine or not _claimant_is_local(parsed, config):
+            return None
     except Exception as exc:
         _LOG.warning("Cannot establish actual claimant execution identity: %s", exc)
         return None
-    if not this_machine:
-        return None
-    # Cross-machine -> unresolvable, unless a record-scoped legacy WSL ref.
-    if parsed.machine and this_machine and parsed.machine != this_machine:
-        if legacy_wsl_record_locality.resolve_legacy_wsl_owner_ref(parsed, config) is None:
-            return None
     project = parsed.project
     if not project:
         # A bare (legacy same-repo) ref -> assume the active project.
@@ -204,7 +238,7 @@ def local_claimant_alive(owner_ref: str) -> bool | None:
             anchor_rec = tracking.load_record(rec_path)
         except Exception:
             return True  # present but unreadable -> bias to sparing
-        if _record_platform_conflicts(anchor_rec):
+        if _record_execution_conflicts(anchor_rec, parsed, config):
             return None
         if anchor_rec.worktree_path and not Path(anchor_rec.worktree_path).exists():
             return False  # the anchor checkout truly went away -> gone
@@ -215,7 +249,7 @@ def local_claimant_alive(owner_ref: str) -> bool | None:
         owner_rec = tracking.load_record(rec_path)
     except Exception:
         return True  # record present but unreadable -> bias to sparing
-    if _record_platform_conflicts(owner_rec):
+    if _record_execution_conflicts(owner_rec, parsed, config):
         return None
     # Citadel E1b cascade (#877): a parent in a TERMINAL status (finalized /
     # orphaned) is done -- it no longer actively holds its outbound worktree
@@ -224,7 +258,7 @@ def local_claimant_alive(owner_ref: str) -> bool | None:
     # its children as "claimed". The children remain protected by their OWN
     # git/PR/session prune safety, so nothing with real work is lost.
     if owner_rec.status in tracking._TERMINAL_OWNER_STATUSES:
-        return False
+        return _confirmed_record_death(owner_rec, config)
     if owner_rec.worktree_path and not Path(owner_rec.worktree_path).exists():
         return False  # owner's worktree dir removed -> gone
     # Dead-session detection: a still-on-disk worktree dir is
@@ -234,7 +268,7 @@ def local_claimant_alive(owner_ref: str) -> bool | None:
     # process, no fresh liveness hint, and days-stale activity); the freed
     # resources still keep their own git/PR/session prune-safety.
     if _owner_looks_dead(owner_rec):
-        return False
+        return _confirmed_record_death(owner_rec, config)
     return True  # owner still present -> spare
 
 
@@ -254,27 +288,14 @@ def resolve_claimant_alive(
     parsed = tracking.parse_claim_ref(owner_ref)
     if parsed is None:
         return None
-    if not parsed.machine:
-        same_machine = True
-    else:
-        try:
-            config = cfg.load_config()
-        except Exception as exc:
-            _LOG.warning("Cannot establish actual claimant execution identity: %s", exc)
-            return None
-        else:
-            same_machine = parsed.machine.casefold() == config.machine.casefold()
-            if not same_machine:
-                same_machine = (
-                    legacy_wsl_record_locality.resolve_legacy_wsl_owner_ref(parsed, config) is not None
-                )
-            if not same_machine:
-                from .execution_spaces import ExecutionSpaceError
-                try:
-                    same_machine = machine_identity.is_local_machine(parsed.machine, config)
-                except (ValueError, ExecutionSpaceError) as exc:
-                    _LOG.warning("Cannot establish claimant alias locality: %s", exc)
-                    return None
+    try:
+        config = cfg.load_config()
+        same_machine = _claimant_is_local(parsed, config)
+    except Exception as exc:
+        _LOG.warning("Cannot establish actual claimant execution identity: %s", exc)
+        return None
+    if same_machine is None:
+        return None
     if same_machine:
         return local_claimant_alive(owner_ref)
     if not allow_remote or os.environ.get(_NO_REMOTE_ENV):

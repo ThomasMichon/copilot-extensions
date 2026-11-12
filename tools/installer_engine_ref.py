@@ -39,7 +39,7 @@ _NATIVE_BEGIN = "# native-executable:begin"
 _NATIVE_END = "# native-executable:end"
 PYTHON_FILES = (
     "installer_engine.py", "installer_engine_health.py", "runtime_launcher.py", "installer_driver.py",
-    "install_source.py",
+    "install_source.py", "runtime_application_install.py",
     "installer_wheel_inputs.py",
     "installer_wheel_snapshot.py",
     "installer_wheel_acquisition.py",
@@ -53,6 +53,7 @@ PYTHON_ADOPTERS = (
     "agent-worktrees", "agent-vault", "agent-pull-requests", "agent-ssh",
     "agent-codespaces", "agent-logger", "agent-bridge",
     "agent-dispatch", "agent-mcp", "agent-index",
+    "budget-guidance", "agent-machines", "agent-containers",
 )
 STANDALONE_PYTHON_ADOPTERS = ("worktree-manager", "libs/update-driver")
 STANDALONE_NATIVE_ADOPTERS = (
@@ -60,6 +61,14 @@ STANDALONE_NATIVE_ADOPTERS = (
     "plugins/agent-containers", "plugins/budget-guidance", "plugins/agent-worktrees",
 )
 STANDALONE_NATIVE_FILES = (*FILES, *SUPPORT_FILES)
+STANDALONE_NATIVE_EXTRA_FILES = {
+    "plugins/agent-machines": ("runtime_launcher.py",),
+}
+
+
+def native_files(consumer: Path, repo: Path) -> tuple[str, ...]:
+    relative = consumer.relative_to(repo).as_posix()
+    return (*STANDALONE_NATIVE_FILES, *STANDALONE_NATIVE_EXTRA_FILES.get(relative, ()))
 
 
 def standalone_python_adopter_dirs(repo: Path) -> tuple[Path, ...]:

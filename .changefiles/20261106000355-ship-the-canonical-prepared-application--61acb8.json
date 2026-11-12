@@ -1,0 +1,9 @@
+{
+  "comment": "Ship the canonical prepared-application SDK with the Containers payload",
+  "changes": [
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    }
+  ]
+}

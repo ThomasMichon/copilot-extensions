@@ -69,7 +69,11 @@ def _owned_record(args: dict, path: Path, *, mutable: bool = True):
     record = tracking.load_record(path)
     authority = project_record_config(record)
     require_record_mutation(record, authority)
-    if not require_owner_identity(record.execution_machine, authority):
+    from . import retained_checkout
+
+    if not retained_checkout.is_local(record, authority) and not require_owner_identity(
+        record.execution_machine, authority,
+    ):
         raise ValueError("producer record belongs to a different local execution-space authority")
     owner = tracking.parse_claim_ref(args["owner_ref"])
     if owner is None or not owner.is_qualified or owner.session or (

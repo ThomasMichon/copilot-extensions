@@ -6,6 +6,7 @@ import dataclasses
 import contextlib
 import json
 import re
+import subprocess
 import sys
 
 from . import config, output, reconcile, update_acquisition, update_events, update_options, update_runtime, update_runtime_plan
@@ -94,6 +95,7 @@ def inventory():
     names = set(targets) | {name for name, _ in reconcile.discover_core_payload_dirs()}
     names.add(reconcile.SELF_PLUGIN)
     rows = []
+    application_profiles = {}
     for name in sorted(names):
         target = targets.get(name)
         payload = reconcile.core_installed_payload_dir(name)
@@ -117,7 +119,15 @@ def inventory():
                     row.update(selected="not applicable", running="not applicable")
                 else:
                     resolved = reconcile.resolve_runtime_installation(name, payload)
-                    row["selected"] = reconcile.runtime_deployed_version(name, root=resolved.runtime_root) or "missing"
+                    from .update_runtime_application import selected_version
+
+                    try:
+                        application = selected_version(resolved.runtime_root, name)
+                    except (OSError, ValueError):
+                        application = "unknown / invalid application selection"
+                    row["selected"] = application or (
+                        reconcile.runtime_deployed_version(name, root=resolved.runtime_root) or "missing"
+                    )
                     row["running"] = reconcile.runtime_running_version(name, root=resolved.runtime_root) or "unknown / not observed"
                     row["source"] += f"; {resolved.actual_mode}: {resolved.reason}"
                 selected_target = _target(name, targets)
@@ -129,6 +139,20 @@ def inventory():
                 if plan.blocked or (plan.eligible is False and scope != "none"):
                     raise ValueError(plan.status)
                 row["updatable"] = True
+                if scope != "none" and (
+                    name == "agent-containers"
+                    or (payload / "runtime-source-target.json").exists()
+                    or (payload / "runtime-source-target.json").is_symlink()
+                ):
+                    from .update_runtime_target import application_profile
+
+                    try:
+                        environment, root = reconcile.runtime_installer_environment(name, payload)
+                        profile = application_profile(name, payload, root, environment)
+                        if profile is not None:
+                            application_profiles[name] = {"selection": profile}
+                    except (OSError, ValueError, subprocess.SubprocessError) as error:
+                        application_profiles[name] = {"error": str(error)}
             except (OSError, ValueError) as error:
                 row["limitation"] = str(error)
         rows.append(row)
@@ -140,6 +164,7 @@ def inventory():
             "schema": SOURCES_SCHEMA, "version": SOURCES_CONTRACT,
             "prepared_install_source": 1,
             "target_contract": {"schema": TARGET_SCHEMA, "version": TARGET_CONTRACT},
+            "application_profiles": application_profiles,
         },
     }
 

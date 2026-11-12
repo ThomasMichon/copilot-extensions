@@ -25,7 +25,11 @@ param(
     [string]$InstallDir,
     [ValidateSet('base', 'provider-exec')]
     [string]$Profile,
-    [switch]$Force
+    [switch]$Force,
+    [string]$WheelProfile,
+    [string]$WheelDirectory,
+    [string]$WheelPython,
+    [string]$WheelUv
 )
 
 Set-StrictMode -Version 2.0
@@ -37,6 +41,14 @@ if ($env:COPILOT_EXTENSIONS_HUMAN_UTF8 -eq '1') {
     }
     . (Join-Path $PSScriptRoot 'installer-human-output.ps1')
 }
+
+if ($WheelProfile -or $WheelDirectory -or $WheelPython -or $WheelUv) {
+    if (-not $WheelProfile -or -not $WheelDirectory -or -not $WheelPython -or -not $WheelUv -or
+        $Action -notin @('install', 'init', 'provision')) {
+        throw 'Closed wheels require profile, directory, Python and UV for install, init or provision'
+    }
+}
+
 
 if ((Test-Path Env:\COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN) -and $Action -notin @('stamp', 'uninstall') -and
     -not (Test-Path Env:\COPILOT_EXTENSIONS_RUNTIME_SOURCE_TARGET)) {
@@ -338,6 +350,7 @@ $PackageVersion = $SrcVersion
 $SourceSelected = $false
 $SourceRuntimeIdentity = '{}'
 function Get-SourceRuntimePython {
+    if ($WheelProfile) { return $WheelPython }
     $py = @('python3', 'python', 'py') | ForEach-Object {
         Get-Command $_ -ErrorAction SilentlyContinue
     } | Where-Object { $_.Source -and $_.Source -notmatch 'WindowsApps' } | Select-Object -First 1
@@ -770,8 +783,8 @@ if (-not (Test-Path $PkgSrcDir)) {
 $hasWinget = $null -ne (Get-Command winget -ErrorAction SilentlyContinue)
 
 # Find a Python interpreter (skip Windows Store aliases that aren't real)
-$pythonCmd = $null
-foreach ($candidate in @('python', 'python3', 'py')) {
+$pythonCmd = if ($WheelProfile) { $WheelPython } else { $null }
+foreach ($candidate in $(if ($WheelProfile) { @() } else { @('python', 'python3', 'py') })) {
     $found = Get-Command $candidate -ErrorAction SilentlyContinue
     if ($found) {
         $prevEAP = $ErrorActionPreference
@@ -817,7 +830,7 @@ if (Get-Command docker -ErrorAction SilentlyContinue) {
 }
 
 # Check for uv -- install via winget if missing
-if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
+if (-not $WheelProfile -and -not (Get-Command uv -ErrorAction SilentlyContinue)) {
     if ($hasWinget) {
         Write-Step 'uv not found -- installing via winget...'
         $prevEAP = $ErrorActionPreference
@@ -841,7 +854,7 @@ Write-Ok "Directories: $InstallDir"
 # -- 2. Provision the selected immutable profile (uv pip install or pip) --
 
 $signedBase = $null
-if ($env:OS -eq 'Windows_NT' -and (Get-Command py -ErrorAction SilentlyContinue)) {
+if (-not $WheelProfile -and $env:OS -eq 'Windows_NT' -and (Get-Command py -ErrorAction SilentlyContinue)) {
     foreach ($v in '3.13', '3.12', '3.11') {
         $probePreference = $ErrorActionPreference
         try {
@@ -862,9 +875,10 @@ $profileArgs = @(
     (Join-Path $PSScriptRoot 'runtime_profile.py'),
     '--root', $InstallDir, '--payload', $PluginDir, '--python', $pythonCmd
 )
-$uv = Get-Command uv -ErrorAction SilentlyContinue
+$uv = Get-Command $(if ($WheelProfile) { $WheelUv } else { 'uv' }) -ErrorAction SilentlyContinue
 if ($uv) { $profileArgs += @('--uv', $uv.Source) }
 if ($Profile) { $profileArgs += @('--profile', $Profile) }
+if ($WheelProfile) { $profileArgs += @('--wheel-profile', $WheelProfile, '--wheel-directory', $WheelDirectory) }
 $profileArgs += @('--expected-source-version', $SrcVersion)
 $profileArgs += @('--expected-source-identity', $SourceRuntimeIdentity)
 # Source manifest inputs are captured before activation.
@@ -941,6 +955,12 @@ $manifest = [ordered]@{
     runtime        = 'python'
 }
 if ($profileResult.runtimeSource) { $manifest['runtime_source'] = $profileResult.runtimeSource }
+if ($WheelProfile) {
+    if ($profileResult.payloadHash -cnotmatch '^[0-9a-f]{64}$') {
+        throw 'Native wheel construction returned no manifest content identity'
+    }
+    $manifest['source']['content_hash'] = $profileResult.payloadHash
+}
 $tmp = "$manifestPath.tmp"
 $manifest | ConvertTo-Json -Depth 4 | Set-Content -Path $tmp -Encoding UTF8
 Move-Item -Force -Path $tmp -Destination $manifestPath

@@ -126,12 +126,42 @@ def delegation_capability():
     }
 
 
+def _partial_parent(request) -> bool:
+    return any(
+        flag in {"--phase", "--target", "--no-project-controller"}
+        or flag.startswith(("--phase=", "--target="))
+        for flag in request.argv
+    )
+
+
+def _legacy_project_request(request, selected) -> bool:
+    if (
+        getattr(request, "authority", None) != ""
+        or getattr(request, "backend", None) != "engine"
+        or getattr(selected, "configured", None) is not False
+        or not getattr(request, "project", None)
+        or cfg.active_project() != request.project
+        or _partial_parent(request)
+    ):
+        return False
+    try:
+        repo = cfg.load_config().default_repo
+        script = configured_script(repo)
+        if not script:
+            return False
+        _controller_path(repo, script)
+    except (AttributeError, OSError, TypeError, ValueError):
+        return False
+    return True
+
+
 def dispatch_update(args, auth, manager, standalone) -> int:
     if getattr(args, "auth_report", False):
         return auth(args)
     request = getattr(args, "_controller_request", None)
     selected = getattr(args, "_controller_authority", None)
     requested = getattr(request, "authority", "standalone")
+    legacy_project = _legacy_project_request(request, selected)
     if selected is not None and selected.configured and selected.mode == "standalone":
         if requested != "standalone":
             output.err("Project update authority changed before execution.")
@@ -139,8 +169,8 @@ def dispatch_update(args, auth, manager, standalone) -> int:
         args = copy(args)
         args.no_project_controller = True
         controlled = None
-    elif requested == "project":
-        if (
+    elif requested == "project" or legacy_project:
+        if not legacy_project and (
             selected is None or not selected.configured or selected.mode != "project"
             or selected.project != request.project or cfg.active_project() != request.project
         ):
@@ -150,11 +180,7 @@ def dispatch_update(args, auth, manager, standalone) -> int:
             getattr(args, "phase", None) or getattr(args, "target", None) is not None
             or getattr(args, "no_project_controller", False)
         ):
-            if any(
-                flag in {"--phase", "--target", "--no-project-controller"}
-                or flag.startswith(("--phase=", "--target="))
-                for flag in request.argv
-            ):
+            if _partial_parent(request):
                 output.err("A partial request cannot own the project update.")
                 return 1
             if getattr(args, "phase", None) or getattr(args, "target", None) is not None:

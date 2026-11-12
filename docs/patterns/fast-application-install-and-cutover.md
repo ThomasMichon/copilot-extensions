@@ -49,6 +49,54 @@ The sequence is a target, not executable CLI syntax. In particular, a
 portfolio-wide atomic selector and complete stage-time readiness are not
 established by today's generated per-app installers.
 
+### Prepare a selected application portfolio without installing it
+
+The local source adapter exposes `--prepare-applications` with an explicit
+`--source-checkout`, exact `--source-commit`, `--main-head`, `--branch dev|main`,
+absolute `--uv` executable, new external `--output` directory and one or more
+`--project` selections. Standalone keys use `standalone:<component>`; runtime
+plugins use their declared project name. Optional `--application-extras` is a
+JSON object mapping selected component names to extra lists. Select one
+`--deadline` (absolute monotonic time) or `--timeout` (seconds).
+
+Run `tools/local_install_source.py` from a dependency-prepared source environment.
+It admits the clean merged source, uses the canonical version-preserving
+composition and artifact owners, and keeps one toolchain alive for the profile
+worker. Scratch checkout suppresses configured Git hooks for that command,
+and composition/control Git commands disable configured filesystem monitors
+per invocation, without changing repository settings.
+Only after every selected snapshot passes
+complete readback does it return a JSON component-to-snapshot map and write
+`applications.json`.
+Before composition it validates the existing output parent and ancestor chain
+against unprivileged replacement and exclusively creates an owner-private root.
+Linked parents and existing or partial output roots are refused without repair.
+Readback verifies the emitted application's wheel copies against the retained
+construction inputs, not just the snapshot's separate wheel directory.
+Progress goes to stderr. No runtime is installed, selected or started.
+Profile preparation runs with the preparer's already-running tooling interpreter,
+not the minimal wheel-build environment. The build toolchain and application
+target environment retain their separate identities. Concurrent compositions
+bind changefile readers to their own scratch modules without replacing a
+process-global import alias, and reserve distinct scratch paths atomically.
+
+Windows application preparation selects a standard CPython interpreter from
+the native version and wheel-platform tags. Unsupported interpreter variants
+refuse before application output; no cross-target marker environment is added.
+
+Unchanged complete sibling outputs may be reused after source, composition,
+toolchain, wheel, profile target/extras/policy and application validation.
+Automatic discovery first requires native owner-private directories protected
+against other users' writes; shared or unverifiable directories are not reuse
+sources. Completion hashes do not authorize execution of a retained toolchain.
+Missing or incompatible retained outputs can lead to ordinary preparation;
+a failed selected worker is an error, not permission to replay construction.
+Deadline-bound profile, composition and Git children use the existing native
+process owner, with descendant settlement reserved inside the original deadline.
+The separate `--reuse-install-source` mode revalidates explicitly selected
+first-party wheel inputs and never silently falls back to a build.
+Neither mode is a new release-approval token or installation-completion claim.
+
 ## Support every application must provide
 
 | Boundary | Required behavior | Existing implementation home |
@@ -73,6 +121,18 @@ and a physical project-local `.venv`. The interpreter is relative to that
 environment: `.venv/bin/python` on POSIX or `.venv\Scripts\python.exe` on
 Windows, with ordinary `pyvenv.cfg` and environment-prefix behavior.
 Installation, configuration/data and cache roots remain separate.
+
+Windows projects select a version/OS/architecture-qualified interpreter through
+their relocatable `.python-version` request, with architecture derived from the
+admitted interpreter ABI tags rather than the host machine label. A synthetic
+UV target-platform override must not rewrite dependency-marker values: the
+profile and lock retain their exact admitted marker environment. Missing or
+ambiguous Windows ABI inputs still refuse preparation.
+
+Stored completion and command bytes do not establish current configuration or
+live service readiness. An application with setup or startup callbacks still
+enters its owner's idempotent configuration/readiness path on repeat; a generic
+publication-only no-op is limited to applications without either callback.
 
 Copy the application inputs, then construct the environment in its addressed
 slot; do not treat an already-created virtual environment as a relocatable
@@ -270,6 +330,13 @@ final verification explicitly.
 Application setup, startup/readiness and construction-input verification run
 outside selector-update locking. Only launcher/selector writes, the final
 success commit and guarded pre-start recovery use brief atomic updates.
+The admitted application replaces differing existing ordinary files at its
+declared global command names without requiring recognized incumbent launcher
+bytes or old-runtime provenance. Other command names and application data are
+not replacement targets. Linked, non-file or oversized targets remain literal
+publication errors. The transaction snapshots prior bytes, detects a command
+changed during preparation, and restores replaced bytes on pre-start failure;
+it does not replay over a concurrent writer.
 Callbacks may therefore use the existing selector owner without waiting for
 their installer to release a lock. A callback that confirms the same selected
 generation is not a competing winner; the final check accepts the canonical

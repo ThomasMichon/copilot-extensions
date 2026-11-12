@@ -51,9 +51,10 @@ def test_inventory_is_read_only_and_does_not_confuse_versions(installed, monkeyp
     before = {p: p.read_bytes() for root in installed.values() for p in root.rglob("*") if p.is_file()}
     facts = owner.inventory()
     assert facts["runtime_sources"] == {
-        "schema": "copilot-extensions.prepared-runtime-sources", "version": 1,
+        "schema": "copilot-extensions.prepared-runtime-sources", "version": 2,
         "prepared_install_source": 1,
         "target_contract": {"schema": "copilot-extensions.runtime-source-target", "version": 1},
+        "application_profiles": {},
     }
     rows = {row["id"]: row for row in facts["entries"]}
     assert rows["agent-example"]["payload"] == "2"
@@ -215,6 +216,77 @@ def test_inventory_does_not_advertise_foreign_runtime_code(installed, monkeypatc
     else:
         monkeypatch.setattr(owner.config, "install_dir", lambda: tmp_path / "other-engine")
     assert owner.inventory()["project_controller_delegation"] is None
+
+
+@pytest.mark.parametrize("valid", [False, True])
+def test_inventory_observes_application_selection_not_stale_legacy_version(
+    installed, tmp_path, valid,
+):
+    root = tmp_path / "selected" / "agent-example"
+    version = "2.0.0+source.fixture.profile.fixture"
+    slot = root / "versions" / version
+    slot.mkdir(parents=True)
+    (root / "current-version").write_text(version)
+    (slot / "application.json").write_text(json.dumps({
+        "name": "agent-example" if valid else "another-component",
+    }))
+    before = {path: path.read_bytes() for path in root.rglob("*") if path.is_file()}
+    row = next(row for row in owner.inventory()["entries"] if row["id"] == "agent-example")
+    assert row["selected"] == (version if valid else "unknown / invalid application selection")
+    assert row["updatable"] and row["running"] == "0"
+    assert before == {path: path.read_bytes() for path in before}
+
+
+@pytest.mark.parametrize("selected", ["dev", "dev-" + "a" * 32, "dev-" + "b" * 64, "dev-../outside"])
+def test_inventory_keeps_legacy_dev_manifest_fallback_without_accepting_unsafe_names(
+    installed, tmp_path, selected,
+):
+    root = tmp_path / "selected" / "agent-example"
+    root.mkdir(parents=True)
+    marker = root / "current-version"
+    marker.write_text(selected, encoding="utf-8")
+    before = marker.read_bytes(), marker.stat().st_mtime_ns
+    row = next(row for row in owner.inventory()["entries"] if row["id"] == "agent-example")
+    assert row["selected"] == ("unknown / invalid application selection" if ".." in selected else "1")
+    assert row["running"] == "0" and row["updatable"]
+    assert (marker.read_bytes(), marker.stat().st_mtime_ns) == before
+
+
+@pytest.mark.parametrize("available", [False, True])
+def test_inventory_source_profile_support_does_not_change_marketplace_eligibility(
+    installed, monkeypatch, tmp_path, available,
+):
+    from agent_worktrees import update_runtime_target as target
+
+    payload = tmp_path / "agent-containers"
+    payload.mkdir()
+    (payload / "plugin.json").write_text(json.dumps({
+        "name": "agent-containers", "version": "2", "runtimeScope": "universal",
+    }))
+    installed["agent-containers"] = payload
+    root = tmp_path / "selected" / "agent-containers"
+    selection = {"fixture": "owned-profile"}
+    calls = []
+    monkeypatch.setattr(reconcile, "runtime_installer_environment", lambda *a: ({"PROFILE_ENV": "selected"}, root))
+
+    def profile(name, owner, runtime, environment):
+        calls.append(name)
+        assert (name, owner, runtime, environment) == (
+            "agent-containers", payload, root, {"PROFILE_ENV": "selected"},
+        )
+        if not available:
+            raise ValueError("update installed profile tooling")
+        return selection
+
+    monkeypatch.setattr(target, "application_profile", profile)
+    result = owner.inventory()
+    row = next(row for row in result["entries"] if row["id"] == "agent-containers")
+    assert row["updatable"] and row["limitation"] == ""
+    assert result["runtime_sources"]["application_profiles"] == {
+        "agent-containers": {"selection": selection} if available else {"error": "update installed profile tooling"},
+    }
+    assert calls == ["agent-containers"]
+    assert not root.exists()
 
 
 def test_inventory_does_not_spawn_current_footprint_probes(installed, monkeypatch, tmp_path):

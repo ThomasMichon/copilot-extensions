@@ -1,0 +1,9 @@
+{
+  "comment": "Prepare native fixture inputs for the selected installation interpreter",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

@@ -121,8 +121,14 @@ The [scoped prerequisite proposal](receiving-continuity.md) preserves the
 old-final-first ordering. It is agent-recommended realization of the original
 request, not a new migration or runtime-effect grant.
 
-- [ ] Obtain a qualified non-mutating native mux-ownership observation through
-  its existing owner; unavailable evidence remains a hold, not inactive proof.
+- Separate pure inspection from explicitly requested bounded live admission.
+  Existing owner queries may refresh native activity timestamps where the
+  caller permits that effect. Exclude active and dependent owners and retain
+  unknown cases individually; do not require every other server to terminate.
+  Pure planning never gains live queries, locks or receipt recovery implicitly.
+- [x] Qualify bounded native live-owner admission through existing owners,
+  preserving mux, bound Copilot, pending launch/lifecycle, process/CWD and
+  responsibility fences. Unavailable evidence remains a hold, not inactivity.
 - [x] Complete the independent pure planning/refusal source boundary without action
   probes, original-proof recovery or mutation leases. Its local qualification
   is not native inactivity proof. #11706 and reconciliation #11731 are merged;
@@ -162,6 +168,35 @@ request, not a new migration or runtime-effect grant.
   changefiles for every changed plugin, then reconcile every Plan and
   Validation item or transfer it to a named tracked objective before Done.
 
+## Windows private-stage compatibility correction
+
+The existing access-preservation intent also covers Python 3.13's Windows
+`mkdir(0700)` change. A native regression found that its special DACL can
+differ from an otherwise uniform checkout and its already-admitted destination
+parent. Stage creation now inherits that parent's access on Windows, as older
+Python versions did; POSIX retains `0700`. All existing source, parent, stage,
+copy, metadata and recovery checks remain mandatory. This closes the reviewed
+contract rather than changing security intent.
+
+Focused native controls cover owner-only and owner/administrator parents,
+exact post-copy metadata, nonuniform or unsafe access refusal and stage-create
+collision retention. A separate fresh-process source consumer covers concluded
+receiving creation/settlement, changed synthetic allocation defaults, relocation,
+immutable original proof, current-location lookup/mutation and a new receiving
+allocation under the new default. Its positive admission is fixture-owned only.
+Same-volume source qualification is not released/installed-consumer acceptance,
+cross-volume receiving qualification, complete real-owner evidence or permission
+for adoption. Those remaining gates stay open.
+
+The fresh-process fixture now removes inherited Git repository selectors and
+disables inherited global/system configuration before every child launch.
+Its negative control supplies unrelated repository/index selectors and invalid
+configuration, exercises the complete flow, and verifies that the unrelated
+fixture repository remains byte-for-byte unchanged. The reviewed source
+candidate passes all seven Windows controls on Python 3.13.17 through the
+canonical contained runner, including preparation and verified cleanup.
+This fixture correction does not change production relocation admission.
+
 ## Validation Plan
 
 The [focused validation matrix](validation.md) defines assertions and tier
@@ -191,6 +226,29 @@ effects remain separate gates. Phase 1 source implementation is admitted;
 adopter pilot feedback gates subsequent widening.
 
 ## Journal
+
+### 2026-11-11 — Explicit live admission and cross-volume receiving source flow
+
+- Intent [#12178](https://github.com/ThomasMichon/copilot-extensions/pull/12178)
+  cleared actual approval and required CI before implementation. Pure planning
+  stays effect-free; separately requested live admission uses existing native
+  owners and participating operation locks, not an activity-neutral prerequisite.
+- The focused native source flow uses real existing-server observations without
+  starting or stopping a server, distinct physical source/destination volumes,
+  a concluded receiving allocation and settled creator responsibility. It
+  preserves original proof through native copy, Git repair, location publication,
+  fresh-process consumers and a new allocation under the changed synthetic
+  default. Checkout payload is bounded to 1 MiB.
+- Busy/unknown bound-process admission, existing-move refusal, owner changes
+  after copy and pure-plan separation retain focused controls. A live result is
+  point-in-time evidence, never a cached permission for apply. The native case
+  includes exact owned Git and lock-sidecar cleanup; a cleanup failure is not
+  reported as complete qualification.
+- This qualifies the supported source component, not installed rollout, a real
+  retained-worktree pilot, complete unreadable-process coverage, retained
+  conversation resume or the broader inactive classes. Keep this effort and
+  #10879 Active; normal source review/CI/merge and accepted Main release remain
+  independent gates.
 
 [2026-11-09 — First receiving current-location component](journal/2026/11.09%20Receiving%20current-location%20component.md)
 records independent component qualification and the remaining native-owner gate.
@@ -871,3 +929,21 @@ Earlier inline entries below remain historical source evidence.
 - Retain this Active effort, #10879, its source workspace and ownership for
   subsequent acceptance reconciliation. No installation, runtime/service
   change, allocation-default update or real checkout movement follows.
+
+### 2026-11-12 — Ordinary admission compatibility correction
+- Reproduced two first-flow compatibility defects with three focused
+  before-fix regressions: generic parent ownership plus a nonce was mistaken
+  for a missing receiving receipt, and literal workspace metadata discovery
+  enumerated unrelated session artifacts against the reference budget.
+- This closes the existing ordinary v1 contract and identity-preserving
+  relocation vision; it does not introduce another allocation shape or
+  weaken receiving continuity. Require original journal classification and
+  exact settled generic parent responsibility; known receiving, ambiguous,
+  malformed, busy and unsupported evidence stays held without recovery.
+- Direct known-leaf lookup retains bounded wildcard enumeration, unchanged
+  reference consumers and changing/redirected/unavailable-directory refusals.
+  Checkout-data limits and native owner admission remain unchanged.
+- Source qualification, review, required checks and accepted Main publication
+  remain separate gates. The real-Git component control is not native host
+  inactivity proof; no installation, real target reconciliation or migration
+  follows from it. This effort and #10879 remain Active.

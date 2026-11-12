@@ -144,6 +144,62 @@ def test_child_preserves_canonical_transaction_environment_and_cwd(engine, monke
     )
 
 
+@pytest.mark.skipif(os.name != "nt", reason="native Windows executable spelling")
+@pytest.mark.parametrize("kind", [
+    "relative", "ordinary", "extended-short", "unc", "deep", "deep-unc",
+])
+def test_windows_child_preserves_supported_executable_spelling(engine, monkeypatch, tmp_path, kind):
+    executable = str(tmp_path / "tool.exe")
+    expected = executable
+    if kind == "relative":
+        executable = expected = "tool.exe"
+    elif kind == "extended-short":
+        executable = engine._native_retained_path(executable)
+    elif kind == "unc":
+        executable = expected = r"\\example.invalid\share\tool.exe"
+    elif kind in {"deep", "deep-unc"}:
+        parent = tmp_path if kind == "deep" else Path(r"\\example.invalid\share")
+        for _ in range(6):
+            parent /= "nested-runtime-resources" * 2
+        executable = str(parent / "python.exe")
+        assert len(executable) >= 260
+        expected = engine._native_retained_path(executable)
+    monkeypatch.setattr(engine, "_procutil", lambda _inputs: None)
+    observed = []
+
+    def run(argv, **options):
+        observed.append(argv)
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(engine, "run_owned", run)
+    engine._child(
+        [executable, "--version"], inputs=SimpleNamespace(wheel_inputs=None),
+        descriptor=0, timeout=1, cwd=tmp_path,
+    )
+    assert observed == [[expected, "--version"]]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows PowerShell startup")
+@pytest.mark.parametrize("extended", [False, True])
+def test_windows_powershell_starts_through_the_actual_child_boundary(
+    engine, procutil, monkeypatch, tmp_path, extended,
+):
+    shell = shutil.which("powershell.exe")
+    assert shell is not None, "native Windows PowerShell is required"
+    shell = str(Path(shell).resolve(strict=True))
+    requested = engine._native_retained_path(shell) if extended else shell
+    monkeypatch.setattr(engine, "_procutil", lambda _inputs: procutil)
+    with engine.runtime.construction_lease(tmp_path, "1.0") as descriptor:
+        result = engine._child(
+            [requested, "-NoProfile", "-NonInteractive", "-Command", "Write-Output 7"],
+            inputs=SimpleNamespace(wheel_inputs=None), descriptor=descriptor, timeout=10,
+            cwd=tmp_path,
+        )
+    assert result.returncode == 0
+    assert result.stdout.strip() == "7"
+    assert result.args[0] == shell
+
+
 def test_frozen_procutil_imports_its_siblings_without_cross_root_reuse(engine, tmp_path):
     loaded = []
     for name in ("first", "second"):

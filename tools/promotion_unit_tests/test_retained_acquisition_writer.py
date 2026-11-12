@@ -681,6 +681,7 @@ def test_creation_handoff_keeps_original_successor_and_unconfirmed_seed(creation
 ])
 def test_creation_inspection_requalifies_original_owner_without_effects(creation_owner, changed):
     b = creation_owner
+    b.db.get_session = lambda ref: {"cold_recovery_stop_token": None}
     generation = [1]
     ready = [True]
     instance = ModuleType(f"{PACKAGE}.acquisition_writer_inspection")
@@ -728,6 +729,7 @@ def test_creation_inspection_requalifies_original_owner_without_effects(creation
             finish(pending)
     else:
         observed = finish(pending)
+        assert observed["automatic_recovery_stopped"] is False
         assert observed["key_digest"] == b.row["key_digest"]
         assert observed["native_session_id"] == b.row["native_session_id"]
         assert observed["worktree_writer"] == b.request.worktree_writer.model_dump()

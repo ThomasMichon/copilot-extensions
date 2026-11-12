@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -250,7 +251,8 @@ def test_cell_builder_uses_engine_not_legacy_selection():
     compile(source, str(SCRIPTS / "cell_install.py"), "exec")
 
 
-def test_cell_builder_binds_policy_helper_to_disposable_package_root(tmp_path, monkeypatch):
+@pytest.mark.parametrize("platform", ["nt", "posix"])
+def test_cell_builder_binds_policy_helper_to_disposable_package_root(tmp_path, monkeypatch, platform):
     adapter = load_adapter()
     snapshot = tmp_path / "snapshot"
     snapshot.mkdir()
@@ -258,6 +260,8 @@ def test_cell_builder_binds_policy_helper_to_disposable_package_root(tmp_path, m
     slot = tmp_path / "slot"
     slot.mkdir()
     calls = []
+    monkeypatch.setattr(adapter, "os", SimpleNamespace(name=platform, environ=os.environ))
+    monkeypatch.setattr(adapter.shutil, "which", lambda _name: "/fixture/native-shell")
 
     def capture(command, *, environment, cwd=None):
         source = Path(environment["APR_CELL_SOURCE"])
@@ -267,15 +271,18 @@ def test_cell_builder_binds_policy_helper_to_disposable_package_root(tmp_path, m
         assert helper.is_relative_to(slot / ".installer-build")
         assert not helper.is_relative_to(snapshot)
         assert json.loads(environment["APR_CELL_PACKAGES"])[-1] == str(source)
+        assert str(source / "libs" / "pr-filters") in json.loads(environment["APR_CELL_PACKAGES"])
+        if platform == "posix" and command[0] == "bash":
+            assert "update-driver pr-filters; do" in command[-1]
         for variable in ("TEMP", "TMP", "TMPDIR"):
             assert environment.get(variable) == os.environ.get(variable)
-        if len(calls) < (2 if os.name == "nt" else 1):
+        if len(calls) < (2 if platform == "nt" else 1):
             assert cwd == source
         calls.append(command)
 
     monkeypatch.setattr(adapter, "run", capture)
     adapter.build(slot, snapshot, "fixture-version")
-    assert len(calls) == (3 if os.name == "nt" else 2)
+    assert len(calls) == (3 if platform == "nt" else 2)
     assert not list((slot / ".installer-build").iterdir())
 
 

@@ -221,8 +221,9 @@ enrollment authority/holds remain unchanged.
   hypotheses and confirmed causes separately.
 - [ ] Implement bounded domain probes and the 168-slot store, using exact
   existing owners and no remediation or new resident process.
-- [ ] Add independent native scheduled execution through Agent Machines after
-  source review, retaining a separate explicit enrollment/activation gate.
+- [x] Add independently enrolled Windows native execution through Agent Machines
+  after source review (#12188), retaining separate release/activation gates.
+  Linux enrollment remains in the open platform qualification item.
 - [x] Prepare inert Windows/Linux job definitions and qualify collection
   support from the exact selected runtime before forwarding new operations;
   keep scheduler registration and native execution unqualified.
@@ -1473,3 +1474,240 @@ The [owner comparison](architecture.md#owner-decision) explains this choice.
   Source merge, release availability, installed adoption and live connectivity
   remain separate evidence. No production task, service or carrier was changed
   by this merge.
+- #12059 merged as `1375dcef5d46f7f2148c7d0c5f52fa5ca4ad4d0f` after
+  current-head Copilot approval with no findings, green required checks and no
+  open threads, using the same authorized Maintainer CODEOWNER exception.
+  The installed Windows enrollment amendment and current delivery lane are
+  reviewed; this is not implementation or deployment evidence.
+- Continue with the configuration-owned enrollment implementation and its real
+  installed-closure/replacement/rollback consumer flow. Keep the parent Active;
+  broader carrier/preferences, Linux and actual host activation remain open.
+
+### 2026-11-11 - Installed enrollment implementation and first native proof
+- Implemented local preview/confirmation, installed collection support
+  qualification, create-disabled/readback/enable, matching no-op, reversible
+  replacement, disable and removal under the existing runtime-reference owner.
+  The declared `health-job` resource only converges a prior local opt-in.
+- The finite installed GUI root no longer depends on a checkout or replaceable
+  marketplace payload. The canonical retained bootstrap binds the exact build
+  identity and Windows virtual environment before site imports.
+- Focused native fixtures proved two calendar cycles, immutable build-input
+  removal, matching convergence, replacement and rollback, failed-replacement
+  restoration, successor execution and exact task/reference cleanup. Windows
+  default-field/UTC serialization and observer sharing/settlement races found
+  during qualification now have focused controls. Visual attendance was not
+  required. Forty-nine focused consent/schema controls passed as well.
+- Declaration/materialization and source checks remain part of the unpublished
+  implementation gate. These are isolated fixture results, not release,
+  production enrollment, actual hourly host results or peer access evidence.
+  The parent remains Active; no production task, service or carrier was changed.
+- Final source checks passed for install contract, headless launch,
+  documentation consistency, lint and module size; all 41 existing enforced
+  typing projects passed on both targets without expanding admission.
+- Recovery now compares cached actions with the qualified selected runtime's
+  definition before any rollback enable. Lifecycle management uses its
+  executing retained manager independently of current collector readiness.
+  Focused unit/actor-free controls and the native CLI flow verify refusal of an
+  unsupported collector while retaining safe disable/removal; native cleanup
+  settled every fixture task and retained consumer lease.
+- Withdrawal recovery retains removal intent after a failed native deletion;
+  it never restores an enabled incumbent. Repeated absence converges without
+  mutation once task, adoption and references are cleared. Disabled enrollment
+  retains an enabled trigger and changes only the task-level setting, so
+  interrupted disable recovers without replacement. CLI/resource boundaries
+  report subprocess timeout/cleanup failures without clearing recovery state.
+  The focused native withdrawal plus unit packet passed 21 cases, and the
+  actor-free packet plus runner controls passed 41.
+- A broader replacement rerun reached its unchanged test deadline while
+  observing successor completion, before the new withdrawal assertions. The
+  exact abandoned fixture task was identity-checked, removed and read back.
+  Changed withdrawal behavior was then isolated under the original bounds;
+  this does not promote the timed-out rerun into a passing result.
+- Pending recovery now persists replace/disable/remove intent independently of
+  the definitions retained for ownership. Removal during pending replacement
+  survives interruption, and disable recovery stops and reads back the exact
+  owned task without collector readiness, refusing settlement with live
+  instances. Failed disabled configuration follows the same no-enabled-rollback
+  rule. Before/after-effect controls, native pre-effect disable interruption and
+  deletion recovery passed; the focused unit suite passed 25 cases and the
+  native-plus-unit selection passed 25 before the final additional unit case.
+- Native mutations now fence their unsettled phase in the existing pending
+  record before launch. Unconfirmed cleanup retains the original native
+  retry/callback owner; later lifecycle owners cannot mutate until its confirmed
+  settlement. Withdrawal may tighten recorded intent while fenced, without
+  claiming completion. Late-enable and successor-owner controls pass.
+  Initial disabled-registration failure reports rollback instead of successful
+  enrollment, and confirmed disabled configuration overrides pending enabled
+  replacement intent. The focused native/unit packet passed 30 cases; the
+  actor-free packet and runner controls passed 41.
+- CLI/resource boundaries retain the original native cleanup owner through one
+  bounded settlement attempt before returning; successful cleanup clears only
+  its native fence, never blindly replays the operation. Failed settlement
+  preserves the fence and error. The boundary controls cover both confirmed
+  and unconfirmed cleanup on both surfaces; all 33 focused unit cases passed.
+- Native shutdown disables future admission and waits for the installed finite
+  root's normal child-Job settlement result, rather than force-stopping the root
+  and treating an empty scheduler list as tree termination. Unknown/crash/
+  native-timeout outcomes remain fenced. An actual delayed collector control
+  proved its final write and normal result precede successful disable, followed
+  by exact task/lease cleanup. Fresh COM readback preserves the intended Enabled
+  change while detecting all other definition drift during bounded waiting.
+- Ordinary file-resource convergence now reserves health enrollment consent/
+  recovery state in selected, legacy and canonical cell installations, closing
+  the generic JSON adoption path while preserving unrelated file behavior.
+  This is a built-in convergence restriction, not a sandbox for arbitrary
+  filesystem-authorized code. The enrollment/resource packet passed 210 cases;
+  actor-free classification and existing composition/runner controls passed 42.
+- A non-selected custom-install control reproduced the discovery-based
+  reservation gap. Enrollment now uses the product-namespaced
+  `agent-machines.health.enrollment.json` filename, reserved independently of
+  installation location and resolved aliases without inventory scans.
+  Unrelated generic filenames remain available. The final enrollment/resource/
+  native withdrawal selection passed 214 cases; the actor-free packet and
+  runner controls passed 42.
+- Win32 trailing-dot, trailing-space and default-stream aliases are normalized
+  before file-resource effects, including when the reserved state does not yet
+  exist. The focused real file-resource location/alias packet passed 15 cases.
+- Confirmation compares the settled desired state with the newly requested
+  store/policy after pending recovery. Recovering a previous configuration
+  cannot imply that the new confirmation was applied; mismatches return
+  `configuration-not-applied` and CLI exit 2, requiring a fresh preview.
+  Changed-store and changed-policy CLI controls passed with the full 50-case
+  enrollment unit packet.
+- Preview and recovery now share pending-definition ownership classification
+  for the recorded incumbent and candidate, including disabled forms. Interrupted
+  candidate definitions no longer block a legitimate preview as foreign;
+  unrelated definitions still refuse. Before/after-enable response-loss controls
+  passed with the full 52-case enrollment unit packet.
+
+### 2026-11-12 - Installed Windows enrollment source merged
+- #12188 merged as `0accca16ceb7926a974552257e7b5b6b0a07b474` after
+  exact-head Copilot approval on `c5d98fb7dcb4790f5fff92f7e747e9ec0e45f1ab`,
+  green required CI, all ten resolved review threads and no draft, hold or
+  conflict. The authorized Maintainer CODEOWNER-review exception was recorded
+  on the PR; no CI or blocking-feedback gate was bypassed.
+- The complete local patch matched the accepted squash's stable patch exactly
+  before source reconciliation. Pull-forward preserved all independent upstream
+  content, and the umbrella issue remains open.
+- Windows installed closure, local consent, reversible native lifecycle and
+  focused failure/settlement controls are source-complete. This does not claim
+  a promoted release, installed host adoption, active hourly publication,
+  post-deployment inbound verification or carrier receipt.
+- Release availability was verified at Main
+  `3679dd8263f2c0f89bf0d76094396220247aaf0c`: all 34 affected/derived file
+  blobs matched the accepted source exactly after promotion completed.
+  This is release evidence, not installed or running-state evidence.
+- Continue with the authorized current-host installer-owned rollout using
+  before-state, rollback and health evidence.
+  Only after qualification and installed support may that host's job be
+  enrolled. Broader preference/carrier and Linux gates remain open; the effort
+  stays Active and its worktrees remain owned.
+
+### 2026-11-12 - First installed local-only Windows adoption
+- The separately authorized host completed its normal target-only Machines
+  update, with a healthy retained previous runtime, preserved installer inputs
+  and a usable canonical selector rollback. Installed CLI health, collection-v1
+  `installed-job` capability and retained GUI bootstrap passed; six installed
+  job modules and the retained launcher matched the accepted implementation.
+- The adopter's configuration owner prepared a new unsynchronized v2 store
+  through exact `ensure-present` resources. Existing policy and admission/fence
+  bytes remain untouched on repeat convergence. The optional health-job resource
+  converges only the separately confirmed local opt-in; it grants no enrollment
+  or unattended-maintenance authority.
+- A real installed one-shot run recorded both current observation and prior-hour
+  service targets within budget. The selected listener was healthy; three
+  selected installed service exports were unavailable, not healthy zeroes.
+  Other health domains remain unknown and no carrier publication was requested.
+- Explicit local confirmation enrolled an enabled hourly native task, reported
+  ready collection support and no recovery/cleanup uncertainty. Both direct and
+  resource repeat convergence were unchanged. The first actual hourly execution
+  remains pending; registration is not execution evidence.
+- A real peer completed authenticated inbound SSH and resolved the exact active
+  session through the existing Bridge carrier. This is current inbound evidence,
+  not proof the historical intermittency was repaired. A separate local daemon
+  initialization-readiness failure remains distinct from listener liveness and
+  successful peer lookup; no service restart was used to hide it.
+- The adopter's private configuration/evidence change is merged. Continue with
+  actual hourly readback, retaining all broader domain, export, preference,
+  carrier and platform gates. The canonical effort remains Active.
+- The first unaccelerated hourly execution subsequently returned native result
+  zero, recorded the current-hour listener observation and preceding-hour
+  service target, and settled all instances and the admission byte. The current
+  listener is healthy; unavailable exports and the previous observation's stale
+  age remain explicit rather than being refreshed.
+- Native readback exposed a status-only timestamp defect: the COM last-run
+  value is UTC-valued but has an unspecified DateTime kind, while its next-run
+  value is local. Applying the same local-to-UTC conversion to both reports a
+  future last-run time outside UTC. The native information provider and stored
+  collection timestamps agree on the real execution time. Correct this below-
+  altitude adapter defect and add a real execution-window regression before
+  treating timestamp presentation as qualified. Collection, cadence and native
+  settlement succeeded; the active job is not a partial installation.
+- The new execution-window assertion reproduced the shifted future time on the
+  original adapter after two real native cycles. The corrected native timing
+  reader and existing enrollment controls pass 53 selected tests, including
+  replacement, rollback and exact withdrawal with unavailable timing metadata.
+  A read-only baseline/candidate comparison agrees with the native execution
+  time. The added query costs approximately 1.4 seconds per explicit management
+  read on that host, not on the hourly collector path. Release and installed
+  adoption of this correction remain separate from this source qualification.
+
+### 2026-11-12 - Corrected runtime adopted and real collection preserved
+- #12264 merged as `8bf93a7ad949e32b8cca1e564bb468b139b34d8a` after
+  exact-head Copilot approval, required green CI and no open review issues.
+  The unit admission update changed only the corrected adapter's fingerprint;
+  node, effect, coverage and budget admission remained unchanged.
+- Promoted Main `20106e78eff5a8e95fc8e46e71a36ec0c1c75d14` matched the
+  accepted implementation, native regression and documentation. The separately
+  authorized target-only update installed the exact correction; native
+  convergence refreshed the retained job and repeat convergence was unchanged.
+- The current host's independently diagnosed frontend initialization failure
+  was recovered through its existing same-code lifecycle. A clean non-forcing
+  drain protected accepted work before health-gated cutover and native
+  predecessor retirement. Post-caller-cleanup readiness and configuration
+  preservation were verified; no package or other-host rollout was required.
+- The configuration owner changed only the selected listener endpoint,
+  preserving publisher, continuity, services and history. Fresh local
+  confirmation restored the hourly job. Its actual next UTC execution returned
+  result zero with correct timestamps, both target slots and settled instances
+  and admission. No missed-hour replay or fabricated historical coverage occurred.
+- Peer SSH, exact lookup and notification storage are observed separately from
+  native SDK consumption. The selected retained receiver still refuses
+  negotiation after serving readiness recovered. Its installation prerequisites
+  and the headed launch selection require separate owner/operator steering;
+  no receipt, binding or consumer guard was bypassed.
+- The normal report/chart consumer rendered the real local health history but
+  rejected the selected producer's valid conversation/tool transition records.
+  Schema-only inspection confirmed a consumer vocabulary gap, not missing
+  durations to invent. Extend only the bounded content-free transition decoder,
+  preserve homogeneous groups and unknown timing/population, then prove the
+  genuine producer-to-report path. Broader effort gates remain open.
+
+### 2026-11-12 - Native Bridge transition report decoder merged
+- #12282 merged as `b75ba9b49c6af5a2b83ff63b211fa780a831dfbd` after
+  exact-head Copilot approval with no open findings and green required CI.
+  Pulled forward onto the confirmed squash merge without finalizing this
+  still-active effort.
+- The actual Bridge reducer, retained writer, persisted readback and normal
+  report/chart consumer passed the focused native regression. The admitted
+  actor-free control preserves separate conversation/tool count groups,
+  cancellation semantics, contradictory-input refusal and output privacy.
+  These observations do not establish unique work, latency or availability.
+- Promoted Main `c20ae8c7eeb67ebded4d38af7e1f4ee7ce29b90b` contains the exact
+  reviewed implementation, both regressions, documentation and admitted control.
+  The separately authorized target-only update installed the exact reviewed
+  module. The normal installed CLI reproduced the frozen reference counts and
+  rendered a real mixed local-health/native-transition report with explicit
+  coverage and unknown population, without changing collector policy or task.
+- Readback separately exposed one terminated native execution before the
+  report-manager update, with no new slot or admission uncertainty. The exact
+  retained GUI help-only launch succeeds now, but disabled scheduler history
+  leaves the termination cause unknown. Preserve the missing hour and verify
+  the next actual scheduled execution rather than replaying it or changing the
+  qualified deadline. Broader carrier, preference, platform and
+  receiver-selection gates stay open.
+- The next actual native execution returned zero with settled instances and
+  no recovery uncertainty. Normal readback separates its fresh current-hour
+  listener from preceding-hour service coverage, retaining the missed listener
+  observation as unknown. This verifies recovery of execution, not the cause
+  of the earlier termination or uninterrupted availability.

@@ -266,6 +266,27 @@ put tokens/private keys in those arguments or accept the command from a remote
 registration. This snapshot-only option conflicts with `--token`; it is not a
 mutation or durable-wait credential override.
 
+Typed snapshots can additionally select `--max-credential-requests N` with
+`N` in `1..64`. The credential-command owner counts each acquisition attempt
+before invoking the helper, including failed attempts, and refuses an excess
+attempt without launching it. The limit requires `--credential-command`;
+ordinary account/token snapshots and omitted-option defaults are unchanged.
+The cap belongs to that synchronous native invocation, not a durable run or
+permission to retry an unknown result. Existing deadlines, capture budgets
+and cleanup custody still apply.
+
+The existing passive `pr-watch inventory --contract --json` response
+additively advertises `snapshot_credential_budget` with `version: 1`,
+`option: "--max-credential-requests"` and `maximum: 64`. Version-1 readers
+ignore this optional property. A consumer requiring the lower limit must
+confirm that capability from the selected executing native generation before
+emitting the option; absent/malformed support is unavailable for that
+requirement, never permission to replay without the limit. No old syntax is
+deprecated. This limits **credential acquisitions**, not physical HTTP sends:
+transport-internal redirects/retries and external custodian work still need
+their own qualified bounds under the caller's original shared allowance.
+The declaration neither verifies credentials nor grants live effects.
+
 For example, the prefix may invoke the separately installed
 [Fleet credential command](../../../fleet-manager/docs/gateway-runtime.md)
 with its explicit worker policy, source/account and exact `ForgeScope`.

@@ -25,6 +25,29 @@ _TASK_EVENTS = frozenset({
     "released", "yielded", "completed", "abandoned", "detached",
     "submitted", "approved", "reopened", "reset",
 })
+_BRIDGE_TRACE_TARGETS = {
+    "conversation": {
+        "user_message": {"sending"},
+        "agent_message": {"responding"},
+        "agent_thought": {"responding"},
+        "session_state_changed": {"responding", "idle", "stopped", "ended", "error"},
+        "turn_complete": {"end-turn", "cancelled", "idle"},
+        "error": {"error"},
+    },
+    "tool_call": {
+        "tool_call": {"running"},
+        "tool_call_start": {"running"},
+        "tool_call_update": {"completed", "cancelled", "error"},
+        "tool_call_progress": {"completed", "cancelled", "error"},
+        "session_state_changed": {"completed", "cancelled", "error"},
+        "turn_complete": {"completed", "cancelled"},
+        "error": {"error"},
+    },
+}
+_BRIDGE_TRACE_STATES = {
+    name: frozenset(state for targets in events.values() for state in targets)
+    for name, events in _BRIDGE_TRACE_TARGETS.items()
+}
 
 
 def _unique(pairs):
@@ -51,6 +74,26 @@ def _integer(value: object) -> bool:
     return type(value) is int and 0 <= value < 2**63
 
 
+def _bridge_trace(record: dict, stamp: int):
+    """Project producer state labels, never infer latency or a work verdict."""
+    name, event, target, prior = (
+        record.get("name"), record.get("event"), record.get("to"), record.get("from"),
+    )
+    if not all(isinstance(value, str) for value in (name, event, target)):
+        return None
+    events = _BRIDGE_TRACE_TARGETS.get(name)
+    if events is None or target not in events.get(event, ()):
+        return None
+    if prior is not None and (
+        not isinstance(prior, str) or prior not in _BRIDGE_TRACE_STATES[name]
+    ):
+        return None
+    if name == "tool_call" and target != "running" and record.get("tool_status") != target:
+        return None
+    group = "bridge-conversation" if name == "conversation" else "bridge-tool"
+    return stamp * 1_000_000, (group,), target, None
+
+
 def _observation(record: object):
     if not isinstance(record, dict):
         return None
@@ -74,6 +117,10 @@ def _observation(record: object):
     if not _integer(stamp) or stamp >= 2**63 // 1_000_000:
         return None
     kind, name, event = record.get("kind"), record.get("name"), record.get("event")
+    if kind == "state_transition":
+        trace = _bridge_trace(record, stamp)
+        if trace is not None:
+            return trace
     if kind == "state_transition" and name == "session" and event == "session_state_changed":
         return stamp * 1_000_000, ("session",), "transition", None
     if kind == "error" and name == "session_health" and event in ("connect_failed", "error"):

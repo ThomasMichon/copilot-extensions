@@ -171,7 +171,11 @@ def test_native_parser_capability_discovery_is_passive_and_strict(capsys, monkey
         observation_inventory, "inventory", lambda *_a, **_kw: pytest.fail("unexpected read"),
     )
     assert pr_cli.cmd_pr_watch_dispatch(["inventory", "--contract", "--json"]) == 0
-    assert json.loads(capsys.readouterr().out)["providers"] == ["github", "gitea"]
+    declaration = json.loads(capsys.readouterr().out)
+    assert declaration["providers"] == ["github", "gitea"]
+    assert declaration["snapshot_credential_budget"] == {
+        "version": 1, "option": "--max-credential-requests", "maximum": 64,
+    }
     assert pr_inventory_cli.dispatch(["--unknown"]) == 2
     assert pr_inventory_cli.dispatch(["owner/repo", "--json"]) == 2
     assert pr_inventory_cli.dispatch(["--contract", "--config", "arbitrary"]) == 2

@@ -18,17 +18,25 @@ RUNTIME_RESOURCES = {
 APPLICATION_RESOURCES = {
     "worktree_manager": (
         "scripts/installer*.py", "scripts/runtime*.py", "scripts/versioned_runtime*.py",
-        "scripts/versioned_runtime_native.ps1", "scripts/source_acquisition.py",
+        "scripts/versioned_runtime_native.ps1", "scripts/source_acquisition.py", "scripts/install_source.py",
         "scripts/repair_recovery.py", "scripts/update_entry.py",
         "scripts/bootstrap-killswitch-guard.*", "scripts/killswitch_mutation.py",
         "scripts/daemon_instances.*", "scripts/daemon_instance_runtime.pyz",
         "scripts/installer-instance-reconcile.*",
         "scripts/runtime-source-tools/**/*",
         "scripts/runtime-input-provider/**/*",
+        "scripts/libs/payload-invocation/*.py",
         "bin/**/*",
         "references/control-plane-provider.json", "references/uninstall-contract.json",
     ),
     "agent_worktrees": ("scripts/**/*",),
+}
+APPLICATION_METADATA_RESOURCES = {
+    "worktree_manager": (
+        "scripts/runtime-source-tools/**/*.toml",
+        "scripts/runtime-source-tools/**/*.txt",
+        "scripts/runtime-source-tools/**/*.lock",
+    ),
 }
 
 
@@ -40,8 +48,14 @@ def application_resources(project, package):
     sources = {
         path.relative_to(project).as_posix(): path
         for pattern in patterns for path in project.glob(pattern)
-        if path.suffix in {".py", ".ps1", ".sh", ".cmd", ".conf", ".pyz", ".json", ".yaml", ".awk"}
+        if path.is_file()
+        and path.suffix in {".py", ".ps1", ".sh", ".cmd", ".conf", ".pyz", ".json", ".yaml", ".awk"}
     }
+    sources.update({
+        path.relative_to(project).as_posix(): path
+        for pattern in APPLICATION_METADATA_RESOURCES.get(package, ())
+        for path in project.glob(pattern) if path.is_file()
+    })
     if sources:
         return {"_runtime_assets/" + name: path for name, path in sources.items()}
     if not included.is_dir():

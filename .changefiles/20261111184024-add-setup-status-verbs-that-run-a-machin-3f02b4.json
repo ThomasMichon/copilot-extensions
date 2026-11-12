@@ -1,0 +1,9 @@
+{
+  "comment": "Add setup/status verbs that run a machine's declared SSH driver module entrypoints and report structured auth requests (driver setup/status contract v1).",
+  "changes": [
+    {
+      "plugin": "agent-ssh",
+      "type": "patch"
+    }
+  ]
+}

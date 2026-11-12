@@ -1318,6 +1318,126 @@ def test_admission_backend_rechecks_preserved_seed_and_native_resume_before_crea
     assert seeds.peek(record) == replacement
 
 
+def test_finite_phase_checker_reads_preserved_seed_under_parent_record_fence(record, monkeypatch):
+    from agent_worktrees import session_liveness
+
+    seed = seeds.stage(record, kind="new", text="preserved native intent")
+    current = tracking.load_record(record)
+    current.head_session = "native-original"
+    current.sessions = [tracking.SessionEntry("native-original", current.started_at)]
+    tracking.save_record(current, record)
+    monkeypatch.setattr(legacy.sessions, "has_mux_session", lambda *_: False)
+    monkeypatch.setattr(session_liveness, "session_liveness", lambda *_: "dead")
+    options = {
+        "admission_only": True, "preserve_seed_id": seed.seed_id,
+        "native_resume_session": "native-original",
+    }
+    reply = native.prepare(record, ["copilot", "--acp"], seed_id=None, **options)
+    code = (
+        "import json,sys\nfrom pathlib import Path\n"
+        "from agent_worktrees import launch_seed_native as native, launch_seed_exec as legacy, session_liveness\n"
+        "from agent_worktrees.launch_execution import Correlation\n"
+        "from agent_worktrees.sessions import LiveVerdict\n"
+        "legacy.sessions.has_mux_session=lambda *_:False\n"
+        "legacy.sessions.verify_worktree_active=lambda *_:LiveVerdict()\n"
+        "session_liveness.session_liveness=lambda *_:'dead'\n"
+        "reply=json.loads(sys.argv[2])\n"
+        "native.admit(Path(sys.argv[1]),Correlation(reply['attempt_id'],reply['resolution_id'],reply['parent_id']),"
+        "reply['operation_id'],**json.loads(sys.argv[3]))\n"
+        "print('admitted')\n"
+    )
+    with tracking._RecordLock(record, require_sidecar=True):
+        result = run_caller_owned(
+            [sys.executable, "-I", "-B", "-c", code, str(record), json.dumps(reply), json.dumps(options)],
+            timeout=10, max_stdout_bytes=4096, max_stderr_bytes=4096,
+        )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.strip() == "admitted"
+    assert seeds.peek(record) == seed
+
+
+def test_headed_native_receipt_releases_record_fence_before_child_exit(record, monkeypatch):
+    import subprocess
+    from agent_procutil import no_window_kwargs
+    from agent_remote_driver.headed import caller
+    from agent_worktrees import launch_seed_posix, resource_relationship, session_liveness
+    from agent_worktrees.retained_native_resume import ENVIRONMENT_KEY
+
+    current = tracking.load_record(record)
+    current.head_session = "native-original"
+    current.head_revision = 1
+    current.sessions = [tracking.SessionEntry("native-original", current.started_at)]
+    tracking.save_record(current, record)
+    identity = {"installation_root": "retained-owner", "runtime_generation": "a" * 32}
+    monkeypatch.setattr(resource_relationship, "writer_identity", lambda: identity)
+    monkeypatch.setenv(ENVIRONMENT_KEY, json.dumps({
+        "version": 1, "operation_id": "original-recovery",
+        "writer": {
+            "version": 1, "identity": identity, "creation_nonce": current.creation_nonce,
+            "worktree_id": current.worktree_id, "worktree_path": current.worktree_path,
+            "project": current.repo,
+        },
+        "head": {"session_id": "native-original", "revision": 1},
+    }))
+    monkeypatch.setattr(legacy.sessions, "has_mux_session", lambda *_: False)
+    monkeypatch.setattr(session_liveness, "session_liveness", lambda *_: "dead")
+    command = ["copilot", "--resume=native-original"]
+    options = {"admission_only": True, "native_resume_session": "native-original"}
+    reply = native.prepare(record, command, seed_id=None, **options)
+    assets = record.parent / "launch-attempts" / reply["attempt_id"] / "headed.shell"
+    assets.mkdir()
+    completion = assets / ".native-seed-exec.complete"
+    completion.touch(mode=0o600)
+    if os.name != "posix":
+        monkeypatch.setattr(launch_seed_posix, "os", SimpleNamespace(**{**vars(os), "name": "posix"}))
+        monkeypatch.setattr(launch_seed_posix, "_completion_file", lambda _record, path: os.open(path, os.O_WRONLY))
+    phases = []
+    probe = (
+        "import sys;from pathlib import Path;from agent_worktrees import tracking\n"
+        "try:\n"
+        " with tracking._RecordLock(Path(sys.argv[1]),timeout=0,require_sidecar=True): pass\n"
+        "except TimeoutError: sys.exit(7)\n"
+    )
+
+    def writer(expected):
+        result = run_caller_owned(
+            [sys.executable, "-I", "-B", "-c", probe, str(record)],
+            timeout=10, max_stdout_bytes=4096, max_stderr_bytes=4096,
+        )
+        assert result.returncode == expected, result.stdout + result.stderr
+        phases.append(expected)
+
+    def execute(_argv, *, admit, spawned, **kwargs):
+        admit()
+        writer(7)
+        assert ENVIRONMENT_KEY not in kwargs["environment"]
+        child = subprocess.Popen(
+            [sys.executable, "-I", "-B", "-c",
+             f"import os,sys;assert {ENVIRONMENT_KEY!r} not in os.environ;sys.stdin.buffer.read(1)"],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            env=kwargs["environment"],
+            **no_window_kwargs(),
+        )
+        try:
+            spawned(child.pid, locks.process_start_time(child.pid))
+            assert child.poll() is None
+            writer(0)
+            assert child.poll() is None
+            child.communicate(input=b"x", timeout=5)
+            return child.returncode, True
+        finally:
+            if child.poll() is None:
+                child.kill()
+                child.communicate(timeout=5)
+
+    monkeypatch.setattr(caller, "execute", execute)
+    assert launch_seed_posix.execute_headed(
+        record, _identity(reply), reply["operation_id"], command, completion, **options,
+    ) == 0
+    assert phases == [7, 0]
+    assert completion.read_text() == "0\n"
+
+
 def test_unknown_output_format_refuses_before_preparation(record, monkeypatch, capsys):
     seed = seeds.stage(record, kind="new", text="must not be claimed")
     def forbidden(*args, **kwargs):

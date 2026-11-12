@@ -36,6 +36,29 @@ def test_symlink_scan_preserves_first_path_and_filter(
 
 
 def test_symlink_scan_falls_back_after_native_scan_error(
+    tmp_path: Path, native_file_symlink, monkeypatch: pytest.MonkeyPatch,
+):
+    target = tmp_path / "target"
+    target.write_text("outside\n", encoding="utf-8")
+    root = tmp_path / "source"
+    root.mkdir()
+    native_file_symlink(root / "link", target)
+    scandir = uer.os.scandir
+    calls = []
+
+    def scan(path):
+        calls.append(path)
+        if len(calls) == 1:
+            raise PermissionError("native scan unavailable")
+        return scandir(path)
+
+    monkeypatch.setattr(uer.os, "scandir", scan)
+    assert uer._find_symlink(root) == "link"
+    assert len(calls) > 1
+    assert calls and calls[0] == root
+
+
+def test_symlink_scan_falls_back_without_native_symlink_support(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ):
     root = tmp_path / "source"

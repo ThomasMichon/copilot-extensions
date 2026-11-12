@@ -161,6 +161,28 @@ consumer. Use the runner's default managed temporary namespace for this capture,
 not a long task-directory override. Pre-launch assertions retain the original
 CLI diagnostics even when no consumer exists.
 
+Two fixture-lifetime controls bring the current portfolio to 343 cases.
+Constructor and post-construction stop timeouts settle the real test-owned
+process tree, listener and streams. POSIX observation retains the unreaped
+Host until its group is retired and confirmed; Windows retains the owned Job.
+These controls do not change HTTP generation, capability floors or native
+product qualification.
+
+Retained native recovery adds 59 cases, bringing the current portfolio to 402.
+The optional `retained_native_session_recovery: 1` capability does not change
+HTTP generation 52 or prior floors. Source-bound controls cover exact original
+journals, the actual parser/client/HTTP join, first-use and terminal inspection,
+deliberate stops, retained Host/ACP timeout custody, held permissions, daemon
+loss without implicit startup, one-shot native load and original-handle
+retention through startup, periodic collection, force-end admission and legacy
+transactional deletion, including successor handles sharing an original journal.
+The portfolio also checks malformed terminal-entry retention, versioned preparation
+of pre-change databases and SQLite work growth for both retention queries.
+The existing core live startup-owner protocol is used without inventing
+acquisition-runtime custody. Host and native process I/O remain controlled
+fixtures, not installed-runtime or native Copilot evidence. Historical
+generations and their captures remain unchanged.
+
 Commit source and the generation declaration, run the new owner's `--prepare`,
 commit and publish that checkpoint, then run `--write`, no-write verification
 and `tools/check-agent-bridge-contracts.py --base <reviewed-base>`. Prepared

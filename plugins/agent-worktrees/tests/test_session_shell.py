@@ -243,7 +243,7 @@ def test_headed_bash_startup_cannot_skip_refused_admission(launch, monkeypatch, 
         **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
     )
     assert result.returncode == 3, result.stdout + result.stderr
-    assert "Could not hand off staged launch prompt:" in result.stderr
+    assert "[Errno 2]" in result.stderr and str(record) in result.stderr
     assert not entered.exists()
 
 

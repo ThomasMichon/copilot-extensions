@@ -139,7 +139,7 @@ class CandidateAdmission:
         from agent_procutil._daemon_instance_identity import birth_identity, path_identity
         from .client_authority import supervisor_authority_target
         from .companion import process_start_token
-        from . import __main__ as cli
+        from .supervise_registration_cli import parse_supervisor_arguments
 
         receipt = self.guard.receipt
         directory = _directory(self.root)
@@ -150,7 +150,7 @@ class CandidateAdmission:
                 raise RuntimeError("supervisor preparation directory is redirected")
         directory.mkdir(parents=True, exist_ok=True)
         path = directory / (receipt.instance_id + ".json")
-        arguments = cli.build_parser().parse_args(daemon._self_update_argv)
+        arguments = parse_supervisor_arguments(daemon._self_update_argv)
         self.record = {
             "runtime_version": self.version, "scope": supervisor_lease_scope(daemon.machine, daemon.env),
             "generation": {"pid": os.getpid(), "start_token": process_start_token(os.getpid())},
@@ -324,10 +324,10 @@ def spawn_candidate(python, argv, *, root, version, profile_binding=None):
 
 
 def _authority(daemon):
-    from . import __main__ as cli
+    from .supervise_registration_cli import parse_supervisor_arguments
     from .client_authority import supervisor_authority_target
 
-    return supervisor_authority_target(cli.build_parser().parse_args(daemon._self_update_argv))
+    return supervisor_authority_target(parse_supervisor_arguments(daemon._self_update_argv))
 
 
 def is_profiled_application(root, version, target):
@@ -364,11 +364,11 @@ def read_legacy_declarations(*, enabled):
 
 
 def _expected_preparation(daemon):
-    from . import __main__ as cli
+    from .supervise_registration_cli import parse_supervisor_arguments
 
     binding = getattr(daemon, "_master_profile", None)
     return {
-        "settings": effective_settings(cli.build_parser().parse_args(daemon._self_update_argv)),
+        "settings": effective_settings(parse_supervisor_arguments(daemon._self_update_argv)),
         "profile_binding": None if binding is None else binding.preparation(incoming=True),
     }
 

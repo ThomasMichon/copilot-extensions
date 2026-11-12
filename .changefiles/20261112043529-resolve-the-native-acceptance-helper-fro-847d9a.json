@@ -1,0 +1,9 @@
+{
+  "comment": "Keep native acceptance on owned helper paths and the admitted test interpreter, preserving containment, literal forwarding and existing construction/item deadlines without rebuilding tooling inside the product budget.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

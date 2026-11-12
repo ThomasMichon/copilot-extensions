@@ -416,7 +416,8 @@ def _all_tracking_dirs() -> list[Path]:
 def _find_tracking_file(raw_id: str) -> Path | None:
     """Locate a worktree's tracking YAML across **all** projects, or None.
 
-    Exact stem match wins globally; a unique 4-char (or longer) suffix match is
+    Anchors stay in the selected project. Other exact stem matches win globally;
+    a unique 4-char (or longer) suffix match is
     the fallback. An ambiguous suffix (or no match) returns None -- the caller
     then treats the worktree as untracked (fail-open), never guessing.
     """
@@ -424,6 +425,8 @@ def _find_tracking_file(raw_id: str) -> Path | None:
 
     if re.search(r"[/\\]|\.\.", raw_id):
         return None
+    if raw_id == tracking.ANCHOR_ID:
+        return _find_tracking_file_exact(raw_id)
     tdirs = _all_tracking_dirs()
     for tdir in tdirs:
         exact = tdir / f"{raw_id}.yaml"
@@ -718,9 +721,15 @@ def cmd_conclude_session(args: argparse.Namespace) -> int:
 
 
 def _find_tracking_file_exact(raw_id: str) -> Path | None:
-    """Locate an exact worktree id across projects without suffix inference."""
+    """Locate an exact ID; permanent anchors never leave the selected project."""
     if re.search(r"[/\\]|\.\.", raw_id):
         return None
+    if raw_id == tracking.ANCHOR_ID:
+        try:
+            path = cfg.tracking_dir() / f"{raw_id}.yaml"
+        except (OSError, RuntimeError, ValueError):
+            return None
+        return path if path.is_file() else None
     matches: list[Path] = []
     for tracking_dir in _all_tracking_dirs():
         path = tracking_dir / f"{raw_id}.yaml"
@@ -754,23 +763,14 @@ def _project_for_tracking_file(path: Path) -> str | None:
 
 
 def _relocate_active_project_for_worktree(wt_id: str) -> bool:
-    """Switch the ambient active project if ``wt_id`` lives in a different one.
+    """Relocate a uniquely found ordinary ID, never a project-scoped anchor.
 
-    A worktree id is globally unique, but a resume-by-id call only knows the
-    *ambient* project (CWD/``--project`` resolved once by ``main()``) -- which
-    is wrong whenever the Picker's cross-project daemon hands back an id for a
-    worktree that belongs to some other registered project (#2338 follow-up:
-    the launcher scoping fix covers plan construction, but a resume-by-id
-    lookup that runs before any plan exists still trusts the ambient project).
-    Rather than fail with a false "Worktree not found" for a worktree that
-    genuinely exists elsewhere, look it up by exact id across every
-    registered project's tracking dir and, if it is uniquely found under a
-    different project, switch the in-process active project to match before
-    the caller re-checks. Best-effort: any lookup error leaves the ambient
-    project untouched, so the caller's existing "not found" handling still
-    applies. Returns ``True`` iff the active project was switched.
+    Cross-project Picker resumes start with ambient CWD/``--project`` config
+    (#2338). Switch only after unique registered-ledger lookup; missing or
+    ambiguous records preserve the caller's existing "not found" handling.
+    Return ``True`` only when the active project was switched.
     """
-    if (cfg.tracking_dir() / f"{wt_id}.yaml").exists():
+    if wt_id == tracking.ANCHOR_ID or (cfg.tracking_dir() / f"{wt_id}.yaml").exists():
         return False
     try:
         found = _find_tracking_file_exact(wt_id)

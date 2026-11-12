@@ -12,7 +12,9 @@ import time
 
 import pytest
 from agent_procutil import no_window_kwargs
-from test_update_entry import PLUGIN, _SUPPORTED_UPDATE_SHELL, _assert_cache_arguments
+from test_update_entry import (
+    PLUGIN, _SUPPORTED_UPDATE_SHELL, _assert_cache_arguments, _copy_native_global_tools,
+)
 from test_update_entry import update_entry_case as shared_update_entry_case
 
 update_entry_case = shared_update_entry_case
@@ -58,15 +60,9 @@ def _stub_admission_for_bash(tmp, native_powershell, bash):
     )
 
 
-@pytest.mark.parametrize("front", ["global", "payload", "installed-project", "git-bash"])
-@pytest.mark.parametrize("observer", ["--wait", "--detach", "--no-manager"])
-def test_update_preflight_checks_real_job_before_any_update_work(
-    update_entry_case, native_powershell, front, observer,
-):
-    from agent_procutil import spawn_sync_in_kill_on_close_job
+def _job_preflight_entry(tmp, home, front, observer):
     from agent_worktrees import project_command_templates
 
-    tmp, home, _resolver = update_entry_case
     entry = PLUGIN / "bin" / "agent-worktrees.ps1"
     arguments = ["--project", "sample", "update", observer]
     if front == "payload":
@@ -81,6 +77,25 @@ def test_update_preflight_checks_real_job_before_any_update_work(
             "sample", PLUGIN, windows=True, user_bin=user_bin,
         )["sample.ps1"], encoding="utf-8")
         arguments = ["update", observer]
+    return entry, arguments
+
+
+def _quoted(text):
+    return "'" + str(text).replace("'", "''") + "'"
+
+
+@pytest.mark.parametrize("front", ["global", "payload", "installed-project"])
+@pytest.mark.parametrize("observer", ["--wait", "--detach", "--no-manager"])
+def test_update_preflight_reports_capturable_error_when_wmi_queue_is_blocked(
+    update_entry_case, native_powershell, monkeypatch, front, observer,
+):
+    """A Job that forbids breakaway queues through WMI; a blocked WMI is reported, never silent."""
+    from agent_procutil import spawn_sync_in_kill_on_close_job
+
+    # The durable WMI path is exercised explicitly; contained test mode refuses it.
+    monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
+    tmp, home, _resolver = update_entry_case
+    entry, arguments = _job_preflight_entry(tmp, home, front, observer)
     runtime = home / ".agent-worktrees"
     (runtime / "bin" / "resolve-runtime.ps1").write_text(
         "throw 'update reached installed runtime'\n", encoding="utf-8",
@@ -88,22 +103,265 @@ def test_update_preflight_checks_real_job_before_any_update_work(
     pending = runtime / "pending-request.json"
     pending.write_text('{"state":"PENDING","request":"existing"}', encoding="utf-8")
     before = _updater_profile_files(home)
-    escaped = lambda text: "'" + str(text).replace("'", "''") + "'"
-    download = tmp / "download.ps1"
-    download.write_text(
-        "[IO.File]::WriteAllText($env:BOOT_ARGS, (ConvertTo-Json -InputObject @($args)))\n"
-        "exit 23\n", encoding="utf-8",
-    )
+    captured = tmp / "captured-errors.txt"
     harness = tmp / "job-preflight.ps1"
+    # Simulates a policy (for example the Defender ASR rule) refusing WMI process creation.
     harness.write_text(
-        "function Invoke-WebRequest { param($Uri,$OutFile,[switch]$UseBasicParsing)\n"
-        f"  [IO.File]::Copy({escaped(download)}, $OutFile)\n"
-        "}\n"
-        f"$forward = @({','.join(escaped(value) for value in arguments)})\n"
-        f"& {escaped(entry)} @forward\n"
+        "function Invoke-CimMethod { throw 'Access denied by policy' }\n"
+        f"$forward = @({','.join(_quoted(value) for value in arguments)})\n"
+        f"& {_quoted(entry)} @forward 2> {_quoted(captured)}\n"
         "exit $LASTEXITCODE\n", encoding="utf-8",
     )
-    command = [native_powershell, "-NoProfile", "-File", str(harness)]
+    process, job = spawn_sync_in_kill_on_close_job(
+        [native_powershell, "-NoProfile", "-File", str(harness)],
+        require_job=True, allow_breakaway=False,
+        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        **no_window_kwargs(),
+    )
+    try:
+        stdout, stderr = process.communicate(timeout=60)
+        assert process.returncode == 1, stdout + stderr
+        # PowerShell redirection captured the diagnostic: it is not a bare console write.
+        raw = captured.read_bytes()
+        encoding = "utf-16" if raw.startswith((b"\xff\xfe", b"\xfe\xff")) else "utf-8-sig"
+        errors = " ".join(raw.decode(encoding, errors="replace").split())
+        assert "WinError 5" in errors
+        assert "Queuing the update through WMI failed" in errors
+        assert "Access denied by policy" in errors
+        assert "Block process creations originating from PSExec and WMI commands" in errors
+        assert "No update was started or request submitted" in errors
+        assert not (tmp / "bootstrap.args").exists()
+        assert _updater_profile_files(home) == before
+        assert not list(tmp.glob("agent-update-*"))
+    finally:
+        if job is not None:
+            job.terminate_and_wait(15)
+        process.wait(timeout=15)
+        process.stdout.close()
+        process.stderr.close()
+
+
+@pytest.mark.parametrize("probe", [
+    "return 2;",
+    'throw new System.ComponentModel.Win32Exception(5, "Breakaway probe cleanup failed");',
+])
+def test_update_preflight_queues_through_wmi_only_when_breakaway_is_denied(
+    update_entry_case, native_powershell, monkeypatch, probe,
+):
+    """Another probe failure, even a cleanup failure carrying code 5, never queues through WMI."""
+    monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
+    tmp, home, _resolver = update_entry_case
+    entry, arguments = _job_preflight_entry(tmp, home, "global", "--detach")
+    queued = tmp / "wmi-called.txt"
+    captured = tmp / "captured-errors.txt"
+    harness = tmp / "probe-failure.ps1"
+    harness.write_text(
+        "Add-Type -TypeDefinition 'namespace CopilotExtensions { public static class "
+        f"UpdateBreakawayProbe {{ public static int Check(string e) {{ {probe} }} }} }}'\n"
+        f"function Invoke-CimMethod {{ Set-Content -LiteralPath {_quoted(queued)} x; throw 'reached' }}\n"
+        f"$forward = @({','.join(_quoted(value) for value in arguments)})\n"
+        f"& {_quoted(entry)} @forward 2> {_quoted(captured)}\n"
+        "exit $LASTEXITCODE\n", encoding="utf-8",
+    )
+    result = subprocess.run(
+        [native_powershell, "-NoProfile", "-File", str(harness)],
+        stdin=subprocess.DEVNULL, capture_output=True, timeout=120, **no_window_kwargs(),
+    )
+    raw = captured.read_bytes()
+    encoding = "utf-16" if raw.startswith((b"\xff\xfe", b"\xfe\xff")) else "utf-8-sig"
+    errors = " ".join(raw.decode(encoding, errors="replace").split())
+    assert result.returncode == 1, errors
+    assert "used only when the caller's Job denies breakaway" in errors
+    assert not queued.exists()
+    assert not list(tmp.glob("agent-update-*"))
+
+
+_QUEUED_BOOTSTRAP = r"""
+# Receipts for teardown, recorded first: this fixture and each ancestor up to the
+# WMI provider host, pinned by PID and creation time. A chain that does not end at
+# the provider host is not a queued submission and records nothing.
+$receipts = @(); $id = $PID; $childStart = [DateTime]::MaxValue; $viaWmi = $false
+while ($id -and $receipts.Count -lt 8) {
+    try { $p = [Diagnostics.Process]::GetProcessById([int]$id) } catch { break }
+    # The provider host runs as a service account: identify it before reading its times.
+    if ($p.ProcessName -ieq 'WmiPrvSE') { $viaWmi = $true; break }
+    try { $started = $p.StartTime.ToUniversalTime() } catch { break }
+    if ($started -gt $childStart) { break }
+    $receipts += @{ pid = [int]$id; created = ($started.Ticks - 621355968000000000) / 1e7 }
+    $childStart = $started
+    $id = [int](Get-CimInstance -ClassName Win32_Process -Filter "ProcessId=$id").ParentProcessId
+}
+if ($viaWmi) {
+    [IO.File]::WriteAllText($env:QUEUED_RECEIPTS + '.tmp', (ConvertTo-Json -Compress -InputObject @($receipts)))
+    [IO.File]::Move($env:QUEUED_RECEIPTS + '.tmp', $env:QUEUED_RECEIPTS)
+}
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class QueuedUpdateJobProbe {
+    [DllImport("kernel32.dll")] static extern IntPtr GetCurrentProcess();
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern bool IsProcessInJob(IntPtr process, IntPtr job, out bool result);
+    public static bool InJob() { bool r; IsProcessInJob(GetCurrentProcess(), IntPtr.Zero, out r); return r; }
+}
+'@
+$proof = @{ args = @($args); in_job = [QueuedUpdateJobProbe]::InJob() }
+[IO.File]::WriteAllText($env:QUEUED_PROOF, (ConvertTo-Json -Compress -InputObject $proof))
+[Console]::Error.WriteLine('Update request queued-req-7; log: example.log')
+if ($args -ccontains '--json') {
+    [Console]::Out.WriteLine('{"request_id": "queued-req-7", "state": "pending"}')
+}
+exit [int]$env:QUEUED_EXIT
+"""
+
+
+# Typographic single quotes end PowerShell literals too; they must stay data.
+_HOSTILE_PROJECT = "a\u2019; Set-Content -LiteralPath $env:QUEUED_INJECTED x; \u2018"
+
+
+def _queued_update_case(update_entry_case, monkeypatch, *, exit_code=0):
+    git = shutil.which("git.exe") or shutil.which("git")
+    if git is None:
+        pytest.skip("Git is required for the local bootstrap source")
+    monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
+    tmp, home, _resolver = update_entry_case
+    source = tmp / "source"
+    (source / "worktree-manager").mkdir(parents=True)
+    (source / "worktree-manager" / "bootstrap.ps1").write_text(_QUEUED_BOOTSTRAP, encoding="utf-8")
+    for command in (
+        ["init", "--quiet", "--initial-branch", "main", str(source)],
+        ["-C", str(source), "add", "-A"],
+        ["-C", str(source), "-c", "user.name=t", "-c", "user.email=t@example.invalid",
+         "commit", "--quiet", "-m", "fixture"],
+    ):
+        subprocess.run([git, *command], check=True, capture_output=True, **no_window_kwargs())
+    monkeypatch.setenv("WORKTREE_MANAGER_BOOTSTRAP_REPO", str(source))
+    monkeypatch.setenv("WORKTREE_MANAGER_BOOTSTRAP_REF", "main")
+    monkeypatch.setenv("QUEUED_PROOF", str(tmp / "queued.json"))
+    monkeypatch.setenv("QUEUED_INJECTED", str(tmp / "injected.txt"))
+    monkeypatch.setenv("QUEUED_EXIT", str(exit_code))
+    monkeypatch.setenv("QUEUED_RECEIPTS", str(tmp / "queued-receipts.json"))
+    (tmp / "tools" / "git").unlink()
+    return tmp, home
+
+
+def _reap_queued_submissions(tmp):
+    """Kill only the processes a queued fixture submission recorded as its own.
+
+    The fixture records PID and creation-time receipts for itself and its WMI
+    ancestors; each is re-verified through a newly opened handle, so a reused PID
+    or an unrelated process that merely mentions the scratch path is never touched.
+    """
+    import psutil
+
+    receipts = tmp / "queued-receipts.json"
+    if not receipts.is_file():
+        return []
+    ours = {os.getpid(), *(parent.pid for parent in psutil.Process().parents())}
+    targets = []
+    for receipt in json.loads(receipts.read_text(encoding="utf-8-sig")):
+        try:
+            process = psutil.Process(int(receipt["pid"]))
+            if process.pid in ours or abs(process.create_time() - float(receipt["created"])) > 0.01:
+                continue
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+        targets.append(process)
+    # psutil re-checks the pinned creation time before signalling each process.
+    for process in targets:
+        try:
+            process.kill()
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+    psutil.wait_procs(targets, timeout=15)
+    return targets
+
+
+def test_queued_submission_teardown_spares_unrelated_processes_naming_the_scratch_path(tmp_path):
+    """Teardown acts on verified receipts only, never on a command-line match."""
+    import psutil
+
+    bystander = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(120)", str(tmp_path)],
+        stdin=subprocess.DEVNULL, **no_window_kwargs(),
+    )
+    try:
+        created = psutil.Process(bystander.pid).create_time()
+        (tmp_path / "queued-receipts.json").write_text(
+            json.dumps([{"pid": bystander.pid, "created": created - 5}]), encoding="utf-8",
+        )
+        assert _reap_queued_submissions(tmp_path) == []
+        assert bystander.poll() is None
+        (tmp_path / "queued-receipts.json").unlink()
+        assert _reap_queued_submissions(tmp_path) == []
+        assert bystander.poll() is None
+    finally:
+        bystander.kill()
+        bystander.wait(timeout=15)
+
+def _run_in_strict_job(command, tmp, timeout=180):
+    from agent_procutil import spawn_sync_in_kill_on_close_job
+
+    process, job = spawn_sync_in_kill_on_close_job(
+        command, require_job=True, allow_breakaway=False,
+        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        **no_window_kwargs(),
+    )
+    try:
+        stdout, stderr = process.communicate(timeout=timeout)
+        return process.returncode, stdout.decode(errors="replace"), stderr.decode(errors="replace")
+    finally:
+        if job is not None:
+            job.terminate_and_wait(15)
+        process.wait(timeout=15)
+        process.stdout.close()
+        process.stderr.close()
+        _reap_queued_submissions(tmp)
+
+
+def test_queued_update_keeps_typographic_quotes_as_data_and_json_on_stdout(
+    update_entry_case, native_powershell, monkeypatch,
+):
+    tmp, home = _queued_update_case(update_entry_case, monkeypatch)
+    entry, _ = _job_preflight_entry(tmp, home, "global", "--detach")
+    arguments = ["--project", _HOSTILE_PROJECT, "update", "--detach", "--json"]
+    code, stdout, stderr = _run_in_strict_job(
+        [native_powershell, "-NoProfile", "-File", str(entry), *arguments], tmp,
+    )
+    assert code == 0, stdout + stderr
+    assert json.loads(stdout) == {"request_id": "queued-req-7", "state": "pending"}
+    proof = json.loads((tmp / "queued.json").read_text(encoding="utf-8-sig"))
+    assert proof["args"] == [
+        "--bootstrap-update", "update", "--project", _HOSTILE_PROJECT, "--detach", "--json",
+    ]
+    assert not (tmp / "injected.txt").exists(), "a typographic quote ended a PowerShell literal"
+
+
+def test_queued_update_reports_a_failed_submission_even_with_a_request_id(
+    update_entry_case, native_powershell, monkeypatch,
+):
+    tmp, home = _queued_update_case(update_entry_case, monkeypatch, exit_code=1)
+    entry, arguments = _job_preflight_entry(tmp, home, "global", "--detach")
+    code, stdout, stderr = _run_in_strict_job(
+        [native_powershell, "-NoProfile", "-File", str(entry), *arguments], tmp,
+    )
+    output = " ".join((stdout + stderr).split())
+    assert code == 1, output
+    assert "submission exited 1 for request queued-req-7" in output
+    assert "Update request queued-req-7 submitted" not in output
+
+
+@pytest.mark.parametrize("front", ["global", "git-bash"])
+@pytest.mark.parametrize("observer", ["--wait", "--detach"])
+def test_update_preflight_queues_detached_update_outside_strict_caller_job(
+    update_entry_case, native_powershell, monkeypatch, front, observer,
+):
+    """The queued update runs through WMI outside the caller's no-breakaway kill-on-close Job."""
+    from agent_procutil import spawn_sync_in_kill_on_close_job
+
+    tmp, home = _queued_update_case(update_entry_case, monkeypatch)
+    entry, arguments = _job_preflight_entry(tmp, home, "global", observer)
+    command = [native_powershell, "-NoProfile", "-File", str(entry), *arguments]
     if front == "git-bash":
         from native_shell_support import ShellUnavailable, admit_native_bash, bash_path
 
@@ -119,23 +377,26 @@ def test_update_preflight_checks_real_job_before_any_update_work(
         **no_window_kwargs(),
     )
     try:
-        stdout, stderr = process.communicate(timeout=30)
-        assert process.returncode == 1, stdout + stderr
-        assert b"WinError 5" in stderr
-        assert b"No update was started or request submitted" in stderr
-        assert b"detached/outside-Job shell mode" in stderr
-        assert b"detach=true" in stderr
-        assert b"Plain async execution or update --detach" in stderr
-        assert b"Do not retry in the same bounded shell" in stderr
-        assert not (tmp / "bootstrap.args").exists()
-        assert _updater_profile_files(home) == before
-        assert not list(tmp.glob("agent-update-*"))
+        stdout, stderr = process.communicate(timeout=180)
+        output = " ".join((stdout + stderr).decode(errors="replace").split())
+        assert process.returncode == 0, output
+        assert "WinError 5" in output
+        assert "queued outside the caller's Job through WMI" in output
+        assert "Update request queued-req-7 submitted" in output
+        assert "--request-status queued-req-7" in output
+        proof = json.loads((tmp / "queued.json").read_text(encoding="utf-8-sig"))
+        assert proof["in_job"] is False
+        assert proof["args"] == ["--bootstrap-update", "update", "--project", "sample", "--detach"]
+        # The submission chain recorded its own teardown receipts.
+        assert json.loads((tmp / "queued-receipts.json").read_text(encoding="utf-8-sig"))
+        assert len(list(tmp.glob("agent-update-queued-*/submission.log"))) == 1
     finally:
         if job is not None:
             job.terminate_and_wait(15)
         process.wait(timeout=15)
         process.stdout.close()
         process.stderr.close()
+        _reap_queued_submissions(tmp)
 
 
 def _check_supported_breakaway_entry(root, native_powershell, front):
@@ -461,7 +722,9 @@ def test_admitted_git_sh_no_manager_reaches_installed_runtime(
 
 
 @pytest.mark.parametrize("project_position", ["before", "after"])
-@pytest.mark.parametrize("front", ["global", "installed-global", "git-sh", "git-bash"])
+@pytest.mark.parametrize("front", [
+    "global", "installed-global", "native-global", "git-sh", "git-bash", "native-git-bash",
+])
 @pytest.mark.parametrize("runtime_source", ["marketplace", "git"])
 def test_configured_project_update_routes_before_manager_bootstrap(
     update_entry_case, native_powershell, monkeypatch, project_position, front, runtime_source,
@@ -504,13 +767,16 @@ def test_configured_project_update_routes_before_manager_bootstrap(
         if project_position == "before"
         else ["update", "--force", "--project", "sample", "--skip-modules", "a b"]
     )
-    if front in ("global", "installed-global"):
-        if front == "installed-global":
+    if front.startswith("native-"):
+        _copy_native_global_tools(home, monkeypatch, "ps1")
+    if front in ("global", "installed-global", "native-global"):
+        if front in ("installed-global", "native-global"):
             user_bin = home / ".local" / "bin"
-            user_bin.mkdir(parents=True)
-            for name in ("agent-worktrees.ps1", "agent-worktrees-update-entry.ps1"):
-                shutil.copy2(PLUGIN / "bin" / name, user_bin / name)
-            (runtime / "payload-dir").write_text(str(PLUGIN), encoding="utf-8")
+            if front == "installed-global":
+                user_bin.mkdir(parents=True)
+                for name in ("agent-worktrees.ps1", "agent-worktrees-update-entry.ps1"):
+                    shutil.copy2(PLUGIN / "bin" / name, user_bin / name)
+                (runtime / "payload-dir").write_text(str(PLUGIN), encoding="utf-8")
             entry_path = user_bin / "agent-worktrees.ps1"
         else:
             entry_path = PLUGIN / "bin" / "agent-worktrees.ps1"
@@ -549,7 +815,9 @@ def test_configured_project_update_routes_before_manager_bootstrap(
         _stub_admission_for_bash(tmp, native_powershell, bash)
         monkeypatch.setenv("WORKTREE_MANAGER_BOOTSTRAP_REPO", "-disabled-for-test")
         command = [
-            bash, bash_path(bash, PLUGIN / "bin" / "agent-worktrees"), *arguments,
+            bash, bash_path(bash, (
+                home / ".local" / "bin" if front == "native-git-bash" else PLUGIN / "bin"
+            ) / "agent-worktrees"), *arguments,
         ]
     result = subprocess.run(
         command, capture_output=True, timeout=30, **no_window_kwargs(),
@@ -1410,3 +1678,95 @@ if __name__ == "__main__":
                 Path(directory) / selected_front, str(options.powershell), selected_front,
             )
             print(f"PASS {selected_front}: actual admission, offline bootstrap, probe and Job cleanup")
+
+
+_WAIT_SUBMISSION = r"""
+$ast = [Management.Automation.Language.Parser]::ParseFile($env:ENTRY_SCRIPT, [ref]$null, [ref]$null)
+$definition = $ast.Find({ param($node)
+    $node -is [Management.Automation.Language.FunctionDefinitionAst] -and
+    $node.Name -eq 'Wait-AgentQueuedSubmission' }, $true)
+. ([scriptblock]::Create($definition.Extent.Text))
+$result = Wait-AgentQueuedSubmission ([int]$env:SUBMISSION_PID) ([DateTime]::Parse($env:SUBMITTED_AT)) $env:EXIT_FILE $env:IDENTITY
+if ($null -eq $result) { 'none' } else { "code=$result" }
+"""
+
+
+@pytest.mark.parametrize(
+    "case", ["exited", "reused", "late-reuse", "unreported", "reuse-unreported", "live-reuse", "pending"],
+)
+def test_queued_submission_that_exits_before_it_is_opened_reports_its_recorded_code(
+    tmp_path, native_powershell, case,
+):
+    """A fast-exiting submission is judged by its recorded exit code, never a reused PID."""
+    exit_file = tmp_path / "submission.exit"
+    identity = str(tmp_path / "submission.out")
+    if case not in ("unreported", "reuse-unreported", "live-reuse", "pending"):
+        exit_file.write_text("3", encoding="utf-8")
+    submitted_at = time.strftime("%Y-%m-%dT%H:%M:%S")
+    unrelated = None
+    if case == "exited":
+        finished = subprocess.run(
+            [native_powershell, "-NoProfile", "-Command", "$PID"],
+            capture_output=True, text=True, check=True, **no_window_kwargs(),
+        )
+        submission_pid = int(finished.stdout.strip())
+    elif case == "pending":
+        # The genuine submission, identified by its command line, records its code later.
+        record = f"Start-Sleep 2; [IO.File]::WriteAllText('{exit_file}', '3'); exit 0 # {identity}"
+        unrelated = subprocess.Popen(
+            [native_powershell, "-NoProfile", "-Command", record],
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            **no_window_kwargs(),
+        )
+        submission_pid = unrelated.pid
+    elif case in ("late-reuse", "reuse-unreported", "live-reuse"):
+        # An unrelated process that took the PID after the submission was queued;
+        # its own exit, even a successful one, is never the submission's result.
+        time.sleep(1.5)
+        unrelated = subprocess.Popen(
+            [native_powershell, "-NoProfile", "-Command",
+             "Start-Sleep 3; exit 0" if case == "reuse-unreported" else "Start-Sleep 120; exit 9"],
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            **no_window_kwargs(),
+        )
+        submission_pid = unrelated.pid
+    else:
+        # A long-lived process started before the submission stands in for a reused PID.
+        submission_pid = os.getpid()
+    env = dict(
+        os.environ,
+        ENTRY_SCRIPT=str(PLUGIN / "bin" / "agent-worktrees-update-entry.ps1"),
+        SUBMISSION_PID=str(submission_pid),
+        SUBMITTED_AT=submitted_at,
+        EXIT_FILE=str(exit_file),
+        IDENTITY=identity,
+    )
+    try:
+        started = time.monotonic()
+        result = subprocess.run(
+            [native_powershell, "-NoProfile", "-NonInteractive", "-Command", _WAIT_SUBMISSION],
+            capture_output=True, text=True, env=env, timeout=60, **no_window_kwargs(),
+        )
+        elapsed = time.monotonic() - started
+    finally:
+        if unrelated is not None:
+            unrelated.kill()
+            unrelated.wait(timeout=15)
+    assert result.returncode == 0, result.stdout + result.stderr
+    expected = "none" if case in ("unreported", "reuse-unreported", "live-reuse") else "code=3"
+    assert result.stdout.strip().splitlines()[-1] == expected, result.stdout + result.stderr
+    assert elapsed < 30, "a reused PID must never be waited on"
+
+def test_durable_update_marker_is_consumed_and_never_inherited(native_powershell):
+    """Descendants of a queued update never see its marker, so later updates can still queue."""
+    script = (
+        "$env:AGENT_WORKTREES_INTERNAL_DURABLE_UPDATE = '1'\n"
+        f". '{PLUGIN / 'bin' / 'agent-worktrees-update-entry.ps1'}' status\n"
+        "\"shell=$_awDurableUpdateShell inherited=$([bool]$env:AGENT_WORKTREES_INTERNAL_DURABLE_UPDATE)\"\n"
+    )
+    result = subprocess.run(
+        [native_powershell, "-NoProfile", "-NonInteractive", "-Command", script],
+        capture_output=True, text=True, timeout=60, **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.strip().splitlines()[-1] == "shell=True inherited=False"

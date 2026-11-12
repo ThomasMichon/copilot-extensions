@@ -36,6 +36,17 @@ for line in sys.stdin:
 """
 
 
+@pytest.mark.parametrize("legacy", [False, True])
+def test_compact_archive_rebuild_is_byte_identical(tmp_path, monkeypatch, legacy):
+    monkeypatch.setattr(zipfile.time, "localtime", lambda _: (2001, 1, 1, 0, 0, 0, 0, 1, -1))
+    first, source = build_session_host_bundle(tmp_path / "first", legacy=legacy)
+    expected = first.read_bytes()
+    first.unlink()
+    monkeypatch.setattr(zipfile.time, "localtime", lambda _: (2026, 1, 1, 0, 0, 0, 0, 1, -1))
+    rebuilt, rebuilt_source = build_session_host_bundle(tmp_path / "first", legacy=legacy)
+    assert (rebuilt_source, rebuilt.read_bytes()) == (source, expected)
+
+
 def _relocate(tmp_path: Path, *, legacy: bool = False) -> Path:
     archive, _digest = build_session_host_bundle(tmp_path / "build", legacy=legacy)
     receiver = tmp_path / "receiver"
@@ -44,6 +55,120 @@ def _relocate(tmp_path: Path, *, legacy: bool = False) -> Path:
     shutil.copyfile(archive, relocated)
     shutil.rmtree(tmp_path / "build")
     return relocated
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_relocated_compact_recovery_codec_roundtrips_complete_record(tmp_path, legacy):
+    archive = _relocate(tmp_path, legacy=legacy)
+    script = """
+import sys
+sys.path.insert(0, sys.argv[1])
+from agent_remote_driver.headed.recovery import RecoveryDescriptor, RecoveryRecord, RecoveryStep
+from agent_remote_driver.headed.recovery_codec import encode_recovery_record, decode_recovery_record
+descriptor = RecoveryDescriptor(
+    "owner", "worktree", "revision", "source", "source-revision", "same-conversation",
+    "environment", "boot", "scope", "incarnation", 1,
+)
+record = RecoveryRecord(
+    "operation", descriptor,
+    (RecoveryStep("retire_intent", "owner-evidence", ("unknown-action",)),),
+    ("native-connection-lost",),
+)
+restored = decode_recovery_record(encode_recovery_record(record))
+assert restored == record
+assert restored.unknown_effects == ("unknown-action",)
+assert restored.status()["effects_wired"] is False
+"""
+    result = subprocess.run(
+        [sys.executable, "-I", "-c", script, str(archive)], cwd=archive.parent,
+        capture_output=True, timeout=15, **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stderr.decode(errors="replace")
+
+
+def test_relocated_private_mux_operation_uses_the_copied_core_and_literal_child(tmp_path):
+    archive = _relocate(tmp_path)
+    binary = tmp_path / "tmux"
+    binary.touch()
+    captured = tmp_path / "native.json"
+    request = {
+        "version": 1, "binary": str(binary), "socket": str(tmp_path / "tmux.sock"),
+        "session": "wt-fixture", "cwd": str(tmp_path),
+        "command": ["child", "", 'quote "inside"', "literal\nline", "tail\\"],
+    }
+    script = """
+import json,os,subprocess,sys
+from pathlib import Path
+from types import SimpleNamespace
+sys.path.insert(0,sys.argv[1])
+from agent_remote_driver import mux_creation as mux
+from agent_remote_driver.session_host.launcher import main
+assert mux.__file__.startswith(sys.argv[1])
+native_run=subprocess.run
+producer="import json,os,sys; from pathlib import Path; Path(sys.argv[1]).write_text(json.dumps({'argv':sys.argv[2:],'cwd':os.getcwd()})); print('$1:1234|%2')"
+def run(argv,**options):
+    return native_run(
+        [sys.executable,'-I','-c',producer,sys.argv[2],*argv],**options,
+    )
+mux.platform=SimpleNamespace(system=lambda:'Linux')
+mux.subprocess=SimpleNamespace(run=run,DEVNULL=subprocess.DEVNULL)
+raise SystemExit(main(['--mux-create-private']))
+"""
+    result = subprocess.run(
+        [sys.executable, "-I", "-S", "-c", script, str(archive), str(captured)],
+        input=json.dumps(request), cwd=archive.parent, capture_output=True,
+        text=True, timeout=15, **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(result.stdout)["native"] == {"incarnation": "$1:1234", "pane": "%2"}
+    actual = json.loads(captured.read_text())
+    assert actual["cwd"] == str(tmp_path)
+    assert actual["argv"] == [
+        str(binary), "-S", request["socket"], "new-session", "-d", "-s", "wt-fixture",
+        "-P", "-F", "#{session_id}:#{session_created}|#{pane_id}", "-c", str(tmp_path),
+        *request["command"],
+    ]
+
+
+@pytest.mark.skipif(os.name != "posix", reason="Native POSIX executable boundary with synthetic TMux")
+@pytest.mark.parametrize("selection", ["current", "legacy", "unknown-option"])
+def test_private_mux_exact_copied_cli_preserves_legacy_and_strict_selection(tmp_path, selection):
+    tmp_path = tmp_path.resolve()
+    archive = _relocate(tmp_path, legacy=selection == "legacy")
+    captured = tmp_path / "dispatched.json"
+    binary = tmp_path / "tmux"
+    binary.write_text(
+        f"#!{sys.executable}\n"
+        "import json,os,sys\nfrom pathlib import Path\n"
+        f"Path({str(captured)!r}).write_text(json.dumps({{'argv':sys.argv[1:],'cwd':os.getcwd()}}))\n"
+        "print('$1:1234|%2')\n",
+        encoding="utf-8",
+    )
+    binary.chmod(0o700)
+    request = {
+        "version": 1, "binary": str(binary), "socket": str(tmp_path / "tmux.sock"),
+        "session": "wt-fixture", "cwd": str(tmp_path),
+        "command": ["child", "", 'quote "inside"', "literal\nline"],
+    }
+    argv = [sys.executable, "-I", "-S", str(archive), "--mux-create-private"]
+    if selection == "unknown-option":
+        argv.append("--typo")
+    result = subprocess.run(
+        argv, input=json.dumps(request), cwd=archive.parent, capture_output=True,
+        text=True, timeout=15, **no_window_kwargs(),
+    )
+    if selection != "current":
+        assert result.returncode == 2 and not captured.exists()
+    else:
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert json.loads(result.stdout)["status"] == "created"
+        actual = json.loads(captured.read_text())
+        assert actual["cwd"] == str(tmp_path)
+        assert actual["argv"] == [
+            "-S", request["socket"], "new-session", "-d", "-s", "wt-fixture",
+            "-P", "-F", "#{session_id}:#{session_created}|#{pane_id}", "-c", str(tmp_path),
+            *request["command"],
+        ]
 
 
 async def _close_frontend(client):

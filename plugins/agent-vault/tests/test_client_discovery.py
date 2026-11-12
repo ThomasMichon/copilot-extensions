@@ -157,6 +157,28 @@ def test_ping_transports_each_callers_current_vault_context(
         server.close()
 
 
+@pytest.mark.parametrize("transport", ["unix", "pipe"])
+def test_strict_failed_selection_never_contacts_legacy_tcp(
+    run_dir, monkeypatch, empty_registry, transport,
+):
+    monkeypatch.setattr(cli, "IS_WSL", False)
+    monkeypatch.setattr(cli, "IS_WINDOWS", transport == "pipe")
+    endpoint = rendezvous.Endpoint.parse(
+        r"pipe:\\.\pipe\example-unreachable" if transport == "pipe" else "unix:/example-unreachable",
+    )
+    monkeypatch.setattr(cli, "_discover_endpoint", lambda *_a, **_kw: endpoint)
+    monkeypatch.setattr(cli, "pipe_send", lambda *_a, **_kw: None)
+    monkeypatch.setattr(cli, "_send_socket", lambda *_a, **_kw: None)
+    server = _EchoServer({"ok": True, "value": "unrelated authority"})
+    monkeypatch.setenv("AGENT_VAULT_PORT", str(server.port))
+    try:
+        assert cli.send_command({"action": "get"}, strict_endpoint=True) is None
+        assert server.received is None
+        assert cli.send_command({"action": "get"})["value"] == "unrelated authority"
+    finally:
+        server.close()
+
+
 def test_discover_returns_none_without_file(run_dir, monkeypatch):
     monkeypatch.setattr(cli, "IS_WSL", False)
     assert cli._discover_endpoint(config.resolve_context()) is None

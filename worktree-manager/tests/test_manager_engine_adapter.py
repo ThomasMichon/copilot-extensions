@@ -60,6 +60,27 @@ def test_adapter_delegates_construction_health_and_retention_without_selecting(t
         assert options["expected_source_identity"] == {}
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows extended-length construction inputs")
+def test_adapter_retains_long_windows_members_through_source_observation(tmp_path, monkeypatch):
+    adapter = si._runtime_installer()
+    payload, root, uv = _source(tmp_path)
+    native = adapter.engine._native_retained_path
+    member = Path("resources") / ("nested-" * 12) / ("retained-" * 12) / "data.bin"
+    source = Path(native(payload / member))
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"retained native construction resource")
+    calls = _capture(adapter, monkeypatch)
+
+    with adapter.candidate(Path(native(payload)), root, assemble=si._copy_payload, uv=uv):
+        prepared = calls[0][2]["plugin"]
+        assert len(str(prepared / member)) > 260
+        assert (prepared / member).read_bytes() == source.read_bytes()
+        assert adapter.runtime.fingerprint_source(
+            adapter.engine._source_files(adapter.engine._package_roots(prepared)),
+        )
+        assert not (root / "current-version").exists()
+
+
 @pytest.mark.parametrize("qualified", [False, True])
 def test_prepare_runtime_candidate_reports_real_copy_and_inventory_progress(
     tmp_path, monkeypatch, capsys, qualified,
@@ -448,10 +469,23 @@ def _closed_inputs(tmp_path, content=b"constructor fixture", extra_wheels=()):
         )
 
 
-def test_source_wheels_bind_generation_and_retain_existing_candidate_contract(tmp_path, monkeypatch):
+@pytest.mark.parametrize("old_marker", [None, b"\xff\xfe\n", b"../foreign\n"])
+def test_source_wheels_bind_generation_and_retain_existing_candidate_contract(
+    tmp_path, monkeypatch, old_marker,
+):
     adapter = si._runtime_installer()
     payload, root, uv = _source(tmp_path)
     generation = _attribute_source(adapter, payload)
+    if old_marker is not None:
+        root.mkdir()
+        (root / "current-version").write_bytes(old_marker)
+    version_dir = adapter.runtime.version_dir
+
+    def ordinary_slot(actual_root, version):
+        adapter.runtime._validate_dev_previous_version(version)
+        return version_dir(actual_root, version)
+
+    monkeypatch.setattr(adapter.runtime, "version_dir", ordinary_slot)
     calls = _capture(adapter, monkeypatch)
     local = ("copilot-extensions-worktree-manager",)
     validate = lambda slot: None
@@ -469,7 +503,8 @@ def test_source_wheels_bind_generation_and_retain_existing_candidate_contract(tm
         assert options["process_retention"] is True and options["reuse_generations"] is False
         assert options["expected_source_identity"]["runtime_version"] == generation
         assert options["plugin"] != payload
-        assert not (root / "current-version").exists()
+        marker = root / "current-version"
+        assert (marker.read_bytes() if marker.exists() else None) == old_marker
 
 
 def test_unattributed_manager_wheels_refuse_before_construction(tmp_path, monkeypatch):
@@ -555,6 +590,105 @@ def test_self_install_forwards_source_inputs_without_replacing_completion_owner(
         }]
 
 
+@pytest.mark.parametrize("reused", [False, True])
+@pytest.mark.parametrize("readiness_error", [None, "passive readiness refused"])
+def test_stage_only_checks_readiness_under_custody_without_publication(
+    tmp_path, monkeypatch, reused, readiness_error,
+):
+    adapter = si._runtime_installer()
+    payload, root, _ = _source(tmp_path)
+    root.mkdir()
+    paths = [
+        root / "current-version", root / "last-known-good",
+        tmp_path / "command", tmp_path / "provider.json", root / "mux-route.json",
+    ]
+    for path in paths:
+        path.write_bytes(b"incumbent\n")
+    before = {path: path.read_bytes() for path in paths}
+    slot = root / "versions" / "1.2.3-dev1"
+    events = []
+    ready = SimpleNamespace(slot=slot, reused=reused)
+
+    @contextmanager
+    def candidate(actual_payload, actual_root, **options):
+        assert actual_payload == payload and actual_root == root
+        assert options["wheel_inputs"] is wheels
+        events.append("retained")
+        try:
+            yield ready
+        finally:
+            events.append("released")
+
+    def verify(actual_root, actual_ready, *, wheel_inputs):
+        assert actual_root == root and actual_ready is ready and wheel_inputs is wheels
+        assert events == ["retained"]
+        events.append("readiness")
+        if readiness_error:
+            raise RuntimeError(readiness_error)
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("staging reached publication or activation")
+
+    monkeypatch.setattr(adapter, "candidate", candidate)
+    monkeypatch.setattr(adapter, "verify_stage_readiness", verify, raising=False)
+    monkeypatch.setattr(si, "needs_install", lambda *args: True)
+    monkeypatch.setattr(si, "_complete_candidate", forbidden)
+    monkeypatch.setattr(si, "_deploy_binstubs", forbidden)
+    monkeypatch.setattr(si, "_write_control_plane_provider_manifest", forbidden)
+    with _closed_inputs(tmp_path) as wheels:
+        result = si.self_install(
+            payload, root=root, dry_run=False, stage_only=True,
+            _wheel_inputs=wheels, _before_publish=forbidden, _after_activate=forbidden,
+        )
+    assert result.action == ("error" if readiness_error else "staged")
+    assert result.slot == str(slot)
+    if readiness_error:
+        assert result.reason == readiness_error
+    assert events == ["retained", "readiness", "released"]
+    assert {path: path.read_bytes() for path in paths} == before
+
+
+@pytest.mark.parametrize("changes", [{}, {"version": True}, {"ready": 1}, {"generation": "foreign"}])
+def test_stage_readiness_uses_owned_installed_child_and_exact_result(tmp_path, monkeypatch, changes):
+    adapter = si._runtime_installer()
+    payload, root, _ = _source(tmp_path)
+    slot = root / "versions" / "1.2.3-dev1"
+    python = slot / "Scripts" / "python.exe"
+    wheels = object()
+    ready = SimpleNamespace(
+        slot=slot, frozen_plugin=payload, payload_hash="a" * 64, descriptor=23,
+    )
+    record = {
+        "schema": "copilot-extensions.manager-stage-readiness", "version": 1,
+        "generation": slot.name, "ready": True, **changes,
+    }
+    calls = []
+
+    def child(command, **options):
+        assert command == [
+            str(python), "-I", "-S", "-B", "-X", "utf8",
+            str(slot / ".runtime-bootstrap" / "runtime_launcher.py"),
+            "-m", "worktree_manager.runtime_stage", "--root", str(root),
+        ]
+        assert options["descriptor"] == ready.descriptor
+        assert options["candidate"] == slot and options["cwd"] == root
+        assert options["timeout"] == 60
+        assert options["inputs"].wheel_inputs is wheels
+        calls.append(command)
+        return SimpleNamespace(stdout=json.dumps(record))
+
+    monkeypatch.setattr(adapter.runtime, "slot_python", lambda *args: python)
+    monkeypatch.setattr(adapter.engine, "_package_roots", lambda path: (path,))
+    monkeypatch.setattr(adapter.engine, "_child", child)
+    monkeypatch.setattr(adapter, "_installation_child_options", lambda: {})
+    if changes:
+        with pytest.raises(RuntimeError, match="exact readiness result"):
+            adapter.verify_stage_readiness(root, ready, wheel_inputs=wheels)
+    else:
+        adapter.verify_stage_readiness(root, ready, wheel_inputs=wheels)
+    assert len(calls) == 1
+
+
 def test_damaged_repair_uses_a_new_generation_of_the_original_package(tmp_path, monkeypatch):
     adapter = si._runtime_installer()
     payload, root, uv = _source(tmp_path)
@@ -609,7 +743,7 @@ def test_partial_selector_publication_restores_both_states(
     before = {path: path.read_bytes() if path.exists() else None for path in (current, last_good)}
     receipts = {path: path.read_bytes() for path in root.glob("versions/*/.install-complete.json")}
     publication = adapter.runtime._runtime_component("versioned_runtime_publication")
-    replace = publication.os.replace
+    replace = publication.replace_selector
     faults = []
     retained = set()
     retain = adapter.runtime.retention_lease
@@ -647,13 +781,14 @@ def test_partial_selector_publication_restores_both_states(
         return recover(*args)
 
     def fail_second(source, target):
-        if Path(target) == last_good and not faults:
+        native = adapter.engine._native_retained_path
+        if Path(native(target)) == Path(native(last_good)) and not faults:
             assert current.read_bytes() == b"2.0.0\n"
             faults.append(True)
             raise PermissionError("injected second-selector failure")
         return replace(source, target)
 
-    monkeypatch.setattr(publication.os, "replace", fail_second)
+    monkeypatch.setattr(publication, "replace_selector", fail_second)
     monkeypatch.setattr(adapter.runtime, "retention_lease", retaining)
     monkeypatch.setattr(adapter.runtime, "_publication_lease", publishing)
     monkeypatch.setattr(publication, "_recover_uncontested_locked", recovering)
@@ -670,23 +805,27 @@ def test_partial_selector_publication_restores_both_states(
     assert retained == set()
 
 
-def test_selector_snapshot_is_rechecked_after_retention_acquisition(tmp_path, monkeypatch):
+@pytest.mark.parametrize("old_last_good", [None, b"\xff\n"])
+def test_selector_snapshot_is_rechecked_after_retention_acquisition(tmp_path, monkeypatch, old_last_good):
     adapter = si._runtime_installer()
     root = tmp_path / "root"
     adapter.runtime.mark_complete(root, "2.0.0", payload_hash="a" * 64)
+    if old_last_good is not None:
+        (root / "last-known-good").write_bytes(old_last_good)
+    concurrent = b"external\n" if old_last_good is None else b"\xfe\n"
     retain = adapter.runtime.retention_lease
 
     @contextmanager
     def concurrent_selection(root, generation, **kwargs):
         with retain(root, generation, **kwargs) as slot:
-            (root / "last-known-good").write_text("external\n")
+            (root / "last-known-good").write_bytes(concurrent)
             yield slot
 
     monkeypatch.setattr(adapter.runtime, "retention_lease", concurrent_selection)
     with pytest.raises(RuntimeError, match="selectors changed"):
         adapter.activate(root, "2.0.0", expected=None)
     assert not (root / "current-version").exists()
-    assert (root / "last-known-good").read_text() == "external\n"
+    assert (root / "last-known-good").read_bytes() == concurrent
 
 
 def test_unchanged_raw_selector_with_missing_slot_allows_bootstrap_recovery(tmp_path):
@@ -702,15 +841,98 @@ def test_unchanged_raw_selector_with_missing_slot_allows_bootstrap_recovery(tmp_
     assert (root / "last-known-good").read_text().strip() == "2.0.0"
 
 
-def test_raw_selector_does_not_admit_an_unsafe_missing_slot(tmp_path):
+@pytest.mark.parametrize("current,last_good", [
+    (b"\xff\xfe\r\n", b"0.9.0\r\n"),
+    (b"../foreign\n", b"\xff\n"),
+    (None, b"../foreign\r\n"),
+])
+@pytest.mark.parametrize("failure", [None, "partial", "after"])
+def test_unknown_old_selectors_allow_valid_target_without_following_them(
+    tmp_path, monkeypatch, current, last_good, failure,
+):
     adapter = si._runtime_installer()
     root = tmp_path / "root"
-    adapter.runtime.mark_complete(root, "2.0.0", payload_hash="a" * 64)
+    for generation in ("0.9.0", "2.0.0"):
+        adapter.runtime.mark_complete(root, generation, payload_hash="a" * 64)
+    sentinel = root / "foreign" / "keep"
+    sentinel.parent.mkdir()
+    sentinel.write_bytes(b"unrelated content")
+    paths = [root / "current-version", root / "last-known-good"]
+    before = dict(zip(paths, (current, last_good)))
+    for path, content in before.items():
+        if content is not None:
+            path.write_bytes(content)
+    receipts = {path: path.read_bytes() for path in root.glob("versions/*/.install-complete.json")}
+    retained = set()
+    retain, version_dir = adapter.runtime.retention_lease, adapter.runtime.version_dir
+    expected_retained = {"2.0.0", *(["0.9.0"] if last_good == b"0.9.0\r\n" else [])}
+    publication = adapter.runtime._runtime_component("versioned_runtime_publication")
+    replace = publication.os.replace
+    io_error = PermissionError("injected partial publication failure")
+    faults = []
+
+    def ordinary_slot(actual_root, generation):
+        assert generation in expected_retained
+        return version_dir(actual_root, generation)
+
+    @contextmanager
+    def retaining(actual_root, generation, **kwargs):
+        with retain(actual_root, generation, **kwargs) as slot:
+            retained.add(generation)
+            try:
+                yield slot
+            finally:
+                retained.remove(generation)
+
+    def fail_second(source, target):
+        if failure == "partial" and Path(target) == paths[1] and not faults:
+            assert paths[0].read_bytes() == b"2.0.0\n"
+            assert retained == expected_retained
+            faults.append(True)
+            raise io_error
+        return replace(source, target)
+
+    def after_publish():
+        assert retained == expected_retained
+        assert all(path.read_bytes() == b"2.0.0\n" for path in paths)
+        if failure == "after":
+            raise RuntimeError("injected uncommitted cutover failure")
+
+    monkeypatch.setattr(adapter.runtime, "version_dir", ordinary_slot)
+    monkeypatch.setattr(adapter.runtime, "retention_lease", retaining)
+    monkeypatch.setattr(publication.os, "replace", fail_second)
+    expected = current.decode().strip() if current == b"../foreign\n" else None
+    if failure:
+        with pytest.raises(
+            PermissionError if failure == "partial" else RuntimeError, match="injected",
+        ) as caught:
+            adapter.activate(root, "2.0.0", expected=expected, after_publish=after_publish)
+        if failure == "partial":
+            assert caught.value is io_error and faults == [True]
+        assert {path: path.read_bytes() if path.exists() else None for path in paths} == before
+    else:
+        adapter.activate(root, "2.0.0", expected=expected, after_publish=after_publish)
+        assert all(path.read_bytes() == b"2.0.0\n" for path in paths)
+    assert not retained
+    assert all(path.read_bytes() == content for path, content in receipts.items())
+    assert sentinel.read_bytes() == b"unrelated content"
+
+
+def test_unsafe_incoming_selector_refuses_before_leases_or_publication(tmp_path, monkeypatch):
+    adapter = si._runtime_installer()
+    root = tmp_path / "root"
+    root.mkdir()
     marker = root / "current-version"
-    marker.write_text("../foreign\n")
+    marker.write_bytes(b"\xff\n")
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("invalid incoming target reached mutation custody")
+
+    monkeypatch.setattr(adapter.runtime, "_publication_lease", forbidden)
+    monkeypatch.setattr(adapter.runtime, "retention_lease", forbidden)
     with pytest.raises(ValueError):
-        adapter.activate(root, "2.0.0", expected="../foreign")
-    assert marker.read_text() == "../foreign\n"
+        adapter.activate(root, "../foreign", expected=None)
+    assert marker.read_bytes() == b"\xff\n"
     assert not (root / "last-known-good").exists()
 
 

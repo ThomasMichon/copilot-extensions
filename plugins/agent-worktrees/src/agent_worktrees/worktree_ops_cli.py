@@ -77,6 +77,10 @@ def add_parsers(sub) -> None:
     effects = move.add_mutually_exclusive_group()
     effects.add_argument("--apply", action="store_true", help="Apply the inspected move (default: read-only plan)")
     effects.add_argument("--abort", action="store_true", help="Cancel a pre-publication move, preserving the source")
+    effects.add_argument(
+        "--check-live", action="store_true",
+        help="Explicit bounded live admission without copying; may refresh mux activity and acquire owner locks",
+    )
     move.add_argument("--capabilities", action="store_true")
     move.add_argument("--json", action="store_true")
     p = sub.add_parser(
@@ -269,7 +273,7 @@ def cmd_move(args: argparse.Namespace) -> int:
     from yaml import YAMLError
 
     if args.capabilities:
-        if args.worktree_id or args.destination or args.apply or args.abort:
+        if args.worktree_id or args.destination or args.apply or args.abort or args.check_live:
             output.err("move capability discovery accepts no target or effects")
             return 1
         print(json.dumps(checkout_relocation.capabilities()))
@@ -282,6 +286,10 @@ def cmd_move(args: argparse.Namespace) -> int:
             checkout_relocation.abort if args.abort
             else checkout_relocation.move if args.apply else checkout_relocation.plan
         )
+        if args.check_live:
+            from .checkout_relocation_plan import check_live
+
+            operation = check_live
         result = operation(args.worktree_id, args.destination, config)
         print(json.dumps(result, sort_keys=True))
         return 0

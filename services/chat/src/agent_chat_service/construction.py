@@ -21,6 +21,7 @@ from .client import ClientError
 _ENGINE: ModuleType | None = None
 _IMPORT_LOCK = threading.Lock()
 _CLIENT_PACKAGES = ("agent-endpoint-rendezvous", "agent-procutil")
+_SERVICE_PACKAGES = (*_CLIENT_PACKAGES, "agent-single-instance-lease")
 _BOOTSTRAP = {
     "_versioned_runtime.py": "versioned_runtime.py",
     "versioned_runtime_leases.py": "versioned_runtime_leases.py",
@@ -122,14 +123,51 @@ def _prepare_client(data: dict) -> None:
 def validate_client() -> None:
     """Installed health includes the exact slot-local retention bootstrap."""
     catalog = installed_catalog()
-    bootstrap = _client_slot() / ".runtime-bootstrap"
-    if {path.name for path in bootstrap.iterdir()} != set(_BOOTSTRAP.values()):
+    slot = _client_slot()
+    bootstrap = slot / ".runtime-bootstrap"
+    expected = set(_BOOTSTRAP.values())
+    runtime = importlib.import_module("agent_chat_service._versioned_runtime")
+    if runtime.is_complete(slot.parent.parent, slot.name):
+        expected.add("runtime-generation")
+        try:
+            launcher = importlib.import_module("agent_chat_service.runtime_launcher")
+            launcher.runtime_identity(slot)
+        except (OSError, ValueError):
+            raise ClientError(
+                "construction_bootstrap_invalid", "Chat retained runtime identity is invalid.",
+            ) from None
+    if {path.name for path in bootstrap.iterdir()} != expected:
         raise ClientError("construction_bootstrap_invalid", "Chat retention bootstrap is incomplete.")
     for name, target in _BOOTSTRAP.items():
         if hashlib.sha256(_resource(bootstrap / target)).hexdigest() != (
             catalog["resource_sha256s"][name]
         ):
             raise ClientError("construction_bootstrap_invalid", "Chat retention bootstrap changed.")
+
+
+def validate_service() -> None:
+    """Validate installed imports and retention, not serving or storage readiness."""
+    validate_client()
+    slot = _client_slot().resolve()
+    for name in (
+        "agent_chat_service.hosting", "agent_procutil.daemon_instances",
+        "single_instance_lease", "endpoint_rendezvous",
+    ):
+        try:
+            module = importlib.import_module(name)
+        except ImportError:
+            raise ClientError(
+                "construction_service_unavailable", "Installed Chat hosting imports are unavailable.",
+            ) from None
+        origin = getattr(module, "__file__", None)
+        if (
+            not origin or not Path(origin).is_file()
+            or not Path(origin).resolve().is_relative_to(slot)
+        ):
+            raise ClientError(
+                "construction_service_unavailable",
+                "Chat hosting imports must belong to the immutable candidate.",
+            )
 
 
 @contextmanager
@@ -147,6 +185,28 @@ def client_candidate(
         root, version, plugin=project, uv=uv, base_python=python,
         extras=("client",), local_packages=_CLIENT_PACKAGES,
         health_module="agent_chat_service.construction", health_callable="validate_client",
+        construction_callable="agent_chat_service.construction:_prepare_client",
+        construction_data={"slot": str(root.resolve() / "versions" / version)},
+        wait_timeout=wait_timeout, child_timeout=child_timeout,
+    ) as candidate:
+        yield candidate
+
+
+@contextmanager
+def service_candidate(
+    root: Path, version: str, *, project: Path, uv: Path, python: Path,
+    wait_timeout: float = 180, child_timeout: float = 180,
+):
+    """Retain a sealed service-role candidate without selecting or starting it.
+
+    Validation imports the installed host and its dependencies; it never opens
+    storage, acquires a live writer lease or publishes a serving endpoint.
+    """
+    engine = _engine()
+    with engine.numbered_candidate(
+        root, version, plugin=project, uv=uv, base_python=python,
+        extras=("service",), local_packages=_SERVICE_PACKAGES,
+        health_module="agent_chat_service.construction", health_callable="validate_service",
         construction_callable="agent_chat_service.construction:_prepare_client",
         construction_data={"slot": str(root.resolve() / "versions" / version)},
         wait_timeout=wait_timeout, child_timeout=child_timeout,

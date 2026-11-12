@@ -77,7 +77,10 @@ def test_running_payload_uses_outer_slot_source(tmp_path, monkeypatch, nested):
     assert si.payload_version() == "1.2.3"
 
 
-@pytest.mark.parametrize("failure", [None, "qualification", "activation", "wrong-root", "wrong-package"])
+@pytest.mark.parametrize("failure", [
+    None, "qualification", "activation", "wrong-root", "wrong-package", "stage-only",
+    "stage-qualification", "stage-readiness", "edited-frontdoor", "malformed-selector",
+])
 @pytest.mark.parametrize("alias", [
     None, *(
         pytest.param(value, marks=pytest.mark.skipif(os.name != "nt", reason="Windows path aliases"))
@@ -87,6 +90,8 @@ def test_running_payload_uses_outer_slot_source(tmp_path, monkeypatch, nested):
 def test_app_only_self_install_qualifies_and_transactionally_activates_without_source(
     tmp_path, monkeypatch, failure, alias,
 ):
+    from worktree_manager import runtime_stage
+
     installer = si._runtime_installer()
     root = tmp_path / "root"
     slot = root / "versions" / "1.2.3"
@@ -128,10 +133,12 @@ def test_app_only_self_install_qualifies_and_transactionally_activates_without_s
     def qualified(candidate, record):
         assert candidate.samefile(slot) and record["name"] == "worktree-manager"
         events.append("qualified")
-        if failure == "qualification":
+        if failure in {"qualification", "stage-qualification"}:
             raise RuntimeError("injected qualification failure")
-        yield None, lambda: events.append("unchanged")
-        events.append("released")
+        try:
+            yield None, lambda: events.append("unchanged")
+        finally:
+            events.append("released")
 
     original = si.importlib.util.spec_from_file_location
 
@@ -151,8 +158,8 @@ def test_app_only_self_install_qualifies_and_transactionally_activates_without_s
     def activate(_root, _version, **options):
         assert events[0] == "qualified"
         options["before_publish"]()
+        assert options["forward_only"]()
         events.append("published")
-        options["after_publish"]()
 
     def startup(_root, candidate, *, start_if_missing):
         assert candidate.samefile(slot)
@@ -161,28 +168,59 @@ def test_app_only_self_install_qualifies_and_transactionally_activates_without_s
         if failure == "activation":
             raise RuntimeError("injected activation failure")
 
+    def readiness(actual_root):
+        assert actual_root.samefile(root)
+        assert events == ["qualified"]
+        events.append("readiness")
+        if failure == "stage-readiness":
+            raise RuntimeError("injected readiness failure")
+
     monkeypatch.setattr(si, "running_payload_dir", forbidden)
     monkeypatch.setattr(installer, "candidate", forbidden)
     monkeypatch.setattr(installer, "activate", activate)
     monkeypatch.setattr(installer, "_activate_after_bootstrap_update", startup)
+    monkeypatch.setattr(runtime_stage, "probe", readiness)
     monkeypatch.setattr(si.importlib.util, "spec_from_file_location", application_spec)
+    if failure == "edited-frontdoor":
+        si.local_bin().mkdir(parents=True)
+        for name in si._expected_binstub_contents(application_slot=slot):
+            (si.local_bin() / name).write_bytes(b"edited historical launcher\n")
+    if failure == "malformed-selector":
+        (root / "current-version").write_bytes(b"\xff\xfe\r\n")
+        assert si.current_version(root) is None
+        assert (root / "current-version").read_bytes() == b"\xff\xfe\r\n"
     selected_root = tmp_path / "foreign" if failure == "wrong-root" else root
     if alias == "root":
         selected_root = Path("\\\\?\\" + str(selected_root))
     result = si.self_install(
         root=selected_root, dry_run=False,
-        _reconcile_instances=False,
+        _reconcile_instances=False, stage_only=bool(failure and failure.startswith("stage-")),
     )
-    if failure is None:
+    if failure in {None, "edited-frontdoor", "malformed-selector"}:
         assert result.action == "installed", result.reason
         assert result.version == "1.2.3" and Path(result.slot).samefile(slot)
-        assert events.index("published") < events.index("started") < events.index("released")
+        assert events.index("started") < events.index("published") < events.index("released")
+        assert not si._binstubs_are_stale(application_slot=slot)
+    elif failure == "stage-only":
+        assert result.action == "staged", result.reason
+        assert result.version == "1.2.3" and Path(result.slot).samefile(slot)
+        assert events == ["qualified", "readiness", "unchanged", "released"]
+        assert not si.local_bin().exists()
+        assert not si.control_plane_providers_dir().exists()
+        assert not (root / "current-version").exists()
+        assert not (root / "last-known-good").exists()
     else:
         assert result.action == "error", result
         assert not si.local_bin().exists() or not any(path.is_file() for path in si.local_bin().iterdir())
         if failure in {"wrong-root", "wrong-package"}:
             assert "another installation" in result.reason
             assert events == []
+        if failure == "stage-qualification":
+            assert "qualification failure" in result.reason
+            assert events == ["qualified"]
+        if failure == "stage-readiness":
+            assert "readiness failure" in result.reason
+            assert events == ["qualified", "readiness", "released"]
     assert not (slot / "payload").exists()
 
 
@@ -196,6 +234,30 @@ def test_copy_payload_preserves_bundled_dbus_next_wheel(tmp_path):
     si._copy_payload(payload, slot)
     assert (slot / wheel).read_bytes() == (source / wheel).read_bytes()
     assert (slot / si._SLOT_COMPLETE_MARKER).is_file()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows extended-length payload paths")
+@pytest.mark.parametrize("with_progress", [False, True])
+def test_copy_payload_preserves_long_windows_members(tmp_path, with_progress):
+    payload = _fake_payload(tmp_path, "1.2.3")
+    native = si._runtime_installer().engine._native_retained_path
+    member = Path("resources") / ("nested-" * 12) / ("retained-" * 12) / "data.bin"
+    source = Path(native(payload / member))
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"retained native payload resource")
+    slot = tmp_path / ("destination-" * 8) / "slot"
+    Path(native(slot.parent)).mkdir(parents=True)
+    assert len(str(slot / member)) > 260
+    progress = []
+
+    si._copy_payload(
+        Path(native(payload)), slot,
+        on_progress=(lambda: progress.append(True)) if with_progress else None,
+    )
+
+    assert Path(native(slot / member)).read_bytes() == source.read_bytes()
+    assert Path(native(slot / si._SLOT_COMPLETE_MARKER)).is_file()
+    assert bool(progress) is with_progress
 
 
 @pytest.mark.parametrize("failed_sink", [False, True])
@@ -276,8 +338,8 @@ def test_application_publication_never_runs_legacy_cleanup(tmp_path, monkeypatch
     assert not si._binstubs_are_stale(application_slot=slot)
 
 
-@pytest.mark.parametrize("incumbent", ["legacy", "foreign"])
-def test_application_frontdoors_migrate_only_owned_bytes(tmp_path, monkeypatch, incumbent):
+@pytest.fixture
+def application_frontdoors(tmp_path, monkeypatch):
     root = tmp_path / "root"
     slot = root / "versions" / "1.2.3"
     slot.mkdir(parents=True)
@@ -287,17 +349,77 @@ def test_application_frontdoors_migrate_only_owned_bytes(tmp_path, monkeypatch, 
     )
     local_bin = _patch_local_bin(monkeypatch, tmp_path)
     si._deploy_binstubs()
+    return slot, local_bin
+
+
+@pytest.mark.parametrize("incumbent", ["legacy", "edited"])
+def test_application_frontdoors_replace_declared_outputs_without_old_byte_admission(
+    application_frontdoors, incumbent,
+):
+    slot, local_bin = application_frontdoors
     primary = local_bin / ("worktree-manager.cmd" if os.name == "nt" else "worktree-manager")
-    if incumbent == "foreign":
-        primary.write_bytes(b"foreign launcher\n")
-        before = {path: path.read_bytes() for path in local_bin.iterdir()}
-        with pytest.raises(RuntimeError, match="Foreign Manager command preserved"):
+    if incumbent == "edited":
+        primary.write_bytes(b"edited historical launcher\n")
+    unrelated = local_bin / "unrelated-command"
+    unrelated.write_bytes(b"not an installation output\n")
+    preserved = unrelated.stat().st_ino, unrelated.stat().st_mtime_ns, unrelated.read_bytes()
+    si._deploy_binstubs(application_slot=slot)
+    assert not si._binstubs_are_stale(application_slot=slot)
+    assert si._binstubs_are_stale()
+    assert (unrelated.stat().st_ino, unrelated.stat().st_mtime_ns, unrelated.read_bytes()) == preserved
+
+
+def test_application_frontdoor_write_failure_is_the_original_io_error(
+    application_frontdoors, monkeypatch,
+):
+    slot, local_bin = application_frontdoors
+    target = local_bin / next(iter(si._expected_binstub_contents(application_slot=slot)))
+    target.write_bytes(b"edited historical launcher\n")
+    before = {path: path.read_bytes() for path in local_bin.iterdir()}
+    denied = PermissionError(13, "fixture command write denied", str(target))
+    published = {}
+    attempts = []
+
+    def replace(source, destination):
+        assert destination == target
+        attempts.append(destination)
+        raise denied
+
+    monkeypatch.setattr(si, "_replace_with_retry", replace)
+    with pytest.raises(PermissionError) as raised:
+        si._deploy_binstubs(application_slot=slot, _published=published)
+    assert raised.value is denied
+    assert attempts == [target] and published == {}
+    assert {path: path.read_bytes() for path in local_bin.iterdir()} == before
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows no-delete-share I/O")
+def test_application_frontdoor_native_lock_reports_io_not_metadata_refusal(application_frontdoors):
+    import ctypes
+    from ctypes import wintypes
+
+    slot, local_bin = application_frontdoors
+    target = local_bin / next(iter(si._expected_binstub_contents(application_slot=slot)))
+    target.write_bytes(b"edited historical launcher\n")
+    before = {path: path.read_bytes() for path in local_bin.iterdir()}
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.CreateFileW.argtypes = [
+        wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID,
+        wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE,
+    ]
+    kernel.CreateFileW.restype = wintypes.HANDLE
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel.CloseHandle.restype = wintypes.BOOL
+    handle = kernel.CreateFileW(str(target), 0x80000000, 1, None, 3, 0x80, None)
+    if handle == ctypes.c_void_p(-1).value:
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        with pytest.raises(PermissionError) as raised:
             si._deploy_binstubs(application_slot=slot)
+        assert raised.value.winerror in {5, 32}
         assert {path: path.read_bytes() for path in local_bin.iterdir()} == before
-    else:
-        si._deploy_binstubs(application_slot=slot)
-        assert not si._binstubs_are_stale(application_slot=slot)
-        assert si._binstubs_are_stale()
+    finally:
+        assert kernel.CloseHandle(handle)
 
 
 def test_application_status_checks_qualified_slot_not_a_source_payload(tmp_path, monkeypatch):
@@ -320,7 +442,7 @@ def test_application_status_checks_qualified_slot_not_a_source_payload(tmp_path,
 
 @pytest.mark.parametrize("incumbent", [False, True])
 @pytest.mark.parametrize("failure", ["frontdoor", "activation", "foreign-after"])
-def test_application_publication_recovers_only_its_created_frontdoors(
+def test_uncommitted_application_publication_recovers_only_its_created_frontdoors(
     tmp_path, monkeypatch, incumbent, failure,
 ):
     payload = _fake_payload(tmp_path, "1.2.3")
@@ -343,7 +465,6 @@ def test_application_publication_recovers_only_its_created_frontdoors(
 
     def activate(_root, _version, **options):
         options["before_publish"]()
-        options["after_publish"]()
 
     def fail_activation(_slot):
         if failure == "foreign-after":
@@ -365,7 +486,7 @@ def test_application_publication_recovers_only_its_created_frontdoors(
         si._complete_candidate(
             SimpleNamespace(slot=slot, reused=False), payload, root,
             previous=None, was_current=False, after_activate=fail_activation,
-            transactional_activation=True,
+            transactional_activation=False,
         )
     if failure == "foreign-after":
         assert primary.read_bytes() == b"foreign after publication\n"
@@ -373,6 +494,64 @@ def test_application_publication_recovers_only_its_created_frontdoors(
         after = {path: path.read_bytes() for directory in (local_bin, registry)
                  if directory.exists() for path in directory.iterdir() if path.is_file()}
         assert after == before
+
+
+@pytest.mark.parametrize("incumbent", [False, True])
+@pytest.mark.parametrize("failure", ["frontdoor", "foreign-provider"])
+def test_acknowledged_application_publication_failure_never_restores_frontdoors(
+    tmp_path, monkeypatch, incumbent, failure,
+):
+    payload = _fake_payload(tmp_path, "1.2.3")
+    root = tmp_path / "root"
+    slot = root / "versions" / "1.2.3"
+    slot.mkdir(parents=True)
+    (slot / "application.json").write_text("{}", encoding="utf-8")
+    shutil.copyfile(
+        Path(__file__).resolve().parents[2] / "libs" / "installer-engine" / "runtime_application_binstubs.py",
+        slot / "runtime_application_binstubs.py",
+    )
+    local_bin = _patch_local_bin(monkeypatch, tmp_path)
+    _patch_provider_registry(monkeypatch, tmp_path)
+    if incumbent:
+        si._deploy_binstubs()
+        si._write_control_plane_provider_manifest(payload, root=root)
+    primary = local_bin / "worktree-manager"
+    previous = primary.read_bytes() if primary.exists() else None
+    expected = si._expected_binstub_contents(application_slot=slot)["worktree-manager"]
+    starts = []
+
+    def activate(_root, _version, **options):
+        options["before_publish"]()
+
+    replace, provider = si._replace_with_retry, si._write_control_plane_provider_manifest
+
+    def fail_frontdoor(source, target):
+        if target.name == "worktree-manager.ps1" and source.suffix == ".tmp":
+            raise RuntimeError("injected post-start publication failure")
+        replace(source, target)
+
+    def fail_provider(*args, **kwargs):
+        provider(*args, **kwargs)
+        primary.write_bytes(b"foreign after acknowledged startup\n")
+        raise RuntimeError("injected post-start publication failure")
+
+    monkeypatch.setattr(si._runtime_installer(), "activate", activate)
+    if failure == "frontdoor":
+        monkeypatch.setattr(si, "_replace_with_retry", fail_frontdoor)
+    else:
+        monkeypatch.setattr(si, "_write_control_plane_provider_manifest", fail_provider)
+    with pytest.raises(RuntimeError, match="injected post-start"):
+        si._complete_candidate(
+            SimpleNamespace(slot=slot, reused=False), payload, root,
+            previous=None, was_current=False, after_activate=starts.append,
+            transactional_activation=True,
+        )
+    assert starts == [slot]
+    if failure == "foreign-provider":
+        assert primary.read_bytes() == b"foreign after acknowledged startup\n"
+    else:
+        assert primary.read_text(encoding="utf-8") == expected
+    assert primary.read_bytes() != previous
 
 
 @pytest.mark.parametrize("marker", [None, "", "../outside"])

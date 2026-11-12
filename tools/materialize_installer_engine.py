@@ -11,8 +11,11 @@ import installer_engine_ref as ier
 
 
 def _find_symlinked_ancestor(path: Path, root: Path) -> Path | None:
-    root_r = root.resolve()
-    if path.is_absolute() and path.is_relative_to(root_r) and ".." not in path.parts:
+    root_a = root.absolute()
+    if (
+        path.is_absolute() and path.is_relative_to(root_a)
+        and ".." not in path.parts and ".." not in root_a.parts
+    ):
         current = path
         while True:
             try:
@@ -26,10 +29,11 @@ def _find_symlinked_ancestor(path: Path, root: Path) -> Path | None:
                     return current
                 if getattr(info, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0):
                     break
-            if current == root_r:
+            if current == root_a:
                 return None
             current = current.parent
-    # Aliases and reparse points retain the resolved walk rather than cached identity.
+    # Non-lexical paths and reparse points retain the resolved walk.
+    root_r = root.resolve()
     current = path
     while True:
         if current.is_symlink():
@@ -74,7 +78,7 @@ def derived_file_pairs(
     for consumer in ier.python_adopter_dirs(canonical_root):
         consumers.setdefault(consumer, set()).update((*ier.PYTHON_FILES, *ier.SUPPORT_FILES))
     for consumer in ier.native_adopter_dirs(canonical_root):
-        consumers.setdefault(consumer, set()).update(ier.STANDALONE_NATIVE_FILES)
+        consumers.setdefault(consumer, set()).update(ier.native_files(consumer, canonical_root))
     for plugin in ier.human_output_adopters(canonical_root, ier.ADOPTERS):
         consumer = canonical_root / "plugins" / plugin
         declaration = ier.human_output_entrypoint(consumer).with_suffix(".human-output.json")

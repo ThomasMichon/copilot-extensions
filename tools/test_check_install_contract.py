@@ -54,7 +54,10 @@ _SPEC.loader.exec_module(checker)
 
 def _gate_source(tmp_path: Path) -> Path:
     source = REPO / "plugins" / "agent-worktrees" / "src" / "agent_worktrees"
-    for name in ("reconcile.py", "update_gate.py", "update_runtime.py", "update_runtime_plan.py"):
+    for name in (
+        "reconcile.py", "update_gate.py", "update_runtime.py", "update_runtime_plan.py",
+        "update_runtime_application.py",
+    ):
         shutil.copyfile(source / name, tmp_path / name)
     return tmp_path
 
@@ -746,6 +749,8 @@ def test_every_shipped_installer_checks_its_completion_marker() -> None:
     (".sh", '_runtime_construction_complete "$actual_hash"\nreturn 0\n', False),
     (".ps1", "Complete-RuntimeConstruction -PayloadHash $actualHash\nreturn $true\n", True),
     (".ps1", "Complete-RuntimeConstruction -PayloadHash $actualHash -RetainHelpers\nreturn $true\n", True),
+    (".ps1", "Complete-RuntimeConstruction -PayloadHash $actualHash -RetainHelpers:([bool]$NativeWheelSelection)\nreturn $true\n", True),
+    (".ps1", "Complete-RuntimeConstruction -PayloadHash $actualHash -RetainHelpers:([bool]$NativeWheelSelection) | Out-Null\nreturn $true\n", False),
     (".ps1", "try {\nComplete-RuntimeConstruction -PayloadHash $actualHash -RetainHelpers\n} catch {}\nreturn $true\n", False),
     (".ps1", "Complete-RuntimeConstruction -PayloadHash $actualHash -RetainHelpers | Out-Null\nreturn $true\n", False),
     (".ps1", "try {\nComplete-RuntimeConstruction -PayloadHash $actualHash\n} catch {}\nreturn $true\n", False),
@@ -1024,7 +1029,8 @@ def _script_tree(root: Path) -> None:
         "tools/not-a-script.txt": direct,
     }
     for ignored in (
-        ".git", ".venv", "venv", ".venv-tools", ".test-venvs", "node_modules"
+        ".git", ".venv", "venv", ".venv-tools", ".test-venvs", ".test-runs",
+        ".pytest_cache", "node_modules",
     ):
         scripts[f"generated/{ignored}/nested/activate.ps1"] = direct
         # These were never excluded from the stricter plugin sweep.

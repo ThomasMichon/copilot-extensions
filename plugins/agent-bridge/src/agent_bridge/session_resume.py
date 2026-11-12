@@ -34,6 +34,7 @@ if TYPE_CHECKING:
     from .acp_client import AcpClient
     from .acquisition_launch_owner import AcquisitionLaunchOwner
     from .hosting_policy import SessionHostingFence
+    from .retained_session_recovery import RetainedRecovery
 
 _NATIVE_OWNER_CALLER_PREFIX = "native-owner-resume:"
 
@@ -125,6 +126,7 @@ class _SessionResumeMixin:
         allow_recreate: bool = False,
         owner_native_resume: bool = False,
         acquisition_launch: AcquisitionLaunchOwner | None = None,
+        recovery_operation: RetainedRecovery | None = None,
     ) -> Session:
         """Resume a stopped session by spawning a new process.
 
@@ -156,6 +158,13 @@ class _SessionResumeMixin:
         session = self._sessions.get(session_id)
         if not session:
             raise KeyError(f"Session {session_id} not found")
+        from .retained_session_recovery import require_resume
+
+        require_resume(self, session)
+        if recovery_operation is not None:
+            recovery_operation.require_current()
+            if drain or allow_recreate or not owner_native_resume or acquisition_launch is not None:
+                raise ValueError("Retained recovery cannot drain, recreate or change launch owners")
 
         from .acquisition_launch_owner import require_resume_owner
         require_resume_owner(self, session, acquisition_launch, drain=drain, allow_recreate=allow_recreate)
@@ -167,6 +176,7 @@ class _SessionResumeMixin:
                 session_id, permission_callback, drain=drain, allow_recreate=allow_recreate,
                 owner_native_resume=owner_native_resume, hosting_fence=hosting_fence,
                 acquisition_launch=acquisition_launch,
+                recovery_operation=recovery_operation,
             )
 
     @admitted_recovery
@@ -182,6 +192,7 @@ class _SessionResumeMixin:
         owner_native_resume: bool = False,
         hosting_fence: SessionHostingFence,
         acquisition_launch: AcquisitionLaunchOwner | None = None,
+        recovery_operation: RetainedRecovery | None = None,
     ) -> Session:
         """Observe admitted recovery; retain fresh checks at later effect boundaries."""
         from .hosting_policy import require_session_hosting, require_target_hosting
@@ -215,6 +226,8 @@ class _SessionResumeMixin:
             return resumed
 
         async with lifecycle_lock(session._lifecycle_lock):
+            if recovery_operation is not None:
+                recovery_operation.require_current()
             await require_session_hosting(self, session, operation="resume", fence=hosting_fence)
             from .acquisition_launch_owner import require_resume_owner
             require_resume_owner(self, session, acquisition_launch, drain=drain, allow_recreate=allow_recreate)
@@ -268,7 +281,7 @@ class _SessionResumeMixin:
             from .acquisition_worktree_writer import current, registration_pending
 
             self._set_background_recovery_enabled(
-                session, acquisition_launch is None and current() is None,
+                session, acquisition_launch is None and current() is None and recovery_operation is None,
             )
             self._clear_disconnected_reattach_retry_state(session_id)
 
@@ -285,7 +298,9 @@ class _SessionResumeMixin:
                 except Exception:
                     await registration_pending(self, session)
                     raise
-                self._set_background_recovery_enabled(session, acquisition_launch is None)
+                self._set_background_recovery_enabled(
+                    session, acquisition_launch is None and recovery_operation is None,
+                )
 
             # Prefer reattaching to a surviving Session Host (adopt the running
             # child + its in-flight turn) over a fresh child + load_session, so a
@@ -308,6 +323,7 @@ class _SessionResumeMixin:
             with phase("session-host-reattach"):
                 reattached = (
                     acquisition_launch is None
+                    and recovery_operation is None
                     and (not cold_pending or cold_outage["recovery_phase"] == "registered")
                 ) and await self._try_reattach_live_host(session)
             if reattached:
@@ -324,7 +340,10 @@ class _SessionResumeMixin:
                 return session
 
             with phase("provider-target"):
-                await self._refresh_provider_target(session)
+                if recovery_operation is None:
+                    await self._refresh_provider_target(session)
+                else:
+                    recovery_operation.require_current()
             await require_target_hosting(session.target, operation="resume")
             original_target = session.target
             resume_target = original_target
@@ -332,6 +351,17 @@ class _SessionResumeMixin:
                 resume_target = replace(
                     session.target, native_resume_id=session.acp_session_id,
                 )
+            if recovery_operation is not None:
+                from .acquisition_worktree_writer import current
+                from .retained_session_recovery import ENVIRONMENT_KEY
+
+                writer = current()
+                if writer is None or writer.request.worktree_writer is None:
+                    raise ValueError("Retained recovery lost its original Worktrees writer")
+                resume_target = replace(resume_target, env={
+                    **resume_target.env,
+                    ENVIRONMENT_KEY: recovery_operation.environment(writer.request.worktree_writer),
+                })
 
             session.status = SessionStatus.STARTING
             self._db.update_session_status(
@@ -349,13 +379,18 @@ class _SessionResumeMixin:
                 client = None
                 try:
                     session.target = resume_target
+                    if recovery_operation is not None:
+                        recovery_operation.require_current()
                     load_existing = bool(session.acp_session_id)
                     if cold_outage is not None:
                         from .cold_outages import launching
 
                         launching(self, session)
                     with phase("session-host-preparation"):
-                        if acquisition_launch is not None or cold_outage is not None and session.target.type == "local":
+                        if (
+                            acquisition_launch is not None or recovery_operation is not None
+                            or cold_outage is not None and session.target.type == "local"
+                        ):
                             from .connect import ConnectTracker
 
                             host_result = await self._connect_via_session_host(
@@ -366,6 +401,7 @@ class _SessionResumeMixin:
                                 load_session_id=session.acp_session_id,
                                 model=session.model_override, effort=session.effort_override,
                                 **({"acquisition_launch": acquisition_launch} if acquisition_launch is not None else {}),
+                                **({"recovery_operation": recovery_operation} if recovery_operation is not None else {}),
                             )
                         else:
                             host_result = await self._resume_via_new_remote_host(
@@ -389,7 +425,9 @@ class _SessionResumeMixin:
                             effort_override=session.effort_override,
                             **client_preferences(session.target, self._db, session_id),
                         )
-                        if permission_callback:
+                        from .retained_session_recovery import permission_held
+
+                        if permission_callback or permission_held(self._db, session.target):
                             client.auto_approve = False
                         # Bound each round so a stalled Copilot ACP launch (the
                         # "Resuming…"/extension-reload race, #1468) fails fast and
@@ -467,10 +505,11 @@ class _SessionResumeMixin:
                     self._db.update_session_status(
                         session_id, SessionStatus.STOPPED.value, time.time(),
                     )
-                    if client is not None:
+                    if client is not None and recovery_operation is None:
                         with contextlib.suppress(Exception):
                             await client.shutdown()
-                    session.client = None
+                    if recovery_operation is None:
+                        session.client = None
                     raise
                 except Exception as exc:
                     if isinstance(exc, AgentHostingError):
@@ -516,12 +555,15 @@ class _SessionResumeMixin:
                     # Stop the wedged child before the next round (the "stop" in
                     # stop->resume); re-rolls the launch against the SAME ACP
                     # session, preserving prior-turn context.
-                    if acquisition_launch is None:
+                    if acquisition_launch is None and recovery_operation is None:
                         if client:
                             with contextlib.suppress(Exception):
                                 await client.shutdown()
                         session.client = None
-                    if cold_outage is not None or acquisition_launch is not None or allocation_recovery:
+                    if (
+                        cold_outage is not None or acquisition_launch is not None
+                        or recovery_operation is not None or allocation_recovery
+                    ):
                         session.status = SessionStatus.STOPPED
                         self._db.update_session_status(
                             session_id, SessionStatus.STOPPED.value, time.time(),
@@ -614,7 +656,9 @@ class _SessionResumeMixin:
                             effort_override=session.effort_override,
                             **client_preferences(session.target, self._db, session_id),
                         )
-                        if permission_callback:
+                        from .retained_session_recovery import permission_held
+
+                        if permission_callback or permission_held(self._db, session.target):
                             recreate_client.auto_approve = False
                         await asyncio.wait_for(
                             start_client(recreate_client, agent_proc.proc, session),

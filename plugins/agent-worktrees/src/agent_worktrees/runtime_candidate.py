@@ -8,6 +8,7 @@ import os
 import re
 import shutil
 import sys
+import time
 import uuid
 from datetime import datetime, timezone
 from importlib.metadata import distributions
@@ -65,7 +66,9 @@ def prepare_runtime_candidate(provenance: dict[str, str] | None = None) -> None:
         raise RuntimeError("Frozen package version differs from the requested runtime")
 
     source = json.loads(provenance["deployment_source"])
-    if "frozen_plugin" in provenance:
+    if "frozen_plugin" in provenance and not (
+        application and source.get("schema") == "copilot-extensions.runtime-source"
+    ):
         from .update_stage import fingerprint
 
         source["payload_fingerprint"] = fingerprint(Path(provenance["frozen_plugin"]))
@@ -118,8 +121,13 @@ def verify_runtime_candidate() -> None:
     from ._build_info import BUILD_INFO
 
     core._load_full_command_surface()
-    if Version(BUILD_INFO.get("version", "")) != Version(distribution_version("agent-worktrees")):
-        raise RuntimeError("Installed build provenance has the wrong package version")
+    installed_version = distribution_version("agent-worktrees")
+    if Version(BUILD_INFO.get("version", "")) != Version(installed_version):
+        raise RuntimeError(
+            "Installed build provenance has the wrong package version "
+            f"(provenance={BUILD_INFO.get('version')!r}, distribution={installed_version!r}, "
+            f"prefix={sys.prefix!r})"
+        )
     for field in ("commit", "branch", "source", "build_timestamp", "runtime_generation"):
         if not isinstance(BUILD_INFO.get(field), str) or not BUILD_INFO[field]:
             raise RuntimeError(f"Installed build provenance has no {field}")
@@ -167,13 +175,26 @@ def verify_installed_origins() -> None:
         not isinstance(receipt, dict)
         or receipt.get("schema") != "installer-engine.frozen-input-origins"
         or type(receipt.get("version")) is not int
-        or receipt["version"] != 1
+        or receipt["version"] not in (1, 2)
         or not isinstance(receipt.get("packages"), dict)
         or not receipt["packages"]
     ):
         raise RuntimeError("Frozen origin evidence has an unsupported schema")
     recorded = receipt["packages"]
     source_wheels = receipt.get("source_wheels")
+    closed = receipt["version"] == 2
+    if closed:
+        if source_wheels is not None:
+            raise RuntimeError("Closed wheel evidence cannot replace Source wheel evidence")
+        from agent_worktrees.runtime_dev_cli import _lifecycle
+
+        inputs = _lifecycle().engine.WheelReuseInputs(
+            slot.name, json.dumps(receipt.get("wheel_inputs"), sort_keys=True, separators=(",", ":"), allow_nan=False),
+            time.monotonic() + 30,
+        )
+        source_wheels = inputs.receipt()["distributions"]
+    elif receipt.get("wheel_inputs") is not None:
+        raise RuntimeError("Source origin evidence unexpectedly contains closed wheels")
     if source_wheels is not None and (
         not isinstance(source_wheels, dict) or not source_wheels or set(source_wheels) != set(recorded)
     ):
@@ -182,12 +203,16 @@ def verify_installed_origins() -> None:
     for distribution in distributions():
         direct_url = distribution.read_text("direct_url.json")
         if direct_url is None:
+            if closed:
+                raise RuntimeError("Closed wheel installation has an unrecorded distribution")
             continue
         origin = json.loads(direct_url)
         name = distribution.metadata["Name"]
         if source_wheels is not None:
             name = re.sub(r"[-_.]+", "-", name).lower()
         if name not in recorded and "dir_info" not in origin:
+            if closed:
+                raise RuntimeError("Closed wheel installation has an unrecorded distribution")
             continue
         valid_origin = origin.get("dir_info") in ({}, {"editable": False})
         if source_wheels is not None and name in source_wheels:

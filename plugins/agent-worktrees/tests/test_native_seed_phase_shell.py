@@ -89,6 +89,122 @@ def _run(
         return result
 
 
+@pytest.mark.parametrize("exit_code", [7, 3])
+def test_recordless_normalized_bash_handoff_runs_after_setup(tmp_path, exit_code):
+    scripts = SCRIPT.parent
+    runtime, copilot = tmp_path / "runtime", tmp_path / "copilot"
+    marker, output = tmp_path / "hook-ran", tmp_path / "backend"
+    runtime.write_text(
+        "#!/usr/bin/env bash\nset -euo pipefail\n"
+        'if [[ "$*" == *"config-root"* ]]; then printf "%s\\n" "$FIXTURE_CONFIG_ROOT"; exit 0; fi\n'
+        'if [[ "$*" == *" get "* ]]; then exit 0; fi\n'
+        '[[ "$3" == agent_worktrees.normalized_backend && -f "$FIXTURE_HOOK" ]]\n'
+        'printf "%s\\0" "$@" > "$FIXTURE_CAPTURE"\n'
+        f"exit {exit_code}\n",
+        encoding="utf-8", newline="\n",
+    )
+    runtime.chmod(0o700)
+    copilot.write_text("#!/usr/bin/env bash\nexit 99\n", encoding="utf-8", newline="\n")
+    copilot.chmod(0o700)
+    hook = tmp_path / "hook.sh"
+    hook.write_text('printf setup > "$FIXTURE_HOOK"\n', encoding="utf-8", newline="\n")
+    home = tmp_path / "home"
+    home.mkdir()
+    arguments = ["--model", "--resume=literal", "--resume=selected", "-i", "quoted '\nseed", "--", "tail"]
+    environment = {
+        **os.environ, "HOME": _shell_path(home),
+        "FIXTURE_HOOK": _shell_path(marker), "FIXTURE_CAPTURE": _shell_path(output),
+        "FIXTURE_CONFIG_ROOT": _shell_path(home),
+        "AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT": _shell_path(home / "uninstalled"),
+    }
+    result = run_caller_owned([
+        _bash(), "--noprofile", "--norc", _shell_path(scripts / "default-setup.sh"),
+        "--machine", "fixture", "--runtime-python", _shell_path(runtime),
+        "--copilot-path", _shell_path(copilot), "--setup-hook", _shell_path(hook), *arguments,
+    ], cwd=tmp_path, env=environment, timeout=30, max_stdout_bytes=8192, max_stderr_bytes=8192)
+    assert result.returncode == exit_code, result.stdout + result.stderr
+    assert output.read_bytes().decode("utf-8").split("\0")[:-1] == [
+        "-I", "-m", "agent_worktrees.normalized_backend", "--", _shell_path(copilot), *arguments,
+    ]
+
+
+@pytest.mark.parametrize("resolver", ["missing", "empty"])
+def test_recordless_bash_selected_runtime_cannot_fall_back(tmp_path, resolver):
+    root = tmp_path / "selected"
+    if resolver == "empty":
+        (root / "bin").mkdir(parents=True)
+        (root / "bin" / "resolve-runtime.sh").write_text("AW_PY=''\n", encoding="utf-8", newline="\n")
+    marker, native = tmp_path / "raw-backend", tmp_path / "copilot"
+    native.write_text(
+        '#!/usr/bin/env bash\nprintf raw > "$FIXTURE_RAW"\n', encoding="utf-8", newline="\n",
+    )
+    native.chmod(0o700)
+    environment = {
+        **os.environ, "HOME": _shell_path(tmp_path),
+        "AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT": _shell_path(root),
+        "AW_PY": _shell_path(native), "FIXTURE_RAW": _shell_path(marker),
+    }
+    result = run_caller_owned([
+        _bash(), "--noprofile", "--norc", _shell_path(SCRIPT.parent / "default-setup.sh"),
+        "--machine", "fixture", "--copilot-path", _shell_path(native),
+    ], cwd=tmp_path, env=environment, timeout=30, max_stdout_bytes=8192, max_stderr_bytes=8192)
+    assert result.returncode == 3, result.stdout + result.stderr
+    assert "Normalized Copilot runtime is unavailable; no backend started." in result.stderr
+    assert not marker.exists()
+
+
+@pytest.mark.parametrize("ambient", [False, True], ids=["absent", "conflicting"])
+@pytest.mark.parametrize("arguments", [[], ["", "two words", 'quote "inside"']])
+def test_recordless_bash_resolver_binds_selected_root_and_restores_ambient(tmp_path, ambient, arguments):
+    home, selected = tmp_path / "home", tmp_path / "selected"
+    legacy, output = home / ".agent-worktrees", tmp_path / "observed"
+    for root in (selected, legacy):
+        python = root / "versions" / "1.0" / "bin" / "python"
+        python.parent.mkdir(parents=True)
+        python.write_text(
+            "#!/usr/bin/env bash\nset -euo pipefail\n"
+            'if [[ "$*" == *" get "* ]]; then exit 0; fi\n'
+            '[[ "$3" == agent_worktrees.normalized_backend ]]\n'
+            'printf "%s\\0" "$0" "${AGENT_RT_ROOT-unset}" "$@" > "$FIXTURE_CAPTURE"\nexit 7\n',
+            encoding="utf-8", newline="\n",
+        )
+        python.chmod(0o700)
+        (python.parent.parent / ".install-complete.json").write_text(json.dumps({
+            "version": "1.0", "completed_at": "fixture", "pid": 0,
+        }), encoding="utf-8", newline="\n")
+        (root / "current-version").write_text("1.0", encoding="utf-8", newline="\n")
+    (selected / "bin").mkdir()
+    shutil.copy2(SCRIPT.parent / "resolve-runtime.sh", selected / "bin" / "resolve-runtime.sh")
+    native = tmp_path / "copilot"
+    native.write_text("#!/usr/bin/env bash\nexit 99\n", encoding="utf-8", newline="\n")
+    native.chmod(0o700)
+    environment = {
+        key: value for key, value in os.environ.items()
+        if not key.startswith("COPILOT_EXTENSIONS_BOOT_TRACE")
+    }
+    environment.update(
+        HOME=_shell_path(home), AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT=_shell_path(selected),
+        FIXTURE_CAPTURE=_shell_path(output), AGENT_RT_RESOLVE_TRACE_MODE="read-only",
+    )
+    if ambient:
+        environment["AGENT_RT_ROOT"] = _shell_path(legacy)
+    else:
+        environment.pop("AGENT_RT_ROOT", None)
+    result = run_caller_owned([
+        _bash(), "--noprofile", "--norc", _shell_path(SCRIPT.parent / "default-setup.sh"),
+        "--machine", "fixture", "--copilot-path", _shell_path(native),
+        *arguments,
+    ], cwd=tmp_path, env=environment, timeout=30, max_stdout_bytes=8192, max_stderr_bytes=8192)
+    assert result.returncode == 7, result.stdout + result.stderr
+    observed = output.read_bytes().decode("utf-8").split("\0")[:-1]
+    assert observed[:2] == [
+        _shell_path(selected / "versions" / "1.0" / "bin" / "python"),
+        _shell_path(legacy) if ambient else "unset",
+    ]
+    assert observed[2:6] == ["-I", "-m", "agent_worktrees.normalized_backend", "--"]
+    assert observed[6:] == [_shell_path(native), *arguments]
+
+
 @pytest.mark.parametrize("application", [False, True], ids=["legacy", "application"])
 def test_finite_phase_streams_exact_reply_and_returns_provider_status(tmp_path: Path, application) -> None:
     root = tmp_path / "runtime"

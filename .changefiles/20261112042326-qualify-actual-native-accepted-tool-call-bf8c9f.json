@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify actual native accepted tool calls during physical runtime handover",
+  "changes": [
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    }
+  ]
+}

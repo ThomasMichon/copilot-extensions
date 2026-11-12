@@ -1,0 +1,9 @@
+{
+  "comment": "Run fresh portable mux receiving through the canonical headed Driver core",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

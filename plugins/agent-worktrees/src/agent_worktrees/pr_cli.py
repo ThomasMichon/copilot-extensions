@@ -67,6 +67,7 @@ def _pr_watch_usage() -> None:
     print("  snapshot/status <repo> <pr> --json  Read configured native gate evidence once.", file=out)
     print("  threads <repo> <pr> --json  Read discussion bodies and revision context on demand.", file=out)
     print("  diff <repo> <pr> --json  Read a native unified diff without tracked reconciliation.", file=out)
+    print("  population --contract --json | <repo> --help  Bounded selected-population reads.", file=out)
     print("  reply/requeue <repo> <pr> --help  Bounded ADO discussion or existing-evaluation remediation.", file=out)
     print("  checks <repo> <lenses|record-self-review|verify-self-review|scope-report> --workspace PATH", file=out)
     print("  checks <repo> export-config --workspace WORKER_PATH --base origin/main --output NEW_FILE", file=out)
@@ -489,10 +490,8 @@ def cmd_pr_watch_dispatch(argv: list[str]) -> int:
     p.add_argument("--token", default=None, help="Provider token override (else the binding)")
     p.add_argument("--config", default=None)
     if verb == "snapshot":
-        p.add_argument(
-            "--credential-command", default=None,
-            help="Trusted non-secret JSON argv acquiring typed credentials per native request",
-        )
+        from .pr_credential_command import add_snapshot_arguments
+        add_snapshot_arguments(p)
     if verb in ("snapshot", "status", "threads", "diff"):
         p.add_argument("--json", action="store_true")
     if verb == "wait":
@@ -537,12 +536,9 @@ def cmd_pr_watch_dispatch(argv: list[str]) -> int:
 
     try:
         credential_source = None
-        if verb == "snapshot" and args.credential_command is not None:
-            if args.token is not None:
-                raise ValueError("--credential-command cannot be combined with --token")
-            from .pr_credential_command import command_source
-
-            credential_source = command_source(args.credential_command)
+        if verb == "snapshot":
+            from .pr_credential_command import snapshot_source
+            credential_source = snapshot_source(args)
         if read_only:
             from .pr_read_context import load_read_config
             if args.repo is None and not cfg.active_project():

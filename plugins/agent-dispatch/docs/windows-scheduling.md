@@ -69,10 +69,36 @@ supervisor launcher bytes under its existing installation publication mutex.
 Byte-identical launchers are left untouched, including when a live reader
 denies writes or replacement. Changed launchers use the existing bounded
 atomic publisher: readers permitting replacement retain the complete old
-script, while a handle denying replacement causes a visible publication
-failure after bounded retry. This does not stop readers, alter scheduling
-intent, or treat an unpublished change as successful. The POSIX launch path
-and Source application's separate scheduled-launcher publisher are unchanged.
+script. Unqualified sharing conflicts remain visible publication failures.
+
+Stable entrypoints resolve the selected runtime,
+then forward in the same PowerShell process to its packaged
+`agent_dispatch/service_launchers/*.ps1`. Configuration, logs, launch admission,
+arguments and exit ownership stay with that call; no detached forwarding child
+or new task is introduced. `-ResolveOnly` remains a read-only runtime lookup.
+An older slot without this resource produces an explicit incompatibility error,
+not a fallback into another generation's service code. Reinstalling an older
+release regenerates its matching stable launcher; merely moving the runtime
+marker backwards does not recreate an older launch contract.
+
+Changed launchers use the bounded atomic publisher. Readers permitting
+replacement retain the complete old script. On a Windows sharing conflict,
+the incoming installer may retire an exact outgoing generated PowerShell
+wrapper while holding its existing cross-version activation mutex. Restart
+Manager supplies the actual file-holder creation identity; an admitted central
+coordinator/supervisor child supplies its role and replaced-slot ownership.
+Only that holder is terminated through a native process pin. The non-holder
+central, its Jobs and protected children are not additional targets, and
+ordinary supersession still owns their lifecycle.
+
+The generation captured at successful activation must still be outgoing, and
+the incoming selection is rechecked immediately before termination. Custom
+scripts, unknown/foreign holders, ambiguous ancestry, current/reselected/future
+generations and unrelated readers are not retirement targets. Missing ownership
+does not authorize a PID/name sweep. Publication is retried once after this
+bounded attempt; a remaining OS conflict is a visible failure naming the target,
+never a successful unpublished change. The POSIX launch path and Source
+application's separate scheduled-launcher publisher are unchanged.
 
 ## Task-only retirement
 
@@ -106,9 +132,23 @@ For installer-owned profiles only, the existing classic lane publishes an
 optional `lane_readiness` extension through `supervisor_status_io`: profile and
 settings identities, profile-content generation, runtime version, native
 PID/birth/custody and a finite completed cycle. The per-profile lease prevents
-duplicate new-style lanes. Native admission, process liveness, cycle start,
-failed cycles, stale versions/settings and unconfirmed custody are not ready.
+duplicate new-style lanes. Native admission, process liveness, cycle start or
+failure cannot establish readiness; stale versions/settings and unconfirmed
+custody are not ready.
 The profile marker is consumed before worker spawning, not inherited by workers.
+
+The optional `completed_cycle` record retains a successful cycle's finite
+timestamps, cycle ID, runtime version and native generation while the next
+cycle publishes its current progress. A new generation or settings identity
+cannot inherit that proof. Readers retain compatibility with older completed
+status records; an invalid new record cannot fall back to older fields.
+This is startup completion evidence, not a fresh health/progress claim.
+Installer preflight reuses the supervisor's canonical parser without loading
+unrelated queue commands. Source startup observes configured and primary-native
+intent together, then keeps its separate admission-time policy check.
+Capability detection and Source startup share one selected interpreter, retaining
+the existing unsupported-probe fallback without treating startup-action failures
+as permission to start a classic lane.
 
 A classic lane observes selected-version/profile supersession at a cycle
 boundary and leaves its loop without stopping its workers. The incoming ensure

@@ -160,6 +160,63 @@ retention, and explicit uninstall/all-code-absent accounting still belong to
 their existing lifecycle owners; external cache routing does not establish
 that those gates have passed or introduce another cleanup policy.
 
+### Platform-cache provider contract
+
+`agent_procutil.python_cache.POLICY_VERSION == 2` advertises the additive
+`policy_arguments(root, runtime=target)` provider. Existing `cache_arguments`
+and `python_cache_args` callers retain their preceding contract; consumer
+migration and update-time collection are separate lifecycle work.
+
+The new provider returns `["-X", "pycache_prefix=<private-platform-cache>"]`
+only for a completed target slot belonging to the addressed installation.
+It returns `["-B"]` for an unsealed target, unsupported ownership, unavailable
+cache or invalid metadata, without allocating per-invocation directories.
+Forward the complete vector rather than extracting a prefix. A new caller
+with an older provider uses its documented no-write fallback.
+
+The base is Windows Local AppData (absolute `LOCALAPPDATA` or its native known
+folder), macOS `~/Library/Caches`, or absolute `XDG_CACHE_HOME` with `~/.cache`
+as the other POSIX default. Relative overrides never select the working
+directory. The owned layout is
+`copilot-extensions/python/v1/<installation>/installed-<identity>/bytecode`.
+Identity includes the normalized installation/target paths and completed
+content; native Python cache tags still separate interpreter bytecode.
+
+Native ownership and permissions must protect executable cache input and its
+ancestors from other unprivileged users' writes or substitution. New
+directories use private creation; existing foreign/shared-writable paths are
+not repaired or trusted. A matching JSON record is not an access boundary.
+Windows validates ownership/DACLs and POSIX validates ownership/modes.
+Owned POSIX cache directories require private traversal, so a permissively
+created `.pyc` cannot become writable input for another user through a
+world-traversable cache tree. Windows checks inheritable access rules as well
+as rules applying to the directory itself. Because Windows bypass-traverse
+access can reach independently granted children below a private directory,
+the provider additionally checks existing bytecode descendants' ownership and
+DACLs. This metadata-only admission stops at 256 entries or 50 ms between
+filesystem/security calls; exhaustion selects `-B` without changing the cache.
+Large Windows caches therefore currently lose reuse rather than bypass
+protection. POSIX private traversal needs no descendant walk.
+macOS additionally reads extended
+ACLs: deny-only ACLs are safe; extended allow entries are conservatively
+unsupported and select the no-write fallback rather than inferring safety
+from mode bits. An unresolved user home likewise selects the fallback.
+
+The namespace's bounded `owner.json` lives beside bytecode. Its installation's
+private `catalog.sqlite` indexes ownership before the provider enables cache
+writes, reserving restart-safe collection progress without a directory census.
+The catalog, existing SQLite sidecars and owner record receive native file
+protection checks before use. Under SQLite serialization, an empty schema-zero
+catalog can finish initialization after an interrupted first allocation;
+nonempty or unknown schemas are not reset. Owner records are completely written
+and flushed before exclusive hard-link publication, so interruption cannot
+expose a partial record. Unsupported atomic publication selects `-B`.
+Unknown schemas, conflicting records and failed catalog operations take the
+no-write fallback, preserving the existing objects. This provider neither
+deletes a cache nor changes runtime selection, retention or service lifetime.
+The caller still owns target admission and retention across launch; an owner
+record or catalog entry is not a runtime lease or permission to execute it.
+
 ## Windows bootstrap and shell admission
 
 ### Opt-in pre-resume observation admission
@@ -948,6 +1005,20 @@ An overlapping terminal-backed start in the same process refuses before taking
 another mode snapshot; ownership remains held through restoration and close.
 Readiness and output drainage accept valid descriptors above the `select()` range.
 
+`native_scope` is an opaque in-process token issued only after the original
+guardian and validated native pidfd are retained, before `before_exec` admission.
+Keep that token alongside the exact provider object. `scope_settled(token)`
+returns `True` only after successful owned cleanup, including the guardian's
+settlement receipt, independent confirmation and terminal/resource disposal.
+Missing or foreign tokens and incomplete/failed cleanup return `None` (unknown).
+Reading either callable performs no OS query, wait, termination or confirmation;
+`retirement_started` alone cannot qualify this result. A successful bounded
+cleanup retry may publish settlement only with the original retained receipt.
+The token remains stable after disposal, but is not a numeric handle, a
+serializable recovery descriptor or a post-loss reacquisition mechanism.
+Environment, boot, conversation, current source and authority mapping remain
+the original caller's separate responsibility; this API supplies none of them.
+
 `wait()` returns the native exit status only after whole-session settlement and
 terminal restoration. `terminate()` closes the original lifetime channel and
 awaits that same cleanup. Cancelled waiters do not cancel the retained cleanup;
@@ -1355,8 +1426,26 @@ It composes the helpers above, so its flags never drift from them:
   and layer `extra_env` into the child environment. This bypasses Windows venv
   redirectors so process control names the actual worker while retaining its
   venv imports. Opaque executable commands are not rewritten by `spawn_daemon`.
-- **Escapes tracked caller cleanup.** `breakaway=True` (default) requests native
-  breakaway and starts the Windows child suspended. Canonical Job producers
+- **Escapes caller cleanup.** On Windows, a resident durable daemon
+  (`breakaway=True`, the default, outside contained test mode) starts through
+  the WMI durable launch: `Win32_Process.Create` runs a hidden no-Job bootstrap
+  with the explicit environment block, cwd and log destinations (WMI inherits
+  nothing), which creates the daemon suspended, pins PID and creation time,
+  hands a process handle back and resumes it. The daemon is in none of the
+  caller's Jobs and outside its process tree, so a tree kill or closing any
+  caller kill-on-close Job does not end it; it still ends on explicit kill,
+  sign-out or reboot. This is the reviewed decision for
+  ThomasMichon/copilot-extensions#12117 and is reserved for processes that must
+  outlive their launcher: installers starting their services, daemon
+  self-restart, watchdog/supervisor restarts and a CLI ensuring its own backing
+  daemon. CLI-to-CLI calls, bounded helpers and request/tool/test children keep
+  ordinary creation and Jobs; WMI is never a general spawn fallback. A blocked
+  WMI creation (for example the Defender ASR rule "Block process creations
+  originating from PSExec and WMI commands", or a Windows container/silo)
+  raises `DaemonSpawnError` naming that cause. See
+  `docs/patterns/windows-background-process-launch.md`.
+  Finite workers keep native breakaway and start the Windows child suspended.
+  Canonical Job producers
   assign fresh `Local\ce-owned-job-<uuid>` names and propagate the complete
   semicolon-separated chain in `COPILOT_EXTENSIONS_OWNED_JOB_SCOPES`, including
   strict outer scopes. Explicit child environment replacement cannot drop
@@ -1372,8 +1461,10 @@ It composes the helpers above, so its flags never drift from them:
   Unconfirmed exit retains process custody on `DaemonSpawnError.process` and
   prohibits replay. Only a settled refusal permits an explicitly requested
   `contained_fallback=True`, with a warning and log entry accepting the shorter
-  lifetime. Explicit `breakaway=False` and contained tests stay contained.
-  The returned `Popen` controls the actual daemon. POSIX uses a new session.
+  lifetime. Explicit `breakaway=False` and contained tests stay contained and
+  never use WMI.
+  The returned process control (`WindowsDaemonProcess` for a WMI launch,
+  otherwise `Popen`) controls the actual daemon. POSIX uses a new session.
 - **Explicit cwd.** `cwd` must be an existing absolute directory and must not be
   inside an `installed-plugins` payload, either as given or once symlinks and
   junctions are resolved (`<runtime>/current -> .../installed-plugins/...` is

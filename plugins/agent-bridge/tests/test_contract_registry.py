@@ -414,7 +414,9 @@ async def test_remote_acp_route_matches_independent_expected_wire(monkeypatch, g
         )
 
     monkeypatch.setattr(remote_acp_sessions, "connect_remote_session", connect)
-    manager = SimpleNamespace(is_draining=False)
+    from contextlib import nullcontext
+
+    manager = SimpleNamespace(is_draining=False, start_admission=nullcontext)
     request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(
         session_manager=manager, resolver=None, ready=True,
     )))
@@ -574,6 +576,8 @@ def test_health_fixture_matches_route_serialization(tmp_path, monkeypatch) -> No
     # rather than depending on whatever real ~/.agent-bridge happens to hold
     # on the machine running the test.
     monkeypatch.setattr(health_route, "config_dir", lambda: tmp_path / "no-routing")
+    writer = {"installation_root": None, "runtime_generation": None}
+    monkeypatch.setattr(health_route, "observe_worktree_writer", lambda: dict(writer))
     request = SimpleNamespace(
         app=SimpleNamespace(
             state=SimpleNamespace(
@@ -596,9 +600,26 @@ def test_health_fixture_matches_route_serialization(tmp_path, monkeypatch) -> No
         health_route.HISTORY: 1,
         health_route.CURRENT_REQUESTS: 1,
         health_route.OWNER_MEMBERSHIP: 1,
+        health_route.TOOL_STATISTICS: 1,
+        health_route.PORTABLE_MUX_CAPABILITY: 1,
+        health_route.READONLY_PLUGIN_CONTROLS_CAPABILITY: 1,
+        health_route.PORTABLE_INBOX_CAPABILITY: 1,
+        "worktree_record_delegation": 1,
+        health_route.RETAINED_WRITER_CAPABILITY: 1,
+        health_route.WRITER_INSPECTION_CAPABILITY: 1,
+        health_route.CREATION_WRITER_CAPABILITY: 1,
+        health_route.CREATION_WRITER_RESUME_CAPABILITY: 1,
+        health_route.CREATION_WRITER_INSPECTION_CAPABILITY: 1,
+        "retained_native_session_recovery": 1,
+        health_route.LIVE_QUESTION_ANSWERS_CAPABILITY: 1,
+        health_route.LIVE_DELIVERY_OBSERVATION_CAPABILITY: 1,
+        health_route.MUX_QUESTION_ANSWERS_CAPABILITY: 1,
+        health_route.HOST_STATUS_CAPABILITY: 1,
     }
     expected["protocol_version"] = bridge_protocol.HTTP_PROTOCOL_VERSION
     expected["drain_contract"] = _fixture("inputs/http47/negotiated-drain.json")["advertised"]["drain_contract"]
+    expected["worktree_record_writer"] = writer
+    expected["host_status"] = {"availability": "unavailable", "reason": "runtime_unavailable"}
     # "slot"."pid" is this test process's real pid (slot_descriptor calls
     # os.getpid() directly) -- not fixture-comparable byte-for-byte. Verify it
     # separately, then compare the rest of "slot" (and the whole body) exactly.
@@ -648,6 +669,7 @@ def test_session_create_request_fixture_proves_unknown_field_tolerance() -> None
     assert request.model_dump(mode="json") == {
         **fixture["accepted_model"], "creation_key": None, "creation_prompt": None,
         "provider_instance": False, "remote_session_id": None,
+        "worktree_writer": None, "preference_source": None, "context": None,
     }
     assert "future_option" not in request.model_fields_set
 
@@ -694,13 +716,15 @@ async def test_agents_list_response_fixture_matches_route_serialization() -> Non
 
 
 def test_representative_error_fixture_matches_route() -> None:
+    from contextlib import nullcontext
+
     fixture = _fixture("fixtures/http/current/representative-error.json")
     request = SimpleNamespace(
         url=SimpleNamespace(path="/api/v1/sessions"),
         app=SimpleNamespace(
             state=SimpleNamespace(
                 ready=False,
-                session_manager=SimpleNamespace(),
+                session_manager=SimpleNamespace(start_admission=nullcontext),
             )
         )
     )

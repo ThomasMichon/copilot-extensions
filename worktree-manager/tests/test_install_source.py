@@ -75,6 +75,23 @@ def test_local_source_refuses_changed_or_escaping_inputs(snapshot, mutation):
         inputs.select(snapshot)
 
 
+@pytest.mark.parametrize("mutation", ["seed", "tree", "foreign-kind"])
+def test_local_source_refuses_inconsistent_composed_git_association(snapshot, mutation):
+    selected = inputs.select(snapshot)
+    record = selected.record
+    record["main_head"] = "c" * 40
+    record["composition"] = {"main_seed": "c" * 40, "tree": "d" * 40}
+    if mutation == "seed":
+        record["composition"]["main_seed"] = "e" * 40
+    elif mutation == "tree":
+        record["composition"]["tree"] = "main"
+    else:
+        record["kind"] = "main"
+    (snapshot / inputs.MANIFEST).write_text(json.dumps(record), encoding="utf-8")
+    with pytest.raises(ValueError, match="composition"):
+        inputs.select(snapshot)
+
+
 @pytest.mark.parametrize("application", [False, True])
 def test_local_source_keeps_wheels_held_until_native_installer_returns(snapshot, monkeypatch, application):
     installer = self_install._runtime_installer()
@@ -112,6 +129,80 @@ def test_local_source_keeps_wheels_held_until_native_installer_returns(snapshot,
     assert not held
 
 
+def test_native_release_keeps_its_inputs_held_without_a_source_association(tmp_path, monkeypatch):
+    installer = self_install._runtime_installer()
+    held = []
+    wheels = object()
+
+    @contextmanager
+    def retain(profile, directory, **options):
+        assert profile == tmp_path / "profile.json" and directory == tmp_path / "wheels"
+        assert options == {"expected_profile_sha256": "a" * 64}
+        held.append(wheels)
+        try:
+            yield wheels
+        finally:
+            held.pop()
+
+    monkeypatch.setattr(inputs, "wheel_inputs", retain)
+    monkeypatch.setattr(inputs, "wheel_selection", lambda *args: {})
+
+    def install(args, **options):
+        assert held == [wheels] and options == {"native_wheel_inputs": wheels}
+        return tmp_path / "selected"
+
+    monkeypatch.setattr(installer, "_install_payload", install)
+    args = SimpleNamespace(
+        wheel_profile=tmp_path / "profile.json", wheel_directory=tmp_path / "wheels",
+        payload=tmp_path / "payload", wheel_profile_sha256="a" * 64,
+    )
+    assert installer._install(args) == tmp_path / "selected"
+    assert not held
+
+
+@pytest.mark.parametrize("staged", [False, True])
+def test_native_wheel_payload_reaches_original_owner_without_source_acquisition(
+    tmp_path, monkeypatch, staged,
+):
+    installer = self_install._runtime_installer()
+    import source_acquisition
+
+    monkeypatch.setattr(source_acquisition, "manager_payload", lambda *args: pytest.fail(
+        "closed-wheel installation must not acquire another source",
+    ))
+    payload, root = tmp_path / "payload", tmp_path / "runtime"
+    slot = root / "versions" / "selected"
+    wheels = object()
+    activated = []
+    monkeypatch.setattr(
+        installer, "_activate_after_bootstrap_update",
+        lambda observed_root, observed_slot: activated.append((observed_root, observed_slot)),
+    )
+
+    def install(observed, **options):
+        assert observed == payload
+        assert options["_native_wheel_inputs"] is wheels
+        assert options["_base_python"] == tmp_path / "python"
+        assert options["_uv"] == tmp_path / "uv"
+        assert options["_transactional_activation"] is not staged
+        assert options.get("stage_only", False) is staged
+        options["_before_publish"]()
+        if staged:
+            assert options["_after_activate"] is None
+        else:
+            options["_after_activate"](slot)
+        return SimpleNamespace(action="staged" if staged else "installed", slot=str(slot))
+
+    monkeypatch.setattr(self_install, "self_install", install)
+    args = SimpleNamespace(
+        payload=payload, root=root, install_source=None, skip_instance_reconcile=True,
+        repair_update=False, recover_adopted=None, source_digest=None, stage_only=staged,
+        wheel_python=tmp_path / "python", wheel_uv=tmp_path / "uv",
+    )
+    assert installer._install_payload(args, native_wheel_inputs=wheels) == slot
+    assert activated == ([] if staged else [(root, slot)])
+
+
 def test_source_input_discovery_has_no_installation_or_old_runtime_dependency(monkeypatch, capsys):
     installer = self_install._runtime_installer()
     monkeypatch.setattr(installer, "_execution_driver", lambda *a: pytest.fail("discovery needs no driver"))
@@ -146,7 +237,7 @@ def test_current_bootstrap_uses_its_driver_to_install_a_legacy_source(snapshot, 
         "--root", str(snapshot / "installed"), "--install-source", str(snapshot),
         "--", "update", "--supervised-debug",
     ]) == 23
-    assert observed == [SCRIPTS.parent]
+    assert observed == [Path(installer.__file__).resolve().parents[1]]
     assert not (selected.payload / "scripts").exists()
 
 
@@ -323,7 +414,9 @@ def test_prepared_source_activation_uses_existing_transactional_daemon_boundary(
 @pytest.mark.parametrize("metadata_name", [
     "copilot-extensions-worktree-manager", "Copilot_Extensions_Worktree_Manager",
 ])
-@pytest.mark.parametrize("mutation", [None, "source", "provenance", "missing", "linked"])
+@pytest.mark.parametrize("mutation", [
+    None, "source", "provenance", "missing", "linked", "legacy", "seed", "tree", "removed",
+])
 def test_local_source_retains_real_inspected_wheels(snapshot, metadata_name, mutation, monkeypatch):
     selected = inputs.select(snapshot)
     filename = "copilot_extensions_worktree_manager-1.0.0-py3-none-any.whl"
@@ -361,6 +454,10 @@ def test_local_source_retains_real_inspected_wheels(snapshot, metadata_name, mut
     }
     (snapshot / "profile.json").write_text(json.dumps(profile), encoding="utf-8")
     selected.record["projects"]["worktree-manager"].update(profile="profile.json", wheel_inputs="wheels")
+    if mutation != "legacy":
+        selected.record.update(
+            main_head="c" * 40, composition={"main_seed": "c" * 40, "tree": "d" * 40},
+        )
     (snapshot / inputs.MANIFEST).write_text(json.dumps(selected.record), encoding="utf-8")
     events = []
     select_project = inputs.select_project
@@ -375,8 +472,11 @@ def test_local_source_retains_real_inspected_wheels(snapshot, metadata_name, mut
         "provenance": "project repository provenance changed during installation",
         "missing": "source differs from its immutable source association",
         "linked": "installation input member must not be linked",
+        "seed": "composition changed",
+        "tree": "composition changed",
+        "removed": "composition changed",
     }
-    with pytest.raises(ValueError, match=error[mutation]) if mutation else nullcontext():
+    with pytest.raises(ValueError, match=error[mutation]) if mutation in error else nullcontext():
         with inputs.manager_inputs(snapshot) as (retained, wheels):
             assert retained.identity == selected.identity
             wheels.verify()
@@ -398,6 +498,17 @@ def test_local_source_retains_real_inspected_wheels(snapshot, metadata_name, mut
                 is_symlink = Path.is_symlink
                 monkeypatch.setattr(
                     Path, "is_symlink", lambda path: path == retained.payload or is_symlink(path),
+                )
+            elif mutation == "seed":
+                selected.record["main_head"] = "e" * 40
+                selected.record["composition"]["main_seed"] = "e" * 40
+            elif mutation == "tree":
+                selected.record["composition"]["tree"] = "e" * 40
+            elif mutation == "removed":
+                del selected.record["composition"]
+            if mutation in {"seed", "tree", "removed"}:
+                (snapshot / inputs.MANIFEST).write_text(
+                    json.dumps(selected.record), encoding="utf-8",
                 )
     assert events == ["select", "consumer", "select"]
 

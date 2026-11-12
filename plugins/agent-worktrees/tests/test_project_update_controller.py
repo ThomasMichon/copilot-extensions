@@ -501,8 +501,9 @@ def test_project_authority_reaches_controller_under_real_driver_custody(
     ("phase", "runtimes"), ("standalone", "standalone"), ("target", "agent-bridge"),
     ("integration", "integration:owned"),
 ])
+@pytest.mark.parametrize("legacy", [False, True])
 def test_project_controller_can_delegate_under_real_custody(
-    project, monkeypatch, tmp_path, delegation, expected,
+    project, monkeypatch, tmp_path, delegation, expected, legacy,
 ):
     import update_driver
     from agent_worktrees import update_driver_cli
@@ -552,14 +553,24 @@ def test_project_controller_can_delegate_under_real_custody(
     monkeypatch.setenv("USERPROFILE", str(home))
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
     monkeypatch.setattr(config, "install_dir", lambda: engine)
-    update_driver.change_authority(
-        "project", project="example", root=driver_root, timeout=5,
-        verify_capabilities=lambda _deadline: True,
-    )
+    configuration = home / ".example"
+    configuration.mkdir()
+    (configuration / "config.yaml").write_text(json.dumps({
+        "repo_name": "example", "platform": "windows",
+        "repos": {"example": {
+            "anchor": str(tmp_path), "worktree_root": str(tmp_path / "worktrees"),
+            "update_controller": {"windows": "tools/update.py", "linux": "tools/update.py"},
+        }},
+    }), encoding="utf-8")
+    if not legacy:
+        update_driver.change_authority(
+            "project", project="example", root=driver_root, timeout=5,
+            verify_capabilities=lambda _deadline: True,
+        )
     request = update_driver.enqueue(
         update_driver.RequestSpec(
             "engine", ("--force",), project="example", cwd=str(tmp_path),
-            source=str(engine.resolve()), authority="project",
+            source=str(engine.resolve()), authority="" if legacy else "project",
         ),
         runner=update_driver.TrustedRunner((sys.executable, "-c", "pass"), str(tmp_path)),
         root=driver_root,
@@ -574,6 +585,7 @@ def test_project_controller_can_delegate_under_real_custody(
     assert update_driver.drain(root=driver_root, executor=execute) == 0
     assert update_driver.status(request.id, root=driver_root).exit_code == 0
     assert result.read_text(encoding="utf-8") == expected
+    assert update_driver.current_authority(root=driver_root).configured is not legacy
 
 
 def test_standalone_authority_is_forwarded_to_manager(project, monkeypatch):
@@ -597,11 +609,17 @@ def test_standalone_authority_is_forwarded_to_manager(project, monkeypatch):
 
 
 @pytest.mark.parametrize(("phase", "expected"), [("integration", True), ("runtimes", False)])
+@pytest.mark.parametrize("legacy", [False, True])
 def test_delegated_project_phase_exposes_manager_ownership_only_during_integration(
-    project, phase, expected,
+    project, phase, expected, legacy,
 ):
-    request = SimpleNamespace(authority="project", project="example", argv=())
-    authority = SimpleNamespace(configured=True, mode="project", project="example")
+    request = SimpleNamespace(
+        backend="engine", authority="" if legacy else "project", project="example", argv=(),
+    )
+    authority = SimpleNamespace(
+        configured=not legacy, mode="standalone" if legacy else "project",
+        project="" if legacy else "example",
+    )
     selected = args(phase=phase, _controller_request=request, _controller_authority=authority)
     observed = []
     result = project_update_controller.dispatch_update(
@@ -617,9 +635,15 @@ def test_delegated_project_phase_exposes_manager_ownership_only_during_integrati
     assert not hasattr(selected, "_controller_owns_manager")
 
 
-def test_delegated_integration_restores_manager_marker_after_error(project):
-    request = SimpleNamespace(authority="project", project="example", argv=())
-    authority = SimpleNamespace(configured=True, mode="project", project="example")
+@pytest.mark.parametrize("legacy", [False, True])
+def test_delegated_integration_restores_manager_marker_after_error(project, legacy):
+    request = SimpleNamespace(
+        backend="engine", authority="" if legacy else "project", project="example", argv=(),
+    )
+    authority = SimpleNamespace(
+        configured=not legacy, mode="standalone" if legacy else "project",
+        project="" if legacy else "example",
+    )
     selected = args(
         phase="integration", _controller_request=request, _controller_authority=authority,
         _controller_owns_manager="previous",
@@ -632,6 +656,44 @@ def test_delegated_integration_restores_manager_marker_after_error(project):
     with pytest.raises(RuntimeError, match="integration failed"):
         project_update_controller.dispatch_update(selected, lambda _args: 0, lambda _args: 0, fail)
     assert selected._controller_owns_manager == "previous"
+
+
+def test_legacy_delegation_without_a_controller_keeps_manager_with_standalone_owner(
+    project,
+):
+    repo, _script = project
+    repo.update_controller.clear()
+    request = SimpleNamespace(backend="engine", authority="", project="example", argv=())
+    authority = SimpleNamespace(configured=False, mode="standalone", project="")
+    selected = args(
+        phase="integration", _controller_request=request, _controller_authority=authority,
+    )
+    observed = []
+    assert project_update_controller.dispatch_update(
+        selected, lambda _args: pytest.fail("auth report ran"),
+        lambda value: observed.append(getattr(value, "_controller_owns_manager", None)) or 7,
+        lambda: pytest.fail("standalone owner was skipped"),
+    ) == 7
+    assert observed == [None]
+
+
+@pytest.mark.parametrize("selection", [
+    {"no_project_controller": True}, {"phase": "integration"}, {"target": "agent-bridge"},
+])
+def test_unselected_partial_parent_keeps_standalone_routing(project, selection):
+    flags = tuple(
+        part
+        for key, value in selection.items()
+        for part in (["--" + key.replace("_", "-")] + ([] if value is True else [value]))
+    )
+    request = SimpleNamespace(backend="engine", authority="", project="example", argv=flags)
+    authority = SimpleNamespace(configured=False, mode="standalone", project="")
+    selected = args(**selection, _controller_request=request, _controller_authority=authority)
+    assert project_update_controller.dispatch_update(
+        selected, lambda _args: pytest.fail("auth report ran"), lambda _args: 7,
+        lambda: pytest.fail("standalone owner was skipped"),
+    ) == 7
+    assert not hasattr(selected, "_controller_owns_manager")
 
 
 def test_automatic_controller_rechecks_policy_when_enabled_after_submission(

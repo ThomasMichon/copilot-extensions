@@ -1,6 +1,6 @@
 {
   "captured_from": {
-    "commit": "c0e0743fbd379b98822056fdeceded8551bd2204",
+    "commit": "b4255373643e7358c090f94ecdedd1e0afb2afd6",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 1,
     "source_path": "libs/copilot-driver-core/src/agent_remote_driver/preference_attestation.py",
@@ -32,7 +32,7 @@
     },
     "authority": {
       "kind": "wrapper-v1",
-      "digest": "e69f6466031f5c48fb65f5fc1a83028f73e3fbf8cdf4d5d302d51efd682553c3",
+      "digest": "08fff3fcdd79ee0039f744bf93726d0831a388d508ed5cbd6590f6b90910541a",
       "mode": "defaults",
       "target": "9032997c94da9512223bde48704c19c2d587c4ff4f1105f61204524b68662819",
       "space": {
