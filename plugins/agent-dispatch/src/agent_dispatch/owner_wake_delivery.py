@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from . import bridge
 from .bridge_command_delivery import native_prompt, steering_prompt
 from .ordinary_agent_facts import identity, native_conflict
@@ -51,7 +53,7 @@ def _require_retained_owner(task, reservation: SpawnReservation, owner, owner_se
 def _target_identity(reservation: SpawnReservation, task, owner: str) -> tuple[str, str]:
     if reservation.driver == "restricted-bridge":
         from .restricted_delivery import wake_identity
-        return wake_identity(reservation, task)
+        return wake_identity(reservation, replace(task, owner=owner))
     actual = identity(reservation.agent_info)
     if (
         actual.worktree != reservation.worktree

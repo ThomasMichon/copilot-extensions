@@ -179,6 +179,9 @@ receipt-reconciliation path and never authorize replacement sends.
 The bounded isolated relevance, steering, wake, pool and native-transport
 selection passed 290 tests, with one existing detached-cleanup-only parameter
 skipped. These are source controls, not actual installed-runtime acceptance.
+The review correction applies the already-fenced submitting worker to both
+restricted native-target reads without changing stored task ownership. Its
+restricted/ordinary delivery and supervisor packet passed 184 selected controls.
 
 Historical ownership that is absent or changed stays explicitly pending.
 External registered callers, periodic source evaluation, cohort stamps, actual
