@@ -17,6 +17,10 @@ CASES = {case["id"]: case for case in SCENARIOS["cases"]}
     "unknown-write-outcome",
     "inflow-and-excluded-denominator",
     "target-met-closeout-pending",
+    "partial-enumeration",
+    "eligibility-and-event-policy",
+    "spent-and-unknown-acquisitions",
+    "retained-owner-and-resource",
 ])
 def test_failure_scenarios_retain_their_controlling_contract(case_id: str) -> None:
     scenario = CASES[case_id]
