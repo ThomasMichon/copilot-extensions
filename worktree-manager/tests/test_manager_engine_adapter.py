@@ -60,6 +60,27 @@ def test_adapter_delegates_construction_health_and_retention_without_selecting(t
         assert options["expected_source_identity"] == {}
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows extended-length construction inputs")
+def test_adapter_retains_long_windows_members_through_source_observation(tmp_path, monkeypatch):
+    adapter = si._runtime_installer()
+    payload, root, uv = _source(tmp_path)
+    native = adapter.engine._native_retained_path
+    member = Path("resources") / ("nested-" * 12) / ("retained-" * 12) / "data.bin"
+    source = Path(native(payload / member))
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"retained native construction resource")
+    calls = _capture(adapter, monkeypatch)
+
+    with adapter.candidate(Path(native(payload)), root, assemble=si._copy_payload, uv=uv):
+        prepared = calls[0][2]["plugin"]
+        assert len(str(prepared / member)) > 260
+        assert (prepared / member).read_bytes() == source.read_bytes()
+        assert adapter.runtime.fingerprint_source(
+            adapter.engine._source_files(adapter.engine._package_roots(prepared)),
+        )
+        assert not (root / "current-version").exists()
+
+
 @pytest.mark.parametrize("qualified", [False, True])
 def test_prepare_runtime_candidate_reports_real_copy_and_inventory_progress(
     tmp_path, monkeypatch, capsys, qualified,
@@ -609,7 +630,7 @@ def test_partial_selector_publication_restores_both_states(
     before = {path: path.read_bytes() if path.exists() else None for path in (current, last_good)}
     receipts = {path: path.read_bytes() for path in root.glob("versions/*/.install-complete.json")}
     publication = adapter.runtime._runtime_component("versioned_runtime_publication")
-    replace = publication.os.replace
+    replace = publication.replace_selector
     faults = []
     retained = set()
     retain = adapter.runtime.retention_lease
@@ -647,13 +668,14 @@ def test_partial_selector_publication_restores_both_states(
         return recover(*args)
 
     def fail_second(source, target):
-        if Path(target) == last_good and not faults:
+        native = adapter.engine._native_retained_path
+        if Path(native(target)) == Path(native(last_good)) and not faults:
             assert current.read_bytes() == b"2.0.0\n"
             faults.append(True)
             raise PermissionError("injected second-selector failure")
         return replace(source, target)
 
-    monkeypatch.setattr(publication.os, "replace", fail_second)
+    monkeypatch.setattr(publication, "replace_selector", fail_second)
     monkeypatch.setattr(adapter.runtime, "retention_lease", retaining)
     monkeypatch.setattr(adapter.runtime, "_publication_lease", publishing)
     monkeypatch.setattr(publication, "_recover_uncontested_locked", recovering)

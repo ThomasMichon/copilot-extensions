@@ -130,7 +130,7 @@ def candidate(
     if not uv.is_file():
         raise RuntimeError("uv is required for Manager runtime construction")
     root.mkdir(parents=True, exist_ok=True)
-    inputs = root / ".installer-inputs"
+    inputs = Path(engine._native_retained_path(root / ".installer-inputs"))
     inputs.mkdir(exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="manager-payload-", dir=inputs) as temporary:
         import tomllib
