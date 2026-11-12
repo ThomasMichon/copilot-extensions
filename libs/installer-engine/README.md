@@ -63,6 +63,12 @@ step. Raw developer copies can still be stale; do not make a failing copied
 consumer pass by substituting a canonical dependency. Qualify its real composed
 payload instead. Materialization does not install or update a running runtime.
 
+The retained-source constructor checks build-tool containment using resolved
+physical paths and the shared Windows extended-path normalization. Equivalent
+native spellings retain their original I/O paths; actual outside, sibling and
+relative tool roots remain refused. `tools/test_installer_build_tools_root.py`
+covers this boundary, alongside the real source-construction packets.
+
 The separate composed Vault consumer regression builds a private payload through
 the production materializer, then executes its copied remover and command
 recognizer without candidate-side canonical libraries. It preserves the original

@@ -9,12 +9,12 @@ import time
 from pathlib import Path
 
 from . import incoming, sockio
-from .custody_conduit import _exchange, attach as attach_conduit
-from .custody_contract import supports
+from .custody_conduit import _exchange, attach as attach_conduit, probe as probe_conduit
+from .custody_contract import supports, supports_trace_binding
 from .execution_context import SharingUnavailable
 
 
-def _qualify_backend(handle, admission):
+def _qualify_backend(handle, admission, required_trace_bookkeeping=0):
     from .cutover import _require_selected
     from .source_serving import installation_matches
 
@@ -38,8 +38,20 @@ def _qualify_backend(handle, admission):
         or reply.get("ready") is not True or reply.get("draining") is not False
     ):
         raise SharingUnavailable("current backend does not support session custody")
+    if required_trace_bookkeeping and not supports_trace_binding(reply.get("custody_backend")):
+        raise SharingUnavailable("current backend cannot enforce checkpoint identity mode")
     _require_selected((admission.generation, None, root))
     return root.resolve()
+
+
+def qualify_trace_keeper(handle, runtime_root):
+    backend = Path(sockio.absolute_handle(handle))
+    keeper = backend.parent / "custody-v1" / backend.name
+    try:
+        probe_conduit(keeper, runtime_root, required_trace_bookkeeping=1)
+    except sockio.HostUnreachableError:
+        # Cold startup still qualifies the actual keeper and backend before attach.
+        pass
 
 
 def _spawn(keeper, backend, root):
@@ -63,7 +75,7 @@ def _spawn(keeper, backend, root):
     )
 
 
-def attach(handle, bridge, admission, *, ensure=True):
+def attach(handle, bridge, admission, *, ensure=True, required_trace_bookkeeping=0):
     """Prepare an adopted conduit without changing ordinary forwarder selection.
 
     Default caller selection stays unchanged. An explicit owner CLI handoff can
@@ -72,12 +84,15 @@ def attach(handle, bridge, admission, *, ensure=True):
     """
     if not isinstance(admission, incoming.Admission):
         raise SharingUnavailable("custody requires current backend admission")
+    if type(required_trace_bookkeeping) is not int or required_trace_bookkeeping not in (0, 1):
+        raise ValueError("unsupported checkpoint identity mode")
     backend = Path(sockio.absolute_handle(handle))
-    root = _qualify_backend(backend, admission)
+    root = _qualify_backend(backend, admission, required_trace_bookkeeping)
     keeper = backend.parent / "custody-v1" / backend.name
+    options = {"required_trace_bookkeeping": required_trace_bookkeeping} if required_trace_bookkeeping else {}
     try:
         try:
-            connection = attach_conduit(keeper, bridge, root)
+            connection = attach_conduit(keeper, bridge, root, **options)
         except sockio.HostUnreachableError as exc:
             if not ensure:
                 raise SharingUnavailable("custody unavailable; direct execution is not reattachment") from exc
@@ -88,7 +103,7 @@ def attach(handle, bridge, admission, *, ensure=True):
                 if remaining <= 0:
                     raise SharingUnavailable("custody startup deadline expired") from exc
                 try:
-                    connection = attach_conduit(keeper, bridge, root, timeout=min(remaining, 1))
+                    connection = attach_conduit(keeper, bridge, root, timeout=min(remaining, 1), **options)
                     break
                 except sockio.HostUnreachableError:
                     time.sleep(min(0.05, remaining))
@@ -104,7 +119,7 @@ def attach(handle, bridge, admission, *, ensure=True):
         raise SharingUnavailable("custody unreachable; backend publication retained") from exc
 
 
-def run_adopted(handle, bridge, *, owner_pid, owner_birth):
+def run_adopted(handle, bridge, *, owner_pid, owner_birth, required_trace_bookkeeping=0):
     """Dedicated opt-in process entrypoint with originating-session lifetime.
 
     The originating launcher supplies its own native identity before any shim
@@ -115,7 +130,10 @@ def run_adopted(handle, bridge, *, owner_pid, owner_birth):
 
     with SessionOwner(owner_pid, owner_birth) as owner:
         admission = incoming.ensure_current(handle)
-        connection = attach(handle, bridge, admission)
+        connection = attach(
+            handle, bridge, admission,
+            **({"required_trace_bookkeeping": required_trace_bookkeeping} if required_trace_bookkeeping else {}),
+        )
         sockio.pump(connection, session_owner=owner)
     # Connection and native owner pin are settled before exiting. Buffered stdin
     # may remain parked on a writer retained by someone other than the dead owner.
