@@ -342,6 +342,15 @@ the non-public approval conversation.
 
 ## Plan
 
+The [next twenty-primary checkpoint](journal/2026/11.12-oldest-contracts-and-finite-delivery.md)
+records three source completions, one accepted tracking fold and sixteen
+retained oldest contracts. It corrects the campaign's overreading of #3367's
+historical remaining-ask statement as a numeric-tracker veto, credits #3418's
+released wait leaf and #3581's completed full-title lane, and retains #3511's
+configured whole-current-tree validation gap without inventing history erasure.
+The complete 915-open census remains 186 above the fixed target; all parent
+Plan/Validation and actual custody gates remain unresolved.
+
 The [worker-witness and safe Resume study](<journal/2026/11.08 worker-witness-and-safe-resume.md>)
 preserves the independent retirement witness, claimed native acceptance and
 documentary coordination contracts without implementation or closure credit.
@@ -2967,6 +2976,11 @@ sources, transferring owners or turning partial/planning gains into completion.
   #5665 handoff remains separate from documentary publication.
 - [ ] Verify and publish supported dispositions, preserving source versus
   release versus rollout distinctions and all active ownership.
+  The [source-completion and migration checkpoint](journal/2026/11.12-source-completions-and-migration-residuals.md)
+  verifies #12272/#12276/#12117/#11798/#11803 as completed source requests while retaining
+  #12280's independent checkout path and all 143 checklist entries across
+  #11891/#11892/#11893. Its 918-open census remains above the fixed target;
+  source completion establishes neither installed adoption nor parent completion.
   The [roadmap follow-through register](roadmap-follow-through.md) records
   #8733/#7650/#8802/#9072/#9413/#7940/#7408/#9332 finite completions,
   #8796's exact retained claim
@@ -3188,6 +3202,21 @@ sources, transferring owners or turning partial/planning gains into completion.
   normal publication flow.
 
 ## Validation Plan
+
+The [twenty-primary follow-through](journal/2026/11.12-oldest-contracts-and-finite-delivery.md)
+distinguishes actual source fulfillment from #3367's planned, unchecked
+receiving clauses. All four dispositions have fresh qualification and exact
+public/provider readback. The original source owner's words, campaign-generated
+judgments and bounded contributor scope remain distinct; no generic
+implementation, native, acknowledgment or historical-erasure gate is added.
+
+The [source-completion checkpoint](journal/2026/11.12-source-completions-and-migration-residuals.md)
+retains #12272's independently read existing real-exec CI evidence, #12276's
+publication controls and #12117's scoped durable-launch source/test crosswalk,
+with separately attributed author-reported native validation.
+All five completed dispositions have verified public acknowledgments
+and provider states. The three migration inventories are not 143 independently
+demonstrated defects; their complete migration/proof obligations remain open.
 
 The [five canonical tracking folds](<journal/2026/11.09 canonical-reliability-cohort.md>)
 have exact live acknowledgment readbacks, unchanged source assignees and

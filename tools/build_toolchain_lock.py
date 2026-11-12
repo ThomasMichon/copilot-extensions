@@ -389,7 +389,7 @@ class ToolchainLock:
         ``--python`` selected a different one than this process's own.
         Queried once and cached -- the locked venv's interpreter never
         changes for the lifetime of this ``ToolchainLock``."""
-        _remaining_timeout(self._deadline, error_type=ArtifactBuildError)
+        _execution_options(self._deadline)
         if self._marker_environment is None:
             self._marker_environment = _query_marker_environment(
                 self.venv_python, **({"deadline": self._deadline} if self._deadline is not None else {}),

@@ -36,6 +36,10 @@ def dispatch(argv: list[str]) -> int:
                 "effects": "none", "max_pages": 20, "max_pulls": 1000,
                 "snapshot_request_budget": MAX_SNAPSHOT_REQUESTS,
                 "snapshot_capture_bytes": 1_048_584,
+                "snapshot_credential_budget": {
+                    "version": 1, "option": "--max-credential-requests",
+                    "maximum": MAX_SNAPSHOT_REQUESTS,
+                },
             }))
             return 0
         if not args.repo or not args.config or not args.credential_command or not args.json:

@@ -14,7 +14,10 @@ import sys
 import time
 import uuid
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+_SCRIPTS = Path(__file__).resolve().parent
+if _SCRIPTS.name == "installer-engine" and _SCRIPTS.parent.name == "libs":
+    sys.path.insert(0, str(_SCRIPTS.parent / "versioned-runtime"))
+sys.path.insert(0, str(_SCRIPTS))
 import installer_engine as engine
 from installer_wheel_inputs import WheelLimits, inspect_archive
 from installer_wheel_snapshot import WheelReuseInputs, retain_wheel_inputs

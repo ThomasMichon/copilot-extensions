@@ -14,7 +14,6 @@ import json
 import os
 from pathlib import Path
 import shutil
-import subprocess
 import sys
 import tempfile
 import time
@@ -26,6 +25,7 @@ from installer_dependency_config import native_retained_path
 
 import prepare_runtime_source as preparation
 import materialize_main as materialization
+import source_preparation_process as preparation_process
 
 MANIFEST = "install-source.json"
 SCHEMA = "copilot-extensions.install-source"
@@ -159,7 +159,7 @@ def compose(
         from local_runtime_promotion import compose as compose_runtime
 
         composition = compose_runtime(
-            repository, source_commit=commit, main_seed=main_head,
+            repository, source_commit=commit, main_seed=main_head, deadline=deadline,
             **({"select_inputs": lambda source: _application_export_paths(source, projects)}
                if projects is not None else {}),
         )
@@ -308,7 +308,7 @@ def _build_workspace(
     source: Path, output: Path, selected: tuple[str, ...], builder, *,
     retain_toolchain: bool = False,
 ):
-    """Keep Windows backend paths short while binding their retained inputs."""
+    """Keep Windows backend and interpreter paths short while binding their inputs."""
     if os.name != "nt":
         yield source, output / "build-tools", lambda: None
         return
@@ -342,7 +342,7 @@ def _reuse_projects(
     identities: dict, roster: dict, *, source_policy: str, min_age_days: int | None,
     copy_wheels: bool = True, deadline: float | None = None,
 ) -> dict:
-    """Consume explicitly selected prior inputs, not a new cache or approval."""
+    """Revalidate explicitly selected prior inputs without reconstructing them."""
     from local_install_profile import source_inputs
     from installer_wheel_snapshot import retain_wheel_inputs
     from packaging.tags import parse_tag, sys_tags
@@ -480,8 +480,8 @@ def _built_projects(
     reuse_source: Path | None = None,
     uv: str | Path | None = None, deadline: float | None = None,
     retain_toolchain: bool = False,
-) -> dict:
-    """Use the existing project roster and one seasoned build-tool closure."""
+):
+    """Keep one existing builder/toolchain alive through complete profile readback."""
     import build_python_artifacts as builder
     from build_toolchain_lock import resolve_toolchain_lock
     from promotion_python_artifacts import project_key
@@ -489,11 +489,6 @@ def _built_projects(
     from versioned_runtime_source import assembly_hash
 
     preparation._remaining(deadline)
-    execution = {}
-    if uv is not None:
-        execution["uv"] = uv
-    if deadline is not None:
-        execution["deadline"] = deadline
     output = Path(native_retained_path(output))
     source = output / "source"
     roster, selected, payloads, identities = _source_projects(source, record, projects)
@@ -501,21 +496,26 @@ def _built_projects(
         reuse_source, output, record, selected, identities, roster,
         source_policy=source_policy, min_age_days=min_age_days, deadline=deadline,
     ) if reuse_source is not None else None
+    builder = _load_module(Path(builder.__file__), "_local_install_artifact_builder") if reused is None else None
+    execution = {}
+    if uv is not None:
+        execution["uv"] = uv
+    if deadline is not None:
+        execution["deadline"] = deadline
+    if execution and builder is not None:
+        build_wheel = builder.build_wheel
+
+        def bounded_build_wheel(*args, **kwargs):
+            if uv is not None:
+                kwargs["uv"] = str(uv)
+            if deadline is not None:
+                preparation._remaining(deadline)
+                kwargs["deadline"] = min(deadline, time.monotonic() + 180)
+            return build_wheel(*args, **kwargs)
+
+        builder.build_wheel = bounded_build_wheel
     workspace = nullcontext((source, output / "build-tools", lambda: None))
-    if reused is None:
-        builder = _load_module(Path(builder.__file__), "_local_install_artifact_builder")
-        if execution:
-            build_wheel = builder.build_wheel
-
-            def bounded_build_wheel(*args, **kwargs):
-                if uv is not None:
-                    kwargs["uv"] = str(uv)
-                if deadline is not None:
-                    preparation._remaining(deadline)
-                    kwargs["deadline"] = min(deadline, time.monotonic() + 180)
-                return build_wheel(*args, **kwargs)
-
-            builder.build_wheel = bounded_build_wheel
+    if builder is not None:
         builder.REPO, builder.PLUGINS_DIR, builder.LIBS_DIR = source, source / "plugins", source / "libs"
         workspace = _build_workspace(
             source, output, selected, builder, retain_toolchain=retain_toolchain,
@@ -604,9 +604,9 @@ def _prepare_profiles(
 
     environment = _query_marker_environment(Path(sys.executable), deadline=deadline)
     preparation._remaining(deadline)
-    result = subprocess.run(
+    result = preparation_process.run(
         [
-            str(toolchain.venv_python), str(Path(__file__).with_name("local_install_profile.py")),
+            sys.executable, str(Path(__file__).with_name("local_install_profile.py")),
             "--install-source", str(built), "--output", str(output / "profiles"),
             "--uv", uv, "--deadline", str(deadline),
             "--application-components", json.dumps(components),
@@ -620,8 +620,7 @@ def _prepare_profiles(
               if reuse_source is not None else []),
         ],
         capture_output=True, text=True, env=sanitize_subprocess_env(),
-        timeout=deadline - time.monotonic(),
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        deadline=deadline,
     )
     preparation._remaining(deadline)
     if result.returncode == 3 and reuse_source is not None:
@@ -657,6 +656,12 @@ def _reused_applications(
     from build_toolchain_lock import ArtifactBuildError, resolve_toolchain_lock
     from install_source import _member, _read
 
+    try:
+        permissions = preparation_process.procutil_module("python_cache_permissions")
+        permissions.check(output.parent, private=True)
+        permissions.check_ancestors(output.parent)
+    except (ImportError, OSError):
+        return None
     candidates = []
     with os.scandir(output.parent) as entries:
         for index, entry in enumerate(entries):
@@ -667,6 +672,7 @@ def _reused_applications(
                 continue
             previous = Path(entry.path)
             try:
+                permissions.check(previous, private=True)
                 if previous.is_symlink() or getattr(previous.lstat(), "st_file_attributes", 0) & 0x400:
                     continue
                 completion = _read(_member(previous, "applications.json"))
@@ -689,6 +695,11 @@ def _reused_applications(
     for _modified, previous, old in sorted(candidates, reverse=True)[:32]:
         preparation._remaining(deadline)
         try:
+            permissions.check(previous, private=True)
+            permissions.check_bytecode(
+                previous, max_entries=100_000,
+                seconds=preparation._remaining(deadline),
+            )
             toolchain = resolve_toolchain_lock(
                 _member(previous, "inputs/build-tools"),
                 python=getattr(sys, "_base_executable", sys.executable),
@@ -727,9 +738,10 @@ def prepare_applications(
 
     preparation._remaining(deadline)
     if (
-        not components or len(components) > 64 or len(set(components)) != len(components)
+        not components or len(components) > 64
         or any(not isinstance(name, str) or not preparation._PLUGIN.fullmatch(name)
                for name in components)
+        or len(set(components)) != len(components)
         or not isinstance(uv, str) or not uv or "\0" in uv
     ):
         raise ValueError("application preparation requires bounded unique components and a UV executable")
@@ -746,22 +758,25 @@ def prepare_applications(
     ):
         raise ValueError("application extras require bounded unique names for selected components")
     repository = repository.resolve(strict=True)
+    if output.is_symlink():
+        raise ValueError("application output must be new and outside the source checkout")
+    output = output.absolute()
+    permissions = preparation_process.procutil_module("python_cache_permissions")
+    permissions.check(output.parent, ancestor=True)
+    permissions.check_ancestors(output.parent)
     output = output.resolve()
-    if (
-        output.exists() or output.is_symlink()
-        or output == repository or output.is_relative_to(repository)
-    ):
+    if output.exists() or output == repository or output.is_relative_to(repository):
         raise ValueError("application output must be new and outside the source checkout")
     output = Path(native_retained_path(output))
-    projects = {
-        name: "standalone:" + name if name in COMPONENTS else name for name in components
-    }
+    projects = tuple("standalone:" + name if name in COMPONENTS else name for name in components)
     admitted = preparation._admit(repository, commit, branch, deadline=deadline)
+    owner = preparation_process.procutil_module("_daemon_instance_owner")
+    owner.mkdir_private(output)
+    permissions.check(output, private=True)
     built = output / "inputs"
     record = compose(
         repository, commit, main_head, built, finalized_main=branch == "main",
-        deadline=deadline, source_descriptor=source_descriptor,
-        projects=tuple(projects.values()),
+        deadline=deadline, source_descriptor=source_descriptor, projects=projects,
     )
     if record["source_commit"] != commit or record["source_tree"] != admitted[1]:
         raise ValueError("application composition differs from the admitted source")
@@ -774,9 +789,7 @@ def prepare_applications(
         preparation._remaining(deadline)
         return reused
     with _built_projects(
-        built, record,
-        projects=tuple(projects.values()),
-        uv=uv, deadline=deadline, retain_toolchain=True,
+        built, record, projects=projects, uv=uv, deadline=deadline, retain_toolchain=True,
     ) as (_record, toolchain):
         snapshots = _prepare_profiles(
             built, record, output, components, extras, toolchain, uv=uv, deadline=deadline,
@@ -784,9 +797,10 @@ def prepare_applications(
     if preparation._admit(repository, commit, branch, deadline=deadline) != admitted:
         raise ValueError("source checkout changed during application preparation")
     preparation._remaining(deadline)
+    completion = _application_completion(snapshots, deadline=deadline)
+    preparation._remaining(deadline)
     (output / "applications.json").write_text(
-        json.dumps(_application_completion(snapshots, deadline=deadline), sort_keys=True) + "\n",
-        encoding="utf-8",
+        json.dumps(completion, sort_keys=True) + "\n", encoding="utf-8",
     )
     return snapshots
 
@@ -833,8 +847,7 @@ def main(argv: list[str] | None = None) -> int:
         if (
             args.branch is None or args.main_head is None or not args.projects or args.suite
             or args.reuse_install_source is not None or args.finalized_main
-            or args.toolchain_source != "governed"
-            or args.uv is None
+            or args.toolchain_source != "governed" or args.uv is None
         ):
             parser.error("application preparation requires branch, Main head and selected projects only")
         components = tuple(name.removeprefix("standalone:") for name in args.projects)
@@ -850,8 +863,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.source_checkout, args.source_commit, args.main_head, args.output,
                 components=components, branch=args.branch, uv=args.uv,
                 deadline=time.monotonic() + 600 if deadline is None else deadline,
-                extras=extras,
-                source_descriptor=args.source_descriptor,
+                extras=extras, source_descriptor=args.source_descriptor,
             )
         print(json.dumps(snapshots, sort_keys=True))
         return 0
@@ -867,8 +879,7 @@ def main(argv: list[str] | None = None) -> int:
         args.output.absolute(), record, source_policy=args.toolchain_source,
         min_age_days=args.toolchain_min_age_days,
         projects=projects,
-        reuse_source=args.reuse_install_source,
-        uv=args.uv, deadline=deadline,
+        reuse_source=args.reuse_install_source, uv=args.uv, deadline=deadline,
     )
     print(json.dumps(record, sort_keys=True))
     return 0

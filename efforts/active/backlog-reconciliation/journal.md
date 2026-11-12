@@ -3,6 +3,10 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-12 - Oldest contracts and finite source delivery](journal/2026/11.12-oldest-contracts-and-finite-delivery.md)
+
+- [2026-11-12 - Source completions and migration residuals](journal/2026/11.12-source-completions-and-migration-residuals.md)
+
 - [2026-11-12 - Oldest-cohort qualification and governed-build intake](journal/2026/11.12-oldest-cohort-qualification-and-receiving.md)
 
 - [2026-11-12 - Standing research and native proof boundaries](journal/2026/11.12-standing-research-and-native-proof.md)

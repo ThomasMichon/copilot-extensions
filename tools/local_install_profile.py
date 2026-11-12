@@ -21,13 +21,16 @@ from packaging.version import Version
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "worktree-manager" / "scripts"
 sys.path.insert(0, str(SCRIPTS))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "libs" / "installer-engine"))
 import install_source as source_inputs
 from installer_wheel_inputs import WheelLimits, _check_deadline, inspect_archive
 from installer_wheel_snapshot import retain_wheel_inputs
 
 from build_toolchain_lock import _query_marker_environment
 from application_sources import application_sources
-from promotion_python_artifacts import PromotionArtifactError, project_key, validate_manifest, validate_wheel_sources
+from promotion_python_artifacts import (
+    PromotionArtifactError, project_key, validate_manifest, validate_wheel_sources,
+)
 from runtime_profile import SCHEMA, ProfileError, _reachable, _requirement, validate_profile
 from runtime_profile_wheels import profile_wheel_inputs
 from runtime_source_lock import _wheel_pins, dependencies
@@ -537,6 +540,8 @@ def _application_selection(components: list[str], extras: dict):
 
 
 def _verify_application(snapshot: Path, component: str, record: dict, selected, inputs):
+    from installer_engine_health import verify_application_wheels
+
     if (
         selected.identity.document() != record["projects"][selected.project_key]["source"]
         or selected.identity.source_commit != record["source_commit"]
@@ -554,6 +559,10 @@ def _verify_application(snapshot: Path, component: str, record: dict, selected, 
         ).is_file()
     ):
         raise ProfileError("prepared application has no matching locked construction inputs")
+    try:
+        verify_application_wheels(inputs, application)
+    except (OSError, RuntimeError) as error:
+        raise ProfileError("prepared application wheel copies differ from their retained inputs") from error
 
 
 def prepare_applications(
@@ -618,6 +627,7 @@ def reuse_applications(
 
     _application_selection(components, extras)
     record = source_inputs._read(snapshot / source_inputs.MANIFEST)
+
     def verify_record():
         current = source_inputs._read(snapshot / source_inputs.MANIFEST)
         if hashlib.sha256(json.dumps(current, sort_keys=True).encode("utf-8")).hexdigest() != source_record_sha256:
@@ -713,6 +723,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--extra", action="append", default=[])
     args = parser.parse_args(argv)
     deadline = args.deadline if args.deadline is not None else time.monotonic() + args.timeout
+    _check_deadline(deadline)
     if args.application_components is not None:
         if (
             args.prepare_profile or args.extra or args.download_origin

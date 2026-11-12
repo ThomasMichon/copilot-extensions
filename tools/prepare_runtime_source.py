@@ -93,7 +93,12 @@ def _git(
     streams = {"capture_output": True} if output is None else {
         "stdout": output, "stderr": subprocess.PIPE,
     }
-    result = subprocess.run(
+    run = subprocess.run
+    if deadline is not None:
+        from source_preparation_process import run as owned_run
+
+        run = partial(owned_run, deadline=deadline)
+    result = run(
         ["git", "--no-replace-objects", "-c", "core.fsmonitor=false",
          "-c", "core.autocrlf=false", "-c", "core.longpaths=true", "-C", str(source), *arguments],
         **streams, text=True, encoding="utf-8", errors="replace",
@@ -158,6 +163,8 @@ def _extract_archive(
     files: set[Path] = set()
     directories: set[Path] = set()
     if include_paths is not None:
+        if not isinstance(include_paths, tuple):
+            raise SourcePreparationError("Source archive selection requires portable relative paths")
         if not include_paths or any(destination.iterdir()):
             raise SourcePreparationError("Scoped source extraction requires paths and an empty destination")
         selected = []
@@ -178,9 +185,9 @@ def _extract_archive(
                 or "\\" in member.name or ":" in member.name
             ):
                 raise SourcePreparationError("Source archive contains an unsafe path")
-            target = destination.joinpath(*name.parts)
-            if not member.isdir() and not member.isfile():
+            if not (member.isdir() or member.isfile()):
                 raise SourcePreparationError("Source archive links and special files are unsupported")
+            target = destination.joinpath(*name.parts)
             if selected is not None:
                 parents = [
                     destination.joinpath(*name.parts[:index])

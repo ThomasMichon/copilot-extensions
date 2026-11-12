@@ -1342,7 +1342,15 @@ after removing its construction archive, rejects incompatible core support
 before prerequisite/registration/mux effects, and preserves unknown/reuse
 semantics without a legacy fallback. It also refuses experimental opt-out
 before fresh launch effects while retaining compatibility with existing
-opted-out sessions. `tests/test_receiving_bundle.py` rejects a poisoned shared
+opted-out sessions. Private-socket creation now enters the selected core's
+finite `--mux-create-private` operation; focused Driver
+`tests/test_mux_creation_cli.py` controls cover one literal dispatch, refusal,
+lost results and forbidden default-server joins. The relocated-core process
+control in `tests/test_session_host_core.py` uses a synthetic mux response and
+platform selector, not native POSIX qualification. The joined fixture likewise
+keeps its remote mux/platform edge synthetic while executing the real copied
+headed core; direct receiver-side creation is forbidden.
+`tests/test_receiving_bundle.py` rejects a poisoned shared
 core cache and verifies exact retry payload bytes across private core rebuilds;
 Driver's `tests/test_session_host_core.py` checks reproducible current and
 compatibility archives after cache eviction.
@@ -6746,6 +6754,28 @@ publication, native maintenance or application adoption.
 for Linux's native checkout semantics, covering manifests, parents, standalone
 versions, fallbacks, templates, the catalog and changefile directories/files.
 Actor-free preflight cases cover all version destinations before any write.
+
+### Complete local application preparation and reuse
+
+Run `tools/test_local_install_reuse.py` with the existing bounded test runner
+for real first-party wheel/profile bytes, unchanged complete reuse, and changed
+source, composition, wheel, application, target, extras, policy or toolchain
+refusals. These fixtures neither build another wheel nor install an application.
+The small preparation batch, worker-failure-versus-cache-miss and retained
+toolchain/deadline controls live in `promotion_unit_tests/test_standalone_artifacts.py`.
+Source-object controls also exercise the caller budget inherited by canonical
+Git operations and the scratch-cleanup reserve inside that same deadline.
+
+`test_copied_application_qualifies_after_the_prepared_source_is_removed` in
+`tools/test_local_install_source.py` separately invokes a real copied application.
+Its Windows-only marker-sensitive case omits a dependency in the native profile
+and verifies offline locking/execution do not introduce a cross-target marker
+branch. Windows preparation currently requires a standard CPython target;
+unsupported interpreter variants refuse before emitting the application.
+These source fixtures do not qualify installed service/continuity outcomes.
+The separate installer-child executable-spelling failure remains tracked in
+[issue #12253](https://github.com/ThomasMichon/copilot-extensions/issues/12253);
+do not report its installation cases as passing preparation evidence.
 
 ## Unit-only promotion packet
 

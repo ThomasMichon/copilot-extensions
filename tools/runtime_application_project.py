@@ -53,6 +53,34 @@ def install_callbacks(name: str, *, extras=()) -> tuple[list[str] | None, list[s
     return None, None
 
 
+def target_python_request(target_environment: dict | None, target_tags: list[str] | None) -> str | None:
+    """Select a native interpreter, without changing dependency-marker semantics."""
+    if target_environment is not None and target_environment["sys_platform"] == "win32":
+        platforms = {tag.rsplit("-", 1)[-1] for tag in target_tags or []} - {"any"}
+        targets = {
+            "win_amd64": "x86_64",
+            "win_arm64": "aarch64",
+            "win32": "x86",
+        }
+        if len(platforms) != 1 or not platforms <= targets.keys():
+            raise ValueError("application profile has no unambiguous Windows Python ABI platform")
+        platform = platforms.pop()
+        version = target_environment["python_full_version"]
+        tag = "cp" + "".join(version.split(".")[:2])
+        if (
+            target_environment.get("implementation_name", "cpython") != "cpython"
+            or re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", version) is None
+            or f"{tag}-{tag}-{platform}" not in (target_tags or [])
+            or any(
+                re.fullmatch(r"cp[0-9]+[a-z]+", field)
+                for entry in target_tags or [] for field in entry.split("-")[:2]
+            )
+        ):
+            raise ValueError("Windows applications require a standard CPython target interpreter")
+        return f"cpython-{version}-windows-{targets[platform]}-none"
+    return None
+
+
 def emit(
     destination: Path, *, distribution: str, version: str, requires_python: str,
     commands: dict[str, str], wheels: dict[str, Path], primary: str | None = None,
@@ -71,27 +99,10 @@ def emit(
     primary = primary or (distribution if distribution in commands else next(iter(commands)))
     if primary not in commands:
         raise ValueError("primary application command is not declared")
-    python_request = None
-    if target_environment is not None and target_environment["sys_platform"] == "win32":
-        platforms = {tag.rsplit("-", 1)[-1] for tag in target_tags or []} - {"any"}
-        targets = {
-            "win_amd64": "x86_64",
-            "win_arm64": "aarch64",
-            "win32": "x86",
-        }
-        if len(platforms) != 1 or not platforms <= targets.keys():
-            raise ValueError("application profile has no unambiguous Windows Python ABI platform")
-        implementation = target_environment.get("implementation_name", "cpython")
-        if implementation not in {"cpython", "pypy"}:
-            raise ValueError("application profile has no supported Windows Python implementation")
-        # A platform override rewrites dependency markers; select the interpreter without changing them.
-        python_request = (
-            f"{implementation}-{target_environment['python_full_version']}"
-            f"-windows-{targets[platforms.pop()]}-none"
-        )
+    python_request = target_python_request(target_environment, target_tags)
     launchers = {}
     for name, entry in commands.items():
-        for filename, content in slot_binstubs(name, entry).items():
+        for filename, content in slot_binstubs(name, entry, python_request=python_request).items():
             if filename in {"install", "install.cmd", "install.ps1", "install.sh"} and name != primary:
                 continue
             if filename in launchers:

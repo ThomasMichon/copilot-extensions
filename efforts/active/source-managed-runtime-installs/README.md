@@ -492,10 +492,11 @@ preserves the complete pre-amendment record.
 
 ### Incremental source-install integration
 
-- [ ] S1: Complete the next independent deadline and Git-isolation source
+- [x] S1: Complete the next independent deadline and Git-isolation source
   increments, keeping each bug class, affected canonical copies and focused
   regressions together under the existing owners. Deadline acquisition merged
-  in #12195; local composition/Git isolation remains in progress.
+  in #12195; canonical local composition, Main-version seeding and Git isolation
+  merged in #12219. These source increments do not qualify installed adoption.
 - [ ] S2: Verify combined replacement coverage against preserved #11121 source
   before superseding its implementation; retain its history and ten-review-round
   limit. A small diff or passing review alone is not replacement completeness.
@@ -725,6 +726,7 @@ onto one branch.
 
 ## Journal
 
+- [2026-11-12 - Composition delivered and complete preparation integration](journal/2026/11.12%20complete-preparation.md)
 - [2026-11-11 - Bounded public metadata acquisition delivered](journal/2026/11.11%20bounded-metadata-acquisition.md)
 
 ### 2026-11-06 - Integration review deadline and CI corrections

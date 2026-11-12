@@ -1,8 +1,8 @@
 """Atomic source-relevance decisions; transport and owner closeout stay separate.
 
 This receiver is internal to the trusted coordinator. No HTTP, CLI, emitter or
-periodic caller is enabled here. Callers must resolve source scope and judge the
-backing object; queue history decides whether abandonment is resource-free.
+periodic caller is enabled here. Callers judge the backing object; queue history
+decides resource-free abandonment or original-owner closeout on existing outboxes.
 """
 
 from __future__ import annotations
@@ -41,8 +41,13 @@ def closeout_request(conn: sqlite3.Connection, task_id: str) -> sqlite3.Row | No
     ).fetchone()
 
 
-def require_relevant_goal(conn: sqlite3.Connection, task_id: str) -> None:
+def require_relevant_goal(conn: sqlite3.Connection, task_id: str, *, owner_wake=None) -> None:
     if closeout_request(conn, task_id) is not None:
+        from .queue_relevance_delivery import closeout_wake
+        if owner_wake is not None and owner_wake.task_id == task_id and closeout_wake(conn, owner_wake):
+            held = conn.execute("SELECT hold_reason FROM tasks WHERE id=?", (task_id,)).fetchone()
+            if held["hold_reason"] is None:
+                return
         raise TaskError("task relevance requires owner closeout, not restarting its original goal")
 
 
@@ -130,8 +135,8 @@ class QueueRelevanceMixin:
 
         ``observation_ref`` identifies the caller's backing-object observation;
         it does not authenticate it or turn an incomplete listing into closure.
-        A closeout receipt is durable intent/steering, not wake delivery or
-        native/workspace cleanup. Those effects require the existing owners.
+        A closeout receipt is intent plus a linked original-owner wake when
+        available, not transport acceptance or native/workspace cleanup.
         """
         if not isinstance(scope, RelevanceScope):
             raise TaskError("relevance needs a coordinator-resolved source scope")
@@ -214,17 +219,29 @@ class QueueRelevanceMixin:
                         "INSERT INTO task_relevance_closeouts"
                         " (task_id, request_id, generation, owner, owner_session_id, steer_id, created_at)"
                         " VALUES (?, ?, ?, ?, ?, ?, ?)",
-                        (task_id, request_id, task.generation, task.owner,
+                        (task_id, request_id, task.generation, (
+                            task.owner or (task.completed_by if task.status == Status.SUBMITTED else None)
+                        ),
                          task.owner_session_id, steer_id, ts),
                     )
+            wake = None
+            if decision == "closeout_pending":
+                from .queue_relevance_delivery import enqueue_closeout
+                wake = enqueue_closeout(self, conn, task, closeout_request(conn, task_id), ts=ts)
+            retained_wake = conn.execute(
+                "SELECT w.id, w.status FROM wake_outbox w"
+                " JOIN task_steer s ON s.wake_operation_id=w.id WHERE s.id=?", (steer_id,),
+            ).fetchone() if steer_id is not None else None
             result = {
                 "task_id": task_id, "request_id": request_id, "decision": decision,
                 "status": to_status, "generation": task.generation, "custody": custody,
                 "owner": task.owner, "owner_session_id": task.owner_session_id,
                 "steer_id": steer_id, "accepted_at": ts,
+                "wake_operation_id": retained_wake["id"] if retained_wake else None,
                 "delivery": (
                     "held" if steer_id is not None and task.hold_reason is not None
-                    else "pending_owner_closeout" if steer_id is not None
+                    else retained_wake["status"] if retained_wake else
+                    "pending_owner_closeout" if steer_id is not None
                     else "not_requested"
                 ),
             }
@@ -238,6 +255,8 @@ class QueueRelevanceMixin:
             )
             conn.execute("COMMIT")
         self._notify_owned_transition()
+        if wake is not None:
+            self._notify_wake()
         return result
 
     def relevance_receipt(self, task_id: str, request_id: str) -> dict | None:
@@ -255,7 +274,13 @@ class QueueRelevanceMixin:
                 "SELECT taken, taken_at FROM task_steer WHERE id=?", (result["steer_id"],),
             ).fetchone()
             closeout = closeout_request(conn, task_id)
+            wake = conn.execute(
+                "SELECT w.id, w.status, w.execution_send_state, w.last_error FROM wake_outbox w"
+                " JOIN task_steer s ON s.wake_operation_id=w.id WHERE s.id=?",
+                (closeout["steer_id"],),
+            ).fetchone() if closeout else None
             return {
                 "acceptance": result, "closeout": dict(closeout) if closeout else None,
                 "steer_consumed_at": steer["taken_at"] if steer and steer["taken"] else None,
+                "wake": dict(wake) if wake else None,
             }

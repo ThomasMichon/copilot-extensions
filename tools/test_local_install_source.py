@@ -4,6 +4,7 @@ import os
 import hashlib
 import io
 import json
+import re
 from pathlib import Path
 import subprocess
 import shutil
@@ -32,6 +33,69 @@ def test_isolated_provider_cli_loads_owned_siblings_not_caller_modules(tmp_path)
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert "--prepare-applications" in result.stdout
+
+
+@pytest.mark.parametrize("shared", ["parent", "candidate"])
+@pytest.mark.skipif(os.name == "nt", reason="POSIX access bits; Windows uses native DACL checks")
+def test_automatic_reuse_never_executes_a_shared_candidate(tmp_path, monkeypatch, shared):
+    import build_toolchain_lock as locks
+
+    previous = tmp_path / "previous"
+    previous.mkdir(mode=0o700)
+    (previous / "inputs").mkdir()
+    record = {"schema": local.SCHEMA, "version": 1, "projects": {}}
+    (previous / "inputs" / local.MANIFEST).write_text(json.dumps(record))
+    (previous / "applications.json").write_text(json.dumps({
+        "schema": "copilot-extensions.prepared-applications", "version": 1,
+        "snapshots": {"demo": "candidate-controlled"},
+    }))
+    (tmp_path if shared == "parent" else previous).chmod(0o777)
+    monkeypatch.setattr(locks, "resolve_toolchain_lock", lambda *a, **kw: pytest.fail(
+        "shared preparation directories cannot supply an executable toolchain",
+    ))
+    assert local._reused_applications(
+        tmp_path / "incoming/inputs", record, tmp_path / "incoming", ("demo",), {},
+        uv="unused", deadline=time.monotonic() + 10,
+    ) is None
+
+
+def test_profile_timeout_settles_the_actual_descendant_writer(tmp_path, monkeypatch):
+    import build_toolchain_lock as locks
+
+    heartbeat = tmp_path / "heartbeat"
+    worker = tmp_path / "profile-worker.py"
+    child = (
+        "import pathlib,time\np=pathlib.Path(" + repr(str(heartbeat)) + ")\n"
+        "while True:\n p.write_text(str(time.monotonic())); time.sleep(.02)\n"
+    )
+    worker.write_text(
+        "import subprocess,sys,time\n"
+        "subprocess.Popen([sys.executable,'-c'," + repr(child) + "],"
+        "creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))\n"
+        "time.sleep(60)\n",
+    )
+    original = local.preparation_process.run
+    deadlines = []
+
+    def run(argv, **options):
+        argv[1] = str(worker)
+        deadlines.append(options["deadline"])
+        return original(argv, **options)
+
+    monkeypatch.setattr(local.preparation_process, "run", run)
+    monkeypatch.setattr(locks, "_query_marker_environment", lambda *a, **kw: {})
+    deadline = time.monotonic() + 8
+    with pytest.raises(subprocess.TimeoutExpired):
+        local._prepare_profiles(
+            tmp_path, {}, tmp_path / "output", ("demo",), {},
+            SimpleNamespace(venv_python=Path(sys.executable), record={}),
+            uv="unused", deadline=deadline,
+        )
+    assert deadlines == [deadline]
+    assert time.monotonic() < deadline
+    before = heartbeat.read_bytes()
+    time.sleep(.1)
+    assert heartbeat.read_bytes() == before
 
 
 @pytest.mark.parametrize("line", [
@@ -1182,10 +1246,11 @@ def test_complete_output_reuse_uses_one_provider_without_replaying_worker_failur
 
     def worker(argv, **options):
         calls.append("worker")
-        assert argv[0] == str(toolchain.venv_python)
+        assert argv[0] == sys.executable
         assert argv[argv.index("--reuse-applications") + 1] == str(Path(local.native_retained_path(previous)))
         assert json.loads(argv[argv.index("--toolchain-record") + 1]) == toolchain.record
-        assert options["timeout"] > 0 and options["env"] == toolchains.sanitize_subprocess_env()
+        assert options["deadline"] == deadline
+        assert options["env"] == toolchains.sanitize_subprocess_env()
         if phase == "timeout":
             raise subprocess.TimeoutExpired(argv, 1)
         if phase in {"miss", "worker-failure"}:
@@ -1208,7 +1273,7 @@ def test_complete_output_reuse_uses_one_provider_without_replaying_worker_failur
     monkeypatch.setattr(local, "compose", compose)
     monkeypatch.setattr(toolchains, "resolve_toolchain_lock", resolve)
     monkeypatch.setattr(toolchains, "_query_marker_environment", lambda *a, **k: {"fixture": "native"})
-    monkeypatch.setattr(local.subprocess, "run", worker)
+    monkeypatch.setattr(local.preparation_process, "run", worker)
     monkeypatch.setattr(local, "_built_projects", build)
     importer = builtins.__import__
     def cold_import(name, *args, **kwargs):
@@ -1952,6 +2017,7 @@ def prepare_native_source(tmp_path, request):
 
 def prepare_native_source_inputs(tmp_path, request):
     import local_install_profile as native
+    from packaging.markers import default_environment
     from wheel_input_fixture import wheel_bytes
 
     original = tmp_path / "original"
@@ -2061,7 +2127,12 @@ def prepare_native_source_inputs(tmp_path, request):
         extra={"demo_app/__init__.py": content.encode(), **callback},
         metadata=(
             "Metadata-Version: 2.4\nName: demo-app\nVersion: 1.0.0\n" +
-            ("Requires-Dist: counter>=1\n" if dependency else "") + "\n"
+            ("Requires-Dist: counter>=1\n" if dependency else "") +
+            (
+                "Requires-Dist: absent-marker-fixture; platform_machine != "
+                + json.dumps(default_environment()["platform_machine"]) + "\n"
+                if isinstance(options, dict) and options.get("native-marker") else ""
+            ) + "\n"
         ).encode(),
     ))
     selected.project["artifact"] = {"wheels": [{
@@ -2211,7 +2282,12 @@ def test_application_retention_refuses_missing_helper_without_plugin_fallback(
     assert not (root / "current-version").exists()
 
 
-@pytest.mark.parametrize("native_source", [True], indirect=True)
+@pytest.mark.parametrize("native_source", [
+    True, pytest.param(
+        {"native-marker": True}, id="native-marker-closure",
+        marks=pytest.mark.skipif(os.name != "nt", reason="native Windows marker semantics"),
+    ),
+], indirect=True)
 @pytest.mark.parametrize("deep_slot", [False, True])
 def test_copied_application_qualifies_after_the_prepared_source_is_removed(
     native_source, tmp_path, deep_slot,
@@ -2524,11 +2600,10 @@ def test_complete_application_preparation_uses_existing_owners(
     def worker(argv, **options):
         assert held == [True]
         assert argv[:2] == [
-            str(tmp_path / "borrowed-python"), str(Path(native.__file__)),
+            sys.executable, str(Path(native.__file__)),
         ]
         assert options["env"] == build_toolchain_lock.sanitize_subprocess_env()
-        assert 0 < options["timeout"] <= deadline - time.monotonic() + 1
-        assert options["creationflags"] == (subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+        assert options["deadline"] == deadline
         calls.append("worker")
         if failure == "record":
             record_path = Path(argv[argv.index("--install-source") + 1]) / source.MANIFEST
@@ -2567,7 +2642,7 @@ def test_complete_application_preparation_uses_existing_owners(
         finally:
             in_worker.clear()
 
-    monkeypatch.setattr(local.subprocess, "run", isolated_worker)
+    monkeypatch.setattr(local.preparation_process, "run", isolated_worker)
     monkeypatch.setattr(builtins, "__import__", cold_import)
     options = dict(
         components=("demo-app",), branch="dev", uv="selected-uv", deadline=deadline,
@@ -3097,7 +3172,10 @@ def test_application_adapter_runs_real_install_repeat_and_retains_failed_start(
     slot = root / "versions" / selection["runtime_version"]
     assert result == {"state": "installed", "slot": str(slot)}
     for helper in (slot / ".runtime-bootstrap").iterdir():
-        assert helper.read_bytes() == (slot / "runtime" / helper.name).read_bytes()
+        if helper.name == "runtime-generation":
+            assert re.fullmatch(rb"[0-9a-f]{32}\n", helper.read_bytes())
+        else:
+            assert helper.read_bytes() == (slot / "runtime" / helper.name).read_bytes()
     before = {name: (root / name).read_bytes() for name in ("current-version", "last-known-good")}
     assert json.loads((root / "setup.json").read_text()) == ["--setup"]
     assert json.loads((root / "started.json").read_text()) == ["--start"]

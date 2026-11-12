@@ -378,11 +378,15 @@ def _require_wake_admissible(owner: Any, conn: sqlite3.Connection, wake: Any,
         raise TaskError("wake send requires the current unexpired delivery token")
     task = owner._fetch(conn, wake.task_id)
     current = (
-        owner._wake_is_current(task, WakeOperation._from_row(row)) if table == "wake_outbox"
+        owner._wake_is_current(task, WakeOperation._from_row(row), conn=conn) if table == "wake_outbox"
         else owner._run_waiter_wake_is_current(conn, task, RunWaiterWakeOperation._from_row(row))
     )
     if not current or task is None:
         raise TaskError("wake send task fence advanced")
+    from .queue_execution_handoff import require_execution_admission
+    require_execution_admission(
+        conn, task.id, owner_wake=wake if table == "wake_outbox" else None,
+    )
     if getattr(wake, "pool_recovery_revision", None) is not None:
         assignment = recovery_assignment(conn, task.id)
         if (

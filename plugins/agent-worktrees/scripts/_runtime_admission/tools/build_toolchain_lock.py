@@ -389,7 +389,7 @@ class ToolchainLock:
         ``--python`` selected a different one than this process's own.
         Queried once and cached -- the locked venv's interpreter never
         changes for the lifetime of this ``ToolchainLock``."""
-        _remaining_timeout(self._deadline, error_type=ArtifactBuildError)
+        _execution_options(self._deadline)
         if self._marker_environment is None:
             self._marker_environment = _query_marker_environment(
                 self.venv_python, **({"deadline": self._deadline} if self._deadline is not None else {}),
@@ -577,12 +577,11 @@ def resolve_toolchain_lock(
         raise ArtifactBuildError(f"unknown toolchain source policy: {source_policy!r}")
     if source_policy == "governed" and min_age_days is not None:
         raise ArtifactBuildError("min_age_days applies only to seasoned-public toolchains")
-    if deadline is not None and source_policy == "seasoned-public":
-        raise ArtifactBuildError("deadline-bound public toolchain discovery is unavailable")
     age = DEFAULT_MIN_AGE_DAYS if min_age_days is None else min_age_days
-    public = resolve_public_source(
-        _LOCKED_TOOLCHAIN_PACKAGES, age, **budget,
-    ) if source_policy == "seasoned-public" else None
+    public = (
+        resolve_public_source(_LOCKED_TOOLCHAIN_PACKAGES, age, **budget)
+        if source_policy == "seasoned-public" else None
+    )
     validated = (public.provenance["index"], None) if public else _validated_trusted_index_url(env)
     if validated is None:
         raise ArtifactBuildError(

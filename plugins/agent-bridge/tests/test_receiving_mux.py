@@ -44,11 +44,17 @@ def native(monkeypatch):
     calls = []
 
     def run(argv, *, cwd):
+        assert "new-session" not in argv, "Fresh creation must enter the selected core"
         calls.append((argv, cwd))
         return subprocess.CompletedProcess(argv, 0, "$1:1234|%2\n", "")
 
+    def create(request, support):
+        calls.append((["core-create", request], request["cwd"]))
+        return {"incarnation": "$1:1234", "pane": "%2"}
+
     monkeypatch.setattr(receiving_mux, "_mux_binary", lambda: "tmux")
     monkeypatch.setattr(receiving_mux, "_run_tmux", run)
+    monkeypatch.setattr(receiving_mux, "_create_mux", create)
     monkeypatch.setattr(receiving_mux, "_socket_identity", lambda path: {"selected": "socket"})
     monkeypatch.setattr(receiving_mux, "_policy", lambda request, support: None)
     monkeypatch.setattr(receiving_mux, "_require_core", lambda support: None)
@@ -66,8 +72,15 @@ def test_creation_and_reuse_observe_the_same_native_incarnation(tmp_path, native
     monkeypatch.setattr(receiving_mux, "_require_core", lambda *a: pytest.fail("retained reuse needs no new core"))
     reused = receiving_mux.receive(request, payload)
     assert reused["ok"] and reused["reused"]
-    assert [call[0][3] for call in native] == ["new-session", "display-message"]
-    assert native[0][0][:3] == ["tmux", "-S", created["mux_socket"]]
+    assert native[0][0] == ["core-create", {
+        "version": 1, "binary": "tmux", "socket": created["mux_socket"],
+        "session": created["mux_session"], "cwd": request["cwd"],
+        "command": [
+            sys.executable, "-I", "-S", str(attempt / "support" / "receiver.py"),
+            "child", str(attempt),
+        ],
+    }]
+    assert native[1][0][3] == "display-message"
     assert native[1][0][-2] == created["native"]["pane"]
     assert "send-keys" not in native[0][0]
     assert json.loads((Path(request["state_root"]) / request["attempt"] / "receipt.json").read_text())["phase"] == "created"
@@ -102,7 +115,8 @@ def test_legacy_experimental_opt_out_does_not_reject_retained_reuse(tmp_path, na
     ).hexdigest()
     receipt.write_text(json.dumps(retained), encoding="utf-8")
     assert receiving_mux.receive(request, payload)["reused"] is True
-    assert [call[0][3] for call in native] == ["new-session", "display-message"]
+    assert native[0][0][0] == "core-create"
+    assert native[1][0][3] == "display-message"
 
 
 def test_registration_is_private_to_the_original_attempt_and_never_on_argv(tmp_path, native, monkeypatch):
@@ -140,7 +154,7 @@ def test_unknown_creation_is_retained_and_never_replayed(tmp_path, native, monke
         native.append(args)
         raise subprocess.TimeoutExpired("tmux", 30)
 
-    monkeypatch.setattr(receiving_mux, "_run_tmux", unknown)
+    monkeypatch.setattr(receiving_mux, "_create_mux", unknown)
     first = receiving_mux.receive(request, payload)
     second = receiving_mux.receive(request, payload)
     assert first["pending"] and second["pending"]
@@ -400,6 +414,7 @@ def test_unavailable_core_never_creates_mux_or_enters_a_legacy_launch(tmp_path, 
     {"contract": "legacy"}, {"version": True}, {"protocol_version": True},
     {"protocol_version": 2}, {"modes": ["headless"]}, {"modes": "headed"},
     {"transports": []}, {"lifetime_policies": ["acp"]}, {"headed_process_receipts": []},
+    {"mux_creation": []}, {"mux_creation": "posix-private-create-v1"},
 ])
 def test_core_declaration_is_checked_at_the_actual_receiving_executable(tmp_path, monkeypatch, changed):
     support = tmp_path / "support"
@@ -409,6 +424,7 @@ def test_core_declaration_is_checked_at_the_actual_receiving_executable(tmp_path
         "contract": "agent-remote-driver.session-host", "version": 1, "protocol_version": 1,
         "modes": ["headless", "headed"], "transports": ["tcp-frame"],
         "lifetime_policies": ["acp", "cli"], "headed_process_receipts": ["native-child-v1"],
+        "mux_creation": ["posix-private-create-v1"],
     }
     calls = []
 
@@ -442,4 +458,49 @@ def test_packaged_core_is_selected_after_copy_without_a_guest_suite(tmp_path, mo
     support.mkdir()
     receiving_mux._unpack(payload, support)
     assert len(construction) == 1 and not construction[0].exists()
-    receiving_mux._require_core(support)
+    if os.name == "nt":
+        with pytest.raises(ValueError, match="does not support"):
+            receiving_mux._require_core(support)
+    else:
+        receiving_mux._require_core(support)
+
+
+@pytest.mark.parametrize("outcome", ["created", "rejected", "unknown", "lost", "malformed", "identity"])
+def test_private_creation_transport_preserves_request_and_refuses_unconfirmed_results(
+    tmp_path, monkeypatch, outcome,
+):
+    support = tmp_path / "support"
+    support.mkdir()
+    (support / "driver.pyz").touch()
+    request = {
+        "version": 1, "binary": "/usr/bin/tmux", "socket": "/fixture/tmux.sock",
+        "session": "wt-fixture", "cwd": "/fixture",
+        "command": ["child", "", 'quote "inside"', "literal\nline"],
+    }
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        assert argv == [*receiving_mux._core_executable(support), "--mux-create-private"]
+        assert json.loads(kwargs["input"]) == request and kwargs["timeout"] == 40
+        if outcome == "lost":
+            raise subprocess.TimeoutExpired("selected core", 40)
+        reply = {
+            "contract": "copilot-driver.mux-creation", "version": 1,
+            "status": outcome, "native": {"incarnation": "$1:1234", "pane": "%2"},
+        }
+        if outcome == "identity":
+            reply.update(status="created", native={"incarnation": "$1:1234", "pane": "%other"})
+        return subprocess.CompletedProcess(
+            argv, 0 if outcome in {"created", "identity"} else 3,
+            "{" if outcome == "malformed" else json.dumps(reply), "",
+        )
+
+    monkeypatch.setattr(receiving_mux.subprocess, "run", run)
+    monkeypatch.setattr(receiving_mux, "_run_tmux", lambda *a, **k: pytest.fail("No direct creation fallback"))
+    if outcome == "created":
+        assert receiving_mux._create_mux(request, support) == {"incarnation": "$1:1234", "pane": "%2"}
+    else:
+        with pytest.raises((ValueError, subprocess.TimeoutExpired)):
+            receiving_mux._create_mux(request, support)
+    assert len(calls) == 1

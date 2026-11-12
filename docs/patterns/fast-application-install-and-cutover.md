@@ -49,6 +49,54 @@ The sequence is a target, not executable CLI syntax. In particular, a
 portfolio-wide atomic selector and complete stage-time readiness are not
 established by today's generated per-app installers.
 
+### Prepare a selected application portfolio without installing it
+
+The local source adapter exposes `--prepare-applications` with an explicit
+`--source-checkout`, exact `--source-commit`, `--main-head`, `--branch dev|main`,
+absolute `--uv` executable, new external `--output` directory and one or more
+`--project` selections. Standalone keys use `standalone:<component>`; runtime
+plugins use their declared project name. Optional `--application-extras` is a
+JSON object mapping selected component names to extra lists. Select one
+`--deadline` (absolute monotonic time) or `--timeout` (seconds).
+
+Run `tools/local_install_source.py` from a dependency-prepared source environment.
+It admits the clean merged source, uses the canonical version-preserving
+composition and artifact owners, and keeps one toolchain alive for the profile
+worker. Scratch checkout suppresses configured Git hooks for that command,
+and composition/control Git commands disable configured filesystem monitors
+per invocation, without changing repository settings.
+Only after every selected snapshot passes
+complete readback does it return a JSON component-to-snapshot map and write
+`applications.json`.
+Before composition it validates the existing output parent and ancestor chain
+against unprivileged replacement and exclusively creates an owner-private root.
+Linked parents and existing or partial output roots are refused without repair.
+Readback verifies the emitted application's wheel copies against the retained
+construction inputs, not just the snapshot's separate wheel directory.
+Progress goes to stderr. No runtime is installed, selected or started.
+Profile preparation runs with the preparer's already-running tooling interpreter,
+not the minimal wheel-build environment. The build toolchain and application
+target environment retain their separate identities. Concurrent compositions
+bind changefile readers to their own scratch modules without replacing a
+process-global import alias, and reserve distinct scratch paths atomically.
+
+Windows application preparation selects a standard CPython interpreter from
+the native version and wheel-platform tags. Unsupported interpreter variants
+refuse before application output; no cross-target marker environment is added.
+
+Unchanged complete sibling outputs may be reused after source, composition,
+toolchain, wheel, profile target/extras/policy and application validation.
+Automatic discovery first requires native owner-private directories protected
+against other users' writes; shared or unverifiable directories are not reuse
+sources. Completion hashes do not authorize execution of a retained toolchain.
+Missing or incompatible retained outputs can lead to ordinary preparation;
+a failed selected worker is an error, not permission to replay construction.
+Deadline-bound profile, composition and Git children use the existing native
+process owner, with descendant settlement reserved inside the original deadline.
+The separate `--reuse-install-source` mode revalidates explicitly selected
+first-party wheel inputs and never silently falls back to a build.
+Neither mode is a new release-approval token or installation-completion claim.
+
 ## Support every application must provide
 
 | Boundary | Required behavior | Existing implementation home |
