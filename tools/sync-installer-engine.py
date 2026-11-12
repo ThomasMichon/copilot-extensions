@@ -346,7 +346,7 @@ def verify(*, phase: str = "materialized") -> list[str]:
             elif not destination.is_file() or destination.read_bytes() != source.read_bytes():
                 problems.append(f"{destination.relative_to(REPO)} differs from canonical Python engine")
     for consumer in (() if development else ier.native_adopter_dirs(REPO)):
-        for name in ier.STANDALONE_NATIVE_FILES:
+        for name in ier.native_files(consumer, REPO):
             source, destination = CANONICAL_DIR / name, consumer / "scripts" / name
             for path in (source, destination):
                 indirect = uer._find_symlinked_ancestor(path, REPO.resolve())
@@ -371,7 +371,7 @@ def verify(*, phase: str = "materialized") -> list[str]:
     plugins = REPO / "plugins"
     for candidate in plugins.iterdir() if plugins.is_dir() else ():
         native_files = (
-            ier.STANDALONE_NATIVE_FILES if candidate in ier.native_adopter_dirs(REPO) else ()
+            ier.native_files(candidate, REPO) if candidate in ier.native_adopter_dirs(REPO) else ()
         )
         if candidate.name not in PYTHON_ADOPTERS and any(
             (candidate / "scripts" / name).exists()
@@ -456,7 +456,7 @@ def sync() -> list[str]:
             shutil.copyfile(source, destination)
             written.append(destination.relative_to(REPO).as_posix())
     for consumer in ier.native_adopter_dirs(REPO):
-        for name in ier.STANDALONE_NATIVE_FILES:
+        for name in ier.native_files(consumer, REPO):
             source, destination = CANONICAL_DIR / name, consumer / "scripts" / name
             for path in (source, destination):
                 indirect = uer._find_symlinked_ancestor(path, REPO.resolve())
