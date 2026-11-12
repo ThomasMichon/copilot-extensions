@@ -405,9 +405,19 @@ handover. Preserve held sessions and the separate pre-feature adoption hold.
     with a bounded loopback canned provider, initially and after all three
     predecessor exits. #12249 subsequently qualifies three accepted native
     tool calls while each predecessor is actually quiescing, followed by fresh
-    incoming traffic. Unknown outcomes, installed adoption and production
-    lifetime remain open. See the
+    incoming traffic. #12252 adds an accepted invocation whose real result
+    transport fails during quiescence: custody remains uncertain/fenced, the
+    affected conduit exits, the native client reports an error without replay,
+    and outcome observers stay active through shutdown. This qualifies the
+    bounded negative source case, not recovery of the lost result or continued
+    use of that failed MCP session. Installed adoption and production lifetime
+    remain open. See the
     [tool-consumption slice](journal/2026/11.10-explicit-owner-cli.md#actual-native-tool-consumption-prepared).
+    Main `0bf2f14e6a035bf91ed441be02dc81c64f3b5432` releases MCP
+    `0.2.250-dev1`: all 78 package tree entries match the qualified source,
+    except the independently checked fallback-version stamp; the constructor
+    correction also matches. This verifies released implementation bytes, not
+    installation, the latest test-only PR's promotion or running acceptance.
   - [x] **Explicit-owner source merged:** #11935 landed at
     `c0eab0d952a37607f6cf7030ac1a77f377f98a74` after current-head automated
     approval, required CI and resolution of addressed findings. The source
@@ -543,6 +553,14 @@ withdrawal authorizes no GUI effect or change to the SDK's own admission rules.
     Seven actual tool results and three in-flight transitions pass on the
     corrected exact source, with single initialization and exact cleanup.
     This does not qualify unknown delivery outcomes or installed adoption.
+  - [x] **Actual unknown native-delivery source:** #12252 qualifies one
+    upstream-accepted call with lost result delivery during real quiescence.
+    The real keeper records uncertain/fenced state with the accepted nonce;
+    the native client reports an error, the affected conduit exits, and the
+    invocation occurs exactly once through cleanup. Provider and ACP outcome
+    observers remain active through bounded client shutdown. Exact EOF and one
+    initialization are verified. This is terminal no-replay qualification,
+    not result recovery, session resumability or installed acceptance.
 - [ ] Failed candidate health, changed owner/route/selection and an old
   generation's late cleanup cannot corrupt or retire the current generation.
 - [ ] EOF/disconnect and verified owner death settle exact client resources;
