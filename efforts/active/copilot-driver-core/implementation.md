@@ -185,8 +185,11 @@ schedules.
 Explicit caller stop remains distinct from idle expiry and observer retirement.
 A public SDK `disconnect`/`stop` return is not proof that an old joined
 observer drained or that every native descendant settled. Preserve the
-independently owned observer-close/drain and whole-session-settlement gates
-before auth recovery can be enabled; this proposal does not lift those holds.
+existing clean-path observer-close/drain and whole-session-settlement
+qualification results without reinterpreting a refusal as success. The
+proposed crash path below does not require a clean SDK certificate; it still
+requires current authority and independent whole-scope settlement before any
+replacement. Neither proposal enables current auth recovery.
 CLI foreground lifetime remains independent of all ACP idle policy.
 
 **Promotion order and validation.** First review this boundary, then add a
@@ -201,6 +204,87 @@ Keep process/native/clean-room lanes explicit and bounded, not in required
 unit-only CI. Only a later qualified lifecycle slice can enable idle grace;
 neither this plan nor an inventory-only merge completes the parent's lifetime,
 caller-convergence, receiving or observer-retirement gates.
+
+### Uncertainty-preserving crash recovery proposal
+
+This agent-recommended refinement addresses abrupt transport loss and observer,
+process or host restart. It remains a source-contract proposal until reviewed;
+no observer, service, credential mutation, live retirement or activation is
+authorized here. Existing clean-path negative evidence, including #11969,
+remains valid rather than being relabelled as a pass.
+
+**Original owner and transition.** Reuse the original launch/lifecycle owner's
+durable store and admission operation, not a second fleet authority or a
+per-session reconnect daemon. Retain one recovery request/operation identity,
+owner/worktree/source revisions, durable conversation, environment and boot,
+exact native-scope incarnation, bounded observations and references to uncertain
+external work. Store classifications and owner-operation references, not raw
+process logs or credentials. Record intent, confirmed settlement, resume intent
+and restored observation separately. Observer restart reconciles that original
+transition; an uncertain effect is not repeated under a fresh request identity.
+
+**Classify, settle, restore.** Silence, missing status and an unreachable host
+are not authority or proof of absence. Distinguish active work, waiting input,
+transport loss, authentication failure, proven old-boot retirement and unknown
+state. Current policy and exact enrolled custody precede retirement;
+independent whole-scope settlement precedes any replacement. Pending or
+unobservable work remains unknown, even when the process scope is settled.
+Optional clean SDK detach/drain evidence must not be invented to clear that
+uncertainty.
+
+With an approved current signed-in source and original-owner admission, restore
+observation of the same durable conversation without a launch seed, last prompt
+or external-action retry. With no approved source, remain held; do not perform
+unattended login or substitute another identity. Restoration is not quiescence
+or task completion.
+Affected uncertain work stays held for reconciliation through its existing
+owner. An uncertain resume result requires observation of the original
+transition and possible new incarnation, not another launch.
+
+**Keep distinct contracts distinct.** A generic native owner's root exit or
+`terminate` return is not a whole-scope certificate. Qualified platform
+providers retain their existing Job/guardian/census and retirement owners.
+The existing exact cross-boot Worktrees restart path stages a STATUS FIRST
+seed/acknowledgement; it must not be silently reused as this seedless crash
+operation. The existing seedless argv helper supplies argument composition,
+not launch authority or restoration proof. Local source-lease/owner-death
+enforcement remains independent: an occasional remote sweep cannot guarantee
+hard expiry while its observer or network is unavailable.
+
+**First bounded leaf and acceptance.** The receiver contributor can prepare
+side-effect-free crash-candidate/status export and a strict transition reducer
+through an original-owner-supplied store/compare-and-swap boundary. Keep effect
+callbacks unwired and native/automatic recovery unqualified. Actor-free durable
+store tests cover reopen after retirement or resume intent, duplicate and
+conflicting requests, changed boot/source/owner/lease, missing settlement,
+unknown external effects and lost resume acknowledgements.
+
+The actor-free reducer and `RecoveryStore` protocol landed in #12144. They
+are not a production store or admission provider. The next original-owner
+adapter belongs outside the core, initially in Worktrees' existing guarded
+tracking-write and per-worktree launch state. Resolve canonical owner paths
+through that owner, never from untrusted descriptor strings. Compare every
+descriptor field, reserve absence at revision zero, retain immutable prior
+steps and operation-ID uniqueness, and acknowledge only durable atomic commit.
+An ambiguous writer response requires a read of the same original operation;
+it must not select direct-write fallback after possible admission.
+
+The receiver contributor's disjoint next leaf is a complete, bounded versioned
+record codec and passive store-read projection. Serialize the ordered steps,
+not the abbreviated status view; reject duplicate fields, unsupported versions,
+invalid types and oversized data without repair or truncation. Preserve
+unknown effects after restored observation. Keep generic store internals and
+native admission with their existing owner, and platform settlement with its
+qualified provider. A reducer/CAS return, including an identical-step replay
+that returns a later record, never dispatches a native effect.
+
+Only subsequent reviewed provider integration and independently admitted
+process/native controls can qualify exact scope settlement and same-session
+history restoration. Test observer death, abrupt native loss without a final
+event, partition versus proven reboot, authority expiry and pending unknown
+effects. Required unit-only CI is not widened; clean SDK observer close remains
+an optional improvement, not this crash path's critical dependency. No current
+receiver marker, refusal or activation gate changes with this proposal.
 
 ## Evidence before each functional promotion
 
