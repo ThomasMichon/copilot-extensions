@@ -112,7 +112,8 @@ def resolve_registration(
         candidates = [
             (item["spec"], item) for item in registrations.values()
             if item["kind"] == RegistrationKind.EVALUATOR
-            and _local_active(item, selector)
+            and item["status"] == RegistrationStatus.ACTIVE
+            and item["machine"] in (None, selector.machine) and item["env"] == selector.env
         ]
         selected = _evaluator_for_task(
             candidates, repo=task.repo, evaluator_ref=task.evaluator_ref,

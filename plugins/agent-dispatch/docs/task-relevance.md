@@ -169,6 +169,9 @@ Predecessor hold correlation also includes paused local rows without admitting
 them as callers or counting an equivalent replaced emitter as a second source.
 Evaluator repo/ref selection precedes hold exclusion: an
 all-repos reporter cannot take over a held repo-specific evaluator's work.
+Selection retains the verification owner's applicable machine-unpinned evaluator
+definitions too. Such a definition can block an all-repos fallback, but does not
+become an eligible local relevance reporter merely by participating in selection.
 Legacy/manual tasks without matching emitter provenance remain outside scope.
 
 Opt-in client methods check support on their bound running peer before sending

@@ -335,6 +335,39 @@ def test_held_repo_evaluator_does_not_authorize_all_repos_fallback(q, venue, hol
     assert q.get(t.id).status == Status.QUEUED
 
 
+@pytest.mark.parametrize("machine,env,status,expected", [
+    (None, "default", "active", 409),
+    ("host-b", "default", "active", 200),
+    (None, "other", "active", 200),
+    (None, "default", "paused", 200),
+])
+def test_applicable_unscoped_evaluator_keeps_repo_precedence_without_caller_authority(
+    q, venue, machine, env, status, expected,
+) -> None:
+    api, trusted, _ = venue
+    declaration(trusted, "review-source", "emitter", {**SPEC, "evaluator_ref": "review-loop"})
+    global_id = declaration(trusted, "global-evaluator", "evaluator", {
+        "all_repos": True, "evaluator_ref": "review-loop", "evaluator_spec": {"rules": []},
+    })
+    q.register_registration("evaluator", {
+        "repo": TEST_REPO, "evaluator_ref": "review-loop", "evaluator_spec": {"rules": []},
+    }, reg_id="exact-evaluator", machine=machine, env=env)
+    if status == "paused":
+        q.set_registration_status("exact-evaluator", status)
+    t = emitted(q, evaluator_ref="review-loop")
+    response = api.get(
+        f"/task-relevance/tasks/{t.id}", headers=_headers(), params={"registration_id": global_id},
+    )
+    assert response.status_code == expected, response.text
+    if machine is None:
+        unscoped = api.get(
+            f"/task-relevance/tasks/{t.id}", headers=_headers(),
+            params={"registration_id": "exact-evaluator"},
+        )
+        assert unscoped.status_code == 409, unscoped.text
+    assert q.get(t.id).status == Status.QUEUED
+
+
 def test_new_client_refuses_prior_scope_before_report_and_keeps_old_reads(q, venue) -> None:
     api, trusted, _ = venue
     rid = declaration(trusted, "review-source", "emitter", SPEC)
