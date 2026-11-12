@@ -1,4 +1,4 @@
-"""Actual offline Copilot discovery across private physical runtime handovers."""
+"""Actual offline Copilot protocol traffic across private physical handovers."""
 
 from __future__ import annotations
 
@@ -33,7 +33,7 @@ pytestmark = [
 UPSTREAM = r"""
 import json, os, sys, threading
 from pathlib import Path
-trigger, receipt = map(Path, sys.argv[1:])
+trigger, receipt, replies = map(Path, sys.argv[1:])
 lock = threading.Lock()
 stopped = threading.Event()
 initialized = revision = 0
@@ -49,13 +49,17 @@ def notify():
             continue
         if current != revision:
             revision = current
-            emit({"jsonrpc":"2.0","method":"notifications/tools/list_changed"})
+            emit({"jsonrpc":"2.0","id":"fixture-ping-"+str(revision),"method":"ping"})
 thread = threading.Thread(target=notify, daemon=True)
 thread.start()
 try:
     for line in sys.stdin:
         message = json.loads(line)
         if "id" not in message:
+            continue
+        if "method" not in message:
+            with replies.open("a") as output:
+                output.write(json.dumps(message)+"\n")
             continue
         method = message.get("method")
         result = {"pid":os.getpid(),"initialized":initialized,"revision":revision}
@@ -102,7 +106,7 @@ async def rpc(
 
 
 @pytest.mark.timeout(180)
-async def test_actual_native_client_rediscovers_through_replacement_and_rollback(
+async def test_actual_native_client_responds_through_replacement_and_rollback(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     record_testsuite_property: Callable[[str, object], None],
 ) -> None:
@@ -121,12 +125,13 @@ async def test_actual_native_client_rediscovers_through_replacement_and_rollback
     actor.write_text(fixture.ACTOR, encoding="utf-8")
     upstream.write_text(UPSTREAM, encoding="utf-8")
     trigger, receipt = tmp_path / "refresh", tmp_path / "upstream-eof.json"
+    replies = tmp_path / "client-replies.jsonl"
     observations = tmp_path / "responses.jsonl"
     caller_context = tmp_path / "caller-context.json"
     config = home / "bridge.json"
     config.write_text(json.dumps({
         "server": {"type": "stdio", "command": [
-            sys.executable, str(upstream), str(trigger), str(receipt),
+            sys.executable, str(upstream), str(trigger), str(receipt), str(replies),
         ]}, "auth": {"kind": "none"},
     }), encoding="utf-8")
     fixed = workspace / "current" / "serve.sock"
@@ -185,15 +190,13 @@ async def test_actual_native_client_rediscovers_through_replacement_and_rollback
                 flip_data_handle(handle, legacy_path=fixed)
                 return process, handle, reply["pid"]
 
-            async def discovery(label: str, pid: int, *, refresh: bool = True) -> dict:
+            async def exchange(label: str, pid: int, *, refresh: bool = True) -> dict:
                 nonlocal sequence
                 previous = sequence if refresh else -1
 
                 def rows() -> list[dict]:
                     lines = observations.read_text(encoding="utf-8").splitlines() if observations.exists() else []
-                    return [
-                        row for row in map(json.loads, lines) if row["method"] == "tools/list"
-                    ]
+                    return list(map(json.loads, lines))
 
                 async def observe() -> dict:
                     nonlocal sequence
@@ -204,6 +207,24 @@ async def test_actual_native_client_rediscovers_through_replacement_and_rollback
                     observed = rows()
                     for row in reversed(observed):
                         result = row["response"]["result"]
+                        if refresh:
+                            reply_id = row["request"].get("id")
+                            if (
+                                row["method"] == "client/reply"
+                                and isinstance(reply_id, str)
+                                and reply_id.startswith("fixture-ping-")
+                                and int(reply_id.removeprefix("fixture-ping-")) > previous
+                                and result["backend_pid"] == pid
+                                and replies.is_file()
+                                and any(
+                                    reply.get("id") == reply_id and reply.get("result") == {}
+                                    for reply in map(json.loads, replies.read_text().splitlines())
+                                )
+                            ):
+                                return result
+                            continue
+                        if row["method"] != "tools/list":
+                            continue
                         token = result.get("nextCursor")
                         if token is None or int(token) <= previous or result.get("backend_pid") != pid:
                             continue
@@ -221,7 +242,8 @@ async def test_actual_native_client_rediscovers_through_replacement_and_rollback
                 assert result["pipeline_code"] == label
                 assert Path(result["backend_prefix"]).resolve() == slots[label][1].resolve()
                 assert Path(result["backend_module"]).resolve().is_relative_to(slots[label][1].resolve())
-                assert result["initialized"] == 1
+                if not refresh:
+                    assert result["initialized"] == 1
                 assert result["backend_trace"] == str(handles[-1])
                 return result
 
@@ -267,7 +289,7 @@ async def test_actual_native_client_rediscovers_through_replacement_and_rollback
                 old, old_handle, old_pid = await backend("old")
                 caller_context.with_suffix(".ready").write_text("ready", encoding="utf-8")
                 await session
-                first = await discovery("old", old_pid, refresh=False)
+                first = await exchange("old", old_pid, refresh=False)
                 upstream_identity = first["pid"], birth_identity(first["pid"])
                 owner = json.loads(observations.with_suffix(".owner.json").read_text(encoding="utf-8"))
                 assert (owner["owner_pid"], owner["owner_birth"]) == (client.pid, client_birth)
@@ -289,39 +311,35 @@ async def test_actual_native_client_rediscovers_through_replacement_and_rollback
 
                 for label in ("new", "old", "old"):
                     incoming, _, incoming_pid = await backend(label)
-                    result = await discovery(label, incoming_pid)
-                    assert result["pid"] == upstream_identity[0]
+                    await exchange(label, incoming_pid)
                     retained_identities()
                     await fixture.shutdown(old_handle)
                     await asyncio.wait_for(old.wait(), 10)
                     assert old.returncode == 0
-                    result = await discovery(label, incoming_pid)
-                    assert result["pid"] == upstream_identity[0]
+                    await exchange(label, incoming_pid)
                     retained_identities()
                     old, old_handle = incoming, handles[-1]
                 sequence += 1
-                dropped = str(sequence)
+                dropped = "fixture-ping-" + str(sequence)
                 observations.with_suffix(".drop").write_text(dropped, encoding="utf-8")
-                trigger.write_text(dropped, encoding="utf-8")
+                trigger.write_text(str(sequence), encoding="utf-8")
 
-                async def dropped_response() -> bool:
-                    return any(
-                        json.loads(line)["response"]["result"].get("nextCursor") == dropped
-                        for line in observations.read_text(encoding="utf-8").splitlines()
-                    )
+                async def dropped_request() -> bool:
+                    path = observations.with_suffix(".dropped")
+                    return path.is_file() and path.read_text(encoding="utf-8") == dropped
 
-                await fixture.eventually(dropped_response)
+                await fixture.eventually(dropped_request)
                 await asyncio.sleep(1)
                 assert not any(
-                    json.loads(line)["request"].get("params", {}).get("cursor") == dropped
-                    for line in observations.read_text(encoding="utf-8").splitlines()
+                    json.loads(line).get("id") == dropped
+                    for line in replies.read_text(encoding="utf-8").splitlines()
                 )
                 retained_identities()
                 record_testsuite_property("actual_native_client", str(executable.name))
                 record_testsuite_property("physical_generations", json.dumps({
                     label: generation for label, (generation, _) in slots.items()
                 }))
-                record_testsuite_property("discovery_after_handover", 3)
+                record_testsuite_property("native_ping_roundtrips_after_handover", 3)
             finally:
                 if session is not None and not session.done():
                     session.cancel()
@@ -335,7 +353,7 @@ async def test_actual_native_client_rediscovers_through_replacement_and_rollback
                     if sys.exc_info()[0] is not None:
                         print("Native client stderr:", diagnostic.decode("utf-8", "replace")[-8000:])
                         for path in [
-                            observations, observations.with_suffix(".owner.json"),
+                            observations, replies, observations.with_suffix(".owner.json"),
                             observations.with_suffix(".refusal"), observations.with_suffix(".capabilities"),
                             *(tmp_path / "logs").glob("**/*.log"),
                             *workspace.glob("**/*.log"),

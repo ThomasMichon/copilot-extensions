@@ -169,11 +169,7 @@ def build_runtimes(
             witness = (
                 f"\n            with open({str(observations)!r},'a') as witness:\n"
                 "                witness.write(__import__('json').dumps({"
-                "'method':request.get('method'),'request':request,'response':response})+'\\n')\n"
-                f"            drop=__import__('pathlib').Path({str(observations.with_suffix('.drop'))!r})\n"
-                "            if (request.get('method')=='tools/list' and drop.is_file()\n"
-                "                and response['result'].get('nextCursor')==drop.read_text()):\n"
-                "                return None"
+                "'method':request.get('method'),'request':request,'response':response})+'\\n')"
             )
         pipeline.write_text(body.replace(
             needle,
@@ -240,6 +236,33 @@ def build_runtimes(
             connector.write_text(body.replace(
                 needle,
                 'AdmissionRefused("backend attachment admission was not confirmed: " + repr(ack))',
+            ), encoding="utf-8")
+            backend = payload / "src" / "agent_mcp" / "backend.py"
+            body = backend.read_text(encoding="utf-8")
+            needle = '            raise ConnectionError("upstream send outcome is unknown; no replay")'
+            assert body.count(needle) == 1
+            body = body.replace(
+                needle,
+                needle + "\n"
+                f"        with open({str(observations)!r},'a') as witness:\n"
+                "            witness.write(__import__('json').dumps({"
+                "'method':'client/reply','request':message,'response':{'result':{"
+                f"'pipeline_code':{label!r},"
+                "'backend_pid':__import__('os').getpid(),"
+                "'backend_prefix':__import__('sys').prefix,'backend_module':__file__,"
+                "'backend_trace':__import__('os').environ.get("
+                "'COPILOT_EXTENSIONS_BOOT_TRACE_SHIM_START_MS')}}})+'\\n')",
+            )
+            needle = "    async def output(self, message):\n"
+            assert body.count(needle) == 1
+            backend.write_text(body.replace(
+                needle,
+                needle
+                + f"        drop=__import__('pathlib').Path({str(observations.with_suffix('.drop'))!r})\n"
+                "        if (message.get('method')=='ping' and drop.is_file()\n"
+                "            and message.get('id')==drop.read_text()):\n"
+                f"            __import__('pathlib').Path({str(observations.with_suffix('.dropped'))!r}).write_text(message['id'])\n"
+                "            return\n",
             ), encoding="utf-8")
         package = source.payload_package_version(payload, "agent-mcp")
         digest = source.assembly_hash(payload)
