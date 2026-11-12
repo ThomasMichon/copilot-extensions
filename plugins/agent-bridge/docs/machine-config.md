@@ -17,6 +17,39 @@ Named-machine parsing, identity matching and local-host checks are shared throug
 `machine-transport`. Bridge retains its profile/path discovery, SSH-environment
 selection, authentication hooks and ACP launch protocol.
 
+## Live-session execution naming
+
+The extension reads its session binding for worktree/project association only.
+Saved `machine` fields never determine registration. Before each registration,
+including heartbeats, it observes its own hostname and execution substrate and
+queries the authenticated `GET /api/v1/execution-context` endpoint.
+
+The query takes `hostname` and `environment` (`windows`, `wsl` or `linux`).
+A successful response declares `schema: agent-bridge.execution-context/v1`
+and a `context` containing the reporter's observations plus the shared
+resolver's `machine`, `execution_machine` and optional `customization_key`.
+This is naming information, not permission to allocate or mutate a worktree.
+Container roots remain Linux even when their host kernel is WSL.
+
+The provider reads the configured profiles' machine files on every lookup
+and uses `machine-transport.resolve_local_execution_context`. No cached roster
+or worktree stamp can hide a configuration rename. Missing optional topology
+uses the shared standalone hostname/guest naming semantics; missing, invalid,
+ambiguous or conflicting configured topology returns HTTP 503. An unresolved
+current lookup clears advertised worktree targeting instead of retaining a
+previous machine name. Binding association and process-incarnation protections
+remain independent.
+
+This additive endpoint supports new callers against current providers and
+leaves older registration callers unchanged. Only HTTP 404 from an older
+provider permits the existing asynchronous `agent-worktrees get machine`
+fallback. HTTP errors, malformed declarations or mismatched reporter
+observations do not downgrade to cached naming. Provider rollback follows
+that same 404 path; the legacy adapter remains supported with no retirement
+scheduled. Current-provider heartbeats do not spawn the Worktrees CLI for
+machine naming. Native composed latency remains a separate measurement from
+the deterministic no-spawn and fresh-configuration regressions.
+
 ## Overview
 
 Agent-bridge topology is configured via **profiles** in

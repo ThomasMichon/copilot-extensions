@@ -31,7 +31,10 @@ import {
 } from "./delivery.mjs";
 import { firstLoadThisSession } from "./announce.mjs";
 import { makeBridgeEndpoint } from "./bridge-endpoint.mjs";
-import { metadataRefresher, processIdentity, registrationMetadata, resolveMetadataAsync } from "./metadata.mjs";
+import {
+  metadataRefresher, processIdentity, refreshRegistrationMetadata, resolveMachineAsync, resolveMetadataAsync,
+} from "./metadata.mjs";
+import { machineLookup } from "./machine-context.mjs";
 import { createRetainedInbox, retainedDeliverySelected } from "./retained-delivery.mjs";
 import { createHeadedDriverSession, createRemoteDriverSession, isRemoteDriverSource } from "./remote-driver.mjs";
 import { PendingQuestions, QUESTION_TYPES, pollQuestions } from "./questions.mjs";
@@ -166,7 +169,17 @@ let endpoint = null;
 let retainedInbox = null;
 let headedControl = null;
 
+function ensureBridgeEndpoint() {
+  endpoint ??= makeBridgeEndpoint({
+    resolveBase: resolveBaseUrl, resolveToken, fetchImpl: fetch, log: extLog,
+    timeoutMs: HTTP_TIMEOUT_MS,
+  });
+  state.base = endpoint.ep.base;
+  state.token = endpoint.ep.token;
+}
+
 async function fetchBridge(method, path, body) {
+  ensureBridgeEndpoint();
   const res = await endpoint.call(method, path, body);
   state.base = endpoint.ep.base;
   state.token = endpoint.ep.token;
@@ -207,7 +220,9 @@ async function retainedBridgeRequest(method, path, body) {
 
 // Session metadata (machine, worktree, ...), resolved off the event loop from
 // load. Registration waits for it -- never readiness: see serializedRegister.
-const metadataReady = resolveMetadataAsync({ sessionId: state.sessionId })
+const lookupMachine = machineLookup(fetchBridge);
+const resolveCurrentMachine = (options) => resolveMachineAsync({ ...options, lookup: lookupMachine });
+const metadataReady = resolveMetadataAsync({ sessionId: state.sessionId, machineResolver: resolveCurrentMachine })
   .then((meta) => {
     state.meta = meta;
     if (!meta.machine && !meta.receiving_scope_id) extLog("logical machine owner unresolved; session-only registration with bounded retries");
@@ -236,7 +251,8 @@ const register = serializedRegister(
   async (id) => {
     if (!state.base || !state.token) return false;
     try {
-      const body = { session_id: id, ...processIdentity(), ...registrationMetadata(state.meta) };
+      const metadata = await refreshRegistrationMetadata(state, resolveCurrentMachine);
+      const body = { session_id: id, ...processIdentity(), ...metadata };
       const res = await fetchBridge("POST", "/api/v1/live-sessions", body);
       if (res.ok) return true;
       if (res.status === 409) {
@@ -515,12 +531,7 @@ session.on((event) => {
 
 // --- Load-time initialization (runs once; async work off the event loop) ---
 try {
-  endpoint = makeBridgeEndpoint({
-    resolveBase: resolveBaseUrl, resolveToken, fetchImpl: fetch, log: extLog,
-    timeoutMs: HTTP_TIMEOUT_MS,
-  });
-  state.base = endpoint.ep.base;
-  state.token = endpoint.ep.token;
+  ensureBridgeEndpoint();
   // state.meta starts unset -- metadataReady (above) fills it in the
   // background. Deliberately NOT awaited here: this whole init block must
   // finish (and the extension report ready) without waiting on any child
