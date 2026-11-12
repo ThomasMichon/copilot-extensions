@@ -690,6 +690,35 @@ contract. They do not qualify native retirement, restoration, automatic
 recovery, source-lease enforcement or live rollout. Those remain separate
 original-owner/provider integration gates.
 
+`launch_recovery_admission.RecoveryAdmissionInspector` adds passive inspection
+over that store and the actual original launch-execution journal. Its caller
+supplies an independently retained `RecoveryBinding`: exact descriptor, launch
+correlation/operation, approved source-selection references, original
+`OwnerIntent` snapshot and opaque native owner handle. The snapshot is captured
+at the original launch, not recaptured when an inspector is constructed or
+reopened. Construction and inspection compare it with canonical owner state;
+closed owners, including `orphaned`, and opaque/unsupported provider bindings
+are refused. Provider snapshots are immutable serialized values, not mutable
+dataclass references. Inspection matches all request/current binding fields,
+requires the exact durable intent/revision, and rereads owner/journal/store
+state after checking the supplied lease's conservative remaining lifetime.
+Restoration candidates additionally need the recorded newer authority revision
+and an owner-supplied settlement observation. Opaque lease IDs are not authority
+revisions. Changed, missing, revoked or ambiguous inputs remain held, unknown
+or marked for same-operation reconciliation; prior holds and unknown work
+are not cleared.
+
+The inspector invokes only the retained lease's local `remaining_seconds()`
+reader. It never acquires a grant, installs credentials, writes intent,
+dispatches a native operation or reconstructs a lost custody handle.
+`candidate` means supplied owned inputs match, not that a real source/controller
+was verified or a provider scope independently settled. Every result keeps
+`effects_wired: false`, `native_recovery: unqualified` and `replay: never`.
+Neither a result nor a reconstructed inspector is an admission certificate.
+No ordinary caller, observer, CLI or RPC is wired to it. Actual current-source
+verification, final-boundary serialization, durable provider reacquisition and
+native recovery qualification remain unimplemented.
+
 ### Launch-owned pane assets and current boundary handlers
 
 Windows Picker and `sessions.mux_new_session` creators coordinate through
