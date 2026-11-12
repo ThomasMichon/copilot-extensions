@@ -599,10 +599,11 @@ def resolve_toolchain_lock(
         raise ArtifactBuildError(f"unknown toolchain source policy: {source_policy!r}")
     if source_policy == "governed" and min_age_days is not None:
         raise ArtifactBuildError("min_age_days applies only to seasoned-public toolchains")
-    if deadline is not None and source_policy == "seasoned-public":
-        raise ArtifactBuildError("deadline-bound public toolchain discovery is unavailable")
     age = DEFAULT_MIN_AGE_DAYS if min_age_days is None else min_age_days
-    public = resolve_public_source(_LOCKED_TOOLCHAIN_PACKAGES, age) if source_policy == "seasoned-public" else None
+    public = (
+        resolve_public_source(_LOCKED_TOOLCHAIN_PACKAGES, age, **queries)
+        if source_policy == "seasoned-public" else None
+    )
     validated = (public.provenance["index"], None) if public else _validated_trusted_index_url(env)
     if validated is None:
         raise ArtifactBuildError(
