@@ -157,7 +157,8 @@ def _state(value):
     pending = value["pending"]
     if pending is not None:
         if (
-            type(pending) is not dict or set(pending) != {"before", "candidate", "token", "references"}
+            type(pending) is not dict or set(pending) != {"before", "candidate", "token", "references", "intent"}
+            or pending["intent"] not in {"replace", "disable", "remove"}
             or re.fullmatch(r"[a-f0-9]{64}", str(pending["token"])) is None
             or type(pending["references"]) is not list or len(pending["references"]) > 8
         ):
@@ -273,7 +274,7 @@ class Enrollment:
             state = self.read()
             native = self.backend.call("read")
             if state["pending"] is not None:
-                raise slots.HealthError("health-task-recovery-required")
+                return self._recover(state, native, disable=True)
             self._owned(native, state["confirmed"])
             self._recover_reference_fence(state)
             if state["desired"] is None:
@@ -290,6 +291,7 @@ class Enrollment:
             working = {**state, "pending": {
                 "before": state["confirmed"], "candidate": record,
                 "token": transaction["token"], "references": transaction["owners"].get(REFERENCE, []),
+                "intent": "disable",
             }}
             slots._write(self.path, working)
             try:
@@ -426,7 +428,9 @@ class Enrollment:
             references = transaction["owners"].get(REFERENCE, [])
             pending = {
                 "before": before, "candidate": candidate, "token": transaction["token"],
-                "references": references,
+                "references": references, "intent": (
+                    "remove" if remove else "replace" if desired["enabled"] else "disable"
+                ),
             }
             working = {**state, "pending": pending}
             _state(working)
@@ -490,6 +494,10 @@ class Enrollment:
         return native
 
     def _settle(self, state, native, record, *, status, rollback="not-needed"):
+        if record is not None and not record["desired"]["enabled"] and (
+            native["enabled"] or native["instances"]
+        ):
+            raise slots.HealthError("native-health-task-settlement-unconfirmed")
         pending = state["pending"]
         updated = {
             **state, "desired": record["desired"] if record else None,
@@ -507,7 +515,7 @@ class Enrollment:
         )
         return self._result(status, native, updated, changed=True, rollback=rollback)
 
-    def _recover(self, state, native, *, rollback=False, remove=False):
+    def _recover(self, state, native, *, rollback=False, remove=False, disable=False):
         pending = state["pending"]
         before, candidate = pending["before"], pending["candidate"]
         matched = None
@@ -520,13 +528,32 @@ class Enrollment:
             if matched is None:
                 raise slots.HealthError("health-task-recovery-conflict")
         transaction = self.leases.begin_runtime_reference_transaction(self.root, REFERENCE)
+        intent = (
+            "remove" if remove or pending["intent"] == "remove"
+            else "disable" if disable or pending["intent"] == "disable"
+            else pending["intent"]
+        )
         state = {**state, "pending": {
             **pending, "token": transaction["token"],
-            "references": transaction["owners"].get(REFERENCE, []),
+            "references": transaction["owners"].get(REFERENCE, []), "intent": intent,
         }}
         slots._write(self.path, state)
-        if remove or candidate is None:
+        if intent == "remove" or candidate is None:
             return self._settle(state, self._switch(native, None), None, status="removed")
+        if intent == "disable":
+            if not native["configured"]:
+                return self._settle(state, native, None, status="disabled")
+            native = self.backend.call("disable", expected=native["digest"])
+            if (
+                native["enabled"] or native["instances"]
+                or signature(native["xml"]) != signature(disabled(matched["definition"]))
+            ):
+                raise slots.HealthError("native-health-task-settlement-unconfirmed")
+            record = {
+                **matched, "desired": {**matched["desired"], "enabled": False},
+                "definition": native["xml"],
+            }
+            return self._settle(state, native, record, status="disabled")
         if not rollback and candidate and matched == candidate and (
             signature(native["xml"]) == signature(candidate["definition"])
         ):

@@ -56,6 +56,8 @@ class Task:
         self.calls = []
         self.fail = None
         self.refuse_read = False
+        self.instances = []
+        self.settle_instances = True
 
     def snapshot(self):
         configured = self.xml is not None
@@ -63,7 +65,7 @@ class Task:
             "configured": configured, "xml": self.xml,
             "digest": hashlib.sha256(self.xml.encode()).hexdigest() if configured else "absent",
             "enabled": configured and enrollment.signature(self.xml)["Settings/Enabled"] == "true",
-            "instances": [], "account_sid": SID, "state": 3,
+            "instances": list(self.instances), "account_sid": SID, "state": 3,
         }
 
     def call(self, operation, *, expected="", definition=""):
@@ -80,6 +82,8 @@ class Task:
             self.xml = definition
         elif operation == "disable":
             self.xml = enrollment.disabled(self.xml)
+            if self.settle_instances:
+                self.instances.clear()
         elif operation == "remove":
             self.xml = None
         elif operation == "enable":
@@ -241,6 +245,18 @@ def test_repeated_removal_is_noop_only_after_references_are_settled(case):
     assert not refs.owners[enrollment.REFERENCE]
 
 
+def test_failed_disabled_configuration_does_not_restore_enabled_incumbent(case):
+    owner, desired, native, _, selection, installed = case
+    adopt(owner, desired)
+    selection[0] = installed("2.0")
+    native.calls.clear()
+    native.fail = "replace"
+    result = adopt(owner, {**desired, "enabled": False})
+    assert result["status"] == "disabled" and not result["enabled"]
+    assert "enable" not in native.calls
+    assert owner.read()["desired"]["enabled"] is False
+
+
 def test_interrupted_disable_recovers_without_replacement_or_enable(case):
     owner, desired, native, _, *_ = case
     adopt(owner, desired)
@@ -256,10 +272,78 @@ def test_interrupted_disable_recovers_without_replacement_or_enable(case):
     assert owner.disable()["status"] == "unknown"
     native.call = call
     native.calls.clear()
-    assert owner.converge()["status"] == "recovered-candidate"
-    assert not native.calls and not native.snapshot()["enabled"]
+    assert owner.converge()["status"] == "disabled"
+    assert native.calls == ["disable"] and not native.snapshot()["enabled"]
+    native.calls.clear()
     assert owner.converge()["status"] == "unchanged"
     assert not native.calls
+
+
+@pytest.mark.parametrize("after_effect", [False, True])
+def test_removal_supersedes_pending_replacement_before_any_effect(case, after_effect):
+    owner, desired, native, refs, selection, installed = case
+    adopt(owner, desired)
+    selection[0] = installed("2.0")
+    call = native.call
+
+    def interrupt_enable(operation, **fields):
+        if operation == "enable":
+            native.refuse_read = True
+            raise RuntimeError("interrupted replacement")
+        return call(operation, **fields)
+
+    native.call = interrupt_enable
+    assert owner.converge()["status"] == "unknown"
+    native.refuse_read = False
+
+    def interrupt_remove(operation, **fields):
+        if operation == "remove":
+            assert owner.read()["pending"]["intent"] == "remove"
+            if after_effect:
+                call(operation, **fields)
+            raise RuntimeError("interrupted withdrawal")
+        return call(operation, **fields)
+
+    native.call = interrupt_remove
+    with pytest.raises(RuntimeError, match="interrupted withdrawal"):
+        owner.converge(remove=True)
+    assert owner.read()["pending"]["intent"] == "remove"
+    native.call = call
+    native.calls.clear()
+    assert owner.converge()["status"] == "removed"
+    assert not native.xml and "enable" not in native.calls
+    assert not refs.owners[enrollment.REFERENCE]
+
+
+@pytest.mark.parametrize("after_effect", [False, True])
+def test_disable_recovery_preserves_intent_without_readiness_and_requires_settlement(case, after_effect):
+    owner, desired, native, refs, *_ = case
+    adopt(owner, desired)
+    call = native.call
+
+    def interrupt_disable(operation, **fields):
+        if operation == "disable":
+            if after_effect:
+                call(operation, **fields)
+            raise RuntimeError("interrupted disable")
+        return call(operation, **fields)
+
+    native.call = interrupt_disable
+    assert owner.disable()["status"] == "unknown"
+    assert owner.read()["pending"]["intent"] == "disable"
+    owner._policy = owner.qualifier = lambda *_args: pytest.fail("disable required collection readiness")
+    native.call = call
+    native.instances = ["owned-instance"]
+    native.settle_instances = False
+    with pytest.raises(ValueError, match="settlement-unconfirmed"):
+        owner.converge()
+    assert owner.read()["pending"]["intent"] == "disable"
+    assert refs.owners[enrollment.REFERENCE] == ["1.0"]
+    native.settle_instances = True
+    native.calls.clear()
+    assert owner.converge()["status"] == "disabled"
+    assert native.calls == ["disable"] and not native.snapshot()["instances"]
+    assert owner.read()["desired"]["enabled"] is False
 
 
 @pytest.mark.parametrize("kind", ["timeout", "cleanup"])

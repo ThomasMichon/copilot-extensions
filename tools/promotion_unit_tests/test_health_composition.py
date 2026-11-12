@@ -190,10 +190,12 @@ def test_withdrawal_recovery_cannot_select_or_enable_an_incumbent(owners):
     owner._switch = lambda native, candidate: switches.append(candidate) or native
     owner._settle = lambda *_args, **fields: fields
     state = {"pending": {
-        "before": {"retained": "incumbent"}, "candidate": None, "references": [], "token": "a" * 64,
+        "before": {"retained": "incumbent"}, "candidate": {"retained": "replacement"},
+        "references": [], "token": "a" * 64, "intent": "replace",
     }}
-    result = owner._recover(state, {"configured": False}, rollback=True)
+    result = owner._recover(state, {"configured": False}, rollback=True, remove=True)
     assert result["status"] == "removed" and switches == [None] and len(writes) == 1
+    assert writes[0][1]["pending"]["intent"] == "remove"
 
 
 def test_removed_enrollment_convergence_is_noop_after_reference_settlement(owners):

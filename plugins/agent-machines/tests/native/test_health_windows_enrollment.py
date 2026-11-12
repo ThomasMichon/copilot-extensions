@@ -346,6 +346,18 @@ def test_native_failed_withdrawal_stays_disabled_and_recovers_idempotently(tmp_p
         }
         preview = owner.configure(desired)
         assert owner.configure(desired, apply=True, expected=preview["preview_token"])["status"] == "converged"
+        def interrupt_disable(operation, **fields):
+            if operation == "disable":
+                raise RuntimeError("fixture pre-effect disable interruption")
+            return call(operation, **fields)
+
+        owner.backend.call = interrupt_disable
+        assert owner.disable()["status"] == "unknown"
+        assert call("read")["enabled"]
+        owner.backend.call = call
+        owner._policy = owner.qualifier = lambda *_args: pytest.fail("withdrawal required collection readiness")
+        recovered = owner.converge()
+        assert recovered["status"] == "disabled" and not recovered["enabled"] and not recovered["instances"]
         failed_remove = []
 
         def lose_remove_reply(operation, **fields):

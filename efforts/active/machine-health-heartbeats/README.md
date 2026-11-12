@@ -1522,3 +1522,11 @@ The [owner comparison](architecture.md#owner-decision) explains this choice.
   exact abandoned fixture task was identity-checked, removed and read back.
   Changed withdrawal behavior was then isolated under the original bounds;
   this does not promote the timed-out rerun into a passing result.
+- Pending recovery now persists replace/disable/remove intent independently of
+  the definitions retained for ownership. Removal during pending replacement
+  survives interruption, and disable recovery stops and reads back the exact
+  owned task without collector readiness, refusing settlement with live
+  instances. Failed disabled configuration follows the same no-enabled-rollback
+  rule. Before/after-effect controls, native pre-effect disable interruption and
+  deletion recovery passed; the focused unit suite passed 25 cases and the
+  native-plus-unit selection passed 25 before the final additional unit case.

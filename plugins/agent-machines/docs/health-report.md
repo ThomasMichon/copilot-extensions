@@ -408,6 +408,11 @@ store, collector, watchdog or retry scheduler is introduced.
 
 Local desired/confirmed state and a bounded recovery record live under that
 installation's `health-job.json`. An unknown effect retains dependency custody.
+The recovery record explicitly retains replace/disable/remove intent before
+native effects. Removal supersedes a pending replacement; failed or interrupted
+withdrawal cannot recover an enabled incumbent. Disable recovery uses exact
+owned stop/readback without collector-policy readiness, and cannot settle while
+owned instances remain.
 `converge` first reconciles the recorded exact task; it does not blindly repeat
 registration. Conflicting definitions refuse without overwrite. Failed
 replacement restores a qualified known-good definition and reports rollback
