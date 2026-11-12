@@ -180,6 +180,9 @@ headlessness and child transfer in an approved isolated lane, stop with a
 precise unsupported/prerequisite result. Do not silently elevate, adopt a
 system service, relax Job checks or substitute the old WMI inference.
 An alternative privileged lifecycle needs its own explicit decision.
+(Superseded for resident durable daemons by the reviewed WMI durable launch in
+#12117; see the README journal entry of 2026-11-11 and
+`docs/patterns/windows-background-process-launch.md`.)
 
 No normal spawn call installs or registers the broker. Configuration and the
 consumer's canonical install/update flow own adoption and lifecycle. Missing,
