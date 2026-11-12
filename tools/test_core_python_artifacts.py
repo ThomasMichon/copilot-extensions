@@ -11,6 +11,7 @@ import build_python_artifacts as builder
 import core_python_artifacts as core
 import promotion_python_artifacts as artifacts
 import pytest
+import standalone_python_artifacts as standalone
 from test_promotion_python_artifacts import _wheel_bytes
 from test_standalone_python_artifacts import LOCK, _source
 
@@ -91,12 +92,21 @@ def _build(root, monkeypatch):
         calls.append(source)
         wheel = out_dir / filename
         requires = ["shared-core>=1"] if package == "agent_sample" else []
+        component = next((
+            name for name, relative in standalone.COMPONENTS.items()
+            if source == root / relative
+        ), None)
+        members = {
+            name: path.read_bytes()
+            for name, path in standalone.injected_resources(component, root).items()
+        } if component is not None else {}
+        members[f"{package}-1.0.dist-info/METADATA"] = (
+            f"Metadata-Version: 2.4\nName: {package}\nVersion: 1.0\n"
+            + "".join(f"Requires-Dist: {value}\n" for value in requires)
+        ).encode()
         wheel.write_bytes(_wheel_bytes(
             package, "1.0", payload=(source / "src" / package / "__init__.py").read_bytes(),
-            members={f"{package}-1.0.dist-info/METADATA": (
-                f"Metadata-Version: 2.4\nName: {package}\nVersion: 1.0\n"
-                + "".join(f"Requires-Dist: {value}\n" for value in requires)
-            ).encode()},
+            members=members,
         ))
         return wheel
 
