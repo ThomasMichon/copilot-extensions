@@ -110,7 +110,6 @@ def test_batch_cache_protection_failure_preserves_order_and_legacy_get(
         assert key_file.read_bytes() == key
     expected_error = {
         "wrapped-key": kek.KekError,
-        "unavailable-wrapping": AttributeError,
     }.get(failure, CacheProtectionError)
     with pytest.raises(expected_error):
         cli.cmd_get(SimpleNamespace(entry="Example/one", field="password"))

@@ -554,8 +554,63 @@ Fernet caches and `seal`/`unseal` use the optional `pycryptodomex` dependency
 Select that profile through the installer rather than modifying a completed
 runtime. Without it, POSIX caches are inert and KEK commands return a clear
 error. New Windows caches can use native per-user DPAPI without a third-party
-package. Existing Fernet caches require the backend and are never replaced when
-it is unavailable; existing DPAPI caches keep their format after installation.
+package. Existing Fernet caches require the backend; unreadable originals are
+never overwritten. Existing DPAPI caches keep their format after installation.
+
+`cache-populate` bounds old-cache adoption through a contained helper: ten
+seconds for reading/decoding, with two seconds reserved separately for native
+process cleanup. Store/replacement lock acquisition is bounded to two seconds.
+A compatible cache remains in place. Otherwise, its exact encrypted file and
+wrapped key are copied into an owner-private `preserved-cache` compartment.
+If the original is busy, inaccessible or the reader times out, it is retained
+in place instead. A separately protected, schema-1 cache in that compartment
+then serves the selected Vault/database and installation. This never changes
+the authoritative Vault, SSH keys, signing keys or envelope KEKs.
+
+The helper uses isolated Python imports and the selected runtime's package
+root, never packages or startup hooks supplied by the caller's directory or
+`PYTHONPATH`. Replacement coordination stays at the original cache root across
+selection changes. If an old transaction or inaccessible lock prevents that
+coordination, or the original reader times out, cannot open the data, or lacks
+its decoder backend, the fresh empty cache may exist, but credential
+reads and writes remain pending. A later explicit population/setup retries the bounded
+assessment under the same replacement lock and carries readable pending
+journals into the current cache before permitting use. Unreadable originals
+remain preserved. An unresolved journal is never a recovered credential.
+
+Recovered compartments include the selected endpoint and host in their authority
+binding. Once recovery is active, an authority without a published compartment
+cannot fall back to the original cache. Explicit population/setup prepares a
+separate empty compartment without importing another authority's original values
+or journals. Reads alone never prepare it.
+
+Recovery uses the same live `get` request as ordinary population. Only missing
+current records are inserted: newer writes, existing values and pending
+password replacements win over a recovery response. Repeating population or
+restarting the CLI does not re-import preserved bytes or reset the new cache.
+`cache-status` (also `--json`) reports whether originals were copied or retained
+in place. It keeps recovery visible even after some entries are populated:
+the cache cannot know that every credential has been recovered. If the Vault
+is locked, unlock it explicitly or use the existing explicit `--prompt` option.
+Owner-key setup recovers only after the owner confirms the existing key; a
+failed/locked owner request does not start cache recovery or initialize a key.
+After preparation, setup re-reads the existing owner under replacement
+coordination before reconciliation; it never repeats first-owner creation.
+
+Cache-only, batch/pinned read-only, status and verification operations never
+initiate this recovery, migrate a key or unlock/start a service. They can read
+a previously published current cache. Protected-cache failures remain visible;
+an unknown schema or corrupt ciphertext is not an empty store.
+
+The selected runtime advertises `preserved-cache-recovery-v1` through the
+existing `invocation-contract --json` metadata. This is additive client-local
+behavior, not a new daemon request: existing `get` and owner-setup protocols
+are unchanged. Healthy old caches remain readable by prior clients. After
+fallback, older clients do **not** understand the new compartment selection;
+they see only the retained original, not recovered values. Do not roll back a
+recovery-dependent consumer to such a client or copy stale original records
+over current state. Preserve originals for deliberate inspection; recovery
+does not authorize their deletion or an older writer's takeover.
 
 Password replacement is journaled before the KeePass mutation. Pending
 replacements are never served by cache-first reads and cannot be overwritten by
