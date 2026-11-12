@@ -129,8 +129,11 @@ def test_deadline_bounds_trickling_https_proxy_connect(monkeypatch):
     listener.settimeout(2)
     stop, connected = threading.Event(), threading.Event()
     request_data = []
-    monkeypatch.setenv("HTTPS_PROXY", f"http://127.0.0.1:{listener.getsockname()[1]}")
-    monkeypatch.setenv("NO_PROXY", "")
+    proxy_url = f"http://127.0.0.1:{listener.getsockname()[1]}"
+    for name in ("HTTPS_PROXY", "https_proxy"):
+        monkeypatch.setenv(name, proxy_url)
+    for name in ("NO_PROXY", "no_proxy"):
+        monkeypatch.setenv(name, "")
 
     def proxy():
         try:
@@ -183,7 +186,8 @@ def test_default_fetch_bounds_response_lifetime(monkeypatch, prefix, chunk, foll
     listener.listen(1)
     listener.settimeout(1)
     stop, streaming = threading.Event(), threading.Event()
-    monkeypatch.setenv("NO_PROXY", "127.0.0.1")
+    for name in ("NO_PROXY", "no_proxy"):
+        monkeypatch.setenv(name, "127.0.0.1")
     processes = []
     real_popen = subprocess.Popen
 
