@@ -19,6 +19,7 @@ rewriting historical journal evidence or treating a source merge as rollout.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
+| [Task Relevance Reconciliation](active/task-relevance-reconciliation/README.md) | Draft; emitter/evaluator reconciliation and bound-owner closeout proposal | #12274; existing queue, wake, session and workspace owners; no runtime activation |
 | [Python Bytecode Cache Lifecycle](active/python-bytecode-cache-lifecycle/README.md) | Active; design accepted, additive private user-cache provider under implementation; consumer migration and retirement/update relief remain | #10968 bytecode follow-on; preserves runtime retention, other hygiene tracks and normal update authority; no real cleanup or rollout |
 | [Latest Waiting Update](active/latest-waiting-update/README.md) | Done; reviewed queue source merged and actual Main release verified; pending archive | #11985 under #7758; existing execution, component provisioning and maintenance owners retained; no rollout |
 | [Launch Observation Regressions](active/launch-observation-regressions/README.md) | Active; legacy mux caller corrections and readiness-only scope proposal | #11722; preserves #11564/#11718 mux owners, admission and operational holds; no rollout |
