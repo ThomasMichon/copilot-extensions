@@ -137,6 +137,8 @@ missing or incomplete discovery is not eligibility evidence. This does not
 enable relevance reports from declared registrations.
 It honors concrete and logical local overrides. Another
 registration with the same emitter provenance is ambiguous and refused.
+That check includes conflicting declarations in the fresh merged set before
+their registration rows are mirrored, not only already-published rows.
 An unchanged registration upsert does not invalidate observations; changed,
 removed/recreated or paused registrations do. A draining receiver refuses new
 decisions. A fresh abandonment uses the existing result-free terminal event

@@ -192,6 +192,9 @@ eligibility before mirror publication, full terminal event/telemetry semantics
 and slash-containing receipt identities. The corrected production state passed
 179 selected controls, with three actual-registrar cases passing in a residual
 run after correcting their active-owner fixture. No guard was weakened.
+The subsequent collision correction checks both equivalent supersession and
+conflicting source provenance in fresh unmirrored declarations. Its focused
+registered/source/transport packet passed 67 controls.
 
 ### 2026-11-12 - Original-owner delivery approved and merged
 

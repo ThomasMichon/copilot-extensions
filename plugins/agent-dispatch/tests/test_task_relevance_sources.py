@@ -16,16 +16,20 @@ from tests.test_task_relevance_registration import SPEC, emitted, emitter, q as 
 from tests.test_task_relevance_transport import body
 
 
-@pytest.mark.parametrize("source_state", ["empty", "superseded", "incomplete"])
+@pytest.mark.parametrize("source_state", ["empty", "superseded", "ambiguous", "incomplete"])
 def test_actual_configured_registrar_is_consulted_before_relevance_effect(
     q, tmp_path, monkeypatch, source_state,
 ) -> None:
     trusted = tmp_path / "trusted"
     trusted.mkdir()
     document = trusted / "source.json"
-    if source_state == "superseded":
+    if source_state in {"superseded", "ambiguous"}:
         document.write_text(json.dumps({
-            "name": "review-source", "owner": "example", "kind": "emitter", "spec": SPEC,
+            "name": "review-source", "owner": "example", "kind": "emitter",
+            "spec": {
+                **SPEC,
+                **({"command": ["different-source-reader", "tick"]} if source_state == "ambiguous" else {}),
+            },
         }), encoding="utf-8")
     elif source_state == "incomplete":
         document.write_text("{invalid", encoding="utf-8")

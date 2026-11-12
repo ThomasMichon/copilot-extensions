@@ -254,8 +254,9 @@ def test_fresh_abandon_emits_existing_lifecycle_once_not_on_report_replay(q, api
 
 @pytest.mark.parametrize("bound", [False, True])
 @pytest.mark.parametrize("override", [None, "declared:example:review-source", "logical:example:review-source"])
+@pytest.mark.parametrize("conflicting", [False, True])
 def test_unmirrored_declaration_supersedes_direct_even_when_its_source_is_disabled(
-    q, api, monkeypatch, bound, override,
+    q, api, monkeypatch, bound, override, conflicting,
 ) -> None:
     from agent_dispatch.config import overrides_path
     from agent_dispatch.registrar import load_declaration
@@ -266,8 +267,11 @@ def test_unmirrored_declaration_supersedes_direct_even_when_its_source_is_disabl
         q.claim_one("host/worker", task_id=t.id)
         q.start(t.id, "host/worker", owner_session_id="original-native")
     values = body(q, t.id)
+    declared_spec = {
+        **SPEC, **({"command": ["different-source-reader", "tick"]} if conflicting else {}),
+    }
     declaration = load_declaration({
-        "name": "review-source", "owner": "example", "kind": "emitter", "spec": SPEC,
+        "name": "review-source", "owner": "example", "kind": "emitter", "spec": declared_spec,
     })
     monkeypatch.setattr(
         "agent_dispatch.relevance_source.read_supervisor_declarations",
@@ -282,7 +286,7 @@ def test_unmirrored_declaration_supersedes_direct_even_when_its_source_is_disabl
     )
     response = api.post(f"/task-relevance/tasks/{t.id}", headers=_headers(), json=values)
     assert snapshot.status_code == response.status_code == 409
-    assert "superseded" in response.json()["detail"]
+    assert ("ambiguous" if conflicting else "superseded") in response.json()["detail"]
     assert q.get(t.id) == before
     assert q.steer_log(t.id) == q.list_wakes(t.id) == []
 

@@ -41,3 +41,11 @@ class RelevanceSource:
         merged = merge_registration_sources(direct, declared)
         if registration["id"] not in merged.registrations:
             raise TaskError("relevance direct registration is superseded by its effective declaration")
+        spec = registration["spec"]
+        provenance = spec.get("source") or "emitter", spec.get("id")
+        if any(
+            item["id"] != registration["id"] and item["kind"] == "emitter"
+            and ((other := item["spec"]).get("source") or "emitter", other.get("id")) == provenance
+            for item in merged.registrations.values()
+        ):
+            raise TaskError("relevance emitter attribution is ambiguous in the effective registrar set")
