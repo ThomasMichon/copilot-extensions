@@ -110,9 +110,17 @@ function Wait-AgentQueuedSubmission($ProcessId, [DateTime]$SubmittedAt, [string]
     # is watched only to notice a submission that ended without recording one,
     # so a reused PID can neither delay the result nor supply its own code.
     $recordedCode = {
+        # Published by an atomic rename, so the name never refers to a partial
+        # write; still read share-tolerantly and retry on any transient failure.
         if (-not (Test-Path -LiteralPath $ExitFile -PathType Leaf)) { return $null }
+        $text = $null
+        try {
+            $stream = [IO.File]::Open($ExitFile, [IO.FileMode]::Open, [IO.FileAccess]::Read,
+                [IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete)
+            try { $text = (New-Object IO.StreamReader($stream)).ReadToEnd() } finally { $stream.Dispose() }
+        } catch { return $null }
         $recorded = 0
-        if ([int]::TryParse(([IO.File]::ReadAllText($ExitFile)).Trim(), [ref]$recorded)) { return $recorded }
+        if ([int]::TryParse($text.Trim(), [ref]$recorded)) { return $recorded }
         return $null
     }
     $process = $null
@@ -164,7 +172,8 @@ function Submit-AgentDurableUpdate([string]$Preflight) {
             "`$spec = ConvertFrom-Json ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('$payload')))`n" +
             "`$forward = [string[]]@(`$spec.args)`n& ([string]`$spec.caller) @forward`n" +
             "`$code = if (`$null -eq `$LASTEXITCODE) { 0 } else { `$LASTEXITCODE }`n" +
-            "[IO.File]::WriteAllText([string]`$spec.exit, [string]`$code)`nexit `$code`n"
+            "[IO.File]::WriteAllText([string]`$spec.exit + '.tmp', [string]`$code)`n" +
+            "[IO.File]::Move([string]`$spec.exit + '.tmp', [string]`$spec.exit)`nexit `$code`n"
         $shell = (Get-Process -Id $PID).Path
         $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($script))
         $command = "`"$env:ComSpec`" /d /s /c `"`"$shell`" -NoProfile -NonInteractive " +
