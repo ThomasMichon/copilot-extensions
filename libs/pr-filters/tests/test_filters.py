@@ -97,6 +97,20 @@ def test_identity_alternatives_and_explicit_tag_any() -> None:
     assert selected.evaluate({"from": ["bob"], "tags": []}, now=0) == NONMATCH
 
 
+@pytest.mark.parametrize(("field", "fact"), [("created", "created_at"), ("activity", "activity_at")])
+@pytest.mark.parametrize("instant", [10**400, -(10**400)])
+def test_numeric_overflow_preserves_unknown_age_and_rejects_now(
+    field: str, fact: str, instant: int,
+) -> None:
+    age = {"age": {"field": field, "max_seconds": 10}}
+    assert expression(age).evaluate({fact: instant}, now=100) == UNKNOWN
+    assert expression({"any": [age, {"repo": ["x"]}]}).evaluate(
+        {fact: instant, "repo": "x"}, now=100,
+    ) == MATCH
+    with pytest.raises(FilterError, match="invalid evaluation instant"):
+        expression(age).evaluate({fact: 100}, now=instant)
+
+
 @pytest.mark.parametrize("where", [
     {}, {"repo": []}, {"repo": ["x", "x"]}, {"repo": "x"}, {"unknown": ["x"]},
     {"any": []}, {"all": [{"repo": ["x"]}], "publication": ["draft"]},

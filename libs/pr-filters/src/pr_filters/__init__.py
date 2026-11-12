@@ -8,7 +8,7 @@ import hashlib
 import json
 import math
 import re
-from typing import Any
+from typing import Any, TypeGuard
 
 PROTOCOL = "agent-pull-requests.filters/v1"
 FIELDS = frozenset({"repo", "from", "assigned", "age", "tags", "publication"})
@@ -191,9 +191,18 @@ class Expression:
         self, facts: Mapping[str, Any], *, now: float,
         groups: Mapping[str, Mapping[str, Any]] | None = None,
     ) -> str:
-        if isinstance(now, bool) or not isinstance(now, (int, float)) or not math.isfinite(now):
+        if not _finite_number(now):
             raise FilterError("invalid evaluation instant")
         return _evaluate(self.document()["where"], facts, now, groups or {})
+
+
+def _finite_number(value: object) -> TypeGuard[int | float]:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        return False
 
 
 def _combine(results: list[str], operator: str) -> str:
@@ -235,9 +244,7 @@ def _evaluate(
             results.append(_identity(selected, value, groups))
         elif name == "age":
             instant = facts.get("created_at" if selected["field"] == "created" else "activity_at")
-            if isinstance(instant, bool) or not isinstance(instant, (int, float)) or (
-                not math.isfinite(instant) or instant > now
-            ):
+            if not _finite_number(instant) or instant > now:
                 results.append(UNKNOWN)
             else:
                 age = now - instant
