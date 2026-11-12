@@ -502,9 +502,9 @@ def test_mux_passive_uses_target_retained_interpreter_without_pythonpath(constru
 
 @pytest.mark.parametrize("after_replace", [False, True])
 def test_partial_publication_restores_native_selection_without_cutover(
-    constructed, monkeypatch, after_replace,
+    replacement_ready, monkeypatch, after_replace,
 ):
-    directory, env, root, previous, _ = constructed
+    directory, env, root, previous, _ = replacement_ready
     prepared = json.loads(Path(os.environ["MANAGER_RUNTIME_ACCEPTANCE_DATA"]).read_text())["constructed"]
     target = Path(prepared["target"])
     markers = [root / "current-version", root / "last-known-good"]
@@ -537,14 +537,26 @@ def test_partial_publication_restores_native_selection_without_cutover(
     assert all(path.read_bytes() == content for path, content in receipts.items())
 
 
-def test_same_package_generation_update_replaces_and_verifies_live_fixture_mux(constructed, monkeypatch):
+@pytest.fixture
+def replacement_ready(constructed):
+    directory, env, root, previous, process = constructed
+    prepared = json.loads(Path(os.environ["MANAGER_RUNTIME_ACCEPTANCE_DATA"]).read_text())["constructed"]
+    target = Path(prepared["target"])
+    selected = si.current_version(root)
+    assert selected in {previous.name, target.name}
+    si._runtime_installer().activate(root, previous.name, expected=selected)
+    assert si.current_version(root) == previous.name
+    return directory, env, root, previous, process
+
+
+def test_same_package_generation_update_replaces_and_verifies_live_fixture_mux(replacement_ready, monkeypatch):
     from worktree_manager import mux_daemon_cutover as cutover
 
     started = time.monotonic()
     def phase(name: str) -> None:
         print(f"Manager replacement {name}: {time.monotonic() - started:.2f}s", flush=True)
 
-    directory, env, root, previous, _ = constructed
+    directory, env, root, previous, _ = replacement_ready
     prepared = json.loads(Path(os.environ["MANAGER_RUNTIME_ACCEPTANCE_DATA"]).read_text())["constructed"]
     target = Path(prepared["target"])
     assert si.payload_version(previous / "payload") == si.payload_version(target / "payload")

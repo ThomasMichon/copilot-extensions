@@ -132,6 +132,27 @@ synthetic stores and native fixture owners.
 
 ### 2026-11-12 - Final source-pinned retention evidence
 
+- The [403-case capture/replay](https://github.com/ThomasMichon/copilot-extensions/actions/runs/43250136923)
+  passed at `9eab001f71535daae4d9259cb9b06831318b0358`, including independent
+  no-write verification, immutable historical-publication controls and the
+  canonical contract checker. The qualified artifact's source, stages and
+  export receipt were verified before the native publisher materialized 188
+  outputs. Local validation passed both contracts and 1,096 retained fixtures.
+- The [fifth native lane](https://github.com/ThomasMichon/copilot-extensions/actions/runs/43250113709)
+  demonstrates that disjoint construction and all 17 Windows items fit the
+  original group: construction took about 197 seconds and the ten consumer
+  assertions finished in 59.90 seconds, without a group timeout. Three later
+  assertions failed because the shared fixture already selected the target:
+  the two publication-fault cases never reached their injection and live
+  replacement correctly reported already-current. Replacement cases now
+  explicitly establish the healthy previous generation through the native
+  activation owner before taking snapshots; all fault, rollback, update-action
+  and live process assertions remain unchanged. This correction still requires
+  a physical pass, not an accepted failure.
+- That lane passed Linux seed, Linux entry/installed and Windows terminal/mux.
+  macOS did not execute: GitHub reported that no hosted runner acquired the job
+  after multiple attempts and disclosed arm64 capacity constraints. This is
+  unavailable venue evidence, not a macOS pass or product failure.
 - A subsequent review identified an ordinary-resume gap after completed retained
   recovery: constructing a new direct or Host-backed client could restore default
   automatic permission approval. All construction paths now consult the durable
