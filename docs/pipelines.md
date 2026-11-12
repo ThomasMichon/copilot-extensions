@@ -621,6 +621,14 @@ the separate exact-copy checks and frozen-candidate consumer tests remain
 required, including source-bound checker witnesses and positive unit origins.
 The release writer checks out that same pinned source; `origin/main` remains
 the promotion parent and version/state seed, not the executable tooling root.
+The source-only `tools/local_runtime_promotion.py` adapter uses this same
+composer with exact source and Main commit IDs, but retains shipped Main
+versions instead of allocating bumps. It materializes the complete tree and
+optionally reports a selected export closure, without publishing a commit,
+ref, artifact or runtime selection. Changefiles are removed only from its
+owned scratch checkout; the input checkout and pending bump intent remain
+unchanged. Main version metadata is read in bounded raw-blob batches, and
+inherited Git repository/index/config selectors do not redirect composition.
 The writer's job-wide token is read-only. Checkout persists no credentials,
 and the release PAT is scoped only to the trusted push, coverage publication,
 PR landing and tagging shell steps. Git uses the `gh` credential helper, which

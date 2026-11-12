@@ -6636,6 +6636,18 @@ forwarding through the existing toolchain-lock owner. These socket/thread tests
 are separate from the actor-free promotion-unit packet; they do not establish
 native installer, private-feed or installed maintenance qualification.
 
+### Source-only local composition
+
+`tools/test_promote_release.py` includes real-Git local-composition fixtures:
+exact committed source despite staged edits, Main plugin/standalone/library
+version retention without bump allocation, pending changefile preservation,
+foreign repository/index isolation, repeatable output and scratch settlement
+on selection failure. These fixture-owned process tests remain separate from
+the actor-free promotion packet. `test_source_objects.py` in that packet
+checks raw-blob batching, Git-environment filtering and delegation/cleanup
+through substituted existing owners. Neither packet qualifies installed
+publication, native maintenance or application adoption.
+
 ## Unit-only promotion packet
 
 The actor-free health composition packet also admits installed Windows

@@ -16,8 +16,15 @@ from promotion_complete_source import (
 from promotion_unit_contract import MAX_PACKET_FILE_BYTES, decode_json
 
 
+def git_environment(**overrides: str) -> dict[str, str]:
+    environment = {
+        key: value for key, value in os.environ.items() if not key.upper().startswith("GIT_")
+    }
+    return {**environment, **overrides}
+
+
 def _git(repo: Path, args: list[str], *, data: bytes | None = None) -> bytes:
-    env = {key: value for key, value in os.environ.items() if not key.upper().startswith("GIT_")}
+    env = git_environment()
     result = subprocess.run(
         ["git", "--no-replace-objects", *args], cwd=repo, env=env, input=data,
         capture_output=True, timeout=30,
@@ -26,6 +33,43 @@ def _git(repo: Path, args: list[str], *, data: bytes | None = None) -> bytes:
     if result.returncode:
         raise ValueError(f"cannot read complete-source Git data: {result.stderr.decode(errors='replace')}")
     return result.stdout
+
+
+def is_ancestor(repo: Path, ancestor: str, descendant: str) -> bool:
+    result = subprocess.run(
+        ["git", "--no-replace-objects", "merge-base", "--is-ancestor", ancestor, descendant],
+        cwd=str(repo), capture_output=True, text=True, env=git_environment(),
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    return result.returncode == 0
+
+
+def changefile_existed_at(rev: str, name: str, *, repo: Path) -> bool:
+    """Read whether a changefile was already present at the previous Dev boundary."""
+    result = subprocess.run(
+        ["git", "--no-replace-objects", "cat-file", "-e", f"{rev}:.changefiles/{name}"],
+        cwd=str(repo), capture_output=True, text=True, env=git_environment(),
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    return result.returncode == 0
+
+
+def main_version_inputs(repo: Path, main_head: str, paths: list[str]) -> dict[str, str]:
+    selected = set(paths)
+    if not selected:
+        return {}
+    objects = {}
+    for row in _git(repo, ["ls-tree", "-rz", main_head]).split(b"\0"):
+        if not row:
+            continue
+        metadata, raw_path = row.split(b"\t", 1)
+        path = raw_path.decode("utf-8", errors="surrogateescape")
+        if path in selected:
+            _mode, kind, blob = metadata.decode("ascii").split()
+            if kind == "blob":
+                objects[path] = blob
+    blobs = read_blobs(repo, list(objects.values()))
+    return {path: blobs[blob].decode("utf-8") for path, blob in objects.items()}
 
 
 def candidate_tree_and_parent(repo: Path, *, candidate_sha: str) -> tuple[str, str]:
@@ -69,7 +113,18 @@ def read_tree(repo: Path, *, candidate_sha: str, main_before: str, tree: str) ->
         entries[name] = (mode, blob)
     if not 1 <= len(entries) <= MAX_SOURCE_FILES:
         raise ValueError("complete-source Git inventory is empty or oversized")
-    identifiers = sorted({blob for _mode, blob in entries.values()})
+    blobs = read_blobs(repo, [blob for _mode, blob in entries.values()])
+    return {name: (mode, blobs[blob]) for name, (mode, blob) in entries.items()}
+
+
+def read_blobs(repo: Path, requested: list[str]) -> dict[str, bytes]:
+    """Read bounded raw blobs; commit/path admission remains with the caller."""
+    if not requested:
+        return {}
+    if any(not isinstance(blob, str) or not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", blob)
+           for blob in requested):
+        raise ValueError("invalid pinned Git blob identity")
+    identifiers = sorted(set(requested))
     request = ("\n".join(identifiers) + "\n").encode()
     metadata = _git(repo, ["cat-file", "--batch-check"], data=request).splitlines()
     if len(metadata) != len(identifiers):
@@ -82,7 +137,7 @@ def read_tree(repo: Path, *, candidate_sha: str, main_before: str, tree: str) ->
         sizes[blob] = int(fields[2])
     if (
         any(size > MAX_PACKET_FILE_BYTES for size in sizes.values())
-        or sum(sizes[blob] for _mode, blob in entries.values()) > MAX_SOURCE_BYTES
+        or sum(sizes[blob] for blob in requested) > MAX_SOURCE_BYTES
     ):
         raise ValueError("complete-source Git blobs exceed the existing source bounds")
     output = _git(repo, ["cat-file", "--batch"], data=request)
@@ -99,7 +154,7 @@ def read_tree(repo: Path, *, candidate_sha: str, main_before: str, tree: str) ->
         position = end + 1
     if position != len(output):
         raise ValueError("unexpected complete-source batch bytes")
-    return {name: (mode, blobs[blob]) for name, (mode, blob) in entries.items()}
+    return blobs
 
 
 def source_identity(index_raw: bytes, receipt: dict, *, qualification_digest: str) -> dict:

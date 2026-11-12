@@ -557,7 +557,10 @@ def _project_version_at(ref: str, rel_pyproject: str) -> str | None:
     `_version_at`'s generic "first `version = ` line" regex, which could
     read an earlier unrelated table's own `version` key instead of a
     standalone consumer's real release version (PR #4514 review)."""
-    text = _git("show", f"{ref}:{rel_pyproject}")
+    return _project_version_from_text(_git("show", f"{ref}:{rel_pyproject}"))
+
+
+def _project_version_from_text(text: str) -> str | None:
     if not text:
         return None
     try:

@@ -47,10 +47,9 @@ def test_library_identifiers_do_not_alias_other_projects(library, name):
 
 
 def test_library_seed_preserves_shipped_version_without_reapplying_old_change(library, monkeypatch):
-    monkeypatch.setattr(promotion, "_git", lambda *args, **kwargs: "")
     monkeypatch.setattr(
-        acc, "_project_version_at",
-        lambda ref, path: "0.1.0-dev8" if path == "libs/agent-procutil/pyproject.toml" else None,
+        promotion, "_main_version_inputs",
+        lambda *args: {"libs/agent-procutil/pyproject.toml": '[project]\nversion="0.1.0-dev8"\n'},
     )
     promotion._seed_versions_from_main(library, "shipped", acc=acc, repo=library)
     for root in acc.library_roots("libs/agent-procutil"):
@@ -148,6 +147,7 @@ def test_library_apply_failure_is_not_accepted(library):
 
 
 def test_shipped_version_seed_failure_refuses(monkeypatch, tmp_path):
+    monkeypatch.setattr(promotion, "_main_version_inputs", lambda *args: {})
     fake = SimpleNamespace(
         iter_standalone_consumer_names=lambda: [],
         iter_library_consumer_names=lambda: ["libs/agent-procutil"],
