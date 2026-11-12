@@ -1,0 +1,9 @@
+{
+  "comment": "Add opt-in emitter receipt relevance checks with retained unknown outcomes and registered source fences",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

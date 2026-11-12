@@ -89,12 +89,12 @@ merged plan does not establish running adoption.
 
 ### Phase 2 - One relevance decision, two callers
 
-- [ ] Add a coordinator-owned relevance report with durable request identity,
+- [x] Add a coordinator-owned relevance report with durable request identity,
       source/registration scope and expected task revision or generation.
       Emitters and evaluators use the same transaction.
-      Local direct command-emitter admission and runtime support are merged;
-      declared/evaluator effective-scope admission is in source validation before
-      caller migration.
+      Direct and declared command-emitter and companion evaluator admission,
+      effective-source revisions and runtime support merged in #12293/#12300.
+      Automatic source caller migration remains in Phase 3.
 - [x] Inside that transaction, abandon only a task with no prior claim/start,
       current assignment, native attachment, pending startup or retained
       resource obligation. Claim and preparation races must linearize with it.
@@ -113,9 +113,12 @@ merged plan does not establish running adoption.
 
 ### Phase 3 - Source and periodic evaluation integration
 
-- [ ] Let an emitter reconcile its retained task receipts against authoritative
+- [x] Let an emitter reconcile its retained task receipts against authoritative
       backing-object state, including closed objects missing from an open-only
       listing. An unavailable or incomplete listing is not closure evidence.
+      The opt-in [receipt caller](../../../plugins/agent-dispatch/docs/emitter-relevance.md)
+      supplies the source-check contract and registered transaction; domain
+      adapter migration and installed-runtime qualification remain separate.
 - [ ] Extend the existing registrar/evaluator execution path with optional,
       bounded reconsideration of its own eligible unbound tasks. Persist due
       work and retry/backoff through the existing owner, without a second daemon.
@@ -140,7 +143,9 @@ merged plan does not establish running adoption.
 
 ## Validation Plan
 
-- [ ] Source closure before claim abandons without launching an agent.
+- [x] Source closure before claim abandons without launching an agent.
+      Isolated receipt-caller/current-HTTP controls exercise explicit source
+      closure with empty open-only production, not installed-runtime activation.
 - [ ] Concurrent claim, reservation and workspace/native preparation cannot
       create a body after a successful unbound-abandon decision.
 - [x] A previously claimed but now unassigned task does not become
@@ -172,5 +177,5 @@ authority. Add no universal attestation layer or duplicate lifecycle engine.
 ## Journal
 
 - [2026-11-12 - Receiver delivery](journal/2026/11.12-receiver-delivery.md):
-  architecture, internal ownership, original-owner delivery and local registered
-  receiver merges; broader scope, callers and running adoption remain open.
+  architecture, internal ownership, original-owner delivery and effective-source
+  receiver merges; callers and running adoption remain open.

@@ -545,7 +545,10 @@ def build_command(
             or "ci_repair" in spec
         ):
             holder = str(reg.get("machine") or platform.node() or "local")
-            return base + ["emitter", "serve", path, "--holder", holder]
+            return base + [
+                "emitter", "serve", path, "--holder", holder,
+                *(["--registration-id", str(reg["id"])] if spec.get("relevance") is not None else []),
+            ]
         argv = base + ["webhook", "--config", path]
         argv += ["--host", str(spec.get("host", "127.0.0.1"))]
         argv += ["--port", str(spec.get("port", 9331))]
