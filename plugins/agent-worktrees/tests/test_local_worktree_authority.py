@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import sys
 from argparse import Namespace
@@ -205,6 +206,22 @@ def test_local_proof_is_filesystem_only(local_worktree, monkeypatch):
     assert retained_checkout.is_local(record, config)
 
 
+def test_registered_anchor_is_local_without_machine_topology(local_worktree):
+    fixture = local_worktree
+    _topology(fixture, "malformed")
+    config = fixture.load()
+    ledger = fixture.ledger.parent / "@anchor.yaml"
+    ledger.write_text(yaml.safe_dump({
+        **fixture.data, "worktree_id": "@anchor", "worktree_path": str(fixture.anchor),
+        "kind": "anchor", "resources": [],
+    }), encoding="utf-8")
+    record = tracking.load_record(ledger)
+    execution_spaces.require_record_mutation(record, config)
+    assert retained_checkout.is_local(record, config)
+    report = health.audit_local_registration([record, tracking.load_record(fixture.ledger)])
+    assert report["local"] == 2 and report["unproven"] == 0
+
+
 def test_local_checkout_does_not_override_an_explicit_foreign_target(local_worktree):
     from agent_worktrees.resolve_target import retained_target_is_local
 
@@ -216,3 +233,164 @@ def test_local_checkout_does_not_override_an_explicit_foreign_target(local_workt
     assert not retained_target_is_local(
         config, fixture.checkout.name, "old-execution", other_environment,
     )
+
+
+@pytest.mark.parametrize("versioned", [False, True])
+def test_local_checkout_cannot_cross_the_actual_execution_platform(local_worktree, versioned):
+    fixture = local_worktree
+    _topology(fixture, "missing")
+    other = "wsl" if cfg.detect_platform() != "wsl" else "windows"
+    fixture.data["platform"] = other
+    if versioned:
+        fixture.data["environment"] = other
+    else:
+        for field in ("machine_identity_version", "environment", "execution_machine"):
+            fixture.data.pop(field)
+    fixture.ledger.write_text(yaml.safe_dump(fixture.data), encoding="utf-8")
+    record = tracking.load_record(fixture.ledger)
+    config = fixture.load()
+    assert not retained_checkout.is_local(record, config)
+    with pytest.raises(execution_spaces.ExecutionSpaceError, match="platform"):
+        execution_spaces.require_record_mutation(record, config)
+
+
+@pytest.mark.parametrize("ambiguous_suffix", [False, True])
+def test_declared_remote_retains_selector_despite_retained_local_record(
+    local_worktree, monkeypatch, capfd, ambiguous_suffix,
+):
+    from agent_worktrees import installer, resolve_cli
+
+    fixture = local_worktree
+    _topology(fixture, "missing")
+    selector = "old-execution"
+    raw_id = fixture.checkout.name
+    if ambiguous_suffix:
+        other = fixture.ledger.with_name("another-worktree.yaml")
+        other.write_text(yaml.safe_dump({
+            **fixture.data, "worktree_id": other.stem,
+        }), encoding="utf-8")
+        raw_id = "worktree"
+    entry = cfg.MachineEntry(
+        key=selector, display_name="Remote", hostname="remote-host",
+        execution_platform=cfg.detect_platform(),
+    )
+    monkeypatch.setattr(cfg, "load_machines_yaml", lambda *a, **k: {selector: entry})
+    monkeypatch.setattr(installer, "read_projects_registry", lambda: {"projects": {"example": {}}})
+    routed = []
+    monkeypatch.setattr(
+        resolve_cli, "_emit_remote_plan_for_env",
+        lambda *args, **kwargs: routed.append(args) or 0,
+    )
+    before = fixture.ledger.read_bytes()
+    assert resolve_cli.cmd_resolve(_args(worktree_id=raw_id, machine=selector)) == 0
+    assert routed[0][1] == selector
+    assert routed[0][3][:2] == ["--worktree-id", raw_id]
+    assert cfg.active_project() == "example"
+    assert fixture.ledger.read_bytes() == before
+    capfd.readouterr()
+
+
+def test_ambiguous_declared_target_cannot_fall_back_to_a_historical_alias(
+    local_worktree, monkeypatch,
+):
+    from agent_worktrees import resolve_target
+
+    fixture = local_worktree
+    _topology(fixture, "missing")
+    config = fixture.load()
+    entries = {name: cfg.MachineEntry(
+        key=name, display_name=name, alias="old-execution", hostname=name,
+        execution_platform=cfg.detect_platform(),
+    ) for name in ("remote-one", "remote-two")}
+    monkeypatch.setattr(cfg, "load_machines_yaml", lambda *a, **k: entries)
+    with pytest.raises(ValueError, match="[Aa]mbiguous"):
+        resolve_target.target_is_local(
+            config, "old-execution", worktree_id=fixture.checkout.name,
+        )
+
+
+def test_cross_project_local_probe_uses_receiving_config_without_rebinding_remote(
+    local_worktree, monkeypatch, capfd,
+):
+    from agent_worktrees import installer, local_cache_refresh, resolve_cli, resolve_target
+
+    fixture = local_worktree
+    _topology(fixture, "malformed")
+    receiving = fixture.load()
+    ambient = replace(receiving, repo_name="other", machine="other-host", repos={
+        "other": receiving.default_repo,
+    })
+    _stub_launch_plumbing(monkeypatch, receiving)
+    monkeypatch.setattr(cfg, "_ACTIVE_PROJECT", "other")
+    monkeypatch.setattr(cfg, "tracking_dir", lambda name=None: cfg.project_dir(
+        name or cfg.active_project(),
+    ) / "worktrees")
+    monkeypatch.setattr(cfg, "load_config", lambda *a, **k: (
+        receiving if cfg.active_project() == receiving.repo_name else ambient
+    ))
+    monkeypatch.setattr(installer, "read_projects_registry", lambda: {
+        "projects": {"example": {}, "other": {}},
+    })
+    assert resolve_target.retained_target_is_local(ambient, fixture.checkout.name, "old-execution")
+    assert cfg.active_project() == "other"
+    assert not resolve_target.retained_target_is_local(ambient, fixture.checkout.name, "foreign-host")
+    assert cfg.active_project() == "other"
+    monkeypatch.setattr(local_cache_refresh, "prepare_tool_roster", lambda *a, **k: None)
+    assert resolve_cli.cmd_resolve(_args(
+        worktree_id=fixture.checkout.name, machine="old-execution",
+        no_resume=True, defer_projections=True,
+    )) == 0
+    plan = json.loads(capfd.readouterr().out)
+    assert plan.get("launch", plan)["work_dir"] == str(fixture.checkout)
+    assert cfg.active_project() == "example"
+
+
+def test_journal_recovered_receipt_keeps_readonly_local_proof(local_worktree, monkeypatch):
+    from agent_worktrees import creation_requests, receiving_allocation, worktree_trust
+
+    fixture = local_worktree
+    _topology(fixture, "malformed")
+    config = fixture.load()
+    admission = receiving_allocation.ReceivingAllocation.from_fields({
+        "origin": "remote/parent/origin", "request_id": "original", "token": "a" * 32,
+        "target": {"machine": "old-execution", "project": "example", "options": {"no_pair": True}},
+    })
+    fixture.data["owner_ref"] = admission.origin
+    fixture.ledger.write_text(yaml.safe_dump(fixture.data), encoding="utf-8")
+    record = tracking.load_record(fixture.ledger)
+    child = {
+        "id": record.worktree_id, "repo": record.repo,
+        "branch": record.branch, "path": record.worktree_path,
+    }
+    connection = creation_requests._connection(fixture.ledger.parent.parent / "workspace-creation.sqlite3")
+    with connection:
+        connection.execute("INSERT INTO creations VALUES (?, 1, ?, 'complete', ?)", (
+            hashlib.sha256(admission.key.encode()).hexdigest(),
+            json.dumps({"receiving_allocation": admission.to_fields()}),
+            json.dumps({"creation_nonce": record.creation_nonce, "worktree": child}),
+        ))
+    connection.close()
+    before = fixture.ledger.read_bytes()
+    monkeypatch.setattr(
+        execution_spaces, "registry_for_config",
+        lambda *a: pytest.fail("recovered local receipt consulted optional topology"),
+    )
+    execution_spaces.require_record_mutation(record, config)
+    assert record.receiving_allocation_present
+    monkeypatch.setattr(
+        creation_requests, "_connection",
+        lambda *a: pytest.fail("local proof opened a journal schema writer"),
+    )
+    assert retained_checkout.is_local(record, config)
+    trusted = []
+    monkeypatch.setattr(
+        worktree_trust.permissions, "ensure_trusted_folder",
+        lambda path: trusted.append(path) or True,
+    )
+    assert worktree_trust.ensure_record_trusted(record, config)
+    assert trusted == [record.worktree_path]
+    owner = tracking.format_claim_ref(record.execution_machine, record.repo, record.worktree_id)
+    assert tracking_producer_write._owned_record({"owner_ref": owner}, fixture.ledger)[0].receiving_allocation_present
+    assert fixture.ledger.read_bytes() == before
+    record.receiving_allocation["token"] = "b" * 32
+    assert not retained_checkout.is_local(record, config)

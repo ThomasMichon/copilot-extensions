@@ -26,7 +26,6 @@ from .launch_progress import preview_mode, step
 from .resolve_picker_cli import ResolvePickerContext, run_legacy_picker
 from .resolve_machine_cli import remote_selector_args as _remote_selector_args
 from .resolve_target import target_is_local as _target_is_local
-from .resolve_target import retained_target_is_local
 
 
 def _core():
@@ -65,10 +64,6 @@ def _emit_remote_plan_for_env(*args, **kwargs):
 
 def _heal_stale_anchor_if_self_missing(*args, **kwargs):
     return _core()._heal_stale_anchor_if_self_missing(*args, **kwargs)
-
-
-
-
 
 
 def _launch_profile_selection(*args, **kwargs):
@@ -534,11 +529,9 @@ def _cmd_resolve(args: argparse.Namespace) -> int:
         if state.requested_machine:
             config = state.load_config()
             try:
-                target_is_local = retained_target_is_local(
-                    config, state.worktree_id, state.requested_machine,
-                    getattr(args, "environment", None),
-                ) or _target_is_local(
+                target_is_local = _target_is_local(
                     config, state.requested_machine, getattr(args, "environment", None),
+                    worktree_id=state.worktree_id,
                 )
                 requested_environment = (
                     cfg.detect_platform() if target_is_local else resolve_machine_selection(
@@ -671,11 +664,9 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
     # WSL worktree) fail closed with a bogus "Worktree not found" instead of
     # SSHing into the requested environment -- confirmed live.
     try:
-        same_machine = retained_target_is_local(
-            config, state.worktree_id, state.requested_machine,
-            getattr(state.args, "environment", None),
-        ) or _target_is_local(
+        same_machine = _target_is_local(
             config, state.requested_machine, getattr(state.args, "environment", None),
+            worktree_id=state.worktree_id,
         )
         requested_environment = (
             cfg.detect_platform() if same_machine else resolve_machine_selection(

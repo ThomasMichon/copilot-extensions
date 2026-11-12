@@ -7060,7 +7060,8 @@ template or changed input still rejects admission.
 An exact node whitelist deselects other cases before execution and restores manifest
 order. Missing or duplicate admitted nodes reject collection before execution.
 Nine execution-acquisition controls in `test_related_acquisition.py` exercise
-the original selection and absence paths, fatal source/presence failures,
+the original selection and absence paths, retained config with failed
+acquisition observations for optional source/presence failures,
 suppressed registry failures, self-restoring callbacks and argument-time
 rebinding, including an opaque absent-registry fallback with a self-restoring
 resolver. Synthetic source, resolver and registry boundaries retain probe

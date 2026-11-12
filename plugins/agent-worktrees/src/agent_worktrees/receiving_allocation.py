@@ -181,7 +181,9 @@ def _require_retained_finality(
         raise ValueError("receiving allocation is concluded; reopening or downgrading requires new ownership")
 
 
-def recover_missing(record: tracking.WorktreeRecord, records: Path) -> bool:
+def recover_missing(
+    record: tracking.WorktreeRecord, records: Path, *, upgrade_journal: bool = True,
+) -> bool:
     """Old writers may omit a field, but cannot create journal-backed provenance."""
     from . import creation_requests
 
@@ -202,6 +204,8 @@ def recover_missing(record: tracking.WorktreeRecord, records: Path) -> bool:
                 row[1] == creation_requests.RECEIVING_IDENTITY_INDEX
                 for row in connection.execute("PRAGMA index_list(creations)")
             ):
+                if not upgrade_journal:
+                    return False
                 # Legacy journals are upgraded once, never scanned on every
                 # ordinary record save. New creation writers install the index.
                 upgrade = creation_requests._connection(path)

@@ -47,6 +47,16 @@ def require_git_checkout(checkout: Path, anchor: Path, branch: str) -> None:
         raise ValueError("Git worktree registration points at another location")
 
 
+def _git_directory(anchor: Path) -> Path:
+    if not anchor.is_absolute():
+        raise ValueError("receiving anchor must be absolute")
+    common = anchor / ".git" if (anchor / ".git").is_dir() else anchor
+    common = common.resolve()
+    if not (common / "HEAD").is_file() or not (common / "objects").is_dir():
+        raise ValueError("receiving anchor is not a Git repository")
+    return common
+
+
 def _require_linked_checkout(checkout: Path, anchor: Path) -> None:
     """Read Git's own reciprocal membership without starting Git on entry."""
     if not checkout.is_absolute() or checkout.resolve() != checkout.absolute():
@@ -58,12 +68,7 @@ def _require_linked_checkout(checkout: Path, anchor: Path) -> None:
     if not text.startswith("gitdir: ") or "\n" in text:
         raise ValueError("invalid linked-worktree marker")
     administrative = (checkout / text.removeprefix("gitdir: ")).resolve()
-    if not anchor.is_absolute():
-        raise ValueError("receiving anchor must be absolute")
-    common = anchor / ".git" if (anchor / ".git").is_dir() else anchor
-    common = common.resolve()
-    if not (common / "HEAD").is_file() or not (common / "objects").is_dir():
-        raise ValueError("receiving anchor is not a Git repository")
+    common = _git_directory(anchor)
     if administrative.parent != common / "worktrees":
         raise ValueError("local checkout belongs to another Git family")
     shared = (administrative / "commondir").read_text(encoding="utf-8").strip()
@@ -82,13 +87,12 @@ def is_local(record, config) -> bool:
 
     try:
         repo = config.repos.get(record.repo)
-        if repo is None or config.repo_name != record.repo:
+        if repo is None or config.repo_name != record.repo or record.platform != cfg.detect_platform():
             return False
         checkout = Path(record.worktree_path)
         ledger = cfg.project_dir(record.repo) / "worktrees" / f"{record.worktree_id}.yaml"
         if (
-            record.worktree_id == "@anchor"
-            or not checkout.is_absolute() or not (checkout / ".git").is_file()
+            not checkout.is_absolute()
             or Path(record.worktree_id).name != record.worktree_id
             or "/" in record.worktree_id or "\\" in record.worktree_id
             or ledger.is_symlink() or not ledger.is_file()
@@ -97,15 +101,31 @@ def is_local(record, config) -> bool:
             or ledger.resolve().parent != ledger.parent.resolve()
         ):
             return False
+        if record.worktree_id != "@anchor" and not (checkout / ".git").is_file():
+            return False
         current = tracking.load_record(ledger)
+        if (
+            record.receiving_allocation_present and not current.receiving_allocation_present
+            and record.receiving_allocation != current.receiving_allocation
+        ):
+            from .receiving_allocation import recover_missing, require_record
+
+            if not recover_missing(current, ledger.parent, upgrade_journal=False):
+                return False
+            require_record(current, config, local_record=True)
         fields = (
             "repo", "worktree_id", "worktree_path", "branch", "creation_nonce",
             "machine", "platform", "machine_identity", "checkout_managed",
-            "owner_ref", "pair_ref", "receiving_allocation",
+            "owner_ref", "pair_ref", "receiving_allocation", "receiving_allocation_present",
         )
         if any(getattr(current, field) != getattr(record, field) for field in fields):
             return False
-        _require_linked_checkout(checkout, Path(repo.anchor))
+        if record.worktree_id == "@anchor":
+            if checkout != Path(repo.anchor) or checkout.resolve() != checkout.absolute():
+                return False
+            _git_directory(checkout)
+        else:
+            _require_linked_checkout(checkout, Path(repo.anchor))
         return True
     except (AttributeError, OSError, ValueError, RuntimeError, cfg.yaml.YAMLError, git_ops.GitError):
         return False

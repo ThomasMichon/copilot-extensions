@@ -291,6 +291,11 @@ def require_record_mutation(record: Any, config: Any, *, recover_receiving: bool
 
     if record is None:
         return
+    if getattr(record, "platform", cfg.detect_platform()) != cfg.detect_platform():
+        raise ExecutionSpaceError(
+            "record snapshot identity/platform belongs to a different execution space/platform; "
+            "native execution platform required"
+        )
     from .checkout_relocation_state import require_idle
 
     paths = {Path(record.yaml_path)} if getattr(record, "yaml_path", None) is not None else set()

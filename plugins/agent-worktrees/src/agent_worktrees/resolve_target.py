@@ -13,28 +13,50 @@ def retained_target_is_local(
     config: cfg.Config, worktree_id: str | None, name: str | None,
     environment: str | None = None,
 ) -> bool:
-    from . import retained_checkout, tracking, worktree_identity
+    from . import retained_checkout, session_tracking_cli, tracking
+    from .execution_spaces import ExecutionSpaceError, project_record_config
 
     if not worktree_id or not name or (
         environment and normalize_environment(environment) != cfg.detect_platform()
     ):
         return False
-    identity = worktree_identity._resolve_worktree_id(worktree_id)
-    record = tracking.load_record_by_id(identity)
-    return bool(
-        record is not None
-        and name.casefold() in {
-            value.casefold() for value in (
-                record.machine, record.execution_machine, config.machine, cfg.socket.gethostname(),
-            ) if value
-        }
-        and retained_checkout.is_local(record, config)
-    )
+    try:
+        path = (
+            session_tracking_cli._find_tracking_file_exact(worktree_id)
+            or session_tracking_cli._find_tracking_file(worktree_id)
+        )
+        if path is None:
+            return False
+        record = tracking.load_record(path)
+        receiving = config if record.repo == config.repo_name else project_record_config(record)
+        if not retained_checkout.is_local(record, receiving):
+            return False
+    except (OSError, ValueError, RuntimeError, cfg.yaml.YAMLError):
+        return False
+    observed = cfg.socket.gethostname()
+    if name.casefold() in {observed.casefold(), observed.split(".")[0].casefold()}:
+        return True
+    if name.casefold() not in {
+        value.casefold() for value in (
+            record.machine, record.execution_machine, receiving.machine,
+        ) if value
+    }:
+        return False
+    try:
+        entries = registry_for_config(receiving)
+    except ExecutionSpaceError:
+        return True
+    # A retained alias is a fallback, not an override of a declared target.
+    selected = resolve_machine_selection(entries, name, environment, allow_physical_context=True)
+    return selected.entry is None
 
 
 def target_is_local(
     config: cfg.Config, name: str | None, environment: str | None = None,
+    *, worktree_id: str | None = None,
 ) -> bool:
+    if retained_target_is_local(config, worktree_id, name, environment):
+        return True
     if not name:
         return not environment or normalize_environment(environment) == cfg.detect_platform()
     if (

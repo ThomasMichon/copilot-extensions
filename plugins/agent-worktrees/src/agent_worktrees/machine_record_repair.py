@@ -47,10 +47,15 @@ def _binding(config) -> tuple:
     )
 
 
-def _prove_local_alias(config, previous: str) -> None:
+def _require_native_platform(config) -> str:
     platform = cfg.detect_platform()
     if platform not in ("windows", "linux") or config.platform != platform:
         raise ValueError("machine-label repair requires the current native execution platform")
+    return platform
+
+
+def _prove_local_alias(config, previous: str) -> None:
+    platform = _require_native_platform(config)
     execution_spaces.require_current_execution_space(config)
     entries = execution_spaces.registry_for_config(config)
     selected = resolve_machine_selection(entries, config.machine, platform)
@@ -136,6 +141,7 @@ def _prove_history(data: dict, config) -> None:
 def _inspect(project: str, record_id: str, previous: str, target: str | None):
     with ConfigCacheSession().scope():
         config = cfg.load_config(include_control_plane_related_pr=False)
+    _require_native_platform(config)
     if config.repo_name != project:
         raise ValueError("resolved project does not match the selected project")
     if target is not None and target != config.machine:

@@ -1024,7 +1024,7 @@ def test_project_authority_uses_requested_repo_anchor(scoped_config, tmp_path, m
 
     monkeypatch.setattr(cfg, "load_machines_yaml", registry)
     record = SimpleNamespace(
-        repo="project", machine="workstation-wsl", platform="wsl", worktree_id="wt-other",
+        repo="project", machine="workstation-wsl", platform=cfg.detect_platform(), worktree_id="wt-other",
         owner_ref=None,
     )
     with pytest.raises(execution_spaces.ExecutionSpaceError, match="different execution space"):
