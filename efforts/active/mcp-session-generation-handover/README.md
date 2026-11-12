@@ -399,11 +399,14 @@ handover. Preserve held sessions and the separate pre-feature adoption hold.
     #12242 now qualifies the joined actual offline Copilot protocol path through
     three private physical handovers and post-retirement exchanges. See the
     [native-client source result](journal/2026/11.10-explicit-owner-cli.md#actual-native-client-source-result).
-    Installed adoption, actual tool invocation and production lifetime remain open.
+    Installed adoption and production lifetime remain open; the source tool
+    qualification follows below.
     #12247 qualifies four actual native tool executions and result consumption
     with a bounded loopback canned provider, initially and after all three
-    predecessor exits. Accepted/in-flight handover qualification is the next
-    source slice, not an installed or production-lifetime result. See the
+    predecessor exits. #12249 subsequently qualifies three accepted native
+    tool calls while each predecessor is actually quiescing, followed by fresh
+    incoming traffic. Unknown outcomes, installed adoption and production
+    lifetime remain open. See the
     [tool-consumption slice](journal/2026/11.10-explicit-owner-cli.md#actual-native-tool-consumption-prepared).
   - [x] **Explicit-owner source merged:** #11935 landed at
     `c0eab0d952a37607f6cf7030ac1a77f377f98a74` after current-head automated
@@ -534,6 +537,12 @@ withdrawal authorizes no GUI effect or change to the SDK's own admission rules.
     all three post-retirement handovers. Exact-source native execution and
     retained-identity cleanup pass; in-flight/unknown outcomes and installed
     adoption remain open.
+  - [x] **Actual accepted/in-flight native source:** #12249 requires a
+    copied-backend witness that actual quiescence has started with accepted
+    work and settlers still pending before each held call is released.
+    Seven actual tool results and three in-flight transitions pass on the
+    corrected exact source, with single initialization and exact cleanup.
+    This does not qualify unknown delivery outcomes or installed adoption.
 - [ ] Failed candidate health, changed owner/route/selection and an old
   generation's late cleanup cannot corrupt or retire the current generation.
 - [ ] EOF/disconnect and verified owner death settle exact client resources;

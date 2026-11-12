@@ -16,6 +16,8 @@ class CannedProvider:
         self.errors: list[str] = []
         self.calls: list[str] = []
         self.results: dict[str, str] = {}
+        self.unknown_nonce = ""
+        self.unknown_results: dict[str, str] = {}
         self.nonce = ""
         self.url = ""
 
@@ -50,6 +52,15 @@ class CannedProvider:
             assert len(results) == 1 and self.nonce in self.calls
             self.results[self.nonce] = results[0]
             return {"content": "fixture-complete:" + self.nonce}, "stop"
+        if self.nonce == self.unknown_nonce:
+            failures = [
+                message for message in messages if message.get("role") == "tool"
+                and message.get("tool_call_id") == "call_" + self.nonce
+            ]
+            if failures:
+                assert len(failures) == 1 and self.nonce in self.calls
+                self.unknown_results[self.nonce] = json.dumps(failures[0].get("content"))
+                return {"content": "fixture-unknown:" + self.nonce}, "stop"
         assert self.nonce not in self.calls, "fixture tool was not consumed; refuse replay"
         names = [
             tool["function"]["name"] for tool in request.get("tools", [])

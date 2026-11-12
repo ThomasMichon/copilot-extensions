@@ -421,6 +421,51 @@ async def test_actual_native_client_responds_through_replacement_and_rollback(
                     )
 
                 await fixture.eventually(released_reply)
+                nonce = "native-fixture-unknown"
+                model.nonce = model.unknown_nonce = nonce
+                hold.write_text(nonce, encoding="utf-8")
+                pending = asyncio.create_task(provider.rpc(
+                    client, stderr, 99, "session/prompt", {
+                        "sessionId": opened["sessionId"],
+                        "prompt": [{"type": "text", "text": "Run the fixture tool with nonce " + nonce}],
+                    },
+                ))
+                await fixture.eventually(accepted_call)
+                incoming, _, incoming_pid = await backend("new")
+                await fixture.eventually(quiescing_call)
+                assert not pending.done() and nonce not in model.results
+                observations.with_suffix(".lose-tool").write_text(nonce, encoding="utf-8")
+                release.write_text(nonce, encoding="utf-8")
+
+                async def uncertain_call() -> dict:
+                    loss = observations.with_suffix(".lost-tool")
+                    unknown = observations.with_suffix(".unknown")
+                    if not loss.is_file() or not unknown.is_file():
+                        return {}
+                    dropped = json.loads(loss.read_text())
+                    assert dropped["backend_pid"] == old.pid and dropped["nonce"] == nonce
+                    for row in map(json.loads, unknown.read_text().splitlines()):
+                        if any(
+                            message.get("params", {}).get("arguments", {}).get("nonce") == nonce
+                            for message in row["accepted"]
+                        ):
+                            assert row["keeper_pid"] == keeper_identity[0]
+                            assert row["uncertain"] and row["fenced"]
+                            return row
+                    return {}
+
+                await fixture.eventually(uncertain_call)
+                await asyncio.sleep(1)
+                assert nonce not in model.results
+                assert model.calls.count(nonce) == 1
+                assert not model.errors, model.errors
+                if pending.done():
+                    result, text = await pending
+                    assert result["stopReason"] == "end_turn", result
+                    assert "fixture-unknown:" + nonce in text
+                    assert "fixture-complete:" + nonce not in text
+                retained_identities()
+                record_testsuite_property("actual_native_unknown_delivery_calls", 1)
                 record_testsuite_property("actual_native_client", str(executable.name))
                 record_testsuite_property("physical_generations", json.dumps({
                     label: generation for label, (generation, _) in slots.items()
@@ -490,4 +535,9 @@ async def test_actual_native_client_responds_through_replacement_and_rollback(
             "pid": upstream_identity[0], "initialized": 1,
             "boundary": f"signal-{signal.SIGTERM}",
         }
+        accepted = list(map(json.loads, calls.read_text().splitlines()))
+        assert [row["nonce"] for row in accepted] == model.calls
+        assert all(row["pid"] == upstream_identity[0] for row in accepted)
+        assert model.calls.count("native-fixture-unknown") == 1
+        assert "native-fixture-unknown" not in model.results
         record_testsuite_property("contained_native_upstream_exit", exit_receipt["boundary"])
