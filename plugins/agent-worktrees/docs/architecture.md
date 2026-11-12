@@ -702,17 +702,27 @@ are refused. Provider snapshots are immutable serialized values, not mutable
 dataclass references. Inspection matches all request/current binding fields,
 requires the exact durable intent/revision, and rereads owner/journal/store
 state after checking the supplied lease's conservative remaining lifetime.
-Restoration candidates additionally need the recorded newer authority revision
-and an owner-supplied settlement observation. Opaque lease IDs are not authority
+The binding also captures the retained provider's optional, opaque `native_scope`
+token at its original construction, not when an inspector is reopened.
+Supported providers expose this token and `scope_settled(original_token)` as
+passive same-object readers. Changed tokens refuse without value/PID matching.
+Restoration candidates additionally need the recorded newer authority revision,
+an owner-supplied settlement observation and an exact `True` from that original
+provider for its retained token. The observation alone is insufficient; missing,
+older, failed or unconfirmed provider support remains unknown. Ordinary passive
+intent inspection remains available with an older provider.
+Opaque lease IDs are not authority
 revisions. Changed, missing, revoked or ambiguous inputs remain held, unknown
 or marked for same-operation reconciliation; prior holds and unknown work
 are not cleared.
 
 The inspector invokes only the retained lease's local `remaining_seconds()`
-reader. It never acquires a grant, installs credentials, writes intent,
+reader and the provider's passive identity/status readers. It never waits for
+or requests cleanup, acquires a grant, installs credentials, writes intent,
 dispatches a native operation or reconstructs a lost custody handle.
 `candidate` means supplied owned inputs match, not that a real source/controller
-was verified or a provider scope independently settled. Every result keeps
+was verified or post-owner-loss custody was reacquired. A positive same-owner
+cleanup status does not qualify native recovery. Every result keeps
 `effects_wired: false`, `native_recovery: unqualified` and `replay: never`.
 Neither a result nor a reconstructed inspector is an admission certificate.
 No ordinary caller, observer, CLI or RPC is wired to it. Actual current-source

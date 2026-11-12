@@ -1,7 +1,10 @@
 """Passive admission candidates over the actual owner store and launch journal."""
 
+import asyncio
 from dataclasses import fields, replace
 import json
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 
@@ -20,6 +23,16 @@ class Lease:
     def remaining_seconds(self):
         self.calls += 1
         return self.remaining
+
+
+class NativeOwner:
+    def __init__(self):
+        self.native_scope = object()
+        self.settled = None
+
+    def scope_settled(self, native_scope):
+        assert native_scope is self.native_scope
+        return self.settled
 
 
 @pytest.fixture
@@ -46,7 +59,7 @@ def owner(tmp_path, monkeypatch):
     binding = admission.RecoveryBinding(
         descriptor, correlation, execution.subject["operation_id"],
         admission.SourceSelection("target", "account", "recipient", "route", "controller-1"),
-        admission.OwnerIntent.capture(record.yaml_path), object(),
+        admission.OwnerIntent.capture(record.yaml_path), NativeOwner(),
     )
     store = launch_recovery_store.WorktreeRecoveryStore(record.yaml_path)
     step = RecoveryStep("retire_intent", "intent", ("unknown-external-work",))
@@ -163,10 +176,150 @@ def test_resume_requires_exact_new_authority_and_independent_owned_settlement(ow
     assert inspect(owner, observation=current, **request)["reason"] == "scope-settlement-unconfirmed"
     assert inspect(owner, observation=replace(
         current, scope_settled=True,
+    ), **request)["reason"] == "scope-settlement-unconfirmed"
+    current.binding.native_owner.settled = True
+    assert inspect(owner, observation=replace(
+        current, scope_settled=True,
     ), **request)["classification"] == "candidate"
     assert inspect(owner, observation=replace(
         current, authority_revision=3, scope_settled=True,
     ), **request)["reason"] == "authority-revision-mismatch"
+
+
+@pytest.mark.parametrize("settled", [None, False, 1, "settled"])
+def test_provider_status_must_confirm_the_original_scope(owner, settled):
+    _, observation, store, _ = owner
+    descriptor = observation.binding.descriptor
+    record_recovery_step(store, descriptor, "recovery-operation", 1, RecoveryStep("settled", "scope"))
+    record_recovery_step(
+        store, descriptor, "recovery-operation", 2,
+        RecoveryStep("resume_intent", "resume", authority_revision=2),
+    )
+    observation.binding.native_owner.settled = settled
+    result = inspect(
+        owner, phase="resume_intent", expected_revision=3,
+        observation=replace(observation, authority_revision=2, scope_settled=True),
+    )
+    assert result["reason"] == "scope-settlement-unconfirmed"
+
+
+@pytest.mark.parametrize("originally_missing", [False, True])
+def test_native_scope_is_retained_before_inspector_construction_and_reopen(owner, originally_missing):
+    _, observation, _, path = owner
+    if originally_missing:
+        observation.binding.native_owner.native_scope = None
+        observation = replace(observation, binding=replace(observation.binding))
+    original = observation.binding._native_scope
+    observation.binding.native_owner.native_scope = object()
+    assert observation.binding._native_scope is original
+    for _ in range(2):
+        reopened = admission.RecoveryAdmissionInspector(path, observation.binding, "recovery-operation")
+        result = reopened.inspect(
+            observation.binding.descriptor, "recovery-operation", "retire_intent", 1, observation,
+        )
+        assert result["reason"] == "native-scope-changed"
+    current = replace(observation.binding)
+    assert inspect(owner, observation=replace(
+        observation, binding=current,
+    ))["reason"] == "current-binding-mismatch"
+
+
+def test_missing_provider_capability_preserves_inspection_but_not_settlement(owner):
+    _, observation, store, path = owner
+    binding = replace(observation.binding, native_owner=object())
+    reopened = admission.RecoveryAdmissionInspector(path, binding, "recovery-operation")
+    current = replace(observation, binding=binding)
+    assert reopened.inspect(
+        binding.descriptor, "recovery-operation", "retire_intent", 1, current,
+    )["classification"] == "candidate"
+    record_recovery_step(store, binding.descriptor, "recovery-operation", 1, RecoveryStep("settled", "scope"))
+    record_recovery_step(
+        store, binding.descriptor, "recovery-operation", 2,
+        RecoveryStep("resume_intent", "resume", authority_revision=2),
+    )
+    result = reopened.inspect(
+        binding.descriptor, "recovery-operation", "resume_intent", 3,
+        replace(current, authority_revision=2, scope_settled=True),
+    )
+    assert result["reason"] == "scope-settlement-unconfirmed"
+
+
+def test_scope_change_during_status_requires_reconciliation(owner):
+    _, observation, store, _ = owner
+    descriptor = observation.binding.descriptor
+    record_recovery_step(store, descriptor, "recovery-operation", 1, RecoveryStep("settled", "scope"))
+    record_recovery_step(
+        store, descriptor, "recovery-operation", 2,
+        RecoveryStep("resume_intent", "resume", authority_revision=2),
+    )
+    provider = observation.binding.native_owner
+
+    def changed(_scope):
+        provider.native_scope = object()
+        return True
+
+    provider.scope_settled = changed
+    result = inspect(
+        owner, phase="resume_intent", expected_revision=3,
+        observation=replace(observation, authority_revision=2, scope_settled=True),
+    )
+    assert result["classification"] == "reconcile"
+    assert result["reason"] == "native-scope-changed"
+
+
+@pytest.mark.parametrize("cleanup", ["retained", "settled", "close-failed"])
+def test_inspector_consumes_the_real_auth_child_passive_contract(owner, monkeypatch, cleanup):
+    from agent_procutil.owned_process import OwnedCleanupError
+    from agent_remote_driver.headed import auth_child
+
+    async def inline(function, *args):
+        return function(*args)
+
+    monkeypatch.setattr(auth_child, "require_auth_custody", lambda: None)
+    monkeypatch.setattr(auth_child.asyncio, "to_thread", inline)
+    process = SimpleNamespace(pid=123, wait=Mock(), poll=Mock())
+    job = SimpleNamespace(
+        try_terminate_and_confirm_empty=Mock(return_value=True),
+        terminate_and_wait=Mock(), close=Mock(),
+    )
+    monkeypatch.setattr(
+        auth_child, "spawn_sync_in_kill_on_close_job", Mock(return_value=(process, job)),
+    )
+    provider = auth_child.AuthPaneChild()
+    provider.launch(["fixture"])
+    _, observation, store, path = owner
+    binding = replace(observation.binding, native_owner=provider)
+    reopened = admission.RecoveryAdmissionInspector(path, binding, "recovery-operation")
+    record_recovery_step(store, binding.descriptor, "recovery-operation", 1, RecoveryStep("settled", "scope"))
+    record_recovery_step(
+        store, binding.descriptor, "recovery-operation", 2,
+        RecoveryStep("resume_intent", "resume", authority_revision=2),
+    )
+    if cleanup == "settled":
+        asyncio.run(provider.terminate())
+    elif cleanup == "close-failed":
+        job.close.side_effect = OSError("fixture cleanup failed")
+        with pytest.raises(OwnedCleanupError):
+            asyncio.run(provider.terminate())
+    operations = (
+        process.wait, process.poll, job.try_terminate_and_confirm_empty,
+        job.terminate_and_wait, job.close,
+    )
+    for operation in operations:
+        operation.reset_mock()
+        operation.side_effect = AssertionError("inspection must remain passive")
+    before = {item: item.read_bytes() for item in path.parent.rglob("*") if item.is_file()}
+    for _ in range(2):
+        result = reopened.inspect(
+            binding.descriptor, "recovery-operation", "resume_intent", 3,
+            replace(observation, binding=binding, authority_revision=2, scope_settled=True),
+        )
+        assert result["classification"] == ("candidate" if cleanup == "settled" else "unknown")
+        assert result["effects_wired"] is False
+        assert result["unknown_effects"] == ["unknown-external-work"]
+    for operation in operations:
+        operation.assert_not_called()
+    assert {item: item.read_bytes() for item in path.parent.rglob("*") if item.is_file()} == before
 
 
 def test_missing_or_different_intent_is_not_authority(owner):
@@ -265,6 +418,16 @@ def test_change_during_lease_observation_requires_reconciliation(owner):
     result = inspect(owner, observation=replace(observation, lease=ConcurrentLease()))
     assert result["classification"] == "reconcile"
     assert result["unknown_effects"] == ["unknown-external-work"]
+
+
+def test_native_scope_change_during_lease_observation_requires_reconciliation(owner):
+    class ChangedLease:
+        def remaining_seconds(self):
+            owner[1].binding.native_owner.native_scope = object()
+            return 30
+
+    result = inspect(owner, observation=replace(owner[1], lease=ChangedLease()))
+    assert result["classification"] == "reconcile"
 
 
 def test_unknown_source_response_is_static_and_does_not_retry(owner):
