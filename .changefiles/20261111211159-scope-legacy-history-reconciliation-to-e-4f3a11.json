@@ -1,0 +1,9 @@
+{
+  "comment": "Scope legacy history reconciliation to explicit reservation keys and fence application to the selected preview",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

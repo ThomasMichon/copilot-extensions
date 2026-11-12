@@ -102,6 +102,29 @@ completed or abandoned (a submitted task still protects its owner), and the late
 native of a non-concluded task; the preview reports each exclusion count.
 Applying requires the same recovery-bridge readiness as `authorize-fresh`.
 
+For a verified subset, repeat `--reservation-key <key>` on the same command.
+The preview returns `selection.reservation_keys` and an opaque
+`selection.revision`. Applying that selection additionally requires
+`--expected-preview <revision>`. Unknown keys, duplicate or empty explicit
+selections, and already pool-bound selected rows are refused, never interpreted
+as the entire cutoff-wide batch.
+Every shared-native and transport check still observes the whole queue, including
+unselected work. A selected record or its protection classification changing
+after preview refuses application without changing anything.
+
+The running coordinator advertises `selected_legacy_history_versions: [1]`
+in its existing `pool_placement` health descriptor. New clients require that
+capability before posting selected requests and verify the returned selection;
+an older or rolled-back provider cannot silently widen the operation. Expand
+the provider first, then use selected callers. Unselected syntax and its
+attestation requirements remain unchanged. A lost apply response does not
+authorize replay with a fresh preview: inspect the original records and audit
+before deciding what remains. Unavailable, undecodable, server-error or
+invalid-scope apply responses are explicit unknown mutation outcomes, not
+pre-POST upgrade results; known coordinator client-error rejections retain their status.
+it never authorizes an automatic retry. Selection and a matching preview never establish
+holder, startup or transport absence on the operator's behalf.
+
 The affected residents are the coordinator (`serve`), supervisor daemon
 (`supervise serve`) and its worker-lane supervisors (`supervise`). The existing
 `scripts/install.sh` / `scripts/install.ps1` install/update/activation seams own
