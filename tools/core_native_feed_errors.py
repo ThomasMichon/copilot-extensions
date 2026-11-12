@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+
+class GuardedSelectionError(ValueError):
+    """A guarded native selection could not establish its input boundaries."""
+
+
 _GENERIC = "guarded feed input was refused"
 _SAFE_REASONS = {
     "wheel feed request failed or timed out": "guarded feed request failed or timed out",

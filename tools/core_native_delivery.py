@@ -578,6 +578,7 @@ def _build_from_snapshot(
             if verification_limits is not None:
                 verify_guarded_projects(
                     final_feed, witness["projects"], limits=verification_limits,
+                    wheel_limits=limits, target_tags=target["tags"],
                     deadline=deadline, procutil=_producer_procutil(),
                 )
                 if project_core_inputs(source, manifest_data, target, deadline=deadline) != (

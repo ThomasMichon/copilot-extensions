@@ -138,13 +138,23 @@ $task = Read-Task
 if ($null -eq $task) {
     @{ configured = $false; xml = $null; digest = 'absent'; instances = @(); enabled = $false; account_sid = $sid } | ConvertTo-Json -Compress
 } else {
+    $lastRun = $null
+    $nextRun = $null
+    try {
+        # COM can return UTC-valued LastRunTime but local NextRunTime, both unspecified-kind.
+        $timing = Get-ScheduledTaskInfo -TaskPath '\' -TaskName $r.name
+        $lastRun = $timing.LastRunTime.ToUniversalTime().ToString('o')
+        $nextRun = $timing.NextRunTime.ToUniversalTime().ToString('o')
+    } catch {
+        # Unavailable timing metadata must not block exact native withdrawal.
+    }
     @{
         configured = $true; xml = $task.Xml; digest = (Digest $task.Xml)
         enabled = [bool]$task.Enabled; state = [int]$task.State
         instances = @($task.GetInstances(0) | ForEach-Object { $_.InstanceGuid })
         last_result = [long]$task.LastTaskResult
-        last_run = $task.LastRunTime.ToUniversalTime().ToString('o')
-        next_run = $task.NextRunTime.ToUniversalTime().ToString('o')
+        last_run = $lastRun
+        next_run = $nextRun
         account_sid = $sid
     } | ConvertTo-Json -Compress -Depth 4
 }
