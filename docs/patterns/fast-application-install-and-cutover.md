@@ -63,7 +63,9 @@ Run `tools/local_install_source.py` from a dependency-prepared source environmen
 It admits the clean merged source, uses the canonical version-preserving
 composition and artifact owners, and keeps one toolchain alive for the profile
 worker. Scratch checkout suppresses configured Git hooks for that command,
-without changing repository settings. Only after every selected snapshot passes
+and composition/control Git commands disable configured filesystem monitors
+per invocation, without changing repository settings.
+Only after every selected snapshot passes
 complete readback does it return a JSON component-to-snapshot map and write
 `applications.json`.
 Before composition it validates the existing output parent and ancestor chain

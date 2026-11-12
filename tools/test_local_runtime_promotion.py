@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import shlex
+import subprocess
 import time
 
 import pytest
@@ -51,6 +52,45 @@ def test_composition_cannot_execute_selected_checkout_hooks(repo, tmp_path, hook
     assert marker.read_bytes() == b"selected-hook\n"
     assert (repo / ".git/config").read_bytes() == configuration
     assert support._git(["worktree", "list", "--porcelain"], repo) == worktrees
+
+
+@pytest.mark.parametrize("monitor_path", ["relative", "absolute"])
+def test_composition_cannot_execute_repository_filesystem_monitor(repo, tmp_path, monitor_path):
+    main = support._git(["rev-parse", "main"], repo)
+    marker = tmp_path / "filesystem-monitor-executed"
+    monitor = repo / "tools/fixture-monitor"
+    monitor.write_text(
+        "#!/bin/sh\nprintf 'monitor\\n' >> " + shlex.quote(marker.as_posix())
+        + "\nprintf 'fixture-token\\000'\n",
+        encoding="utf-8",
+    )
+    monitor.chmod(0o755)
+    support._git(["add", "tools/fixture-monitor"], repo)
+    support._git(["update-index", "--chmod=+x", "tools/fixture-monitor"], repo)
+    support._git(["commit", "-m", "selected filesystem monitor fixture"], repo)
+    source = support._git(["rev-parse", "HEAD"], repo)
+    support._git([
+        "config", "core.fsmonitor",
+        "tools/fixture-monitor" if monitor_path == "relative" else shlex.quote(monitor.as_posix()),
+    ], repo)
+    support._git(["config", "core.fsmonitorHookVersion", "2"], repo)
+    probe = subprocess.run(
+        ["git", "status", "--porcelain"], cwd=repo, capture_output=True, text=True,
+        env=local.promotion.git_environment(),
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert probe.returncode == 0 and marker.is_file(), probe.stderr
+    executed = marker.read_bytes()
+    assert executed
+    configuration = (repo / ".git/config").read_bytes()
+
+    composed = local.compose(
+        repo, source_commit=source, main_seed=main, deadline=time.monotonic() + 60,
+    )
+
+    assert composed.source_commit == source
+    assert marker.read_bytes() == executed
+    assert (repo / ".git/config").read_bytes() == configuration
 
 
 @pytest.mark.skipif(os.name == "nt", reason="requires Git's native symlink checkout")

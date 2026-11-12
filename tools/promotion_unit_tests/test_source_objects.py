@@ -37,8 +37,10 @@ def test_composition_budget_bounds_git_and_restores_the_original_transport(tmp_p
     clock = [100.0]
     monkeypatch.setattr(source_io.time, "monotonic", lambda: clock[0])
     calls = []
+    commands = []
 
     def run(argv, **options):
+        commands.append(argv)
         calls.append(options)
         return SimpleNamespace(returncode=0, stdout=b"ok\n", stderr=b"")
 
@@ -50,6 +52,10 @@ def test_composition_budget_bounds_git_and_restores_the_original_transport(tmp_p
         with source_io.composition_budget(200):
             source_io.is_ancestor(tmp_path, "a", "b")
         source_io.changefile_existed_at("a", "example.json", repo=tmp_path)
+        assert all(
+            argv[:4] == ["git", "--no-replace-objects", "-c", "core.fsmonitor=false"]
+            for argv in commands
+        )
         assert [row["timeout"] for row in calls] == [10, 4, 4, 4]
         assert all(row["deadline"] == 110 for row in calls)
         clock[0] = 111

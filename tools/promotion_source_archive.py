@@ -82,7 +82,7 @@ def git_text(
             if not key.upper().startswith("GIT_") or key in candidate_identity
         })
     result = run_composition_child(
-        ["git", "--no-replace-objects",
+        ["git", "--no-replace-objects", "-c", "core.fsmonitor=false",
          *(["-c", "core.longpaths=true", "-c", "checkout.workers=2"] if os.name == "nt" else []),
          *args],
         cwd=str(repo), capture_output=True, env=environment,
@@ -98,7 +98,8 @@ def git_text(
 def _git(repo: Path, args: list[str], *, data: bytes | None = None) -> bytes:
     env = git_environment()
     result = run_composition_child(
-        ["git", "--no-replace-objects", *args], cwd=repo, env=env, input=data,
+        ["git", "--no-replace-objects", "-c", "core.fsmonitor=false", *args],
+        cwd=repo, env=env, input=data,
         capture_output=True, **git_timeout_options(30),
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
@@ -109,7 +110,8 @@ def _git(repo: Path, args: list[str], *, data: bytes | None = None) -> bytes:
 
 def is_ancestor(repo: Path, ancestor: str, descendant: str) -> bool:
     result = run_composition_child(
-        ["git", "--no-replace-objects", "merge-base", "--is-ancestor", ancestor, descendant],
+        ["git", "--no-replace-objects", "-c", "core.fsmonitor=false",
+         "merge-base", "--is-ancestor", ancestor, descendant],
         cwd=str(repo), capture_output=True, text=True, env=git_environment(),
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         **git_timeout_options(),
@@ -120,7 +122,8 @@ def is_ancestor(repo: Path, ancestor: str, descendant: str) -> bool:
 def changefile_existed_at(rev: str, name: str, *, repo: Path) -> bool:
     """Read whether a changefile was already present at the previous Dev boundary."""
     result = run_composition_child(
-        ["git", "--no-replace-objects", "cat-file", "-e", f"{rev}:.changefiles/{name}"],
+        ["git", "--no-replace-objects", "-c", "core.fsmonitor=false",
+         "cat-file", "-e", f"{rev}:.changefiles/{name}"],
         cwd=str(repo), capture_output=True, text=True, env=git_environment(),
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         **git_timeout_options(),

@@ -25,7 +25,8 @@ def _git(repo: Path, args: list[str]) -> bytes:
     env = {key: value for key, value in os.environ.items() if not key.upper().startswith("GIT_")}
     try:
         result = run_composition_child(
-            ["git", "--no-replace-objects", *args], cwd=repo, env=env, capture_output=True,
+            ["git", "--no-replace-objects", "-c", "core.fsmonitor=false", *args],
+            cwd=repo, env=env, capture_output=True,
             **git_timeout_options(30),
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
