@@ -8,10 +8,7 @@ import json
 import os
 from pathlib import Path
 import shutil
-import subprocess
 import sys
-
-from .owner_capabilities import CONTRACT
 
 
 def _provider(entry: dict) -> list[str] | None:
@@ -39,42 +36,11 @@ def _provider(entry: dict) -> list[str] | None:
     return [command, *prefix, "session-owner-capabilities"]
 
 
-def _supports(entry: dict, environment: dict[str, str]) -> bool:
-    from agent_procutil import no_window_kwargs
-
-    query = _provider(entry)
-    extra = entry.get("env", {})
-    if (
-        query is None or not isinstance(extra, dict)
-        or not all(isinstance(key, str) and isinstance(value, str) for key, value in extra.items())
-        or any("${" in value or "\0" in value for value in extra.values())
-    ):
-        return False
-    try:
-        result = subprocess.run(
-            query, env={**environment, **extra}, cwd=entry.get("cwd"),
-            capture_output=True, text=True, timeout=5, **no_window_kwargs(),
-        )
-        report = json.loads(result.stdout)
-        contract = report.get("contract", {})
-        return bool(
-            result.returncode == 0 and report.get("supported") is True
-            and report.get("invocation_allowed") is True
-            and contract.get("name") == CONTRACT["name"]
-            and type(contract.get("minimum")) is int and contract["minimum"] == 1
-            and type(contract.get("maximum")) is int and contract["maximum"] >= 1
-            and isinstance(contract.get("capabilities"), list)
-            and "explicit-native-owner-pair" in contract.get("capabilities", [])
-        )
-    except (OSError, ValueError, TypeError, AttributeError, subprocess.TimeoutExpired):
-        return False
-
-
 def overlay(
     configuration: dict, names: list[str], *, pid: int, birth: str,
     environment: dict[str, str],
 ) -> dict:
-    """Override only explicit names whose actual provider reports pair support."""
+    """Carry selected entries to MCP start without querying a mutable provider."""
     servers = configuration.get("mcpServers")
     if (
         not isinstance(servers, dict) or not names
@@ -87,11 +53,26 @@ def overlay(
         entry = servers[name]
         if not isinstance(entry, dict):
             raise ValueError("Selected MCP server configuration must be an object")
-        if _supports(entry, environment):
+        query = _provider(entry)
+        extra = entry.get("env", {})
+        if (
+            query is not None and isinstance(extra, dict)
+            and all(isinstance(key, str) and isinstance(value, str) for key, value in extra.items())
+            and not any("${" in value or "\0" in value for value in extra.values())
+        ):
             replacement = copy.deepcopy(entry)
-            replacement["args"].extend((
-                "--session-owner-pid", str(pid), "--session-owner-birth", birth,
-            ))
+            original = [entry["command"], *entry["args"]]
+            remaining = entry["args"] if len(query) == 2 else entry["args"][len(query) - 2:]
+            request = {
+                "original": original, "arguments": remaining, "query": query,
+                "pid": pid, "birth": birth,
+            }
+            replacement["command"] = str(Path(sys._base_executable).absolute())
+            replacement["args"] = [
+                "-I", "-S", "-c", Path(__file__).with_name("owner_bootstrap.py").read_text(
+                    encoding="utf-8",
+                ), json.dumps(request, ensure_ascii=True),
+            ]
             selected[name] = replacement
     return {"mcpServers": selected}
 

@@ -16,7 +16,6 @@ import pytest
 from agent_procutil import no_window_kwargs
 from agent_mcp import owner_exec
 from agent_mcp.__main__ import main
-from agent_mcp.owner_capabilities import CONTRACT
 
 
 def _entry():
@@ -26,48 +25,31 @@ def _entry():
     }
 
 
-def _reply(**changes):
-    return subprocess.CompletedProcess(
-        [], 0, json.dumps({
-            "contract": CONTRACT, "supported": True, "invocation_allowed": True, **changes,
-        }), "",
-    )
-
-
 def test_overlay_preserves_selected_entry_and_never_activates_unselected_servers(monkeypatch):
     config = {"mcpServers": {"chosen": _entry(), "other": _entry()}}
     before = copy.deepcopy(config)
-    query = Mock(return_value=_reply())
-    monkeypatch.setattr(owner_exec.subprocess, "run", query)
+    query = Mock(side_effect=AssertionError("parent-time query is not physical MCP start"))
+    monkeypatch.setattr(subprocess, "run", query)
     result = owner_exec.overlay(
         config, ["chosen"], pid=42, birth="native:1", environment={"BASE": "unchanged"},
     )
-    expected = copy.deepcopy(config["mcpServers"]["chosen"])
-    expected["args"].extend(("--session-owner-pid", "42", "--session-owner-birth", "native:1"))
-    assert result == {"mcpServers": {"chosen": expected}}
+    assert set(result["mcpServers"]) == {"chosen"}
+    entry = result["mcpServers"]["chosen"]
+    assert entry["command"] == str(Path(sys._base_executable).absolute())
+    assert entry["args"][:3] == ["-I", "-S", "-c"]
+    assert {key: value for key, value in entry.items() if key not in {"command", "args"}} == {
+        key: value for key, value in before["mcpServers"]["chosen"].items()
+        if key not in {"command", "args"}
+    }
     assert config == before
-    assert query.call_args.args[0] == [
+    request = json.loads(entry["args"][-1])
+    assert request["query"] == [
         sys.executable, "-I", "-m", "agent_mcp", "session-owner-capabilities",
     ]
-    assert query.call_args.kwargs["env"] == {"BASE": "unchanged", "FIXTURE_CONTEXT": "literal"}
-    assert query.call_args.kwargs["cwd"] == "original-cwd"
-
-
-@pytest.mark.parametrize("reply", [
-    _reply(supported=False), _reply(invocation_allowed=False),
-    _reply(contract={**CONTRACT, "minimum": True}),
-    _reply(contract={**CONTRACT, "maximum": 0}),
-    _reply(contract={**CONTRACT, "capabilities": "explicit-native-owner-pair"}),
-    subprocess.CompletedProcess([], 2, "not-json", ""),
-    subprocess.TimeoutExpired("provider", 5),
-])
-def test_unsupported_provider_keeps_existing_server_selection(monkeypatch, reply):
-    query = Mock(**({"side_effect": reply} if isinstance(reply, Exception) else {"return_value": reply}))
-    monkeypatch.setattr(owner_exec.subprocess, "run", query)
-    assert owner_exec.overlay(
-        {"mcpServers": {"chosen": _entry()}}, ["chosen"],
-        pid=42, birth="native:1", environment={},
-    ) == {"mcpServers": {}}
+    assert request["original"] == [sys.executable, *_entry()["args"]]
+    assert request["arguments"] == ["forward", "--config", "x"]
+    assert request["pid"] == 42 and request["birth"] == "native:1"
+    query.assert_not_called()
 
 
 @pytest.mark.parametrize("change", [
@@ -81,7 +63,7 @@ def test_unsupported_provider_keeps_existing_server_selection(monkeypatch, reply
 def test_unknown_or_already_owned_entry_is_not_probed_or_overridden(monkeypatch, change):
     entry = {**_entry(), **change}
     query = Mock(side_effect=AssertionError("not eligible"))
-    monkeypatch.setattr(owner_exec.subprocess, "run", query)
+    monkeypatch.setattr(subprocess, "run", query)
     assert owner_exec.overlay(
         {"mcpServers": {"chosen": entry}}, ["chosen"],
         pid=42, birth="native:1", environment={},
@@ -92,7 +74,7 @@ def test_unknown_or_already_owned_entry_is_not_probed_or_overridden(monkeypatch,
 @pytest.mark.parametrize("names", [[], ["missing"], ["chosen", "chosen"]])
 def test_selection_refusal_precedes_provider_execution(monkeypatch, names):
     query = Mock(side_effect=AssertionError("not admitted"))
-    monkeypatch.setattr(owner_exec.subprocess, "run", query)
+    monkeypatch.setattr(subprocess, "run", query)
     with pytest.raises(ValueError):
         owner_exec.overlay(
             {"mcpServers": {"chosen": _entry()}}, names, pid=42, birth="native:1", environment={},
@@ -125,7 +107,7 @@ def test_unqualified_platform_refuses_without_client_or_provider_effects(monkeyp
     config.write_text('{"mcpServers":{}}', encoding="utf-8")
     monkeypatch.setattr(owner_exec.sys, "platform", "win32")
     query, execute = Mock(), Mock()
-    monkeypatch.setattr(owner_exec.subprocess, "run", query)
+    monkeypatch.setattr(subprocess, "run", query)
     monkeypatch.setattr(owner_exec.os, "execve", execute)
     assert main([
         "exec-client", "--mcp-config", str(config), "--server", "chosen", "--", "copilot",
@@ -166,11 +148,11 @@ def test_real_exec_retains_owner_birth_and_sealed_private_overlay(tmp_path):
         "with open(path) as stream: config=json.load(stream)\n"
         "entry=config['mcpServers']['chosen']\n"
         "assert entry['env']=={'FIXTURE_CONTEXT':'literal'}\n"
-        "args=entry['args']\n"
-        "assert int(args[-3])==os.getpid()\n"
+        "request=json.loads(entry['args'][-1])\n"
+        "assert request['pid']==os.getpid()\n"
         "fd=int(path.rsplit('/',1)[1])\n"
         "assert fcntl.fcntl(fd,fcntl.F_GET_SEALS)&fcntl.F_SEAL_WRITE\n"
-        "print(json.dumps({'pid':os.getpid(),'birth':args[-1],'cwd':os.getcwd(),"
+        "print(json.dumps({'pid':os.getpid(),'birth':request['birth'],'cwd':os.getcwd(),"
         "'literal':sys.argv[1],'environment':os.environ['OWNER_EXEC_FIXTURE']}),flush=True)\n",
         encoding="utf-8",
     )
@@ -180,7 +162,6 @@ def test_real_exec_retains_owner_birth_and_sealed_private_overlay(tmp_path):
         f"sys.path.insert(0,{str(root)!r})\n"
         "from agent_mcp import owner_exec\n"
         f"entry={_entry()!r}\n"
-        "owner_exec._supports=lambda *args:True\n"
         "owner_exec.execute({'mcpServers':{'chosen':entry}},['chosen'],sys.argv[1:])\n"
     )
     process = subprocess.Popen(
@@ -200,3 +181,45 @@ def test_real_exec_retains_owner_birth_and_sealed_private_overlay(tmp_path):
         if process.poll() is None:
             process.kill()
             process.wait(timeout=5)
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="actual Linux MCP-start bootstrap")
+@pytest.mark.parametrize("provider_state", ["rollback", "unprovisioned"])
+def test_actual_mcp_start_uses_current_provider_and_probe_never_provisions(tmp_path, provider_state):
+    package = tmp_path / "agent_mcp"
+    package.mkdir()
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    marker = tmp_path / "probe-provisioned"
+    entry = {
+        "command": sys.executable, "args": ["-m", "agent_mcp", "bridge", 'literal "target"'],
+        "env": {"PYTHONPATH": str(tmp_path), "FIXTURE_CONTEXT": "preserved"},
+    }
+    selected = owner_exec.overlay(
+        {"mcpServers": {"chosen": entry}}, ["chosen"], pid=os.getpid(),
+        birth="unused-on-ordinary-fallback", environment={},
+    )["mcpServers"]["chosen"]
+    # The selected provider changes only after the client overlay was prepared.
+    (package / "__main__.py").write_text(
+        "import json,os,sys\n"
+        "from pathlib import Path\n"
+        "if sys.argv[1:]==['session-owner-capabilities']:\n"
+        " if os.environ.get('AGENT_MCP_NO_SELFPROVISION')!='1':\n"
+        f"  Path({str(marker)!r}).write_text('unexpected provision')\n"
+        f" raise SystemExit({1 if provider_state == 'unprovisioned' else 2})\n"
+        "print(json.dumps({'args':sys.argv[1:],'cwd':os.getcwd(),\n"
+        " 'context':os.environ['FIXTURE_CONTEXT'],\n"
+        " 'probe_only':os.environ.get('AGENT_MCP_NO_SELFPROVISION')}))\n",
+        encoding="utf-8",
+    )
+    environment = {**os.environ, **selected["env"]}
+    environment.pop("AGENT_MCP_NO_SELFPROVISION", None)
+    completed = subprocess.run(
+        [selected["command"], *selected["args"]], cwd=tmp_path, env=environment,
+        capture_output=True, text=True, timeout=10, **no_window_kwargs(),
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert json.loads(completed.stdout) == {
+        "args": ["bridge", 'literal "target"'], "cwd": str(tmp_path),
+        "context": "preserved", "probe_only": None,
+    }
+    assert not marker.exists()

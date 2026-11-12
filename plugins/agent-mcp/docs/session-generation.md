@@ -22,16 +22,31 @@ SDK extension or desktop observer is introduced.
 
 Each selected entry must have a literal absolute `agent-mcp` command, or an
 absolute Python command with `[-I] -m agent_mcp`, followed by `bridge` or
-`forward`. Before rewriting it, the launcher queries that entry's actual
-provider for explicit-pair support, with its environment and cwd. Old,
-unproven, opted-out, interpolated and already ownership-bound entries retain
-their ordinary configuration; a failed support query does not start MCP or
-retry an application operation. The qualified entries preserve their other
-configuration and receive the existing paired owner flags.
+`forward`. A stdlib-only bootstrap snapshot runs at the actual MCP start,
+with the entry's unchanged environment and inherited cwd. It queries that
+entry's selected provider with probe-only `AGENT_MCP_NO_SELFPROVISION=1`;
+the eventual server does not inherit that probe-only override.
+Pair support alone does not qualify adoption. The new optional-entry
+capability identifies a physical interpreter, prefix, receiver module and
+explicit wrapper-owned environment delta. The bootstrap execs that immutable
+receiver, rather than emitting new syntax through a mutable wrapper.
+
+The receiver rechecks its actual code, selection, startup opt-outs, native
+owner and cold custody context before any backend startup. An incompatible
+cwd or unsupported sharing context executes the original ordinary command
+with its original environment and cwd; it never forces the project into the
+custody home. A changed selection, old provider, failed read-only query or
+unsupported optional contract also retains ordinary behavior before effects.
+No application operation is retried after startup or intake. The existing
+explicit paired `bridge`/`forward` flags remain strict and never acquire this
+optional fallback. Interpolated and already ownership-bound entries are not
+overridden.
 
 The session-only `--additional-mcp-config` overlay is a sealed anonymous file,
 read through the client's inherited Linux descriptor. Configuration and env
-values are not copied into command-line JSON or a persistent file. Cwd,
+values stay in the entry environment, not the bootstrap request or a persistent
+file. Only the provider's declared wrapper-owned path/interpreter delta travels
+to the physical receiver. Cwd,
 environment and literal native arguments otherwise remain unchanged. The OS
 reclaims the descriptor on client exit; no filesystem artifact needs a cleaner.
 Failed exec closes it and reports failure, without starting a replacement client.
@@ -42,7 +57,10 @@ literal `--` delimiters are refused rather than reinterpreted. Windows and
 other unqualified launch paths refuse this new command before client/provider
 effects; existing `bridge`/`forward` behavior is unchanged. The real-process
 fixture proves identity retention and anonymous-overlay reading with a
-synthetic native client, not actual Copilot config consumption, installed
+synthetic native client. A separate offline native Copilot packet compares
+ordinary and overlay launches in the same environment, checks actual MCP
+consumption and owner identity against a controlled physical receiver, and
+requires exact child settlement. That fixture is not installed custody
 adoption, Windows pre-execution capture or whole-effort acceptance.
 
 An explicitly custody-bound single-stdio `BridgeSession` can export quiescent

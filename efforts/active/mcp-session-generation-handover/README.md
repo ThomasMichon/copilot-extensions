@@ -346,8 +346,11 @@ handover. Preserve held sessions and the separate pre-feature adoption hold.
     open.
   - [ ] **Explicit Linux exec caller:** capture the exec owner's native pair
     and pass a sealed, session-only overlay for explicitly named configured
-    entries, after actual-provider support discovery. Qualify actual Copilot
-    consumption separately from the synthetic native-exec fixture. Preserve
+    entries, with actual-start discovery bound to a physical optional receiver.
+    Preserve probe-only self-provisioning inhibition, cold-context fallback
+    before effects and strict existing paired CLI semantics. Qualify actual
+    Copilot consumption against an ordinary same-environment baseline,
+    separately from the synthetic native-exec fixture. Preserve
     ordinary selection for unsupported entries and leave Windows capture,
     default caller adoption and installed acceptance open.
   - [x] **Explicit-owner source merged:** #11935 landed at
