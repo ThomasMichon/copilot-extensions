@@ -61,6 +61,8 @@ def test_complete_application_portfolio_builds_once_and_publishes_only_after_rea
         return "d" * 40, "b" * 40
 
     def compose(repository, commit, main, output, **options):
+        permissions = local.preparation_process.procutil_module("python_cache_permissions")
+        permissions.check(output.parent, private=True)
         assert options["projects"] == ("standalone:worktree-manager", "agent-worktrees")
         assert options["deadline"] == deadline
         calls.append("compose")

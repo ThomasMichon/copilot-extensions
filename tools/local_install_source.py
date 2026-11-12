@@ -758,12 +758,19 @@ def prepare_applications(
     repository = repository.resolve(strict=True)
     if output.is_symlink():
         raise ValueError("application output must be new and outside the source checkout")
+    output = output.absolute()
+    permissions = preparation_process.procutil_module("python_cache_permissions")
+    permissions.check(output.parent, ancestor=True)
+    permissions.check_ancestors(output.parent)
     output = output.resolve()
     if output.exists() or output == repository or output.is_relative_to(repository):
         raise ValueError("application output must be new and outside the source checkout")
     output = Path(native_retained_path(output))
     projects = tuple("standalone:" + name if name in COMPONENTS else name for name in components)
     admitted = preparation._admit(repository, commit, branch, deadline=deadline)
+    owner = preparation_process.procutil_module("_daemon_instance_owner")
+    owner.mkdir_private(output)
+    permissions.check(output, private=True)
     built = output / "inputs"
     record = compose(
         repository, commit, main_head, built, finalized_main=branch == "main",

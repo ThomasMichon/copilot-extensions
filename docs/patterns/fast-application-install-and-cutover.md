@@ -64,6 +64,9 @@ It admits the clean merged source, uses the canonical version-preserving
 composition and artifact owners, and keeps one toolchain alive for the profile
 worker. Only after every selected snapshot passes complete readback does it
 return a JSON component-to-snapshot map and write `applications.json`.
+Before composition it validates the existing output parent and ancestor chain
+against unprivileged replacement and exclusively creates an owner-private root.
+Linked parents and existing or partial output roots are refused without repair.
 Readback verifies the emitted application's wheel copies against the retained
 construction inputs, not just the snapshot's separate wheel directory.
 Progress goes to stderr. No runtime is installed, selected or started.

@@ -3,13 +3,259 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
 import shutil
+import subprocess
 import time
+from contextlib import contextmanager
+from types import SimpleNamespace
 
 import pytest
 
 import local_install_source as local
+
+
+@pytest.fixture
+def application_portfolio(tmp_path, monkeypatch):
+    import build_toolchain_lock as locks
+
+    permissions = local.preparation_process.procutil_module("python_cache_permissions")
+    owner = local.preparation_process.procutil_module("_daemon_instance_owner")
+    parent = tmp_path / "portfolios"
+    owner.mkdir_private(parent)
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    state = SimpleNamespace(parent=parent, repository=repository, builds=0, compositions=0)
+    toolchain = SimpleNamespace(record={"fixture": True})
+
+    def write(path, content):
+        with os.fdopen(owner.open_private(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY), "w") as stream:
+            stream.write(content)
+
+    def compose(repository, commit, main, output, **options):
+        permissions.check(output.parent, private=True)
+        state.compositions += 1
+        owner.mkdir_private(output)
+        record = {
+            "schema": local.SCHEMA, "version": 1, "kind": "source",
+            "source_commit": commit, "source_tree": "b" * 40, "main_head": main,
+            "projects": {"demo": {"artifact": {"build_toolchain": toolchain.record}}},
+        }
+        write(output / local.MANIFEST, json.dumps(record))
+        return record
+
+    @contextmanager
+    def build(output, record, **options):
+        state.builds += 1
+        owner.mkdir_private(output / "build-tools")
+        yield record, toolchain
+
+    def profiles(built, record, output, components, extras, toolchain, **options):
+        previous = options.get("reuse_source")
+        if previous is not None:
+            return json.loads((previous / "applications.json").read_text())["snapshots"]
+        snapshot = output / "profiles/demo/snapshot"
+        for path in (output / "profiles", snapshot.parent, snapshot):
+            owner.mkdir_private(path)
+        write(snapshot / "fixture.txt", "prepared")
+        write(output / "applications.json", "")
+        return {"demo": str(snapshot)}
+
+    monkeypatch.setattr(local.preparation, "_admit", lambda *a, **kw: ("d" * 40, "b" * 40))
+    monkeypatch.setattr(local, "compose", compose)
+    monkeypatch.setattr(local, "_built_projects", build)
+    monkeypatch.setattr(local, "_prepare_profiles", profiles)
+    monkeypatch.setattr(locks, "resolve_toolchain_lock", lambda *a, **kw: toolchain)
+
+    def prepare(output):
+        return local.prepare_applications(
+            repository, "a" * 40, "c" * 40, output, components=("demo",),
+            branch="dev", uv="unused", deadline=time.monotonic() + 30,
+        )
+
+    state.prepare = prepare
+    return state
+
+
+def test_fresh_application_root_is_private_and_complete_repeat_reuses(application_portfolio):
+    state = application_portfolio
+    first = state.parent / "first"
+    old_umask = os.umask(0o022)
+    try:
+        prepared = state.prepare(first)
+    finally:
+        os.umask(old_umask)
+    permissions = local.preparation_process.procutil_module("python_cache_permissions")
+    permissions.check_bytecode(first, max_entries=100, seconds=10)
+    assert state.prepare(state.parent / "second") == prepared
+    assert (first / "applications.json").is_file()
+    assert state.builds == 1 and state.compositions == 2
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX sticky directory semantics")
+def test_fresh_application_accepts_trusted_sticky_parent_without_reusing_siblings(application_portfolio):
+    state = application_portfolio
+    state.parent.chmod(0o1777)
+    assert state.prepare(state.parent / "first")
+    assert state.prepare(state.parent / "second")
+    assert state.builds == 2
+
+
+@pytest.mark.parametrize("where", ["parent", "ancestor", "foreign-parent"])
+@pytest.mark.skipif(os.name == "nt", reason="POSIX access bits and ownership")
+def test_fresh_application_refuses_replaceable_parent_chain(application_portfolio, monkeypatch, where):
+    state = application_portfolio
+    target = state.parent.parent if where == "ancestor" else state.parent
+    original = target.stat().st_mode
+    if where == "foreign-parent":
+        lstat = Path.lstat
+
+        def foreign(path, *args, **options):
+            info = lstat(path, *args, **options)
+            if path == target:
+                values = list(info)
+                values[4] = os.getuid() + 1
+                return os.stat_result(values)
+            return info
+
+        monkeypatch.setattr(Path, "lstat", foreign)
+    else:
+        target.chmod(0o777)
+    try:
+        with pytest.raises(PermissionError):
+            state.prepare(state.parent / "refused")
+        assert state.compositions == 0
+        assert not (state.parent / "refused").exists()
+    finally:
+        if where != "foreign-parent":
+            target.chmod(original)
+
+
+@pytest.mark.parametrize("where", ["leaf", "parent", "ancestor"])
+def test_fresh_application_refuses_linked_output_chain(application_portfolio, where):
+    state = application_portfolio
+    link = state.parent / "linked"
+    target = state.parent / "target"
+    target.mkdir()
+    if os.name == "nt":
+        subprocess.run(
+            [os.environ["COMSPEC"], "/c", "mklink", "/J", str(link), str(target)],
+            check=True, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+    else:
+        link.symlink_to(target, target_is_directory=True)
+    if where == "ancestor":
+        (target / "nested").mkdir()
+    output = link if where == "leaf" else link / (
+        "nested/refused" if where == "ancestor" else "refused"
+    )
+    with pytest.raises((ValueError, PermissionError)):
+        state.prepare(output)
+    assert state.compositions == 0
+    assert not (target / "applications.json").exists()
+    assert not (target / "refused").exists()
+
+
+@pytest.mark.parametrize("previous", ["ordinary", "shared", "foreign", "partial"])
+def test_fresh_application_never_repairs_or_reenters_existing_root(
+    application_portfolio, monkeypatch, previous,
+):
+    state = application_portfolio
+    output = state.parent / "existing"
+    output.mkdir()
+    marker = output / "retained"
+    marker.write_bytes(b"previous attempt")
+    if previous == "shared" and os.name != "nt":
+        output.chmod(0o777)
+    if previous == "foreign":
+        permissions = local.preparation_process.procutil_module("python_cache_permissions")
+        check = permissions.check
+
+        def foreign(path, **options):
+            if path == output:
+                raise PermissionError("foreign root")
+            return check(path, **options)
+
+        monkeypatch.setattr(permissions, "check", foreign)
+    if previous == "partial":
+        (output / "inputs").mkdir()
+    mode = output.stat().st_mode
+    with pytest.raises(ValueError, match="must be new"):
+        state.prepare(output)
+    assert marker.read_bytes() == b"previous attempt"
+    assert output.stat().st_mode == mode and state.compositions == 0
+
+
+def test_fresh_application_claim_is_exclusive_before_composition(application_portfolio, monkeypatch):
+    state = application_portfolio
+    output = state.parent / "racing"
+    owner = local.preparation_process.procutil_module("_daemon_instance_owner")
+    mkdir = owner.mkdir_private
+    claimed = []
+
+    def competitor(path, **options):
+        mkdir(path)
+        (path / "competitor").write_text("retained")
+        claimed.append(path)
+        mkdir(path, **options)
+
+    monkeypatch.setattr(owner, "mkdir_private", competitor)
+    with pytest.raises(FileExistsError):
+        state.prepare(output)
+    assert claimed and (output / "competitor").read_text() == "retained"
+    assert state.compositions == 0
+
+
+def test_concurrent_fresh_preparers_have_one_owner(application_portfolio, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier, local as thread_local
+
+    state = application_portfolio
+    barrier, entered = Barrier(2), thread_local()
+
+    def admit(*args, **options):
+        if not getattr(entered, "first", False):
+            entered.first = True
+            barrier.wait(timeout=5)
+        return "d" * 40, "b" * 40
+
+    def prepare():
+        try:
+            return state.prepare(state.parent / "concurrent")
+        except FileExistsError as error:
+            return error
+
+    monkeypatch.setattr(local.preparation, "_admit", admit)
+    with ThreadPoolExecutor(max_workers=2) as workers:
+        futures = [workers.submit(prepare) for _ in range(2)]
+        results = [future.result(timeout=10) for future in futures]
+    assert sum(isinstance(result, dict) for result in results) == 1
+    assert sum(isinstance(result, FileExistsError) for result in results) == 1
+    assert state.compositions == 1 and state.builds == 1
+
+
+def test_failed_fresh_preparation_retains_private_partial_root_without_reusing_it(
+    application_portfolio, monkeypatch,
+):
+    state = application_portfolio
+    profiles = local._prepare_profiles
+    first = state.parent / "partial"
+
+    def fail(*args, **options):
+        raise RuntimeError("profile failed")
+
+    monkeypatch.setattr(local, "_prepare_profiles", fail)
+    with pytest.raises(RuntimeError, match="profile failed"):
+        state.prepare(first)
+    permissions = local.preparation_process.procutil_module("python_cache_permissions")
+    permissions.check(first, private=True)
+    assert (first / "inputs").is_dir() and not (first / "applications.json").exists()
+    with pytest.raises(ValueError, match="must be new"):
+        state.prepare(first)
+    monkeypatch.setattr(local, "_prepare_profiles", profiles)
+    assert state.prepare(state.parent / "next") != {}
+    assert state.builds == 2 and state.compositions == 2
 
 
 @pytest.fixture
