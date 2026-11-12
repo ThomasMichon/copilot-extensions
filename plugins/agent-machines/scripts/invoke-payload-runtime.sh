@@ -6,7 +6,7 @@ READ_ONLY_RUNTIME_ENTRY=0
 if [[ "${1:-}" == installation-configuration ]]; then
     CONFIGURATION_ENTRY=1
 fi
-if [[ "${1:-}" == health && ( "${2:-}" == run || "${2:-}" == prepare-job ) ]]; then
+if [[ "${1:-}" == health && ( "${2:-}" == run || "${2:-}" == prepare-job || "${2:-}" == job ) ]]; then
     HEALTH_RUN_ENTRY=1
 fi
 if [[ "$CONFIGURATION_ENTRY" == 1 || "$HEALTH_RUN_ENTRY" == 1 ]]; then

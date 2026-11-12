@@ -11,6 +11,34 @@ import stat
 import sys
 from pathlib import Path
 
+GUI_BOOTSTRAP_VERSION = 1
+
+
+def _gui_environment(runtime, root: Path, slot: Path) -> None:
+    """Bind the physical Windows GUI host to this retained virtual environment."""
+    python = runtime.slot_python(root, slot.name)
+    if sys.platform != "win32" or python is None:
+        raise RuntimeError("GUI retention bootstrap requires a Windows runtime")
+    environment = python.parent.parent
+    config = environment / "pyvenv.cfg"
+    values = {}
+    for line in _identity_bytes(config, 65536).decode("utf-8").splitlines():
+        key, separator, value = line.partition("=")
+        if separator:
+            values[key.strip().lower()] = value.strip()
+    home = Path(values.get("home", ""))
+    if (
+        not home.is_absolute()
+        or values.get("include-system-site-packages", "").lower() != "false"
+        or not Path(sys.executable).samefile(home / "pythonw.exe")
+        or not Path(sys.base_prefix).samefile(home)
+    ):
+        raise RuntimeError("GUI host does not match the retained runtime base")
+    # Task Scheduler cannot pass __PYVENV_LAUNCHER__. Bind before site.main(),
+    # and keep subprocess selection inside the retained environment.
+    sys.executable = str(python)
+    sys.prefix = sys.exec_prefix = str(environment)
+
 
 def _identity_bytes(path: Path, limit: int) -> bytes:
     def regular(info: os.stat_result) -> bool:
@@ -56,6 +84,9 @@ def main() -> None:
     if slot.parent.name != "versions" or slot.name == "dev":
         raise RuntimeError("Runtime retention bootstrap requires an immutable numbered slot")
     arguments = sys.argv[1:]
+    gui_runtime = arguments[:1] == ["--gui-runtime"]
+    if gui_runtime:
+        arguments = arguments[1:]
     expected_identity = None
     if arguments[:1] == ["--runtime-identity"]:
         if len(arguments) < 4 or not re.fullmatch(r"[0-9a-f]{32}:[0-9a-f]{64}", arguments[1]):
@@ -78,6 +109,10 @@ def main() -> None:
     with runtime.retention_lease(root, slot.name, payload_hash=marker["payload_hash"]):
         if expected_identity is not None and runtime_identity(slot) != expected_identity:
             raise RuntimeError("Retained runtime build identity changed")
+        if gui_runtime:
+            if expected_identity is None:
+                raise RuntimeError("GUI retention bootstrap requires a selected build identity")
+            _gui_environment(runtime, root, slot)
         import site
 
         site.main()
