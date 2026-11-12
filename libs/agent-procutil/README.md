@@ -205,6 +205,12 @@ from mode bits. An unresolved user home likewise selects the fallback.
 The namespace's bounded `owner.json` lives beside bytecode. Its installation's
 private `catalog.sqlite` indexes ownership before the provider enables cache
 writes, reserving restart-safe collection progress without a directory census.
+The catalog, existing SQLite sidecars and owner record receive native file
+protection checks before use. Under SQLite serialization, an empty schema-zero
+catalog can finish initialization after an interrupted first allocation;
+nonempty or unknown schemas are not reset. Owner records are completely written
+and flushed before exclusive hard-link publication, so interruption cannot
+expose a partial record. Unsupported atomic publication selects `-B`.
 Unknown schemas, conflicting records and failed catalog operations take the
 no-write fallback, preserving the existing objects. This provider neither
 deletes a cache nor changes runtime selection, retention or service lifetime.

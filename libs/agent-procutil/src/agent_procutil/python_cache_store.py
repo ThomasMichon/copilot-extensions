@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import sys
+import uuid
 from functools import lru_cache
 from pathlib import Path
 
@@ -91,6 +92,22 @@ def _directory(path: Path, permissions, *, private: bool = False, ancestor: bool
     permissions.check(path, private=private, ancestor=ancestor)
 
 
+def _publish_record(record: Path, encoded: bytes, *, private_owner) -> None:
+    temporary = record.with_name(".owner-" + uuid.uuid4().hex)
+    descriptor = private_owner.open_private(temporary, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(encoded)
+            stream.flush()
+            os.fsync(stream.fileno())
+        try:
+            os.link(temporary, record)
+        except FileExistsError:
+            pass
+    finally:
+        temporary.unlink()
+
+
 def prepare(root: Path, target: Path, identity: str, *, read_record) -> Path:
     """Create/reuse one matching private namespace outside the runtime."""
     permissions = component("python_cache_permissions")
@@ -116,19 +133,14 @@ def prepare(root: Path, target: Path, identity: str, *, read_record) -> Path:
     component("python_cache_catalog").register(
         location.parent, key, encoded, private_owner=private_owner,
     )
-    try:
-        descriptor = private_owner.open_private(
-            record, os.O_CREAT | os.O_EXCL | os.O_WRONLY,
-        )
-    except FileExistsError:
-        if record.lstat().st_size > 16384:
-            raise ValueError("Python cache ownership exceeds its byte budget")
-        existing = read_record(record)
-        if len(existing) > 16384 or existing != encoded:
-            raise ValueError("Python cache ownership differs")
-    else:
-        with os.fdopen(descriptor, "wb") as stream:
-            stream.write(encoded)
+    if not os.path.lexists(record):
+        _publish_record(record, encoded, private_owner=private_owner)
+    permissions.check_file(record)
+    if record.lstat().st_size > 16384:
+        raise ValueError("Python cache ownership exceeds its byte budget")
+    existing = read_record(record)
+    if len(existing) > 16384 or existing != encoded:
+        raise ValueError("Python cache ownership differs")
     bytecode = location / "bytecode"
     _directory(bytecode, permissions, private=True)
     permissions.check_bytecode(bytecode)

@@ -191,6 +191,12 @@ gates, not claims that the current code already provides them.
   packet now passes (4,792 tests), including that regression. Rebased native
   Linux provider/interpreter controls pass (51 passed / 10 platform skips);
   successful disposable fixtures were removed through their scratch owner.
+- Extended the same native protection boundary to the SQLite catalog, existing
+  journal/WAL/shared-memory sidecars and owner record. Empty schema-zero
+  catalogs recover serialized interrupted initialization without resetting
+  unknown schemas; immutable owner records publish only after complete writes.
+  Native Windows interruption and metadata-DACL controls pass (63 passed /
+  5 platform skips). No real cache, runtime or service was changed.
 
 ### 2026-11-11 - Design accepted; implementation starting
 

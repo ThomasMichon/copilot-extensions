@@ -6,27 +6,28 @@ import os
 import sqlite3
 from pathlib import Path
 
+from . import python_cache_permissions as permissions
+
 
 @contextlib.contextmanager
 def connection(installation: Path, *, private_owner):
     """Open only this cache layout's private catalog, refusing unknown schemas."""
     path = installation / "catalog.sqlite"
-    created = False
     try:
         descriptor = private_owner.open_private(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
     except FileExistsError:
-        info = path.lstat()
-        if not path.is_file() or path.is_symlink() or getattr(info, "st_file_attributes", 0) & 0x400:
-            raise ValueError("Python cache catalog is not ordinary")
+        pass
     else:
         os.close(descriptor)
-        created = True
+    for candidate in (path, *(Path(str(path) + suffix) for suffix in ("-journal", "-wal", "-shm"))):
+        if os.path.lexists(candidate):
+            permissions.check_file(candidate)
     database = None
     try:
         database = sqlite3.connect(path, timeout=0.1)
         database.execute("BEGIN IMMEDIATE")
         version = database.execute("PRAGMA user_version").fetchone()[0]
-        if created:
+        if version == 0 and database.execute("SELECT 1 FROM sqlite_master LIMIT 1").fetchone() is None:
             database.execute("CREATE TABLE entries (key TEXT PRIMARY KEY, owner BLOB NOT NULL)")
             database.execute("CREATE TABLE progress (name TEXT PRIMARY KEY, value TEXT NOT NULL)")
             database.execute(

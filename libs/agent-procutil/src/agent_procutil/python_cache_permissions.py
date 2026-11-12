@@ -151,6 +151,17 @@ def check_ancestors(path: Path) -> None:
         check(parent, ancestor=True)
 
 
+def check_file(path: Path) -> None:
+    """Protect cache metadata too, including independently granted Windows files."""
+    info = path.lstat()
+    if not stat.S_ISREG(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
+        raise PermissionError("bytecode cache metadata is not ordinary")
+    if os.name == "nt":
+        _windows_check(path, ancestor=False, private=True)
+    elif info.st_uid != os.getuid() or info.st_mode & 0o077:
+        raise PermissionError("bytecode cache metadata is not private")
+
+
 def check_bytecode(path: Path, *, max_entries: int = 256, seconds: float = 0.05) -> None:
     """Bound Windows descendant admission; private POSIX traversal suffices."""
     if os.name != "nt":

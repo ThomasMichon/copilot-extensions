@@ -13,6 +13,7 @@ import pytest
 from agent_procutil import python_cache as cache
 from agent_procutil import python_cache_permissions as permissions
 from agent_procutil import python_cache_store as store
+from agent_procutil import python_cache_catalog as catalog
 from agent_procutil import no_window_kwargs
 
 
@@ -76,6 +77,40 @@ def test_catalog_indexes_one_owner_and_corruption_disables_cache(tmp_path, local
     assert cache.policy_arguments(root, runtime=target) == ["-B"]
     with sqlite3.connect(catalog) as connection:
         assert connection.execute("PRAGMA user_version").fetchone()[0] == 9
+
+
+def test_interrupted_catalog_initialization_recovers_without_resetting_unknown_schema(
+    tmp_path, local_cache, monkeypatch,
+):
+    root = tmp_path / "installation"
+    target = _installed(root)
+    connect = sqlite3.connect
+
+    class Interrupted(sqlite3.Connection):
+        def execute(self, sql, *args):
+            if sql.startswith("CREATE TABLE"):
+                raise sqlite3.OperationalError("interrupted initialization")
+            return super().execute(sql, *args)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(catalog.sqlite3, "connect", lambda *a, **kw: connect(*a, factory=Interrupted, **kw))
+        assert cache.policy_arguments(root, runtime=target) == ["-B"]
+    assert cache.policy_arguments(root, runtime=target)[0] == "-X"
+
+
+def test_interrupted_owner_publication_never_exposes_partial_record(tmp_path, local_cache, monkeypatch):
+    root = tmp_path / "installation"
+    target = _installed(root)
+
+    def interrupted(*args, **kwargs):
+        raise OSError("interrupted before immutable record publication")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(store.os, "link", interrupted)
+        assert cache.policy_arguments(root, runtime=target) == ["-B"]
+    assert not list(local_cache.rglob("owner.json"))
+    assert not list(local_cache.rglob(".owner-*"))
+    assert cache.policy_arguments(root, runtime=target)[0] == "-X"
 
 
 def test_unsealed_invocation_does_not_allocate_any_namespace(tmp_path, local_cache):
@@ -233,7 +268,10 @@ def test_real_interpreter_reuses_external_bytecode_and_unsealed_writes_nothing(
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows native DACL protection")
-@pytest.mark.parametrize("kind", ["base", "inherit-only", "file", "directory"])
+@pytest.mark.parametrize("kind", [
+    "base", "inherit-only", "file", "directory", "owner",
+    "catalog", "catalog-journal", "catalog-wal", "catalog-shm",
+])
 def test_native_windows_shared_writable_cache_is_not_selected(tmp_path, local_cache, kind):
     import ctypes
     from ctypes import wintypes
@@ -244,6 +282,12 @@ def test_native_windows_shared_writable_cache_is_not_selected(tmp_path, local_ca
         selected = cache.policy_arguments(root, runtime=target)
         assert selected[0] == "-X"
         changed = Path(selected[1].split("=", 1)[1])
+        if kind == "owner":
+            changed = changed.parent / "owner.json"
+        elif kind.startswith("catalog"):
+            changed = changed.parent.parent / (kind.replace("catalog", "catalog.sqlite", 1))
+            if kind != "catalog":
+                changed.write_bytes(b"untouched metadata fixture")
         if kind in {"file", "directory"}:
             changed /= "existing"
             if kind == "file":
