@@ -86,6 +86,12 @@ during finalize is excluded.
 
 ## Plan
 
+The next bounded runtime build-out follows the
+[owned test-runner scratch pilot](scratch-pilot.md): scoped storage preferences,
+external allocation custody, safe retained disposition, and a real Windows/Linux
+runner flow. This proposal must clear source review before behavior changes; cache eviction,
+installed rollout and legacy-data cleanup are outside the pilot.
+
 ### Track A — Reclaim legacy `.test-venvs` (#10965)
 - [x] Standalone `tools/reclaim_legacy_test_dirs.py`: inventory root
       `.test-venvs/`/`.test-runs/` across registered worktrees, optionally
