@@ -57,7 +57,7 @@ retain their existing limits.
 ## Current decisions and retained boundaries
 
 The [2026-11-12 oldest-cohort refresh](roadmap-oldest-cohort-refresh.md)
-adds 36 current source/ownership assessments and corrects the #1803 framing
+adds 72 current source/ownership assessments and corrects the #1803 framing
 residual below. It does not replace the original twelve selections, invent
 implementation appointments or treat existing canonical keepers as redundant.
 
