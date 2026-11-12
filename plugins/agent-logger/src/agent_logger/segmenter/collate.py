@@ -31,24 +31,44 @@ Segmented mode writes numbered files to --output-dir:
 events.jsonl is streamed one line at a time and turns are written as they
 complete, so memory stays bounded by one turn (plus the --max-total budget in
 single-file mode) rather than by the transcript size.
+
+The events -> Markdown conversion itself lives in the reusable
+:mod:`agent_logger.segmenter.digest` engine (shared with ``ramp-up-session``);
+this module adds session resolution, the persistent digest store, manifests,
+and the CLI. Engine names are re-exported here for existing importers.
 """
 
 from __future__ import annotations
 
 import argparse
-import contextlib
-import json
 import os
 import sys
-from collections.abc import Iterable
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, TextIO
+from typing import Any
 
 from agent_logger import sessions
 from agent_logger.config import load_config
 from agent_logger.secret_patterns import SECRET_PATTERNS, redact  # noqa: F401
+from agent_logger.segmenter.digest import (  # noqa: F401 -- re-exported
+    DEFAULT_MAX_TOOL_OUTPUT,
+    DEFAULT_MAX_TOTAL,
+    DEFAULT_SEGMENT_SIZE,
+    TurnStats,
+    build_session_digest,
+    clear_digest_dir,
+    fmt_ts,
+    format_checkpoints,
+    format_digest,
+    format_metadata,
+    format_turn,
+    format_turn_stats,
+    read_checkpoints,
+    read_rewind_index,
+    read_workspace,
+    render_session_digest,
+    write_segments,
+)
 from agent_logger.segmenter.platform import detect_machine
 from agent_logger.segmenter.turn_stream import (  # noqa: F401 -- re-exported
     SKIP_EVENT_TYPES,
@@ -59,13 +79,16 @@ from agent_logger.segmenter.turn_stream import (  # noqa: F401 -- re-exported
     truncate,
 )
 
+# Pre-extraction private names, kept for existing importers.
+_format_metadata = format_metadata
+_format_checkpoints = format_checkpoints
+_format_turn_stats = format_turn_stats
+_format_turn = format_turn
+
 # ---------------------------------------------------------------------------
 # Defaults
 # ---------------------------------------------------------------------------
 
-DEFAULT_MAX_TOOL_OUTPUT = 600      # chars per tool result body
-DEFAULT_MAX_TOTAL = 120_000        # overall output budget (~30k tokens)
-DEFAULT_SEGMENT_SIZE = 80_000      # ~20k tokens per segment file
 DEFAULT_BACKFILL_COUNT = 3         # how many previous sessions to link/backfill
 
 
@@ -452,24 +475,17 @@ def write_to_nas(
         if f.is_file():
             f.unlink()
 
-    # Read session artifacts; turns are streamed straight into segment files.
-    workspace = read_workspace(session_dir)
-    checkpoints = read_checkpoints(session_dir)
-    snapshots = read_rewind_index(session_dir)
-    stream = TurnStream(session_dir, cutoff, max_tool_output, since=since)
-
-    # Write segments
-    segments = write_segments(
-        workspace=workspace,
-        session_start=stream.session_start,
-        checkpoints=checkpoints,
-        turns=stream,
-        snapshots=snapshots,
-        cutoff_time=cutoff,
-        output_dir=nas_digest_dir,
+    # Collate the session; turns are streamed straight into segment files.
+    # ``TurnStream`` is resolved from this module so callers/tests may swap it.
+    digest = build_session_digest(
+        session_dir,
+        nas_digest_dir,
+        since=since,
+        cutoff=cutoff,
         segment_size=segment_size,
         max_tool_output=max_tool_output,
-        since_time=since,
+        clean=False,
+        stream_factory=TurnStream,
     )
 
     # Find previous sessions (auto-scoped to same worktree/repo)
@@ -501,11 +517,11 @@ def write_to_nas(
         output_dir=nas_digest_dir,
         session_id=session_id,
         machine=machine,
-        workspace=workspace,
-        session_start=stream.session_start,
-        segments=segments,
-        checkpoints=checkpoints,
-        turn_count=stream.turn_count,
+        workspace=digest.workspace,
+        session_start=digest.session_start,
+        segments=digest.files,
+        checkpoints=digest.checkpoints,
+        turn_count=digest.turn_count,
         previous_sessions=previous,
         nas_root=nas_root,
         since=since,
@@ -516,354 +532,6 @@ def write_to_nas(
     _write_index(nas_session_dir, session_id)
 
     return nas_session_dir, nas_digest_dir
-
-
-def fmt_ts(iso: str | None) -> str:
-    """Format an ISO timestamp to a readable form."""
-    if not iso:
-        return "unknown"
-    try:
-        dt = datetime.fromisoformat(iso.replace("Z", "+00:00"))
-        return dt.strftime("%Y-%m-%d %H:%M:%S UTC")
-    except Exception:
-        return iso
-
-
-# ---------------------------------------------------------------------------
-# Readers
-# ---------------------------------------------------------------------------
-
-def read_workspace(session_dir: Path) -> dict[str, str]:
-    """Parse workspace.yaml (simple key: value format)."""
-    ws_file = session_dir / "workspace.yaml"
-    if not ws_file.exists():
-        return {}
-    result: dict[str, str] = {}
-    for line in ws_file.read_text(encoding="utf-8").splitlines():
-        if ":" in line:
-            k, v = line.split(":", 1)
-            result[k.strip()] = v.strip()
-    return result
-
-
-def read_checkpoints(session_dir: Path) -> list[dict[str, str]]:
-    """Read checkpoint markdown files, returning list of {filename, content}."""
-    cp_dir = session_dir / "checkpoints"
-    if not cp_dir.is_dir():
-        return []
-    results = []
-    for f in sorted(cp_dir.iterdir()):
-        if f.name == "index.md" or not f.suffix == ".md":
-            continue
-        try:
-            results.append({
-                "filename": f.name,
-                "content": f.read_text(encoding="utf-8"),
-            })
-        except Exception:
-            pass
-    return results
-
-
-def read_rewind_index(session_dir: Path) -> list[dict[str, Any]]:
-    """Read rewind-snapshots/index.json for per-turn metadata."""
-    idx_file = session_dir / "rewind-snapshots" / "index.json"
-    if not idx_file.exists():
-        return []
-    try:
-        data = json.loads(idx_file.read_text(encoding="utf-8"))
-        return data.get("snapshots", [])
-    except Exception:
-        return []
-
-
-# ---------------------------------------------------------------------------
-# Output formatters
-# ---------------------------------------------------------------------------
-
-def _format_metadata(
-    workspace: dict[str, str],
-    session_start: dict[str, Any],
-    cutoff_time: str | None,
-    since_time: str | None = None,
-) -> list[str]:
-    """Render the metadata block as lines."""
-    parts: list[str] = []
-    sid = session_start.get("session_id") or workspace.get("id", "unknown")
-    parts.append("# Session Digest\n")
-    parts.append("## Metadata\n")
-    parts.append(f"- **Session ID:** `{sid}`")
-    _start = fmt_ts(session_start.get("start_time") or workspace.get("created_at"))
-    parts.append(f"- **Session start:** {_start}")
-    if since_time:
-        parts.append(f"- **Digest since:** {fmt_ts(since_time)}")
-    if cutoff_time:
-        parts.append(f"- **Digest cutoff:** {fmt_ts(cutoff_time)}")
-    _branch = session_start.get("branch") or workspace.get("branch", "unknown")
-    parts.append(f"- **Branch:** {_branch}")
-    _cwd = session_start.get("cwd") or workspace.get("cwd", "unknown")
-    parts.append(f"- **Working dir:** {_cwd}")
-    head = session_start.get("head_commit", "")
-    if head:
-        parts.append(f"- **Head commit:** `{head[:12]}`")
-    summary = workspace.get("summary", "")
-    if summary:
-        parts.append(f"- **Auto-summary:** {summary}")
-    cli_ver = session_start.get("version", "")
-    if cli_ver:
-        parts.append(f"- **CLI version:** {cli_ver}")
-    parts.append("")
-    return parts
-
-
-def _format_checkpoints(checkpoints: list[dict[str, str]]) -> list[str]:
-    """Render checkpoints as lines."""
-    if not checkpoints:
-        return []
-    parts: list[str] = []
-    parts.append("## Checkpoints (pre-compaction summaries)\n")
-    parts.append("These are curated summaries written by the CLI before context")
-    parts.append("compaction. They capture work done up to that point.\n")
-    for i, cp in enumerate(checkpoints, 1):
-        parts.append(f"### Checkpoint {i}: {cp['filename']}\n")
-        parts.append(cp["content"])
-        parts.append("")
-    return parts
-
-
-@dataclass
-class TurnStats:
-    """Running turn and tool-call counts for the stats section."""
-
-    turns: int = 0
-    tool_calls: int = 0
-    failed_tool_calls: int = 0
-
-    def add(self, turn: dict[str, Any]) -> None:
-        tool_calls = turn.get("tool_calls", [])
-        self.turns += 1
-        self.tool_calls += len(tool_calls)
-        self.failed_tool_calls += sum(
-            1 for tc in tool_calls if tc.get("success") is False
-        )
-
-    @classmethod
-    def of(cls, turns: Iterable[dict[str, Any]]) -> TurnStats:
-        stats = cls()
-        for turn in turns:
-            stats.add(turn)
-        return stats
-
-
-def _format_turn_stats(
-    stats: TurnStats,
-    checkpoints: list[dict[str, str]],
-    snapshots: list[dict[str, Any]],
-) -> list[str]:
-    """Render session stats from precomputed turn counts."""
-    parts: list[str] = []
-    parts.append("## Session Stats\n")
-    parts.append(f"- **Turns:** {stats.turns}")
-    parts.append(f"- **Tool calls:** {stats.tool_calls}")
-    if stats.failed_tool_calls:
-        parts.append(f"- **Failed tool calls:** {stats.failed_tool_calls}")
-    parts.append(f"- **Checkpoints:** {len(checkpoints)}")
-    parts.append(f"- **Rewind snapshots:** {len(snapshots)}")
-    parts.append("")
-    return parts
-
-
-def _format_turn(turn: dict[str, Any], index: int) -> str:
-    """Render a single turn as a Markdown string."""
-    parts: list[str] = []
-    parts.append(f"### Turn {index}")
-    if turn.get("timestamp"):
-        parts.append(f"*{fmt_ts(turn['timestamp'])}*\n")
-
-    user_msg = turn.get("user_message", "").strip()
-    if user_msg:
-        parts.append("**User:**\n")
-        parts.append(user_msg)
-        parts.append("")
-
-    for msg in turn.get("assistant_messages", []):
-        msg = msg.strip()
-        if msg:
-            parts.append("**Assistant:**\n")
-            parts.append(msg)
-            parts.append("")
-
-    tool_calls = turn.get("tool_calls", [])
-    if tool_calls:
-        parts.append("**Tool usage:**\n")
-        for tc in tool_calls:
-            status = "✓" if tc.get("success") else ("✗" if tc.get("success") is False else "?")
-            parts.append(f"- `{tc['tool']}` [{status}] — {tc.get('args', '')}")
-            result = tc.get("result")
-            if result and tc.get("success") is False:
-                parts.append(f"  ```\n  {result}\n  ```")
-            elif result and len(result) > 20:
-                parts.append("  <details><summary>Result preview</summary>\n")
-                parts.append(f"  ```\n  {result}\n  ```")
-                parts.append("  </details>")
-        parts.append("")
-
-    return "\n".join(parts)
-
-
-def format_digest(
-    workspace: dict[str, str],
-    session_start: dict[str, Any],
-    checkpoints: list[dict[str, str]],
-    turns: Iterable[dict[str, Any]],
-    snapshots: list[dict[str, Any]],
-    cutoff_time: str | None,
-    max_total: int,
-    since_time: str | None = None,
-) -> str:
-    """Render the full digest as a single string (stdout mode).
-
-    ``turns`` may be a lazy iterable such as a :class:`TurnStream`. Rendered
-    turn text is kept only until it alone exceeds ``max_total`` (the output is
-    then certain to be truncated inside the transcript); remaining turns are
-    still consumed so the metadata reflects the whole window. The header is
-    rendered after the last turn, so ``session_start`` is read only then.
-    """
-    stats = TurnStats()
-    turn_texts: list[str] = []
-    turn_chars = 0
-    for i, turn in enumerate(turns, 1):
-        stats.add(turn)
-        if max_total < 0 or turn_chars <= max_total:
-            text = _format_turn(turn, i)
-            turn_texts.append(text)
-            turn_chars += len(text) + 1  # + the "\n" joining it to the previous part
-    truncated_early = max_total >= 0 and turn_chars > max_total
-
-    parts: list[str] = []
-    parts.extend(_format_metadata(workspace, session_start, cutoff_time, since_time))
-    parts.extend(_format_checkpoints(checkpoints))
-
-    parts.append("## Conversation Transcript\n")
-    if checkpoints:
-        parts.append("*Note: Checkpoints above cover earlier work. The transcript")
-        parts.append("below includes the full session for completeness, but checkpoint")
-        parts.append("content is authoritative for the periods they cover.*\n")
-
-    parts.extend(turn_texts)
-
-    if not truncated_early:
-        parts.extend(_format_turn_stats(stats, checkpoints, snapshots))
-
-    output = "\n".join(parts)
-    if len(output) > max_total:
-        output = output[:max_total] + f"\n\n... [digest truncated at {max_total} chars]"
-    return output
-
-
-def write_segments(
-    workspace: dict[str, str],
-    session_start: dict[str, Any],
-    checkpoints: list[dict[str, str]],
-    turns: Iterable[dict[str, Any]],
-    snapshots: list[dict[str, Any]],
-    cutoff_time: str | None,
-    output_dir: Path,
-    segment_size: int,
-    max_tool_output: int,
-    since_time: str | None = None,
-) -> list[str]:
-    """Write segmented digest files to output_dir.
-
-    Returns a list of created file paths (relative to output_dir).
-
-    Layout:
-      00-context.md   — metadata + checkpoints + stats (written last, on success)
-      01-turns.md     — first batch of turns
-      02-turns.md     — next batch, etc.
-
-    Turns are never split mid-turn. Each segment file is ≤ segment_size
-    chars (soft limit — a single huge turn may exceed it).
-
-    ``turns`` may be a lazy iterable such as a :class:`TurnStream`: each turn
-    is appended to its segment file as soon as it is produced, so only one
-    turn is held in memory. ``00-context.md`` is written after the last turn,
-    so ``session_start`` is read only then, and its presence marks a complete
-    digest. If the run fails or is interrupted, segments already closed are
-    kept as partial progress; the still-open segment and any ``00-context.md``
-    are removed and the original exception propagates.
-    """
-    output_dir.mkdir(parents=True, exist_ok=True)
-    stats = TurnStats()
-    segment_names: list[str] = []
-    seg_fh: TextIO | None = None
-    seg_chars = 0
-    ctx_file = output_dir / "00-context.md"
-
-    try:
-        # ── Turn segments ──
-        for i, turn in enumerate(turns, 1):
-            stats.add(turn)
-            turn_text = _format_turn(turn, i)
-            turn_len = len(turn_text)
-
-            # If adding this turn would exceed the segment size, flush first
-            if seg_fh is not None and seg_chars + turn_len > segment_size:
-                seg_fh.close()
-                seg_fh = None
-
-            if seg_fh is None:
-                seg_num = len(segment_names) + 1
-                fname = f"{seg_num:02d}-turns.md"
-                seg_fh = open(output_dir / fname, "w", encoding="utf-8")
-                segment_names.append(fname)
-                seg_fh.write(f"# Transcript Segment {seg_num}\n\n")
-                seg_chars = 0
-            else:
-                seg_fh.write("\n")
-            seg_fh.write(turn_text)
-            seg_chars += turn_len
-
-        if seg_fh is not None:
-            seg_fh.close()
-            seg_fh = None
-
-        # ── Context file (the completion marker, written last) ──
-        ctx_parts: list[str] = []
-        ctx_parts.extend(_format_metadata(workspace, session_start, cutoff_time, since_time))
-        ctx_parts.extend(_format_checkpoints(checkpoints))
-        ctx_parts.extend(_format_turn_stats(stats, checkpoints, snapshots))
-
-        # Add segment inventory so each reader knows the full picture
-        total_turns = stats.turns
-        ctx_parts.append("## Segment Inventory\n")
-        ctx_parts.append(f"The conversation transcript ({total_turns} turns) has been split")
-        ctx_parts.append("into numbered segment files in this directory. Each segment")
-        ctx_parts.append("contains a consecutive batch of turns. Read them in order to")
-        ctx_parts.append("reconstruct the full session.\n")
-
-        ctx_file.write_text("\n".join(ctx_parts), encoding="utf-8")
-    except BaseException:
-        # Closed segments hold whole turns and are kept. The open segment and
-        # the context file (the completion marker) are removed so an
-        # interrupted run never reads as a complete digest.
-        unfinished = [ctx_file]
-        if seg_fh is not None:
-            with contextlib.suppress(OSError):
-                seg_fh.close()
-            unfinished.append(output_dir / segment_names.pop())
-        for path in unfinished:
-            with contextlib.suppress(OSError):
-                path.unlink(missing_ok=True)
-        if segment_names:
-            print(
-                f"collate: interrupted; kept {len(segment_names)} completed segment(s) in "
-                f"{output_dir}; digest incomplete (no 00-context.md)",
-                file=sys.stderr,
-            )
-        raise
-
-    return ["00-context.md", *segment_names]
 
 
 # ---------------------------------------------------------------------------
@@ -974,30 +642,17 @@ def main() -> None:
             print("nas_status: unreachable")
 
     if args.output_dir:
-        # Segmented mode — write files to local directory
+        # Segmented mode — write files to local directory (stale files cleaned)
         out_dir = Path(args.output_dir)
-        # Clean stale files from previous runs
-        if out_dir.exists():
-            for f in out_dir.iterdir():
-                if f.is_file() and (f.name.endswith(".md") or f.name == "manifest.yaml"):
-                    f.unlink()
-        workspace = read_workspace(session_dir)
-        checkpoints = read_checkpoints(session_dir)
-        snapshots = read_rewind_index(session_dir)
-        stream = TurnStream(session_dir, args.cutoff, args.max_tool_output, since=args.since)
-        out_dir = Path(args.output_dir)
-        files = write_segments(
-            workspace=workspace,
-            session_start=stream.session_start,
-            checkpoints=checkpoints,
-            turns=stream,
-            snapshots=snapshots,
-            cutoff_time=args.cutoff,
-            output_dir=out_dir,
+        files = build_session_digest(
+            session_dir,
+            out_dir,
+            since=args.since,
+            cutoff=args.cutoff,
             segment_size=args.segment_size,
             max_tool_output=args.max_tool_output,
-            since_time=args.since,
-        )
+            stream_factory=TurnStream,
+        ).files
         print(f"Wrote {len(files)} segment(s) to {out_dir.resolve()}:")
         for f in files:
             fpath = out_dir / f
@@ -1011,19 +666,13 @@ def main() -> None:
 
     if not (args.nas or args.output_dir):
         # Single-file mode — write to stdout
-        workspace = read_workspace(session_dir)
-        checkpoints = read_checkpoints(session_dir)
-        snapshots = read_rewind_index(session_dir)
-        stream = TurnStream(session_dir, args.cutoff, args.max_tool_output, since=args.since)
-        digest = format_digest(
-            workspace=workspace,
-            session_start=stream.session_start,
-            checkpoints=checkpoints,
-            turns=stream,
-            snapshots=snapshots,
-            cutoff_time=args.cutoff,
+        digest = render_session_digest(
+            session_dir,
+            since=args.since,
+            cutoff=args.cutoff,
+            max_tool_output=args.max_tool_output,
             max_total=args.max_total,
-            since_time=args.since,
+            stream_factory=TurnStream,
         )
         print(digest)
 
