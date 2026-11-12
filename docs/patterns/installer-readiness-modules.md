@@ -102,6 +102,10 @@ installed package rather than a checkout-local module, including on Python
 configuration and explicit UTF-8 output; it neither grants provisioning
 authority nor changes the selected runtime. Normal operational command caching
 and installer behavior are unchanged.
+The same options apply to legacy PowerShell's encoded-argument bootstrap and
+the Machines/Worktrees payload dispatchers, not only direct `-m` branches.
+Worktrees' metadata-only path skips operational cache selection. Inline
+standard-library parsers also exclude the project from their import path.
 
 ### Script-only runtime ownership
 

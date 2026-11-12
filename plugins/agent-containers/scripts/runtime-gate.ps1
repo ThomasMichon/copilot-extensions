@@ -252,17 +252,17 @@ function Invoke-Runtime {
     $previousEap = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
+        $pythonOptions = @()
+        if ($forwardArgs.Count -gt 0 -and $forwardArgs[0] -in @('installer-readiness', 'invocation-contract')) {
+            $pythonOptions = @('-I', '-B', '-X', 'utf8')
+        }
         if (-not $argumentMode -or $argumentMode -eq 'Legacy') {
             # Match Codespaces' lossless forwarding across legacy native argument passing.
             $json = ConvertTo-Json -InputObject @($forwardArgs) -Compress
             $encoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($json))
             $runtimeBootstrap = "import base64,json,runpy,sys;sys.argv=['agent_containers']+json.loads(base64.b64decode(sys.argv[1]));runpy.run_module('agent_containers',run_name='__main__',alter_sys=True)"
-            & $Python -c $runtimeBootstrap $encoded
+            & $Python @pythonOptions -c $runtimeBootstrap $encoded
         } else {
-            $pythonOptions = @()
-            if ($forwardArgs.Count -gt 0 -and $forwardArgs[0] -in @('installer-readiness', 'invocation-contract')) {
-                $pythonOptions = @('-I', '-B', '-X', 'utf8')
-            }
             & $Python @pythonOptions -m agent_containers @forwardArgs
         }
     } finally {

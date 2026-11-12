@@ -116,6 +116,19 @@ the shadow. No service is provisioned. Windows covers the CMD/Windows PowerShell
 entry and PowerShell 7; POSIX covers its native gate, with unavailable platform
 cases skipped rather than credited.
 
+The `payload-invocation` selection
+`--test-file tests/test_evaluator_bootstrap_consumers.py --test-file tests/test_readiness_dispatcher_imports.py
+-k 'readonly_runtime_excludes_checkout or readiness_dispatcher_preserves_project' --allow-explicit-tiers`
+invokes the real dispatchers against private installed modules and
+marker-writing checkout shadows. It covers Windows PowerShell, modern
+PowerShell and forced Legacy argument passing for CodeSpaces/Containers,
+plus Machines/Worktrees on each available native platform. Assertions retain
+the selected cwd, installed site packages, isolation, UTF-8 output, no bytecode
+and immutable payload files. Index's
+`tests/test_runtime_gate.py -k posix_readiness_parser_never`
+separately exercises its inline JSON parser from a checkout containing
+`json.py`; a Windows skip is not POSIX evidence.
+
 ### Selected native ADO discussion resolution
 
 The focused Worktrees packet `--test-file tests/test_ado_thread_resolution.py

@@ -192,6 +192,8 @@ function Invoke-AgentMachinesRuntime([string]$Python) {
     try {
         if ($healthRunEntry) {
             & $Python -I (Join-Path $scriptDir 'health-collection-entry.py') @forwardArgs
+        } elseif ($forwardArgs.Count -gt 0 -and $forwardArgs[0] -in @('installer-readiness', 'invocation-contract')) {
+            & $Python -I -B -X utf8 -m agent_machines @forwardArgs
         } else {
             & $Python -m agent_machines @forwardArgs
         }

@@ -261,18 +261,18 @@ function Invoke-Runtime {
     $previousEap = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
+        $pythonOptions = @()
+        if ($forwardArgs.Count -gt 0 -and $forwardArgs[0] -in @('installer-readiness', 'invocation-contract')) {
+            $pythonOptions = @('-I', '-B', '-X', 'utf8')
+        }
         if ($PSVersionTable.PSVersion -lt [version]'7.3' -or
             (Get-Variable PSNativeCommandArgumentPassing -ValueOnly -ErrorAction SilentlyContinue) -eq 'Legacy') {
             # Legacy native argument passing retokenizes embedded quotes.
             $json = ConvertTo-Json -InputObject @($forwardArgs) -Compress
             $encoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($json))
             $bootstrap = "import base64,json,runpy,sys;sys.argv=['agent_codespaces']+json.loads(base64.b64decode(sys.argv[1]));runpy.run_module('agent_codespaces',run_name='__main__',alter_sys=True)"
-            & $Python -c $bootstrap $encoded
+            & $Python @pythonOptions -c $bootstrap $encoded
         } else {
-            $pythonOptions = @()
-            if ($forwardArgs.Count -gt 0 -and $forwardArgs[0] -in @('installer-readiness', 'invocation-contract')) {
-                $pythonOptions = @('-I', '-B', '-X', 'utf8')
-            }
             & $Python @pythonOptions -m agent_codespaces @forwardArgs
         }
     } finally {

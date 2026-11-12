@@ -89,6 +89,10 @@ run_runtime() {
     if [[ "$HEALTH_RUN_ENTRY" == 1 ]]; then
         exec "$AGENT_RT_PY" -I "$SCRIPT_DIR/health-collection-entry.py" "$@"
     fi
+    case "${1:-}" in
+        installer-readiness|invocation-contract)
+            exec "$AGENT_RT_PY" -I -B -X utf8 -m agent_machines "$@" ;;
+    esac
     exec "$AGENT_RT_PY" -m agent_machines "$@"
 }
 

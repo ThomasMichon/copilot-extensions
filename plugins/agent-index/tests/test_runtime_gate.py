@@ -313,6 +313,22 @@ def _configure_repository_role(root: Path, env: dict[str, str], role: str) -> No
     env["AGENT_INDEX_ROLE"] = role
 
 
+@pytest.mark.skipif(os.name == "nt", reason="Native POSIX gate")
+def test_posix_readiness_parser_never_imports_checkout_json(tmp_path: Path) -> None:
+    script, env = _fixture(tmp_path, "bash")
+    (tmp_path / ".agent-index" / "config.yaml").unlink()
+    marker = tmp_path / "shadow-json-executed"
+    (tmp_path / "json.py").write_text(
+        f"from pathlib import Path\nPath({str(marker)!r}).touch()\n"
+        "raise RuntimeError('checkout json imported')\n", encoding="utf-8",
+    )
+    result = _run("bash", script, env, "installer-readiness", cwd=tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(result.stdout)["state"] == "configuration-empty"
+    assert not marker.exists()
+    assert not list(tmp_path.glob("__pycache__/*.pyc"))
+
+
 def _run(
     shell: str,
     script: Path,
@@ -618,7 +634,8 @@ def test_bootstrap_does_not_import_any_runtime_or_repo_shadow(
     shutil.copy2(PLUGIN / "scripts" / bootstrap.name, bootstrap)
     shutil.copy2(PLUGIN / "scripts" / f"bootstrap-killswitch-guard.{suffix}", scripts)
     shutil.copy2(PLUGIN / "scripts" / f"runtime-gate.{suffix}", scripts)
-    shutil.copy2(PLUGIN / "scripts" / "resolve_effective_config.py", scripts)
+    for name in ("resolve_effective_config.py", "config_commands.py", "resolve-activation-role.py"):
+        shutil.copy2(PLUGIN / "scripts" / name, scripts)
     plugin_name = "agent-index-bootstrap-probe"
     (payload / "plugin.json").write_text(
         json.dumps({"name": plugin_name}),
@@ -1095,6 +1112,7 @@ def test_real_resolver_absent_or_explicit_false_preserves_legacy(
         PLUGIN / "scripts" / "resolve_effective_config.py",
         scripts / "resolve_effective_config.py",
     )
+    shutil.copy2(PLUGIN / "scripts" / "config_commands.py", scripts)
     shutil.copy2(
         PLUGIN / "scripts" / "resolve-activation-role.py",
         scripts / "resolve-activation-role.py",

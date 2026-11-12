@@ -56,7 +56,7 @@ fi
 EFFECTIVE_JSON="$("$PY_GATE" -B -E -X utf8 "$EFFECTIVE_RESOLVER" \
     --cwd "${AGENT_INDEX_REPO:-$PWD}" 2>/dev/null)" || _configuration_failure
 EFFECTIVE_FLAT="$(
-    printf '%s' "$EFFECTIVE_JSON" | "$PY_GATE" -E -X utf8 -c '
+    printf '%s' "$EFFECTIVE_JSON" | "$PY_GATE" -I -B -X utf8 -c '
 import json, sys
 value = json.load(sys.stdin)
 if (not isinstance(value, dict) or value.get("schema") != "agent-index.effective-config"

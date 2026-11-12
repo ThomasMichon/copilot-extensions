@@ -2406,3 +2406,64 @@ load dimension without an unchanged full-suite retry, host runtime effects,
 new fixture family, query/record-cap change or new workflow. Required
 current-head CI, strict complete fresh acceptance, admitted-baseline upgrade,
 frozen enforcement and separate Main adoption remain open.
+
+### November 12 - Close the remaining read-only import branches
+
+Review 5869520902 actually targets `cb4`, not the later baseline-only `f6`
+commit. Its body retains four High import-isolation paths: legacy PowerShell
+forwarding for CodeSpaces/Containers, Index's inline JSON parser, and the
+Machines/Worktrees payload dispatchers. The subsequent complete 600-second
+review wait expires with no new event. Neither a timeout nor the older
+Comment is a passing current-head verdict.
+
+Trace the full forwarding functions before editing. The payload-invocation
+generator emits binstubs pointing at the plugin-owned dispatchers; it does
+not generate these dispatcher bodies. The complete paginated changed-file
+inventory of #11121 contains none of the seven dispatcher/parser paths being
+changed. No constructor, runtime-source, publication or peer-owned hunk is
+taken over.
+
+Both legacy encoded-argument and modern module branches now receive the same
+readiness/metadata-only Python options. Machines and Worktrees explicitly use
+isolated, bytecode-free UTF-8 module entry for those reads; Worktrees avoids
+operational cache selection on that path. Index's inline JSON parser also
+uses isolated, bytecode-free UTF-8 Python. Ordinary commands, health collection,
+installer behavior, selected-project cwd and runtime selection are unchanged.
+
+The new Windows shadow regressions fail before the fix: 16 failures, four
+passes and eight platform/redundant-host skips. Every failure executes a
+checkout shadow through a missed legacy or payload-dispatch path. After the
+fix, the combined focused packet passes 44 cases with eight explicit skips,
+including unchanged ordinary argument forwarding and evaluator cleanup.
+This is real dispatcher/private-venv evidence, not trust-admission or
+complete-suite qualification.
+
+An adjacent Index bootstrap test exposes a second fixture that copied the
+effective reader without its new canonical command adapter. The bootstrap
+and real-resolver bundles now retain that helper, as the main gate fixture
+already does. The focused Index packet then passes four cases with three
+explicit platform skips. The new native POSIX inline-parser regression is
+among those skips on Windows; it is not credited as executed here.
+
+Separately, hosted run 43158874125 succeeds in all three unchanged modes
+against exact source `cb4a8eeca07244196dd4936e8f0ad175284fbeeb`. Its fresh
+artifact 13918091579 binds that source and tree, complete runtime installation,
+nine satisfied required modules and all five Create/Open/detach/normal-exit/
+Resume assertions. Prepare, exercise, assertions and settlement all return
+zero, with no error or payload-difference reports. Six owned daemon instances
+are explicitly settled; no task remains. Its trace records 2,096 successful
+scans, zero scan errors, maximum query-pipeline elapsed 1,138 ms, closed CIM
+session, armed window and cooperative stop. The bounded record set truncates.
+These are pipeline timings, not provider-only timeout measurements.
+
+That result is evidence for `cb4`, not this corrected runtime candidate, and
+does not repair or waive the original intermittent CIM failure. Final-head
+CI, actual review and the existing exact-source native lane remain required.
+Authentic admitted-baseline upgrade, mandatory frozen enforcement and separate
+Main adoption remain open. No operator rollout, shared repair, profile-matrix
+growth, Main pin change or parent completion is authorized or claimed.
+
+Touched Python passes F/E9 lint after removing one unused test import.
+All source modules remain within the existing ceilings; strict runtime
+resolution, all 13 install contracts, documentation consistency and whitespace
+checks pass. No baseline ceiling or required gate is weakened.
