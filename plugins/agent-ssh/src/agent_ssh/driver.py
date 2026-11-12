@@ -22,7 +22,7 @@ from __future__ import annotations
 import json
 import os
 import re
-import shutil
+import shlex
 import socket
 import subprocess
 import sys
@@ -195,15 +195,15 @@ def _read_json(path: Path) -> Any:
         return None
 
 
-def _directory_marketplace_roots(repo_root: Path, plugin: str) -> list[Path]:
+def _directory_marketplace_roots(repo_root: Path, plugin: str) -> list[tuple[str, Path]]:
     settings = _read_json(repo_root / ".github" / "copilot" / "settings.json")
     if not isinstance(settings, dict):
         return []
     markets = settings.get("extraKnownMarketplaces")
     if not isinstance(markets, dict):
         return []
-    roots: list[Path] = []
-    for spec in markets.values():
+    roots: list[tuple[str, Path]] = []
+    for name, spec in markets.items():
         source = spec.get("source") if isinstance(spec, dict) else None
         if not isinstance(source, dict) or source.get("source") != "directory":
             continue
@@ -224,16 +224,60 @@ def _directory_marketplace_roots(repo_root: Path, plugin: str) -> list[Path]:
                 if isinstance(entry, dict) and entry.get("name") == plugin:
                     src = entry.get("source")
                     if isinstance(src, str) and src:
-                        roots.append((base / src).resolve())
+                        roots.append((name, (base / src).resolve()))
         else:
-            roots.append((base / plugin).resolve())
+            roots.append((name, (base / plugin).resolve()))
     return roots
 
 
-def _copilot_config_path(home: Path | None = None) -> Path:
+def _copilot_home(home: Path | None = None) -> Path:
     if home is None and os.environ.get("COPILOT_HOME"):
-        return Path(os.environ["COPILOT_HOME"]) / "config.json"
-    return (home or Path.home()) / ".copilot" / "config.json"
+        return Path(os.environ["COPILOT_HOME"])
+    return (home or Path.home()) / ".copilot"
+
+
+def _copilot_config_path(home: Path | None = None) -> Path:
+    return _copilot_home(home) / "config.json"
+
+
+def _read_jsonc(path: Path) -> Any:
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        return None
+    try:
+        return json.loads("\n".join(line for line in text.splitlines() if not line.lstrip().startswith("//")))
+    except ValueError:
+        return None
+
+
+def _enabled_value(settings: Any, identity: str) -> bool | None:
+    enabled = settings.get("enabledPlugins") if isinstance(settings, dict) else None
+    value = enabled.get(identity) if isinstance(enabled, dict) else None
+    return value if isinstance(value, bool) else None
+
+
+class _Activation:
+    """Effective ``<plugin>@<marketplace>`` activation (repo, then user, then inventory)."""
+
+    def __init__(self, home: Path | None, repo_settings: Any) -> None:
+        self.repo = repo_settings
+        self.user = _read_jsonc(_copilot_home(home) / "settings.json")
+        config = _read_jsonc(_copilot_config_path(home))
+        records = config.get("installedPlugins") if isinstance(config, dict) else None
+        self.inventory: dict[str, bool] = {}
+        for record in records if isinstance(records, list) else []:
+            if isinstance(record, dict) and isinstance(record.get("name"), str) and isinstance(record.get("marketplace"), str):
+                key = f"{record['name']}@{record['marketplace']}"
+                self.inventory[key] = record.get("enabled", True) is not False
+
+    def explicit(self, identity: str) -> bool | None:
+        value = _enabled_value(self.repo, identity)
+        return value if value is not None else _enabled_value(self.user, identity)
+
+    def installed(self, identity: str) -> bool:
+        value = self.explicit(identity)
+        return value if value is not None else self.inventory.get(identity, False)
 
 
 def _norm(path: Path | str) -> str:
@@ -247,12 +291,8 @@ def repository_trusted(repo_root: Path, home: Path | None = None) -> bool:
     once the operator has trusted that checkout, the same consent Copilot
     requires before loading the repository's own settings.
     """
-    try:
-        text = _copilot_config_path(home).read_text(encoding="utf-8")
-        lines = [line for line in text.splitlines() if not line.lstrip().startswith("//")]
-        folders = json.loads("\n".join(lines)).get("trustedFolders", [])
-    except (OSError, ValueError, UnicodeError, AttributeError):
-        return False
+    config = _read_jsonc(_copilot_config_path(home))
+    folders = config.get("trustedFolders") if isinstance(config, dict) else None
     if not isinstance(folders, list):
         return False
     repo = _norm(repo_root)
@@ -265,13 +305,13 @@ def repository_trusted(repo_root: Path, home: Path | None = None) -> bool:
     return False
 
 
-def _installed_plugin_roots(plugin: str, home: Path | None = None) -> list[Path]:
-    base = _copilot_config_path(home).parent / "installed-plugins"
+def _installed_plugin_roots(plugin: str, home: Path | None = None) -> list[tuple[str, Path]]:
+    base = _copilot_home(home) / "installed-plugins"
     try:
         markets = sorted(p for p in base.iterdir() if p.is_dir())
     except OSError:
         return []
-    return [market / plugin for market in markets]
+    return [(market.name, market / plugin) for market in markets]
 
 
 def _payload_root() -> Path | None:
@@ -295,20 +335,38 @@ def find_module(
     Tiers are searched in order (agent-ssh payload, calling repo's directory
     marketplaces, installed plugins); the first tier with any hit wins and
     must contain exactly one distinct match. Repository marketplaces are
-    consulted only when Copilot trusts the checkout (``trustedFolders``).
+    consulted only when Copilot trusts the checkout (``trustedFolders``),
+    and marketplace/installed candidates must be effectively enabled
+    (``enabledPlugins`` in repo then user settings, else the installed
+    inventory record).
     """
     tiers: list[list[Path]] = []
     if driver.plugin == "agent-ssh":
         root = payload_root()
         tiers.append([root] if root is not None else [])
     repo_root = _git_toplevel(cwd)
-    untrusted_repo = False
-    if repo_root and repository_trusted(repo_root, home):
-        tiers.append(_directory_marketplace_roots(repo_root, driver.plugin))
-    else:
-        untrusted_repo = bool(repo_root)
-        tiers.append([])
-    tiers.append(_installed_plugin_roots(driver.plugin, home))
+    trusted = bool(repo_root) and repository_trusted(repo_root, home)
+    untrusted_repo = bool(repo_root) and not trusted
+    repo_settings = _read_json(repo_root / ".github" / "copilot" / "settings.json") if trusted else None
+    activation = _Activation(home, repo_settings)
+    disabled: list[str] = []
+    directory: list[Path] = []
+    if trusted:
+        for market, root in _directory_marketplace_roots(repo_root, driver.plugin):
+            identity = f"{driver.plugin}@{market}"
+            if activation.explicit(identity) is True:
+                directory.append(root)
+            elif (root / "transports" / driver.module / "module.yaml").is_file():
+                disabled.append(identity)
+    tiers.append(directory)
+    installed: list[Path] = []
+    for market, root in _installed_plugin_roots(driver.plugin, home):
+        identity = f"{driver.plugin}@{market}"
+        if activation.installed(identity):
+            installed.append(root)
+        elif (root / "transports" / driver.module / "module.yaml").is_file():
+            disabled.append(identity)
+    tiers.append(installed)
     for roots in tiers:
         hits: list[Path] = []
         for root in roots:
@@ -328,6 +386,8 @@ def find_module(
         if untrusted_repo
         else ""
     )
+    if disabled:
+        note += "; skipped disabled plugin(s): " + ", ".join(disabled)
     raise DriverError(
         f"driver module {driver.label} not found (transports/{driver.module}/module.yaml){note}"
     )
@@ -379,6 +439,51 @@ _BATCH_SUFFIXES = {".cmd", ".bat"}
 _CMD_UNSAFE = re.compile(r'[&|<>^%!"()\r\n]')
 
 
+def _search_path(name: str, *, windows: bool) -> str | None:
+    """Find *name* on PATH only: never the current directory or relative entries."""
+    exts = [""]
+    if windows and not Path(name).suffix:
+        exts = [ext.lower() for ext in os.environ.get("PATHEXT", ".COM;.EXE;.BAT;.CMD").split(";") if ext]
+    for entry in os.environ.get("PATH", "").split(os.pathsep):
+        if not entry or not os.path.isabs(entry):
+            continue
+        for ext in exts:
+            candidate = os.path.join(entry, name + ext)
+            if os.path.isfile(candidate):
+                return candidate
+    return None
+
+
+def _powershell() -> str:
+    root = os.environ.get("SystemRoot") or os.environ.get("WINDIR")
+    if root:
+        candidate = os.path.join(root, "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
+        if os.path.isfile(candidate):
+            return candidate
+    return _search_path("powershell", windows=True) or "powershell"
+
+
+def resolve_auth_executable(name: str, module_dir: Path, *, windows: bool) -> str:
+    """Resolve an auth command's argv0 to a trusted absolute path.
+
+    Absolute paths are used as-is, paths with a separator are relative to the
+    provider's module directory, and bare names come from absolute PATH
+    entries only (never the caller's checkout).
+    """
+    if os.path.isabs(name):
+        return name
+    if "/" in name or (windows and "\\" in name):
+        base = module_dir.resolve()
+        path = (base / name).resolve()
+        if path != base and base not in path.parents:
+            raise DriverError(f"auth command '{name}' must stay inside the module directory")
+        return str(path)
+    found = _search_path(name, windows=windows)
+    if found is None:
+        raise FileNotFoundError(f"'{name}' not found on PATH")
+    return found
+
+
 def script_argv(script: Path | str, args: list[str] | tuple[str, ...] = (), *, windows: bool) -> list[str]:
     """Build an argv that runs *script* with *args* without a shell re-parse.
 
@@ -392,7 +497,7 @@ def script_argv(script: Path | str, args: list[str] | tuple[str, ...] = (), *, w
     if suffix == ".py":
         return [sys.executable, path, *rest]
     if windows and suffix == ".ps1":
-        return ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", path, *rest]
+        return [_powershell(), "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", path, *rest]
     if windows and suffix in _BATCH_SUFFIXES:
         if any(_CMD_UNSAFE.search(value) for value in (path, *rest)):
             raise DriverError(f"refusing to run batch file {Path(path).name} with shell metacharacters")
@@ -544,17 +649,20 @@ def _stderr_target() -> Any:
     return subprocess.DEVNULL
 
 
-def run_auth_command(command: list[str], *, runner=subprocess.run, windows: bool | None = None) -> int:
+def run_auth_command(
+    command: list[str], module_dir: Path, *, runner=subprocess.run, windows: bool | None = None
+) -> int:
     """Run an operator auth command attached to the console.
 
-    stdin stays interactive; stdout goes to stderr so prompts and progress
-    never corrupt the final result printed on stdout (``--json``).
+    It runs from the provider's module directory with argv0 resolved to a
+    trusted absolute path. stdin stays interactive; stdout goes to stderr so
+    prompts and progress never corrupt the final result printed on stdout.
     """
     is_windows = os.name == "nt" if windows is None else windows
-    head = shutil.which(command[0]) or command[0]
     try:
+        head = resolve_auth_executable(command[0], module_dir, windows=is_windows)
         argv = script_argv(head, command[1:], windows=is_windows)
-        return runner(argv, check=False, stdout=_stderr_target()).returncode
+        return runner(argv, check=False, cwd=str(module_dir), stdout=_stderr_target()).returncode
     except DriverError as exc:
         print(f"[FAIL] {exc}", file=sys.stderr)
         return 126
@@ -627,22 +735,35 @@ def run(
     result = run_entrypoint(inv, runner=runner)
     if not inv.interactive or result["state"] != "operator-action-required":
         return result
-    run_auth = auth_runner or (lambda command: run_auth_command(command))
+    run_auth = auth_runner or (lambda command: run_auth_command(command, inv.module_dir))
     seen: set[str] = set()
     for request in result["auth_requests"]:
         if request["key"] in seen:
             continue
         seen.add(request["key"])
-        print(f"[auth] {request['reason']}", file=sys.stderr)
+        print(f"[auth] {safe_text(request['reason'])}", file=sys.stderr)
         code = run_auth(request["command"])
         if code != 0:
-            print(f"[auth] command exited {code}: {request['command'][0]}", file=sys.stderr)
+            print(f"[auth] command exited {code}: {safe_text(request['command'][0])}", file=sys.stderr)
     return run_entrypoint(inv, runner=runner)
+
+
+_CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
+
+
+def safe_text(value: str) -> str:
+    """Escape terminal control characters (ESC, OSC, CSI ...) for human output."""
+    return _CONTROL.sub(lambda m: f"\\x{ord(m.group()):02x}", value)
+
+
+def display_command(command: list[str], *, windows: bool | None = None) -> str:
+    is_windows = os.name == "nt" if windows is None else windows
+    return subprocess.list2cmdline(command) if is_windows else shlex.join(command)
 
 
 def render_human(result: dict[str, Any], verb: str) -> str:
     lines = [f"agent-ssh {verb}: {result['state']}" + (f" -- {result['detail']}" if result["detail"] else "")]
     for request in result["auth_requests"]:
         lines.append(f"  auth required [{request['key']}] {request['reason']}")
-        lines.append(f"    run: {subprocess.list2cmdline(request['command'])}")
-    return "\n".join(lines)
+        lines.append(f"    run: {display_command(request['command'])}")
+    return "\n".join(safe_text(line) for line in lines)

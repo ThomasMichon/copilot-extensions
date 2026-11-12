@@ -158,8 +158,17 @@ candidates):
    is consulted only when the repo root is covered by Copilot's own folder
    trust (`trustedFolders` in `$COPILOT_HOME/config.json`, default
    `~/.copilot/config.json`), so an untrusted checkout can never supply or
-   override an executable provider;
-3. installed plugins, `<copilot home>/installed-plugins/<marketplace>/<plugin>`.
+   override an executable provider, and only when `<plugin>@<marketplace>` is
+   explicitly enabled (`enabledPlugins` in the repo settings, else the user's
+   `<copilot home>/settings.json`);
+3. installed plugins, `<copilot home>/installed-plugins/<marketplace>/<plugin>`,
+   only when the copy is effectively active: an explicit `enabledPlugins`
+   value (repo, then user) wins, otherwise the `enabled` flag of its
+   `installedPlugins` record in `config.json`. A copy with no inventory record
+   is skipped.
+
+A disabled candidate is never executed; when nothing else matches, the
+not-found error names the skipped disabled plugins.
 
 `--module <path to module.yaml>` overrides discovery and is the explicit
 authorization path (the `module` name must still match the declaration).
@@ -213,12 +222,19 @@ requests and 64 argv entries are accepted; strings are bounded to 4096 chars.
 console. When the result is `operator-action-required`, agent-ssh runs each
 request's `command` once per distinct `key`, attached to the console (the only
 step that inherits it; its stdout is redirected to stderr so `--json` output
-stays parseable; `argv0` is resolved on `PATH`, and a resolved batch file is
-refused if any argument contains `cmd.exe` metacharacters), then re-runs the
+stays parseable). Auth commands run from the module directory with `argv0`
+resolved to a trusted absolute path: absolute paths are used as-is, a path
+containing a separator is resolved inside the module directory (escaping it is
+refused), and a bare name is searched on absolute `PATH` entries only (never
+the caller's working directory). A resolved batch file is refused if any
+argument contains `cmd.exe` metacharacters. agent-ssh then re-runs the
 setup entrypoint once with the same flags and reports that second result (exit
 `2` if still `operator-action-required`).
 
 `agent-ssh` prints the validated result (`--json`) or a short summary. The
+human summary escapes terminal control characters from provider-supplied text,
+and the suggested `run:` line is quoted with `shlex.join` on POSIX and
+`subprocess.list2cmdline` on Windows. The
 `auth_requests` list is the input contract for an operator auth queue: unattended
 runs (for example renewal) report requests instead of prompting, and the `key`
 lets a queue collapse duplicates.

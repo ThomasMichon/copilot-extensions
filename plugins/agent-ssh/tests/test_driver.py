@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
@@ -146,14 +147,14 @@ def test_select_local_machine_override():
 # --- module discovery -------------------------------------------------------
 
 
-def _repo_with_directory_marketplace(tmp_path: Path, *, manifest=True) -> Path:
+def _repo_with_directory_marketplace(tmp_path: Path, *, manifest=True, enabled=True) -> Path:
     repo = tmp_path / "repo"
     (repo / ".github" / "copilot").mkdir(parents=True)
     (repo / ".github" / "copilot" / "settings.json").write_text(
         json.dumps({"extraKnownMarketplaces": {
             "local": {"source": {"source": "directory", "path": "./plugins-src"}},
             "remote": {"source": {"source": "github", "repo": "example/remote"}},
-        }}),
+        }, "enabledPlugins": {"example-provider@local": enabled}}),
         encoding="utf-8",
     )
     market = repo / "plugins-src"
@@ -170,19 +171,28 @@ def _repo_with_directory_marketplace(tmp_path: Path, *, manifest=True) -> Path:
     return repo
 
 
-def _trust(home: Path, *folders: Path) -> Path:
-    (home / ".copilot").mkdir(parents=True, exist_ok=True)
-    (home / ".copilot" / "config.json").write_text(
-        "// managed by copilot\n" + json.dumps({"trustedFolders": [str(f) for f in folders]}),
+def _copilot(home: Path, *, trusted=(), installed=(), user_enabled=None) -> Path:
+    """Write Copilot config: trusted folders, installed inventory and user activation."""
+    copilot = home / ".copilot"
+    copilot.mkdir(parents=True, exist_ok=True)
+    inventory = []
+    for market, enabled in installed:
+        _write_module(copilot / "installed-plugins" / market / "example-provider")
+        inventory.append({"name": "example-provider", "marketplace": market, "enabled": enabled})
+    (copilot / "config.json").write_text(
+        "// managed by copilot\n"
+        + json.dumps({"trustedFolders": [str(f) for f in trusted], "installedPlugins": inventory}),
         encoding="utf-8",
     )
+    if user_enabled is not None:
+        (copilot / "settings.json").write_text(json.dumps({"enabledPlugins": user_enabled}), encoding="utf-8")
     return home
 
 
 @pytest.mark.parametrize("manifest", [True, False])
 def test_find_module_directory_marketplace(tmp_path, manifest):
     repo = _repo_with_directory_marketplace(tmp_path, manifest=manifest)
-    home = _trust(tmp_path / "home", repo)
+    home = _copilot(tmp_path / "home", trusted=[repo])
     found = d.find_module(DRIVER, repo, home=home, payload_root=lambda: None)
     sub = "providers/example" if manifest else "example-provider"
     assert found == (repo / "plugins-src" / sub / "transports" / "example" / "module.yaml").resolve()
@@ -190,17 +200,15 @@ def test_find_module_directory_marketplace(tmp_path, manifest):
 
 def test_directory_marketplace_wins_over_installed_copy(tmp_path):
     repo = _repo_with_directory_marketplace(tmp_path)
-    home = _trust(tmp_path / "home", tmp_path)
-    _write_module(home / ".copilot" / "installed-plugins" / "local" / "example-provider")
+    home = _copilot(tmp_path / "home", trusted=[tmp_path], installed=[("local", True)])
     found = d.find_module(DRIVER, repo, home=home, payload_root=lambda: None)
     assert "plugins-src" in str(found)
 
 
 def test_untrusted_checkout_cannot_override_installed_provider(tmp_path):
     repo = _repo_with_directory_marketplace(tmp_path)
-    home = _trust(tmp_path / "home", tmp_path / "elsewhere")
+    home = _copilot(tmp_path / "home", trusted=[tmp_path / "elsewhere"], installed=[("local", True)])
     installed = home / ".copilot" / "installed-plugins" / "local" / "example-provider"
-    _write_module(installed)
     found = d.find_module(DRIVER, repo, home=home, payload_root=lambda: None)
     assert found == (installed / "transports" / "example" / "module.yaml").resolve()
 
@@ -211,15 +219,45 @@ def test_untrusted_checkout_provider_is_not_discovered(tmp_path):
         d.find_module(DRIVER, repo, home=tmp_path / "home", payload_root=lambda: None)
 
 
+def test_disabled_repository_provider_is_not_discovered(tmp_path):
+    repo = _repo_with_directory_marketplace(tmp_path, enabled=False)
+    home = _copilot(tmp_path / "home", trusted=[repo])
+    with pytest.raises(d.DriverError, match="disabled plugin.*example-provider@local"):
+        d.find_module(DRIVER, repo, home=home, payload_root=lambda: None)
+
+
+@pytest.mark.parametrize(
+    "inventory_enabled, user_enabled",
+    [(False, None), (True, {"example-provider@market-a": False}), (None, None)],
+)
+def test_disabled_or_uninventoried_installed_copy_is_not_executed(tmp_path, inventory_enabled, user_enabled):
+    cwd = tmp_path / "plain"
+    cwd.mkdir()
+    installed = [] if inventory_enabled is None else [("market-a", inventory_enabled)]
+    home = _copilot(tmp_path / "home", installed=installed, user_enabled=user_enabled)
+    if inventory_enabled is None:
+        _write_module(home / ".copilot" / "installed-plugins" / "market-a" / "example-provider")
+    with pytest.raises(d.DriverError, match="disabled"):
+        d.find_module(DRIVER, cwd, home=home, payload_root=lambda: None)
+
+
+def test_user_activation_enables_inventory_disabled_copy(tmp_path):
+    cwd = tmp_path / "plain"
+    cwd.mkdir()
+    home = _copilot(
+        tmp_path / "home", installed=[("market-a", False)], user_enabled={"example-provider@market-a": True},
+    )
+    assert "market-a" in str(d.find_module(DRIVER, cwd, home=home, payload_root=lambda: None))
+
+
 def test_find_module_installed_plugins_and_ambiguity(tmp_path):
     cwd = tmp_path / "plain"
     cwd.mkdir()
-    home = tmp_path / "home"
+    home = _copilot(tmp_path / "home", installed=[("market-a", True)])
     installed = home / ".copilot" / "installed-plugins"
-    _write_module(installed / "market-a" / "example-provider")
     found = d.find_module(DRIVER, cwd, home=home, payload_root=lambda: None)
     assert found == (installed / "market-a" / "example-provider" / "transports" / "example" / "module.yaml").resolve()
-    _write_module(installed / "market-b" / "example-provider")
+    home = _copilot(tmp_path / "home2", installed=[("market-a", True), ("market-b", True)])
     with pytest.raises(d.DriverError, match="ambiguous") as err:
         d.find_module(DRIVER, cwd, home=home, payload_root=lambda: None)
     assert "market-a" in str(err.value) and "market-b" in str(err.value)
@@ -472,8 +510,8 @@ def test_entrypoint_launch_error_is_failed(topology):
 
 
 def test_script_argv_mapping(tmp_path):
-    assert d.script_argv(tmp_path / "s.ps1", ["-a"], windows=True) == [
-        "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(tmp_path / "s.ps1"), "-a",
+    assert d.script_argv(tmp_path / "s.ps1", ["-a"], windows=True)[1:] == [
+        "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(tmp_path / "s.ps1"), "-a",
     ]
     assert d.script_argv(tmp_path / "s.cmd", ["login"], windows=True)[1:] == [
         "/d", "/c", str(tmp_path / "s.cmd"), "login",
@@ -496,26 +534,66 @@ def test_batch_entrypoints_are_refused_on_windows(tmp_path):
         d.entrypoint_script(path, module, "setup", windows=True)
 
 
-def test_auth_command_stdout_goes_to_stderr(monkeypatch):
+def test_auth_command_runs_from_module_dir_with_stdout_on_stderr(monkeypatch, tmp_path):
     calls = []
-    monkeypatch.setattr(d.shutil, "which", lambda name: None)
+    tool = str(tmp_path / "bin" / "example-cli")
+    monkeypatch.setattr(d, "_search_path", lambda name, windows: tool)
     monkeypatch.setattr(d, "_stderr_target", lambda: "STDERR")
 
     def runner(argv, **kwargs):
         calls.append((argv, kwargs))
         return SimpleNamespace(returncode=0)
 
-    assert d.run_auth_command(["example-cli", "login"], runner=runner, windows=False) == 0
-    assert calls == [(["example-cli", "login"], {"check": False, "stdout": "STDERR"})]
+    assert d.run_auth_command(["example-cli", "login"], tmp_path, runner=runner, windows=False) == 0
+    assert calls == [([tool, "login"], {"check": False, "cwd": str(tmp_path), "stdout": "STDERR"})]
 
 
 def test_auth_command_batch_with_metacharacters_is_refused(monkeypatch, tmp_path):
-    monkeypatch.setattr(d.shutil, "which", lambda name: str(tmp_path / "example-cli.cmd"))
+    monkeypatch.setattr(d, "_search_path", lambda name, windows: str(tmp_path / "example-cli.cmd"))
 
     def runner(argv, **kwargs):
         raise AssertionError("must not run")
 
-    assert d.run_auth_command(["example-cli", "a&b"], runner=runner, windows=True) == 126
+    assert d.run_auth_command(["example-cli", "a&b"], tmp_path, runner=runner, windows=True) == 126
+
+
+def test_auth_executable_never_resolves_from_caller_checkout(monkeypatch, tmp_path):
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    (checkout / "example-cli").write_text("", encoding="utf-8")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "example-cli").write_text("", encoding="utf-8")
+    monkeypatch.chdir(checkout)
+    monkeypatch.setenv("PATH", os.pathsep.join([".", "", str(bin_dir)]))
+    module_dir = tmp_path / "module"
+    assert d.resolve_auth_executable("example-cli", module_dir, windows=False) == str(bin_dir / "example-cli")
+
+
+def test_relative_auth_helper_resolves_inside_module_dir(tmp_path):
+    module_dir = tmp_path / "module"
+    assert d.resolve_auth_executable("scripts/login.py", module_dir, windows=False) == str(
+        (module_dir / "scripts" / "login.py").resolve()
+    )
+    with pytest.raises(d.DriverError, match="inside the module"):
+        d.resolve_auth_executable("../outside.py", module_dir, windows=False)
+
+
+def test_missing_auth_executable_exits_127(monkeypatch, tmp_path):
+    monkeypatch.setattr(d, "_search_path", lambda name, windows: None)
+    assert d.run_auth_command(["example-cli"], tmp_path, runner=None, windows=False) == 127
+
+
+def test_human_output_escapes_terminal_controls():
+    osc52 = "\x1b]52;c;ZXZpbA==\x07"
+    result = d.make_result("ready", f"no SSH driver declared for machine 'w{osc52}'")
+    text = d.render_human(result, "status")
+    assert "\x1b" not in text and "\x07" not in text and "\\x1b" in text
+
+
+def test_display_command_uses_platform_quoting():
+    assert d.display_command(["example-cli", "--scope", "a&b"], windows=False) == "example-cli --scope 'a&b'"
+    assert d.display_command(["example-cli", "a b"], windows=True) == 'example-cli "a b"'
 
 
 def test_git_toplevel_ignores_inherited_git_selectors(monkeypatch, tmp_path):
