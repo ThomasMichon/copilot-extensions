@@ -87,6 +87,10 @@ class _Connection(http.client.HTTPConnection):
 
 
 class LocalClient:
+    protocol = PROTOCOL
+    route = "repositories"
+    storage = "repository_cache_version:2"
+
     def __init__(self, path: Path, namespace: str, target: str) -> None:
         if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,63}", target):
             raise LocalClientError("invalid configured target")
@@ -100,7 +104,7 @@ class LocalClient:
         connection = _Connection(self.path, deadline=self.deadline)
         try:
             body = json.dumps(value, allow_nan=False).encode() if value is not None else None
-            path = "/v1/repositories" if operation == "list" else f"/v1/repositories/{self.target}/{operation}"
+            path = f"/v1/{self.route}" if operation == "list" else f"/v1/{self.route}/{self.target}/{operation}"
             connection.request(
                 method, path, body=body,
                 headers={"content-type": "application/json"} if body else {},
@@ -114,7 +118,7 @@ class LocalClient:
                 raise LocalClientError("invalid local response")
             if response.status != 200:
                 raise LocalClientError(str(value.get("error", "local request unavailable")))
-            if value.get("protocol") != PROTOCOL or value.get("namespace") != self.namespace:
+            if value.get("protocol") != self.protocol or value.get("namespace") != self.namespace:
                 raise LocalClientError("local namespace/contract differs")
             return value
         except (OSError, http.client.HTTPException, UnicodeError, json.JSONDecodeError):
@@ -128,7 +132,7 @@ class LocalClient:
         """Select running support and retain namespace/backend binding through every request."""
         if self.binding is None:
             selected = self._http("GET", "capabilities")
-            if selected.get("continuing") is not True or selected.get("storage") != "repository_cache_version:2" or (
+            if selected.get("continuing") is not True or selected.get("storage") != self.storage or (
                 selected.get("forge_writes") is not False or selected.get("task_emissions") is not False
             ):
                 raise LocalClientError("selected local continuing profile unsupported")

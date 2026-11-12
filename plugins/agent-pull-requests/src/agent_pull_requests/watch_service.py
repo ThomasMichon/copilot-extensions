@@ -41,6 +41,7 @@ class WatchService:
         reports=None,
         response_limit: int = BODY_BYTES,
         local_socket=None, local_peers=(), operation_seconds: int = 60,
+        filter_definitions=None, filter_sponsors=(),
     ) -> None:
         if not callable(authority) or not callable(checkpoint):
             raise ValueError("current service authority is required")
@@ -59,6 +60,11 @@ class WatchService:
         self._disk: asyncio.Task | None = None
         self._tasks: tuple[asyncio.Task, ...] = ()
         self.observer = ReplayObserver(store, bindings=observations)
+        self.filter_sponsors = tuple(filter_sponsors)
+        if filter_definitions is not None:
+            if not store.repository_filtered:
+                raise ValueError("filter definitions require selected filtered storage")
+            self.observer.repositories.definitions = filter_definitions
         local = local_socket is not None
         if local and (not store.repository_continuing or self.observer.repositories is None):
             raise ValueError("local repository profile requires selected continuing storage")
@@ -102,9 +108,12 @@ class WatchService:
     async def _observe(self) -> None:
         while not self._stop.is_set():
             self._check()
-            self._disk = asyncio.create_task(asyncio.to_thread(
-                self.observer.cycle, expires_at=self._authority(), checkpoint=self._check,
-            ))
+            self._disk = asyncio.create_task(
+                asyncio.to_thread(self._observe_cycle) if self.store.repository_filtered
+                else asyncio.to_thread(
+                    self.observer.cycle, expires_at=self._authority(), checkpoint=self._check,
+                )
+            )
             try:
                 self._last_cycle = await asyncio.shield(self._disk)
             except OperationLockedError:
@@ -126,6 +135,27 @@ class WatchService:
                 await asyncio.wait_for(self._stop.wait(), self.interval)
             except asyncio.TimeoutError:
                 pass
+
+    def _observe_cycle(self):
+        authority = {"expires_at": self._authority(), "checkpoint": self._check}
+        if self.store.repository_filtered:
+            from .filtered_subscriptions import FilteredSubscriptions
+            subscriptions = FilteredSubscriptions(self.observer.repositories)
+            for sponsor in self.filter_sponsors:
+                scope = self.gateway.bindings[(sponsor["principal"], sponsor["target"])]
+                result = subscriptions.execute(scope.account, scope.consumer, "subscribe", {
+                    "request_id": sponsor["request_id"], "ttl": sponsor["ttl"],
+                    "definition": sponsor["definition"],
+                }, **authority)
+                row = result["subscription"]
+                if row["cancelled"]:
+                    continue
+                now = int(self.store.clock())
+                if row["expires_at"] < now + sponsor["ttl"] // 2:
+                    subscriptions.execute(scope.account, scope.consumer, "renew", {
+                        "registration_id": row["registration_id"], "expires_at": now + sponsor["ttl"],
+                    }, **authority)
+        return self.observer.cycle(**authority)
 
     def _withdraw(self) -> None:
         self._stopping.set()
@@ -154,10 +184,21 @@ class WatchService:
                     expires_at=self._authority(), checkpoint=self._check,
                 )
                 if self.observer.repositories is not None:
-                    from .repository_native import qualify
+                    if self.store.repository_filtered:
+                        from .filtered_native import qualify
+                    else:
+                        from .repository_native import qualify
                     for binding in self.observer.bindings.values():
                         if binding.repository_identity is not None:
-                            qualify(binding, checkpoint=self._check)
+                            support = qualify(binding, checkpoint=self._check)
+                            if self.store.repository_filtered:
+                                self.observer.repositories.capabilities[binding.account] = support
+                    if self.store.repository_filtered:
+                        for sponsor in self.filter_sponsors:
+                            scope = self.gateway.bindings[(sponsor["principal"], sponsor["target"])]
+                            self.observer.repositories.definitions.resolve(sponsor["definition"]).require(
+                                self.observer.repositories.capabilities[scope.account], {scope.repo},
+                            )
                 for workspace in self.gateway.workspaces.values():
                     # Attention has its own explicit layout contract; never relabel
                     # those bytes as the older conversation-serving layout.

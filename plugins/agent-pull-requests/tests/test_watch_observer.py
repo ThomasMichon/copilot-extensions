@@ -51,6 +51,26 @@ def cycle(owner, **kwargs):
     return owner.cycle(expires_at=int(owner.store.clock()) + 60, **kwargs)
 
 
+def test_busy_publication_retains_completed_read_without_repeating_native_acquisition(store, monkeypatch):
+    from single_instance_lease import OperationLockedError
+    register(store)
+    reads, publications = [], []
+    original = store.observe
+    def fetch(*_args, **_kwargs):
+        reads.append("read")
+        return PRSnapshot(merged=True)
+    def publish(*args, **kwargs):
+        publications.append("attempt")
+        if len(publications) < 3:
+            raise OperationLockedError("held by another admitted request")
+        return original(*args, **kwargs)
+    monkeypatch.setattr(observer, "fetch_snapshot", fetch)
+    monkeypatch.setattr(store, "observe", publish)
+    assert cycle(ReplayObserver(store, bindings=(binding(),)))["observed"] == 1
+    assert reads == ["read"] and len(publications) == 3
+    assert execute(store, "pending")["events"]
+
+
 def test_legacy_only_cycle_releases_completed_snapshots_instead_of_retaining_entire_population(
     store, monkeypatch,
 ):
