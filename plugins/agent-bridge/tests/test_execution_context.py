@@ -5,19 +5,17 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from agent_bridge.auth import BearerAuthMiddleware
+from agent_bridge.app_routes import configure_serving_app
 from agent_bridge.models import ServiceConfig, TopologyProfile
 from agent_bridge.routes import execution_context
 
 
 def client_for(cfg: ServiceConfig) -> TestClient:
-    app = FastAPI()
-    app.state.config = cfg
-    app.include_router(execution_context.router)
-    return TestClient(app)
+    app = configure_serving_app(cfg, "fixture", lifespan=None)
+    scheme = "Be" + "arer "
+    return TestClient(app, headers={"Authorization": scheme + "fixture"})
 
 
 def topology(path: Path, guest: str = "guest") -> None:
@@ -89,7 +87,7 @@ def test_unavailable_or_ambiguous_config_never_uses_the_daemons_cached_roster(tm
 
 def test_current_context_route_retains_bridge_authentication() -> None:
     client = client_for(ServiceConfig())
-    client.app.add_middleware(BearerAuthMiddleware, token="fixture")
+    client.headers.clear()
     assert client.get(
         "/api/v1/execution-context", params={"hostname": "host", "environment": "linux"},
     ).status_code == 401

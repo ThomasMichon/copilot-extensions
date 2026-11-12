@@ -54,6 +54,14 @@ affected creation/acquisition/resume seams; HTTP generation 52 and historical
 packets remain unchanged. This is ACP provider source qualification, not
 automatic caller migration, CLI-native registration or installed adoption.
 
+Live execution naming adds seven focused controls to the current portfolio.
+They exercise the actual authenticated application route, current-config
+rename and failure behavior, standalone native/guest semantics and the Node
+registration/compatibility controls. The execution-context route and extension
+adapter are semantic sources. HTTP generation 52, prior feature floors and
+historical packets remain unchanged; the additive naming response carries its
+own `agent-bridge.execution-context/v1` schema.
+
 The optional `live_delivery_observation: 1` expansion retains HTTP generation
 52 and every prior introduction floor. Eighteen additional source cases cover
 fresh/partial/stale pending input, SDK acceptance versus root consumption,

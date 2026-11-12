@@ -148,9 +148,34 @@ def test_host_status_legacy_timeout_compatibility(host_status_api, monkeypatch):
     host_status.test_status_runtime_handles_distinct_legacy_asyncio_timeout(host_status_api, monkeypatch)
 
 import bridge_http52_evidence as evidence
+from test_execution_context import (
+    test_rename_is_visible_on_next_request_without_restarting_or_rewriting_records
+    as test_rename_is_visible_on_next_request_without_restarting_or_rewriting_records,
+    test_standalone_uses_shared_unmapped_host_semantics
+    as test_standalone_uses_shared_unmapped_host_semantics,
+    test_unavailable_or_ambiguous_config_never_uses_the_daemons_cached_roster
+    as test_unavailable_or_ambiguous_config_never_uses_the_daemons_cached_roster,
+    test_current_context_route_retains_bridge_authentication
+    as test_current_context_route_retains_bridge_authentication,
+)
 from bridge_http_retained_probes import capture_request, record_observations
 from http51_receipt_probes import observe as observe_receipt
 from http51_live_cli_probes import observe as observe_live_cli
+
+
+def test_execution_context_extension_controls():
+    from agent_procutil.owned_process import run_caller_owned
+
+    node = shutil.which("node")
+    assert node is not None, "execution-context capture requires Node"
+    tests = Path(__file__).parent
+    result = run_caller_owned(
+        [node, "--test", str(tests / "metadata.test.mjs"), str(tests / "bridge-endpoint.test.mjs")],
+        timeout=60, max_stdout_bytes=256 * 1024, max_stderr_bytes=64 * 1024,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 from test_live_delivery_state import (
     delivery_api as delivery_api,
     test_accepted_behind_question_is_explicit_not_failed_and_keyed_retry_is_one_row
