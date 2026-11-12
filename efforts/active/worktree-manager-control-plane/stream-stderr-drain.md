@@ -2,7 +2,7 @@
 
 [Canonical Manager effort](README.md#finite-registered-stream-stderr-drain)
 
-- **Slice status:** Active; reviewed plan merged, bounded source proof next.
+- **Slice status:** Done (finite source only); implementation merged and acceptance recorded.
 - **Participant:** Managed source `patient-knob`, finite stream-consumer only.
 
 ## Goal and request
@@ -62,7 +62,7 @@ preflight is needed.
   providers, retaining quiet-provider positives.
 - [x] S2: Implement concurrent bounded stderr draining and owned settlement
   in the existing list/progress consumers.
-- [ ] S3: Pass focused consumers and source guards, obtain exact-head review
+- [x] S3: Pass focused consumers and source guards, obtain exact-head review
   and required CI, merge and reconcile this finite source lane.
 
 ## Validation Plan
@@ -75,7 +75,7 @@ preflight is needed.
   while stdout is silent and application close. Verify finite return, exact
   owned child settlement and no surviving drain thread; never accept an
   output failure as terminal success.
-- [ ] SV4: Run the affected stream/deadline and progress-modal regressions,
+- [x] SV4: Run the affected stream/deadline and progress-modal regressions,
   lint/module/install/documentation guards and actual required CI.
 
 ## Completion and ownership
@@ -88,6 +88,25 @@ is a test fixture. A source pass does not prove that every installed pivot is
 healthy or that a productive configuration was changed.
 
 ## Journal
+
+### 2026-11-12 - Finite source accepted
+
+Implementation #12141 merged at 00:02:46 UTC as
+`97638e7d3259e7d07b3f96199039797502f7a4db`, following reviewed plan #12121.
+The final affected five-file packet passes 127 cases. Both reproduced High
+findings are corrected and their threads resolved; genuine approval
+`5866966127` names the exact final head
+`f15ff8061daf5198328ee0917d63b46c230ee09d` with no open issues.
+Actual CI run `43123564880` passed guards, eligible units and the PR gate;
+lockdown run `43123561671`, source attribution and the publication identifier
+check also passed before merge. No required check or finding was bypassed.
+
+The source worktree is reconciled onto the actual merge with only the three
+squash-merged commits removed and a retained recovery ref. S0-S3 and SV1-SV4
+are accepted for this finite consumer correction. The parent Manager effort
+and every independent provider, first-run, persistent-channel, native and
+installed-runtime obligation remain open; no rollout or productive-provider
+repair is claimed.
 
 ### 2026-11-11 - Review correction: invalidate failed reads before cleanup
 
