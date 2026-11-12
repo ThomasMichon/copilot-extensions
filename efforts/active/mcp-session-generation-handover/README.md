@@ -396,6 +396,14 @@ handover. Preserve held sessions and the separate pre-feature adoption hold.
     [joined optional-receiver source packet](journal/2026/11.10-explicit-owner-cli.md#joined-optional-receiver-source-composition).
     Its controlled caller does not qualify actual Copilot handover or installed
     acceptance.
+    #12242 now qualifies the joined actual offline Copilot protocol path through
+    three private physical handovers and post-retirement exchanges. See the
+    [native-client source result](journal/2026/11.10-explicit-owner-cli.md#actual-native-client-source-result).
+    Installed adoption, actual tool invocation and production lifetime remain open.
+    The next source packet adds a bounded loopback canned provider to require
+    actual tool execution and result consumption after each predecessor exits;
+    native qualification is pending. See the
+    [tool-consumption slice](journal/2026/11.10-explicit-owner-cli.md#actual-native-tool-consumption-prepared).
   - [x] **Explicit-owner source merged:** #11935 landed at
     `c0eab0d952a37607f6cf7030ac1a77f377f98a74` after current-head automated
     approval, required CI and resolution of addressed findings. The source
@@ -512,6 +520,13 @@ withdrawal authorizes no GUI effect or change to the SDK's own admission rules.
     caller through replacement, rollback and same-slot replacement, retaining
     original caller/conduit identities and upstream state until EOF. Actual
     Copilot handover and installed acceptance remain open.
+  - [x] **Joined actual native-client source:** #12242 qualifies actual offline
+    Linux Copilot through the optional receiver across replacement, rollback
+    and same-slot replacement, including post-retirement ping/reply traffic,
+    original client/conduit/keeper/upstream native identities and exact cleanup.
+    Contained shutdown is SIGTERM, not graceful upstream EOF. This does not
+    qualify installed/default adoption, model-driven tool calls, accepted
+    mutations or production caller lifetime.
 - [ ] Failed candidate health, changed owner/route/selection and an old
   generation's late cleanup cannot corrupt or retire the current generation.
 - [ ] EOF/disconnect and verified owner death settle exact client resources;

@@ -133,8 +133,15 @@ checks also run after each predecessor exits. The copied receiver briefly holds
 before qualification so the private fixture can prepare its backend from the
 native client's actual semantic environment; production matching is unchanged.
 Fixture-only witnesses record physical interpreter/module and native lifetimes.
-This tests protocol traffic, not model-driven tool invocation or accepted mutations;
-it requires `COPILOT_NATIVE_TEST_EXECUTABLE` on a disposable runner. The existing
+An ephemeral loopback Chat Completions provider also returns only the advertised
+fixture tool. Actual Copilot must execute it once initially and after each
+predecessor exits, then submit its real result to that provider and return the
+matching completion over ACP. The private upstream ledger and physical-backend
+witness must agree on each unique argument and retained upstream identity.
+The transport uses no API key or external inference and pre-approves only that
+fixture tool; unexpected permission requests fail rather than gain authority.
+This is source qualification, not installed acceptance or in-flight mutation
+recovery; it requires `COPILOT_NATIVE_TEST_EXECUTABLE` on a disposable runner. The existing
 path-gated `mcp-owner-exec` workflow supplies the pinned asset. A platform or asset
 skip is not qualification, and this source packet does not enable installed
 adoption or qualify Windows. Under the preserved runner containment, native
