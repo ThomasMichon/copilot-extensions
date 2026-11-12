@@ -79,25 +79,28 @@ def attach(handle, bridge, runtime_root, *, timeout=10, required_trace_bookkeepi
             fields["checkpoint_trace_bookkeeping"] = required_trace_bookkeeping
         if not hmac.compare_digest(binding.identity(cfg), identity):
             raise execution_context.SharingUnavailable("custody caller context changed")
-        ack = _exchange(
-            connection, token,
-            {"op": "attach", "bridge": bridge, "custody": CONTRACT,
-             "installation_root": str(root), "configuration_context": context, **fields},
-            deadline,
-        )
+        try:
+            ack = _exchange(
+                connection, token,
+                {"op": "attach", "bridge": bridge, "custody": CONTRACT,
+                 "installation_root": str(root), "configuration_context": context, **fields},
+                deadline,
+            )
+        except (OSError, ValueError) as error:
+            raise ConnectionError("custody attach outcome is unknown; no replay") from error
         if (
             ack.get("ok") is not True or ack.get("attached") is not True
             or not supports(ack.get("custody"))
         ):
-            raise execution_context.SharingUnavailable("custody attach was not confirmed")
+            raise ConnectionError("custody attach was not confirmed; no replay")
         if required_trace_bookkeeping and (
             not supports_trace_binding(ack.get("custody"))
             or type(ack.get("checkpoint_trace_bookkeeping")) is not int
             or ack["checkpoint_trace_bookkeeping"] != required_trace_bookkeeping
         ):
-            raise execution_context.SharingUnavailable("custody checkpoint identity mode was not confirmed")
+            raise ConnectionError("custody checkpoint identity mode was not confirmed; no replay")
         if not hmac.compare_digest(binding.identity(cfg), identity):
-            raise execution_context.SharingUnavailable("custody caller context changed")
+            raise ConnectionError("custody caller context changed after attach; no replay")
         connection.settimeout(None)
         return connection
     except BaseException:

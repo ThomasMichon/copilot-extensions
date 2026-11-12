@@ -172,7 +172,9 @@ support before checkpoint preparation or upstream startup, and confirms the
 selected binding mode in its attach acknowledgment. Missing, boolean, unknown
 or mismatched confirmations cannot qualify adoption. The acknowledgment still
 follows activation; a lost acknowledgment is not permission to retry the
-application through another path.
+application through another path. Once attach is sent, transport or decoding
+failure, invalid acknowledgment, or changed caller context is a terminal
+`ConnectionError`, never the pre-effect `SharingUnavailable` fallback signal.
 
 Absent requirements preserve the existing attach request and acknowledgment.
 Legacy backends remain usable for legacy attachments; their missing optional

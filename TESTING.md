@@ -2423,6 +2423,9 @@ old-host refusal before attach, capable-host/legacy-backend refusal before
 preparation, exact mode acknowledgment, malformed modes, baseline compatibility
 and required-mode handover with the original upstream. This does not qualify
 optional-launcher adoption or remove its pre-effect guard.
+The same controls distinguish pre-attach capability refusal from terminal
+post-attach outcomes, including a bad mode acknowledgment after actual upstream
+startup, lost/malformed replies and caller-context drift.
 The fixture uses contained,
 leased instance ownership and exact cleanup, not host credentials, installed
 services, desktop observation or a production-lifetime claim. It is not part

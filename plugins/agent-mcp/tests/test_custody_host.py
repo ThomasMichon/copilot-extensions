@@ -625,6 +625,25 @@ async def test_sync_conduit_keeps_early_notification_and_live_stream_across_hand
         await ipc.aclose_writer(writer)
 
 
+async def test_bad_mode_ack_after_actual_upstream_start_never_permits_fallback(tmp_path, monkeypatch):
+    async with shared(tmp_path, monkeypatch) as fixture:
+        original_send = fixture.host._send
+
+        async def send_without_mode(writer, reply):
+            if reply.get("attached") is True:
+                reply = {key: value for key, value in reply.items() if key != "checkpoint_trace_bookkeeping"}
+            await original_send(writer, reply)
+        monkeypatch.setattr(fixture.host, "_send", send_without_mode)
+        with pytest.raises(ConnectionError) as failure:
+            await asyncio.to_thread(
+                custody_conduit.attach, fixture.host.socket_path, "fixture", fixture.root,
+                required_trace_bookkeeping=1,
+            )
+        assert not isinstance(failure.value, ec.SharingUnavailable)
+        assert len(fixture.upstreams) == 1 and fixture.upstreams[0].starts == 1
+        await until(lambda: fixture.upstreams[0].closes == 1 and not fixture.host.sessions)
+
+
 async def test_backend_link_loss_is_terminal_not_a_new_upstream(tmp_path, monkeypatch):
     async with shared(tmp_path, monkeypatch) as fixture:
         reader, writer, _, _ = await fixture.attach()

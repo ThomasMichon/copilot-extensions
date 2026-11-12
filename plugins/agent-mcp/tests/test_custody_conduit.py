@@ -100,8 +100,9 @@ def test_failed_attach_never_pumps_or_retries(admission, monkeypatch, case):
         if case == "context-drift" and request["op"] == "attach":
             monkeypatch.setenv("CUSTODY_CONDUIT_FIXTURE", "changed")
     connection = connect(changed=changed)
-    with pytest.raises(OSError):
+    with pytest.raises(ConnectionError) as failure:
         conduit.attach(root / "custody.sock", "fixture", root)
+    assert not isinstance(failure.value, ec.SharingUnavailable)
     assert connection.closed
     assert [item["op"] for item in connection.requests] == ["ping", "attach"]
 
@@ -144,8 +145,9 @@ def test_required_mode_needs_actual_attach_confirmation(admission, confirmation)
         ) is connection
         assert not connection.closed
     else:
-        with pytest.raises(ec.SharingUnavailable, match="not confirmed"):
+        with pytest.raises(ConnectionError, match="not confirmed") as failure:
             conduit.attach(root / "custody.sock", "fixture", root, required_trace_bookkeeping=1)
+        assert not isinstance(failure.value, ec.SharingUnavailable)
         assert connection.closed
     assert [item["op"] for item in connection.requests] == ["ping", "attach"]
     assert connection.requests[-1]["checkpoint_trace_bookkeeping"] == 1
@@ -174,3 +176,19 @@ def test_invalid_required_mode_refuses_before_connect(admission, mode):
     with pytest.raises(ValueError):
         conduit.attach(root / "custody.sock", "fixture", root, required_trace_bookkeeping=mode)
     assert not connection.requests
+
+
+@pytest.mark.parametrize("reply", [b"", b"{invalid}\n", b'{"ok":true', b"[]\n"])
+def test_lost_or_malformed_attach_outcome_is_terminal(admission, reply):
+    root, _, _, connect = admission
+    connection = connect()
+
+    def changed(request):
+        if request["op"] == "attach":
+            connection.data = reply
+    connection.changed = changed
+    with pytest.raises(ConnectionError) as failure:
+        conduit.attach(root / "custody.sock", "fixture", root)
+    assert not isinstance(failure.value, ec.SharingUnavailable)
+    assert connection.closed
+    assert [item["op"] for item in connection.requests] == ["ping", "attach"]
