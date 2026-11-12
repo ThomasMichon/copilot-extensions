@@ -81,6 +81,7 @@ class RecoveryBinding:
     source: SourceSelection
     owner_intent: OwnerIntent
     native_owner: object = field(repr=False, compare=False)
+    _native_scope: object | None = field(default=None, init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if (
@@ -91,6 +92,7 @@ class RecoveryBinding:
         ):
             raise ValueError("An independently retained original launch binding is required")
         launch_attempt.identity(self.launch_operation_id)
+        object.__setattr__(self, "_native_scope", getattr(self.native_owner, "native_scope", None))
 
 
 class RemainingLease(Protocol):
@@ -198,8 +200,12 @@ class RecoveryAdmissionInspector:
             if (
                 type(current) is not RecoveryBinding or current != binding
                 or current.native_owner is not binding.native_owner
+                or current._native_scope is not binding._native_scope
             ):
                 return result("held", "current-binding-mismatch")
+            native_scope = binding._native_scope
+            if getattr(binding.native_owner, "native_scope", None) is not native_scope:
+                return result("held", "native-scope-changed")
             if observation.source_state not in {"approved", "revoked", "unknown"}:
                 return result("unknown", "source-evidence-invalid")
             if observation.source_state != "approved":
@@ -221,12 +227,20 @@ class RecoveryAdmissionInspector:
                 or not 0 < remaining <= 3600
             ):
                 return result("held", "source-lease-unconfirmed")
-            if phase == "resume_intent" and observation.scope_settled is not True:
-                return result("unknown", "scope-settlement-unconfirmed")
+            if phase == "resume_intent":
+                settlement = getattr(binding.native_owner, "scope_settled", None)
+                if (
+                    observation.scope_settled is not True or native_scope is None
+                    or not callable(settlement) or settlement(native_scope) is not True
+                ):
+                    return result("unknown", "scope-settlement-unconfirmed")
+                if getattr(binding.native_owner, "native_scope", None) is not native_scope:
+                    return result("reconcile", "native-scope-changed")
             owner, _ = launch_recovery_store._binding(self._path)
             if (
                 OwnerIntent._from_record(owner) != self._owner_state or self._launch() != launch
                 or self._store.load(descriptor) != record
+                or getattr(binding.native_owner, "native_scope", None) is not native_scope
             ):
                 return result("reconcile", "owner-or-intent-changed")
         except Exception:

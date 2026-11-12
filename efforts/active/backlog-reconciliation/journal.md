@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-12 - Later receiving and finite source boundaries](journal/2026/11.12-later-receiving-and-source-boundaries.md)
+
 - [2026-11-12 - Preserved cache, truthful readiness and oldest contracts](journal/2026/11.12-preserved-cache-and-oldest-contracts.md)
 
 - [2026-11-12 - Oldest contracts and finite source delivery](journal/2026/11.12-oldest-contracts-and-finite-delivery.md)
