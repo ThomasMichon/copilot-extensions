@@ -300,7 +300,7 @@ async def test_actual_native_client_responds_through_replacement_and_rollback(
                     if row["state"] == "running" and row["service"] == "agent-mcp-custody"
                 ]
                 assert len(keepers) == 1
-                keeper_identity = keepers[0]["pid"], keepers[0]["birth"]
+                keeper_identity = int(keepers[0]["pid"]), keepers[0]["birth"]
 
                 def retained_identities() -> None:
                     assert client.returncode is None
