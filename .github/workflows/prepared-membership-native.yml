@@ -38,9 +38,11 @@ jobs:
           - packet: admission-and-safe
             select: "prepared_native_membership_reuses_original_association or (registered_file_local_write_reuses_original_guard_facts and (ordinary or create or path-alias or json-args or cell or batch-read-only) and not (structured or write-name or patch or argument-))"
           - packet: fallback
-            select: "registered_file_local_write_reuses_original_guard_facts and not (ordinary or create or path-alias or json-args or cell or batch-read-only or structured or write-name or patch or literal-batch or argument-)"
+            select: "registered_file_local_write_reuses_original_guard_facts and not (ordinary or create or path-alias or json-args or cell or batch-read-only or structured or write-name or patch or literal-batch or argument-) and not literal-shell"
             residual: "registered_file_local_write_reuses_original_guard_facts and literal-batch and not cell"
             arguments: "native_shell_arguments or argument-shell-attribution or argument-batch-attribution"
+          - packet: fallback-shell
+            select: "registered_file_local_write_reuses_original_guard_facts and not (ordinary or create or path-alias or json-args or cell or batch-read-only or structured or write-name or patch or literal-batch or argument-) and literal-shell"
           - packet: structured
             select: "registered_file_local_write_reuses_original_guard_facts and structured and not (write-name or (patch and not structured-patch))"
           - packet: write-names
