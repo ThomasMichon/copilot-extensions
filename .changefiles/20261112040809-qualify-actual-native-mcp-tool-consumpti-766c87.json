@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify actual native MCP tool consumption across private physical handovers",
+  "changes": [
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    }
+  ]
+}
