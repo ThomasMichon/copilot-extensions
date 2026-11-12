@@ -161,6 +161,22 @@ def test_unrelated_wake_and_original_resume_never_inherit_closeout_admission(q):
     assert q.admit_execution_wake(wake, provenance=None).identity is not None
 
 
+def test_event_note_after_closeout_claim_cannot_supersede_the_durable_closeout(q):
+    task_id = bound(q)
+    report(q, task_id)
+    wake = q.claim_due_wake()
+    q.append_event_note(task_id, sender="source", note="Object is closed", wake_agent=True)
+    assert q.get(task_id).wake_operation_id != wake.id
+    admission = q.admit_execution_wake(wake, provenance=None)
+    q.settle_execution_wake(wake, admission, outcome="sent", detail="original closeout accepted")
+    assert q.finish_wake(wake.id, wake.delivery_token, delivered=True).status == "delivered"
+    assert q.claim_due_wake() is None
+    assert [w.status for w in q.list_wakes(task_id)] == ["delivered", "stale"]
+    before = q.list_wakes(task_id)
+    assert report(q, task_id, request_id="later-observation")["wake_operation_id"] == wake.id
+    assert q.list_wakes(task_id) == before
+
+
 @pytest.mark.parametrize("status", [Status.STARTED, Status.SUSPENDED, Status.SUBMITTED])
 def test_actual_native_transport_keeps_original_conversation_and_closeout_prompt(
     hosted, monkeypatch, status,
@@ -211,11 +227,17 @@ def _hosted_report(queue, task_id):
     ))
 
 
-def test_actual_default_drainer_delivers_closeout_to_original_native(hosted, monkeypatch):
+@pytest.mark.parametrize("event_note", [False, True])
+def test_actual_default_drainer_delivers_closeout_to_original_native(hosted, monkeypatch, event_note):
     from agent_dispatch.events import EventBus
     from agent_dispatch.wake import drain_wake_outbox
     queue, task_id = hosted
+    if event_note:
+        queue.resume(task_id, OWNER, reuse_session=True)
     accepted = _hosted_report(queue, task_id)
+    if event_note:
+        queue.append_event_note(task_id, sender="source", note="Object is closed", wake_agent=True)
+        assert queue.get(task_id).wake_operation_id != accepted["wake_operation_id"]
     calls = _capture(monkeypatch)
 
     async def scenario():
@@ -224,7 +246,7 @@ def test_actual_default_drainer_delivers_closeout_to_original_native(hosted, mon
         ))
         try:
             for _ in range(200):
-                if queue.list_wakes(task_id)[0].status == "delivered":
+                if all(w.status in {"delivered", "stale"} for w in queue.list_wakes(task_id)):
                     break
                 await asyncio.sleep(0.01)
             else:
@@ -237,7 +259,10 @@ def test_actual_default_drainer_delivers_closeout_to_original_native(hosted, mon
     asyncio.run(scenario())
     assert [argv for argv, _ in calls] == [_expected(accepted["wake_operation_id"])]
     assert "do not start or resume the goal" in calls[0][1]["input"]
-    assert queue.get(task_id).status == Status.SUSPENDED
+    assert queue.get(task_id).status == (Status.STARTED if event_note else Status.SUSPENDED)
+    assert [w.status for w in queue.list_wakes(task_id)] == (
+        ["delivered", "stale"] if event_note else ["delivered"]
+    )
 
 
 @pytest.mark.parametrize("outcome", ["lost_response", "accepted"])

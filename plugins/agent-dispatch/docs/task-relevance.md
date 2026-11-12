@@ -76,7 +76,9 @@ without reassigning the task. Absent or changed ownership stays pending; this
 receiver never guesses a historical owner or creates a replacement agent.
 
 Only the outbox row linked through the closeout's actual steer can pass its
-original-goal admission fence. Ordinary goal wakes, run waiters and forged or
+original-goal admission fence. A later ordinary/event-note wake cannot supersede
+that durable link through the task's latest-wake summary field.
+Ordinary goal wakes, run waiters and forged or
 changed prompt objects cannot inherit this permission. Independent execution
 scope closure, qualified-runtime provenance, delivery token, generation, owner,
 native, retirement, cooling, transport custody and cold-pool lane gates still

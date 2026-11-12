@@ -182,6 +182,10 @@ skipped. These are source controls, not actual installed-runtime acceptance.
 The review correction applies the already-fenced submitting worker to both
 restricted native-target reads without changing stored task ownership. Its
 restricted/ordinary delivery and supervisor packet passed 184 selected controls.
+Closeout validity uses its durable steer/outbox link rather than the mutable
+latest ordinary wake summary, so a later event note cannot strand the accepted
+closeout. The affected linkage/admission packet passed 110 controls, with one
+existing detached-cleanup-only parameter skipped.
 
 Historical ownership that is absent or changed stays explicitly pending.
 External registered callers, periodic source evaluation, cohort stamps, actual

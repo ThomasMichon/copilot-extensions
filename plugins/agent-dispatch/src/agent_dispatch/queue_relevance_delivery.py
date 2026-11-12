@@ -34,7 +34,7 @@ def closeout_wake(conn: sqlite3.Connection, wake: WakeOperation) -> bool:
         " JOIN task_steer s ON s.id=c.steer_id AND s.task_id=c.task_id"
         " JOIN wake_outbox w ON w.id=s.wake_operation_id AND w.task_id=c.task_id"
         " JOIN tasks t ON t.id=c.task_id"
-        " WHERE c.task_id=? AND w.id=? AND t.wake_operation_id=w.id"
+        " WHERE c.task_id=? AND w.id=?"
         " AND t.status IN ('claimed','started','suspended','submitted')"
         " AND t.generation=c.generation"
         " AND CASE WHEN t.status='submitted' AND t.owner IS NULL THEN t.completed_by"
