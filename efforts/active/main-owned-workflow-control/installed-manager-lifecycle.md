@@ -2964,3 +2964,15 @@ coherent capture delta and obtain current required CI before the separate
 Windows installed-suite attempt. The original fatal CIM failure and both review
 threads remain unwaived; no current native success or parent completion is
 inferred from this capture.
+
+Publishing that evidence encounters newer Dev MCP owner-entry work, not a
+Bridge source overlap. The retained backup precedes rebase onto
+`8e0352bb07b637232b55c3547d4566101ec2dcd2`. All 47 owned patches survive;
+only two generated MCP producer-digest hunks need canonical regeneration,
+still at revision 36. None of the 2,238 captured execution-closure paths is
+among the upstream changes, and the actual contract guard passes without
+changing any captured source identity or provenance. The source-equivalence
+check preserves the original `37662d62d2` capture attribution; it is not a new
+execution claim. The combined actual MCP owner-entry, Windows fallback and
+flat/nested bootstrap packet passes 65 cases with 14 platform skips. Current
+required CI and exact-head installed Windows qualification remain separate.
