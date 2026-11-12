@@ -5268,7 +5268,7 @@
         "tools/promotion_unit_tests/test_local_launch_boundary.py": "3e624d4e23f8238fa2d75c8d7fef649ec704c54fc7e0eadca3fbf2a6eb3d1854",
         "tools/promotion_unit_tests/test_manager_launchers.py": "f31a192e5ad6d54c54964448ecd35579901ec622640ad47684f5733d0cd63707",
         "tools/promotion_unit_tests/test_manager_uninstall.py": "03ac1242560686175d4eb2174d269ee06cb8bafccd2e20115178ebad7b3b5cc6",
-        "tools/promotion_unit_tests/test_materialized_local_sources.py": "529dd3e5b92d4b4d58f1b8e5352770b710da08eb7c234ffddce707d140d70d10",
+        "tools/promotion_unit_tests/test_materialized_local_sources.py": "21787ff0e4d5ffc4533b336ad6f34e2e0e44feb766990e7c8b70fe395379f797",
         "tools/promotion_unit_tests/test_mcp_home.py": "d1740e27b644f828638e8afdf6ee0f7bcec78953ca91bf969f6e5bedde0836e2",
         "tools/promotion_unit_tests/test_namespace_contract.py": "8e691a991ed59907727538ad3141ae5b6fb6f41ab7a123fc6c11127cfc87b46a",
         "tools/promotion_unit_tests/test_native_owned.py": "fa183e43ce186240c24ccaf475352ffd1dbeddd594999eb84a4050562d333d89",
