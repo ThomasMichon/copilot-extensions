@@ -11,6 +11,7 @@ import tomllib
 from dataclasses import asdict, replace
 
 import pytest
+import materialize_installer_engine as materialization
 import runtime_feed_configuration as configuration
 import runtime_source_manager as builds
 from test_installer_wheel_acquisition import CERTIFICATE, feeds as feeds  # noqa: F401
@@ -80,6 +81,11 @@ def manager_source(adopter, configured_source, monkeypatch):
     )
     monkeypatch.setattr(si, "local_bin", lambda: root / "bin")
     monkeypatch.setattr(si, "control_plane_providers_dir", lambda: root / "providers")
+    for canonical, _ in materialization.derived_file_pairs(
+        repository, repository, copied_consumer=(project, project),
+    ):
+        canonical.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(_ROOT / canonical.relative_to(repository), canonical)
     select_source(configured_source)
     return root
 
@@ -97,11 +103,22 @@ def test_manager_source_warm_install_in_a_new_process_never_resolves_or_rebuilds
     env = environment(adopter, state, tmp_path, authenticate="auto")
     env.update(UV_INDEX_GOVERNED_USERNAME="fixture-user", UV_INDEX_GOVERNED_PASSWORD="synthetic-secret")
     arguments = options(adopter, target, env)
+    attempts = 0
 
     def install():
-        return builds.install_manager_source_runtime(
-            plan(adopter), **{**arguments, "deadline": time.monotonic() + 120},
-        )
+        nonlocal attempts
+        attempts += 1
+        started = time.monotonic()
+        try:
+            return builds.install_manager_source_runtime(
+                plan(adopter), **{**arguments, "deadline": started + 120},
+            )
+        finally:
+            print(
+                f"manager-source-native: {uv_selection} attempt={attempts} "
+                f"elapsed={time.monotonic() - started:.3f}s",
+                flush=True,
+            )
 
     if uv_selection == "absolute":
         path = os.pathsep.join(
@@ -173,11 +190,14 @@ result = builds.install_manager_source_runtime(plan, **options)
 assert result.action == "already-current", result
 print(json.dumps(asdict(result)))
 """
+    warm_started = time.monotonic()
     second = subprocess.run(
         [sys.executable, "-I", "-B", "-c", script, str(_ROOT), json.dumps(specification, default=str)],
         capture_output=True, text=True, timeout=90,
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
+    print(f"manager-source-native: {uv_selection} fresh-process reuse "
+          f"elapsed={time.monotonic() - warm_started:.3f}s", flush=True)
     assert second.returncode == 0, second.stdout + second.stderr
     assert json.loads(second.stdout)["slot"] == first.slot
     assert len(state["requests"]) == requests
