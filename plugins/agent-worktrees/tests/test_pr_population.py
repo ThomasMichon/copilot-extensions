@@ -469,3 +469,20 @@ def test_query_cover_encodes_scope_and_never_expands_a_conjunction(monkeypatch):
     url = requests[0][requests[0].index("--url") + 1]
     assert "/Project%20Space/_apis/git/repositories/repo%23query/pullRequests?" in url
     assert parse_qs(urlsplit(url).query)["$top"] == ["50"]
+
+
+def test_query_branch_cap_applies_to_the_selected_cover_not_discarded_conjuncts():
+    identities = [f"00000000-0000-0000-0000-{number:012x}" for number in range(80)]
+    wide = {"any": [
+        {"from": {"users": identities[:40]}},
+        {"from": {"users": identities[40:]}},
+    ]}
+    selected = expression({"all": [{"from": {"users": [USER]}}, wide]})
+    assert pop.validate("azure-devops", REPO, ENDPOINT, selected, 4, 200) == [("creatorId", USER)]
+    unfiltered = expression({"any": [wide, {"repo": [REPO]}]})
+    assert pop.validate("azure-devops", REPO, ENDPOINT, unfiltered, 4, 200) == [None]
+    with pytest.raises(ValueError, match="branch limit"):
+        pop.population(
+            "azure-devops", REPO, api_base=ENDPOINT, expression=expression(wide),
+            credential_source=lambda: pytest.fail("over-limit selected query cover"),
+        )

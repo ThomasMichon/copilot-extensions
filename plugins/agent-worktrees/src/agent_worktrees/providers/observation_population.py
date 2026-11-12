@@ -57,8 +57,6 @@ def _queries(node):
             if not branch:
                 return set()
             result.update(branch)
-            if len(result) > MAX_REQUESTS:
-                raise ValueError("population query branch limit")
         return result
     if "all" in node:
         choices = [_queries(child) for child in node["all"]]
@@ -100,7 +98,10 @@ def validate(provider, repo, api_base, expression, max_pages, max_pulls):
                     raise ValueError("population requires canonical provider user IDs")
 
     identities(expression.document()["where"])
-    return sorted(_queries(expression.document()["where"])) or [None]
+    queries = sorted(_queries(expression.document()["where"]))
+    if len(queries) > MAX_REQUESTS:
+        raise ValueError("population query branch limit")
+    return queries or [None]
 
 
 def _read(url, credentials, deadline):
