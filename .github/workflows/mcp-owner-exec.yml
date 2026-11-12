@@ -17,9 +17,12 @@ on:
       - "plugins/agent-mcp/src/agent_mcp/custody_contract.py"
       - "plugins/agent-mcp/src/agent_mcp/custody_connector.py"
       - "plugins/agent-mcp/src/agent_mcp/custody_session.py"
+      - "plugins/agent-mcp/src/agent_mcp/custody_host.py"
+      - "plugins/agent-mcp/src/agent_mcp/custody_conduit.py"
       - "plugins/agent-mcp/tests/test_owner_exec.py"
       - "plugins/agent-mcp/tests/test_owner_entry.py"
       - "plugins/agent-mcp/tests/test_custody_host.py"
+      - "plugins/agent-mcp/tests/test_custody_conduit.py"
       - "plugins/agent-mcp/tests/test_incoming_execution.py"
       - "plugins/agent-mcp/tests/test_custody_lifetime.py"
       - "plugins/agent-mcp/tests/test_session_checkpoint.py"
@@ -54,6 +57,7 @@ jobs:
           --test-file tests/test_owner_entry.py
           --test-file tests/test_owner_capabilities.py
           --test-file tests/test_custody_host.py
+          --test-file tests/test_custody_conduit.py
           --test-file tests/test_incoming_execution.py
           --test-file tests/test_custody_lifetime.py
           --test-file tests/test_session_checkpoint.py

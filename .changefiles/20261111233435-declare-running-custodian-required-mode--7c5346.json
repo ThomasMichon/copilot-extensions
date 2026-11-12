@@ -1,0 +1,9 @@
+{
+  "comment": "Declare running custodian required-mode enforcement and verify checkpoint identity admission before upstream startup.",
+  "changes": [
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    }
+  ]
+}
