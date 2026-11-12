@@ -33,12 +33,20 @@ from __future__ import annotations
 
 import http.client
 import json
+import math
 import re
+import socket
+import subprocess
+import sys
+import threading
+import time
 import urllib.error
 import urllib.request
 from collections.abc import Callable
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 
 #: Default seasoning window, in days, applied when a caller doesn't name
 #: one explicitly. Not derived from this effort's own Phase 1 lag
@@ -120,14 +128,162 @@ class SeasonedVersionError(RuntimeError):
     an unseasoned "latest"."""
 
 
-def _default_fetch(url: str) -> bytes:
+@contextmanager
+def _response_deadline(response: http.client.HTTPResponse, deadline: float):
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise SeasonedVersionError("public toolchain resolution deadline exceeded")
+    # Interrupt the owned transport: closing a buffered reader from another
+    # thread can wait on the very read that needs to be interrupted.
+    transport = response.fp.raw._sock
+    expired = threading.Event()
+
+    def interrupt() -> None:
+        expired.set()
+        try:
+            transport.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
+
+    timer = threading.Timer(remaining, interrupt)
+    timer.start()
+    try:
+        yield
+    finally:
+        timer.cancel()
+        timer.join()
+        if expired.is_set() or time.monotonic() >= deadline:
+            raise SeasonedVersionError("public toolchain resolution deadline exceeded")
+
+
+def _deadline_opener(deadline: float):
+    class Response(http.client.HTTPResponse):
+        def __init__(self, *args, **kwargs):
+            self._deadline_scope = None
+            super().__init__(*args, **kwargs)
+            scope = _response_deadline(self, deadline)
+            try:
+                scope.__enter__()
+            except BaseException:
+                super().close()
+                raise
+            self._deadline_scope = scope
+
+        def read(self, amt=None):
+            try:
+                return super().read(amt)
+            except BaseException:
+                self.close()
+                raise
+
+        def close(self):
+            scope, self._deadline_scope = self._deadline_scope, None
+            try:
+                super().close()
+            finally:
+                if scope is not None:
+                    scope.__exit__(None, None, None)
+
+    class HTTPConnection(http.client.HTTPConnection):
+        response_class = Response
+
+    class HTTPSConnection(http.client.HTTPSConnection):
+        response_class = Response
+
+    class HTTPHandler(urllib.request.HTTPHandler):
+        def http_open(self, request):
+            request.timeout = min(request.timeout, deadline - time.monotonic())
+            if request.timeout <= 0:
+                raise SeasonedVersionError("public toolchain resolution deadline exceeded")
+            return self.do_open(HTTPConnection, request)
+
+    class HTTPSHandler(urllib.request.HTTPSHandler):
+        def https_open(self, request):
+            request.timeout = min(request.timeout, deadline - time.monotonic())
+            if request.timeout <= 0:
+                raise SeasonedVersionError("public toolchain resolution deadline exceeded")
+            return self.do_open(HTTPSConnection, request, context=self._context)
+
+    return urllib.request.build_opener(HTTPHandler(), HTTPSHandler())
+
+
+def _fetch_response(url: str, *, deadline: float | None = None) -> bytes:
     """The real network fetch -- isolated behind the injectable ``fetch``
     parameter below so every test exercises the actual selection logic
     against a fixed, synthetic response instead of real network calls to
     pypi.org (slow, flaky, and not reproducible evidence)."""
+    timeout = _REQUEST_TIMEOUT_SECONDS
+    if deadline is not None:
+        if isinstance(deadline, bool) or not isinstance(deadline, (int, float)) or not math.isfinite(deadline):
+            raise SeasonedVersionError("public toolchain requires a finite monotonic deadline")
+        timeout = min(timeout, deadline - time.monotonic())
+        if timeout <= 0:
+            raise SeasonedVersionError("public toolchain resolution deadline exceeded")
     request = urllib.request.Request(url, headers={"User-Agent": "copilot-extensions-build-toolchain-lock"})
-    with urllib.request.urlopen(request, timeout=_REQUEST_TIMEOUT_SECONDS) as response:
-        return response.read()
+    if deadline is None:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return response.read()
+    try:
+        with _deadline_opener(deadline).open(request, timeout=timeout) as response:
+            return response.read()
+    except urllib.error.HTTPError as error:
+        error.close()
+        raise
+
+
+def _default_fetch(url: str, *, deadline: float | None = None) -> bytes:
+    if deadline is None:
+        return _fetch_response(url)
+    if isinstance(deadline, bool) or not isinstance(deadline, (int, float)) or not math.isfinite(deadline):
+        raise SeasonedVersionError("public toolchain requires a finite monotonic deadline")
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise SeasonedVersionError("public toolchain resolution deadline exceeded")
+    # Socket timeouts cannot cancel DNS or bound all address/proxy attempts.
+    # This child owns only the request; run() kills and waits for it on expiry.
+    command = [
+        sys.executable, "-I", "-B", str(Path(__file__).resolve()),
+        "--fetch-deadline", str(deadline), url,
+    ]
+    options = {"creationflags": subprocess.CREATE_NO_WINDOW} if sys.platform == "win32" else {}
+    try:
+        result = subprocess.run(
+            command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            timeout=remaining, **options,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise SeasonedVersionError("public toolchain resolution deadline exceeded") from exc
+    if time.monotonic() >= deadline:
+        raise SeasonedVersionError("public toolchain resolution deadline exceeded")
+    if result.returncode == 0:
+        return result.stdout
+    try:
+        failure = json.loads(result.stderr)
+    except (ValueError, UnicodeError) as exc:
+        raise SeasonedVersionError("public toolchain metadata worker failed") from exc
+    if isinstance(failure, dict) and failure.get("kind") == "http" and type(failure.get("code")) is int:
+        raise urllib.error.HTTPError(url, failure["code"], failure.get("message", ""), None, None)
+    if isinstance(failure, dict) and failure.get("kind") == "deadline":
+        raise SeasonedVersionError("public toolchain resolution deadline exceeded")
+    raise SeasonedVersionError("public toolchain metadata request failed")
+
+
+def _fetch_main(arguments: list[str]) -> int:
+    if len(arguments) != 3 or arguments[0] != "--fetch-deadline":
+        raise SeasonedVersionError("unsupported metadata worker arguments")
+    try:
+        data = _fetch_response(arguments[2], deadline=float(arguments[1]))
+    except urllib.error.HTTPError as exc:
+        sys.stderr.write(json.dumps({"kind": "http", "code": exc.code, "message": str(exc.reason)}))
+        return 1
+    except SeasonedVersionError:
+        sys.stderr.write(json.dumps({"kind": "deadline"}))
+        return 1
+    except Exception:
+        sys.stderr.write(json.dumps({"kind": "request"}))
+        return 1
+    sys.stdout.buffer.write(data)
+    return 0
 
 
 def _resolve_seasoned_release(
@@ -311,3 +467,7 @@ def resolve_seasoned_public_release(
             raise SeasonedVersionError(f"{package} {version}: missing or invalid file SHA-256")
         hashes.add(digest.lower())
     return SeasonedPublicRelease(version, tuple(sorted(hashes)))
+
+
+if __name__ == "__main__":
+    raise SystemExit(_fetch_main(sys.argv[1:]))
