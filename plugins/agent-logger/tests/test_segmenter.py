@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 import agent_logger.segmenter.collate as collate
+import agent_logger.segmenter.digest as digest
 import agent_logger.segmenter.ramp_up as ramp_up
 import agent_logger.segmenter.read_digest as read_digest
 
@@ -276,6 +277,28 @@ def test_ramp_up_brief_from_a_tail_matches_the_full_turn_list(tmp_path: Path, ta
     )
 
     assert actual == expected
+
+
+def test_build_session_digest_gives_a_charter_its_view_in_the_same_pass(tmp_path: Path) -> None:
+    session_dir = _many_turns_session(tmp_path / "s", 9)
+    out = tmp_path / "out"
+    out.mkdir()
+    (out / "99-turns.md").write_text("stale segment from an earlier run", encoding="utf-8")
+    seen: list[dict] = []
+
+    result = digest.build_session_digest(
+        session_dir, out, segment_size=400, max_tool_output=40, on_turn=seen.append,
+    )
+
+    stream = collate.TurnStream(session_dir, None, 40)
+    expected = collate.write_segments(
+        digest.read_workspace(session_dir), stream.session_start, digest.read_checkpoints(session_dir),
+        stream, digest.read_rewind_index(session_dir), None, tmp_path / "ref", 400, 40,
+    )
+    assert result.files == expected
+    assert _read_dir(out) == _read_dir(tmp_path / "ref")
+    assert [turn["user_message"] for turn in seen] == [f"q{i}" for i in range(9)]
+    assert (result.stats.turns, result.stats.failed_tool_calls, result.turn_count) == (9, 3, 9)
 
 
 def test_write_segments_memory_is_bounded_for_a_large_transcript(tmp_path: Path) -> None:

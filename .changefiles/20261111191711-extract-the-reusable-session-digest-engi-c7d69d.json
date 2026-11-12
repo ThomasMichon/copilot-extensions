@@ -1,0 +1,9 @@
+{
+  "comment": "Extract the reusable session-digest engine (agent_logger.segmenter.digest) shared by collate-session and ramp-up-session",
+  "changes": [
+    {
+      "plugin": "agent-logger",
+      "type": "patch"
+    }
+  ]
+}
