@@ -22,6 +22,11 @@ Existing contributors retain their issues, PRs, plans and resources. Dispatch
 is optional: this is the manual, agent-driven counterpart of an adopted
 registrar triage task, not permission to start or replace that task.
 
+For duplicate/overlap clustering and canonical receiving toward a finite queue
+target, use [consolidate-issue-backlog](../consolidate-issue-backlog/SKILL.md).
+That distinct role preserves whole requirements before separately authorized
+source retirement; individual triage does not grant bulk closure.
+
 The skill owns the reusable procedure. Target severity, routing, attribution,
 privacy and allowed provider effects come from their rightful owners.
 Read [guidance and adapters](references/guidance-and-adapters.md) at activation

@@ -1,0 +1,63 @@
+{
+  "example_only": true,
+  "description": "Synthetic static-contract walkthroughs, not executable decisions, provider effects or model/live qualification.",
+  "cases": [
+    {
+      "id": "incomplete-receiver",
+      "given": "An authorized consolidation source requires both a selected-platform fix and independent acceptance. The proposed receiver retains the fix but omits the acceptance obligation.",
+      "expected": "Keep the source open. Retain the missing acceptance clause and obtain required receiving acceptance before separately deciding source retirement; a thematic link or partial mapping is insufficient.",
+      "required_guidance": {
+        "SKILL.md": [
+          "Map every unique source requirement and literal AND/OR choice to a direct receiving clause or retained gap.",
+          "The receiver must be actionable, not a title, graph link or \"see source\" escape."
+        ],
+        "references/acceptance-and-continuity.md": [
+          "Required plan review precedes dependent publication.",
+          "Then make the source-specific disposition judgment separately."
+        ]
+      }
+    },
+    {
+      "id": "unknown-write-outcome",
+      "given": "The authorized publisher times out after sending a comment. The provider may have accepted it, while the local effect ledger has no result. A later read may instead verify the original post despite failed bookkeeping.",
+      "expected": "Reconcile the original effect through its existing owner and identity without replay. If the original post is verified, repair bookkeeping rather than posting again; neither outcome transfers resource custody.",
+      "required_guidance": {
+        "SKILL.md": [
+          "Unknown mutation outcomes require reconciliation, not blind replay.",
+          "A verified remote effect with failed bookkeeping must not be repeated."
+        ],
+        "references/acceptance-and-continuity.md": [
+          "Reconcile a timeout through the existing owner under its original identity; do not replay a possibly successful write."
+        ]
+      }
+    },
+    {
+      "id": "inflow-and-excluded-denominator",
+      "given": "A synthetic whole-queue campaign targets 50 open issues. Its last complete count is 52, including five ineligible records. Three closures and two arrivals would yield 51, but no new complete census has yet verified that state.",
+      "expected": "Do not declare the target reached or omit the five ineligible records. Obtain a fresh complete census including arrivals and report campaign closures separately from external departures; even a verified count of 51 remains above 50.",
+      "required_guidance": {
+        "SKILL.md": [
+          "Keep the whole denominator visible when it governs the target; ineligible issues do not disappear from that count."
+        ],
+        "references/cohorts-and-acquisition.md": [
+          "Do not subtract campaign closures from an old census and call it current.",
+          "Distinguish campaign-attributable reductions from unrelated departures and campaign-created receivers."
+        ]
+      }
+    },
+    {
+      "id": "target-met-closeout-pending",
+      "given": "A fresh complete census verifies the synthetic target of 50 whole open issues. The final reviewed journal and an owned publication obligation remain unresolved.",
+      "expected": "Stop extra cohorts and side quests, but retain the unfinished parent and its remaining journal, review and own-resource obligations. A verified numerical checkpoint is not full closeout.",
+      "required_guidance": {
+        "SKILL.md": [
+          "At the verified finite target, stop extra cohorts and side quests.",
+          "Complete the charter's remaining final journal, review and own-resource obligations rather than declaring success from the count alone."
+        ],
+        "references/acceptance-and-continuity.md": [
+          "Do not close an effort from a phase, PR or count alone"
+        ]
+      }
+    }
+  ]
+}
