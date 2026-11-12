@@ -1,0 +1,9 @@
+{
+  "comment": "Add an actor-free original-owner recovery journal with durable guarded CAS and uncertainty-preserving reads.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
