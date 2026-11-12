@@ -298,6 +298,21 @@ All status remains native-recovery-unqualified and reconciliation-required.
 Actual provider settlement, current admission and native seedless history
 restoration need separate qualification before any owner wires recovery.
 
+`headed.recovery_codec.encode_recovery_record` and `decode_recovery_record`
+exchange the complete typed record, not its lossy `status()` projection.
+The UTF-8 JSON envelope has exactly `contract` (`copilot-driver.headed-recovery-record`),
+integer `version` (1) and `record`. All descriptor/step fields, including null
+optional step fields, are required; unknown or duplicate fields, unsupported
+versions, incorrect types, invalid Unicode, floating-point/non-finite values,
+invalid history and records over 262144 bytes refuse without repair or truncation.
+No authorization/capability flags are serialized. Canonical encoding retains
+the operation, exact binding, complete ordered history, holds and unknown effects.
+`load_recovery_status(store, descriptor)` reads that exact binding without CAS
+or any effects. Missing records remain unknown, not settled or absent sessions.
+Neither codec availability nor successful decoding establishes store/native
+admission. The compact receiving archive includes these pure modules but adds
+no recovery command, provider or capability advertisement.
+
 See the [ACP WS boundary](../../plugins/agent-remote-driver/docs/session-host-websocket.md).
 The compact dependency-free receiving archive supports TCP only. Tests stay
 with the application and Bridge consumers; the canonical receiving-policy
