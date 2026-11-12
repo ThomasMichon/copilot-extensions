@@ -348,6 +348,57 @@ $s = if (Test-Path -LiteralPath $state) { 'ready' } else { 'needed' }
     assert (source.parent / "calls.txt").read_text().splitlines() == ["check", "apply", "check"]
 
 
+@pytest.mark.parametrize("dont_write_bytecode", [False, True])
+def test_selected_engine_callback_preserves_caller_bytecode_policy(
+    source: Path, tmp_path: Path, monkeypatch, dont_write_bytecode: bool,
+) -> None:
+    probe = tmp_path / "cold callback"
+    probe.mkdir()
+    (probe / "sample.py").write_text("value = 42\n", encoding="utf-8")
+    callback = source / "callback.py"
+    callback.write_text("""
+import json, os, pathlib, subprocess, sys
+from agent_procutil import no_window_kwargs
+request = json.loads(pathlib.Path(sys.argv[1]).read_text())
+engine = json.loads(os.environ["AGENT_WORKTREES_REPOSITORY_SETUP_ENGINE"])
+assert engine["argv"][-2:] == ["-m", "agent_worktrees"]
+probe = pathlib.Path(request["repository"]["path"]).parent / "cold callback"
+code = (
+    "import json,pathlib,sys; sys.path.insert(0,sys.argv[1]); import sample; "
+    "print(json.dumps({'disabled':sys.dont_write_bytecode,'value':sample.value}))"
+)
+completed = subprocess.run(
+    [*engine["argv"][:-2], "-c", code, str(probe)],
+    check=True, capture_output=True, text=True, timeout=30, **no_window_kwargs(),
+)
+(probe / "observation.json").write_text(completed.stdout)
+pathlib.Path(request["result_file"]).write_text(json.dumps({
+    "version": 1, "status": "ready", "message": "Callback checked",
+}))
+""", encoding="utf-8")
+    if sys.platform == "win32":
+        selected = consumer(source, """
+& $env:AGENT_WORKTREES_REPOSITORY_SETUP_PYTHON `
+    (Join-Path $r.repository.path 'callback.py') $RequestFile
+if ($LASTEXITCODE -ne 0) { throw 'Callback failed' }
+""")
+    else:
+        (source / "setup.sh").write_text(
+            f"#!/usr/bin/env bash\nexec {shlex.quote(sys.executable)} "
+            f"{shlex.quote(str(callback))} \"$2\"\n", encoding="utf-8",
+        )
+        commit(source)
+        selected = setup.inspect(source, URL)
+    monkeypatch.setattr(sys, "dont_write_bytecode", dont_write_bytecode)
+    monkeypatch.setenv("PYTHONDONTWRITEBYTECODE", "1")
+    assert setup.run(selected, apply=False, trusted=True).status == "ready"
+    assert json.loads((probe / "observation.json").read_text()) == {
+        "disabled": dont_write_bytecode, "value": 42,
+    }
+    assert bool(list(probe.rglob("*.pyc"))) is (not dont_write_bytecode)
+    assert git(source, "status", "--porcelain") == ""
+
+
 def test_redirected_consumer_cannot_inherit_attended_git_prompt(source: Path, monkeypatch) -> None:
     selected = consumer(source, """
 if ($env:GIT_TERMINAL_PROMPT -ne '0') { throw 'Redirected caller enabled a terminal prompt' }
