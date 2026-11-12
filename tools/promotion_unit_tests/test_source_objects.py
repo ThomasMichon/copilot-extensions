@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import hashlib
 import os
+import stat
 import subprocess
+from types import SimpleNamespace
 
 import pytest
 
@@ -210,3 +212,24 @@ def test_local_composition_delegates_to_existing_owners_and_always_settles(
         with pytest.raises(ValueError, match=failure):
             local.compose(tmp_path, source_commit=source, main_seed=main, select_inputs=select)
     assert calls[-1] == ("cleanup", scratch, {"repo": tmp_path})
+
+
+@pytest.mark.parametrize("target", ["directory", "file"])
+def test_changefile_reader_rejects_indirection_before_consumption(monkeypatch, tmp_path, target):
+    import changefile
+
+    directory = tmp_path / ".changefiles"
+    directory.mkdir()
+    path = directory / "pending.json"
+    path.write_text('{"changes":[]}\n', encoding="utf-8")
+    monkeypatch.setattr(changefile, "CHANGEFILES_DIR", directory)
+    linked = directory if target == "directory" else path
+    original = type(path).lstat
+    monkeypatch.setattr(
+        type(path), "lstat",
+        lambda candidate: SimpleNamespace(st_mode=stat.S_IFLNK, st_file_attributes=0)
+        if candidate == linked else original(candidate),
+    )
+    with pytest.raises(ValueError, match="unsafe changefile path"):
+        changefile.read_changefiles()
+    assert path.read_text(encoding="utf-8") == '{"changes":[]}\n'

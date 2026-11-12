@@ -53,6 +53,7 @@ from promotion_candidate import (
 from promotion_source_archive import (
     changefile_existed_at as _changefile_existed_at,
     git_environment,
+    git_text,
     is_ancestor,
     main_version_inputs as _main_version_inputs,
 )
@@ -83,27 +84,10 @@ def _git(
     args: list[str], *, cwd: Path | None = None, check: bool = True,
     env: dict[str, str] | None = None, input_text: str | None = None,
 ) -> str:
-    environment = git_environment()
-    if env is not None:
-        candidate_identity = {
-            f"GIT_{role}_{field}"
-            for role in ("AUTHOR", "COMMITTER") for field in ("DATE", "NAME", "EMAIL")
-        }
-        environment.update({
-            key: value for key, value in env.items()
-            if not key.upper().startswith("GIT_") or key in candidate_identity
-        })
-    result = subprocess.run(
-        ["git", "--no-replace-objects",
-         *(["-c", "core.longpaths=true", "-c", "checkout.workers=2"] if os.name == "nt" else []),
-         *args],
-        cwd=str(cwd or REPO), capture_output=True, env=environment,
-        input=input_text.encode("utf-8") if input_text is not None else None,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
-    )
-    if check and result.returncode != 0:
-        raise PromotionError(f"git {' '.join(args)} failed: {result.stderr.decode('utf-8').strip()}")
-    return result.stdout.decode("utf-8").strip()
+    try:
+        return git_text(cwd or REPO, args, check=check, env=env, input_text=input_text)
+    except ValueError as exc:
+        raise PromotionError(str(exc)) from exc
 
 
 def _rev_parse(ref: str, *, cwd: Path | None = None) -> str | None:
@@ -313,9 +297,8 @@ def consume_pending_changes(
             acc.PLUGINS_DIR = scratch / "plugins"
             acc.MARKETPLACE = scratch / ".github" / "plugin" / "marketplace.json"
 
-        _seed_versions_from_main(scratch, main_head, acc=acc, repo=repo)
-
         all_changefiles = list(acc.read_changefiles())
+        _seed_versions_from_main(scratch, main_head, acc=acc, repo=repo)
         changefile_names = [p.name for p, _data in all_changefiles]
         if not allocate_versions:
             new_entries = []

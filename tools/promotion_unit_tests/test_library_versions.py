@@ -159,6 +159,45 @@ def test_shipped_version_seed_failure_refuses(monkeypatch, tmp_path):
         promotion._seed_versions_from_main(tmp_path, "shipped", acc=fake, repo=tmp_path)
 
 
+@pytest.mark.parametrize("target", [
+    "plugin.json", "pyproject.toml", "src", "src/package",
+    "src/package/__init__.py", "src/package/_build_info.py",
+    "instruction-projections.json", "template.md", "marketplace.json",
+])
+def test_all_version_write_targets_are_admitted_before_any_change(library, monkeypatch, target):
+    _packaged_projects(library)
+    marketplace = library / ".github/plugin/marketplace.json"
+    marketplace.parent.mkdir(parents=True)
+    marketplace.write_text(json.dumps({"plugins": [
+        {"name": name, "version": version}
+        for name, version in (("producer", "0.1.0-dev1"), ("receiver", "0.4.0-dev1"))
+    ]}), encoding="utf-8")
+    monkeypatch.setattr(acc, "MARKETPLACE", marketplace)
+    root = library / "plugins/receiver"
+    (root / "src/package").mkdir(parents=True)
+    (root / "src/package/__init__.py").write_text(
+        '__version__ = "0.4.0-dev1"\n', encoding="utf-8",
+    )
+    (root / "instruction-projections.json").write_text(json.dumps({
+        "projections": [{"template": "template.md"}],
+    }), encoding="utf-8")
+    (root / "template.md").write_text("[owner: receiver@0.4.0-dev1]\n", encoding="utf-8")
+    linked = marketplace if target == "marketplace.json" else root / target
+    before = {path.relative_to(library): path.read_bytes()
+              for path in library.rglob("*") if path.is_file()}
+    original = type(linked).is_symlink
+    monkeypatch.setattr(type(linked), "is_symlink", lambda path: path == linked or original(path))
+
+    with pytest.raises(acc.VersionError, match="unsafe library version"):
+        acc.apply({
+            "producer": ("0.1.0-dev1", "0.1.1-dev1"),
+            "receiver": ("0.4.0-dev1", "0.4.1-dev1"),
+        })
+
+    assert {path.relative_to(library): path.read_bytes()
+            for path in library.rglob("*") if path.is_file()} == before
+
+
 @pytest.mark.parametrize("kind", ["manifest", "ancestor", "source-directory", "fallback"])
 def test_linked_library_targets_refuse_before_any_version_write(library, kind):
     external = library.parent / (library.name + "-external")

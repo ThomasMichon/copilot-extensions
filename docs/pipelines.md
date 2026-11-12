@@ -629,6 +629,9 @@ ref, artifact or runtime selection. Changefiles are removed only from its
 owned scratch checkout; the input checkout and pending bump intent remain
 unchanged. Main version metadata is read in bounded raw-blob batches, and
 inherited Git repository/index/config selectors do not redirect composition.
+The version writer admits all manifest, fallback, projection-template and catalog
+destinations before its first write. Linked changefile directories/files are
+rejected before version seeding or consumption, not left for later materialization.
 The writer's job-wide token is read-only. Checkout persists no credentials,
 and the release PAT is scoped only to the trusted push, coverage publication,
 PR landing and tagging shell steps. Git uses the `gh` credential helper, which

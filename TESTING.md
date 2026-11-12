@@ -6647,6 +6647,10 @@ the actor-free promotion packet. `test_source_objects.py` in that packet
 checks raw-blob batching, Git-environment filtering and delegation/cleanup
 through substituted existing owners. Neither packet qualifies installed
 publication, native maintenance or application adoption.
+`tools/test_local_runtime_promotion.py` adds real-Git escaping-symlink fixtures
+for Linux's native checkout semantics, covering manifests, parents, standalone
+versions, fallbacks, templates, the catalog and changefile directories/files.
+Actor-free preflight cases cover all version destinations before any write.
 
 ## Unit-only promotion packet
 
