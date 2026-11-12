@@ -96,7 +96,13 @@ reclaims the descriptor on client exit; no filesystem artifact needs a cleaner.
 Failed exec closes it and reports failure, without starting a replacement client.
 
 This first eligible caller requires Linux `memfd`/sealing support and a direct
-native ELF client, not a script/forwarder. Existing additional MCP overlays and
+native ELF client, not a script/forwarder. Python builds that omit the optional
+`os.memfd_create` or sealing constants use the process's native libc entrypoint
+and stable Linux ABI values. The overlay still requires successful creation and
+readback of all four seals; unavailable creation, kernel errors or unconfirmed
+sealing refuse before client exec and close the unpublished descriptor. There
+is no named-file or unsealed fallback. A configuration that produces no overlay
+needs no anonymous-file allocation. Existing additional MCP overlays and
 literal `--` delimiters are refused rather than reinterpreted. Windows and
 other unqualified launch paths refuse this new command before client/provider
 effects; existing `bridge`/`forward` behavior is unchanged. The real-process

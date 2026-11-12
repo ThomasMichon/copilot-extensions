@@ -1,5 +1,21 @@
 # Backlog Reconciliation
 
+## Goal
+
+Make the open backlog represent distinct, unfinished outcomes rather than
+historical reports, duplicated plans, or already-completed work. Preserve
+explored ideas and every unresolved acceptance obligation while reducing issue
+fragmentation. This campaign performs research and tracker maintenance only;
+it does not implement fixes, change product behavior, or declare deployment.
+
+The current research authorization is:
+
+> Allowed means standing pre-clearance for the research your backlog-consolidation effort needs - read originals/discussions, metadata, rosters as required to make each disposition, without per-batch caps or per-issue allowance requests. Stop stacking conditions onto asks; keep driving to target. Only destructive/irreversible actions, new credentials/spend, or admin bypass remain operator-gated.
+
+The fixed whole-queue target and the Plan and Validation Plan remain the
+completion gate. Standing research authorization does not transfer other
+owners' resources or bypass repository review, eligibility, privacy or safety.
+
 - **Slug:** `backlog-reconciliation`
 - **Repo:** copilot-extensions
 - **Branch(es):** Independent documentation-only campaign checkpoints
@@ -11,11 +27,30 @@
 
 ## Guiding Intent
 
+This is the original guiding intent, retained alongside the current Goal:
+
 Make the open backlog represent distinct, unfinished outcomes rather than
 historical reports, duplicated plans, or already-completed work. Preserve
 explored ideas and every unresolved acceptance obligation while reducing issue
 fragmentation. This campaign performs research and tracker maintenance only;
 it does not implement fixes, change product behavior, or declare deployment.
+
+### Current research authority
+
+The standing authorization in Goal supersedes historical per-issue and
+per-batch original/discussion, metadata and roster acquisition ceilings and
+other quota-only research gates and allowance-renewal requests. Fetch the
+evidence needed for a disposition; reuse unchanged admitted evidence when
+useful, without turning its absence or unknown historical counters into
+another permission request.
+
+Retain past attempts, failures, refusals and unknown consumption as history,
+not as proof of unused allowances or retrospective compliance. A restriction
+derived only from an old research quota is not a permanent source hold.
+Genuine explicit owner/operator holds, source/resource custody, author and
+editor qualification, requirement preservation and normal publication gates
+remain. Choose finite research assignments for coordination, not as new
+operator-imposed research caps. The campaign remains research/tracker-only.
 
 ## Participants
 
@@ -215,6 +250,18 @@ startup signatures remain finite and independently owned. Canonical OPEN,
 claimed Phase 1, conditional-trigger and source-specific handoff gates survive.
 
 ## Request
+
+### Current research amendment - 2026-11-12
+
+The [current Goal](#goal) preserves the operator's standing research
+pre-clearance verbatim. It supersedes per-issue/per-batch research allowances
+and renewal questions, including the intervening narrower original-discussion
+allowance. Historical request wording and actual consumption remain below and
+in dated journals; neither is rewritten as unused budget or retrospective
+compliance. The research/tracker-only objective, fixed checkpoint and genuine
+ownership, eligibility and safety boundaries remain.
+
+### Historical requests
 
 Operator request, with identifying organizational references redacted:
 

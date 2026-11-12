@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import copy
+import ctypes
+import errno
 import json
 import os
 from pathlib import Path
@@ -11,6 +13,7 @@ import subprocess
 import sys
 import time
 from unittest.mock import Mock
+from types import SimpleNamespace
 
 import pytest
 
@@ -129,7 +132,8 @@ def test_legacy_exec_keeps_argv_environment_and_does_not_create_an_overlay(monke
     monkeypatch.setattr(owner_exec, "_client", lambda *args: list(native))
     monkeypatch.setattr(owner_exec, "overlay", lambda *args, **kwargs: {"mcpServers": {}})
     create = Mock(side_effect=AssertionError("no qualified entries"))
-    monkeypatch.setattr(owner_exec.os, "memfd_create", create, raising=False)
+    monkeypatch.delattr(owner_exec.os, "memfd_create", raising=False)
+    monkeypatch.setattr(owner_exec, "_sealed_overlay", create)
     execute = Mock(side_effect=Executed)
     monkeypatch.setattr(owner_exec.os, "execve", execute)
     with pytest.raises(Executed):
@@ -138,15 +142,49 @@ def test_legacy_exec_keeps_argv_environment_and_does_not_create_an_overlay(monke
     create.assert_not_called()
 
 
+@pytest.mark.parametrize("failure", ["missing", "kernel"])
+def test_missing_python_binding_retains_native_creation_refusal(monkeypatch, failure):
+    monkeypatch.delattr(owner_exec.os, "memfd_create", raising=False)
+    monkeypatch.setitem(sys.modules, "fcntl", SimpleNamespace())
+    library = SimpleNamespace()
+    if failure == "kernel":
+        library.memfd_create = Mock(return_value=-1)
+    monkeypatch.setattr(ctypes, "CDLL", lambda *args, **kwargs: library)
+    monkeypatch.setattr(ctypes, "get_errno", lambda: errno.ENOSYS)
+    if failure == "missing":
+        with pytest.raises(ValueError, match="anonymous-file creation is unavailable"):
+            owner_exec._sealed_overlay({})
+    else:
+        with pytest.raises(OSError) as raised:
+            owner_exec._sealed_overlay({})
+        assert raised.value.errno == errno.ENOSYS
+
+
+@pytest.mark.parametrize("failure", ["error", "unconfirmed"])
+def test_failed_sealing_closes_the_unpublished_descriptor(monkeypatch, tmp_path, failure):
+    descriptor = os.open(tmp_path / "overlay", os.O_RDWR | os.O_CREAT, 0o600)
+    monkeypatch.setattr(owner_exec.os, "memfd_create", lambda *args: descriptor, raising=False)
+    monkeypatch.setitem(sys.modules, "fcntl", SimpleNamespace(
+        fcntl=Mock(side_effect=OSError(errno.EPERM, "sealing refused"))
+        if failure == "error" else Mock(return_value=0),
+    ))
+    with pytest.raises(OSError if failure == "error" else ValueError):
+        owner_exec._sealed_overlay({})
+    with pytest.raises(OSError) as closed:
+        os.fstat(descriptor)
+    assert closed.value.errno == errno.EBADF
+
+
 @pytest.mark.skipif(not sys.platform.startswith("linux"), reason="native Linux exec and sealed memfd")
-def test_real_exec_retains_owner_birth_and_sealed_private_overlay(tmp_path):
+@pytest.mark.parametrize("bindings", ["default", "omitted"])
+def test_real_exec_retains_owner_birth_and_sealed_private_overlay(tmp_path, bindings):
     from agent_procutil._daemon_instance_identity import birth_identity
 
     native = tmp_path / "copilot"
     native.symlink_to(shutil.which("python3") or sys.executable)
     fixture = tmp_path / "client.py"
     fixture.write_text(
-        "import fcntl,json,os,sys\n"
+        "import errno,fcntl,json,os,sys\n"
         "path=sys.argv[-1][1:]\n"
         "with open(path) as stream: config=json.load(stream)\n"
         "entry=config['mcpServers']['chosen']\n"
@@ -154,15 +192,25 @@ def test_real_exec_retains_owner_birth_and_sealed_private_overlay(tmp_path):
         "request=json.loads(entry['args'][-1])\n"
         "assert request['pid']==os.getpid()\n"
         "fd=int(path.rsplit('/',1)[1])\n"
-        "assert fcntl.fcntl(fd,fcntl.F_GET_SEALS)&fcntl.F_SEAL_WRITE\n"
+        "assert fcntl.fcntl(fd,getattr(fcntl,'F_GET_SEALS',1034))&15==15\n"
+        "try: os.write(fd,b'changed')\n"
+        "except OSError as error: assert error.errno==errno.EPERM\n"
+        "else: raise AssertionError('overlay remained writable')\n"
         "print(json.dumps({'pid':os.getpid(),'birth':request['birth'],'cwd':os.getcwd(),"
         "'literal':sys.argv[1],'environment':os.environ['OWNER_EXEC_FIXTURE']}),flush=True)\n",
         encoding="utf-8",
     )
     root = Path(owner_exec.__file__).resolve().parents[1]
     script = (
-        "import json,sys\n"
-        f"sys.path.insert(0,{str(root)!r})\n"
+        "import fcntl,json,os,sys\n"
+        + (
+            "for module in (os,fcntl):\n"
+            " for name in ('memfd_create','MFD_ALLOW_SEALING','MFD_CLOEXEC',"
+            "'F_ADD_SEALS','F_GET_SEALS','F_SEAL_SEAL','F_SEAL_SHRINK','F_SEAL_GROW','F_SEAL_WRITE'):\n"
+            "  if hasattr(module,name): delattr(module,name)\n"
+            if bindings == "omitted" else ""
+        )
+        + f"sys.path.insert(0,{str(root)!r})\n"
         "from agent_mcp import owner_exec\n"
         f"entry={_entry()!r}\n"
         "owner_exec.execute({'mcpServers':{'chosen':entry}},['chosen'],sys.argv[1:])\n"
