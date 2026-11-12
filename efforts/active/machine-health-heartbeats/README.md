@@ -1530,3 +1530,12 @@ The [owner comparison](architecture.md#owner-decision) explains this choice.
   rule. Before/after-effect controls, native pre-effect disable interruption and
   deletion recovery passed; the focused unit suite passed 25 cases and the
   native-plus-unit selection passed 25 before the final additional unit case.
+- Native mutations now fence their unsettled phase in the existing pending
+  record before launch. Unconfirmed cleanup retains the original native
+  retry/callback owner; later lifecycle owners cannot mutate until its confirmed
+  settlement. Withdrawal may tighten recorded intent while fenced, without
+  claiming completion. Late-enable and successor-owner controls pass.
+  Initial disabled-registration failure reports rollback instead of successful
+  enrollment, and confirmed disabled configuration overrides pending enabled
+  replacement intent. The focused native/unit packet passed 30 cases; the
+  actor-free packet and runner controls passed 41.

@@ -157,8 +157,11 @@ def _state(value):
     pending = value["pending"]
     if pending is not None:
         if (
-            type(pending) is not dict or set(pending) != {"before", "candidate", "token", "references", "intent"}
+            type(pending) is not dict or set(pending) != {
+                "before", "candidate", "token", "references", "intent", "native_unsettled",
+            }
             or pending["intent"] not in {"replace", "disable", "remove"}
+            or type(pending["native_unsettled"]) is not bool
             or re.fullmatch(r"[a-f0-9]{64}", str(pending["token"])) is None
             or type(pending["references"]) is not list or len(pending["references"]) > 8
         ):
@@ -292,10 +295,11 @@ class Enrollment:
                 "before": state["confirmed"], "candidate": record,
                 "token": transaction["token"], "references": transaction["owners"].get(REFERENCE, []),
                 "intent": "disable",
+                "native_unsettled": False,
             }}
             slots._write(self.path, working)
             try:
-                native = self.backend.call("disable", expected=native["digest"])
+                native = self._native_call("disable", expected=native["digest"])
                 if (
                     native["enabled"] or native["instances"]
                     or signature(native["xml"]) != signature(record["definition"])
@@ -303,7 +307,7 @@ class Enrollment:
                     raise slots.HealthError("native-health-task-settlement-unconfirmed")
                 return self._settle(working, native, record, status="disabled")
             except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
-                return self._result("unknown", native, working, changed=None, rollback="unconfirmed")
+                return self._result("unknown", native, self.read(), changed=None, rollback="unconfirmed")
 
     def _result(self, status, native, state, *, changed, rollback="not-needed"):
         return {
@@ -313,6 +317,9 @@ class Enrollment:
             "state": native.get("state"), "last_result": native.get("last_result"),
             "last_run": native.get("last_run"), "next_run": native.get("next_run"),
             "recovery_required": state["pending"] is not None, "rollback": rollback,
+            "native_cleanup_unconfirmed": bool(
+                state["pending"] and state["pending"]["native_unsettled"]
+            ),
             "candidate_readiness": (
                 "ready" if status in {"converged", "unchanged", "recovered-candidate"}
                 else "rejected" if status == "rolled-back"
@@ -393,7 +400,10 @@ class Enrollment:
             if expected_state is not None and (state != expected_state or native["digest"] != expected_native):
                 raise slots.HealthError("enrollment-preview-changed")
             if state["pending"] is not None:
-                return self._recover(state, native, remove=remove)
+                return self._recover(
+                    state, native, remove=remove,
+                    disable=desired is not None and not desired["enabled"],
+                )
             self._owned(native, state["confirmed"])
             self._recover_reference_fence(state)
             desired = desired if desired is not None else state["desired"]
@@ -431,6 +441,7 @@ class Enrollment:
                 "references": references, "intent": (
                     "remove" if remove else "replace" if desired["enabled"] else "disable"
                 ),
+                "native_unsettled": False,
             }
             working = {**state, "pending": pending}
             _state(working)
@@ -438,7 +449,7 @@ class Enrollment:
             try:
                 native = self._switch(native, candidate)
             except OwnedCleanupError:
-                return self._result("unknown", native, working, changed=None, rollback="unconfirmed")
+                return self._result("unknown", native, self.read(), changed=None, rollback="unconfirmed")
             except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
                 # Read back the exact task before deciding whether rollback is safe.
                 try:
@@ -468,18 +479,51 @@ class Enrollment:
             expected={REFERENCE: owners.get(REFERENCE, [])},
         )
 
+    def _native_call(self, operation, **fields):
+        from agent_procutil.owned_process import OwnedCleanupError
+
+        state = self.read()
+        pending = state["pending"]
+        if pending is None or pending["native_unsettled"]:
+            raise slots.HealthError("native-health-task-cleanup-unconfirmed")
+        token = pending["token"]
+        slots._write(self.path, {**state, "pending": {**pending, "native_unsettled": True}})
+
+        def settled():
+            current = self.read()
+            if current["pending"] is not None and current["pending"]["token"] == token:
+                slots._write(self.path, {
+                    **current, "pending": {**current["pending"], "native_unsettled": False},
+                })
+
+        def cleanup_settled():
+            with self.leases.reference_transaction_custody(self.root, timeout=5):
+                settled()
+
+        try:
+            result = self.backend.call(operation, **fields)
+        except OwnedCleanupError as error:
+            self.native_cleanup_error = error
+            error._retain_on_settled(cleanup_settled)
+            raise
+        except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
+            settled()
+            raise
+        settled()
+        return result
+
     def _switch(self, native, candidate):
         target = candidate["definition"] if candidate else None
         if native["configured"]:
-            native = self.backend.call("disable", expected=native["digest"])
+            native = self._native_call("disable", expected=native["digest"])
             if native["enabled"] or native["instances"]:
                 raise slots.HealthError("native-health-task-settlement-unconfirmed")
         if candidate is None:
-            native = self.backend.call("remove", expected=native["digest"])
+            native = self._native_call("remove", expected=native["digest"])
             if native["configured"]:
                 raise slots.HealthError("native-health-task-removal-unconfirmed")
             return native
-        native = self.backend.call(
+        native = self._native_call(
             "replace" if native["configured"] else "create",
             expected=native["digest"], definition=disabled(target),
         )
@@ -488,12 +532,15 @@ class Enrollment:
         # Revalidate policy at the enable boundary, including replacement/rollback.
         self._policy(candidate["desired"], native)
         if candidate["desired"]["enabled"]:
-            native = self.backend.call("enable", expected=native["digest"])
+            native = self._native_call("enable", expected=native["digest"])
         if signature(native["xml"]) != signature(target):
             raise slots.HealthError("native-health-task-readback-failed")
         return native
 
     def _settle(self, state, native, record, *, status, rollback="not-needed"):
+        current = self.read()
+        if current["pending"] is None or current["pending"]["native_unsettled"]:
+            raise slots.HealthError("native-health-task-cleanup-unconfirmed")
         if record is not None and not record["desired"]["enabled"] and (
             native["enabled"] or native["instances"]
         ):
@@ -517,6 +564,15 @@ class Enrollment:
 
     def _recover(self, state, native, *, rollback=False, remove=False, disable=False):
         pending = state["pending"]
+        if pending["native_unsettled"]:
+            intent = (
+                "remove" if remove or pending["intent"] == "remove"
+                else "disable" if disable or pending["intent"] == "disable"
+                else pending["intent"]
+            )
+            if intent != pending["intent"]:
+                slots._write(self.path, {**state, "pending": {**pending, "intent": intent}})
+            raise slots.HealthError("native-health-task-cleanup-unconfirmed")
         before, candidate = pending["before"], pending["candidate"]
         matched = None
         if native["configured"]:
@@ -542,8 +598,8 @@ class Enrollment:
             return self._settle(state, self._switch(native, None), None, status="removed")
         if intent == "disable":
             if not native["configured"]:
-                return self._settle(state, native, None, status="disabled")
-            native = self.backend.call("disable", expected=native["digest"])
+                return self._settle(state, native, None, status="rolled-back", rollback="confirmed")
+            native = self._native_call("disable", expected=native["digest"])
             if (
                 native["enabled"] or native["instances"]
                 or signature(native["xml"]) != signature(disabled(matched["definition"]))
@@ -553,7 +609,10 @@ class Enrollment:
                 **matched, "desired": {**matched["desired"], "enabled": False},
                 "definition": native["xml"],
             }
-            return self._settle(state, native, record, status="disabled")
+            return self._settle(
+                state, native, record, status="rolled-back" if rollback else "disabled",
+                rollback="confirmed" if rollback else "not-needed",
+            )
         if not rollback and candidate and matched == candidate and (
             signature(native["xml"]) == signature(candidate["definition"])
         ):

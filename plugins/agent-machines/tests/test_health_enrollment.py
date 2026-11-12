@@ -8,6 +8,7 @@ from pathlib import Path
 from types import SimpleNamespace
 import sys
 import subprocess
+import time
 from xml.etree import ElementTree as ET
 
 import pytest
@@ -252,7 +253,7 @@ def test_failed_disabled_configuration_does_not_restore_enabled_incumbent(case):
     native.calls.clear()
     native.fail = "replace"
     result = adopt(owner, {**desired, "enabled": False})
-    assert result["status"] == "disabled" and not result["enabled"]
+    assert result["status"] == "rolled-back" and not result["enabled"]
     assert "enable" not in native.calls
     assert owner.read()["desired"]["enabled"] is False
 
@@ -277,6 +278,78 @@ def test_interrupted_disable_recovers_without_replacement_or_enable(case):
     native.calls.clear()
     assert owner.converge()["status"] == "unchanged"
     assert not native.calls
+
+
+def test_initial_disabled_enrollment_failure_does_not_claim_success(case):
+    owner, desired, native, _, *_ = case
+    native.fail = "create"
+    result = adopt(owner, {**desired, "enabled": False})
+    assert result["status"] == "rolled-back" and result["rollback"] == "confirmed"
+    assert not result["configured"] and not result["adopted"]
+
+
+@pytest.mark.parametrize("withdrawal", ["disable", "remove"])
+def test_unsettled_enable_blocks_withdrawal_until_original_cleanup_settles(case, withdrawal):
+    from agent_procutil.owned_process import OwnedCleanupError
+
+    owner, desired, native, _, selection, installed = case
+    adopt(owner, desired)
+    selection[0] = installed("2.0")
+    call = native.call
+    cleanup = OwnedCleanupError(None, cleanup_retry=lambda _deadline: None)
+
+    def unconfirmed_enable(operation, **fields):
+        if operation == "enable":
+            raise cleanup
+        return call(operation, **fields)
+
+    native.call = unconfirmed_enable
+    assert owner.converge()["status"] == "unknown"
+    assert owner.native_cleanup_error is cleanup
+    assert owner.read()["pending"]["native_unsettled"]
+    native.call = call
+    native.calls.clear()
+    action = owner.disable if withdrawal == "disable" else lambda: owner.converge(remove=True)
+    for action in (action, owner.converge):
+        with pytest.raises(ValueError, match="cleanup-unconfirmed"):
+            action()
+    assert owner.read()["pending"]["intent"] == withdrawal
+    successor = enrollment.Enrollment(
+        installed(), backend=native, selector=owner.selector, qualifier=owner.qualifier,
+    )
+    with pytest.raises(ValueError, match="cleanup-unconfirmed"):
+        successor.converge()
+    assert not native.calls
+    # The retained native mutator can still finish late before its cleanup.
+    call("enable", expected=native.snapshot()["digest"])
+    assert native.snapshot()["enabled"]
+    cleanup.retry_cleanup(deadline=time.monotonic() + 5)
+    assert not owner.read()["pending"]["native_unsettled"]
+    assert owner.converge()["status"] == ("disabled" if withdrawal == "disable" else "removed")
+    assert not native.snapshot()["enabled"]
+
+
+def test_confirmed_disabled_config_overrides_pending_enabled_replacement(case):
+    owner, desired, native, _, selection, installed = case
+    adopt(owner, desired)
+    selection[0] = installed("2.0")
+    # Fail before any native effect and lose the immediate readback too.
+    call = native.call
+
+    def interrupt(operation, **fields):
+        if operation == "disable":
+            native.refuse_read = True
+            raise RuntimeError("replacement interrupted")
+        return call(operation, **fields)
+
+    native.call = interrupt
+    assert owner.converge()["status"] == "unknown"
+    native.refuse_read = False
+    native.call = call
+    native.calls.clear()
+    result = adopt(owner, {**desired, "enabled": False})
+    assert result["status"] == "disabled" and not result["enabled"]
+    assert native.calls == ["disable"]
 
 
 @pytest.mark.parametrize("after_effect", [False, True])
@@ -431,8 +504,8 @@ def test_failed_state_settlement_is_read_back_without_duplicate_registration(cas
     count = [0]
 
     def fail_settlement(path, value):
-        count[0] += 1
-        if count[0] == 2:
+        if value["pending"] is None and not count[0]:
+            count[0] += 1
             raise OSError("disk unavailable")
         write(path, value)
 

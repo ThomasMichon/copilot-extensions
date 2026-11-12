@@ -413,6 +413,13 @@ native effects. Removal supersedes a pending replacement; failed or interrupted
 withdrawal cannot recover an enabled incumbent. Disable recovery uses exact
 owned stop/readback without collector-policy readiness, and cannot settle while
 owned instances remain.
+Each native mutation first persists an unsettled fence in that same recovery
+record. Confirmed native cleanup clears it; unconfirmed cleanup retains the
+original process owner's retry/callback and refuses further mutations, even
+from a later CLI process. A withdrawal request may tighten recorded intent while
+fenced, but cannot claim success or stop a different mutator. Only the original
+cleanup owner's confirmed settlement clears this fence; task readback alone
+does not prove a paused native mutator has exited.
 `converge` first reconciles the recorded exact task; it does not blindly repeat
 registration. Conflicting definitions refuse without overwrite. Failed
 replacement restores a qualified known-good definition and reports rollback

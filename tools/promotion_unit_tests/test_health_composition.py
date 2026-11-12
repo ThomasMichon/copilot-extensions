@@ -192,10 +192,20 @@ def test_withdrawal_recovery_cannot_select_or_enable_an_incumbent(owners):
     state = {"pending": {
         "before": {"retained": "incumbent"}, "candidate": {"retained": "replacement"},
         "references": [], "token": "a" * 64, "intent": "replace",
+        "native_unsettled": False,
     }}
     result = owner._recover(state, {"configured": False}, rollback=True, remove=True)
     assert result["status"] == "removed" and switches == [None] and len(writes) == 1
     assert writes[0][1]["pending"]["intent"] == "remove"
+    for fields, intent in (({"remove": True}, "remove"), ({"disable": True}, "disable")):
+        writes.clear()
+        switches.clear()
+        with pytest.raises(ValueError, match="cleanup-unconfirmed"):
+            owner._recover({
+                "pending": {**state["pending"], "native_unsettled": True},
+            }, {"configured": False}, **fields)
+        assert not switches and writes[0][1]["pending"]["intent"] == intent
+        assert writes[0][1]["pending"]["native_unsettled"] is True
 
 
 def test_removed_enrollment_convergence_is_noop_after_reference_settlement(owners):
