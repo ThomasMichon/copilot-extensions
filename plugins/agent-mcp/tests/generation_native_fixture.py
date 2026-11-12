@@ -237,6 +237,19 @@ def build_runtimes(
                 needle,
                 'AdmissionRefused("backend attachment admission was not confirmed: " + repr(ack))',
             ), encoding="utf-8")
+            custody = payload / "src" / "agent_mcp" / "custody_session.py"
+            body = custody.read_text(encoding="utf-8")
+            needle = "        self.state.unknown()"
+            assert body.count(needle) == 1
+            custody.write_text(body.replace(
+                needle,
+                needle + "\n"
+                f"        with open({str(observations.with_suffix('.unknown'))!r},'a') as witness:\n"
+                "            witness.write(__import__('json').dumps({"
+                "'keeper_pid':__import__('os').getpid(),'uncertain':self.state.uncertain,"
+                "'fenced':self.state.fenced,"
+                "'accepted':[item.message for item in self.state.accepted.values()]})+'\\n')",
+            ), encoding="utf-8")
             backend = payload / "src" / "agent_mcp" / "backend.py"
             body = backend.read_text(encoding="utf-8")
             needle = '            raise ConnectionError("upstream send outcome is unknown; no replay")'
@@ -269,6 +282,15 @@ def build_runtimes(
             backend.write_text(body.replace(
                 needle,
                 needle
+                + f"        loss=__import__('pathlib').Path({str(observations.with_suffix('.lose-tool'))!r})\n"
+                "        if (loss.is_file() and message.get('result',{}).get('content') == "
+                "[{'type':'text','text':'fixture-result:'+loss.read_text()}]):\n"
+                f"            __import__('pathlib').Path({str(observations.with_suffix('.lost-tool'))!r}).write_text("
+                "__import__('json').dumps({'backend_pid':__import__('os').getpid(),"
+                "'nonce':loss.read_text(),'message':message}))\n"
+                "            self.peer.writer.close()\n"
+                "            await self.peer.writer.wait_closed()\n"
+                "            raise ConnectionError('fixture accepted tool output lost; no replay')\n"
                 + f"        drop=__import__('pathlib').Path({str(observations.with_suffix('.drop'))!r})\n"
                 "        if (message.get('method')=='ping' and drop.is_file()\n"
                 "            and message.get('id')==drop.read_text()):\n"
