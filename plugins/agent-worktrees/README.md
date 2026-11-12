@@ -213,6 +213,13 @@ for its bounded scope and remaining takeover/foundation limitations.
 `--supervised-debug` uses the same exclusive authority under foreground
 supervision, never a second installation writer.
 
+The installed global front door probes a configured project controller before
+Manager bootstrap. Native installation publishes the existing probe worker and
+its finite-process helpers under `~/.agent-worktrees/bin/`, alongside the
+runtime resolvers. This keeps controller routing independent of the legacy
+`payload-dir` snapshot marker. Payload-local commands retain their own helpers;
+older or unconfigured runtimes retain the existing Manager fallback.
+
 `update --inventory --json` advertises
 `project_controller_delegation` version 1 only when the running engine and
 its driver belong to the selected installed slot and support a full project

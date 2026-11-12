@@ -13,16 +13,18 @@ from pathlib import Path
 import pytest
 from agent_procutil import owned_process
 from native_shell_support import bash_path
-from test_update_entry import PLUGIN, _arguments
+from test_update_entry import PLUGIN, _arguments, _copy_native_global_tools
 from test_update_entry import update_entry_case as shared_update_entry_case
 
 update_entry_case = shared_update_entry_case
 
 
 @pytest.mark.parametrize("project_position", ["before", "after"])
-@pytest.mark.parametrize("selection", ["configured", "old-engine", "unconfigured", "broken-helper"])
+@pytest.mark.parametrize("selection", [
+    "configured", "native-configured", "old-engine", "unconfigured", "broken-helper",
+])
 def test_posix_project_controller_precedes_manager_bootstrap(
-    tmp_path, native_bash, project_position, selection,
+    tmp_path, native_bash, project_position, selection, monkeypatch,
 ) -> None:
     home = tmp_path / "home"
     tools = tmp_path / "tools"
@@ -82,17 +84,23 @@ def test_posix_project_controller_precedes_manager_bootstrap(
             native_bash, home / "providers",
         ),
     })
+    entry = PLUGIN / "bin" / "agent-worktrees"
+    if selection == "native-configured":
+        entry = _copy_native_global_tools(home, monkeypatch, "sh") / "agent-worktrees"
     result = owned_process.run_owned(
-        [native_bash, bash_path(native_bash, PLUGIN / "bin" / "agent-worktrees"), *arguments],
+        [native_bash, bash_path(native_bash, entry), *arguments],
         timeout=40, env=env,
     )
-    expected = {"configured": 47, "old-engine": 126, "unconfigured": 126, "broken-helper": 125}
+    expected = {
+        "configured": 47, "native-configured": 47,
+        "old-engine": 126, "unconfigured": 126, "broken-helper": 125,
+    }
     assert result.returncode == expected[selection], result.stderr
     if selection != "broken-helper":
         assert _arguments(tmp_path / "probe.args")[-4:] == [
             "--project", "sample", "get", "update-controller",
         ]
-    if selection == "configured":
+    if selection in ("configured", "native-configured"):
         assert _arguments(tmp_path / "update.args")[-len(arguments):] == arguments
     else:
         assert not (tmp_path / "update.args").exists()
