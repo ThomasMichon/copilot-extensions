@@ -272,6 +272,10 @@ requirements.
 - [ ] Integrate the existing service lifecycle owner's stable-launcher,
   health/cutover and recovery binding; no second Chat supervisor, installer
   engine, command ledger or prerequisite Fleet deployment.
+- [x] Qualify passive service-role construction through the canonical engine.
+  #12153 proves installed hosting imports, role isolation, immutable reuse and
+  source-removed validation on native Linux/Windows Python3.10/3.11. It does not
+  select a service, open storage, acquire a writer or activate a host.
 - [ ] Add optional Manager/readiness discovery only after the independently
   runnable adapter and its readiness meanings are real. Keep the parent
   service, native, migration and adoption gates open until actually proved.
@@ -496,6 +500,11 @@ qualification; native callbacks still require the actual assignment and
 shared-multiplex contracts above.
 
 ## Journal
+
+### 2026-11-11 - Passive service construction merged
+
+[#12153 qualification and remaining lifecycle gates](journal/2026/11.11-passive-service-construction.md).
+The bounded service candidate is merged; the parent remains Active.
 
 ### 2026-11-10 - Nonactivating service candidate prepared; qualification pending
 
