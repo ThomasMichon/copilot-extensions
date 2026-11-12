@@ -15,7 +15,7 @@ from agent_procutil.daemon_instances import daemon_entrypoint
 from . import execution_context, sockio
 from .config import load_config
 from .custody_connector import BackendConnector, selection_signature
-from .custody_contract import CONTRACT, supports
+from .custody_contract import CONTRACT, host_descriptor, supports
 from .custody_intake import ClientIntake
 from .custody_session import CustodySession
 from .custody_wire import MAX_FRAME
@@ -78,7 +78,7 @@ class CustodyHost(Server):
         self._touch()
         if request.get("op") == "ping":
             return {
-                "ok": True, "pong": True, "custody_host": CONTRACT,
+                "ok": True, "pong": True, "custody_host": host_descriptor(),
                 "configuration_context": CONTEXT_VERSION,
                 "execution_context": execution_context.descriptor(),
                 "installation_root": str(self.installation),
@@ -157,6 +157,9 @@ class CustodyHost(Server):
             await self._send(writer, {"ok": False, "error": "unauthorized"})
             return
         try:
+            required_mode = request.get("checkpoint_trace_bookkeeping", 0)
+            if type(required_mode) is not int or required_mode not in (0, 1):
+                raise execution_context.SharingUnavailable("required checkpoint identity mode is invalid")
             cfg = self._configuration(request)
             connector = BackendConnector(
                 self.backend_handle, request["bridge"], self.installation, cfg,
@@ -178,10 +181,16 @@ class CustodyHost(Server):
 
         async def ready():
             nonlocal attached
-            await self._send(writer, {"ok": True, "attached": True, "custody": CONTRACT})
+            reply = {"ok": True, "attached": True, "custody": CONTRACT}
+            if required_mode:
+                reply.update(
+                    custody=host_descriptor(),
+                    checkpoint_trace_bookkeeping=owner.binding.trace_bookkeeping,
+                )
+            await self._send(writer, reply)
             attached = True
 
-        owner = CustodySession(cfg, sink)
+        owner = CustodySession(cfg, sink, required_trace_bookkeeping=required_mode)
         entry = HostedSession(owner, connector, writer)
         self._attached += 1
         self._touch()

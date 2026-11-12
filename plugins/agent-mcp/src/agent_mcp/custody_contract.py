@@ -22,6 +22,11 @@ def backend_descriptor() -> dict:
     }
 
 
+def host_descriptor() -> dict:
+    """Declare enforcement support, not the current backend's selected mode."""
+    return backend_descriptor()
+
+
 def supports(value) -> bool:
     return (
         isinstance(value, dict)

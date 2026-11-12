@@ -162,6 +162,26 @@ not downgrade the snapshot, create another upstream or weaken incoming
 installation completion. Supported rollback between capable physical providers
 and unsupported legacy rollback are distinct qualification cases.
 
+The running custody host independently advertises
+`checkpoint-trace-bookkeeping/1` through its existing authenticated ping. That
+declaration means it can enforce a requested mode, not that its current backend
+supports the mode. An internal conduit may request integer
+`checkpoint_trace_bookkeeping: 1` only after that live declaration; an older
+running keeper is refused before attach. The host then requires actual connector
+support before checkpoint preparation or upstream startup, and confirms the
+selected binding mode in its attach acknowledgment. Missing, boolean, unknown
+or mismatched confirmations cannot qualify adoption. The acknowledgment still
+follows activation; a lost acknowledgment is not permission to retry the
+application through another path. Once attach is sent, transport or decoding
+failure, invalid acknowledgment, or changed caller context is a terminal
+`ConnectionError`, never the pre-effect `SharingUnavailable` fallback signal.
+
+Absent requirements preserve the existing attach request and acknowledgment.
+Legacy backends remain usable for legacy attachments; their missing optional
+capability cannot reject unrelated baseline work. This provider expansion does
+not migrate the optional launcher, remove its trace guard, replace a running
+keeper, enable ordinary callers or establish installed acceptance.
+
 The backend entrypoint validates the existing private endpoint
 authentication, actual immutable launch generation, selected installation,
 caller-selected configuration root and complete execution context before
