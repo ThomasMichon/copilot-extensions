@@ -217,6 +217,14 @@ def build_runtimes(
                 needle, "(print('fixture custody refusal:', repr(exc), flush=True) or "
                 + needle + ")",
             ), encoding="utf-8")
+            connector = payload / "src" / "agent_mcp" / "custody_connector.py"
+            body = connector.read_text(encoding="utf-8")
+            needle = 'AdmissionRefused("backend attachment admission was not confirmed")'
+            assert body.count(needle) == 1
+            connector.write_text(body.replace(
+                needle,
+                'AdmissionRefused("backend attachment admission was not confirmed: " + repr(ack))',
+            ), encoding="utf-8")
         package = source.payload_package_version(payload, "agent-mcp")
         digest = source.assembly_hash(payload)
         identity = source.SourceIdentity(
