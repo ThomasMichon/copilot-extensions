@@ -206,7 +206,16 @@ class PersistentCache:
             if kek.is_wrapped(blob):
                 if readonly and not IS_WINDOWS and blob.startswith(kek.WRAP_MAGIC + b"D"):
                     raise CacheProtectionError("cache key requires an unavailable Windows wrapping backend")
-                key = kek.unwrap_bytes(blob)
+                try:
+                    key = kek.unwrap_bytes(blob)
+                except kek.KekError as exc:
+                    if IS_WINDOWS and blob.startswith(kek.WRAP_MAGIC + b"D"):
+                        from .cache_dpapi import CacheDecryptionUnavailable
+
+                        raise CacheDecryptionUnavailable(
+                            "Windows cache key cannot be decrypted by this logon"
+                        ) from exc
+                    raise
             else:
                 key = blob.strip()
         else:

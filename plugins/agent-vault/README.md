@@ -538,6 +538,13 @@ password dialogs remain visible; console suppression does not enable prompting,
 detach children from their caller or change credential stdin/output handling.
 
 - The daemon keeps KeePass master passwords in memory **per database**. `VAULT_PASSWORD_TTL` controls the password TTL (default `3600` seconds). `agent-vault lock` drops the cached password immediately.
+- A Windows logon that cannot decrypt the selected DPAPI cache may read through
+  the same selected service without modifying that cache. Successful ordinary
+  reads emit a fixed `cache_decryption_unavailable` warning; service refusal is
+  authoritative and never triggers a stale-cache fallback or implicit prompt.
+  `--cache-only` still refuses without service access. Explicit authoritative
+  refresh still requires successful cache reconciliation. Schema, selection,
+  permissions and recovery-policy errors are not decryption fallback triggers.
 - Credential reads fail fast by default when locked: they return an actionable error instead of hanging on a hidden prompt. Use `agent-vault unlock`, `agent-vault unlock --terminal`, or `agent-vault get --prompt ...` when you want an interactive prompt.
 - Unlock-source extensions run before prompts, so a configured provider can satisfy locked reads without UI.
 - The CLI cold-starts the daemon when needed. Windows scheduling is opt-in via the native [`windows_scheduled_task` policy](docs/configuration.md#windows-scheduling-is-separate-from-activation); clean installs leave tasks absent and existing registrations are preserved by default. Linux/WSL installs retain the systemd user unit named `agent-vault.service` when systemd is available.
