@@ -132,6 +132,15 @@ synthetic stores and native fixture owners.
 
 ### 2026-11-12 - Final source-pinned retention evidence
 
+- The [sixth native lane](https://github.com/ThomasMichon/copilot-extensions/actions/runs/43255188400)
+  stopped before the replacement assertions: staging the 1,667-file synthetic
+  qualified source with one `git add` exceeded its 20-second child deadline.
+  Preparation now enumerates the real Git-admitted paths and stages at most
+  64 literal paths per child, reporting only completed batches and stopping on
+  failure. Real-Git success/failure controls and isolated preparation passed
+  three cases; all 34 coordinator controls and touched-file F/E9 lint passed.
+  Child, item and group deadlines are unchanged. Complete physical qualification
+  remains required; no failed lane is treated as a pass.
 - The [403-case capture/replay](https://github.com/ThomasMichon/copilot-extensions/actions/runs/43250136923)
   passed at `9eab001f71535daae4d9259cb9b06831318b0358`, including independent
   no-write verification, immutable historical-publication controls and the

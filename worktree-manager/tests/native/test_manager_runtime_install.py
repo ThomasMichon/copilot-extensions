@@ -63,6 +63,60 @@ def _run(argv, env, cwd):
     )
 
 
+def _stage_qualified_source(command, env, cwd):
+    listed = _run([*command, "ls-files", "--others", "--exclude-standard", "-z"], env, cwd)
+    assert listed.returncode == 0, listed.stdout + listed.stderr
+    paths = [path for path in listed.stdout.split("\0") if path]
+    for offset in range(0, len(paths), 64):
+        batch = paths[offset:offset + 64]
+        staged = _run([*command, "--literal-pathspecs", "add", "--", *batch], env, cwd)
+        assert staged.returncode == 0, staged.stdout + staged.stderr
+        print(f"Manager acceptance: staged qualified source completed-units={offset + len(batch)}",
+              flush=True)
+
+
+@pytest.mark.parametrize("failed_batch", [None, 2])
+def test_qualified_source_staging_is_bounded_and_stops_on_failure(tmp_path, monkeypatch, capsys, failed_batch):
+    env = _environment(tmp_path)
+    command = ["git", "-c", "core.autocrlf=false", "-C", str(tmp_path)]
+    initialized = _run([*command, "init", "--quiet"], env, tmp_path)
+    assert initialized.returncode == 0, initialized.stderr
+    expected = [f"source-{index:03d}[literal].txt" for index in range(145)]
+    for name in expected:
+        (tmp_path / name).write_text(name, encoding="utf-8")
+    (tmp_path / ".gitignore").write_text("ignored.txt\nhome/\n", encoding="utf-8")
+    (tmp_path / "ignored.txt").write_text("not staged", encoding="utf-8")
+    original = _run
+    batches = []
+
+    def run(argv, env, cwd):
+        if "add" in argv:
+            batch = argv[argv.index("--") + 1:]
+            assert 0 < len(batch) <= 64
+            batches.append(batch)
+            if len(batches) == failed_batch:
+                return SimpleNamespace(returncode=1, stdout="", stderr="staging failed")
+        return original(argv, env, cwd)
+
+    monkeypatch.setitem(_stage_qualified_source.__globals__, "_run", run)
+    if failed_batch:
+        with pytest.raises(AssertionError, match="staging failed"):
+            _stage_qualified_source(command, env, tmp_path)
+        assert len(batches) == failed_batch
+        assert capsys.readouterr().out.splitlines() == [
+            "Manager acceptance: staged qualified source completed-units=64",
+        ]
+    else:
+        _stage_qualified_source(command, env, tmp_path)
+        assert len(batches) == 3
+        assert set(sum(batches, [])) == {".gitignore", *expected}
+        assert len(capsys.readouterr().out.splitlines()) == 3
+        staged = original([*command, "ls-files", "-z"], env, tmp_path)
+        assert staged.returncode == 0, staged.stderr
+        assert set(staged.stdout.split("\0")) - {""} == {".gitignore", *expected}
+    assert all((tmp_path / name).read_text(encoding="utf-8") == name for name in expected)
+
+
 @pytest.mark.parametrize("phase", ["payload-copy", "inventory"])
 @pytest.mark.parametrize("outcome", ["productive", "silent", "failed-sink"])
 def test_preparation_completed_units_reach_native_inactivity_owner(tmp_path, phase, outcome):
@@ -211,21 +265,22 @@ def _prepare_qualified_construction(constructed):
     (qualified / "plugin.json").write_text(json.dumps({
         "name": "worktree-manager", "version": package_version,
     }), encoding="utf-8")
+    command = [
+        "git", "-c", "core.autocrlf=false", "-c", "core.safecrlf=false",
+        "-c", f"core.hooksPath={qualified / '.git' / 'hooks'}", "-C", qualified,
+    ]
     for arguments in (
         ["init", "--quiet"],
-        ["add", "."],
         ["-c", "user.name=Manager Fixture", "-c", "user.email=fixture@example.invalid",
          "commit", "--quiet", "-m",
          "Construct isolated qualified Manager fixture\n\n"
          "Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>\n"
          "Copilot-Session: 00000000-0000-4000-8000-000000000001"],
     ):
-        git = _run([
-            "git", "-c", "core.autocrlf=false", "-c", "core.safecrlf=false",
-            "-c", f"core.hooksPath={qualified / '.git' / 'hooks'}",
-            "-C", qualified, *arguments,
-        ], env, directory)
+        git = _run([*command, *arguments], env, directory)
         assert git.returncode == 0, git.stdout + git.stderr
+        if arguments[0] == "init":
+            _stage_qualified_source(command, env, directory)
     commit = _run(["git", "-C", qualified, "rev-parse", "HEAD"], env, directory).stdout.strip()
     tree = _run(["git", "-C", qualified, "rev-parse", "HEAD^{tree}"], env, directory).stdout.strip()
     digest = source.assembly_hash(qualified)

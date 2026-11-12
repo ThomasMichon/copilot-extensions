@@ -42,6 +42,7 @@ APPLICATION_ADAPTER_PHASES = (
 )
 RUNTIME_INPUT_CONTROLS = (
     "test_isolated_preparation_entrypoint_resolves_owned_helpers",
+    "test_qualified_source_staging_is_bounded_and_stops_on_failure",
     "test_preparation_completed_units_reach_native_inactivity_owner",
 )
 
