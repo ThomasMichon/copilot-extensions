@@ -29,7 +29,7 @@ def tmp_path(tmp_path_factory):
 
 @pytest.mark.timeout(180)
 @pytest.mark.parametrize("keeper_start", [
-    "explicit", "launcher",
+    "explicit", "launcher", "receiver",
     pytest.param(
         "optional", marks=pytest.mark.skipif(
             not sys.platform.startswith("linux"), reason="optional receiver requires Linux",
@@ -75,6 +75,7 @@ async def test_native_slots_reattach_original_conduit_without_reinitializing(
 
             async def start(label, role, handle):
                 trace = f"{label}:{role}:{len(processes)}"
+                receipt = home / f"{label}-{role}-{len(processes)}.owner.json"
                 traced = {
                     **environment, "COPILOT_EXTENSIONS_BOOT_TRACE": "1",
                     "COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN": "agent-mcp",
@@ -82,9 +83,13 @@ async def test_native_slots_reattach_original_conduit_without_reinitializing(
                 }
                 process = await fixture.spawn(
                     slots[label][1], actor, role, root, handle, fixed, config, traced, home,
+                    **({"owner_receipt": receipt} if role in {
+                        "conduit-optional", "conduit-receiver",
+                    } else {}),
                 )
                 processes.append(process)
                 launch_traces[process] = trace
+                process.owner_receipt = receipt
                 return process
 
             async def backend(label, suffix=""):
@@ -103,19 +108,21 @@ async def test_native_slots_reattach_original_conduit_without_reinitializing(
             async def client(label):
                 role = {
                     "explicit": "conduit", "launcher": "conduit-launcher",
-                    "optional": "conduit-optional",
+                    "optional": "conduit-optional", "receiver": "conduit-receiver",
                 }[keeper_start]
                 process = await start(label, role, fixed)
                 clients.append(process)
-                if keeper_start == "optional":
+                if keeper_start in {"optional", "receiver"}:
                     async def owner_record():
                         return json.loads(
-                            (home / f"{process.pid}.owner.json").read_text(encoding="utf-8"),
+                            process.owner_receipt.read_text(encoding="utf-8"),
                         )
                     owner = await fixture.eventually(owner_record)
-                    assert owner["owner_pid"] == process.pid
-                    assert owner["owner_birth"] == birth_identity(process.pid)
-                    assert owner["conduit_pid"] != process.pid
+                    # Windows venv Python may interpose a forwarding process.
+                    if os.name != "nt":
+                        assert owner["owner_pid"] == process.pid
+                    assert owner["owner_birth"] == birth_identity(owner["owner_pid"])
+                    assert owner["conduit_pid"] != owner["owner_pid"]
                     caller_identities.extend([
                         (owner["owner_pid"], owner["owner_birth"]),
                         (owner["conduit_pid"], owner["conduit_birth"]),
@@ -166,7 +173,7 @@ async def test_native_slots_reattach_original_conduit_without_reinitializing(
                 ]
                 assert len(keepers) == 1
                 keeper_pid, keeper_birth = int(keepers[0]["pid"]), keepers[0]["birth"]
-                if keeper_start in {"launcher", "optional"}:
+                if keeper_start in {"launcher", "optional", "receiver"}:
                     assert Path(keepers[0]["source"]).is_relative_to(slots["old"][1])
                 await fixture.send(held, {
                     "jsonrpc": "2.0", "id": 2, "method": "tools/call",

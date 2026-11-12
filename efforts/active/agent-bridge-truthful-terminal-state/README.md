@@ -71,6 +71,18 @@ truthful-state invariant down.
   named follow-on issue. A phase is not done merely because its PR merged —
   see each phase's exit criterion below.
 
+The proposed finite #4231/#4223 child-diagnostic lane below remains with the
+same truthful-state, Session Host/shared-driver, process, provider, relay,
+native and source/resource custodians. Preserve the entire OPEN #2464
+contract, this ROOT's Draft status, all existing rows and history. #4029's
+direct historical #4171 progress/result/active-steering scope, #4309's
+connection contract and #954's venue-only/P3 boundaries remain separate;
+#7237 owns an external conversation relationship, not peer-process lifetime.
+Normal reviewed complete Plan/local and global Validation/Coordination/Journal
+delivery, actual direct issue receiving and complete current source/custody
+readback precede a separate #4231 tracking judgment. No generic ACK, claim
+expiry, reassignment, activation or operational authority is introduced.
+
 ## Context
 
 `#22` and the `#2445`/`#2378`/`#2379` cluster surfaced independently, from two
@@ -141,6 +153,34 @@ independently deciding a session's liveness without one arbiter.
       effort has now created the state machine's actual single arbiter; file a
       follow-on issue if a further consolidation is warranted.
 
+### Proposed finite Session Host child-diagnostic lane from #4231/#4223
+
+This is planned receiving under existing owners, not implementation or
+resumption of the Draft effort. It is independent of finishing all Phase A/B/C
+work. The [ordered tracking map](../backlog-reconciliation/reliability-ordered-tracking.md)
+retains the whole wrapper and its separate source-specific receiving gate.
+
+- [ ] **RD4231-P1:** Deliver authoritative startup diagnostic output from
+  the ACTUAL supported ACP Session Host CHILD through child-to-Host relay
+  and consumer persistence/query. Preserve bounded content, appropriate
+  redaction and correct child/Host/process/session/native/provider attribution.
+  Host bootstrap capture, filenames, a helper or classic-only child stderr
+  is not this consumer.
+- [ ] **RD4231-P2:** Retain the complete D4231 issue contract directly in
+  OPEN #2464: credit finite #547/#553/#559 and bounded same-conversation
+  retry/controlled fallback; preserve default no-recreate and exact native/
+  provider/remote/privileged/cold-recovery custody; terminal launch-policy/
+  cleanup-pending refusal, bounded exhaustion and truthful STOPPED/error.
+  Where current authority permits opt-in fresh fallback, preserve old/new
+  native identity AND `context_dropped=true`; unknown authority, uncertain
+  cleanup and refusal remain holds. Do not reimplement the completed ladder.
+- [ ] **RD4231-LV:** Qualify the actual child-to-Host and consumer
+  persistence/query path, bounded/redacted content and correct attribution.
+  Preserve finite retry-success/exhaustion, allowed-fallback/failed-fallback
+  and terminal refusal/unknown controls. Reuse unchanged admitted evidence
+  where applicable and retain original actual-consumer/native tiers;
+  no new every-platform, every-host or whole-programme gate is added.
+
 ### Bug sweep — linked open bugs (2026-09-24)
 
 _Correlated via a facility-driven sweep of open `bug`-labeled issues against active efforts (VEI + direct review). Not yet triaged into a numbered phase — listed here as upcoming work for whoever picks this effort back up._
@@ -172,8 +212,25 @@ _Correlated via a facility-driven sweep of open `bug`-labeled issues against act
       race between an ordinary stop and a concurrent redeploy/drain.
 - [ ] Every new test is deterministic and does not depend on wall-clock
       timing beyond an explicitly injected fake clock or fault.
+- [ ] **RD4231-G:** Resolve every RD4231 Plan/local Validation and the
+  complete D4231 issue contract at the original supported Host CHILD
+  diagnostic/recovery consumer. Keep classic stderr and Host bootstrap
+  evidence separate; documentary receipt is not a diagnostic fix or native
+  pass. Existing Phase A/B/C, exactly-once terminal, stop/dormancy, provider,
+  cleanup, original native and current claimant conditions remain intact.
 
 ## Journal
+
+### 2026-11-12 - Proposed finite Host-child diagnostic receiving
+
+Added direct RD4231 Plan/local/global Validation and continuing custody
+for the complete #4231 inherited #4223 diagnostic/recovery lane. The actual
+shared Host child spawn still sends stderr to DEVNULL; classic bounded
+events and the Host bootstrap tail are credited distinct partials.
+This is a receiving proposal, not future review/merge, actual issue
+delivery, implementation, native evidence, source disposition or resource
+release. The ordered TRACK map and each operational keeper remain separately
+adjudicated. Status stays Draft and every incumbent row is unchanged.
 
 ### 2026-09-11 — Kickoff and reconciliation
 
