@@ -18,7 +18,7 @@ from agent_bridge import receiving_mux
 def _payload(entries=None):
     output = io.BytesIO()
     with zipfile.ZipFile(output, "w") as archive:
-        for name, value in (entries or {"support.json": "{}"}).items():
+        for name, value in (entries or {"support.json": "{}", "driver.pyz": "fixture"}).items():
             entry = zipfile.ZipInfo()
             entry.filename = name
             archive.writestr(entry, value)
@@ -51,15 +51,19 @@ def native(monkeypatch):
     monkeypatch.setattr(receiving_mux, "_run_tmux", run)
     monkeypatch.setattr(receiving_mux, "_socket_identity", lambda path: {"selected": "socket"})
     monkeypatch.setattr(receiving_mux, "_policy", lambda request, support: None)
+    monkeypatch.setattr(receiving_mux, "_require_core", lambda support: None)
     return calls
 
 
-def test_creation_and_reuse_observe_the_same_native_incarnation(tmp_path, native):
+def test_creation_and_reuse_observe_the_same_native_incarnation(tmp_path, native, monkeypatch):
     payload = _payload()
     request = _request(tmp_path, payload)
     created = receiving_mux.receive(request, payload)
     assert created["ok"] and not created["reused"]
     assert created["native"] == {"incarnation": "$1:1234", "pane": "%2"}
+    attempt = Path(request["state_root"]) / request["attempt"]
+    (attempt / "support" / "driver.pyz").unlink()
+    monkeypatch.setattr(receiving_mux, "_require_core", lambda *a: pytest.fail("retained reuse needs no new core"))
     reused = receiving_mux.receive(request, payload)
     assert reused["ok"] and reused["reused"]
     assert [call[0][3] for call in native] == ["new-session", "display-message"]
@@ -67,6 +71,38 @@ def test_creation_and_reuse_observe_the_same_native_incarnation(tmp_path, native
     assert native[1][0][-2] == created["native"]["pane"]
     assert "send-keys" not in native[0][0]
     assert json.loads((Path(request["state_root"]) / request["attempt"] / "receipt.json").read_text())["phase"] == "created"
+
+
+def test_experimental_opt_out_refuses_before_fresh_launch_effects(tmp_path, native, monkeypatch):
+    payload = _payload()
+    request = {
+        **_request(tmp_path, payload), "ensure_mux": True,
+        "copilot_args": ["--no-experimental"],
+    }
+    for name in ("_require_core", "_prepare_mux", "_registration"):
+        monkeypatch.setattr(receiving_mux, name, lambda *args: pytest.fail("fresh launch effect"))
+    with pytest.raises(ValueError, match="requires experimental extensions"):
+        receiving_mux.receive(request, payload)
+    attempt = Path(request["state_root"]) / request["attempt"]
+    monkeypatch.chdir(request["cwd"])
+    with pytest.raises(ValueError, match="requires experimental extensions"):
+        receiving_mux.child(attempt)
+    assert native == []
+
+
+def test_legacy_experimental_opt_out_does_not_reject_retained_reuse(tmp_path, native):
+    payload = _payload()
+    request = _request(tmp_path, payload)
+    receiving_mux.receive(request, payload)
+    request["copilot_args"] = ["--no-experimental"]
+    receipt = Path(request["state_root"]) / request["attempt"] / "receipt.json"
+    retained = json.loads(receipt.read_text())
+    retained["request_digest"] = hashlib.sha256(
+        json.dumps(request, sort_keys=True, separators=(",", ":")).encode(),
+    ).hexdigest()
+    receipt.write_text(json.dumps(retained), encoding="utf-8")
+    assert receiving_mux.receive(request, payload)["reused"] is True
+    assert [call[0][3] for call in native] == ["new-session", "display-message"]
 
 
 def test_registration_is_private_to_the_original_attempt_and_never_on_argv(tmp_path, native, monkeypatch):
@@ -308,6 +344,8 @@ def test_child_rechecks_policy_then_preserves_literal_args_and_scoped_driver(tmp
     request["copilot_args"] = ["--model", "literal model with spaces"]
     attempt = tmp_path / "attempt"
     attempt.mkdir()
+    (attempt / "support").mkdir()
+    (attempt / "support" / "driver.pyz").write_text("fixture", encoding="utf-8")
     (attempt / "launch.json").write_text(json.dumps(request), encoding="utf-8")
     monkeypatch.chdir(request["cwd"])
     monkeypatch.setenv("COPILOT_AGENT_SESSION_ID", "unrelated-parent")
@@ -322,9 +360,86 @@ def test_child_rechecks_policy_then_preserves_literal_args_and_scoped_driver(tmp
     receiving_mux.child(attempt)
     assert [call[0] for call in calls] == ["policy", "execute"]
     _kind, _binary, argv, env = calls[1]
+    assert argv[4:8] == receiving_mux._core_executable(attempt / "support")
+    core, child = argv[:argv.index("--")], argv[argv.index("--") + 1:]
+    assert core[core.index("--mode") + 1] == "headed"
+    assert core[core.index("--lifetime-policy") + 1] == "cli"
+    assert core[core.index("--session-id") + 1] == request["session_id"]
+    assert core[core.index("--attempt-directory") + 1] == str(attempt / "driver-core")
+    assert core[core.index("--state-file") + 1] == str(attempt / "driver-core" / "host.json")
+    assert core[core.index("--cwd") + 1] == request["cwd"]
+    assert core[core.index("--repository-policy-context") + 1] == request["policy_context"]
     assert argv[-2:] == request["copilot_args"]
-    assert argv[argv.index("--session-id") + 1] == request["session_id"]
+    assert child[:3] == ["copilot", "--session-id", request["session_id"]]
     assert env["AGENT_BRIDGE_NATIVE_SESSION_ID"] == request["session_id"]
     assert env["AGENT_REMOTE_DRIVER_CONFIG_DIR"] == str(attempt / "driver")
     assert "COPILOT_AGENT_SESSION_ID" not in env
     assert "WORKTREE_LAUNCH_ID" not in env
+
+
+@pytest.mark.parametrize("reason", ["missing", "unsupported"])
+def test_unavailable_core_never_creates_mux_or_enters_a_legacy_launch(tmp_path, native, monkeypatch, reason):
+    payload = _payload()
+    request = _request(tmp_path, payload)
+
+    def refuse(support):
+        raise ValueError(reason)
+
+    monkeypatch.setattr(receiving_mux, "_require_core", refuse)
+    monkeypatch.setattr(receiving_mux, "_prepare_mux", lambda *a: pytest.fail("no prerequisite effects"))
+    monkeypatch.setattr(receiving_mux, "_registration", lambda *a: pytest.fail("no registration effects"))
+    monkeypatch.setattr(receiving_mux.os, "execvpe", lambda *a: pytest.fail("no legacy native launch"))
+    with pytest.raises(ValueError, match=reason):
+        receiving_mux.receive(request, payload)
+    assert native == []
+    attempt = Path(request["state_root"]) / request["attempt"]
+    assert json.loads((attempt / "receipt.json").read_text())["phase"] == "ready"
+
+
+@pytest.mark.parametrize("changed", [
+    {"contract": "legacy"}, {"version": True}, {"protocol_version": True},
+    {"protocol_version": 2}, {"modes": ["headless"]}, {"modes": "headed"},
+    {"transports": []}, {"lifetime_policies": ["acp"]}, {"headed_process_receipts": []},
+])
+def test_core_declaration_is_checked_at_the_actual_receiving_executable(tmp_path, monkeypatch, changed):
+    support = tmp_path / "support"
+    support.mkdir()
+    (support / "driver.pyz").write_text("fixture", encoding="utf-8")
+    declaration = {
+        "contract": "agent-remote-driver.session-host", "version": 1, "protocol_version": 1,
+        "modes": ["headless", "headed"], "transports": ["tcp-frame"],
+        "lifetime_policies": ["acp", "cli"], "headed_process_receipts": ["native-child-v1"],
+    }
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        assert kwargs["stdin"] == subprocess.DEVNULL and kwargs["timeout"] == 15
+        return subprocess.CompletedProcess(argv, 0, json.dumps(declaration), "")
+
+    monkeypatch.setattr(receiving_mux.subprocess, "run", run)
+    receiving_mux._require_core(support)
+    declaration.update(changed)
+    with pytest.raises(ValueError, match="does not support"):
+        receiving_mux._require_core(support)
+    assert calls == [[*receiving_mux._core_executable(support), "--support-json"]] * 2
+
+
+def test_packaged_core_is_selected_after_copy_without_a_guest_suite(tmp_path, monkeypatch):
+    from agent_bridge.receiving_bundle import build_mux_support
+    from agent_remote_driver.session_host import bundle
+
+    original = bundle.build_session_host_bundle
+    construction = []
+
+    def build(directory):
+        construction.append(Path(directory))
+        return original(directory)
+
+    monkeypatch.setattr(bundle, "build_session_host_bundle", build)
+    payload, _ = build_mux_support()
+    support = tmp_path / "receiving"
+    support.mkdir()
+    receiving_mux._unpack(payload, support)
+    assert len(construction) == 1 and not construction[0].exists()
+    receiving_mux._require_core(support)

@@ -147,6 +147,11 @@ def _unpack(payload: bytes, root: Path) -> None:
                 stream.write(archive.read(entry))
 
 
+def _require_headed_args(request: dict) -> None:
+    if "--no-experimental" in request["copilot_args"]:
+        raise ValueError("Fresh portable headed execution requires experimental extensions")
+
+
 def _policy(request: dict, support: Path) -> None:
     sys.path.insert(0, str(support))
     try:
@@ -165,6 +170,49 @@ def _run_tmux(argv: list[str], *, cwd: str) -> subprocess.CompletedProcess:
         timeout=30, check=False,
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,  # headless-guard: allow standalone stdlib receiver
     )
+
+
+def _core_executable(support: Path) -> list[str]:
+    archive = support / "driver.pyz"
+    info = archive.lstat()
+    if not stat.S_ISREG(info.st_mode) or (
+        getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT
+    ):
+        raise ValueError("Selected mux core must be a regular receiving artifact")
+    interpreter = Path(getattr(sys, "_base_executable", sys.executable)).resolve(strict=True)
+    if not interpreter.is_file():
+        raise ValueError("Selected mux core requires a physical base interpreter")
+    return [str(interpreter), "-I", "-S", str(archive)]
+
+
+def _require_core(support: Path) -> None:
+    selected = subprocess.run(
+        [*_core_executable(support), "--support-json"],
+        stdin=subprocess.DEVNULL, capture_output=True, text=True, encoding="utf-8",
+        timeout=15, check=False,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,  # headless-guard: allow standalone stdlib receiver
+    )
+    try:
+        declaration = json.loads(selected.stdout)
+        if (
+            selected.returncode != 0
+            or declaration.get("contract") != "agent-remote-driver.session-host"
+            or type(declaration.get("version")) is not int or declaration["version"] != 1
+            or type(declaration.get("protocol_version")) is not int
+            or declaration["protocol_version"] != 1
+            or any(
+                type(declaration.get(key)) is not list
+                or not all(type(item) is str for item in declaration[key])
+                or required not in declaration[key]
+                for key, required in (
+                    ("modes", "headed"), ("transports", "tcp-frame"),
+                    ("lifetime_policies", "cli"), ("headed_process_receipts", "native-child-v1"),
+                )
+            )
+        ):
+            raise ValueError("unsupported declaration")
+    except (ValueError, KeyError, TypeError, AttributeError) as error:
+        raise ValueError("Selected mux core does not support headed CLI execution") from error
 
 
 def _native(value: str) -> dict:
@@ -313,6 +361,8 @@ def receive(request: dict, payload: bytes) -> dict:
         if record.get("request_digest") != digest or record.get("phase") != "ready":
             return {**record, "ok": False, "pending": True}
         _policy(request, support)
+        _require_headed_args(request)
+        _require_core(support)
         _prepare_mux(request, support)
         _policy(request, support)
         _registration(request, attempt)
@@ -349,6 +399,7 @@ def child(attempt: Path) -> None:
     if Path.cwd().resolve() != Path(request["cwd"]):
         raise ValueError("Mux child execution directory differs from its retained launch")
     _policy(request, support)
+    _require_headed_args(request)
     bridge = support / "plugins" / "agent-bridge"
     driver = support / "plugins" / "agent-remote-driver"
     env = os.environ.copy()
@@ -373,6 +424,11 @@ def child(attempt: Path) -> None:
     argv = [
         "bash", str(support / "mux" / "pane-wrapper.sh"),
         "--aw-manager-root", str(support / "mux"),
+        *_core_executable(support), "--mode", "headed", "--lifetime-policy", "cli",
+        "--session-id", request["session_id"],
+        "--attempt-directory", str(attempt / "driver-core"),
+        "--state-file", str(attempt / "driver-core" / "host.json"),
+        "--cwd", request["cwd"], "--repository-policy-context", request["policy_context"], "--",
         "copilot", "--session-id", request["session_id"],
         "--plugin-dir", str(driver), "--plugin-dir", str(bridge), *request["copilot_args"],
     ]

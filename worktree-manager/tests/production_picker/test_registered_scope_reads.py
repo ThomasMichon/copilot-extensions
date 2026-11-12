@@ -263,12 +263,14 @@ def test_reload_worker_start_failure_remains_explicit(monkeypatch):
 
 
 def test_spawn_that_finishes_after_scope_reload_retires_only_its_captured_child(monkeypatch):
+    import io
+
     runtime = tasks.RegisteredPivotRuntime(pivot(stream=True, subscribe=True))
     generation = (runtime._gen, 0, object())
     runtime._active_requests["a"] = generation
     runtime._request_context.machine = "a"
     runtime._request_context.generation = generation
-    captured = SimpleNamespace()
+    captured = SimpleNamespace(stderr=io.StringIO())
     other = SimpleNamespace(_picker_scope="b")
     runtime._procs.append(other)
     killed = []
@@ -695,8 +697,11 @@ def test_finite_stream_progress_renews_silence_budget_but_not_silent_output(
     tmp_path, monkeypatch, stalled,
 ):
     provider = tmp_path / "finite.py"
+    ready = tmp_path / "provider-ready"
     provider.write_text(
-        "import json,time\n"
+        "import json,time,sys\n"
+        "from pathlib import Path\n"
+        "Path(sys.argv[1]).touch()\n"
         "print(json.dumps({'type':'row','entry':{'id':'one','state':'checking'}}),flush=True)\n"
         "for index in range(8):\n"
         " time.sleep(.15)\n"
@@ -706,10 +711,10 @@ def test_finite_stream_progress_renews_silence_budget_but_not_silent_output(
         encoding="utf-8",
     )
     reg = pivots.parse_manifest({
-        "label": "Finite readiness", "list": [sys.executable, str(provider)], "stream": True,
+        "label": "Finite readiness", "list": [sys.executable, str(provider), str(ready)], "stream": True,
     }, name="finite", source_path="fixture")
     monkeypatch.setattr(tasks, "STREAM_TIMEOUT", .5)
-    runtime = tasks.RegisteredPivotRuntime(reg)
+    runtime = _runtime_after_provider_start(reg, ready, monkeypatch)
     try:
         runtime.ensure("")
         wait(lambda: runtime.get("")[0] in ("ready", "error"), timeout=4)
@@ -724,21 +729,38 @@ def test_finite_stream_progress_renews_silence_budget_but_not_silent_output(
         runtime.close()
 
 
+def _runtime_after_provider_start(reg, ready, monkeypatch):
+    runtime = tasks.RegisteredPivotRuntime(reg)
+    spawn = runtime._spawn_stream
+
+    def ready_spawn(argv):
+        process = spawn(argv)
+        # These controls isolate progress clocks, not interpreter startup.
+        wait(ready.exists)
+        return process
+
+    monkeypatch.setattr(runtime, "_spawn_stream", ready_spawn)
+    return runtime
+
+
 def test_finite_stream_keeps_process_deadline_despite_progress(tmp_path, monkeypatch):
     provider = tmp_path / "endless.py"
+    ready = tmp_path / "provider-ready"
     provider.write_text(
-        "import json,time\n"
+        "import json,time,sys\n"
+        "from pathlib import Path\n"
+        "Path(sys.argv[1]).touch()\n"
         "while True:\n"
         " print(json.dumps({'type':'row','entry':{'id':'one'}}),flush=True)\n"
         " time.sleep(.05)\n",
         encoding="utf-8",
     )
     reg = pivots.parse_manifest({
-        "label": "Finite readiness", "list": [sys.executable, str(provider)], "stream": True,
+        "label": "Finite readiness", "list": [sys.executable, str(provider), str(ready)], "stream": True,
     }, name="finite", source_path="fixture")
     monkeypatch.setattr(tasks, "STREAM_TIMEOUT", .5)
     monkeypatch.setattr(tasks, "STREAM_PROCESS_TIMEOUT", 1.2)
-    runtime = tasks.RegisteredPivotRuntime(reg)
+    runtime = _runtime_after_provider_start(reg, ready, monkeypatch)
     try:
         runtime.ensure("")
         wait(lambda: runtime.get("")[0] == "error", timeout=4)

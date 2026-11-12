@@ -183,7 +183,8 @@ to make the overview look clean.
 Resolve [the script](scripts/topology.py) from this skill payload. Use a supported
 Python 3.10+ interpreter; it imports only its adjacent
 [contract module](scripts/topology_contract.py),
-[saved Dispatch observation adapter](scripts/topology_dispatch.py) and the
+[saved Dispatch observation adapter](scripts/topology_dispatch.py),
+[admission report](scripts/topology_admission.py) and the
 standard library. Dispatch is optional; the adapter never imports its runtime.
 No install, service, network or credentials are required.
 
@@ -194,6 +195,7 @@ python <resolved-script> reconcile <private-topology-json>
 python <resolved-script> intent <private-topology-json>
 python <resolved-script> flow <private-topology-json> --request <request-id>
 python <resolved-script> placement <private-topology-json> --role <role-id> --kind standing
+python <resolved-script> admission <private-topology-json> --work <private-saved-work-json>
 python <resolved-script> route <private-topology-json> --request <request-id>
 python <resolved-script> relay <private-topology-json> --request <request-id> --followup <followup-id>
 python <resolved-script> seed <private-topology-json> --request <request-id>
@@ -209,6 +211,13 @@ declaration and its adopted materialization, without qualifying coverage;
 worktree and observed current head or a hold; `seed` exports the complete saved
 assignment, role and machine context.
 There is no allocate, send, reconcile-write or launch command.
+
+`admission` ranks saved eligible queued and dormant tasks without claiming or
+resuming them. It consumes only a local proposal budget, protecting Operator
+tasks, their retained owners, interactive reserve and separate review capacity.
+Read the [saved work contract](references/adapters-and-recovery.md#eligible-work-admission)
+before preparing its version-1 input. No other command requires that input;
+omitting it preserves the existing topology format and reports.
 
 `reconcile` combines coverage and eligible placement into advisory lane
 dispositions. It retains unresolved assignments and original effect identities,

@@ -2,7 +2,7 @@
 
 [Canonical Manager effort](README.md#finite-registered-stream-stderr-drain)
 
-- **Slice status:** Proposed; functional edits wait for plan review.
+- **Slice status:** Done (finite source only); implementation merged and acceptance recorded.
 - **Participant:** Managed source `patient-knob`, finite stream-consumer only.
 
 ## Goal and request
@@ -57,25 +57,25 @@ preflight is needed.
 
 ## Plan
 
-- [ ] S0: Review and merge this finite plan before functional source edits.
-- [ ] S1: Capture fail-first real-child controls for noisy list and progress
+- [x] S0: Review and merge this finite plan before functional source edits.
+- [x] S1: Capture fail-first real-child controls for noisy list and progress
   providers, retaining quiet-provider positives.
-- [ ] S2: Implement concurrent bounded stderr draining and owned settlement
+- [x] S2: Implement concurrent bounded stderr draining and owned settlement
   in the existing list/progress consumers.
-- [ ] S3: Pass focused consumers and source guards, obtain exact-head review
+- [x] S3: Pass focused consumers and source guards, obtain exact-head review
   and required CI, merge and reconcile this finite source lane.
 
 ## Validation Plan
 
-- [ ] SV1: Real children emit more than a pipe buffer of stderr before valid
+- [x] SV1: Real children emit more than a pipe buffer of stderr before valid
   list rows and progress frames; both deliver without a silence timeout.
-- [ ] SV2: Preserve nonzero-exit stderr diagnostics, explicit error frames,
+- [x] SV2: Preserve nonzero-exit stderr diagnostics, explicit error frames,
   older-provider fallback and valid empty/held subscriptions.
-- [ ] SV3: Exercise stderr overflow, reader-start/read failure, cancellation
+- [x] SV3: Exercise stderr overflow, reader-start/read failure, cancellation
   while stdout is silent and application close. Verify finite return, exact
   owned child settlement and no surviving drain thread; never accept an
   output failure as terminal success.
-- [ ] SV4: Run the affected stream/deadline and progress-modal regressions,
+- [x] SV4: Run the affected stream/deadline and progress-modal regressions,
   lint/module/install/documentation guards and actual required CI.
 
 ## Completion and ownership
@@ -88,6 +88,99 @@ is a test fixture. A source pass does not prove that every installed pivot is
 healthy or that a productive configuration was changed.
 
 ## Journal
+
+### 2026-11-12 - Finite source accepted
+
+Implementation #12141 merged at 00:02:46 UTC as
+`97638e7d3259e7d07b3f96199039797502f7a4db`, following reviewed plan #12121.
+The final affected five-file packet passes 127 cases. Both reproduced High
+findings are corrected and their threads resolved; genuine approval
+`5866966127` names the exact final head
+`f15ff8061daf5198328ee0917d63b46c230ee09d` with no open issues.
+Actual CI run `43123564880` passed guards, eligible units and the PR gate;
+lockdown run `43123561671`, source attribution and the publication identifier
+check also passed before merge. No required check or finding was bypassed.
+
+The source worktree is reconciled onto the actual merge with only the three
+squash-merged commits removed and a retained recovery ref. S0-S3 and SV1-SV4
+are accepted for this finite consumer correction. The parent Manager effort
+and every independent provider, first-run, persistent-channel, native and
+installed-runtime obligation remain open; no rollout or productive-provider
+repair is claimed.
+
+### 2026-11-11 - Review correction: invalidate failed reads before cleanup
+
+The next review accepts the stdout-custody correction and identifies a second
+valid High finding: a held read that already published rows can remain ready
+after stderr overflow while stdout prevents final cleanup from returning.
+A real held-provider/descendant control fails first on the missing immediate
+error transition.
+
+The list consumer now registers a captured-scope/generation failure callback,
+including replay when diagnostics failed before registration. Notification
+precedes potentially blocking retirement. It retains inspection rows but marks
+the current read failed immediately, and a failure fence prevents queued frames
+from restoring ready state. Superseded-generation failures and unrelated scopes
+remain inert. Native process/reader custody stays retained until cleanup.
+All 127 affected cases pass, including late frames, generation skew, fast
+reader failure and retained cleanup. The corrected thread, fresh final review
+and exact-head CI remain the publication gates.
+
+### 2026-11-11 - Review correction: retain stdout-reader custody
+
+Review #12141 identified a valid High finding: an exited provider and settled
+stderr do not prove stdout or its communication reader settled. A real-child
+control with a descendant retaining stdout fails first because the process was
+removed from tracking after both communication attempts failed.
+
+The correction gates untracking on successful stdout communication as well as
+diagnostic settlement. Close waits for the consuming owner, serializes any
+retry after that owner finishes, and requires the actual stdout pipe closed
+and communication reader stopped. A refused cleanup remains tracked; other
+children still receive retirement attempts. The regression also exercises
+recovery through the normal close owner after releasing the inert fixture,
+with independent finally cleanup. All 125 affected cases pass, followed by
+the expanded real close-owner recovery control. The finding is corrected
+locally; thread resolution, fresh final review and exact-head CI remain open.
+
+### 2026-11-11 - Bounded source correction and consumer proof
+
+The four original real-child controls passed with 11 diagnostic bytes and
+failed first with 330,000 bytes for both list and progress consumers. The
+correction drains stderr concurrently, separately from stdout, with a 1 MiB
+capture cap and explicit output/setup/cleanup failures. Existing process
+containment remains the retirement owner; failed custody is retained and
+closing one refused child does not skip the remaining children.
+
+The affected five-file packet reached 123 passing cases with one residual
+progress-clock fixture failure: interpreter startup consumed its synthetic
+half-second first-publication budget before a row could be produced. The
+related progress-clock fixtures now wait for the real child's startup marker
+before arming their unchanged silence/process clocks. All six finite-stream
+residual controls then pass; there is no unresolved local failure. This is
+123 passing cases plus a six-case corrected residual, not an inflated sum of
+independent cases.
+The new stderr controls cover overflow before/after terminal stdout, reader
+construction/start/read errors, noisy legacy fallback, nonzero diagnostics,
+silent stdout cancellation/close, unchanged publication deadlines and retained
+cleanup refusal. Real child, pipe and reader settlement are asserted.
+
+Lint, full module-size, install-contract, documentation and whitespace checks
+pass. Documentation records the consumer limit and older-consumer behavior.
+Source review, actual required CI, merge and canonical acceptance remain open.
+No installer or fresh-machine provisioning is changed; contained fresh-profile
+children provide the simple consumer boundary. A clean-room installation,
+external venue and installed/provider operation are not claimed or authorized
+by this finite source lane.
+
+### 2026-11-11 - Reviewed proposal accepted
+
+Plan #12121 merged as `3a886b38f5ef5705bf404052eb003e47c911492e`
+after genuine exact-head approval and the actual PR CI and lockdown checks.
+The initial stalled attempts were not treated as passing; a description update
+recording the separate manual CI result triggered fresh passing PR checks.
+The same source worktree is reconciled onto the merge. Next is fail-first
+real-child list/progress proof, not runtime rollout or live-provider repair.
 
 ### 2026-11-11 - Reproduction and bounded proposal
 

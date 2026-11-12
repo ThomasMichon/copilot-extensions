@@ -21,6 +21,7 @@ from topology_dispatch import (
     LIVE_STATES, RETAINING_STATES, adopted_record, flow, intent_lane, lane, linked, native_owner,
     proposed_record,
 )
+from topology_admission import admission
 
 BOOKKEEPING_REVISION_WINDOW = 256
 
@@ -801,7 +802,7 @@ class Topology:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=[
-        "validate", "overview", "reconcile", "intent", "placement", "flow", "route", "relay", "seed", "materialize",
+        "validate", "overview", "reconcile", "intent", "placement", "admission", "flow", "route", "relay", "seed", "materialize",
         "inspect-materialization",
     ])
     parser.add_argument("document", type=Path)
@@ -810,6 +811,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--kind", choices=["standing", "temporary"], default="standing")
     parser.add_argument("--request")
     parser.add_argument("--followup")
+    parser.add_argument("--work", type=Path, help="Saved task and reservation evidence for admission")
     args = parser.parse_args(argv)
     try:
         document = read_json(args.document)
@@ -827,6 +829,10 @@ def main(argv: list[str] | None = None) -> int:
             result = topology.reconcile()
         elif args.command == "intent":
             result = topology.intent()
+        elif args.command == "admission":
+            if args.work is None:
+                raise ContractError("admission requires --work")
+            result = admission(topology, read_json(args.work))
         elif args.command == "flow":
             if not args.request:
                 raise ContractError("flow requires --request")

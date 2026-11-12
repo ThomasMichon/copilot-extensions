@@ -162,6 +162,35 @@ request, not a new migration or runtime-effect grant.
   changefiles for every changed plugin, then reconcile every Plan and
   Validation item or transfer it to a named tracked objective before Done.
 
+## Windows private-stage compatibility correction
+
+The existing access-preservation intent also covers Python 3.13's Windows
+`mkdir(0700)` change. A native regression found that its special DACL can
+differ from an otherwise uniform checkout and its already-admitted destination
+parent. Stage creation now inherits that parent's access on Windows, as older
+Python versions did; POSIX retains `0700`. All existing source, parent, stage,
+copy, metadata and recovery checks remain mandatory. This closes the reviewed
+contract rather than changing security intent.
+
+Focused native controls cover owner-only and owner/administrator parents,
+exact post-copy metadata, nonuniform or unsafe access refusal and stage-create
+collision retention. A separate fresh-process source consumer covers concluded
+receiving creation/settlement, changed synthetic allocation defaults, relocation,
+immutable original proof, current-location lookup/mutation and a new receiving
+allocation under the new default. Its positive admission is fixture-owned only.
+Same-volume source qualification is not released/installed-consumer acceptance,
+cross-volume receiving qualification, complete real-owner evidence or permission
+for adoption. Those remaining gates stay open.
+
+The fresh-process fixture now removes inherited Git repository selectors and
+disables inherited global/system configuration before every child launch.
+Its negative control supplies unrelated repository/index selectors and invalid
+configuration, exercises the complete flow, and verifies that the unrelated
+fixture repository remains byte-for-byte unchanged. The reviewed source
+candidate passes all seven Windows controls on Python 3.13.17 through the
+canonical contained runner, including preparation and verified cleanup.
+This fixture correction does not change production relocation admission.
+
 ## Validation Plan
 
 The [focused validation matrix](validation.md) defines assertions and tier

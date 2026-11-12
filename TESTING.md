@@ -1301,7 +1301,24 @@ Bridge's opt-in `--test-file tests/test_portable_mux_joined.py
 provider, support archive/receiver, extracted Bridge and standalone-driver
 extensions, SQLite retained handoff and driver HTTP route. It proves one
 admitted/consumed send and same-conversation rejoin, with a duplicate-loadout
-refusal. Provider process/SSH/forwards, the native mux, SDK and the
+refusal. It executes the copied compact headed core and its launch-bound
+extension in real processes, with a synthetic native parent/SDK worker and
+independently checked Host/native/extension identities and child settlement.
+Its constructor- and stop-timeout controls settle the owned process tree,
+listener and streams before propagating failure. POSIX observation keeps the
+Host unreaped until its group settles; Windows retains the owned Job.
+Fault actors use the same synthetic Node worker shape as the joined fixture,
+not additional Python producer roles in the capture provenance.
+`tests/test_receiving_mux.py` additionally runs the copied core declaration
+after removing its construction archive, rejects incompatible core support
+before prerequisite/registration/mux effects, and preserves unknown/reuse
+semantics without a legacy fallback. It also refuses experimental opt-out
+before fresh launch effects while retaining compatibility with existing
+opted-out sessions. `tests/test_receiving_bundle.py` rejects a poisoned shared
+core cache and verifies exact retry payload bytes across private core rebuilds;
+Driver's `tests/test_session_host_core.py` checks reproducible current and
+compatibility archives after cache eviction.
+Provider process/SSH/forwards, the native mux, SDK and the
 POSIX-to-private-scratch carrier remain synthetic. Separate focused enrollment,
 readiness and producer controls preserve ordinary remote refusal, original
 reservation/attempt and predecessor CAS, readiness-only polling, operation-bound
