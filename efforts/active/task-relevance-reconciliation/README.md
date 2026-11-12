@@ -92,8 +92,9 @@ merged plan does not establish running adoption.
 - [ ] Add a coordinator-owned relevance report with durable request identity,
       source/registration scope and expected task revision or generation.
       Emitters and evaluators use the same transaction.
-      Local direct command-emitter admission and runtime support are implemented;
-      declared/evaluator effective-scope admission remains before caller migration.
+      Local direct command-emitter admission and runtime support are merged;
+      declared/evaluator effective-scope admission is in source validation before
+      caller migration.
 - [x] Inside that transaction, abandon only a task with no prior claim/start,
       current assignment, native attachment, pending startup or retained
       resource obligation. Claim and preparation races must linearize with it.
@@ -170,112 +171,6 @@ authority. Add no universal attestation layer or duplicate lifecycle engine.
 
 ## Journal
 
-### 2026-11-12 - Registered receiver expansion
-
-Added a strict control-authorized wire receiver and opt-in client with running
-health support discovery. Registration resolution and revision checks share the
-task decision's write transaction; the local override owner is held through it.
-Fresh abandonment preserves existing lifecycle notification without replaying it
-for an accepted duplicate. Retained receipt recovery is separate from fresh
-admission, including after a registration is removed or held.
-
-This increment deliberately advertises local direct task-authoring command
-emitters, not the full effective registrar set. Declared, remote and evaluator
-admission remain explicit follow-through, alongside source adapters, periodic
-evaluation, immutable cohort attribution and actual closeout acknowledgement.
-No automatic caller or runtime is activated. The isolated regression packet
-passed 239 controls before the terminal-notification addition; the final
-affected registration/transport/ownership/concurrency/wake packet passed 94.
-Those selections overlap and are not a combined full-plugin result.
-Review corrections additionally cover actual fresh registrar/direct-declaration
-eligibility before mirror publication, full terminal event/telemetry semantics
-and slash-containing receipt identities. The corrected production state passed
-179 selected controls, with three actual-registrar cases passing in a residual
-run after correcting their active-owner fixture. No guard was weakened.
-The subsequent collision correction checks both equivalent supersession and
-conflicting source provenance in fresh unmirrored declarations. Its focused
-registered/source/transport packet passed 67 controls.
-
-### 2026-11-12 - Original-owner delivery approved and merged
-
-[PR #12285](https://github.com/ThomasMichon/copilot-extensions/pull/12285)
-merged as `e2f4c151889da56f06c9fed16e3c83f22de28e0c` after approval of the
-actual `6f3458f5d1` head and required green checks. Review corrections covered
-submitted restricted-native identity at both target reads and durable closeout
-links surviving later ordinary/event-note wakes. Scoped isolated packets passed
-290, 184 and 110 selected controls respectively; those counts overlap and are
-not a combined full-suite result. The first and final packets each skipped the
-existing detached-cleanup-only parameter.
-
-Lossless source reconciliation retained its pre-completion backup. The parent
-issue remains open. Both source and adopting efforts returned to their current
-Plan/Validation gates. Next is registered-source receiver admission and
-runtime-bound capability publication before emitter/evaluator callers; periodic
-evaluation, cohort attribution, actual lifecycle acknowledgement and live
-adoption remain open. No runtime was activated by this merge.
-
-### 2026-11-12 - Original-owner closeout delivery
-
-Connected closeout acceptance to the existing steer inbox and wake outbox in
-one transaction. Only its linked outbox row can pass the original-goal fence;
-ordinary sender, scope closure, custody, token, native and cold-pool capacity
-checks remain. Suspended closeout consumption does not start the goal or restore
-its lease. Submitted work uses the recorded submitting worker and native without
-reassigning the task. Unknown transport outcomes retain the existing original
-receipt-reconciliation path and never authorize replacement sends.
-The bounded isolated relevance, steering, wake, pool and native-transport
-selection passed 290 tests, with one existing detached-cleanup-only parameter
-skipped. These are source controls, not actual installed-runtime acceptance.
-The review correction applies the already-fenced submitting worker to both
-restricted native-target reads without changing stored task ownership. Its
-restricted/ordinary delivery and supervisor packet passed 184 selected controls.
-Closeout validity uses its durable steer/outbox link rather than the mutable
-latest ordinary wake summary, so a later event note cannot strand the accepted
-closeout. The affected linkage/admission packet passed 110 controls, with one
-existing detached-cleanup-only parameter skipped.
-
-Historical ownership that is absent or changed stays explicitly pending.
-External registered callers, periodic source evaluation, cohort stamps, actual
-session/workspace cleanup acknowledgement and runtime adoption remain open.
-
-### 2026-11-12 - Internal receiver approved and merged
-
-[PR #12281](https://github.com/ThomasMichon/copilot-extensions/pull/12281)
-merged as `abed2cbddb2230c0b0f560f8740081783dd947dd` after approval of the
-actual `9af3ebb770` head and required green checks. Review identified audit
-lookups without a usable task index; the correction covered audit, acquisition
-and send history and added an actual-query-plan control. The final focused
-relevance/query-plan/independent-process packet passed 24 cases; 229 selected
-controls were verified across scoped runs, not a full-plugin pass.
-
-Source reconciliation retained its pre-completion backup. The effort remains
-Active. The next slice is original-owner closeout delivery through the existing
-wake outbox, including suspended steering consumption without restarting the
-original goal. Registered callers, periodic evaluation, cohort attribution,
-actual cleanup acknowledgement and runtime compatibility/adoption remain open.
-
-### 2026-11-12 - Architecture approved and merged
-
-[PR #12277](https://github.com/ThomasMichon/copilot-extensions/pull/12277)
-merged as `a63dc91abba42015aa2320230c8b8e6f73981fa0` after exact-head
-independent approval and required green checks. The source workspace reconciled
-losslessly onto the contribution branch. The effort remains Active: runtime
-implementation, caller integration, cohort attribution and the Validation Plan
-are still open. Next is mapping the existing owners for the shared relevance
-transaction, not activating a new caller.
-
-### 2026-11-12 - Internal ownership receiver
-
-Implemented source-scope and task-revision matching, atomic resource-free
-abandonment, durable request replay and a single retained closeout/steer.
-Ordinary execution admission preserves accepted closeout across recovery,
-reset and requeue. The source receiver remains internal: no new HTTP/CLI
-capability, emitter/evaluator caller, periodic loop or runtime activation.
-Original-owner wake, suspended-owner closeout consumption and actual
-session/workspace acknowledgement remain open in Phases 2-4.
-
-### 2026-11-12 - Initial proposal
-
-Captured the source-closure gap, shared relevance transaction, owner-driven
-closeout and cohort attribution. No new runtime behavior is implemented or
-activated by this proposal.
+- [2026-11-12 - Receiver delivery](journal/2026/11.12-receiver-delivery.md):
+  architecture, internal ownership, original-owner delivery and local registered
+  receiver merges; broader scope, callers and running adoption remain open.

@@ -11,6 +11,7 @@ from agent_procutil import _daemon_instance_identity
 
 from agent_mcp import custody_lifetime, cutover, incoming, owner_capabilities
 from agent_mcp.__main__ import main
+from agent_mcp.owner_bootstrap import ENTRY_CAPABILITY, receiver
 
 
 @pytest.fixture
@@ -83,6 +84,26 @@ def test_changed_selection_is_a_failure_not_supported_or_ordinary_readiness(
     assert "selection changed" in result["error"]
     assert "selection" not in result
     released.assert_called_once_with()
+
+
+@pytest.mark.parametrize("platform", ["linux", "windows"])
+def test_optional_receiver_is_advertised_only_on_its_supported_platform(
+    monkeypatch: pytest.MonkeyPatch, selected: tuple, capsys: pytest.CaptureFixture,
+    platform: str,
+) -> None:
+    monkeypatch.setattr(owner_capabilities, "_platform", lambda: platform)
+    assert main(["session-owner-capabilities"]) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["supported"] is True
+    assert result["platform"] == platform
+    capabilities = result["contract"]["capabilities"]
+    assert "explicit-native-owner-pair" in capabilities
+    assert (ENTRY_CAPABILITY in capabilities) is (platform == "linux")
+    result["entry"]["module"] = str(
+        Path(result["entry"]["prefix"]) / "lib" / "agent_mcp" / "owner_entry.py",
+    )
+    assert (receiver(result) is not None) is (platform == "linux")
+    incoming.ensure_current.assert_not_called()
 
 
 def test_unavailable_native_probe_never_advertises_support(

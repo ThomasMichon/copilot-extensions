@@ -7,7 +7,9 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
 from .client_errors import DispatchUpgradeRequired
-from .task_relevance_contract import RELEVANCE_PATH, RELEVANCE_PROTOCOL, RELEVANCE_SCOPE
+from .task_relevance_contract import (
+    RELEVANCE_EFFECTIVE_SCOPE, RELEVANCE_PATH, RELEVANCE_PROTOCOL, RELEVANCE_SCOPE,
+)
 
 if TYPE_CHECKING:
     import httpx
@@ -20,20 +22,21 @@ class RelevanceClientMixin:
         _control_headers: Callable[[], dict[str, str]]
         health: Callable[[], dict]
 
-    def _require_relevance(self) -> None:
+    def _require_relevance(self, *, effective_scope: bool = False) -> None:
         health = self.health()
         contract = health.get("task_relevance") if isinstance(health, dict) else None
+        scope = RELEVANCE_EFFECTIVE_SCOPE if effective_scope else RELEVANCE_SCOPE
         if (
             not isinstance(contract, dict)
             or contract.get("protocol") != RELEVANCE_PROTOCOL
             or not isinstance(contract.get("supported_versions"), list)
             or not any(type(v) is int and v == 1 for v in contract["supported_versions"])
             or not isinstance(contract.get("registration_scopes"), list)
-            or RELEVANCE_SCOPE not in contract["registration_scopes"]
+            or scope not in contract["registration_scopes"]
             or contract.get("control_authority_configured") is not True
         ):
             raise DispatchUpgradeRequired(
-                "running coordinator lacks control-authorized local emitter relevance; "
+                f"running coordinator lacks control-authorized relevance scope {scope}; "
                 "upgrade the receiver before reporting, with no legacy abandonment fallback"
             )
 
@@ -47,8 +50,12 @@ class RelevanceClientMixin:
             raise DispatchUpgradeRequired("running coordinator returned an invalid relevance receipt")
         return result["result"]
 
-    def relevance_snapshot(self, task_id: str, *, registration_id: str) -> dict:
-        self._require_relevance()
+    def relevance_snapshot(
+        self, task_id: str, *, registration_id: str, effective_scope: bool = False,
+    ) -> dict:
+        self._require_relevance(
+            effective_scope=effective_scope or registration_id.startswith("declared:"),
+        )
         return self._relevance_result(self._http.get(
             f"{RELEVANCE_PATH}/tasks/{quote(task_id, safe='')}",
             params={"registration_id": registration_id}, headers=self._control_headers(),
@@ -56,7 +63,7 @@ class RelevanceClientMixin:
 
     def report_task_relevance(self, task_id: str, *, report: dict) -> dict:
         """Send an original retained request once; unknown outcomes require receipt recovery."""
-        self._require_relevance()
+        self._require_relevance(effective_scope=report.get("effective_revision") is not None)
         return self._relevance_result(self._http.post(
             f"{RELEVANCE_PATH}/tasks/{quote(task_id, safe='')}", json=report,
             headers=self._control_headers(),

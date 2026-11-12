@@ -145,6 +145,25 @@ historical persistent OS-environment mechanism, not a live claim or another
 transfer. Existing Phase 4 wave/Phase 7 intake, all budget/effect/storage
 limits and actual source/resource holds remain; no executor is appointed.
 
+The later #4128/#10154 Manager runtime-source lane uses the SAME existing
+Phase 4 Worktrees/Manager wave and Phase 7 intake, under the incumbent
+primary maintainer and actual Worktrees-registry, Manager-source/delivery/
+provider/queue, fixture/runner/containment, native/source/audit/cohort/
+periodic-failure, release and resource custodians. Preserve OPEN #1303,
+every incumbent participant, requirement, alternative, check state and
+actual claim/hold. This does not activate an effort, appoint an implementer
+or create another registration authority.
+
+Normal review and actual direct Plan/local AND ROOT-global Validation/
+Coordination/dated-Journal delivery, followed by complete current source,
+discussion, receiver, provenance and custody readback, precede a separate
+#4128 tracking-retirement judgment. Redundant tracking retirement is not
+completion of either technical lane or source/resource release. Genuine
+intervening source-owner conditions remain; unfinished implementation,
+a generic new ACK or unrelated whole-portfolio completion is not an added
+intake prerequisite. This proposal performs no import, collection, test,
+native interaction, provider operation, registration repair or cleanup.
+
 The proposed finite #1012 conditional-field synchronization family below uses the
 existing Phase 4 Worktrees/Manager wave and Phase 7 intake, not a new timing
 campaign. Preserve the actual form/test, production-Picker, portfolio and
@@ -1232,6 +1251,54 @@ is not a finding that every test is uncontained or a live escape occurred._
   owned. No blanket context-disabling workaround, real OS mutation or
   whole-portfolio prerequisite substitutes for this finite authority proof.
 
+### Additive Manager runtime-source containment from #4128/#10154
+
+_Planned tracking intake only. Keep incumbent T4128-P1-P4 and T4128-V1,
+their check states, participants and source/resource duties unchanged.
+Filesystem-registry isolation and Manager real-update delivery are distinct
+consumers; neither completes the other._
+
+- [ ] **T4128-P5:** Isolate
+  `test_runtime_source.py::test_real_update_error_record_requires_explicit_missing_argument`
+  BEFORE its real `update_orchestration.run_update_steps`/error-record path,
+  including earlier import/collection/fixture work reaching those authorities.
+  Bind source/runtime selection, home, control-plane provider registry,
+  selected Manager installation and queue/global authority to runner-owned
+  synthetic state, not only a temporary Manager runtime root. Audit adjacent
+  runtime-source tests reaching registration, launcher, daemon or update-journal
+  side effects and contain the same boundaries.
+- [ ] **T4128-P6:** Preserve meaningful real-orchestration missing-argument
+  and error-record coverage; do not mock away the entire orchestration to
+  obtain containment. Temporary provider registration must not escape to
+  an outside selected installation or be consumed by a later ordinary update.
+  Credit #5122's distinct-caller repair without treating it as proof that this
+  module enters the sandbox. Preserve expected outputs/errors and actual
+  caller propagation.
+- [ ] **T4128-P7:** Propagate the same authority isolation into worker
+  subprocesses and restore temporary environment/configuration bindings
+  truthfully across normal and exceptional setup/teardown. Preserve primary
+  failures and truthful cleanup outcomes; never overwrite concurrent operator
+  state or reproduce against a live registry. Keep #10118 legacy upgrade,
+  normal queue recovery policy and persistent User/Machine environment effects
+  separately owned. Retain delivered Worktrees autouse/actual-writer/session-seed
+  and shared-runner protections at their actual scopes.
+
+#### Focused local validation for the Manager lane
+
+- [ ] **T4128-LV2:** Under hostile SYNTHETIC ambient/source/context input,
+  exercise the actual Manager runtime-source real-update/error-record
+  consumer and adjacent delivery paths without bypassing meaningful
+  orchestration. Seed outside-surrogate provider/selected-Manager/source/
+  queue state; verify its identity/content stays unchanged while intended
+  sandbox effects and expected missing-argument/error records occur. Verify
+  a later ordinary synthetic consumer cannot discover a leaked temporary
+  provider. Include wrong/unavailable authority refusal/noninterference,
+  exceptional setup/teardown and worker propagation/restoration controls.
+  Outside state is synthetic, never the live installation. Runtime-root
+  redirection, blanket context disabling or an isolated green retry is not
+  the whole proof. Use the original bounded faithful consumer tier and
+  existing execution/cleanup budgets, not a new every-platform/native programme.
+
 ### Proposed finite intake: clean-room enrollment and client warnings
 
 _(Agent-recommended documentary refinement; no test, CI, package or
@@ -1811,6 +1878,18 @@ every-host or release prerequisite is added to a finite family.
   family is not whole all-authority proof. No source transfer, live escape,
   native-every-host or new blanket ACK is inferred.
 
+- [ ] **T4128-V2:** Resolve ALL T4128-P5-P7 and local T4128-LV2 Manager
+  runtime-source clauses: before-work isolation across source/home/provider/
+  selected-installation/queue/global authorities and adjacent side-effect
+  paths; meaningful actual `run_update_steps`/missing-argument/error-record
+  behavior; intended temporary effects AND unchanged synthetic outside
+  provider/Manager/source/queue state; no later temporary-registration pickup;
+  correct worker propagation and normal/exceptional restoration. Preserve
+  original assertions, T4128-P1-P4/T4128-V1 and earned partial delivery, and
+  actual fixture/source/native/resource owners. Keep #10118, ordinary queue
+  recovery and persistent OS mechanisms separate. This is planned receiving,
+  not execution proof, a new runner/native admission or portfolio completion.
+
 - [ ] **T4217-G:** Resolve EVERY T4217 Plan/local Validation condition:
   all FOUR real scenario/job enrollment/reporting outcomes in authorized
   bounded periodic/disposable lanes, not rig/manual-run proxies. Preserve
@@ -1859,6 +1938,17 @@ with another unbounded full-suite run. Portfolio reductions follow only after
 the inventory and evidence gates are available.
 
 ## Journal
+
+### 2026-11-12 - Proposed Manager runtime-source containment intake
+
+The additive T4128-P5-P7/local-LV2/global-V2 and continuing Coordination retain
+the later #10154 contract adopted by #4128 alongside the earlier five
+filesystem-registry refinements. Meaningful real error-record coverage,
+before-work authority containment, synthetic noninterference and existing
+source/resource custody remain. All incumbent boxes and participants stay
+unchanged. This is a proposal, not implementation, execution, future receiving
+acceptance or source disposition. Actual reviewed merge and whole-current
+readback precede the separate tracking judgment.
 
 ### 2026-11-04 - Six finite timeout contracts retained directly
 
