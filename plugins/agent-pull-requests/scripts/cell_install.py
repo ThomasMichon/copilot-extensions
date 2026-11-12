@@ -26,6 +26,7 @@ METADATA = {
 }
 LIBRARIES = (
     "agent-procutil", "single-instance-lease", "work-coalescing-singleton", "zdd", "update-driver",
+    "pr-filters",
 )
 MUTATIONS = {
     "install", "update", "provision", "broker-remove",
@@ -184,7 +185,7 @@ uv="$(ensure_uv "$APR_CELL_SLOT" tool 0)" ||
     { _fail 'Cell provisioning requires an existing working uv'; exit 1; }
 new_signed_venv "$uv" "$APR_CELL_SLOT" 3.10
 packages=()
-for name in agent-procutil single-instance-lease work-coalescing-singleton zdd update-driver; do
+for name in agent-procutil single-instance-lease work-coalescing-singleton zdd update-driver pr-filters; do
     packages+=("$APR_CELL_SOURCE/libs/$name")
 done
 invoke_uv_pip_install_resilient "$uv" --python "$APR_CELL_SLOT/bin/python" \
@@ -196,7 +197,7 @@ invoke_uv_pip_install_resilient "$uv" --python "$APR_CELL_SLOT/bin/python" \
     run([
         str(python), "-I", "-c",
         "import agent_pull_requests, agent_procutil, single_instance_lease, "
-        "work_coalescing_singleton, zdd; "
+        "work_coalescing_singleton, zdd, pr_filters; "
         f"assert agent_pull_requests.__version__ == {payload_version!r}",
     ], environment=environment)
     # Retain the empty claim directory: removing it would let a delayed builder
