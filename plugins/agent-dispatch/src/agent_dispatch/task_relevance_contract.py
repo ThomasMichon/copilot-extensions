@@ -21,5 +21,6 @@ def relevance_contract(control_token: str | None) -> dict:
     return {
         "protocol": RELEVANCE_PROTOCOL, "supported_versions": [1],
         "registration_scopes": [RELEVANCE_SCOPE, RELEVANCE_EFFECTIVE_SCOPE],
+        "bounded_batches": True,
         "control_authority_configured": bool(control_token),
     }

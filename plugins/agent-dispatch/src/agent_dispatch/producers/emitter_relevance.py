@@ -14,7 +14,7 @@ from typing import Any
 from agent_procutil import no_window_kwargs
 
 from ..client import DispatchClient
-from ..client_errors import DispatchError, RelevanceNotSent
+from ..client_errors import RelevanceNotSent
 from ..queue_records import Status
 from ..repository_resources import resolve_execution_resources, validate_resource_arguments
 from ..task_relevance_contract import emitter_spec_revision
@@ -158,14 +158,20 @@ def reconcile_receipts(
         tasks = []
         selected = state["sweep"][:min(size, available)]
         state["sweep"] = state["sweep"][len(selected):]
+        selected = [task_id for task_id in selected if task_id in rows and task_id not in state["pending"]]
+        snapshots = {}
+        if selected:
+            try:
+                snapshots = client.relevance_snapshots(selected, registration_id=registration_id)
+            except Exception as exc:
+                result["errors"].append({"error": str(exc)})
         for task_id in selected:
             row = rows.get(task_id)
-            if row is None or task_id in state["pending"]:
-                continue
             try:
-                snapshot = client.relevance_snapshot(
-                    task_id, registration_id=registration_id, effective_scope=True,
-                )
+                item = snapshots.get(task_id, {})
+                if "result" not in item:
+                    raise emitter.EmitterError(item.get("error", "relevance snapshot unavailable"))
+                snapshot = item["result"]
                 if (
                     snapshot["task_id"] != task_id
                     or snapshot["registration_id"] != registration_id
@@ -207,6 +213,7 @@ def reconcile_receipts(
             except Exception as exc:
                 result["errors"].append({"error": str(exc)})
             else:
+                reports = []
                 for task in tasks:
                     snapshot = task["snapshot"]
                     task_id = snapshot["task_id"]
@@ -221,32 +228,41 @@ def reconcile_receipts(
                         **{key: row[key] for key in ("verdict", "reason", "observation_ref")},
                     }
                     state["pending"][task_id] = report
-                    _save(path, state)
-                    try:
-                        acceptance = client.report_task_relevance(task_id, report=report)
+                    reports.append({"task_id": task_id, **report})
+                _save(path, state)
+                try:
+                    outcomes = client.report_task_relevance_batch(reports)
+                except Exception as exc:
+                    if isinstance(exc, RelevanceNotSent):
+                        for report in reports:
+                            del state["pending"][report["task_id"]]
+                        _save(path, state)
+                    result["errors"].append({"error": str(exc)})
+                else:
+                    for report in reports:
+                        task_id = report["task_id"]
+                        item = outcomes[task_id]
                         if (
-                            acceptance.get("task_id") != task_id
-                            or acceptance.get("request_id") != report["request_id"]
-                        ):
-                            raise emitter.EmitterError("relevance acceptance identity does not match")
-                    except Exception as exc:
-                        if (
-                            isinstance(exc, RelevanceNotSent)
-                        ) or (
-                            isinstance(exc, DispatchError) and exc.status_code == 409
-                            and isinstance(exc.detail, dict)
-                            and exc.detail.get("code") == "relevance_not_accepted"
-                            and exc.detail.get("task_id") == task_id
-                            and exc.detail.get("request_id") == report["request_id"]
+                            isinstance(item.get("relevance_rejection"), dict)
+                            and item["relevance_rejection"].get("code") == "relevance_not_accepted"
+                            and item["relevance_rejection"].get("task_id") == task_id
+                            and item["relevance_rejection"].get("request_id") == report["request_id"]
                         ):
                             del state["pending"][task_id]
                             _save(path, state)
-                        result["errors"].append({
-                            "task_id": task_id, "request_id": report["request_id"], "error": str(exc),
-                        })
-                        continue
-                    del state["pending"][task_id]
-                    _save(path, state)
-                    result["accepted"].append(acceptance)
+                        acceptance = item.get("result")
+                        if (
+                            not isinstance(acceptance, dict)
+                            or acceptance.get("task_id") != task_id
+                            or acceptance.get("request_id") != report["request_id"]
+                        ):
+                            result["errors"].append({
+                                "task_id": task_id, "request_id": report["request_id"],
+                                "error": item.get("error", item.get("detail", "invalid relevance acceptance")),
+                            })
+                            continue
+                        del state["pending"][task_id]
+                        _save(path, state)
+                        result["accepted"].append(acceptance)
         result["pending"] = len(state["pending"])
     return result

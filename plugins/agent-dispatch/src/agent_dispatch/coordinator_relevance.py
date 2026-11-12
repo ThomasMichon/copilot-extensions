@@ -15,7 +15,7 @@ from .coordinator_auth import _make_control_auth
 from .coordinator_task_views import _event_task_dict
 from .queue import TaskError, TaskQueue
 from .queue_common import CompletionOutcome
-from .queue_relevance_registration import RelevanceRegistration
+from .queue_relevance_registration import RelevanceAdmission, RelevanceRegistration
 from .registrar_discovery import RegistrarSources
 from .relevance_source import RelevanceSource
 from .task_relevance_contract import RELEVANCE_PATH, RELEVANCE_PROTOCOL, relevance_contract
@@ -83,7 +83,7 @@ def register_relevance_routes(
                 result = queue.relevance_snapshot(
                     task_id, registration=RelevanceRegistration(registration_id, machine, env),
                     disabled_ids=disabled,
-                    registration_admission=source.resolve,
+                    registration_admission=source.prepare(),
                 )
         except (TaskError, OSError, ValueError, TimeoutError) as exc:
             raise HTTPException(409, detail=str(exc)) from exc
@@ -91,6 +91,11 @@ def register_relevance_routes(
 
     @app.post(f"{RELEVANCE_PATH}/tasks/{{task_id}}", dependencies=dependencies, response_model=None)
     def reconcile(task_id: str, body: RelevanceBody, request: Request) -> dict | JSONResponse:
+        return decide(task_id, body, request, source.prepare())
+
+    def decide(
+        task_id: str, body: RelevanceBody, request: Request, admission: RelevanceAdmission,
+    ) -> dict | JSONResponse:
         gate = request.app.state.drain_gate
         try:
             with gate.track_claim():
@@ -108,7 +113,7 @@ def register_relevance_routes(
                         reason=body.reason, observation_ref=body.observation_ref,
                         reporter=f"registration:{body.registration_id}", disabled_ids=disabled,
                         on_transition=transition,
-                        registration_admission=source.resolve,
+                        registration_admission=admission,
                     )
         except (TaskError, OSError, ValueError, TimeoutError) as exc:
             # The synchronous decision has finished. Only its atomic receipt
@@ -129,6 +134,13 @@ def register_relevance_routes(
                 })
             raise HTTPException(409, detail=str(exc)) from exc
         return envelope(result)
+
+    from .coordinator_relevance_batch import register_batch_routes
+
+    register_batch_routes(
+        app, queue, dependencies=dependencies, source=source, decide=decide,
+        envelope=envelope, policy=local_policy,
+    )
 
     @app.get(
         f"{RELEVANCE_PATH}/tasks/{{task_id}}/receipts/{{request_id:path}}",

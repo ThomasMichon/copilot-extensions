@@ -76,6 +76,14 @@ A newer accepted source observation invalidates an older task snapshot.
 Domain-specific source revision/reopen semantics still belong to the adapter;
 an opaque `observation_ref` is not a provider transaction or an atomic source lock.
 
+Snapshots use one bounded `GET /task-relevance/snapshots`; reports use one
+`POST /task-relevance/reports`, each capped at 100 tasks. Each request discovers
+fresh registrar declarations once, outside queue write transactions. Each task
+still resolves current direct registrations, overrides and task revisions under
+its own queue transaction. The batch is not an all-or-nothing transaction:
+one rejection or post-commit callback failure does not suppress sibling
+decisions. A report's request id remains its recovery identity, not a batch id.
+
 Each task has one original report persisted in `relevance.json` beside its
 emitter receipts before POST. The existing receipt owner's thread/file lock
 serializes the complete check/report cycle. A successful response removes the
@@ -103,7 +111,8 @@ errors remain uncertain and retained.
 Selection consumes a persisted finite sweep of unique retained task ids before
 starting the next sweep. Repeated discovery receipts cannot move an open task
 ahead of already retained work; newly discovered tasks join the next sweep.
-There are at most `batch_size` snapshot attempts and one checker process per tick. Pending receipt recovery
+There is at most one snapshot batch, one report batch and one checker process
+per tick. Pending receipt recovery
 has its own bounded rotating cursor. The creation log retains its existing
 2,000-record cap and unchanged public receipt format; the tick reports
 `receipt_history_trimmed` when its earliest retained sequence exceeds 1.
@@ -118,7 +127,8 @@ workspace owners; the caller does not release reservations or delete files.
 ## Compatibility and rollout
 
 Publish this receiver before opting in an emitter. The caller requires the
-running peer's effective relevance scope **and** the snapshot's spec revision;
+running peer's effective relevance scope, `bounded_batches: true` **and** the
+snapshot's spec revision;
 a prior direct-only receiver, a receiver without spec correlation, or a rollback
 receives no report. Existing emitters and ordinary operations remain available.
 An older client can ignore additive snapshot/error fields and still use the

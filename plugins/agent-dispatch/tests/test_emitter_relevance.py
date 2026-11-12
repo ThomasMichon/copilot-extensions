@@ -176,7 +176,7 @@ def test_unknown_send_with_absent_receipt_is_not_replayed_or_replaced(q, api, sp
         second = _reconcile(client, spec)
     assert first["pending"] == second["pending"] == len(attempts) == 1
     assert q.get(task.id).status == Status.QUEUED
-    assert attempts[0]["request_id"]
+    assert attempts[0]["reports"][0]["request_id"]
 
 
 @pytest.mark.parametrize("change", ["claim", "registration", "newer_source"])
@@ -321,9 +321,9 @@ def test_pending_request_survives_receipt_trim_and_duplicate_task_receipts(q, ap
         emitter._append_receipts(spec["id"], [{"id": other.id}], max_receipts=1)
         second = _reconcile(client, spec, _runner("needed"))
     assert first["pending"] == 1 and second["pending"] == 2
-    assert [row["verdict"] for row in attempts] == ["obsolete", "needed"]
+    assert [row["reports"][0]["verdict"] for row in attempts] == ["obsolete", "needed"]
     retained = json.loads(emitter.receipts_path(spec["id"]).with_name("relevance.json").read_text())
-    assert retained["pending"][task.id]["request_id"] == attempts[0]["request_id"]
+    assert retained["pending"][task.id]["request_id"] == attempts[0]["reports"][0]["request_id"]
 
 
 def test_cli_keeps_registration_argument_through_tick_and_serve(tmp_path, monkeypatch):
@@ -383,7 +383,7 @@ def test_crash_after_request_persistence_never_implies_it_was_not_sent(q, api, s
         "http://testserver", token="data", control_token="control", transport=transport(api, []),
     ) as client:
         with monkeypatch.context() as patch:
-            patch.setattr(client, "report_task_relevance", crash)
+            patch.setattr(client, "report_task_relevance_batch", crash)
             with pytest.raises(SystemExit):
                 _reconcile(client, spec)
         recovered = _reconcile(client, spec)
@@ -430,9 +430,10 @@ def test_prior_receiver_without_spec_correlation_gets_no_source_command_or_post(
         response = delegate.handle_request(request)
         if request.method == "POST":
             attempts.append(request)
-        if request.url.path.startswith("/task-relevance/tasks/") and request.method == "GET":
+        if request.url.path == "/task-relevance/snapshots":
             value = json.loads(response.content)
-            value["result"].pop("emitter_spec_revision")
+            for item in value["result"]["items"]:
+                item["result"].pop("emitter_spec_revision")
             return httpx.Response(200, json=value)
         return response
 
