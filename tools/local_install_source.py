@@ -234,20 +234,15 @@ def compose(
                 refused = [line for line in log if line.startswith("SKIP")]
                 if refused:
                     raise ValueError("source materialization refused:\n" + "\n".join(refused))
-                from application_sources import declared_projects
-
-                project_paths = tuple(
-                    directory.relative_to(source).as_posix()
-                    for directory in declared_projects(source).values()
-                )
-            for relative in project_paths:
-                consumer = source / relative
-                preparation.materialize_consumer(
-                    source, consumer, consumer, deadline=deadline,
-                    file_pointer_candidates=[
-                        path for path in file_pointer_candidates if path.is_relative_to(consumer)
-                    ],
-                )
+            else:
+                for relative in project_paths:
+                    consumer = source / relative
+                    preparation.materialize_consumer(
+                        source, consumer, consumer, deadline=deadline,
+                        file_pointer_candidates=[
+                            path for path in file_pointer_candidates if path.is_relative_to(consumer)
+                        ],
+                    )
     preparation._remaining(deadline)
     return {
         "schema": SCHEMA, "version": 1,

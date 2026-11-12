@@ -1350,9 +1350,9 @@ def _build_expected_vendored_tree(dest_lib: Path, *, canonical_root: Path) -> No
     """Independently reconstruct the vendored tree from current canonical libs.
 
     This intentionally does NOT call the production nested materializer: it
-    copies the canonical lib, rewrites nested source entries itself, and recurses
-    over nested canonical sibling deps so the expected manifests are an
-    independent oracle.
+    copies the canonical lib, rewrites nested source entries itself, recurses
+    over canonical sibling deps and copies declared canonical installer helpers
+    without invoking their production materializer.
     """
 
     refs = uer.find_uv_editable_refs(dest_lib)
@@ -1363,6 +1363,15 @@ def _build_expected_vendored_tree(dest_lib: Path, *, canonical_root: Path) -> No
             shutil.copytree(canonical_root / "libs" / lib, nested_dest, ignore=mm._ignore)
             _build_expected_vendored_tree(nested_dest, canonical_root=canonical_root)
         _rewrite_nested_path(dest_lib / "pyproject.toml", name=name, raw_path=raw_path)
+    declared = "libs/" + dest_lib.name
+    contract = mm.mie.ier
+    names = set()
+    if declared in contract.STANDALONE_PYTHON_ADOPTERS:
+        names.update((*contract.PYTHON_FILES, *contract.SUPPORT_FILES))
+    if declared in contract.STANDALONE_NATIVE_ADOPTERS:
+        names.update(contract.STANDALONE_NATIVE_FILES)
+    for name in names:
+        shutil.copyfile(canonical_root / "libs/installer-engine" / name, dest_lib / "scripts" / name)
 
 
 def test_find_uv_editable_refs_only_returns_escaping_entries_regardless_of_editable(tmp_path: Path):

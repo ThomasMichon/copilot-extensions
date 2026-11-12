@@ -4948,7 +4948,9 @@
         "tools/promotion_unit_tests/test_application_sources.py::test_project_owned_callbacks_refuse_incomplete_or_nonargument_values[declaration3]",
         "tools/promotion_unit_tests/test_application_sources.py::test_project_owned_callbacks_refuse_incomplete_or_nonargument_values[declaration4]",
         "tools/promotion_unit_tests/test_application_sources.py::test_project_owned_callbacks_refuse_incomplete_or_nonargument_values[declaration5]",
-        "tools/promotion_unit_tests/test_application_sources.py::test_project_owned_callbacks_refuse_incomplete_or_nonargument_values[declaration6]"
+        "tools/promotion_unit_tests/test_application_sources.py::test_project_owned_callbacks_refuse_incomplete_or_nonargument_values[declaration6]",
+        "tools/promotion_unit_tests/test_materialized_local_sources.py::test_whole_snapshot_materializes_declared_project_closure[in-place]",
+        "tools/promotion_unit_tests/test_materialized_local_sources.py::test_whole_snapshot_materializes_declared_project_closure[promotion-copy]"
     ],
     "coverage_targets": [
         "plugins/agent-dispatch/src/agent_dispatch/queue_submission_consumer.py",
@@ -5634,7 +5636,7 @@
         "tools/launch_wrapper_assets_ref.py": "881412e885a63e41680f923fb9af33e8f188994b729434009a4e1861ed0d27be",
         "tools/materialize_installer_engine.py": "2dd0043f75be310bb3df175af3d30f6561a772975798140503b8ed3d1d6277c7",
         "tools/materialize_launch_wrapper_assets.py": "e7c1dcbb9ddf7095bfba8d11dc84ecac08b3e4883c5fd7967fbdb961e83559fc",
-        "tools/materialize_main.py": "a6088947154b7f8e2c08017d90f6586c1308c4a06f90f5cda1d494e1ac8fd16d",
+        "tools/materialize_main.py": "ee0610712dc3753e7477258c438a54f6a431f7003c5b1a51f2e2af219f51e719",
         "tools/materialized_candidate_inventory.py": "9a8ff5cdc600c7ef83328ddf490981c3c4a31cbab3fc1da6a84e4c1c022bb580",
         "tools/native_daemon_artifacts.py": "c0261221fc6334f0f70d1272dde0ed8e28668f84fb7131071e1660615329f81d",
         "tools/native_qualification_contract.py": "2535d0a37a793863feaa21adb23f274faf0db416d73d3014ef361bdd539709e1",
