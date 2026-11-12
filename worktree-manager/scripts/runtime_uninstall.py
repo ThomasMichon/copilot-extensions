@@ -24,6 +24,49 @@ CONTRACT = {
 }
 
 
+def submit_uninstall(args, execution_driver, installation_custody, source_digest) -> int:
+    if validate_frontdoor(args.root, as_json=args.json):
+        return 1
+    if os.name != "nt" or not args.apply:
+        return uninstall(args.root, apply=args.apply, as_json=args.json)
+    absent = report_absent_target(args.root, as_json=args.json)
+    if absent is not None:
+        return absent
+    sys.path.insert(0, str(args.payload / "src"))
+    driver = execution_driver(args.payload)
+    with installation_custody() as custody:
+        if custody is not None:
+            custody.assert_owned()
+            return uninstall(args.root, apply=True, as_json=args.json)
+        from worktree_manager.update_driver_cli import _CONTEXT_KEYS, request_context
+
+        arguments = [
+            sys.executable, "-I", "-S", "-B", "-X", "utf8",
+            str(Path(__file__).resolve().with_name("runtime_install.py")),
+            "--root", str(args.root.resolve()), "--uninstall", "--apply",
+        ]
+        if args.json:
+            arguments.append("--json")
+        request = driver.enqueue(
+            driver.RequestSpec(
+                "manager-uninstall", ("--apply", *(("--json",) if args.json else ())),
+                project=str(args.root.resolve()), cwd=str(args.payload.resolve()),
+                source=source_digest(args.payload),
+                context=tuple({
+                    **request_context(), "WORKTREE_MANAGER_ROOT": str(args.root.resolve()),
+                }.items()),
+            ),
+            runner=driver.TrustedRunner(
+                tuple(arguments), str(args.payload.resolve()), context_keys=_CONTEXT_KEYS,
+            ),
+        )
+        driver.drain()
+        result = driver.wait(request.id, output=sys.stdout)
+        if result.state != "completed" or result.exit_code is None:
+            raise RuntimeError(f"Manager removal did not complete: {result.state}")
+        return result.exit_code
+
+
 def _json(path: Path) -> dict:
     value = runtime._load_unique_json(path)
     if not isinstance(value, dict):
