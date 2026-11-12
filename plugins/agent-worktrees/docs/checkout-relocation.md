@@ -14,6 +14,7 @@ Use the selected executable's existing read-only query surface:
 ```text
 agent-worktrees get checkout-relocation
 agent-worktrees move <id> --to "<absolute destination ending in the same id>" --json
+agent-worktrees move <id> --to "<same destination>" --check-live --json
 agent-worktrees move <id> --to "<same destination>" --apply --json
 ```
 
@@ -25,7 +26,7 @@ running sibling's readiness. A published resident must also advertise
 refuses without starting or replacing a service. No resident is required for
 standalone operation.
 
-Without `--apply` or `--abort`, the command is read-only. It parses a bounded,
+Without `--check-live`, `--apply` or `--abort`, the command is read-only. It parses a bounded,
 identity-stable original ledger, checks existing ordinary-shape and launch
 evidence, and refuses missing original receiving proof or lifecycle markers
 without recovering or acquiring their owners. It never backfills receiving
@@ -43,6 +44,31 @@ unconfirmed native-owner result.
 recovery behavior; a passive refusal is not authorization to invoke it.
 Operational and checkout inventories propagate directory-enumeration failures;
 an unreadable subtree is never treated as proof that no references/data exist.
+
+### Explicit bounded live admission
+
+The selected runtime's `live_admission` capability must advertise
+`agent-worktrees.checkout-live-admission`, version 1 and `check_live: true`
+before sending `--check-live`. Older providers reject the unknown option;
+there is no fallback to PSMux CLI reads.
+
+`--check-live` explicitly enters the existing receiving/lifecycle/launch and
+relocation owners, acquires their participating operation locks, and runs the
+same action-time admission as apply without creating a move journal, copying,
+publishing or recovering an original operation. It requires an unstarted move.
+It can query existing native owners and refresh mux activity timestamps, so
+callers need authority for those effects. It never starts, stops or reaps a
+server. Pure planning is unchanged.
+
+The result identifies its observation time and `apply_rechecks: true`; it is
+not a reusable authorization token. Apply rechecks current owner/identity and
+content evidence, including immediately before destination publication and
+source retirement. Active/dependent or ambiguous candidates refuse individually.
+Native mux census coverage, registered Copilot bindings, launch/lifecycle
+evidence and process/CWD checks retain their separate scopes. Readable CWD
+inspection is not a complete census of unreadable individual processes; do
+not treat this check as universal unmanaged-process absence or widen the
+supported checkout class from a successful result.
 
 ## Initial supported scope
 

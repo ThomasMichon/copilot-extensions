@@ -147,6 +147,7 @@ _PROJECT_ARG_SLUGS = front_door_cli._PROJECT_ARG_SLUGS
 _PROJECT_CHDIR_VERBS = front_door_cli._PROJECT_CHDIR_VERBS
 _chdir_verb_for = front_door_cli._chdir_verb_for
 _resolve_project_checkout = front_door_cli._resolve_project_checkout
+_caller_project_worktree = front_door_cli._caller_project_worktree
 _worktrees_verbs = front_door_cli._worktrees_verbs
 _canonical_slug = front_door_cli._canonical_slug
 _sibling_binstub = front_door_cli._sibling_binstub
