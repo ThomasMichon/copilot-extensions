@@ -1,0 +1,9 @@
+{
+  "comment": "Read Windows health job execution times from native scheduled-task information without timezone guessing.",
+  "changes": [
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    }
+  ]
+}
