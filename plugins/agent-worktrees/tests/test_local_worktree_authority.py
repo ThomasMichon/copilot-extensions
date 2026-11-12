@@ -796,17 +796,21 @@ def test_topology_alias_without_record_proof_cannot_inherit_dead_legacy_owner(
 
 
 @pytest.mark.parametrize("current_namespace", [False, True])
+@pytest.mark.parametrize("head_kind", ["branch", "detached"])
 def test_branch_switch_does_not_veto_registered_local_entry(
-    local_worktree, monkeypatch, tmp_path, capfd, current_namespace,
+    local_worktree, monkeypatch, tmp_path, capfd, current_namespace, head_kind,
 ):
     from agent_worktrees import claimant, local_cache_refresh, resolve_cli
 
     fixture = local_worktree
     _topology(fixture, "malformed")
     checkout = tmp_path / "feature" / fixture.checkout.name
-    original = f"worktree/registered-{current_namespace}"
+    original = f"worktree/registered-{head_kind}-{current_namespace}"
     git_ops.git("worktree", "add", "-b", original, str(checkout), cwd=fixture.anchor)
-    git_ops.git("switch", "-c", f"feature/switched-{current_namespace}", cwd=checkout)
+    if head_kind == "detached":
+        git_ops.git("switch", "--detach", cwd=checkout)
+    else:
+        git_ops.git("switch", "-c", f"feature/switched-{current_namespace}", cwd=checkout)
     fixture.data.update(worktree_path=str(checkout), branch=original)
     fixture.ledger.write_text(yaml.safe_dump(fixture.data), encoding="utf-8")
     config = fixture.load()
