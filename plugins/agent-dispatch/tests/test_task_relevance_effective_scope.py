@@ -230,6 +230,57 @@ def test_current_client_passes_effective_observation_to_current_receiver(q, venu
         )["acceptance"] == accepted
 
 
+@pytest.mark.parametrize("bound", [False, True])
+@pytest.mark.parametrize("held", ["source-a", "logical:local:review-source", "evaluator-a"])
+def test_replacement_retains_predecessor_holds_for_emitter_and_evaluator(
+    q, venue, bound, held,
+) -> None:
+    api, trusted, override_path = venue
+    emitter(q, evaluator_ref="review-loop")
+    declaration(trusted, "review-source", "emitter", {**SPEC, "evaluator_ref": "review-loop"})
+    evaluator(q, venue, declared=False)
+    rid = evaluator(q, venue)
+    t = emitted(q, evaluator_ref="review-loop")
+    if bound:
+        q.claim_one("host/worker", task_id=t.id)
+        q.start(t.id, "host/worker", owner_session_id="original-native")
+    report = request(api, t.id, rid)
+    set_override(override_path, held, reason="predecessor held")
+    response = api.post(f"/task-relevance/tasks/{t.id}", headers=_headers(), json=report)
+    assert response.status_code == 409, response.text
+    assert "operator override" in response.json()["detail"]
+    assert q.get(t.id).status == (Status.STARTED if bound else Status.QUEUED)
+    assert q.steer_log(t.id) == q.list_wakes(t.id) == []
+    assert q.relevance_receipt(t.id, "closed-object") is None
+
+
+@pytest.mark.parametrize("reporter", ["emitter", "evaluator"])
+@pytest.mark.parametrize("mirrored", [False, True])
+def test_fresh_foreign_declaration_provenance_cannot_look_unique(q, venue, reporter, mirrored) -> None:
+    api, trusted, _ = venue
+    spec = {**SPEC, "evaluator_ref": "review-loop"}
+    rid = declaration(trusted, "review-source", "emitter", spec)
+    if reporter == "evaluator":
+        rid = evaluator(q, venue)
+    t = emitted(q, evaluator_ref="review-loop")
+    report = request(api, t.id, rid)
+    foreign_id = declaration(
+        trusted, "foreign-source", "emitter", spec,
+        filters={"permit": {"machine": ["host-b"]}},
+    )
+    if mirrored:
+        q.register_registration("emitter", spec, reg_id=foreign_id, machine="host-b")
+    snapshot = api.get(
+        f"/task-relevance/tasks/{t.id}", headers=_headers(), params={"registration_id": rid},
+    )
+    assert snapshot.status_code == 409, snapshot.text
+    assert "ambiguous" in snapshot.json()["detail"]
+    response = api.post(f"/task-relevance/tasks/{t.id}", headers=_headers(), json=report)
+    assert response.status_code == 409, response.text
+    assert q.get(t.id).status == Status.QUEUED
+    assert q.relevance_receipt(t.id, "closed-object") is None
+
+
 def test_new_client_refuses_prior_scope_before_report_and_keeps_old_reads(q, venue) -> None:
     api, trusted, _ = venue
     rid = declaration(trusted, "review-source", "emitter", SPEC)

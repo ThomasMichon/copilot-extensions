@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
 import sqlite3
 
@@ -26,6 +26,8 @@ class RelevanceRegistration:
 class EffectiveRelevanceSources:
     registrations: dict[str, dict]
     revision: str
+    foreign_emitters: tuple[dict, ...] = ()
+    predecessor_override_ids: dict[str, frozenset[str]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -60,6 +62,8 @@ def resolve_registration(
     if admission is not None:
         effective = admission(conn, selector)
         registrations, effective_revision = effective.registrations, effective.revision
+        foreign_emitters = effective.foreign_emitters
+        predecessor_overrides = effective.predecessor_override_ids
     else:
         if selector.registration_id.startswith("declared:"):
             raise TaskError("declared relevance scope requires effective registrar admission")
@@ -69,10 +73,11 @@ def resolve_registration(
             reg["spec"] = json.loads(row["spec"])
             registrations[reg["id"]] = reg
         effective_revision = None
+        foreign_emitters, predecessor_overrides = (), {}
     reg = registrations.get(selector.registration_id)
     if reg is None or not _local_active(reg, selector):
         raise TaskError("relevance needs an active registration in the executing local scope")
-    if registration_override_ids(reg) & disabled_ids:
+    if _held(reg, disabled_ids, predecessor_overrides):
         raise TaskError("relevance registration is disabled by operator override")
     extended = reg["id"].startswith("declared:") or reg["kind"] == RegistrationKind.EVALUATOR
     if extended and effective_revision is None:
@@ -83,7 +88,7 @@ def resolve_registration(
     ):
         raise TaskError("relevance effective registration revision changed; refresh the source check")
     emitters = [
-        item for item in registrations.values()
+        item for item in (*registrations.values(), *foreign_emitters)
         if item["kind"] == RegistrationKind.EMITTER
         and ((spec := item["spec"]).get("source") or "emitter", spec.get("id"))
         == (task.source, task.origin_ref)
@@ -96,7 +101,7 @@ def resolve_registration(
     spec = emitter["spec"]
     if (
         not _local_active(emitter, selector)
-        or registration_override_ids(emitter) & disabled_ids
+        or _held(emitter, disabled_ids, predecessor_overrides)
     ):
         raise TaskError("relevance companion emitter is unavailable or disabled by operator override")
     if spec.get("task_output") != "json" or not spec.get("command"):
@@ -108,7 +113,7 @@ def resolve_registration(
             (item["spec"], item) for item in registrations.values()
             if item["kind"] == RegistrationKind.EVALUATOR
             and _local_active(item, selector)
-            and not registration_override_ids(item) & disabled_ids
+            and not _held(item, disabled_ids, predecessor_overrides)
         ]
         selected = _evaluator_for_task(
             candidates, repo=task.repo, evaluator_ref=task.evaluator_ref,
@@ -128,3 +133,9 @@ def _local_active(reg: dict, selector: RelevanceRegistration) -> bool:
         reg["status"] == RegistrationStatus.ACTIVE
         and reg["machine"] == selector.machine and reg["env"] == selector.env
     )
+
+
+def _held(reg: dict, disabled_ids: frozenset[str], predecessors: dict[str, frozenset[str]]) -> bool:
+    return bool((
+        registration_override_ids(reg) | predecessors.get(reg["id"], frozenset())
+    ) & disabled_ids)
