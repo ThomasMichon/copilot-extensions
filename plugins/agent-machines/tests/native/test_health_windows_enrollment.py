@@ -175,7 +175,7 @@ def _until(predicate, seconds):
 
 
 @pytest.mark.timeout(240)
-def test_installed_periodic_closure_replacement_rollback_and_withdrawal(tmp_path):
+def test_installed_periodic_closure_replacement_rollback_and_withdrawal(tmp_path, monkeypatch):
     root = tmp_path / "runtime"
     first = FixtureInstallation(_installed(root, "1.0"))
     versions = {"1.0": first}
@@ -190,6 +190,7 @@ def test_installed_periodic_closure_replacement_rollback_and_withdrawal(tmp_path
                 "store": str(store), "policy_token": health_run.policy_preview(store)[2],
                 "user_id": sid, "enabled": True,
             }
+            execution_started = datetime.now(timezone.utc)
             preview = owner.configure(desired)
             result = owner.configure(desired, apply=True, expected=preview["preview_token"])
             assert result["status"] == "converged", result
@@ -220,6 +221,8 @@ def test_installed_periodic_closure_replacement_rollback_and_withdrawal(tmp_path
             target = store / f"{record['hour'] % 168:03d}.json"
             native = owner.backend.call("read")
             assert native["last_result"] == 0
+            last_run = datetime.fromisoformat(native["last_run"].replace("Z", "+00:00"))
+            assert execution_started <= last_run <= datetime.now(timezone.utc)
             assert record["observation"]["domains"]["local_listener"]["state"] == "ok"
             refs = first.runtime._runtime_component("versioned_runtime_leases")
             assert refs.read_runtime_references(root)[enrollment.REFERENCE] == ["1.0"]
@@ -235,10 +238,19 @@ def test_installed_periodic_closure_replacement_rollback_and_withdrawal(tmp_path
             current[0] = first
             assert owner.converge()["status"] == "converged"
             assert owner.read()["confirmed"]["version"] == "1.0"
-            assert owner.disable()["status"] == "disabled"
-            disabled = owner.backend.call("read")
-            assert not disabled["enabled"] and not disabled["instances"]
-            assert owner.converge(remove=True)["status"] == "removed"
+            from agent_machines import health_task_native
+
+            with monkeypatch.context() as missing_timing:
+                missing_timing.setattr(
+                    health_task_native, "_SCRIPT",
+                    "function Get-ScheduledTaskInfo { throw 'fixture-timing-unavailable' }\n"
+                    + health_task_native._SCRIPT,
+                )
+                assert owner.disable()["status"] == "disabled"
+                disabled = owner.backend.call("read")
+                assert not disabled["enabled"] and not disabled["instances"]
+                assert disabled["last_run"] is None and disabled["next_run"] is None
+                assert owner.converge(remove=True)["status"] == "removed"
             assert target.exists() and (store / "policy.json").exists()
     finally:
         cleanup = owner.converge(remove=True)

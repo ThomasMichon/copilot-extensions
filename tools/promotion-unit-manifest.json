@@ -5523,7 +5523,7 @@
         "worktree-manager/scripts/versioned_runtime_publication.py": "ef762e65eb6403c580013ac24808f068e5fc02913035489bbd068c8bf3bae7fc",
         "plugins/agent-machines/src/agent_machines/health_enrollment.py": "dfc6aa9d33f10ead0640b3d981fb1933bd279ada4dd8528a8579176ed81f5467",
         "plugins/agent-machines/src/agent_machines/health_job.py": "69f6b2ffd86adc4c8d262b6a42c59c9036e7d8eef88e6433f2b8fdc29cdbf1ca",
-        "plugins/agent-machines/src/agent_machines/health_task_native.py": "62c20ca8136f9858335171118200b88ae25906745834b3bcfa804ae381638269",
+        "plugins/agent-machines/src/agent_machines/health_task_native.py": "1c35c28bc8ac167bf1be29f2dd2f8f17489215f72fb4b2691c9d6d7549266cd1",
         "libs/installer-engine/runtime_launcher.py": "0cd1ac9fd75cff85f605345ec958fabc70f59796343b798aceec253ecc0b7cde",
         "plugins/agent-machines/src/agent_machines/resource_health_job.py": "fd1ce6396b8a3ab3dc034001a2d135427350ab56de092416a7d53876244e4dd7"
     },

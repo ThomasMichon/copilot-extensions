@@ -221,8 +221,9 @@ enrollment authority/holds remain unchanged.
   hypotheses and confirmed causes separately.
 - [ ] Implement bounded domain probes and the 168-slot store, using exact
   existing owners and no remediation or new resident process.
-- [ ] Add independent native scheduled execution through Agent Machines after
-  source review, retaining a separate explicit enrollment/activation gate.
+- [x] Add independently enrolled Windows native execution through Agent Machines
+  after source review (#12188), retaining separate release/activation gates.
+  Linux enrollment remains in the open platform qualification item.
 - [x] Prepare inert Windows/Linux job definitions and qualify collection
   support from the exact selected runtime before forwarding new operations;
   keep scheduler registration and native execution unqualified.
@@ -1578,3 +1579,75 @@ The [owner comparison](architecture.md#owner-decision) explains this choice.
   candidate definitions no longer block a legitimate preview as foreign;
   unrelated definitions still refuse. Before/after-enable response-loss controls
   passed with the full 52-case enrollment unit packet.
+
+### 2026-11-12 - Installed Windows enrollment source merged
+- #12188 merged as `0accca16ceb7926a974552257e7b5b6b0a07b474` after
+  exact-head Copilot approval on `c5d98fb7dcb4790f5fff92f7e747e9ec0e45f1ab`,
+  green required CI, all ten resolved review threads and no draft, hold or
+  conflict. The authorized Maintainer CODEOWNER-review exception was recorded
+  on the PR; no CI or blocking-feedback gate was bypassed.
+- The complete local patch matched the accepted squash's stable patch exactly
+  before source reconciliation. Pull-forward preserved all independent upstream
+  content, and the umbrella issue remains open.
+- Windows installed closure, local consent, reversible native lifecycle and
+  focused failure/settlement controls are source-complete. This does not claim
+  a promoted release, installed host adoption, active hourly publication,
+  post-deployment inbound verification or carrier receipt.
+- Release availability was verified at Main
+  `3679dd8263f2c0f89bf0d76094396220247aaf0c`: all 34 affected/derived file
+  blobs matched the accepted source exactly after promotion completed.
+  This is release evidence, not installed or running-state evidence.
+- Continue with the authorized current-host installer-owned rollout using
+  before-state, rollback and health evidence.
+  Only after qualification and installed support may that host's job be
+  enrolled. Broader preference/carrier and Linux gates remain open; the effort
+  stays Active and its worktrees remain owned.
+
+### 2026-11-12 - First installed local-only Windows adoption
+- The separately authorized host completed its normal target-only Machines
+  update, with a healthy retained previous runtime, preserved installer inputs
+  and a usable canonical selector rollback. Installed CLI health, collection-v1
+  `installed-job` capability and retained GUI bootstrap passed; six installed
+  job modules and the retained launcher matched the accepted implementation.
+- The adopter's configuration owner prepared a new unsynchronized v2 store
+  through exact `ensure-present` resources. Existing policy and admission/fence
+  bytes remain untouched on repeat convergence. The optional health-job resource
+  converges only the separately confirmed local opt-in; it grants no enrollment
+  or unattended-maintenance authority.
+- A real installed one-shot run recorded both current observation and prior-hour
+  service targets within budget. The selected listener was healthy; three
+  selected installed service exports were unavailable, not healthy zeroes.
+  Other health domains remain unknown and no carrier publication was requested.
+- Explicit local confirmation enrolled an enabled hourly native task, reported
+  ready collection support and no recovery/cleanup uncertainty. Both direct and
+  resource repeat convergence were unchanged. The first actual hourly execution
+  remains pending; registration is not execution evidence.
+- A real peer completed authenticated inbound SSH and resolved the exact active
+  session through the existing Bridge carrier. This is current inbound evidence,
+  not proof the historical intermittency was repaired. A separate local daemon
+  initialization-readiness failure remains distinct from listener liveness and
+  successful peer lookup; no service restart was used to hide it.
+- The adopter's private configuration/evidence change is merged. Continue with
+  actual hourly readback, retaining all broader domain, export, preference,
+  carrier and platform gates. The canonical effort remains Active.
+- The first unaccelerated hourly execution subsequently returned native result
+  zero, recorded the current-hour listener observation and preceding-hour
+  service target, and settled all instances and the admission byte. The current
+  listener is healthy; unavailable exports and the previous observation's stale
+  age remain explicit rather than being refreshed.
+- Native readback exposed a status-only timestamp defect: the COM last-run
+  value is UTC-valued but has an unspecified DateTime kind, while its next-run
+  value is local. Applying the same local-to-UTC conversion to both reports a
+  future last-run time outside UTC. The native information provider and stored
+  collection timestamps agree on the real execution time. Correct this below-
+  altitude adapter defect and add a real execution-window regression before
+  treating timestamp presentation as qualified. Collection, cadence and native
+  settlement succeeded; the active job is not a partial installation.
+- The new execution-window assertion reproduced the shifted future time on the
+  original adapter after two real native cycles. The corrected native timing
+  reader and existing enrollment controls pass 53 selected tests, including
+  replacement, rollback and exact withdrawal with unavailable timing metadata.
+  A read-only baseline/candidate comparison agrees with the native execution
+  time. The added query costs approximately 1.4 seconds per explicit management
+  read on that host, not on the hourly collector path. Release and installed
+  adoption of this correction remain separate from this source qualification.
