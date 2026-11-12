@@ -14,7 +14,7 @@ The preceding location preference remains part of that request:
 - **Repo:** copilot-extensions
 - **Branch(es):** dependency-ordered PRs against `dev`
 - **Created:** 2026-11-11
-- **Status:** Draft
+- **Status:** Active
 - **Parent:** [Derived Disk Hygiene](../derived-disk-hygiene/README.md), bytecode follow-on
 - **Coordination issue:** #10968
 - **Vision:** reconcile the design with [authoritative runtime replacement](../../../visions/installer/README.md#authoritative-runtime-replacement) before implementation
@@ -92,10 +92,10 @@ nor reinterpret an ignored file or a directory name as disposal authority.
   explicit pruning and legacy layouts from their actual source owners.
 - [x] Reconcile the proposal with installer and lifecycle visions, patterns,
   contract evolution and the parent's existing accepted requirements.
-- [ ] Publish [the concrete design](design.md) covering portable placement, namespace identity,
+- [x] Publish [the concrete design](design.md) covering portable placement, namespace identity,
   actual ownership, bounded incremental progress, update integration, legacy
   compatibility, concurrency, refusal/defer outcomes and safety.
-- [ ] Land the design/effort PR through the repository's review and CI gate
+- [x] Land the design/effort PR through the repository's review and CI gate
   before implementation.
 
 ### Phase 2 - Implement the shared lifecycle and consumers
@@ -153,6 +153,63 @@ mixed-version compatibility and safety assertions are implementation acceptance
 gates, not claims that the current code already provides them.
 
 ## Journal
+
+### 2026-11-11 - Additive provider foundation
+
+- Implemented the version-2 private platform-cache policy provider, retaining
+  the legacy helper and current consumers unchanged. Native ownership/DACL
+  checks protect executable bytecode; unsealed or unsupported state gets
+  the no-write result without per-invocation allocation.
+- Added indexed installation-local ownership and progress storage before
+  publishing an allocation's owner record. This prepares bounded collector
+  discovery; it does not implement retirement or legacy deletion yet.
+- Focused provider/interpreter controls passed: native Windows 48 passed /
+  1 POSIX skip; native Linux 44 passed / 5 Windows skips. The Linux run used
+  an exact committed source export and the contained runner; the hardened
+  container prerequisites were unavailable. Its deferred disposable-fixture
+  cleanup was reconciled afterward, with all exact fixture paths absent.
+- Canonical source validation, install contract and focused Python lint
+  passed. The full mirror audit reported unrelated existing toolkit drift;
+  the documented source-only gate validates inputs without asserting mirror
+  equality. No deployed files, real caches or service lifetimes changed.
+- The library remains pending static-type admission under #9807; this
+  foundation does not claim type-portfolio graduation or certification.
+- Expanded permission controls cover inherited Windows grants, private POSIX
+  traversal, unresolved homes, sticky-parent first touch and Darwin's native
+  ACL iterator ABI. The corrected focused packet passes on Windows
+  (54 passed / 4 platform skips) and Linux (51 passed / 7 platform skips).
+  Native macOS remains unavailable. Windows descendant ACL admission now uses
+  an explicitly bounded metadata-only check, because bypass-traverse access
+  defeats parent-only protection. Native Windows directory/file grants and
+  entry/time exhaustion regressions pass (56 passed / 5 platform skips).
+  Large Windows caches conservatively select no-write execution; the design
+  and library contract state this reuse limitation rather than hiding a walk.
+- Full Linux unit-packet execution exposed an older-Python test injection
+  mismatch: that interpreter's TemporaryDirectory stores its removal callable
+  separately from `shutil.rmtree`. The focused fault control now targets the
+  actual TemporaryDirectory removal seam. The complete admitted Linux unit
+  packet now passes (4,792 tests), including that regression. Rebased native
+  Linux provider/interpreter controls pass (51 passed / 10 platform skips);
+  successful disposable fixtures were removed through their scratch owner.
+- Extended the same native protection boundary to the SQLite catalog, existing
+  journal/WAL/shared-memory sidecars and owner record. Empty schema-zero
+  catalogs recover serialized interrupted initialization without resetting
+  unknown schemas; immutable owner records publish only after complete writes.
+  Native Windows interruption and metadata-DACL controls pass (63 passed /
+  5 platform skips). The corrected native Linux packet passes (53 passed /
+  15 platform skips), and the complete admitted unit packet passes again
+  (4,792 tests). Successful disposable fixtures were removed. No real cache,
+  runtime or service was changed.
+
+### 2026-11-11 - Design accepted; implementation starting
+
+- #12131 merged as `42175ce8eb81cea7f48871b155ddbb9c119988b9`
+  after exact-head Copilot approval, required CI success and resolution of
+  the cache ownership finding. #10968 remains open.
+- Pulled the source workspace forward onto the accepted plan. Phase 2 starts
+  with shared placement and producer compatibility, followed by bounded
+  retirement/update collection and native fixture proof. No runtime rollout
+  or real-cache deletion is authorized or claimed.
 
 ### 2026-11-11 - Intake and isolation
 

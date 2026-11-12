@@ -44,6 +44,13 @@ directories privately; validate existing directories and relevant ancestors,
 using native ownership/mode checks on POSIX and ownership/DACL checks on
 Windows. A shared writable override, foreign-owned pre-created namespace or
 unverifiable protection takes `-B` without reading that namespace's bytecode.
+Windows bypass-traverse semantics also require checking existing bytecode
+descendants, not merely their parent: independently granted child access is
+effective even below a private directory. Admit only ordinary, privately
+owned/protected descendants in a metadata-only pass capped at 256 entries
+and 50 ms; exceeding either budget takes `-B` without changing the cache.
+An individual filesystem/security call is not preemptible, so the time cap is
+checked between calls rather than claiming a hard syscall deadline.
 Do not repair someone else's permissions or treat a matching record as trust.
 Apply the same protection checks before admitting collector metadata.
 
@@ -166,7 +173,11 @@ reclaimable in that pass.
 
 Allocation performs no process enumeration, namespace sweep, network call or
 collector subprocess. Retained installed reuse does no per-invocation cache
-tree walk. Cache preparation failure takes the no-write fallback.
+tree walk on POSIX. Windows performs only the bounded protection admission
+described above, not an inventory for collection. Oversized Windows caches
+currently trade reuse for safe no-write execution; this limitation must remain
+visible until a stronger native boundary can avoid descendant admission.
+Cache preparation failure takes the no-write fallback.
 
 The update collector has independent, finite budgets for namespace discovery,
 filesystem entries, bytes inspected/deleted and elapsed time. Count skipped,
