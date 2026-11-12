@@ -66,14 +66,31 @@ the four administrative folds; the
 [follow-through register](roadmap-follow-through.md#four-further-folds-after-seven-contract-receiving-readback)
 records their actual outcomes.
 
-#3367 retains its owner's explicit keep-open disposition for catchable
-unavailable-error acceptance after local mitigation. #4055 retains its
+At that checkpoint, #3367 was retained for its unresolved catchable
+unavailable-error ask after local mitigation. #4055 retains its
 specific all-original-facts/actual-caller-branches condition; the new Plan
 preserves that work but supplies no current real-caller qualification.
 Its Draft effort is not a new veto or whole-broker gate. #4229 remains
 standalone because its specifically required assignee receipt is still
 unmet, not because of a new universal ACK requirement. The held #1266
 keeper and all substantive/source/resource custodians remain unchanged.
+
+### 2026-11-12 - Clarify #3367's tracking condition
+
+The author's historical "Leaving this open" preserves the unresolved
+unavailable-error requirement; it does not demand that this numeric tracker
+remain open after complete accepted transfer. The earlier campaign judgment
+inferred that extra retirement gate. The existing Active receiver already
+retains all seven Plan, seven global Validation and two custody rows, reviewed
+in #9502. They remain unchecked and preserve every literal alternative and
+actual custodian.
+
+After fresh qualification and complete receiving readback, #3367 was retired
+as redundant tracking (`NOT_PLANNED`), not completed implementation. The
+[dated follow-through](journal/2026/11.12-oldest-contracts-and-finite-delivery.md)
+records the public acknowledgment and unchanged source/resource duties.
+No owner statement is revoked, no genuine hold is cleared and no universal
+implementation, native or acknowledgment prerequisite is introduced.
 
 ## Campaign state
 
