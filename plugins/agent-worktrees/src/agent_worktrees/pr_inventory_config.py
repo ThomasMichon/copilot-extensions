@@ -24,7 +24,7 @@ def _mapping(loader, node):
 _UniqueLoader.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _mapping)
 
 
-def load_binding(path: Path, repository: str):
+def load_binding(path: Path, repository: str, *, providers=("github", "gitea")):
     """Only explicit repos.<name>.pr fields select inventory provider policy."""
     from .config import _parse_pr
     if not path.is_absolute():
@@ -48,7 +48,7 @@ def load_binding(path: Path, repository: str):
             raise ValueError("invalid explicit repository binding")
         selected = binding.get("pr")
         if isinstance(selected, dict) and parse_repository(selected.get("repository", "")) == repository:
-            if selected.get("provider") not in ("github", "gitea") or not isinstance(
+            if selected.get("provider") not in providers or not isinstance(
                 selected.get("api_base"), str,
             ) or not selected["api_base"]:
                 raise ValueError("inventory requires an explicit provider and endpoint")

@@ -6472,7 +6472,7 @@ def main(argv: list[str] | None = None, *, publication: object | None = None) ->
     if args_list[0] == "pr-watch":
         from . import pr_cli
         if not (len(args_list) >= 4 and args_list[1] in ("snapshot", "status", "threads", "diff")
-                and "/" in args_list[2] and not args_list[2].startswith("-")) and args_list[1:2] != ["inventory"]:
+                and "/" in args_list[2] and not args_list[2].startswith("-")) and args_list[1:2] not in (["inventory"], ["population"]):
             _ensure_cluster_loaded()
         try:
             return pr_cli.cmd_pr_watch_dispatch(args_list[1:])
