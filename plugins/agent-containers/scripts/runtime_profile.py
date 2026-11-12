@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib.metadata
 import importlib.util
 import json
@@ -141,6 +142,35 @@ def select_execution(root: Path) -> ExecutionSelection:
     return _read_execution(root, python)
 
 
+def _check_wheel_execution_profile(slot: Path, value: dict) -> None:
+    try:
+        receipt = _read_json(slot / ".runtime-input-origins.json")
+        wheels = receipt["wheel_inputs"]
+        binding = wheels["binding"]
+        lock = "sha256:" + hashlib.sha256(json.dumps(
+            binding, sort_keys=True, separators=(",", ":"), allow_nan=False,
+        ).encode("ascii")).hexdigest()
+        extras = ["provider-exec"] if value["profile"] == "provider-exec" else []
+        applications = [row for row in binding["wheels"] if row["name"] == "agent-containers"]
+        if (
+            receipt.get("schema") != "installer-engine.frozen-input-origins"
+            or type(receipt.get("version")) is not int or receipt["version"] != 2
+            or receipt.get("source_wheels") is not None
+            or wheels["construction"] != "closed-wheels" or wheels["lock_id"] != lock
+            or receipt.get("extras", []) != extras or len(applications) != 1
+            or applications[0]["selected_extras"] != extras
+            or set(receipt["packages"]) != set(wheels["distributions"])
+            or "agent-containers" not in wheels["distributions"]
+            or re.fullmatch(
+                re.escape(value["packageVersion"] + ".profile." + lock[7:23])
+                + r"(?:[.+]repair\.[0-9a-f]{32})?", slot.name,
+            ) is None
+        ):
+            raise ValueError("conflicting wheel profile")
+    except (KeyError, TypeError, ValueError) as error:
+        raise RuntimeError("Selected Containers wheel receipt conflicts with its profile") from error
+
+
 def _read_execution(root: Path, python: Path) -> ExecutionSelection:
     slot = python.parent.parent
     if slot.parent != root / "versions" or slot.name.casefold() == runtime.DEV_VERSION:
@@ -166,6 +196,9 @@ def _read_execution(root: Path, python: Path) -> ExecutionSelection:
         raise RuntimeError("Invalid selected Containers slot profile")
     version = value["packageVersion"]
     profile_version = f"{version}{'.' if '+' in version else '+'}{value['profile']}"
+    if slot.name.startswith(version + ".profile."):
+        _check_wheel_execution_profile(slot, value)
+        profile_version = version
     if source.package_version(slot.name) != profile_version:
         raise RuntimeError("Selected Containers slot identity conflicts with its profile")
     retained = _validate_execution_contract(value["executionContract"])

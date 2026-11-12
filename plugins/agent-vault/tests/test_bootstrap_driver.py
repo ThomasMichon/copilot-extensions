@@ -52,8 +52,8 @@ def test_native_profile_readiness_selects_the_required_python_floor(tmp_path, ki
         " [IO.File]::WriteAllText($env:BOOTSTRAP_TEST_FLOOR, [string]$MinimumMinor)\n"
         " return 'fixture-python'\n}\n"
         "function Invoke-Hidden { param([string]$FilePath, [string[]]$ArgList)\n"
-        " if ($ArgList -match 'runtime-activation\\.py$') { return '{\"state\":\"configured\"}' }\n"
-        " $global:LASTEXITCODE=0\n}\n",
+        " $global:LASTEXITCODE=0\n"
+        " if ($ArgList -match 'runtime-activation\\.py$') { return '{\"state\":\"configured\"}' }\n}\n",
         encoding="utf-8",
     )
     floor = tmp_path / "floor.txt"

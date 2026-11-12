@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import hashlib
 import json
 import os
 import shutil
@@ -179,6 +180,74 @@ def test_native_wheel_profile_health_gates_completion(
         )
     assert marker.read_bytes() == b"prior completion" if reused else not marker.exists()
     assert not (root / profiles.PROFILE_FILE).exists()
+
+
+@pytest.mark.parametrize("profile", ["base", "provider-exec"])
+def test_native_wheel_provision_selects_and_retains_its_exact_profile(
+    profiles, tmp_path, monkeypatch, profile,
+):
+    import install_source
+
+    root, payload = tmp_path / "r", tmp_path / "p"
+    extras = ["provider-exec"] if profile == "provider-exec" else []
+    binding = {"wheels": [{"name": "agent-containers", "selected_extras": extras}]}
+    lock = "sha256:" + hashlib.sha256(json.dumps(
+        binding, sort_keys=True, separators=(",", ":"),
+    ).encode()).hexdigest()
+    generation = "1.0.profile." + lock[7:23]
+    fingerprint = "a" * 64
+    receipt = {
+        "schema": "installer-engine.frozen-input-origins", "version": 2,
+        "packages": {"agent-containers": "file:///inspected.whl"}, "extras": extras,
+        "wheel_inputs": {
+            "construction": "closed-wheels", "lock_id": lock, "binding": binding,
+            "distributions": {"agent-containers": {"version": "1.0"}},
+        },
+    }
+    monkeypatch.setattr(profiles, "_select_target", lambda *_a: SimpleNamespace(
+        package_version="1.0", identity=None, profile=profile, runtime_version="1.0",
+    ))
+
+    @contextmanager
+    def inputs(*_a):
+        yield SimpleNamespace(verify=lambda: None)
+
+    @contextmanager
+    def candidate(*_a, validate_candidate, **_kw):
+        with profiles.runtime.construction_lease(root, generation):
+            slot = profiles.runtime.slot(root, generation)
+            python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+            python.parent.mkdir(parents=True, exist_ok=True)
+            python.write_bytes(b"fixture interpreter")
+            profiles._write_json(slot / ".runtime-input-origins.json", receipt)
+            validate_candidate(slot)
+            profiles.runtime.mark_complete(root, generation, payload_hash=fingerprint)
+        yield SimpleNamespace(slot=slot, reused=False)
+
+    monkeypatch.setattr(install_source, "wheel_inputs", inputs)
+    monkeypatch.setattr(install_source, "wheel_selection", lambda *_a: {
+        "extras": extras, "runtime_version": generation,
+        "payload_hash": fingerprint, "local_packages": ["agent-containers"],
+    })
+    monkeypatch.setitem(sys.modules, "installer_engine", SimpleNamespace(numbered_candidate=candidate))
+    monkeypatch.setattr(profiles, "_health", lambda *_a, **_kw: None)
+    result = profiles.provision(
+        root, payload, python=sys.executable, uv="fixture",
+        wheel_profile=tmp_path / "profile.json", wheel_directory=tmp_path / "wheels",
+    )
+    selected = profiles.select_execution(root)
+    assert selected.runtime_version == result["runtimeVersion"] == generation
+    assert selected.profile == profile
+    with profiles.retain_execution(root, selected, timeout=0) as (retained, descriptor):
+        assert retained == selected
+        os.fstat(descriptor)
+    receipt["extras"] = [] if extras else ["provider-exec"]
+    profiles._write_json(selected.python.parent.parent / ".runtime-input-origins.json", receipt)
+    with pytest.raises(RuntimeError, match="wheel receipt conflicts"):
+        profiles.select_execution(root)
+    with pytest.raises(RuntimeError, match="wheel receipt conflicts"):
+        with profiles.retain_execution(root, selected, timeout=0):
+            pytest.fail("changed receipt cannot retain execution")
 
 
 def test_old_transaction_caller_cannot_ignore_required_profile_target(
