@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify provider-only Windows physical owner entry and preserve native fallback stdio",
+  "changes": [
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    }
+  ]
+}
