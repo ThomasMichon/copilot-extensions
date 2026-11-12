@@ -158,6 +158,10 @@ Claimant absence is confirmed dead only after execution locality is validated;
 an unvalidated configured name retained after topology failure is not proof.
 Actual retained owner records remain locally observable, but an invalid current
 context leaves an absent owner unconfirmed and preserves the custody hold.
+Topology-only alias equality cannot replace rejected record-scoped proof.
+A qualified legacy alias, including a current configured name that differs
+from the stored owner, needs that proof before the record can establish death;
+an unproven local alias remains unknown without a remote/self probe.
 `doctor` reports `local_registration` for the project's records, distinguishing
 proven local checkouts, absent checkouts and present but unproven paths, without
 rewriting historical identities.

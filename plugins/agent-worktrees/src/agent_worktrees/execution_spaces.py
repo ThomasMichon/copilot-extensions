@@ -109,7 +109,7 @@ def resolve_owner_record_path(owner_ref: str, config: Any) -> tuple[Path | None,
             record = tracking.load_record(path)
         except (OSError, ValueError, KeyError, TypeError, yaml.YAMLError):
             return None, parsed.worktree_id, "owner record cannot be verified"
-        if getattr(record, "machine_identity", None) is not None and parsed.machine != record.execution_machine:
+        if parsed.machine != getattr(record, "execution_machine", record.machine):
             return None, parsed.worktree_id, "owner reference conflicts with the record execution owner"
     return path, parsed.worktree_id, None
 
@@ -144,14 +144,18 @@ def settle_parent_obligation(record: Any, config: Any, worktree_id: str, *, outp
             return
         with tracking._RecordLock(parent_path, require_sidecar=True):
             parent = tracking.load_record(parent_path)
-            if getattr(parent, "machine_identity", None) is not None and owner.machine != parent.execution_machine:
-                raise ValueError("parent reference conflicts with the record execution owner")
             if legacy_parent and legacy_wsl_record_locality.resolve_legacy_wsl_owner_ref(
                 owner, config,
             ) != parent_path:
                 return
             receiving_config = project_record_config(parent)
             require_record_mutation(parent, receiving_config)
+            if owner.machine != getattr(parent, "execution_machine", parent.machine):
+                alias = None
+                if getattr(parent, "machine_identity", None) is None:
+                    alias = legacy_wsl_record_locality.resolve_legacy_wsl_owner_ref(owner, config)
+                if alias is None or alias.resolve() != parent_path.resolve():
+                    raise ValueError("parent reference conflicts with the record execution owner")
             if not local_child and not require_owner_identity(caller_key, receiving_config):
                 raise ExecutionSpaceError("caller is not local to the parent receiving execution space")
             child_ref = tracking.format_claim_ref(

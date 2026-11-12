@@ -723,3 +723,53 @@ def test_native_owner_cannot_select_coincident_versioned_guest(
     )
     assert not verdict.safe and verdict.category == "claimed"
     assert fixture.ledger.read_bytes() == before
+
+
+@pytest.mark.parametrize("canonical", [False, True])
+def test_topology_alias_without_record_proof_cannot_inherit_dead_legacy_owner(
+    local_worktree, monkeypatch, tmp_path, capfd, canonical,
+):
+    from agent_worktrees import claimant, legacy_wsl_record_locality, prune
+
+    fixture = local_worktree
+    _topology(fixture, "missing")
+    for field in ("machine_identity_version", "environment", "execution_machine"):
+        fixture.data.pop(field)
+    fixture.data.update(machine="record-label", status="finalized", branch="worktree/different")
+    fixture.ledger.write_text(yaml.safe_dump(fixture.data), encoding="utf-8")
+    config = fixture.load()
+    config = replace(
+        config, machine="local-space", configured_machine="local-space",
+        repos={"example": replace(config.default_repo, worktree_root=str(tmp_path / "new-root"))},
+    )
+    entry = cfg.MachineEntry(
+        key="local-space", display_name="Local", hostname="new-host", alias="owner-alias",
+        compatibility_aliases=["record-label"],
+    )
+    monkeypatch.setattr(cfg, "load_config", lambda *a, **k: config)
+    monkeypatch.setattr(cfg, "load_project_config", lambda *a, **k: config)
+    monkeypatch.setattr(cfg, "load_machines_yaml", lambda *a, **k: {entry.key: entry})
+    machine = config.machine if canonical else entry.alias
+    ref = f"{machine}/example/{fixture.checkout.name}"
+    parsed = tracking.parse_claim_ref(ref)
+    assert retained_checkout.resolve_owner(parsed, config) is None
+    assert legacy_wsl_record_locality.resolve_legacy_wsl_owner_ref(parsed, config) is None
+    monkeypatch.setattr(
+        claimant, "_remote_claimant_alive",
+        lambda *a, **k: pytest.fail("unproven local alias started a remote/self probe"),
+    )
+    before = fixture.ledger.read_bytes()
+    assert execution_spaces.resolve_owner_record_path(ref, config)[0] is None
+    assert claims_cli._claims_settle(Namespace(
+        claim_owner_ref=ref, json=True, released=False,
+    ), "retained-resource") != 0
+    capfd.readouterr()
+    assert claimant.local_claimant_alive(ref) is None
+    assert claimant.resolve_claimant_alive(ref) is None
+    child = replace(tracking.load_record(fixture.ledger), status="active", owner_ref=ref, resources=[])
+    verdict = prune.assess(
+        child, git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.UNUSED),
+        turn_count=0, claimant_alive=claimant.local_claimant_alive,
+    )
+    assert not verdict.safe and verdict.category == "claimed"
+    assert fixture.ledger.read_bytes() == before

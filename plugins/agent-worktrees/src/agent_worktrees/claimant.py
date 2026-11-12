@@ -42,21 +42,22 @@ from . import tracking
 _LOG = logging.getLogger(__name__)
 
 
-def _record_execution_conflicts(record: tracking.WorktreeRecord, owner: tracking.ClaimRef) -> bool:
+def _record_execution_conflicts(record: tracking.WorktreeRecord, owner: tracking.ClaimRef, config) -> bool:
     actual = cfg.detect_platform()
     conflict = record.platform != actual
     if conflict:
         _LOG.warning("Claimant record platform conflicts with the actual execution context")
-    elif (
-        owner.machine and getattr(record, "machine_identity", None) is not None
-        and owner.machine != record.execution_machine
-    ):
-        _LOG.warning("Claimant record execution owner conflicts with its qualified reference")
-        conflict = True
+    elif owner.machine and owner.machine != record.execution_machine:
+        alias = None
+        if getattr(record, "machine_identity", None) is None and owner.is_qualified:
+            alias = legacy_wsl_record_locality.resolve_legacy_wsl_owner_ref(owner, config)
+        if alias is None or record.yaml_path is None or alias.resolve() != record.yaml_path.resolve():
+            _LOG.warning("Claimant record execution owner conflicts with its qualified reference")
+            conflict = True
     return conflict
 
 
-def _claimant_is_local(parsed: tracking.ClaimRef, config) -> bool:
+def _claimant_is_local(parsed: tracking.ClaimRef, config) -> bool | None:
     from . import retained_checkout
     from .execution_spaces import require_current_execution_space
 
@@ -67,7 +68,7 @@ def _claimant_is_local(parsed: tracking.ClaimRef, config) -> bool:
         return True
     if legacy_wsl_record_locality.resolve_legacy_wsl_owner_ref(parsed, config) is not None:
         return True
-    return machine_identity.is_local_machine(parsed.machine, config)
+    return None if machine_identity.is_local_machine(parsed.machine, config) else False
 
 
 #: Escape hatch: set truthy to disable cross-machine SSH probing entirely, so a
@@ -220,7 +221,7 @@ def local_claimant_alive(owner_ref: str) -> bool | None:
             anchor_rec = tracking.load_record(rec_path)
         except Exception:
             return True  # present but unreadable -> bias to sparing
-        if _record_execution_conflicts(anchor_rec, parsed):
+        if _record_execution_conflicts(anchor_rec, parsed, config):
             return None
         if anchor_rec.worktree_path and not Path(anchor_rec.worktree_path).exists():
             return False  # the anchor checkout truly went away -> gone
@@ -231,7 +232,7 @@ def local_claimant_alive(owner_ref: str) -> bool | None:
         owner_rec = tracking.load_record(rec_path)
     except Exception:
         return True  # record present but unreadable -> bias to sparing
-    if _record_execution_conflicts(owner_rec, parsed):
+    if _record_execution_conflicts(owner_rec, parsed, config):
         return None
     # Citadel E1b cascade (#877): a parent in a TERMINAL status (finalized /
     # orphaned) is done -- it no longer actively holds its outbound worktree
@@ -275,6 +276,8 @@ def resolve_claimant_alive(
         same_machine = _claimant_is_local(parsed, config)
     except Exception as exc:
         _LOG.warning("Cannot establish actual claimant execution identity: %s", exc)
+        return None
+    if same_machine is None:
         return None
     if same_machine:
         return local_claimant_alive(owner_ref)
