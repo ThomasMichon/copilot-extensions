@@ -117,6 +117,12 @@ mcp-servers:
 For setup steps use the bundled **`agent-mcp`** skill; for per-machine tuning of
 an existing bridge use **`customizing-bridges`**.
 
+The explicit Linux `exec-client` command can bind selected, already configured
+MCP entries to the native client's own exec identity. It is not enabled by
+installation or ordinary bridge startup. See the
+[eligible caller and qualification limits](docs/session-generation.md#explicit-linux-client-exec)
+before opting in.
+
 The literal `mcp-servers.command` above is deliberate. Copilot starts the stdio
 server from repository-committed, machine-portable frontmatter that has no
 plugin-root interpolation contract and may run before or independently of

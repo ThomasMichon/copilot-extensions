@@ -337,10 +337,19 @@ handover. Preserve held sessions and the separate pre-feature adoption hold.
     [source-pinned CLI packet](journal/2026/11.10-explicit-owner-cli.md#qualification-and-merge-follow-up)
     passed. Selected-runtime discovery, controlled production launcher capture
     and automatic adoption remain separate work.
-  - [ ] **Selected-runtime discovery provider:** report owner-handoff support
+  - [x] **Selected-runtime discovery provider:** report owner-handoff support
     from the actual physical selected executable without MCP startup, and
-    qualify both selected and stale-slot queries across replacement. Caller
-    discovery/capture integration and rollback adoption remain open.
+    qualify both selected and stale-slot queries across replacement. #12052
+    merged at `59a739fce374514aaec89b65957c17a5bf6b2b29`; its
+    [source-pinned query qualification](journal/2026/11.10-explicit-owner-cli.md#discovery-provider-qualification-and-merge)
+    passed. Caller discovery/capture integration and rollback adoption remain
+    open.
+  - [ ] **Explicit Linux exec caller:** capture the exec owner's native pair
+    and pass a sealed, session-only overlay for explicitly named configured
+    entries, after actual-provider support discovery. Qualify actual Copilot
+    consumption separately from the synthetic native-exec fixture. Preserve
+    ordinary selection for unsupported entries and leave Windows capture,
+    default caller adoption and installed acceptance open.
   - [x] **Explicit-owner source merged:** #11935 landed at
     `c0eab0d952a37607f6cf7030ac1a77f377f98a74` after current-head automated
     approval, required CI and resolution of addressed findings. The source

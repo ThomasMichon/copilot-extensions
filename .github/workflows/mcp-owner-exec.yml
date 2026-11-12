@@ -1,0 +1,41 @@
+name: MCP owner exec source controls
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["pr/**"]
+    paths:
+      - ".github/workflows/mcp-owner-exec.yml"
+      - "plugins/agent-mcp/src/agent_mcp/owner_exec.py"
+      - "plugins/agent-mcp/tests/test_owner_exec.py"
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Exercise actual exec identity and anonymous overlay in containment
+        run: >-
+          python tools/run-plugin-tests.py agent-mcp
+          --test-file tests/test_owner_exec.py
+          --test-file tests/test_owner_handoff.py
+          --junit-dir "${{ runner.temp }}/mcp-owner-exec-${{ github.run_id }}"
+      - name: Retain source controls, not installed-client acceptance
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mcp-owner-exec-source-controls
+          path: ${{ runner.temp }}/mcp-owner-exec-${{ github.run_id }}
+          if-no-files-found: warn
+          retention-days: 7

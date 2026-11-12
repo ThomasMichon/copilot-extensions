@@ -7,6 +7,44 @@ activated production reattachment feature. The serve provider can advertise a
 backend capability only from an admitted physical generation. Paired explicit
 owner CLI arguments select custody; default callers and installers do not.
 
+## Explicit Linux client exec
+
+`exec-client --mcp-config <entries.json> --server <name> -- <native-copilot> ...`
+is an opt-in originating-owner producer. The input contains a `mcpServers`
+object describing already configured entries; repeat `--server` for the exact
+names to override. It does not discover or activate other servers.
+
+The launcher captures its own native PID and birth, then replaces itself with
+the selected native Linux `copilot` executable. The client therefore retains
+that identity instead of inheriting a shell or headed coordinator's identity.
+No parent waiter, new daemon, session-file discovery, owner environment variable,
+SDK extension or desktop observer is introduced.
+
+Each selected entry must have a literal absolute `agent-mcp` command, or an
+absolute Python command with `[-I] -m agent_mcp`, followed by `bridge` or
+`forward`. Before rewriting it, the launcher queries that entry's actual
+provider for explicit-pair support, with its environment and cwd. Old,
+unproven, opted-out, interpolated and already ownership-bound entries retain
+their ordinary configuration; a failed support query does not start MCP or
+retry an application operation. The qualified entries preserve their other
+configuration and receive the existing paired owner flags.
+
+The session-only `--additional-mcp-config` overlay is a sealed anonymous file,
+read through the client's inherited Linux descriptor. Configuration and env
+values are not copied into command-line JSON or a persistent file. Cwd,
+environment and literal native arguments otherwise remain unchanged. The OS
+reclaims the descriptor on client exit; no filesystem artifact needs a cleaner.
+Failed exec closes it and reports failure, without starting a replacement client.
+
+This first eligible caller requires Linux `memfd`/sealing support and a direct
+native ELF client, not a script/forwarder. Existing additional MCP overlays and
+literal `--` delimiters are refused rather than reinterpreted. Windows and
+other unqualified launch paths refuse this new command before client/provider
+effects; existing `bridge`/`forward` behavior is unchanged. The real-process
+fixture proves identity retention and anonymous-overlay reading with a
+synthetic native client, not actual Copilot config consumption, installed
+adoption, Windows pre-execution capture or whole-effort acceptance.
+
 An explicitly custody-bound single-stdio `BridgeSession` can export quiescent
 JSON data and reconstruct its decorator pipeline over a supplied retained
 transport. The private binding covers the logical custody session and the
