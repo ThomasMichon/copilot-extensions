@@ -1,0 +1,17 @@
+{
+  "comment": "Compose current native and embedded build hooks with retained construction checks; keep artifact resource inspection independent of Setuptools and refresh canonical admission resources.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

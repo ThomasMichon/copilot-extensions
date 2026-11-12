@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import sys
 import sysconfig
+import threading
 import time
 import venv
 import zipfile
@@ -30,6 +31,105 @@ from test_runtime_source_lock import (
     adopter as adopter,
 )
 from wheel_input_fixture import wheel_bytes
+
+
+@pytest.mark.parametrize("refuse", [None, ProfileError, KeyboardInterrupt])
+def test_library_builds_overlap_with_owner_validation_and_complete_settlement(refuse):
+    owner = threading.get_ident()
+    fourth_started = threading.Event()
+    first_checked = threading.Event()
+    lock = threading.Lock()
+    started, settled, checked = [], [], []
+    active, peak = 0, 0
+
+    def build(project, validate):
+        nonlocal active, peak
+        with lock:
+            started.append(project)
+            active += 1
+            peak = max(peak, active)
+            if len(started) == 4:
+                fourth_started.set()
+        try:
+            assert fourth_started.wait(5), "library builds were serialized"
+            if project:
+                assert first_checked.wait(5)
+
+            def verify():
+                assert threading.get_ident() == owner
+                checked.append(project)
+                if project == 0:
+                    first_checked.set()
+                    if refuse:
+                        raise refuse("fixture current inputs refused")
+
+            validate(verify)
+            return project * 10
+        finally:
+            with lock:
+                settled.append(project)
+                active -= 1
+
+    if refuse:
+        with pytest.raises(refuse, match="current inputs refused"):
+            completion._build_libraries(tuple(range(8)), build)
+        assert set(started) == set(range(4))
+        assert checked == [0]
+    else:
+        assert completion._build_libraries(tuple(range(8)), build) == [
+            project * 10 for project in range(8)
+        ]
+        assert set(checked) == set(range(8))
+    assert set(settled) == set(started)
+    assert peak == 4 and active == 0
+
+
+def test_library_dispatch_cancellation_settles_even_a_dequeued_validation(monkeypatch):
+    four_started = threading.Event()
+    four_requested = threading.Event()
+    lock = threading.Lock()
+    started, requested, settled, checked = [], [], [], []
+    queue = completion.Queue
+
+    class InterruptedQueue(queue):
+        def put(self, value, *args, **kwargs):
+            if value[0] is not None:
+                with lock:
+                    requested.append(value[1])
+                    if len(requested) == 4:
+                        four_requested.set()
+            return super().put(value, *args, **kwargs)
+
+        def get(self, *args, **kwargs):
+            value = super().get(*args, **kwargs)
+            if value[0] is not None:
+                assert four_requested.wait(5)
+                raise KeyboardInterrupt("fixture dequeued validation interrupted")
+            return value
+
+    monkeypatch.setattr(completion, "Queue", InterruptedQueue)
+
+    def build(project, validate):
+        with lock:
+            started.append(project)
+            if len(started) == 4:
+                four_started.set()
+        try:
+            assert four_started.wait(5)
+            validate(lambda: checked.append(project))
+            return project
+        finally:
+            with lock:
+                settled.append(project)
+
+    with pytest.raises(KeyboardInterrupt, match="dequeued validation interrupted"):
+        completion._build_libraries(tuple(range(8)), build)
+    assert set(started) == set(range(4))
+    assert set(settled) == set(started)
+    assert len(requested) == 4
+    assert all(reply.done() for reply in requested)
+    assert not checked
+
 
 BACKEND = """
 import base64, csv, hashlib, io, pathlib, tomllib, zipfile

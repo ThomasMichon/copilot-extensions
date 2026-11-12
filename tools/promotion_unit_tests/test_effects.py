@@ -148,6 +148,16 @@ def test_guarded_open_keeps_descriptor_and_flag_semantics_and_clears_its_context
     monkeypatch.setattr(os, "readlink", lambda path: str(tmp_path))
     run = UnitRun(Mock(), tmp_path, {}, tmp_path)
     run.active = True
+    target = tmp_path / "data.txt"
+    resolutions = []
+    resolve = Path.resolve
+
+    def resolved(path, *args, **kwargs):
+        if path == target:
+            resolutions.append(path)
+        return resolve(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "resolve", resolved)
 
     def original(name, actual_flags, mode, *, dir_fd):
         assert name == "data.txt" and actual_flags == flags and mode == 0o640 and dir_fd == 41
@@ -157,7 +167,23 @@ def test_guarded_open_keeps_descriptor_and_flag_semantics_and_clears_its_context
     run._os_open = original
     with pytest.raises(OSError, match="synthetic open refusal"):
         run.guarded_open("data.txt", flags, 0o640, dir_fd=41)
-    assert run.effects == []
+    assert resolutions == [target]
+
+    class SelectedPath:
+        calls = 0
+
+        def __fspath__(self):
+            self.calls += 1
+            return "data.txt" if self.calls == 1 else str(tmp_path.parent / "host.txt")
+
+    selected = SelectedPath()
+    with pytest.raises(OSError, match="synthetic open refusal"):
+        run.guarded_open(selected, flags, 0o640, dir_fd=41)
+    assert selected.calls == 1 and resolutions == [target, target]
+    monkeypatch.setattr(os, "readlink", lambda path: str(tmp_path.parent))
+    with pytest.raises(UnitEvidenceError, match="write outside"):
+        run.guarded_open("data.txt", os.O_WRONLY, 0o640, dir_fd=41)
+    assert run.effects == ["write outside synthetic unit temporary storage"]
     assert run._open_paths == []
 
 

@@ -14,6 +14,8 @@ import runpy
 import venv
 import uuid
 
+from types import ModuleType, SimpleNamespace
+
 import pytest
 
 import build_python_artifacts as builder
@@ -30,6 +32,225 @@ LOCK = builder.ToolchainLock(Path("."), {
     "source_policy": "governed", "python": "/python",
     "validated_index_identity": "sha256:" + "f" * 64,
 })
+
+def test_resource_inspection_imports_without_a_build_backend(tmp_path):
+    script = """
+import runpy, sys
+helper = runpy.run_path(sys.argv[1])
+assert callable(helper["embedded_members"])
+assert callable(helper["embedded_projects"])
+assert not any(name == "setuptools" or name.startswith("setuptools.") for name in sys.modules)
+"""
+    result = subprocess.run(
+        [sys.executable, "-I", "-S", "-B", "-c", script,
+         str(ROOT / "libs/versioned-runtime/standalone_build.py")],
+        cwd=tmp_path, capture_output=True, text=True, timeout=20,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+WHEEL_STAGING_NATIVE_PROBE = r"""
+import errno, os, runpy, sys
+from pathlib import Path
+from unittest.mock import patch
+from setuptools import Distribution
+helper, root = map(Path, sys.argv[1:])
+commands = runpy.run_path(str(helper))["commands"](root, "fixture")
+distribution = Distribution({"name": "fixture", "version": "1", "cmdclass": commands})
+wheel = distribution.get_command_obj("bdist_wheel")
+wheel._runtime_staging_root = root / "wheel"
+command = distribution.get_command_obj("install_lib")
+source = root / "build"
+source.mkdir(parents=True)
+original = source / "module.py"
+original.write_bytes(b"VALUE = 7\n")
+command.build_dir = str(source)
+command.force = True
+for name in ("linked", "copy-fallback", "ordinary"):
+    destination = root / ("ordinary" if name == "ordinary" else "wheel/" + name)
+    if name == "ordinary":
+        wheel._runtime_staging_root = None
+    with patch("os.link", side_effect=OSError(errno.EXDEV, "link unavailable")) if name == "copy-fallback" else patch("os.link", wraps=os.link):
+        outputs = command.copy_tree(str(source), str(destination))
+    selected = destination / original.name
+    assert str(selected) in outputs
+    assert selected.read_bytes() == original.read_bytes() == b"VALUE = 7\n"
+    assert os.path.samefile(original, selected) == (name == "linked")
+print("native-wheel-staging-link-copy-fallback-ordinary-ok")
+"""
+
+
+@pytest.mark.timeout(30)
+def test_native_wheel_staging_preserves_bytes_and_copy_fallback(tmp_path):
+    pytest.importorskip("setuptools.command.bdist_wheel")
+    result = subprocess.run(
+        [sys.executable, "-I", "-B", "-c", WHEEL_STAGING_NATIVE_PROBE,
+         str(ROOT / "libs/versioned-runtime/standalone_build.py"), str(tmp_path)],
+        capture_output=True, text=True, timeout=20,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "native-wheel-staging-link-copy-fallback-ordinary-ok" in result.stdout
+
+
+@pytest.fixture
+def resource_build_commands(tmp_path, monkeypatch):
+    class Build:
+        def run(self):
+            pass
+
+    class Wheel:
+        def run(self):
+            return self.action()
+
+    class Install:
+        def copy_tree(self, *args):
+            return ["ordinary-copy"]
+
+        def get_exclusions(self):
+            return self.exclusions
+
+    for name in ("setuptools", "setuptools.command"):
+        module = ModuleType(name)
+        module.__path__ = []
+        monkeypatch.setitem(sys.modules, name, module)
+    for name, base in (
+        ("bdist_wheel", Wheel), ("build_py", Build), ("install_lib", Install), ("sdist", object),
+    ):
+        module = ModuleType("setuptools.command." + name)
+        setattr(module, name, base)
+        monkeypatch.setitem(sys.modules, module.__name__, module)
+
+    class Distribution:
+        def get_command_class(self, name):
+            module = sys.modules.get("setuptools.command." + name)
+            if module is None:
+                raise ImportError(name)
+            return getattr(module, name)
+
+    sys.modules["setuptools"].Distribution = Distribution
+    helper = runpy.run_path(str(ROOT / "libs/versioned-runtime/standalone_build.py"))
+    commands = helper["commands"](tmp_path, "fixture")
+    wheel = commands["bdist_wheel"]()
+    wheel.resource_helper = helper
+    wheel.bdist_dir = str(tmp_path / "wheel")
+    install = commands["install_lib"]()
+    install.distribution = SimpleNamespace(get_command_obj=lambda *args, **kwargs: wheel)
+    install.build_dir = str(tmp_path / "build")
+    install.dry_run = False
+    install.exclusions = set()
+    return wheel, install
+
+
+def test_resource_builder_keeps_older_backend_commands(tmp_path, monkeypatch, resource_build_commands):
+    monkeypatch.delitem(sys.modules, "setuptools.command.bdist_wheel")
+    helper = runpy.run_path(str(ROOT / "libs/versioned-runtime/standalone_build.py"))
+    expected = {"build_py", "sdist"}
+    if os.name == "nt":
+        expected.add("install_lib")
+    assert set(helper["commands"](tmp_path, "fixture")) == expected
+
+
+@pytest.mark.parametrize("replace_parent", [False, True])
+def test_resource_collection_batches_parent_checks_and_refuses_replacement(
+    tmp_path, monkeypatch, resource_build_commands, replace_parent,
+):
+    wheel, _install = resource_build_commands
+    helper = wheel.resource_helper
+    for destination in helper["RUNTIME_RESOURCES"].values():
+        path = tmp_path / "src/fixture" / destination
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"primitive")
+    (tmp_path / helper["HELPER_NAME"]).write_bytes(b"helper")
+    shared = tmp_path / "shared"
+    shared.mkdir()
+    resources = {}
+    for index in range(3):
+        source = shared / f"asset{index}.py"
+        source.write_bytes(b"asset")
+        resources[f"_runtime_assets/asset{index}.py"] = source
+    commands = helper["commands"](tmp_path, "fixture", companion_resources=resources)
+    command = commands["build_py"]()
+    command.build_lib = str(tmp_path / "output")
+    counts = []
+    actual_stat, actual_read = Path.lstat, Path.read_bytes
+
+    def observe_stat(path, *args, **kwargs):
+        if path == shared:
+            counts.append(path)
+        return actual_stat(path, *args, **kwargs)
+
+    def read(path):
+        data = actual_read(path)
+        if replace_parent and path == shared / "asset2.py":
+            shared.rename(tmp_path / "replaced")
+            shared.mkdir()
+        return data
+
+    monkeypatch.setattr(Path, "lstat", observe_stat)
+    monkeypatch.setattr(Path, "read_bytes", read)
+    if replace_parent:
+        with pytest.raises(RuntimeError, match="ancestor changed during collection"):
+            command.run()
+        assert not (tmp_path / "output").exists()
+    else:
+        command.run()
+        assert (tmp_path / "output/fixture/_runtime_assets/asset2.py").read_bytes() == b"asset"
+    assert len(counts) == 2
+
+
+@pytest.mark.parametrize("fail", [False, True])
+def test_wheel_staging_links_only_generated_output_and_clears_scope(
+    tmp_path, monkeypatch, resource_build_commands, fail,
+):
+    wheel, install = resource_build_commands
+    copied = []
+
+    def copy_file(source, destination, **options):
+        copied.append((source, destination, options["link"]))
+        return destination, True
+
+    def copy_tree(source, destination, *, copy_function, dirs_exist_ok):
+        assert dirs_exist_ok
+        copy_function(str(Path(source) / "module.py"), str(Path(destination) / "module.py"))
+        if fail:
+            raise OSError("staging refused")
+
+    install.copy_file = copy_file
+    monkeypatch.setattr(shutil, "copytree", copy_tree)
+    wheel.action = lambda: install.copy_tree(install.build_dir, wheel.bdist_dir)
+    if fail:
+        with pytest.raises(OSError, match="staging refused"):
+            wheel.run()
+    else:
+        assert wheel.run() is None
+    assert copied == [(
+        str(tmp_path / "build/module.py"), str(tmp_path / "wheel/module.py"), "hard",
+    )]
+    assert wheel._runtime_staging_root is None
+
+
+@pytest.mark.parametrize("ordinary", ["not-wheel", "namespace", "foreign-output", "traversal", "dry-run"])
+def test_wheel_staging_keeps_other_install_paths_on_standard_copy(
+    tmp_path, monkeypatch, resource_build_commands, ordinary,
+):
+    wheel, install = resource_build_commands
+    if ordinary == "namespace":
+        install.exclusions = {"namespace/__init__.py"}
+    if ordinary == "dry-run":
+        install.dry_run = True
+    destination = str(tmp_path / "outside") if ordinary == "foreign-output" else wheel.bdist_dir
+    if ordinary == "traversal":
+        destination = str(tmp_path / "wheel/../outside")
+    monkeypatch.setattr(shutil, "copytree", lambda *args, **kwargs: pytest.fail("unexpected link staging"))
+    results = []
+    wheel.action = lambda: results.append(install.copy_tree(install.build_dir, destination))
+    if ordinary == "not-wheel":
+        wheel.action()
+    else:
+        wheel.run()
+    assert results == [["ordinary-copy"]]
 
 
 @pytest.mark.parametrize("component", [

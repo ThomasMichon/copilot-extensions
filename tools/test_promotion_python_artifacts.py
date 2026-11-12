@@ -26,6 +26,7 @@ from _promotion_workflow_test_support import (
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import build_python_artifacts as builder
+import artifact_bundle_validation as validation
 import promote_release as promotion
 import promotion_python_artifacts as artifacts
 import publish_python_artifacts as publisher
@@ -296,9 +297,9 @@ def test_trusted_validator_rejects_archive_corruption_even_with_valid_outer_dige
     elif mutation == "directory":
         members.append(("directory/", b""))
     elif mutation == "oversized-manifest":
-        monkeypatch.setattr(artifacts, "_MANIFEST_LIMIT", 1)
+        monkeypatch.setattr(validation, "_MANIFEST_LIMIT", 1)
     elif mutation == "oversized-bundle":
-        monkeypatch.setattr(artifacts, "_BUNDLE_LIMIT", 1)
+        monkeypatch.setattr(validation, "_BUNDLE_LIMIT", 1)
     with zipfile.ZipFile(path, "w") as bundle:
         bundle.writestr(
             "manifest.json", b"not json" if mutation == "invalid-json" else json.dumps(manifest),
@@ -531,7 +532,7 @@ def test_trusted_wheel_validation_reads_real_metadata_and_members(tmp_path, monk
                 info.external_attr = (stat.S_IFLNK | 0o777) << 16
             elif mutation == "compressed-bomb":
                 payload = b"x" * 20000
-                monkeypatch.setattr(artifacts, "_BUNDLE_LIMIT", 10000)
+                monkeypatch.setattr(validation, "_BUNDLE_LIMIT", 10000)
         members[position] = info, payload
     if mutation == "duplicate-member":
         members.append(members[0])
@@ -564,7 +565,7 @@ def test_encoded_runtime_metadata_is_a_structured_refusal(tmp_path, monkeypatch)
     def check_runtime(_bundle, _hashes, *, metadata, **_kwargs):
         artifacts.validate_runtime_metadata({"dependencies": ["helper>=2"]}, metadata)
 
-    monkeypatch.setattr(artifacts, "validate_wheel_sources", check_runtime)
+    monkeypatch.setattr(validation, "validate_wheel_sources", check_runtime)
     with pytest.raises(artifacts.PromotionArtifactError):
         artifacts.validate_wheel(io.BytesIO(data), wheel, source_dir=tmp_path)
 
@@ -793,7 +794,7 @@ def resolve_toolchain_lock(*args, **kwargs):
         "core_python_artifacts.py", "promotion_bundle_members.py",
         "python_project_inventory.py", "application_sources.py",
         "plugin_runtime_resources.py", "native_daemon_artifacts.py", "runtime_wheel_inspection.py",
-        "artifact_attestation.py",
+        "artifact_attestation.py", "artifact_bundle_validation.py",
     ):
         shutil.copy(Path(artifacts.__file__).with_name(name), driver / name)
     runtime_helpers = driver.parent / "libs" / "versioned-runtime"
@@ -1532,6 +1533,31 @@ def test_first_party_label_does_not_substitute_for_candidate_closure(tmp_path):
     artifacts.validate_manifest(manifest)
     with pytest.raises(artifacts.PromotionArtifactError, match="source closure differs"):
         artifacts.validate_source_binding(manifest, tmp_path)
+
+
+def test_candidate_source_binding_preserves_trusted_builder_namespace(tmp_path, monkeypatch):
+    import ast
+
+    from release_helper_loaders import dynamic_loads
+
+    source = Path(validation.__file__)
+    assert dynamic_loads(ast.parse(source.read_bytes()), "tools/artifact_bundle_validation.py") == set()
+    plugin_dir = tmp_path / "plugins" / "demo"
+    plugin_dir.mkdir(parents=True)
+    (plugin_dir / "pyproject.toml").write_text(
+        _STATIC_BUILD + '[project]\nname = "demo"\nversion = "1.0"\n',
+    )
+    manifest = _manifest(tmp_path / "wheels", candidate_root=tmp_path)
+    unrelated = tmp_path / "unrelated"
+    monkeypatch.setattr(builder, "REPO", unrelated)
+    monkeypatch.setattr(builder, "LIBS_DIR", unrelated / "libs")
+    monkeypatch.setattr(builder, "PLUGINS_DIR", unrelated / "plugins")
+
+    artifacts.validate_source_binding(manifest, tmp_path)
+
+    assert builder.REPO == unrelated
+    assert builder.LIBS_DIR == unrelated / "libs"
+    assert builder.PLUGINS_DIR == unrelated / "plugins"
 
 
 def test_invalid_candidate_identity_fails_before_git_or_source_access(tmp_path):

@@ -4398,8 +4398,8 @@ existing installation owner. No profile/approval file is required for the
 CPU-first, artifact-preferred, governed-source-permitted baseline. Optional
 `runtimeProfiles` settings in the existing owner-bound deployment policy can
 disable source fallback or explicitly select a capability. Retained capability
-and explicit unprofiled migration remain distinct. Optional exact
-`downloadOrigins` optionally restricts artifact delivery to the selected index
+and explicit unprofiled migration remain distinct. Optional
+`downloadOrigins` restricts artifact delivery to the selected index
 origin and those exact HTTPS file origins. Missing/empty values use
 configured-feed delegation: the admitted feed's current exact-file metadata
 selects artifact links, with bounded HTTPS redirects and no CDN enumeration.
@@ -4465,6 +4465,13 @@ content tree, independently acquired trusted Main history, original attestation
 and complete immutable asset set before returning index data. It downloads no
 executable bundle. Only an actual channel 404 returns absence; permission,
 integrity, malformed or conflicting evidence never becomes a fallback trigger.
+`discover_promoted_source` derives the channel from the caller's independently
+acquired Main commit, not a supplied Dev guess. The stdlib
+`promotion_source_history` reader checks its bounded regular pipeline-state blob,
+single parent, recorded Dev/release/tag association and existing Git objects.
+Its content-only tree calculation is the same primitive used by promotion,
+excluding pipeline state and coverage baselines through a disposable index.
+Fetched tooling is never imported or executed to obtain these facts.
 This extraction is not an ordinary Worktrees installer connection or enablement:
 the installer still owes actual source/provider selection, admitted tooling,
 profile planning and current-policy custody through publication.
@@ -4973,6 +4980,19 @@ The owner callback must verify the independently authenticated selected source
 and supplied revocations and return the actual current installation policy.
 It runs before resolution/construction and throughout retained health/custody.
 
+The additive `source_verifier(payload, SourceIdentity)` keyword lets that
+authenticated source owner perform the complete fresh source check, rather than
+also hashing the same origin through a second raw-pin owner. It is an in-process
+callback, not a serialized receipt, cached grant or source-integrity exemption.
+The admission adapter binds it to the exact origin payload and identity and
+still checks current installation policy and revocations separately. Native
+feed, wheel, interpreter and tooling checks remain unchanged.
+Omission preserves the original source-aware owner callback and raw pin check.
+The adapter selects the keyword only when the actual executing helper's
+signature declares it; an older helper uses that equivalent original path
+without new syntax or an effectful probe/replay. Provider expansion and the
+conditional adapter ship together; no baseline contract is retired.
+
 This uses the existing installation-owned `.source-build-tools` namespace and
 third-party-only immutable constructor, not a shared mutable venv or another
 approval mechanism. Its exact binding includes source, effective policy,
@@ -5025,10 +5045,13 @@ gates.
 ### Authenticated source-build preparation
 
 The repository-only `runtime_source_build.retain_source_runtime_inputs` composes
-the actual configured-runtime-source acquisition owner with canonical source
-preparation, the retained native compiler and the same governed feed worker.
-It uses no artifact index or fabricated release selection. An unsupported
-default marketplace source provider remains unavailable rather than guessed.
+the selected runtime-source acquisition owner with canonical source preparation,
+the retained native compiler and the same governed feed worker.
+`retain_installation_source` chooses the existing configured-source provider or
+registered-marketplace provider from the actual runtime-source selection.
+Provider errors never select another provider. This composition uses no artifact
+index or fabricated release selection; unavailable or unsupported native evidence
+remains unavailable rather than guessed.
 Manager's existing `source_config.default_root` owns its configuration root;
 `self_install.default_root` re-exports that same function. Reading configured
 runtime-source policy therefore needs no Manager installer import and preserves
@@ -5044,6 +5067,15 @@ or artifact selection is introduced. `retain_source_configuration` exposes
 that existing pre-execution boundary without running the compiler; its native
 configuration identity is included in new source locks for later owner
 revalidation. It is not a source-lock candidate or an approval.
+Its optional `source_verifier(payload, SourceIdentity)` delegates complete
+fresh origin authentication to the actual retained source owner, bound to that
+exact path and identity. The default still independently reads the source
+identity. The source-build adapter composes that verifier with current native
+configuration and revocation checks once per verification, instead of hashing
+the same origin again in each nested layer. Requirements, retained source and
+compact build bytes remain independently checked; nothing is cached or shared
+between publication boundaries. This is an additive in-process toolkit hook,
+not a CLI, wire-protocol or live-verifier ABI change.
 Exact native wheel witnesses must be
 unambiguous; inspection precedes backend execution. A separate numbered
 build-tools environment runs the existing frontend offline, with owned
@@ -5061,6 +5093,16 @@ acquired files before backend execution. Only that explained build-only
 closure may be excluded from the final runtime. Its tools binding records the
 actual admitted profile, not fabricated promotion-toolchain provenance; the
 ordinary promotion-toolchain and generator checks remain unchanged.
+Only this exact offline build role overlaps independent library projects, with
+at most four caller-owned builds. Their fresh cache-publication validation
+callbacks run serially on the calling thread; no source, policy or byte check
+is reused across projects. The application builds serially after every library
+has settled. On refusal or interruption, no new project starts and all started
+builds settle before retained source/tooling custody closes. Pending validation
+replies are tracked before enqueueing and refused before executor shutdown,
+including a request interrupted after dequeueing. Associated-wheel
+and ordinary non-offline paths preserve their serial validation and collision
+checks. This scheduling does not extend any per-wheel or whole-operation bound.
 When native source output lacks an asserted Python hint, acquisition retains
 the selected index hint and source admission compares it with actual wheel
 metadata before running a backend; artifact profiles retain their exact check.
@@ -5104,6 +5146,148 @@ artifact publication, maps the marketed engine to the distinct Manager identity,
 or enables bootstrap. Bootstrap-safe packaging, normal installer integration,
 production feed/closure qualification and measured installation savings remain
 separate gates.
+
+### Source origin before admission tooling
+
+`runtime_source_authentication.retain_installation_origin` acquires and prepares
+the actual configured or registered-marketplace source before profile selection
+and without importing Packaging. Its acquisition-only policy snapshot has no
+source-fallback trigger; even a policy disabling source fallback can admit
+origin discovery. Only `AuthenticatedSource.for_plan` associates that same held
+origin with a subsequently selected, currently permitted source plan. The
+source builder can consume it without acquiring another source or losing the
+original verification callback. Existing explicitly planned provider APIs
+retain their prior behavior.
+
+`runtime_admission_bootstrap.retain_origin_tooling` composes that held origin
+with the existing retained native source-compile settings and restricted
+Packaging seed. It captures metadata/settings without resolving the runtime
+or executing a backend, then lets the seed's existing native compiler,
+governed acquisition and immutable constructor admit the tooling dependency.
+Current origin, actual installation policy and supplied deny-only revocations
+are checked throughout this context. Shared revocation checks remain deny-only;
+neither an empty deny set nor an origin snapshot approves runtime construction.
+Seed interpreter probes have a separate 30-second ceiling, clipped by the
+invocation deadline. They use the existing owned-child runner and caller-supplied
+process ownership utilities, so timeout settles launcher descendants before
+returning; a long integration deadline does not become a long probe timeout.
+
+The stdlib feed owner rechecks the exact held compiler with `--show-settings`,
+its retained environment and working directory. Fresh feed, credential, TLS
+and resolver-selection facts must agree with the original captured policy;
+this probe never resolves dependencies or executes a backend. The source-lock
+producer preserves its configuration callback, and source construction invokes
+that original lock's verifier before tools construction and through consumption.
+The restricted seed uses the same feed recheck, including when its caller
+retains only an acquisition origin rather than a source configuration.
+
+The admitted seed's `verify()` callback is valid only while its constructor
+custody remains open. `borrow_installation_origin` lets the admitted interpreter
+reuse the acquisition owner's original origin facts and live callback without
+reacquiring its exclusive source lease. It independently checks actual policy
+and prepared-source identity, never chooses a source provider or performs
+release discovery, and refuses use after its own context closes. Facts alone
+are not authentication: the invocation owner must retain and bind them to its
+actual verifier across the private process boundary.
+
+`artifact_bundle_validation` owns canonical read-only bundle, wheel, manifest
+and source validation; promotion re-exports its prior validation API. Its
+trusted builder comes only from the bundled toolkit, never fetched source or
+publisher tooling. Candidate-root resolution and hashing use explicit root-bound
+calls without reconfiguring the imported builder's module globals. This preserves
+independent candidate inputs and the release loader's namespace-mutation refusal.
+`artifact_release_discovery.read_selected_source_artifact`
+checks actual artifact entries, the selected bundle's attestation and source
+binding, and its raw manifest digest. A missing component is absence; conflicting
+version, asset, manifest, profile or source evidence is a failure.
+`plan_discovered_installation_profile` maps the retained acquisition's real
+Main history through channel discovery, then supplies these actual release and
+artifact facts to the existing policy planner. Missing profiles never erase an
+available artifact. The acquisition owner remains live throughout selection;
+neither this plan nor a downloaded manifest authorizes construction.
+
+Artifact feed capture also returns an invocation-bound `verify()` callback.
+It rechecks the actual installation policy, the original UV invocation's
+configuration and the held compiler's settings. Both native preflights share
+the original evaluation instant; neither resolves packages. Changes to the
+original configuration cannot hide behind its immutable retained copy, and
+the callback refuses after custody closes.
+
+`runtime_artifact_inputs` composes the actual selected bundle with its exact
+third-party closure. It reselects the attested subject, checks acquired promotion
+history, attests and source-validates the first-party bundle, and obtains only
+the remaining distributions from the current native governed feed. First-party
+wheels need no registry identity. The combined retained snapshot is inspected
+against the complete approved profile, including actual dependency metadata.
+Its live callback retains source, policy, bundle, feed and revocation checks;
+closed custody refuses. First-party-only profiles do not require a feed request.
+
+Copied-toolkit controls exercise real acquisition under `-I -S`, reject ambient
+semantic imports, invoke the admitted tooling interpreter, and borrow the held
+origin through Worktrees' private live-verifier pipe. A current seed revocation
+is refused from that child and again at the seed's context exit. These helpers
+remain inert: they do not activate tooling or an ordinary runtime, connect the
+native install entrypoint, or complete the ordinary consumer's publication path.
+
+Worktrees' separate `runtime_install_admission.py` qualification API composes
+the retained origin and seed with an admitted semantic child. The original
+process retains their actual live verifier; the child borrows the acquisition,
+plans from its real source checkout and producer, and passes source-built or
+selected artifact inputs plus a second verifier to the existing native lifecycle. Its parent
+waits for settlement before releasing either context. This API remains
+unwired from ordinary installation. Artifact mode does not request source
+fallback or require that fallback be enabled.
+Full semantic construction, final-interpreter independence and artifact-mode
+publication qualification remain required before enablement.
+
+### Worktrees source-profile lifecycle boundary
+
+Worktrees' Python lifecycle accepts the shared builder's complete source-profile
+binding without flattening its source lock, acquisition or build-tool evidence
+into a bare profile. The native boundary checks their source/component
+association and independently resolves the actual `agent-worktrees` installation
+policy and runtime root; Manager's source-management root does not become the
+runtime owner. The existing constructor retains the original wheel inputs.
+Its health callback rechecks current policy, and the same frozen policy travels
+through the existing governance handover to candidate settlement and native
+helper publication. Direct prepared-profile inputs retain their prior contract.
+Closed-wheel repair also retains the original source descriptor.
+The source/wheel association is checked before constructing publication
+governance. Explicit standalone profile-aware policy requires the matching
+current policy and a live input verifier; a policy snapshot alone is refused.
+Managed publication still requires its independent management lifecycle.
+Artifact-profile association separately retains its attested manifest,
+whole-profile binding and exact third-party acquisition subset. Artifact mode
+requires live admission custody and travels through the same governance
+handover; it does not weaken the independent managed-publication gate.
+
+The lifecycle's optional `input_verifier` keeps a caller's live verification
+callback in that caller while the actual candidate interpreter owns publication.
+Its finite invocation scope uses two private inherited pipes, not a listening
+service or a persisted approval receipt. The caller services fixed bounded
+verification requests while waiting for the candidate's actual outcome.
+The short idle poll applies only before a frame starts. An in-progress frame
+is retained until its existing invocation deadline, rather than discarded
+when the next idle poll would expire.
+Candidate governance carries the verifier contract through its existing JSON
+handover and rechecks the live owner at its publication boundaries. Missing,
+closed, mismatched, expired or refused custody fails closed. Source declares
+`INPUT_VERIFIER_ABI = 1`; a required verifier refuses unsupported source before
+construction rather than replaying an older invocation.
+
+Native helper subprocesses prepare an inventory, not the public copies. Their
+read-only governance can preserve the contract without borrowing the live pipe,
+but cannot acquire publication custody or publish a manifest. Actual helper
+copy publication remains in the candidate and rechecks its live verifier.
+Cancellation retains the existing wait-for-actual-outcome behavior. Omitting
+this optional verifier preserves the prior explicitly prepared-input path;
+shipping this boundary does not connect or enable an ordinary consumer.
+
+These are native input/publication-boundary controls, not ordinary-path
+enablement. The release-discovery/bootstrap caller, complete source/acquisition
+and revocation checks through the real consumer, installed-state qualification
+and rollout remain separate gates. The supported installation route and
+default-off toolkit selection are unchanged.
 
 ### Explicit Manager source-install integration
 

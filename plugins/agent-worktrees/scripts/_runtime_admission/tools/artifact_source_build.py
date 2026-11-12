@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib.machinery
+import os
 import re
 import sys
 from collections import Counter
@@ -212,7 +213,16 @@ def validate_static_build(source_dir: Path, *, trusted_setup: bytes | None = Non
         raise PromotionArtifactError("registered standalone build configuration is missing")
     reserved = sys.stdlib_module_names | {"setuptools", "wheel", "packaging", "sitecustomize", "usercustomize"}
     suffixes = ["", *importlib.machinery.all_suffixes()]
-    for name in sorted(reserved):
+    candidates = {
+        (name + suffix).casefold(): name for name in reserved for suffix in suffixes
+    }
+    # Inventory broadly, then preserve the filesystem's actual case/link semantics.
+    with os.scandir(source_dir) as entries:
+        possible = {
+            candidates[entry.name.casefold()] for entry in entries
+            if entry.name.casefold() in candidates
+        }
+    for name in sorted(possible):
         if any(
             path.exists() or path.is_symlink()
             for path in (source_dir / (name + suffix) for suffix in suffixes)

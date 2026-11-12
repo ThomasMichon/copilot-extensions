@@ -937,6 +937,978 @@ win grows with build complexity.
 
 ## Journal
 
+### 2026-11-11 - Reconcile current source before further qualification
+
+The [source reconciliation record](journal/2026/11.11-current-source-reconciliation.md)
+preserves retained admission and current packaging behavior, fixes a real
+build-backend import regression and records sixteen focused native passes.
+Complete current-source qualification and publication remain open.
+
+### 2026-11-11 - Bound and overlap the two fresh interpreter probes
+
+The [focused qualification record](journal/2026/11.11-paired-interpreter-probes.md)
+records seven passing native Windows controls without a cache, source-verification
+waiver or larger deadline. Complete native and ordinary-unit qualification remain
+open; this is not yet an end-to-end performance result.
+
+### 2026-11-11 - Native admission phase diagnostic remains a nonpass
+
+The [phase record](journal/2026/11.11-native-admission-phase-diagnostic.md)
+attributes the bounded witness to source-wheel construction and fresh verification,
+not an established post-publication deadlock. All original qualification limits
+and remaining acceptance gates stay open.
+
+### 2026-11-05 - Keep native lease acquisition outside actor-free units
+
+The current 4,167-node unit attempt exposes three Windows skips from newly
+admitted tests that explicitly acquire POSIX kernel leases and inspect native
+mode privacy. It also exceeds the unchanged 300-second bound near 93 percent.
+All four Jobs close and the sandbox is removed normally; this is a non-pass,
+not partially qualified unit evidence.
+
+The three native cases move unchanged in purpose to
+`libs/versioned-runtime/tests/test_runtime_lease_privacy.py`. The Linux
+source-build `overlap` lane executes them explicitly. Portable ACL and
+first-touch call-boundary controls remain in the actor-free module; its
+source digest is reviewed and refreshed. The actor-free inventory is now
+4,164 nodes with the same 599 source files, 253 coverage targets and
+300-second bound. No production source, permission, trust or runtime budget
+changes accompany this classification correction, and native execution is
+still owed on its actual supported host.
+
+The cached-validator native attempt also remains a non-pass: preparation falls
+to approximately 2.5 seconds, but the cold-target scenario still exceeds the
+aggregate after selection publication and before settlement/independence.
+Its exact controller and sandbox are gone. A measured fresh Windows TLS-root
+batching experiment is slower with behavior-preserving fallback, so no
+production TLS change is made. Current native latency and complete unit
+qualification remain open.
+
+### 2026-11-05 - Preserve capability selection through qualification tracing
+
+The native witness's timing decorators now preserve each wrapped callable's
+signature. Without that metadata, the seed adapter could legitimately select
+its older source-aware callback and raw-pin path even when the executing
+helper supports the new source-owner hook. That conservative fallback was
+valid evidence for the earlier run, but did not exercise the intended current
+capability and repeated the origin check.
+
+The positive full-native witness now also requires an actual callable
+`source_verifier` argument at seed entry. Timing output, original target
+probes, source and policy checks, retained custody and all operation/aggregate
+budgets remain unchanged. Current-head qualification must exercise this path
+before publication; mixed-helper fallback controls remain separate.
+
+Two fast controls execute the actual embedded parent/child trace helpers,
+checking both capability discovery and callback forwarding without provisioning
+a runtime. They form a separate qualification prerequisite through the normal
+source-bound validator-environment owner.
+
+The first current-hook run reaches actual selection publication but exceeds
+the unchanged aggregate before settlement and independence: 823.875 seconds
+of test allowance and 926.47 seconds including preparation and cleanup.
+Validator-environment preparation consumes approximately 76 seconds; the
+controller and sandbox settle. This remains a non-pass. The next run may reuse
+the runner's normally fingerprint-checked validator environment after the fast
+controls, while retaining a fresh disposable installation target and every
+source, feed, construction, teardown and aggregate deadline.
+
+### 2026-11-05 - Reconcile the qualified slice with current development inputs
+
+The qualified tip is retained before replaying its thirteen commits onto
+development commit `099c2098b4`. Reconciliation conflicts were confined to
+generated footprint digests and unit source-admission hashes; executable
+changes merged without conflict. Intermediate hashes remain fail-closed until
+the combined source is reviewed, rather than borrowing either side's old
+verification as approval.
+
+The canonical payload generator refreshes the newly committed self-contained
+toolkit with the retained-origin, artifact-input and source-owner changes.
+The footprint owner refreshes producer digests without changing contract
+revision 36. Final source-admission review retains all upstream additions:
+the combined packet has 4,167 nodes, 599 source files and 253 coverage targets,
+still under the same 300-second limit. Reviewed hashes reflect the combined
+source, including preserved hashing/copy progress, explicit-root build
+validation and actor-boundary fixture updates.
+One explicit upstream contract migration replaces five legacy per-host
+allowlist cases with four configured-feed cases. HTTPS and public-index refusal
+remain enforced; every other previously qualified case and every upstream
+case is retained. This is not a timeout-driven omission.
+
+The earlier native and unit results remain exact evidence for their retained
+qualified inputs, not blanket qualification of these new upstream bytes.
+Current generated-source consistency, module caps, source admission and the
+13-plugin install contract pass. Focused copied-toolkit delivery passes ten
+cases with one Windows-inapplicable POSIX skip. All forty admitted strict
+projects pass MyPy on both declared Linux and Windows targets; the interrupted
+seventeen-project packet is replaced by complete groups of at most four,
+each within the unchanged 240-second packet bound. Pending projects are not
+claimed as type-qualified.
+
+Immutable current-head unit/native qualification is still owed before
+publication. Ordinary enablement, rollout and all remaining parent completion
+gates stay open.
+
+### 2026-11-05 - Full native publication and runtime independence qualified
+
+The complete opt-in native witness passes at `c2c60d34e7`: 861.23 seconds
+for the test and 894.11 seconds including preparation and cleanup, within the
+unchanged 900-second aggregate. All 17 wheel builds finish below 30 seconds.
+The actual Worktrees constructor publishes its deployment manifest and
+current-version selector, verifies publication under its own interpreter and
+passes the independence probe with its tooling slots hidden. Source and
+tooling contexts settle, and the exact controller and sandbox are gone.
+This is disposable qualification, not ordinary enablement or rollout.
+
+The next canonical unit attempt refuses before executing tests because five
+source hashes predate reviewed changes. The admission review compares every
+changed source against the last qualified commit: two module introductions,
+the explicit shared-error re-export, and the seed/configuration source-owner
+hooks already covered by focused native controls. Only those five hashes are
+updated; all 4,146 nodes, 593 source files, 250 coverage targets and the
+300-second whole-packet limit are preserved. The refused attempt closes all
+four Jobs and removes its sandbox normally.
+
+No runtime source changes accompany this admission/journal update. A new
+immutable current-head unit packet and its independent verification are still
+owed, alongside hosted platform evidence, publication/review/merge and the
+remaining parent objectives.
+
+### 2026-11-05 - Keep fresh source verification with its retained owner
+
+The full native witness still exceeded the unchanged 900-second aggregate
+limit before runtime publication: 819.953 seconds in the test allowance and
+919.50 seconds including preparation and cleanup. All 17 wheel builds stayed
+below 30 seconds; that is not publication or independence proof. The exact
+controller and sandbox settled.
+
+A separate bounded real-source seed diagnostic passed in 188.41 seconds,
+after a 26.259-second fixture-preparation packet. Its profiled ready-seed
+verification took 5.685 seconds, with origin authentication the largest
+component. Feed rechecks, interpreter probes, wheel and tooling checks remain
+unchanged.
+
+The source-configuration boundary now optionally delegates full fresh
+authentication of its exact payload and identity to the held source owner.
+The source-build adapter uses that callback once per composed verification,
+retaining current policy, native settings, revocations, requirements and
+independent retained/compact-byte checks. Omission preserves the independent
+source-identity path; this introduces no persistent verification cache,
+serialized grant, CLI syntax or live-verifier ABI change.
+
+The first combined regression packet exceeded 240 seconds and was split
+without dropping its cases. The new origin/retained/custody controls and
+existing policy/revocation refusals pass together in 96.63 seconds. Application
+mutation/cache-refusal and retry pass in 72.47 seconds; the POSIX mode control
+is explicitly skipped on Windows. The real independent runtime and immutable
+reuse control passes separately in 114.22 seconds. Both original default
+source-lock cases also pass. All packets settle their owned sandbox and
+environment lease. The mutation test now targets the application explicitly:
+valid library wheels may already be cached before its refused build.
+
+Current-head immutable unit qualification, full native publication and
+independence, hosted platform evidence and all remaining parent gates stay
+open. No operation or aggregate limit is raised, and ordinary enablement and
+rollout remain unchanged.
+
+### 2026-11-05 - Settle validation replies on dispatcher cancellation
+
+The scoped scheduling review found that interruption after dequeuing a
+validation request could leave its worker waiting on an unacknowledged reply
+while executor shutdown waited for that worker. The caller now tracks replies
+before enqueueing, refuses outstanding requests before shutdown, and rejects
+later validation against the recorded failure. All started work still joins
+before source/tooling custody closes; no later library starts after failure.
+
+Four focused success/refusal/cancellation controls pass in 10.08 seconds.
+The actual optional Windows workflow passes all five controls in 64.63 seconds,
+including four real backend processes entering the barrier and a separate
+interrupt immediately after dequeueing with four validation requests pending.
+The exact sandbox and environment lease settle. Required source lint passes.
+The same optional packet remains 240 seconds on Windows and Linux; hosted
+Linux execution is still owed.
+
+The canonical unit timeout is separate: bounded diagnostics stop during test
+execution, before coverage reporting. A complete noncertifying covered
+diagnostic passes all 4,146 assertions in 223.891 seconds, but the immutable
+packet still lacks current-head qualification within 300 seconds. Changing
+only the temporary base does not resolve that discrepancy. Unit qualification,
+whole-consumer publication/independence and all remaining parent gates stay
+open; no operation, suite or whole-consumer deadline is raised.
+
+### 2026-11-05 - Overlap bounded libraries without widening the consumer budget
+
+The combined upstream tree passes all 4,146 admitted units with coverage under
+the unchanged 300-second bound. Its exact three-file packet verifies against
+the source and manifest. This proof precedes the scheduling change below and
+does not qualify the new head automatically.
+
+The real consumer still exhausts its 900-second aggregate envelope after
+fifteen library wheels, while entering the application build. Every completed
+wheel remains below its 30-second ceiling; publication and fresh-runtime
+independence are not reached. The observed children and exact sandbox settle,
+and the native execution queue remains unchanged. No deadline is raised.
+
+The exact offline source-profile lane now overlaps at most four independent
+library builds. Fresh cache-publication validation stays on the calling thread,
+the application remains serial after library settlement, and failure stops new
+starts while joining all started work before releasing source/tooling custody.
+Associated-wheel and ordinary non-offline paths retain serial refusal and
+collision handling. A controlled native witness passes in 85.25 seconds:
+five libraries exercise the four-build cap, then the serial application, and
+the complete exact source profile verifies. A frozen-root field mismatch was
+caught and corrected before backend work in the first attempt.
+
+The stronger checked-in Windows packet also passes all four controls in
+66.40 seconds, with confirmed sandbox cleanup. Its barrier executes inside the
+actual library backend processes, rather than only their calling threads:
+four backends must enter before any can continue. The application starts after
+all five libraries settle. The fixture's initial incorrect `pathlib` spelling
+was exposed by retaining the original backend stderr and corrected to its
+existing `Path` import; neither fix changes runtime code or deadlines.
+
+The new real-thread controls have a separate 240-second optional Linux/Windows
+packet; they do not enter or weaken the unit-only effect boundary. Current-head
+unit proof, whole-consumer publication/independence, hosted execution, ordinary
+enablement and the remaining parent Plan/Validation gates stay open.
+
+### 2026-11-05 - Remove measured unit-runner and static-admission repetition
+
+The immutable 3,879-unit packet first exposed stale actor-boundary fixtures for
+the explicit redirect-policy keyword and extracted wheel-validation owner.
+A complete actor-guarded diagnostic collected all remaining failures in one
+bounded pass; the 116 affected controls then passed after their fixtures were
+retargeted without bypassing the legacy promotion API. A subsequent immutable
+coverage run passed assertions through approximately 90 percent before the
+unchanged 300-second wall bound stopped it. That is not a successful packet.
+
+A separately bounded 256-case profile found 128,198 native `stat` calls; static
+build admission spent 7.484 seconds checking trusted-tool shadows. A focused
+regression recorded 3,724 existence/link probes for one clean minimal project.
+Admission now inventories current directory entries and applies the same
+filesystem existence/link checks only to possible reserved names. Case folding
+is a conservative prefilter, not an assumption about filesystem case semantics.
+The seven new controls retain module, package, extension, dangling-link and
+native case behavior, reject an unreadable directory and detect new shadows
+on the next call. The clean fixture needs at most eight probes.
+
+The same 256-case profile's test-call time fell from 11.710 to 5.623 seconds
+(total profiled execution 20.677 to 15.741 seconds). These are small-sample
+component observations, not a completed full-budget qualification. The unit
+actor observer also now resolves a low-level open once and binds its actual
+path spelling once for that operation, retaining fresh descriptor resolution
+on later opens and all refusal/cleanup checks. All 92 affected admission/effect
+controls pass. The positive inventory grows to 3,886 nodes; the source and
+coverage inventories and the 300-second limit remain unchanged.
+
+No whole-suite or native-operation deadline is increased, no source/trust/TLS
+facts are cached, and full native publication/independence and the remaining
+parent validation gates remain open.
+
+### 2026-11-05 - Keep native work moving through bounded component diagnosis
+
+A fresh execution-queue observation confirmed that earlier maintenance had
+completed. The independently bounded main-wheel diagnostic then passed Git
+preparation and acquisition preparation, but its build packet exhausted setup
+time before any backend call. That is not evidence that an individual wheel
+build exceeded its 30-second ceiling.
+
+The existing full consumer witness subsequently reached fifteen successful
+library builds and the final application-wheel entry, but cumulative setup and
+verification exhausted its unchanged 900-second envelope before publication.
+The source origin took 71.697 seconds, initial tooling 111.909 seconds and source
+locking 78.037 seconds. Repeated source checks took 8.503-12.481 seconds;
+library builds took 5.547-11.657 seconds. Final application-wheel timing,
+publication and runtime independence remain unqualified. The disposable scope
+and its known children were independently confirmed gone. No timeout or native
+operation limit was increased.
+
+Component measurements rejected a proposed directory-enumeration change because
+its paired timings were mixed. A smaller tooling-fingerprint change retained
+identical fresh hashes while reducing paired serial reads from 0.267/0.151 seconds
+to 0.074/0.071 seconds with four readers. This is a small-sample component result,
+not an end-to-end speed claim. The implementation uses the existing bounded
+reader owner, preserves count/byte limits and checks selected file sizes again;
+all protected reads settle on success or failure. No TLS, source or trust facts
+are cached and no source, policy or interpreter probe is removed.
+
+The two event-gated reader cases pass in the original early-policy packet, and
+61 byte/workflow controls confirm exact packet coverage with unchanged bounds.
+A nested diagnostic path exceeded native Git's working-directory handling;
+the same packet passes with short framework-owned temporary paths. Experimental
+Git argument/working-directory workarounds were rejected and removed rather
+than changing the product around that diagnostic layout.
+The separate scoped integration review found no high-confidence correctness
+bugs, but does not replace the outstanding native consumer proof. This effort
+and its remaining Plan and Validation Plan remain Active.
+
+### 2026-11-04 - Refresh source admission without relaxing loader or time bounds
+
+The static release-helper audit found that the extracted bundle validator still
+configured a dynamically loaded builder by changing its module globals. The
+existing loader correctly refused that mutation. Candidate source resolution
+and payload hashing now accept an explicit root; bundle validation binds those
+calls to its candidate without executing candidate code or changing the trusted
+builder's namespace. The loader guard itself is unchanged.
+
+Two focused regressions passed, followed by a separate **25-case** compatibility
+packet covering plugin, core and standalone source bindings. The release-helper
+packet passed **351 controls** after restoring its missing test-only coverage
+dependency and updating a stale Git-process fixture for the already-strengthened
+history reader. These packets retained independent **120-second** bounds and
+settled their disposable scopes normally. The fixture now checks the existing
+long-path/no-replace options, private index and 30-second process limit rather
+than expecting the superseded Git argv.
+
+The unit manifest now binds **541 canonical Git-blob sources** and **227
+coverage targets**, including the extracted bundle validator, promotion-history
+reader and shared error types. Its **3,879 nodes** and **300-second** whole-packet
+bound remain unchanged. Exact collection passed under the existing actor guard
+with no prohibited effects; this is not a successful execution/coverage proof
+packet. All current Python files have a declared typecheck owner. The changed
+strict installation-context scope passes MyPy for both Linux and Windows;
+pending scopes are not thereby qualified. All **196** changed Python files pass
+the existing Ruff checks. The install-contract gate passes for all **13**
+runtime plugins after the owning footprint generator refreshed MCP's two
+producer digests without changing contract revision or semantics.
+
+Concurrent native maintenance remains active, so no additional full native
+build/publication witness was attempted. The final main-wheel build tail,
+publication, runtime independence and the remaining parent validation gates are
+still unresolved. Ordinary entrypoints and manifest enablement remain off.
+
+### 2026-11-04 - Promotion-history reads retain native long-path support
+
+- The next unchanged-budget native witness stopped on a source-history
+  refusal after 233.19 seconds, not on a timeout. Origin acquisition took
+  40.43 seconds, tooling readiness 81.28 seconds and seed retention 10.47
+  seconds; parent-seed checks took 4.72-5.63 seconds. These observations
+  do not isolate optimization gains from the changed temporary volume.
+  The native queue was unchanged and idle across the run, and the runner
+  removed its exact sandbox. Publication and final independence were not reached.
+- A single 4.73-second regression reproduced the same refusal with real
+  acquired Git objects beyond the legacy Windows path limit. Acquisition
+  already uses invocation-local `core.longpaths=true`; the independent
+  promotion-history reader lacked that setting. Added it to that reader
+  without changing global Git configuration, history/object selection,
+  environment isolation or operation deadlines.
+- All 16 promotion-identity controls pass, including the native long-path
+  regression, in 33.13 seconds under a 120-second packet. Fast lint passed.
+  This fixes the isolated path-handling defect; full native qualification
+  and every remaining parent gate are still open.
+- The subsequent native witness passed promotion-history discovery and
+  source-lock capture, then built fifteen first-party wheels in 4.83-7.84
+  seconds each. The following build hit its unchanged 30-second guard;
+  the run ended after 644.52 seconds including preparation and cleanup,
+  before publication. Observed composed source checks took 8.59-11.15
+  seconds, below their unchanged 30-second limit. The queue audit was
+  identical and idle before and after this run.
+- A smaller, data-only diagnostic used the actual acquisition, native-feed
+  and tooling owners but selected only the main package and stopped before
+  runtime admission. That build passed in 17.30 seconds; its 300-second
+  packet passed in 131.15 seconds after a separate bounded source-preparation
+  packet. This does not resolve the full-run build timeout or prove cold
+  bootstrap, a complete closure, publication or final independence.
+  Later timing attempts failed during preparation; a subsequent queue audit
+  detected newly active update work overlapping the latest attempts.
+  Those nonpasses do not qualify performance. Heavy qualification is held
+  while that existing update owner is active; no timeout or host policy changed.
+
+### 2026-11-04 - Frozen snapshot writes overlap after the complete baseline
+
+- Alternating data-only comparisons of the actual 2,134-file, approximately
+  32.8 MB graph measured serial snapshot writes at 8.30/8.83 seconds versus
+  2.04/2.23 seconds with four bounded writers. Each pass reread the retained
+  byte buffer and preserved file modes, ordered caller progress and the full
+  source/frozen digests. This is component evidence, not origin approval.
+- Applied the bounded writer window only after the complete initial byte
+  snapshot. Buffer reads stay on the caller; source file-set and content
+  checks remain independent afterward. Every writer settles before the
+  byte buffer closes or a failed destination is removed. New event-gated
+  success/failure cases cover overlap and cleanup, alongside the existing
+  baseline, corruption, mutation, spill and partial-buffer checks.
+  The focused freeze packet passed 25 tests in 32.52 seconds within its
+  unchanged 180-second limit; source synchronization and fast lint passed.
+- A prior diagnostic completed its measured copy work but failed while
+  pytest wrote its cache on an exhausted source volume. That run remains
+  a nonpass. The subsequent qualification used operator-selected temporary
+  storage with unchanged time limits, verified cleanup and no global setting
+  or installed-runtime change. Full native and parent completion gates remain
+  open.
+
+### 2026-11-04 - Retained content reads use a bounded sliding window
+
+- Alternating data-only comparisons of the actual 2,134-file source graph
+  checked 4,268 original/retained file reads on every pass. Existing batch
+  reads took 2.77/2.41 seconds versus 1.79/1.85 seconds with a four-reader
+  sliding window, with identical ordered results and caller-owned progress.
+  Every byte was freshly read and every worker settled before return.
+- Applied the measured change to the canonical retained-content helper and
+  synchronized twelve source copies, without changing installed runtimes.
+  The new event-gated regression rejects the former batch barrier. Existing
+  cancellation, ordered-failure, enumeration, progress and bounded-work
+  contracts remain covered. Two integration cases now exercise real
+  construction hashing instead of a stale mock that omitted per-file hashes.
+  The reader/source-sync packet passed 156 tests with three platform skips
+  in 120.08 seconds under its unchanged 180-second limit; lint passed.
+- The actual retained-configuration diagnostic passed in 119.27 seconds
+  under its unchanged 300-second packet and 210-second internal deadline.
+  Capture took 54.08 seconds, including 16.48 seconds comparing paired
+  contents and 11.08 seconds copying. Subsequent configuration checks took
+  4.15-4.51 seconds. These are small, I/O-variable component measurements,
+  not authenticated origin approval, tail-latency or publication evidence.
+  All source pins, fresh-byte checks, feed policy and 30-second guards remain
+  intact. Full native qualification and every remaining parent gate stay open.
+
+### 2026-11-04 - Source verification overlaps reads without batch barriers
+
+- The real-origin diagnostic acquired and checked the selected commit, but
+  did not reach a ready seed/private-pipe round trip within its unchanged
+  diagnostic deadline. Subsequent setup attempts also hit bounded file-copy
+  and staging limits. These are nonpasses, not authenticated-composition or
+  publication evidence; no aggregate or constituent timeout was increased.
+- A smaller configuration profile identified repeated path-label computation
+  and batch barriers in the existing four-reader fingerprint loop. A
+  separately tested sliding window computes labels once per call, preserves
+  the ordered length-framed digest, and still rereads every byte. It adds no
+  subprocess, network access, persistent content cache or trust-fact reuse.
+- Alternating comparisons read the same 2,134 files and approximately
+  32.8 MB on every pass with identical digests: the existing hash loop took
+  2.17/1.93 seconds and the candidate took 1.36/1.44 seconds. In the actual
+  retained configuration callback, existing checks took 4.29/4.54 seconds
+  versus 3.42/3.86 seconds with the candidate. These small samples demonstrate
+  component savings, not tail-latency or full native qualification.
+- Applied the equivalent loop to the canonical runtime and synchronized its
+  fifteen source copies. A focused event-gated regression proves that a
+  following read can start before an earlier batch's slow final read returns,
+  while preserving framing, one label calculation and one fresh read per file.
+  The fingerprint/shipped-CLI packet passed 41 tests with one platform skip;
+  source-sync tests passed 113 with one skip. Lint and source synchronization
+  checks passed. Each packet retained its own finite limit and settled cleanup.
+  The broader fingerprint contract packet also passed 33 tests with two
+  platform skips, covering symlinks, ordering, failures and current-byte reads.
+- The source pins, source-hash format, feed/certificate handling, interpreter
+  checks and 30-second verification guards remain unchanged. Authenticated
+  parent/seed composition, native publication and post-tooling independence
+  remain open; no parent Plan or Validation Plan item is closed by this
+  optimization.
+- The subsequent exact native witness exhausted its original 900-second
+  aggregate limit before publication (928.25 seconds including preparation
+  and cleanup). It measured origin acquisition at 172.56 seconds, seed/tooling
+  readiness at 156.57 seconds, source-lock readiness at 78.49 seconds and two
+  retention stages at 34.97/42.14 seconds. Parent-seed checks usually took
+  6.58-9.27 seconds; one took 24.44 seconds. Observed composed source checks
+  took 14.37-19.20 seconds, below the unchanged 30-second guard, but the
+  witness stopped during the third wheel build. The native update queue was
+  identical and idle before and after; no update overlap is established.
+  This remains a nonpass. Measure remaining retained-input/preparation work
+  next rather than enlarging the aggregate budget.
+- A bounded configuration-capture profile subsequently passed in 192.56
+  seconds. Capture itself took 62.29 seconds: retained UV input setup
+  accounted for 38.30 seconds, including 16.50 seconds copying and
+  18.99 seconds comparing original/retained file contents. Those paired
+  comparisons still use four-at-a-time batch barriers; compare a bounded
+  sliding window there before changing that helper. This is diagnostic
+  component evidence, not origin approval or full installation qualification.
+
+### 2026-11-04 - Native verification timeout isolated from outer suite budget
+
+- Prepared and collected the exact full native witness in a separate
+  300-second packet. Its subsequent invocation retained the existing
+  900-second envelope and constituent operation guards. The native update
+  queue was unchanged before and after the run; no host-state drift was
+  reported.
+- The run failed after three wheel builds at the source candidate's
+  30-second verification guard, not at the aggregate limit. Earlier composed
+  checks took 9.5, 10.4 and 12.1 seconds. Failure was observed during the
+  retained fingerprint's progress check, but that does not attribute the
+  entire elapsed time to hashing: live selection/parent checks run first.
+  Publication and post-tooling independence remain unproved.
+- A separate data-only diagnostic froze the actual seventeen-project source
+  graph, then read all 2,134 files and approximately 32.8 MB on each of eight
+  checks. Discovery, enumeration and hashing stayed between 1.7 and 2.3
+  seconds with unchanged identities. This is a source-scan component result,
+  not the full authenticated callback chain.
+- A separately materialized configuration diagnostic retained its original
+  source pin, real native settings, credentials and OS trust handling.
+  Four complete checks took 4.0-5.7 seconds; source pins took 1.8-2.6
+  seconds, retained fingerprints 1.5-2.1 seconds, and native configuration
+  0.37-0.56 seconds. TLS-context construction took less than 0.1 second
+  per call. Its selected test provenance is not origin approval.
+- These component results do not reproduce the composed timeout or justify
+  changing the hashing algorithm, caching trust facts, dropping a source pin
+  or increasing a deadline. The authenticated parent/seed verifier composition
+  remains the next bounded diagnostic.
+
+### 2026-11-04 - Bounded packets qualified; slower probe wrapper removed
+
+- After fresh read-only queue checks found no active update requests, the ten
+  independent seed packets covered all nineteen cases: seventeen passed and
+  two skipped for their actual POSIX-only or explicit native-feed opt-in
+  conditions. Every executed packet confirmed contained cleanup. No item or
+  packet deadline increased.
+- The real health/reuse packet exposed Windows error 206 in the proposed
+  nested probe wrapper's long executable path. A separate actual interpreter
+  regression reproduced the failure, and explicit native application handling
+  fixed it. A refusal-test spy also needed to distinguish the permitted stdlib
+  interpreter probe from forbidden package resolution; the real probe still
+  runs, and unadmitted resolver or HTTP work remains forbidden.
+- Alternating native measurements then rejected the wrapper itself: separate
+  owned probes had a 0.498-second median, versus 0.550 seconds for the nested
+  wrapper, with both modes executing the same two real interpreters. Removed
+  the slower nested wrapper rather than retaining complexity based on process
+  counts. Both original and installed probes use their established owned
+  runner and share one absolute 30-second deadline; no facts are reused.
+- The final simpler path passed six actual Python 3.14 probe controls,
+  including long paths and second-probe descendant settlement. Real cold
+  construction, reuse and both target-drift checks passed again in 67 seconds
+  under the unchanged 100-second item limit. Five actual collection/workflow
+  controls also passed. All twelve declared Python installer copies are
+  synchronized with the canonical helper.
+- These are bounded seed and workflow proofs, not full source/artifact
+  publication, hosted-lane or installed-rollout qualification. Those gates and
+  the parent effort remain open.
+
+### 2026-11-04 - Acceptance suites split into independently bounded packets
+
+- Replaced the combined seed acceptance run with ten disjoint packets on
+  Linux and Windows. Each has its own contained process tree, temporary roots,
+  settled cleanup and duration report; wall limits range from 60 to 300
+  seconds. Existing 100-second seed items and 15-second probe controls remain
+  unchanged, and the workflow explicitly prepares their timeout plugin.
+- Split the retained dependency-compile lane's five modules into five separate
+  300-second packets, preserving the previous keyword selection. Both matrices
+  keep their existing six-minute job ceiling and report failures independently.
+  No native operation or full-publication deadline increased.
+- Five focused workflow controls passed in 3.2 seconds. They collect the real
+  test cases to check exhaustive, duplicate-free partitioning and execute the
+  workflow bodies against recorded workloads to check isolation, bounds and
+  cleanup. The actual workflow probe body then passed all five selected
+  native controls in 6.7 seconds and confirmed both inner and enclosing cleanup.
+- Feed/build packets and hosted workflow execution remain pending; this local
+  check does not claim their success. Separate planning and source-lock
+  scenarios remain stage proofs, not a substitute for the full publication
+  witness. The effort and its remaining validation gates stay open.
+
+### 2026-11-04 - Paired seed probes retain independent facts and a shared bound
+
+- Readiness previously opened two separate owned scopes to execute the
+  original and installed interpreters. It now executes both real interpreters
+  inside one existing owned scope, under one absolute deadline clipped to
+  30 seconds. Neither target facts nor source verification are cached.
+  Source, policy, environment, interpreter-byte, helper-byte, feed and retained
+  input checks remain live; standalone verification still probes its original
+  interpreter.
+- Five focused controls passed under each prepared Python 3.11 and 3.14
+  environment in separate 60-second packets, taking 10.2 and 10.5 seconds.
+  They cover both actual interpreter executions, one owned scope, isolated
+  environments, partial-probe refusal and actual Windows descendant settlement
+  when the second probe times out. Both packets confirmed normal cleanup;
+  focused lint and whitespace checks passed.
+- The real seed reuse control now also exercises changed target facts from
+  either interpreter through `ReadySeed.verify()`. That feed/construction
+  packet has not yet been rerun. Heavy qualification remains paused pending
+  confirmation that concurrent host maintenance has settled. No end-to-end
+  saving or full publication success is claimed, and no completion item closed.
+
+### 2026-11-04 - Wheel staging optimized without a larger build budget
+
+- Selected optimization rather than a larger application-operation allowance.
+  The application and library builds retain their 30-second guards; the
+  explicit full witness retains its existing 900-second outer envelope.
+- Modern backend wheel staging can link already generated build output into
+  its disposable staging tree, with the backend's ordinary copy fallback.
+  Source inputs never become installation hard links. Ordinary installation,
+  namespace exclusions, dry runs, resolved foreign/traversal outputs and older
+  backends retain standard behavior; the wheel-only scope clears on errors.
+- Resource collection previously repeated the same ancestor walks for each
+  asset. It now validates each ancestor once within that collection and rechecks
+  its identity after reading. Every file remains individually validated and read;
+  no source-byte or cross-build provenance cache was introduced. A directory
+  replacement during collection refuses before emitting resources.
+- Eleven focused controls passed in 4.5 seconds, including actual native
+  linking, forced copy fallback and ordinary-copy behavior. A temporary
+  parallel-resource-write experiment did not demonstrate improvement and was
+  removed. The canonical generator and its audit pass.
+- The uninstrumented application-only qualification used actual governed
+  consumer-admitted Packaging and Setuptools with the exact owned build path.
+  Requirement validation, build and child settlement completed in 29.6 seconds
+  under the unchanged 30-second guard. All 442 operational resources, source
+  immutability and wheel RECORD checks passed. This is one bounded sample, not
+  tail-latency or full-caller qualification.
+- Actual Manager and Worktrees wheel/sdist/rebuilt-wheel/installed-resource
+  round trips passed two cases in 225 seconds under a separate 300-second
+  packet. Native full source/artifact publication and post-tooling health
+  remain unproved; no ordinary path was enabled and no installation deployed.
+- The subsequent full witness still exhausted its unchanged 900-second
+  aggregate envelope during the first-party loop, before application publication.
+  Its containment audit also observed a persistent machine-environment PATH
+  change. The audit retains changed names, not durable before/after values;
+  the registry audit log was unavailable to the current reader. Attribution is
+  therefore unknown, no rollback was attempted, and this run is not credited as
+  qualification or as evidence that the staging fix caused the host-state drift.
+
+### 2026-11-03 - Source-build cost isolated under constituent deadlines
+
+- After catalogue acquisition succeeded, the full witness still exhausted its
+  existing 900-second aggregate envelope. A separate actual long-path marker
+  probe reproduced Windows error 206; explicit native executable handling fixed
+  that probe without changing interpreter selection. Missing executable paths
+  retain ordinary subprocess failure behavior.
+- The two-project authenticated source-build/reuse control passed in 108 seconds
+  under its existing 120-second operation deadline. Profiling that same control
+  exhausted the deadline rather than receiving more time: 16 owned child calls
+  accounted for 51 seconds, and two wheel builds used six child calls including
+  separate marker queries. Owned requirement validation now obtains the actual
+  interpreter's marker facts in its existing validation child. Nineteen focused
+  requirement/query cases passed in 4.7 seconds, and the actual source-build/reuse
+  plus long-path controls passed in a separate bounded packet.
+- Added a 300-second source-stage deadline and 30-second marker-query/per-wheel
+  build ceilings inside the unchanged full-witness envelope. The diagnostic
+  captured native lock selection in 74 seconds, individual builds in 3-8 seconds
+  and recursively repeated whole-source checks in 12-17 seconds. The source-stage
+  deadline refused after three builds; publication and final-runtime independence
+  did not pass. This was measurable repeated work, not evidence of a stuck build.
+- Flattened the composed source verifier: the replacement candidate performs its
+  requirement/fingerprint checks once, while retaining the original configuration
+  callback, live authentication and revocation checks. The real source-build/reuse
+  control passed in 72 seconds and asserts that whole-source verification never
+  nests recursively. Separate compact-source mutation and policy-revocation
+  refusals passed in 85 seconds; the Windows permission-only case is a skip.
+- These are local bounded controls, not full source/artifact publication,
+  post-tooling health, hosted-platform qualification, ordinary-path enablement or
+  rollout. Those original Plan and Validation items remain open. No aggregate
+  timeout or installed policy was widened.
+- Coalesced adjacent pre-wheel source scans into the initial build-loop check.
+  Every newly constructed wheel still checks compact bytes, live configuration,
+  authentication and revocation before entering the cache, and complete-closure
+  checks remain before and after consumption. The real build/reuse, compact-body
+  mutation/retry and policy-revocation packet passed three cases in 167 seconds
+  under its 180-second bound; the permission-only Windows case remains skipped.
+- The same 300-second source-lifetime diagnostic subsequently reached seven
+  builds rather than three; single, nonrecursive source checks still took
+  approximately 12 seconds. An isolated actual frozen-graph control measured
+  2,134 files and 4.8 seconds per fingerprint, without feed/bootstrap work or
+  subprocesses. Retained-source custody spans construction and final health,
+  not just acquisition. The final explicit witness therefore uses the unchanged
+  900-second outer envelope, 30-second per-build/query/source-check guards and
+  the separate 300-second planning/lock packets, rather than confusing the
+  diagnostic lifetime cap with an acquisition-stage contract. Publication
+  remains unproved pending that complete result.
+- The operation-bounded witness reached eleven builds, then refused a source
+  check taking 41 seconds against its 30-second allowance. Removed another
+  duplicate retained-tree scan by separating configuration selection checks
+  from the candidate's retained-byte check; standalone configuration consumption
+  still validates both. File/directory progress also observes the scan deadline.
+  Six actual lock/integrity/deadline cases passed in eight seconds and assert
+  exactly one retained scan per verification. Native build/reuse plus all 47
+  existing reuse controls passed in 80 seconds; a separate current-policy
+  revocation check passed in 41 seconds. No full-publication success is claimed.
+- The next unchanged-envelope witness completed fifteen library builds and hit
+  the 30-second limit while building the application package. An isolated
+  copied-payload probe reproduced that application timeout with actual governed
+  consumer-admitted Packaging and Setuptools, without repeating cold full-caller
+  bootstrap. Captured backend progress shows ordinary files being copied from
+  `build/lib` into wheel staging, not a blocked metadata query. This diagnostic
+  is not source/artifact publication proof. A separate producer-toolchain probe
+  correctly refused its absent explicit trust policy; no trust exception,
+  public-feed substitution or installed policy change was introduced.
+
+### 2026-11-03 - Catalogue refusal isolated without another long qualification
+
+- With verification framing fixed, the full witness progressed into real
+  governed-wheel acquisition and failed an explicit catalogue candidate bound,
+  rather than stalling in planning. Publication and final-runtime independence
+  remain unproved.
+- A separately bounded metadata-only diagnostic distinguished well-formed
+  multi-version catalogue history from malformed rows, without constructing
+  runtimes or downloading candidate wheels. Calibrated only the disposable
+  full-witness fixture to 4,096 entries; no timeout, byte, request, redirect,
+  production caller or installed-policy setting changed.
+- JSON catalogue budget errors now identify the project and observed/allowed
+  counts; malformed rows have a distinct refusal. Both controlled TLS refusal
+  cases and the configured-feed metadata preflight passed in a seven-second
+  packet. Actual installation still requires all existing exact-file, seasoning,
+  revocation, source and live-publication checks.
+
+### 2026-11-03 - Isolated verification-channel deadlock and probe bounds
+
+- The single full-caller qualification still did not complete within its
+  900-second aggregate envelope. No larger timeout was granted or implemented,
+  and publication/final-runtime independence remain unproved.
+- Separated actual source-bound planning from bootstrap/publication. Direct
+  planning completed in 13 seconds, while the borrowed-origin variant stalled
+  under its 300-second bound. A three-second real pipe regression reproduced
+  loss of a partially read request when a 100 ms idle poll expired; the owner
+  then discarded the remaining fragment and the child waited for its reply.
+- Fixed the idle/frame distinction without changing wire ABI or authority:
+  the idle budget applies only before the first byte; an in-progress frame
+  uses the existing invocation deadline. Windows pipe bindings are prepared
+  once per frame read, not per byte. All 10 native verification controls passed
+  in 2.8 seconds; the new regression completed in 0.39 seconds. The actual
+  borrowed source-bound planner then passed under its unchanged 300-second
+  packet bound, with planning completing in 38 seconds.
+- Interpreter probes also used the entire remaining integration deadline.
+  Added a separate 30-second ceiling and the existing owned-child runner.
+  A deliberately stalled actual probe and Windows descendant settled in
+  approximately two seconds. Normal cold/reuse seed behavior and the copied
+  stdlib bootstrap/borrow/revocation witness passed in separate 120-second
+  packets. Current canonical seed copies were regenerated; no runtime deployed.
+- Removed a redundant fixture history query: expected Dev identity now comes
+  independently from the commit created by the fixture, rather than asking
+  the production history reader to calculate its own expected result. The
+  shared layout suppresses environment values from fixture representations.
+  Full publication, post-tooling independence and the broader Plan/Validation
+  items remain open.
+
+### 2026-11-03 - Bounded native qualification and feed-directed locations
+
+- Added default-off, owner-bound `allowFeedRedirects` selection for captured
+  governed feeds. It covers HTTPS metadata redirects and selected file
+  locations/redirects, enters policy identity, and preserves credential-origin
+  isolation, exact SHA-256, seasoning, revocations and existing acquisition
+  limits. Only the disposable full-caller fixture enables it. Acquisition,
+  configuration and owner-policy packets passed 164 checks; installation policy
+  copies were synchronized, not deployed.
+- The full native witness remains unqualified. Earlier 300-second attempts
+  measured approximately 100 seconds for origin acquisition/preparation and
+  125-143 seconds for restricted tooling bootstrap before semantic construction.
+  A separately opted-in 900-second disposable witness exposed a real Windows
+  long-path interpreter launch failure, then a native multi-wheel reader
+  mismatch. Neither run proved publication or final-runtime independence.
+- Fixed interpreter executable normalization without changing captured argv or
+  target policy. Three small source-lock checks passed in 5 seconds, including
+  a real interpreter beyond the ordinary Windows path limit. Native build-union
+  locks now use the existing supported-tag ranking while ordinary remote locks
+  keep exact-wheel defaults; both real multi-wheel selection/tie controls passed
+  in a 29-second packet, and 26 strict/malformed controls passed in
+  17 seconds.
+- Kept regression packets separate and bounded rather than increasing their
+  total budget: source authentication passed 17 checks in 116 seconds under a
+  180-second cap; cold seed/first touch, settings-only capture, revocation and
+  live refusal passed in 68, 81, 33 and 76 seconds under individual 120-second
+  packet caps. Seed tests additionally have 100-second per-item timeouts.
+  Controller profiling of one cold/reuse seed check attributed 46 launches to
+  feed-settings rechecks and 22 to interpreter checks. Those costs remain
+  visible; no verification guard was removed to improve timing.
+- Extracted the full witness's promoted-source layout into a shared fixture
+  and added a source-lock-only qualification. The actual complete native
+  consumer's source and configured-feed union lock passed in 289 seconds under
+  the ordinary 300-second bound, including post-capture verification. This
+  does not qualify discovery/bootstrap/publication or final-runtime independence.
+  Synchronized 60 declared installer-helper copies and verified the generation
+  check; no installed runtime was changed.
+- Ordinary entrypoints remain disabled. Full native source/artifact publication,
+  post-tooling independence, rollback, hosted parity, production-feed behavior,
+  retention/offline recovery, savings and installed rollout remain open.
+
+### 2026-11-03 - Artifact composition and real native qualification gaps
+
+- Added retained artifact composition: actual attested subject and bundle,
+  acquired promotion history, canonical source binding, first-party bytes from
+  the bundle, and only the remaining exact dependencies from the current
+  governed feed. The combined whole-profile snapshot retains live source,
+  policy, feed, byte and revocation checks through consumption.
+- Actual acquired-source controls passed all 17 authentication cases.
+  Updated mixed/first-party-only composition and copied-toolkit controls passed
+  three focused cases, including exact third-party-only requests and refusal
+  after source, feed or custody changes.
+- Native artifact association now carries mode through the existing governance
+  handover and requires a live verifier. Source fallback may remain disabled;
+  managed publication retains its independent authority. All 144
+  non-construction native installer cases passed; seven real cases were
+  excluded from that result.
+- A new full native source-caller qualification attempt exposed fixture gaps
+  first, then two real compatibility gaps. Repeated optional/conditional local
+  mappings now require independent unconditional reachability from the actual
+  input roots; inactive/context-only ambiguity controls remain intact.
+  Native seed witnesses accept valid auxiliary MD5 metadata only alongside
+  required SHA-256. Full compile/seed controls and an explicitly enabled
+  configured-feed witness passed 120 cases in 34.19 seconds with normal cleanup.
+- The complete caller subsequently reached actual wheel acquisition and refused
+  a download-origin transition absent from the disposable installation policy.
+  That is not successful seed construction, native publication or interpreter
+  independence. Redirect-policy composition and the complete consumer proof
+  remain open; the original 300-second bound and operation limits are unchanged.
+- The ordinary entrypoint, manifest enablement, installed runtime and rollout
+  policy remain unchanged. Artifact-mode real publication, mid-copy rollback
+  and every remaining Plan/Validation item remain open; no completion box changed.
+
+### 2026-11-03 - Native admission association and artifact-feed lifetime
+
+- Source/wheel association now precedes native publication governance.
+  Explicit standalone profile-aware policy requires both its matching current
+  owner policy and live input verification; policy facts alone refuse.
+  Managed installation still requires its independent management lifecycle.
+- Added a qualification-only native admission API. Its original process holds
+  source acquisition and the admitted seed while a semantic child borrows the
+  original origin, performs real planning, and passes source-built inputs to
+  native installation under another live verifier. The ordinary entrypoint
+  and manifest remain unchanged; selected artifact mode explicitly refuses
+  rather than silently falling back. Full semantic/native construction and
+  final-interpreter independence are not yet qualified.
+- All 124 non-construction native installer compatibility cases passed in
+  56.67 seconds (140.28 including managed-runner preparation and cleanup);
+  seven real-construction cases were excluded, not reported as passes.
+  Focused actual-policy checks passed 21 cases, and touched native files
+  passed focused lint.
+- Artifact feed capture now retains a real verification callback across its
+  context. It checks actual installation policy, original UV configuration
+  and held native settings without package resolution, using the same fixed
+  evaluation instant. Verification after context exit refuses.
+- A new original-configuration mutation test initially failed: re-probing
+  only the immutable retained copy could not detect that change. The fix
+  reuses UV's existing preflight on the original invocation as well. Focused
+  controls then passed five cases; all 57 feed compatibility cases passed in
+  134.39 seconds with normal owned cleanup and the unchanged 300-second bound.
+- Artifact first-party/third-party composition, artifact-mode native
+  association, actual semantic caller qualification, mid-copy rollback and
+  the broader Plan and Validation Plan remain open. No completion box changed;
+  no installed runtime, ordinary manifest or rollout policy changed.
+
+### 2026-11-03 - Canonical artifact validation and real discovered planning
+
+- Moved the canonical read-only bundle, wheel, manifest and source validators
+  into a toolkit-safe owner, preserving promotion's public validation API.
+  Isolated source hashing loads only the canonical bundled builder; fetched
+  tooling and promotion/publishing adapters are not admission dependencies.
+- Discovery now checks the selected bundle's attestation, actual source closure
+  and raw manifest digest before profile association. The planner follows the
+  retained acquisition's real Main history, supplies actual release/artifact
+  facts to existing policy selection, and keeps origin verification live.
+  Available artifacts are not erased when profiles are absent; conflicting
+  asset, manifest, version, source or profile evidence refuses.
+- All 192 existing promotion compatibility cases passed across bounded packets;
+  the packet counts were 89 including the new copied-toolkit proof, 98 and eight
+  with two existing cases overlapping. Their durations were 105.99, 241.31 and
+  58.74 seconds, each with normal owned cleanup and the unchanged 300-second
+  limit. The earlier combined run hit that limit after 128 tests and remains
+  a nonpass, not a full-suite result.
+- A 31-case real-origin discovery/planner and existing policy packet passed in
+  31.16 seconds. It selected the actual artifact profile, distinguished genuine
+  profile/channel absence, and rejected permission failure and a forged manifest
+  binding. All 32 touched Python files passed focused lint; staged and unstaged
+  whitespace checks passed.
+- Generated-toolkit SDK and complete release-binding compatibility passed 50
+  cases in 67.07 seconds with normal owned cleanup; one native POSIX adapter
+  case was skipped on Windows and is not POSIX qualification.
+- This is not ordinary consumer enablement or native publication proof.
+  The admitted semantic worker, final target independence, artifact-mode native
+  association, current input checks through publication, mid-copy rollback and
+  the broader Plan and Validation Plan remain open. No completion box changed.
+
+### 2026-11-03 - Live verifier across the existing native publication handover
+
+- Extended the existing candidate-owned handover with an optional finite live
+  verifier. The original caller retains the actual callback and services fixed
+  requests through private inherited pipes while awaiting the candidate.
+  Existing governance JSON carries its contract; no listener, daemon, new
+  source resolver or approval store is introduced.
+- Source declares its supported verifier ABI. Unsupported source refuses before
+  construction. Helper inventory preparation remains read-only and cannot
+  acquire publication custody; actual helper copying remains candidate-owned
+  and uses the live check. The default unguarded prepared-input route retains
+  its prior contract and is not ordinary consumer enablement.
+- Local native transport controls passed 9 cases; the coupled
+  governance/publication/compatibility packet passed 43 cases. The new real
+  candidate packet then constructed and published a complete private runtime
+  and rejected a second attempt in the actual candidate interpreter, preserving
+  incumbent selectors and manifest bytes. It passed in 193.17 seconds,
+  271.77 seconds including preparation and cleanup, within the original
+  300-second aggregate bound.
+- Its first silent attempt exceeded that same aggregate bound and remains a
+  nonpass. Added streamed lifecycle phases before the diagnostic rerun; no
+  timeout was widened. Native-extension lint and module-size guards passed.
+  Complete source/feed callback composition, mid-copy rollback, monitor
+  transitions, hosted qualification and the real ordinary caller remain open.
+
+### 2026-11-03 - Current feed verification and live origin borrowing
+
+- Preserved the native source configuration's verifier in the yielded source
+  lock. Source construction now invokes that original verifier before tools
+  construction and through runtime consumption, rather than relying on an
+  eventual outer-context check.
+- Actual certificate-mutation controls exposed an additional stale-projection
+  gap: some UV versions embed selected certificate bytes in their first settings
+  output. The shared stdlib feed owner now rechecks only the exact held
+  compiler's `--show-settings` projection, with its original environment,
+  working directory and deadline. It compares current acquisition policy with
+  the held projection and performs no dependency resolution or backend work.
+  The restricted Packaging seed uses this same mechanism, including when its
+  owner supplies an acquisition origin without a source configuration.
+- The seed exposes an active-custody `verify()` callback. The admitted tooling
+  interpreter can borrow its owner's original origin through the existing
+  private native pipe without reacquiring the source's exclusive lease. It
+  rereads actual policy/source identity and refuses use after its borrow
+  closes. Neither the origin facts nor this helper establish independent
+  source or publication authority.
+- A 12-case source-lock/current-input packet passed in 90.91 seconds. The
+  shared source/seed packet passed eight cases in 275.23 seconds, including
+  acquisition/consumption certificate changes, public-feed refusal and retained
+  compiler selections. Three seed callback/cold-reuse cases passed in 130.85
+  seconds. The copied `-I -S` bootstrap/admitted-child proof passed in 50.05
+  seconds, including no-reacquisition, live seed revocation and closed-borrow
+  refusal. All used the existing 300-second enclosing limit and normal owned
+  cleanup. Earlier failing controls are not passing evidence.
+- The ordinary caller, actual artifact/profile association, final target
+  validation, native publication composition and the existing broader Plan
+  and Validation Plan remain open. No ordinary lane or installed runtime was
+  enabled, and no completion checkbox is changed by these helper proofs.
+
+### 2026-11-03 - Retained origin and cold admission-tool bootstrap
+
+- Separated the publisher's content-only Git-tree calculation into the shared
+  stdlib history reader. Discovery now derives the frozen Dev channel from
+  an independently acquired Main commit and validates its recorded
+  parent/release/tag association before the existing attested channel reader.
+  It does not import fetched tooling or substitute lookup errors for absence.
+- Added acquisition-only origin intent before profile selection. Actual
+  configured/registered providers retain their existing ownership and source
+  preparation; the held origin can later associate with a genuinely selected
+  source plan without reacquisition. Source fallback remains a separate gate.
+- Composed that stdlib origin with the existing native compiler settings,
+  restricted Packaging seed, governed acquisition and immutable tooling
+  constructor. Fresh copied-toolkit processes reject ambient semantic imports,
+  execute semantic validation under the admitted interpreter, and refuse a
+  current seed-wheel revocation after tooling health. Tooling is not activated.
+- Local complete packets passed: 45 source-authentication/profile-policy cases,
+  35 registered-provider cases, and 21 copied-toolkit/source-identity cases.
+  Each retained its original five-minute containment bound and reported normal
+  cleanup. Initial new-fixture teardown and native long-path launch failures
+  were corrected, not credited as passing evidence.
+- The Worktrees connection and enablement checkboxes remain open. Construction
+  callbacks remain in the invoking process, whereas native settlement runs in
+  the candidate interpreter. A frozen policy signature alone cannot carry live
+  source/feed/revocation verification across that boundary. The original
+  candidate-owned health/publication/rollback contract must be preserved while
+  closing this gap; these helpers do not establish its completion.
+
+### 2026-11-03 - Source-channel prerequisite merged; real Worktrees connection next
+
+#10244 merged as `472a863d3b94369e0c9481ad5415c134f747e7fe` from
+`47e2e4837d622327d9728ca67e00c3e5d79c65af`, with current-head Copilot approval,
+no review issues or unresolved threads, and required green CI. The merged
+candidate's 3,879-unit packet passed in 115.877 seconds under the unchanged
+300-second bound and retained fresh coverage evidence. All 28 selected
+Linux/Windows native jobs passed; the actual copied-toolkit cohorts passed
+10 cases on Linux and 9 on Windows with the declared POSIX-only skip.
+
+The queued-source request fixture uses the existing retained request contract.
+The source/profile, constructor, refusal, Manager and disjoint toolkit rows
+retain their case selections and six-minute limits. Earlier native failures,
+the interrupted profile job and local Windows whole-packet timeouts remain
+non-passing evidence, not retrospective qualification or broader budget
+exceptions.
+
+No ordinary-consumer Plan or Validation Plan item is closed by this
+prerequisite. The next approved #9009 item remains the real Worktrees
+installation lifecycle, with its distinct `agent-worktrees` owner/root,
+actual release/source-provider selection and current policy/acquisition/
+revocation custody through existing health, publication and rollback.
+Keep the supported source path and default-false enablement unchanged until
+that complete consumer is qualified. #4876 remains open and this effort
+remains Active; this merge grants no rollout or finalization authority.
+
 ### 2026-11-03 - Read-only source-channel discovery prerequisite
 
 Extracted the existing frozen-source release reader into

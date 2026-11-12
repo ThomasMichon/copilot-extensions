@@ -1,9 +1,5 @@
-"""Fail-closed seasoning for UV's actual configured resolver.
-
-UV resolves its own configuration, including user and index settings. Its
-development settings projection is intentionally treated as a versioned input:
-an unknown representation refuses installation, never weakens the policy.
-Captured settings may contain credentials and must never be printed.
+"""Fail-closed seasoning for UV's actual, versioned resolver configuration.
+Unknown settings refuse installation; captured credentials are never printed.
 """
 from __future__ import annotations
 
@@ -63,6 +59,11 @@ class _CompileMetadata(set):
 
 class _SourceCompileMetadata(set):
     """Only unconditional owned path mappings may define omitted distributions."""
+
+    def __init__(self, values=()):
+        super().__init__(values)
+        self.roots = set()
+        self.depth = 0
 
 
 def _captured_environment(env):
@@ -192,10 +193,18 @@ def _bundled_dbus_next(project, name, wheel):
 def _check_project(
     source: Path, roots: tuple[Path, ...], seen: set[Path], expected: str | None = None,
 ) -> None:
+    source_graph = isinstance(seen, _SourceCompileMetadata)
+    if source_graph:
+        if seen.depth == 0:
+            seen.roots.add(source.resolve())
+        seen.depth += 1
     try:
         _inspect_project(source, roots, seen, expected)
     except (AttributeError, KeyError, TypeError, ValueError) as exc:
         raise DependencyPolicyError("source dependency metadata is unsupported") from exc
+    finally:
+        if source_graph:
+            seen.depth -= 1
 
 
 def _inspect_project(
@@ -438,7 +447,9 @@ def _source_inputs(
             _check_project(project_path, roots, seen)
         elif "file:" in value.lower():
             raise DependencyPolicyError("local file reference in an unsupported option")
-    compiled_projects = set(seen)
+    compiled_projects = _SourceCompileMetadata(seen) if isinstance(seen, _SourceCompileMetadata) else set(seen)
+    if isinstance(compiled_projects, _SourceCompileMetadata):
+        compiled_projects.roots.update(seen.roots)
     if project_directory:
         manifest = base / project_directory / "pyproject.toml"
         if manifest.is_file():
@@ -497,6 +508,8 @@ def _source_inputs(
             for entry in entries if isinstance(entries, list) else [entries]:
                 if entry.get("editable") is True and "path" in entry:
                     editables.add(_contained(project / entry["path"], roots))
+    if isinstance(seen, _SourceCompileMetadata):
+        seen.roots = compiled_projects.roots
     return base, seen, files, editables
 
 

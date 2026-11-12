@@ -369,7 +369,9 @@ def test_download_orchestration_bounds_workers_and_preserves_input_order(
         def map(self, function, items):
             return map(function, items)
 
-    def download(_root, item, _feeds, _origins, _cutoffs, _limits, _deadline, _context, budget):
+    def download(
+        _root, item, _feeds, _origins, _cutoffs, _limits, _deadline, _context, budget,
+    ):
         budget.reserve("requests", 1)
         return {"selected": item}
 

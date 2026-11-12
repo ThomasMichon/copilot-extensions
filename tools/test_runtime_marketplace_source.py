@@ -9,6 +9,7 @@ import time
 import pytest
 
 import runtime_marketplace_source as marketplace
+from runtime_source_authentication import retain_installation_source
 from runtime_profile import ProfileError, ProfileUnavailable
 from test_runtime_source_authentication import configured_source as configured_source, git
 from test_runtime_profile_policy_plan import adopter as adopter
@@ -112,6 +113,40 @@ def test_actual_registered_source_binds_independent_commit_tree_and_payload(regi
     assert all((fixture["home"] / name).read_bytes() == data for name, data in before.items())
     assert not (fixture["root"] / "versions").exists()
     assert not (fixture["root"] / "current-version").exists()
+
+
+def test_installation_selects_its_registered_provider_without_trying_configured_source(
+    registered_source, monkeypatch,
+):
+    fixture = registered_source
+    monkeypatch.setattr(
+        marketplace.authentication, "retain_authenticated_source",
+        lambda *args, **kwargs: pytest.fail("native marketplace was replaced by a configured source"),
+    )
+    adopter = fixture["adopter"]
+    with retain_installation_source(
+        plan(adopter), installation=adopter[1], deadline=time.monotonic() + 90,
+    ) as selected:
+        assert selected.record()["provider"] == "registered-marketplace-source"
+        assert selected.identity.source_commit == fixture["commit"]
+        selected.verify()
+
+
+def test_failed_selected_marketplace_provider_does_not_try_another_provider(
+    registered_source, monkeypatch,
+):
+    fixture = registered_source
+    write(fixture["home"] / "config.json", {"installedPlugins": []})
+    monkeypatch.setattr(
+        marketplace.authentication, "retain_authenticated_source",
+        lambda *args, **kwargs: pytest.fail("unavailable marketplace silently selected another source"),
+    )
+    adopter = fixture["adopter"]
+    with pytest.raises(ProfileUnavailable, match="ledger is unavailable"):
+        with retain_installation_source(
+            plan(adopter), installation=adopter[1], deadline=time.monotonic() + 90,
+        ):
+            pytest.fail("missing native evidence became source authentication")
 
 
 def test_newer_remote_tip_is_not_substituted_for_installed_source(registered_source):

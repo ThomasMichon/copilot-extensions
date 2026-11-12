@@ -631,11 +631,57 @@ def test_explicit_download_origin_allows_redirect_without_forwarding_credentials
     )
     fake = "synthetic-test-header"
     feed = acquisition.WheelFeed(IDENTITY, state["origin"] + "/simple", (("Authorization", fake),))
-    with acquire(state, feeds=(feed,), download_origins=(download["origin"],)) as result:
+    with acquire(
+        state, feeds=(feed,), download_origins=(download["origin"],),
+    ) as result:
         assert result.snapshot.archives[FILENAME].read() == DATA
         assert fake.encode() not in result.evidence_json
     assert all(headers.get("Authorization") == fake for _, headers in state["requests"])
     assert all("Authorization" not in headers for _, headers in download["requests"])
+
+
+@pytest.mark.parametrize("route", ["link", "index-redirect", "chain", "insecure", "loop", "digest"])
+def test_feed_delegation_follows_only_https_locations_with_existing_bounds(feeds, route):
+    state, foreign = feeds(), feeds()
+    project(state)
+    project(foreign)
+    location = foreign["origin"] + "/files/" + FILENAME
+    expected_error = None
+    if route == "link":
+        project(state, [listed(url=location)])
+    elif route == "index-redirect":
+        state["routes"]["/simple/fixture/"] = (
+            302, {"Location": foreign["origin"] + "/simple/fixture/"}, b"",
+        )
+    elif route == "chain":
+        state["routes"]["/files/" + FILENAME] = (302, {"Location": location}, b"")
+        foreign["routes"]["/files/" + FILENAME] = (
+            307, {"Location": state["origin"] + "/final.whl"}, b"",
+        )
+        state["routes"]["/final.whl"] = (200, {}, DATA)
+    elif route == "insecure":
+        state["routes"]["/files/" + FILENAME] = (
+            302, {"Location": "http://127.0.0.1:9/file.whl"}, b"",
+        )
+        expected_error = "HTTPS location"
+    elif route == "loop":
+        state["routes"]["/files/" + FILENAME] = (
+            302, {"Location": "/files/" + FILENAME}, b"",
+        )
+        expected_error = "redirect budget"
+    else:
+        project(state, [listed(url=location)])
+        foreign["routes"]["/files/" + FILENAME] = (200, {}, b"incorrect bytes")
+        expected_error = "digest"
+    if expected_error is not None:
+        with pytest.raises(ValueError, match=expected_error):
+            with acquire(state):
+                pytest.fail("feed delegation bypassed an existing safety boundary")
+    else:
+        with acquire(state) as result:
+            assert result.snapshot.archives[FILENAME].read() == DATA
+            assert result.evidence()["files"][0]["source_origins"]
+        assert foreign["requests"]
 
 
 @pytest.mark.parametrize("location", [
@@ -686,6 +732,19 @@ def test_exact_metadata_wheel_and_double_copy_storage_limits_are_inclusive(feeds
         max_wheel_bytes=len(DATA), max_closure_bytes=len(DATA),
     )) as result:
         assert result.snapshot.archives[FILENAME].read() == DATA
+
+
+@pytest.mark.parametrize("entries,maximum,reason", [
+    ([listed(), listed(filename="other.whl")], 1, "candidate budget exceeded for fixture: 2 > 1"),
+    ([None], 10, "invalid entries for fixture"),
+])
+def test_index_budget_and_invalid_rows_are_distinct_refusals(feeds, entries, maximum, reason):
+    state = feeds()
+    project(state, entries)
+    with pytest.raises(acquisition.WheelError, match=reason):
+        with acquire(state, limits=limits(max_candidates_per_project=maximum)):
+            pytest.fail("invalid or over-budget index reached its selected download")
+    assert [path for path, _ in state["requests"]] == ["/simple/fixture/"]
 
 
 def test_changed_download_digest_is_not_an_availability_failure(feeds):

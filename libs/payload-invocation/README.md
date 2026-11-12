@@ -259,6 +259,26 @@ deferred stamping and direct manifest publication. Missing policy preserves
 standalone behavior; an older helper may proceed only when no policy exists.
 Malformed, unsupported or foreign policy cannot authorize publication.
 
+The additive in-process `profile_publication_authority` scope is the lifecycle
+SDK's profile-consumer capability. It binds an absolute runtime root, plugin
+identity and trusted consumer callback; each publication check requires the
+current valid, unmanaged profile policy and invokes the callback to revalidate
+live profile authority. The consumer retains full input verification at its
+actual mutation boundaries; generic ownership inspection is not a second
+input-verification owner. Worktrees rechecks under acquired custody before
+construction and immediately before exposing a manifest for commit, including
+retained restoration. Nested scopes retain every enclosing check
+and reset on exit, including failure. It changes neither command syntax nor
+the version-1 lease purpose or inherited ticket. It is not serialized or
+inherited by a subprocess: that process needs its own admitted profile consumer.
+Worktrees selects the callable from the exact lifecycle helper it loads before
+acquiring publication custody, including retained restoration and manifest
+publication. An older helper without this capability refuses profile publication
+before effects; ordinary callers keep their existing missing-policy baseline.
+Provider expansion and the conditional Worktrees adopter ship together; rollback
+to an older helper explicitly refuses this optional operation rather than
+downgrading it. No old syntax or capability is retired by this addition.
+
 An explicit management caller may use `--managed-deployment` with
 `--run-lifecycle` (never teardown or a read/check operation). This requests
 management purpose on the existing token-owned lock, not another updater or a

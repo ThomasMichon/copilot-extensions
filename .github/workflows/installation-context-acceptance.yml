@@ -1895,9 +1895,23 @@ jobs:
 
   dependency-compile-linux:
     if: ${{ inputs.dependency_compile }}
-    name: Retained dependency compile (Linux)
+    name: Retained dependency compile (Linux, ${{ matrix.suite }})
     runs-on: ubuntu-latest
     timeout-minutes: 6
+    strategy:
+      fail-fast: false
+      matrix: &dependency-compile-matrix
+        include:
+          - suite: native-compile
+            test: tools/test_installer_dependency_compile.py
+          - suite: compile-policy
+            test: tools/test_installer_dependency_policy.py
+          - suite: source-lock
+            test: tools/test_runtime_source_lock.py
+          - suite: source-authentication
+            test: tools/test_runtime_source_authentication.py
+          - suite: source-feed
+            test: tools/test_runtime_source_feed.py
     steps: &dependency-compile-steps
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -1905,22 +1919,42 @@ jobs:
           python-version: "3.12"
       - uses: astral-sh/setup-uv@v9.0.0
       - name: Validator tooling only
-        run: python tools/seasoned_uv.py --uv uv --registry-only -- --system pytest pyyaml
+        run: python tools/seasoned_uv.py --uv uv --registry-only -- --system pytest "pytest-timeout>=2.3,<3" pyyaml
       - name: Real retained compile, transitive age and unchanged install isolation
-        run: >-
-          python -m pytest -q
-          tools/test_installer_dependency_compile.py
-          tools/test_installer_dependency_policy.py
-          tools/test_runtime_source_lock.py
-          tools/test_runtime_source_authentication.py
-          tools/test_runtime_source_feed.py
-          -k "compile or real_uv_registry_transitive_and_isolated_build_age or runtime_source_lock or runtime_source_authentication or runtime_source_feed"
+        shell: python
+        env:
+          PACKET_TEST: ${{ matrix.test }}
+        run: |
+          import os, sys
+          from pathlib import Path
+          repo = Path.cwd()
+          sys.path.insert(0, str(repo / "tools"))
+          from plugin_test_containment import Limits, TestSandbox, isolated_environment, run_contained
+          owner = TestSandbox(prefix="dependency-compile-")
+          with owner as directory:
+              temporary = Path(directory)
+              environment = isolated_environment(os.environ, temporary)
+              environment["PYTHONPATH"] = str(repo / "tools")
+              code = run_contained(
+                  [sys.executable, "-m", "pytest", "-q", os.environ["PACKET_TEST"],
+                   "-k", "compile or real_uv_registry_transitive_and_isolated_build_age or runtime_source_lock or runtime_source_authentication or runtime_source_feed",
+                   "--durations=10", "--basetemp", str(temporary / "pytest")],
+                  cwd=repo, env=environment, sandbox=temporary,
+                  limits=Limits(wall_seconds=300),
+              )
+          if owner.retained or temporary.exists():
+              raise RuntimeError("Dependency compile test cleanup did not settle")
+          print(f"DEPENDENCY_COMPILE_NORMAL_CLEANUP=TRUE EXIT={code}", flush=True)
+          raise SystemExit(code)
 
   dependency-compile-windows:
     if: ${{ inputs.dependency_compile }}
-    name: Retained dependency compile (Windows)
+    name: Retained dependency compile (Windows, ${{ matrix.suite }})
     runs-on: windows-latest
     timeout-minutes: 6
+    strategy:
+      fail-fast: false
+      matrix: *dependency-compile-matrix
     steps: *dependency-compile-steps
 
   source-build-linux:
@@ -1931,10 +1965,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix: &source-build-matrix
-        suite: [profiles, refusals, manager, normal, toolkit]
+        suite: [profiles, refusals, manager, normal, toolkit, overlap]
         include:
           - suite: profiles
-            expression: not (unadmitted_source_build_inputs or rejected_native_source_settings or built_metadata_must_match or backend_timeout or revoked_source_policy)
+            expression: not (unadmitted_source_build_inputs or rejected_native_source_settings or built_metadata_must_match or backend_timeout or revoked_source_policy or native_library_builds_overlap)
             constructor_expression: distinct_build_requirements_get_separate_tooling_and_cached_wheels or all_requirement_groups_are_acquired_before_the_feed_becomes_unavailable or offline_builds_keep_native_cache_selection_and_caller_relative_interpreter
           - suite: refusals
             expression: unadmitted_source_build_inputs or rejected_native_source_settings or built_metadata_must_match or backend_timeout or revoked_source_policy
@@ -1962,9 +1996,38 @@ jobs:
           python -m pytest -q
           tools/test_runtime_admission_toolkit.py
           libs/payload-invocation/tests/test_runtime_admission.py
+      - name: Bounded library overlap and serial application construction
+        if: ${{ matrix.suite == 'overlap' }}
+        shell: python
+        run: |
+          import os, sys
+          from pathlib import Path
+          repo = Path.cwd()
+          sys.path.insert(0, str(repo / "tools"))
+          from plugin_test_containment import Limits, TestSandbox, isolated_environment, run_contained
+          owner = TestSandbox(prefix="source-library-overlap-")
+          with owner as directory:
+              temporary = Path(directory)
+              environment = isolated_environment(os.environ, temporary)
+              environment["PYTHONPATH"] = str(repo / "tools")
+              code = run_contained(
+                  [sys.executable, "-m", "pytest", "-q",
+                   "tools/test_runtime_source_build.py", "tools/test_runtime_source_wheels.py",
+                   "-k", "native_library_builds_overlap or library_builds_overlap or library_dispatch_cancellation",
+                   "--basetemp", str(temporary / "pytest")],
+                  cwd=repo, env=environment, sandbox=temporary,
+                  limits=Limits(wall_seconds=240),
+              )
+          if owner.retained or temporary.exists():
+              raise RuntimeError("Source library overlap did not settle its sandbox")
+          if code:
+              raise SystemExit(code)
+      - name: Native POSIX lease privacy and existing-mode preservation
+        if: ${{ matrix.suite == 'overlap' && runner.os == 'Linux' }}
+        run: python -m pytest -q libs/versioned-runtime/tests/test_runtime_lease_privacy.py
       - &source-wheel-backend-step
         name: Acquire the pinned real backend fixture before isolated feed tests
-        if: ${{ matrix.suite != 'manager' && matrix.suite != 'toolkit' }}
+        if: ${{ matrix.suite != 'manager' && matrix.suite != 'toolkit' && matrix.suite != 'overlap' }}
         shell: python
         run: |
           from datetime import datetime, timezone
@@ -2137,9 +2200,43 @@ jobs:
 
   packaging-seed-linux:
     if: ${{ inputs.dependency_compile }}
-    name: Stdlib Packaging seed (Linux)
+    name: Stdlib Packaging seed (Linux, ${{ matrix.suite }})
     runs-on: ubuntu-latest
     timeout-minutes: 6
+    strategy:
+      fail-fast: false
+      matrix: &packaging-seed-matrix
+        include:
+          - suite: interpreter-probes
+            expression: paired_target_probe or target_probe_has
+            seconds: 60
+          - suite: health-and-reuse
+            expression: real_seed_cold_health_reuse
+            seconds: 180
+          - suite: selection-revocation
+            expression: owner_revocation and selection
+            seconds: 180
+          - suite: health-revocation
+            expression: owner_revocation and health
+            seconds: 180
+          - suite: consumption-revocation
+            expression: owner_revocation and consumption
+            seconds: 180
+          - suite: acquisition-feed
+            expression: origin_tooling_rechecks and acquisition
+            seconds: 180
+          - suite: consumption-feed
+            expression: origin_tooling_rechecks and consumption
+            seconds: 180
+          - suite: owner-arguments
+            expression: owner_cli_selection
+            seconds: 300
+          - suite: early-policy-refusals
+            expression: public_native_feed or interpreter_link or tooling_identity
+            seconds: 180
+          - suite: standalone-seed
+            expression: first_touch or native_configured_feed_packaging_witness
+            seconds: 120
     steps: &packaging-seed-steps
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -2147,15 +2244,43 @@ jobs:
           python-version: "3.12"
       - uses: astral-sh/setup-uv@v9.0.0
       - name: Validator tooling only
-        run: python tools/seasoned_uv.py --uv uv --registry-only -- --system pytest pyyaml packaging
+        run: python tools/seasoned_uv.py --uv uv --registry-only -- --system pytest "pytest-timeout>=2.3,<3" pyyaml packaging
       - name: Native governed seed, immutable health and isolated first touch
-        run: python -m pytest -q tools/test_installer_packaging_seed.py
+        shell: python
+        env:
+          PACKET_EXPRESSION: ${{ matrix.expression }}
+          PACKET_SECONDS: ${{ matrix.seconds }}
+        run: |
+          import os, sys
+          from pathlib import Path
+          repo = Path.cwd()
+          sys.path.insert(0, str(repo / "tools"))
+          from plugin_test_containment import Limits, TestSandbox, isolated_environment, run_contained
+          owner = TestSandbox(prefix="packaging-seed-")
+          with owner as directory:
+              temporary = Path(directory)
+              environment = isolated_environment(os.environ, temporary)
+              environment["PYTHONPATH"] = str(repo / "tools")
+              code = run_contained(
+                  [sys.executable, "-m", "pytest", "-q", "tools/test_installer_packaging_seed.py",
+                   "-k", os.environ["PACKET_EXPRESSION"], "--timeout=100", "--durations=10",
+                   "--basetemp", str(temporary / "pytest")],
+                  cwd=repo, env=environment, sandbox=temporary,
+                  limits=Limits(wall_seconds=int(os.environ["PACKET_SECONDS"])),
+              )
+          if owner.retained or temporary.exists():
+              raise RuntimeError("Packaging seed test cleanup did not settle")
+          print(f"PACKAGING_SEED_NORMAL_CLEANUP=TRUE EXIT={code}", flush=True)
+          raise SystemExit(code)
 
   packaging-seed-windows:
     if: ${{ inputs.dependency_compile }}
-    name: Stdlib Packaging seed (Windows)
+    name: Stdlib Packaging seed (Windows, ${{ matrix.suite }})
     runs-on: windows-latest
     timeout-minutes: 6
+    strategy:
+      fail-fast: false
+      matrix: *packaging-seed-matrix
     steps: *packaging-seed-steps
 
   marketplace-source-linux:
