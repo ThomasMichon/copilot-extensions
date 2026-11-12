@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import argparse
 from types import SimpleNamespace
 
 import pytest
@@ -120,3 +121,127 @@ def test_move_keeps_strict_action_preflight(planning_record, monkeypatch):
     with pytest.raises(ValueError, match="strict preflight sentinel"):
         relocation.move(fixture.identity, str(fixture.destination), fixture.config)
     assert seen == [(fixture.identity, str(fixture.destination), fixture.config)]
+
+
+@pytest.mark.parametrize("phase", ["planned", "copying"])
+def test_explicit_live_check_owns_guards_without_writing_a_move(planning_record, monkeypatch, phase, capsys):
+    from contextlib import contextmanager, nullcontext
+    from agent_worktrees.checkout_relocation_plan import check_live
+
+    fixture = planning_record
+    fixture.config.default_repo = SimpleNamespace(worktree_root=str(fixture.ledger.parent))
+    entered = []
+
+    def guard(name):
+        @contextmanager
+        def held(*_args, **_kwargs):
+            if "on_stale" in _kwargs:
+                _kwargs["on_stale"]("retained stale marker")
+            entered.append(name)
+            try:
+                yield
+            finally:
+                entered.remove(name)
+        return held
+
+    for owner, name in (
+        (relocation, "FinalizeLock"), (relocation.worktree_lifecycle, "guard"),
+        (relocation.launch_admission, "guard"), (relocation.state, "owner"),
+    ):
+        monkeypatch.setattr(owner, name, guard(str(id(owner))))
+    monkeypatch.setattr(relocation, "_receiving_admission", lambda *_: (None, None, nullcontext()))
+
+    def preflight(*_args):
+        assert len(entered) == 4
+        return {"phase": phase, "apply": False}
+
+    monkeypatch.setattr(relocation, "_action_plan", preflight)
+    monkeypatch.setattr(relocation.state, "write", lambda *_: pytest.fail("live check wrote a move"))
+    if phase == "planned":
+        report = check_live(fixture.identity, str(fixture.destination), fixture.config)
+        assert report["live_admission"]["apply_rechecks"] and not report["apply"]
+    else:
+        with pytest.raises(ValueError, match="unstarted move"):
+            check_live(fixture.identity, str(fixture.destination), fixture.config)
+    assert not entered
+    captured = capsys.readouterr()
+    assert not captured.out and "retained stale marker" in captured.err
+
+
+@pytest.mark.parametrize("active,confirmed", [(True, True), (False, False), (False, True)])
+def test_live_owner_check_preserves_strict_bound_process_and_unknown_fences(
+    planning_record, monkeypatch, active, confirmed,
+):
+    fixture = planning_record
+    seen = []
+
+    def verify(record, *, strict):
+        assert record is fixture
+        seen.append(strict)
+        return SimpleNamespace(active=active, probes_ok=confirmed)
+
+    monkeypatch.setattr(relocation.sessions, "verify_worktree_active", verify)
+    monkeypatch.setattr(relocation.procs, "checkout_retirement_blocker", lambda *_: None)
+    if active or not confirmed:
+        with pytest.raises(ValueError, match="confirmed inactive"):
+            relocation._stopped(fixture, fixture.destination)
+    else:
+        relocation._stopped(fixture, fixture.destination)
+    assert seen == [True]
+
+
+def _move_arguments(*arguments):
+    from agent_worktrees import worktree_ops_cli
+
+    parser = argparse.ArgumentParser()
+    worktree_ops_cli.add_parsers(parser.add_subparsers())
+    return parser.parse_args(["move", *arguments])
+
+
+def test_live_cli_discovery_does_not_load_target_state(monkeypatch, capsys):
+    from agent_worktrees import worktree_ops_cli
+
+    monkeypatch.setattr(relocation, "_native_supported", lambda: True)
+    monkeypatch.setattr(cfg, "load_config", lambda: pytest.fail("discovery loaded target state"))
+    assert worktree_ops_cli.cmd_move(_move_arguments("--capabilities")) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["live_admission"] == {
+        "schema": "agent-worktrees.checkout-live-admission", "version": 1,
+        "check_live": True, "activity_refresh": True, "apply_rechecks": True,
+    }
+
+
+def test_live_cli_dispatch_never_selects_copy_or_pure_planning(planning_record, monkeypatch, capsys):
+    from agent_worktrees import checkout_relocation_plan, worktree_ops_cli
+
+    fixture = planning_record
+    seen = []
+    monkeypatch.setattr(cfg, "load_config", lambda: fixture.config)
+
+    def admitted(*arguments):
+        seen.append(arguments)
+        return {"apply": False, "phase": "planned", "live_admission": {"apply_rechecks": True}}
+
+    monkeypatch.setattr(checkout_relocation_plan, "check_live", admitted)
+    for owner, name in ((relocation, "move"), (relocation, "plan"), (relocation.state, "write")):
+        monkeypatch.setattr(owner, name, lambda *_: pytest.fail("live CLI selected copying or journal writes"))
+    assert worktree_ops_cli.cmd_move(_move_arguments(
+        fixture.identity, "--to", str(fixture.destination), "--check-live", "--json",
+    )) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["live_admission"]["apply_rechecks"] and not result["apply"]
+    assert seen == [(fixture.identity, str(fixture.destination), fixture.config)]
+
+
+@pytest.mark.parametrize("conflict", ["--apply", "--abort", "--capabilities"])
+def test_live_cli_rejects_conflicting_effect_or_discovery_options(conflict, monkeypatch, capsys):
+    from agent_worktrees import worktree_ops_cli
+
+    monkeypatch.setattr(cfg, "load_config", lambda: pytest.fail("conflicting command read target state"))
+    if conflict == "--capabilities":
+        assert worktree_ops_cli.cmd_move(_move_arguments("--check-live", conflict)) == 1
+        assert "accepts no target or effects" in capsys.readouterr().out
+    else:
+        with pytest.raises(SystemExit) as refusal:
+            _move_arguments("--check-live", conflict)
+        assert refusal.value.code == 2
