@@ -374,7 +374,11 @@ def _call(setup: Setup, mode: str) -> Outcome:
         environment[ENGINE_PYTHON] = os.path.abspath(sys.executable)
         environment[ENGINE_CONTEXT] = json.dumps({
             "schema": "copilot-extensions.repository-setup-engine", "version": 1,
-            "argv": [environment[ENGINE_PYTHON], "-I", "-m", "agent_worktrees"],
+            "argv": [
+                environment[ENGINE_PYTHON], "-I",
+                *(["-B"] if sys.dont_write_bytecode else []),
+                "-m", "agent_worktrees",
+            ],
             "capabilities": {
                 "new_admission": _json(Path(__file__).with_name("new-admission-v1.json")),
             },

@@ -440,6 +440,9 @@ This avoids using an ambient Python merely to discover the selected one.
 Invoke this exact argv plus the intended engine arguments. It preserves the
 selected interpreter environment, including a virtual environment's executable
 path, rather than resolving its symlink to a different base interpreter.
+When the caller has disabled Python bytecode writes, the argv also carries
+`-B`: isolated mode ignores `PYTHONDONTWRITEBYTECODE`, so inheriting that
+environment variable alone would not preserve the caller's policy.
 It does not search PATH, bootstrap another engine or advertise package versions
 as capabilities. Existing scripts may ignore this additive environment contract;
 new consumers requiring it must refuse its absence or an unsupported shape.
