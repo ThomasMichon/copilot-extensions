@@ -72,6 +72,12 @@ def declared_copies(content: Path, root: Path, scope: str, shell: str, contextua
         for name in SETUP:
             add(content / "scripts" / name, root / "scripts" / name, shell == "sh")
     if not contextual:
+        for name in (
+            "update_controller_probe.py",
+            "installation-context/shell-caller-owned.ps1",
+            "installation-context/daemon_instance_runtime.pyz",
+        ):
+            add(content / "scripts" / name, root / "bin" / name, shell == "sh", required=True)
         home = Path(os.environ.get("USERPROFILE") or Path.home()) if os.name == "nt" else Path.home()
         for name in TOOLS:
             source = (

@@ -118,6 +118,26 @@ def _arguments(path: Path) -> list[str]:
     return values[:-1]
 
 
+def _copy_native_global_tools(home: Path, monkeypatch, shell: str):
+    with monkeypatch.context() as environment:
+        environment.setenv("HOME", str(home))
+        environment.setenv("USERPROFILE", str(home))
+        environment.setattr(Path, "home", classmethod(lambda cls: home))
+        environment.syspath_prepend(str(PLUGIN / "scripts"))
+        declared_copies = runpy.run_path(
+            str(PLUGIN / "scripts" / "runtime_install_publication.py"),
+        )["declared_copies"]
+        runtime = home / ".agent-worktrees"
+        for binding in declared_copies(PLUGIN, runtime, "resolvers", shell, False):
+            source, target = Path(binding["source"]), Path(binding["target"])
+            if source.name.startswith("resolve-runtime."):
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
+        assert not (runtime / "payload-dir").exists()
+    return home / ".local" / "bin"
+
+
 @pytest.mark.parametrize("front", ["global", "payload", "project", "installed-project"])
 @pytest.mark.parametrize("runtime", ["missing", "broken"])
 def test_update_entry_fetches_before_python(update_entry_case, front, runtime, native_bash):
