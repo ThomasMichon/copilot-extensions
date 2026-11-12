@@ -132,7 +132,7 @@ refuse before effect and never fall back to a broader sweep or process waiter.
 
 ## Implementation plan
 
-- [ ] Land this contract/vision amendment through normal independent review and
+- [x] Land this contract/vision amendment through normal independent review and
   required CI before runtime implementation.
 - [ ] Add the bounded expression parser, canonical immutable definition
   resolution, capability validation and three-valued driver evaluation.
@@ -178,3 +178,15 @@ local ingress, real service placement, existing production-state migration,
 provider enrollment, live traffic and review/Dispatch automation remain
 separately authorized acceptance; no synthetic fixture passes those gates.
 The canonical parent remains Active until its own full Plan/Validation resolves.
+
+## Journal
+
+### 2026-11-11 - Contract accepted; shared semantics first
+
+#12161 merged after current-head approval with no open findings and successful
+required CI. Managed completion used the existing Maintainer review-rule
+exception, not a CI bypass. The implementation sequence starts with the
+dependency-free `agent-pr-filters` library so service and native drivers consume
+one parser, capability/scope validator and three-valued evaluator.
+Named definitions remain inert; this first source slice does not yet register
+demand, acquire provider facts or expose an operational service route.

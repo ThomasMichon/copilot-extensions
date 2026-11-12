@@ -7,7 +7,7 @@ exclude-newer = "7 days"
 
 [project]
 name = "agent-pull-requests"
-version = "0.3.297-dev1"
+version = "0.3.298-dev1"
 description = "Cross-repository pull-request CLI with agent-worktrees-mediated GitHub auth."
 readme = "README.md"
 license = "MIT"
@@ -16,6 +16,7 @@ authors = [
     { name = "Thomas Michon" }
 ]
 dependencies = [
+    "agent-pr-filters",
     "agent-update-driver",
     "agent-work-coalescing-singleton",
     "agent-procutil",
@@ -25,6 +26,7 @@ dependencies = [
 ]
 
 [tool.uv.sources]
+agent-pr-filters = { path = "libs/pr-filters" }
 agent-update-driver = { path = "libs/update-driver" }
 # Shared coalescing/rendezvous daemon primitive (module
 # ``work_coalescing_singleton``) -- resolved live from its canonical path so
