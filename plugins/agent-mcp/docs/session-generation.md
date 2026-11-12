@@ -45,9 +45,15 @@ than becoming an unowned ordinary call. Interpolated and already ownership-bound
 entries are not overridden.
 
 Unreferenced bootstrap-trace fields remain in the physical upstream environment
-but are excluded from shared-context identity. Otherwise, each launch timestamp
-would reject an equivalent second client against the existing custodian.
-Explicit configuration references keep those values semantically significant.
+but supporting peers exclude them from shared-context identity. The existing
+`agent-mcp.execution-context/2` descriptor additively declares
+`trace_bookkeeping: 1`; callers select that mode in their context request only
+when the peer advertises it. Missing declarations and old requests retain the
+original v2 hashing algorithm, including its limitations; unknown requested modes
+refuse before configuration loading. There is no package-version inference.
+Without the negotiated mode, each launch timestamp can reject an equivalent
+second client against an older custodian. Explicit configuration references
+always keep those values semantically significant.
 
 The session-only `--additional-mcp-config` overlay is a sealed anonymous file,
 read through the client's inherited Linux descriptor. Configuration and env
