@@ -5485,7 +5485,7 @@
         "libs/lazy-cli-dispatch/src/lazy_cli_dispatch/__init__.py": "66144ff97e625c7a2d44f98a365036c19dfefb6f2502d2ed894b8c50d6d7a94c",
         "libs/lazy-cli-dispatch/tests/test_dispatch.py": "7168051eac1318629a3d77ab2e4c084384396f542361726d6a46889122d8a0b5",
         "libs/peer-launch/peer_launch.py": "a03c3a4565dffa728ca3a067149be60054495af10891c9099de241324221d56f",
-        "libs/peer-launch/tests/test_peer_environment.py": "eb1282d24ef44406e254528ea11379cabeeef8e04698730d358dda84f0ad005d",
+        "libs/peer-launch/tests/test_peer_environment.py": "8ee66a8089bf044ad1d3d1f5ee5962b98c989376637be6f25775bf6a2bc28435",
         "libs/plugin-activation/src/plugin_activation/__init__.py": "4d43a4846e8a92cba8995a051af74dafa275c71e525092dacadb8fa09888e0a6",
         "libs/plugin-activation/src/plugin_activation/_config_io.py": "8e12b1e8432bb7288689ab2aaa0688ce357bef80bb0e0fe2137ec50d520b4f04",
         "libs/plugin-activation/src/plugin_activation/_findings.py": "3e9c656317ebf2b6628dec49a62c3a5c87d827b97161be7d287a871cafa39cc7",

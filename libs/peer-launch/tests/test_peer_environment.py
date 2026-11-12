@@ -4,6 +4,7 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path, PureWindowsPath
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -188,13 +189,13 @@ def test_vault_peer_refuses_unqualified_native_platform_without_owner_fallback(
      "\\\\?\\UNC\\server\\share\\" + "x" * 250 + r"\python.exe"),
 ], ids=["short-drive", "long-drive", "extended-drive", "long-unc"])
 def test_windows_peer_launch_binds_executable_without_rewriting_argv(
-    monkeypatch, tmp_path, pinned, selected, executable,
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, pinned: bool, selected: str, executable: str,
+) -> None:
     python = PureWindowsPath(selected)
     environment = {"COPILOT_EXTENSIONS_CONTEXT": "validated-peer"}
-    calls = []
+    calls: list[tuple[list[str], dict[str, Any]]] = []
 
-    def call(command, **kwargs):
+    def call(command: list[str], **kwargs: Any) -> int:
         calls.append((command, kwargs))
         return 23
 
