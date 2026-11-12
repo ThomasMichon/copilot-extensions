@@ -102,7 +102,7 @@ def test_prepared_wheel_reuse_revalidates_inputs_without_build_fallback(reusable
 
 @pytest.mark.parametrize("fault", [
     None, "completion", "wheel", "application", "extras", "target", "policy",
-    "toolchain", "selected-source",
+    "toolchain", "selected-source", "missing-copy", "damaged-copy",
 ])
 def test_complete_application_reuse_revalidates_real_outputs_without_constructing(
     reusable_source, tmp_path, monkeypatch, fault,
@@ -143,6 +143,9 @@ def test_complete_application_reuse_revalidates_real_outputs_without_constructin
         construction = native.source_inputs.application_inputs(observed, inputs)
     application = snapshot / "applications/demo"
     application.mkdir(parents=True)
+    (application / "wheels").mkdir()
+    for filename, archive in archives.items():
+        shutil.copyfile(archive, application / "wheels" / filename)
     (application / "application.json").write_text(json.dumps({"construction": construction}))
     (application / "uv.lock").write_text("version = 1\n")
     snapshot_record = native.source_inputs._read(snapshot / local.MANIFEST)
@@ -155,7 +158,11 @@ def test_complete_application_reuse_revalidates_real_outputs_without_constructin
         (snapshot / "wheels/demo" / next(iter(archives))).write_bytes(b"damaged")
     elif fault == "application":
         (application / "application.json").write_text('{"construction": {}}\n')
-    if fault in {"wheel", "application"}:
+    elif fault == "missing-copy":
+        (application / "wheels" / next(iter(archives))).unlink()
+    elif fault == "damaged-copy":
+        (application / "wheels" / next(iter(archives))).write_bytes(b"damaged")
+    if fault in {"wheel", "application", "missing-copy", "damaged-copy"}:
         completion = local._application_completion(snapshots, deadline=deadline)
     (completed / "applications.json").write_text(json.dumps(completion))
     (output / local.MANIFEST).write_text(json.dumps(record))

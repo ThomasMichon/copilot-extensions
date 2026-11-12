@@ -93,7 +93,12 @@ def _git(
     streams = {"capture_output": True} if output is None else {
         "stdout": output, "stderr": subprocess.PIPE,
     }
-    result = subprocess.run(
+    run = subprocess.run
+    if deadline is not None:
+        from source_preparation_process import run as owned_run
+
+        run = partial(owned_run, deadline=deadline)
+    result = run(
         ["git", "--no-replace-objects", "-c", "core.fsmonitor=false",
          "-c", "core.autocrlf=false", "-c", "core.longpaths=true", "-C", str(source), *arguments],
         **streams, text=True, encoding="utf-8", errors="replace",

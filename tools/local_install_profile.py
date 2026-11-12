@@ -541,6 +541,8 @@ def _application_selection(components: list[str], extras: dict):
 
 
 def _verify_application(snapshot: Path, component: str, record: dict, selected, inputs):
+    from installer_engine_health import verify_application_wheels
+
     if (
         selected.identity.document() != record["projects"][selected.project_key]["source"]
         or selected.identity.source_commit != record["source_commit"]
@@ -558,6 +560,10 @@ def _verify_application(snapshot: Path, component: str, record: dict, selected, 
         ).is_file()
     ):
         raise ProfileError("prepared application has no matching locked construction inputs")
+    try:
+        verify_application_wheels(inputs, application)
+    except (OSError, RuntimeError) as error:
+        raise ProfileError("prepared application wheel copies differ from their retained inputs") from error
 
 
 def prepare_applications(

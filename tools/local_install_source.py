@@ -14,7 +14,6 @@ import json
 import os
 from pathlib import Path
 import shutil
-import subprocess
 import sys
 import tempfile
 import time
@@ -26,6 +25,7 @@ from installer_dependency_config import native_retained_path
 
 import prepare_runtime_source as preparation
 import materialize_main as materialization
+import source_preparation_process as preparation_process
 
 MANIFEST = "install-source.json"
 SCHEMA = "copilot-extensions.install-source"
@@ -602,7 +602,7 @@ def _prepare_profiles(
 
     environment = _query_marker_environment(Path(sys.executable), deadline=deadline)
     preparation._remaining(deadline)
-    result = subprocess.run(
+    result = preparation_process.run(
         [
             str(toolchain.venv_python), str(Path(__file__).with_name("local_install_profile.py")),
             "--install-source", str(built), "--output", str(output / "profiles"),
@@ -618,8 +618,7 @@ def _prepare_profiles(
               if reuse_source is not None else []),
         ],
         capture_output=True, text=True, env=sanitize_subprocess_env(),
-        timeout=deadline - time.monotonic(),
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        deadline=deadline,
     )
     preparation._remaining(deadline)
     if result.returncode == 3 and reuse_source is not None:
@@ -655,6 +654,12 @@ def _reused_applications(
     from build_toolchain_lock import ArtifactBuildError, resolve_toolchain_lock
     from install_source import _member, _read
 
+    try:
+        permissions = preparation_process.procutil_module("python_cache_permissions")
+        permissions.check(output.parent, private=True)
+        permissions.check_ancestors(output.parent)
+    except (ImportError, OSError):
+        return None
     candidates = []
     with os.scandir(output.parent) as entries:
         for index, entry in enumerate(entries):
@@ -665,6 +670,7 @@ def _reused_applications(
                 continue
             previous = Path(entry.path)
             try:
+                permissions.check(previous, private=True)
                 if previous.is_symlink() or getattr(previous.lstat(), "st_file_attributes", 0) & 0x400:
                     continue
                 completion = _read(_member(previous, "applications.json"))
@@ -687,6 +693,11 @@ def _reused_applications(
     for _modified, previous, old in sorted(candidates, reverse=True)[:32]:
         preparation._remaining(deadline)
         try:
+            permissions.check(previous, private=True)
+            permissions.check_bytecode(
+                previous, max_entries=100_000,
+                seconds=preparation._remaining(deadline),
+            )
             toolchain = resolve_toolchain_lock(
                 _member(previous, "inputs/build-tools"),
                 python=getattr(sys, "_base_executable", sys.executable),

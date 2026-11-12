@@ -42,6 +42,7 @@ def test_complete_application_portfolio_builds_once_and_publishes_only_after_rea
 ):
     import local_install_profile as profiles
     import local_install_source as local
+    import installer_engine_health as health
 
     deadline = time.monotonic() + 30
     clock = time.monotonic
@@ -130,6 +131,9 @@ def test_complete_application_portfolio_builds_once_and_publishes_only_after_rea
         else {"construction": {"retained": True}},
     )
     monkeypatch.setattr(profiles.source_inputs, "application_inputs", lambda *args: {"retained": True})
+    monkeypatch.setattr(
+        health, "verify_application_wheels", lambda *args: None,
+    )
     output = tmp_path.parent / (tmp_path.name + "-output")
     options = dict(components=tuple(identities), branch="dev", uv="selected-uv", deadline=deadline)
     if phase == "complete":
@@ -199,13 +203,23 @@ def test_complete_output_reuse_does_not_replay_worker_failures(tmp_path, monkeyp
         "source_commit": "a" * 40, "source_tree": "b" * 40,
         "projects": {"agent-worktrees": {"artifact": {"build_toolchain": {"fixture": True}}}},
     }
+    permissions = local.preparation_process.procutil_module("python_cache_permissions")
+    owner = local.preparation_process.procutil_module("_daemon_instance_owner")
+    tmp_path = tmp_path / "private"
+    permissions.mkdir(tmp_path)
+    permissions.check(tmp_path, private=True)
     previous = tmp_path / "previous"
-    (previous / "inputs/build-tools").mkdir(parents=True)
-    (previous / "inputs" / local.MANIFEST).write_text(json.dumps(record))
-    (previous / "applications.json").write_text(json.dumps({
-        "schema": "copilot-extensions.prepared-applications", "version": 1,
-        "snapshots": {"agent-worktrees": "old"},
-    }))
+    for path in (previous, previous / "inputs", previous / "inputs/build-tools"):
+        permissions.mkdir(path)
+    for path, content in (
+        (previous / "inputs" / local.MANIFEST, record),
+        (previous / "applications.json", {
+            "schema": "copilot-extensions.prepared-applications", "version": 1,
+            "snapshots": {"agent-worktrees": "old"},
+        }),
+    ):
+        with os.fdopen(owner.open_private(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY), "w") as stream:
+            json.dump(content, stream)
     built = tmp_path / "incoming/inputs"
     built.mkdir(parents=True)
     calls = []
@@ -247,6 +261,113 @@ def test_missing_retained_toolchain_cannot_start_construction(tmp_path, monkeypa
     assert not target.parent.exists()
 
 
+@pytest.mark.parametrize("refused", ["parent", "candidate", "descendants"])
+def test_automatic_reuse_checks_native_permissions_before_candidate_execution(tmp_path, monkeypatch, refused):
+    import local_install_source as local
+    import build_toolchain_lock as locks
+
+    previous = tmp_path / "previous"
+    previous.mkdir()
+    (previous / "inputs").mkdir()
+    record = {"schema": local.SCHEMA, "version": 1, "projects": {}}
+    (previous / "inputs" / local.MANIFEST).write_text(json.dumps(record))
+    (previous / "applications.json").write_text(json.dumps({
+        "schema": "copilot-extensions.prepared-applications", "version": 1,
+        "snapshots": {"demo": "candidate-controlled"},
+    }))
+    checks = []
+
+    def check(path, **options):
+        checks.append(path)
+        if path == (tmp_path if refused == "parent" else previous) and refused != "descendants":
+            raise PermissionError("untrusted preparation directory")
+
+    def descendants(path, **options):
+        checks.append(path)
+        raise PermissionError("untrusted executable descendant")
+
+    monkeypatch.setattr(local.preparation_process, "procutil_module", lambda name: SimpleNamespace(
+        check=check, check_ancestors=lambda path: None, check_bytecode=descendants,
+    ))
+    monkeypatch.setattr(locks, "resolve_toolchain_lock", lambda *a, **kw: pytest.fail(
+        "shared preparation directories cannot supply an executable toolchain",
+    ))
+    assert local._reused_applications(
+        tmp_path / "incoming/inputs", record, tmp_path / "incoming", ("demo",), {},
+        uv="unused", deadline=time.monotonic() + 10,
+    ) is None
+    assert checks[0] == tmp_path
+    if refused != "parent":
+        assert previous in checks
+
+
+@pytest.mark.parametrize("outcome", ["success", "timeout", "cleanup-unconfirmed"])
+def test_source_child_keeps_execution_and_cleanup_inside_the_original_deadline(monkeypatch, outcome):
+    import subprocess
+    import source_preparation_process as process
+    from dataclasses import dataclass
+
+    @dataclass
+    class Budget:
+        deadline: float
+        cleanup_reserve: float
+
+    failure = subprocess.TimeoutExpired("fixture", 8) if outcome == "timeout" else RuntimeError("unconfirmed")
+    calls = []
+
+    def run(argv, **options):
+        calls.append(options)
+        if outcome != "success":
+            raise failure
+        return subprocess.CompletedProcess(argv, 3, b"prepared\n", b"miss\n")
+
+    monkeypatch.setattr(process.time, "monotonic", lambda: 100.0)
+    monkeypatch.setattr(process, "procutil_module", lambda name: SimpleNamespace(
+        run_caller_owned=run, OwnedExecutionBudget=Budget,
+    ))
+    if outcome == "success":
+        result = process.run(["worker"], deadline=110, text=True)
+        assert (result.returncode, result.stdout, result.stderr) == (3, "prepared\n", "miss\n")
+    else:
+        with pytest.raises(type(failure)) as caught:
+            process.run(["worker"], deadline=110, text=True)
+        assert caught.value is failure
+    assert calls[0]["budget"] == Budget(110, 2)
+    assert calls[0]["timeout"] == 10 and calls[0]["binary"] is True
+
+
+def test_source_archive_copy_cannot_continue_after_the_callers_deadline(monkeypatch):
+    import io
+    import subprocess
+    import source_preparation_process as process
+    from dataclasses import dataclass
+
+    @dataclass
+    class Budget:
+        deadline: float
+        cleanup_reserve: float
+
+    clock = [100.0]
+
+    class Sink(io.BytesIO):
+        def write(self, data):
+            written = super().write(data)
+            clock[0] = 111.0
+            return written
+
+    monkeypatch.setattr(process.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(process, "procutil_module", lambda name: SimpleNamespace(
+        OwnedExecutionBudget=Budget,
+        run_caller_owned=lambda argv, **kw: subprocess.CompletedProcess(
+            argv, 0, b"x" * (2 << 20), b"",
+        ),
+    ))
+    sink = Sink()
+    with pytest.raises(subprocess.TimeoutExpired):
+        process.run(["archive"], deadline=110, stdout=sink)
+    assert len(sink.getvalue()) == 1 << 20
+
+
 def test_lazy_toolchain_marker_read_keeps_original_deadline(monkeypatch, tmp_path):
     import build_toolchain_lock as locks
 
@@ -279,14 +400,14 @@ def test_profile_worker_only_reports_a_miss_for_explicit_reuse(tmp_path, monkeyp
 
     def run(argv, **options):
         commands.append(argv)
-        assert 0 < options["timeout"] <= 30
+        assert options["deadline"] == deadline
         return SimpleNamespace(
             returncode={"success": 0, "miss": 3, "failed": 1, "wrong-snapshot": 0}[outcome],
             stdout=json.dumps(expected if outcome != "wrong-snapshot" else {"agent-worktrees": "foreign"}),
             stderr="worker error",
         )
 
-    monkeypatch.setattr(local.subprocess, "run", run)
+    monkeypatch.setattr(local.preparation_process, "run", run)
     args = (tmp_path, {}, tmp_path / "incoming", ("agent-worktrees",), {},
             SimpleNamespace(venv_python=Path("python"), record={}))
     options = dict(uv="uv", deadline=deadline, reuse_source=previous)

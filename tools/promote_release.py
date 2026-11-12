@@ -227,7 +227,9 @@ def _sync_instruction_projections(
     script = (trusted_source or scratch) / relative
     if not (scratch / relative).exists() or not script.exists():
         return []
-    proc = subprocess.run(
+    from promotion_source_archive import run_composition_child
+
+    proc = run_composition_child(
         [sys.executable, str(script), "sync", str(scratch), "--json"],
         capture_output=True, text=True, env=git_environment(),
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,

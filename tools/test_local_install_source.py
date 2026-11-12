@@ -19,6 +19,69 @@ import local_install_source as local
 import promote_release
 
 
+@pytest.mark.parametrize("shared", ["parent", "candidate"])
+@pytest.mark.skipif(os.name == "nt", reason="POSIX access bits; Windows uses native DACL checks")
+def test_automatic_reuse_never_executes_a_shared_candidate(tmp_path, monkeypatch, shared):
+    import build_toolchain_lock as locks
+
+    previous = tmp_path / "previous"
+    previous.mkdir(mode=0o700)
+    (previous / "inputs").mkdir()
+    record = {"schema": local.SCHEMA, "version": 1, "projects": {}}
+    (previous / "inputs" / local.MANIFEST).write_text(json.dumps(record))
+    (previous / "applications.json").write_text(json.dumps({
+        "schema": "copilot-extensions.prepared-applications", "version": 1,
+        "snapshots": {"demo": "candidate-controlled"},
+    }))
+    (tmp_path if shared == "parent" else previous).chmod(0o777)
+    monkeypatch.setattr(locks, "resolve_toolchain_lock", lambda *a, **kw: pytest.fail(
+        "shared preparation directories cannot supply an executable toolchain",
+    ))
+    assert local._reused_applications(
+        tmp_path / "incoming/inputs", record, tmp_path / "incoming", ("demo",), {},
+        uv="unused", deadline=time.monotonic() + 10,
+    ) is None
+
+
+def test_profile_timeout_settles_the_actual_descendant_writer(tmp_path, monkeypatch):
+    import build_toolchain_lock as locks
+
+    heartbeat = tmp_path / "heartbeat"
+    worker = tmp_path / "profile-worker.py"
+    child = (
+        "import pathlib,time\np=pathlib.Path(" + repr(str(heartbeat)) + ")\n"
+        "while True:\n p.write_text(str(time.monotonic())); time.sleep(.02)\n"
+    )
+    worker.write_text(
+        "import subprocess,sys,time\n"
+        "subprocess.Popen([sys.executable,'-c'," + repr(child) + "],"
+        "creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))\n"
+        "time.sleep(60)\n",
+    )
+    original = local.preparation_process.run
+    deadlines = []
+
+    def run(argv, **options):
+        argv[1] = str(worker)
+        deadlines.append(options["deadline"])
+        return original(argv, **options)
+
+    monkeypatch.setattr(local.preparation_process, "run", run)
+    monkeypatch.setattr(locks, "_query_marker_environment", lambda *a, **kw: {})
+    deadline = time.monotonic() + 8
+    with pytest.raises(subprocess.TimeoutExpired):
+        local._prepare_profiles(
+            tmp_path, {}, tmp_path / "output", ("demo",), {},
+            SimpleNamespace(venv_python=Path(sys.executable), record={}),
+            uv="unused", deadline=deadline,
+        )
+    assert deadlines == [deadline]
+    assert time.monotonic() < deadline
+    before = heartbeat.read_bytes()
+    time.sleep(.1)
+    assert heartbeat.read_bytes() == before
+
+
 @pytest.mark.parametrize("line", [
     b"<!-- VENDOR_POINTER: source=canonical.txt kind=file -->\n",
     b"<!-- VENDOR_POINTER: source=canonical.txt kind=file -->\r\n",
@@ -1168,6 +1231,7 @@ def prepare_native_source(tmp_path, request):
 
 def prepare_native_source_inputs(tmp_path, request):
     import local_install_profile as native
+    from packaging.markers import default_environment
     from wheel_input_fixture import wheel_bytes
 
     original = tmp_path / "original"
@@ -1272,7 +1336,8 @@ def prepare_native_source_inputs(tmp_path, request):
             "Metadata-Version: 2.4\nName: demo-app\nVersion: 1.0.0\n" +
             ("Requires-Dist: counter>=1\n" if dependency else "") +
             (
-                'Requires-Dist: absent-marker-fixture; platform_machine != "AMD64"\n'
+                "Requires-Dist: absent-marker-fixture; platform_machine != "
+                + json.dumps(default_environment()["platform_machine"]) + "\n"
                 if isinstance(options, dict) and options.get("native-marker") else ""
             ) + "\n"
         ).encode(),

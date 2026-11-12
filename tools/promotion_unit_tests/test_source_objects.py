@@ -14,6 +14,8 @@ from promotion_unit_tests.test_complete_source import case
 
 
 def test_composition_budget_bounds_git_and_restores_the_original_transport(tmp_path, monkeypatch):
+    import source_preparation_process as process
+
     clock = [100.0]
     monkeypatch.setattr(source_io.time, "monotonic", lambda: clock[0])
     calls = []
@@ -22,7 +24,7 @@ def test_composition_budget_bounds_git_and_restores_the_original_transport(tmp_p
         calls.append(options)
         return SimpleNamespace(returncode=0, stdout=b"ok\n", stderr=b"")
 
-    monkeypatch.setattr(source_io.subprocess, "run", run)
+    monkeypatch.setattr(process, "run", run)
     with source_io.composition_budget(110):
         source_io.git_text(tmp_path, ["status"])
         clock[0] = 106
@@ -31,6 +33,7 @@ def test_composition_budget_bounds_git_and_restores_the_original_transport(tmp_p
             source_io.is_ancestor(tmp_path, "a", "b")
         source_io.changefile_existed_at("a", "example.json", repo=tmp_path)
         assert [row["timeout"] for row in calls] == [10, 4, 4, 4]
+        assert all(row["deadline"] == 110 for row in calls)
         clock[0] = 111
         with pytest.raises(ValueError, match="deadline"):
             source_io.git_text(tmp_path, ["status"])

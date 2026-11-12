@@ -64,6 +64,8 @@ It admits the clean merged source, uses the canonical version-preserving
 composition and artifact owners, and keeps one toolchain alive for the profile
 worker. Only after every selected snapshot passes complete readback does it
 return a JSON component-to-snapshot map and write `applications.json`.
+Readback verifies the emitted application's wheel copies against the retained
+construction inputs, not just the snapshot's separate wheel directory.
 Progress goes to stderr. No runtime is installed, selected or started.
 Windows application preparation selects a standard CPython interpreter from
 the native version and wheel-platform tags. Unsupported interpreter variants
@@ -71,8 +73,13 @@ refuse before application output; no cross-target marker environment is added.
 
 Unchanged complete sibling outputs may be reused after source, composition,
 toolchain, wheel, profile target/extras/policy and application validation.
+Automatic discovery first requires native owner-private directories protected
+against other users' writes; shared or unverifiable directories are not reuse
+sources. Completion hashes do not authorize execution of a retained toolchain.
 Missing or incompatible retained outputs can lead to ordinary preparation;
 a failed selected worker is an error, not permission to replay construction.
+Deadline-bound profile, composition and Git children use the existing native
+process owner, with descendant settlement reserved inside the original deadline.
 The separate `--reuse-install-source` mode revalidates explicitly selected
 first-party wheel inputs and never silently falls back to a build.
 Neither mode is a new release-approval token or installation-completion claim.

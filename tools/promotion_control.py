@@ -7,7 +7,7 @@ import re
 import stat
 import subprocess
 from pathlib import Path
-from promotion_source_archive import git_timeout_options
+from promotion_source_archive import git_timeout_options, run_composition_child
 
 MANIFEST_PATH = ".github/promotion-control.json"
 SCHEMA = "copilot-extensions.promotion-control"
@@ -24,7 +24,7 @@ class ControlPreservationError(RuntimeError):
 def _git(repo: Path, args: list[str]) -> bytes:
     env = {key: value for key, value in os.environ.items() if not key.upper().startswith("GIT_")}
     try:
-        result = subprocess.run(
+        result = run_composition_child(
             ["git", "--no-replace-objects", *args], cwd=repo, env=env, capture_output=True,
             **git_timeout_options(30),
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
