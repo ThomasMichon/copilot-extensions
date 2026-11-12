@@ -1,0 +1,9 @@
+{
+  "comment": "Expand private checkpoint readers with opt-in trace-bookkeeping identity while retaining legacy custody defaults.",
+  "changes": [
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    }
+  ]
+}
