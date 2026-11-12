@@ -386,7 +386,12 @@ handover. Preserve held sessions and the separate pre-feature adoption hold.
     pre-effect fallback signals. Conditional optional-receiver selection now
     probes that running provider before startup, passes the strict requirement
     through cold/existing attach and independently checks backend support.
-    Source publication, promoted release and installed adoption remain open.
+    #12233 merged that optional-receiver boundary and the tightly coupled
+    native constructor comparison correction at
+    `6ae73d5d3883312a2fe30c33dd53706f5e31618a` after current-head approval,
+    required CI and Windows/Linux source qualification. Promoted release and
+    installed adoption remain open; the source packets do not establish a
+    joined installed-client handover.
   - [x] **Explicit-owner source merged:** #11935 landed at
     `c0eab0d952a37607f6cf7030ac1a77f377f98a74` after current-head automated
     approval, required CI and resolution of addressed findings. The source
@@ -495,8 +500,9 @@ withdrawal authorizes no GUI effect or change to the SDK's own admission rules.
   - [x] **Internal conditional custody source:** two Windows cases and two
   Linux cases qualify trace-varying physical replacement, capable rollback
   and same-slot process replacement with original upstream state preserved.
-  The optional-launcher guard and old-running-custodian selection remain
-  separate open adoption work; this is not installed-consumer acceptance.
+  The optional receiver's old-running-custodian boundary subsequently passed
+  mixed-version source controls through #12233. These separate source packets
+  are not joined installed-consumer acceptance.
 - [ ] Failed candidate health, changed owner/route/selection and an old
   generation's late cleanup cannot corrupt or retire the current generation.
 - [ ] EOF/disconnect and verified owner death settle exact client resources;

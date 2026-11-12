@@ -107,6 +107,18 @@ consumption and owner identity against a controlled physical receiver, and
 requires exact child settlement. That fixture is not installed custody
 adoption, Windows pre-execution capture or whole-effort acceptance.
 
+The Linux `optional` case in `tests/test_generation_handover.py` composes the
+real optional bootstrap and selected physical receiver with the existing
+trace-varying replacement, rollback and same-slot replacement fixture. Its
+controlled native caller supplies its own PID/birth and retains the original
+pipes. The test checks both caller and original conduit identities, shared
+service counts, one upstream initialization, accepted-operation preservation
+and EOF settlement. It does not substitute that controlled caller for actual
+Copilot, qualify installed rollout or extend eligibility beyond Linux. Run it
+through `python tools/run-plugin-tests.py agent-mcp --test-file
+tests/test_generation_handover.py --allow-explicit-tiers --timeout 240
+--plugin-timeout 260 --test-timeout 180`.
+
 An explicitly custody-bound single-stdio `BridgeSession` can export quiescent
 JSON data and reconstruct its decorator pipeline over a supplied retained
 transport. The private binding covers the logical custody session and the

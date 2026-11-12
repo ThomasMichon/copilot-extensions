@@ -28,7 +28,14 @@ def tmp_path(tmp_path_factory):
 
 
 @pytest.mark.timeout(180)
-@pytest.mark.parametrize("keeper_start", ["explicit", "launcher"])
+@pytest.mark.parametrize("keeper_start", [
+    "explicit", "launcher",
+    pytest.param(
+        "optional", marks=pytest.mark.skipif(
+            not sys.platform.startswith("linux"), reason="optional receiver requires Linux",
+        ),
+    ),
+])
 async def test_native_slots_reattach_original_conduit_without_reinitializing(
     tmp_path, monkeypatch, record_testsuite_property, keeper_start,
 ):
@@ -49,6 +56,7 @@ async def test_native_slots_reattach_original_conduit_without_reinitializing(
     fixed = home / "current" / "serve.sock"
     keeper = fixed.parent / "custody-v1" / fixed.name
     processes, clients, handles, upstreams = [], [], [], []
+    caller_identities = []
     launch_traces, backend_traces = {}, {}
     cleanup = []
     with contextlib.ExitStack() as retained:
@@ -93,9 +101,25 @@ async def test_native_slots_reattach_original_conduit_without_reinitializing(
                 return process, handle, reply["pid"]
 
             async def client(label):
-                role = "conduit-launcher" if keeper_start == "launcher" else "conduit"
+                role = {
+                    "explicit": "conduit", "launcher": "conduit-launcher",
+                    "optional": "conduit-optional",
+                }[keeper_start]
                 process = await start(label, role, fixed)
                 clients.append(process)
+                if keeper_start == "optional":
+                    async def owner_record():
+                        return json.loads(
+                            (home / f"{process.pid}.owner.json").read_text(encoding="utf-8"),
+                        )
+                    owner = await fixture.eventually(owner_record)
+                    assert owner["owner_pid"] == process.pid
+                    assert owner["owner_birth"] == birth_identity(process.pid)
+                    assert owner["conduit_pid"] != process.pid
+                    caller_identities.extend([
+                        (owner["owner_pid"], owner["owner_birth"]),
+                        (owner["conduit_pid"], owner["conduit_birth"]),
+                    ])
                 await fixture.send(process, {
                     "jsonrpc": "2.0", "id": 1, "method": "initialize",
                     "params": {"protocolVersion": "2025-06-18"},
@@ -142,7 +166,7 @@ async def test_native_slots_reattach_original_conduit_without_reinitializing(
                 ]
                 assert len(keepers) == 1
                 keeper_pid, keeper_birth = int(keepers[0]["pid"]), keepers[0]["birth"]
-                if keeper_start == "launcher":
+                if keeper_start in {"launcher", "optional"}:
                     assert Path(keepers[0]["source"]).is_relative_to(slots["old"][1])
                 await fixture.send(held, {
                     "jsonrpc": "2.0", "id": 2, "method": "tools/call",
@@ -240,6 +264,10 @@ async def test_native_slots_reattach_original_conduit_without_reinitializing(
                 physical(await inspect(), "old", replacement_pid)
                 assert replacement.returncode is None
                 assert identity_state(keeper_pid, keeper_birth) == "matching"
+                assert all(
+                    identity_state(pid, birth) == "matching"
+                    for pid, birth in caller_identities
+                )
                 record_testsuite_property("platform", sys.platform)
                 record_testsuite_property("physical_generations_" + keeper_start, json.dumps({
                     label: generation for label, (generation, _) in slots.items()
@@ -267,3 +295,4 @@ async def test_native_slots_reattach_original_conduit_without_reinitializing(
         assert cleanup and all(result.status in {"settled", "missing"} for result in cleanup)
         assert identity_state(keeper_pid, keeper_birth) == "dead"
         assert all(identity_state(pid, birth) == "dead" for pid, birth in upstreams)
+        assert all(identity_state(pid, birth) == "dead" for pid, birth in caller_identities)
