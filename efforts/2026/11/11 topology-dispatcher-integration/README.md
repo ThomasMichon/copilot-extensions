@@ -13,8 +13,8 @@ preserving reserved capacity.
 - **Repo:** copilot-extensions
 - **Branch(es):** managed source worktrees; one reviewed PR per phase
 - **Created:** 2026-11-10
-- **Status:** Active
-- **Vision:** [Agent topology](../../../visions/agent-fabric/agentic-factory/agent-topology/README.md)
+- **Status:** Done
+- **Vision:** [Agent topology](../../../../visions/agent-fabric/agentic-factory/agent-topology/README.md)
 - **Umbrella issue:** #12009
 
 ## Guiding Intent
@@ -41,9 +41,9 @@ launches, sends, reconciles or grants effect authority on its own.
 
 ## Context
 
-[Portable Agent Topology](../../2026/11/09%20portable-agent-topology/README.md)
+[Portable Agent Topology](../09%20portable-agent-topology/README.md)
 delivered the dispatcher skill, schema and read-only helper.
-[Dispatch Standing Charters](../../2026/11/10%20dispatch-standing-charters/README.md)
+[Dispatch Standing Charters](../10%20dispatch-standing-charters/README.md)
 delivered native standing declarations, accepted materializations and
 registrar-local policy. Coverage already counts only native accepted lanes, but
 owner observations carry presence only, and several dispatcher flows remain
@@ -100,24 +100,45 @@ synthetic fixtures. Live adoption is a separate explicit decision.
 
 ### Phase 6 - Eligible work admission
 
-- [ ] Propose admission of eligible dormant work and prioritized backlog while
-  preserving operator tasks, interactive reserve and review capacity (#12137).
+- [x] Propose admission of eligible dormant work and prioritized backlog while
+  preserving operator tasks, interactive reserve and review capacity (#12137,
+  #12139).
 
 ## Validation Plan
 
-- [ ] Unit/behavior for each phase with synthetic fixtures, including unknown,
+- [x] Unit/behavior for each phase with synthetic fixtures, including unknown,
   stale and contradictory evidence and unchanged input bytes.
-- [ ] Simple E2E: invoke the real helper as a subprocess for each new read-only
+- [x] Simple E2E: invoke the real helper as a subprocess for each new read-only
   command or report.
-- [ ] Clean-room: a fresh synthetic topology without optional evidence keeps
+- [x] Clean-room: a fresh synthetic topology without optional evidence keeps
   legacy behavior.
-- [ ] Live external venue: not exercised under this source-only authority;
+- [x] Live external venue: not exercised under this source-only authority;
   record that explicitly per phase.
-- [ ] Affected plugin tests, Python lint, changefiles, required CI and actual
+- [x] Affected plugin tests, Python lint, changefiles, required CI and actual
   merge for each phase; public artifacts audited for private identifiers.
-- [ ] Reconcile every Plan and Validation Plan item before marking Done.
+- [x] Reconcile every Plan and Validation Plan item before marking Done.
 
 ## Journal
+
+### 2026-11-11 - Source scope completed
+
+- Phase 6 merged in #12139 at `b3663a83733d11d6099b0ce4cce9d3a307265cdb`
+  after review assessment, resolution of every inline thread and green
+  required CI. The native source worktree finalized with all content verified
+  upstream and its parent obligation settled.
+- All six source phases are merged: #12010, #12017, #12030, #12067, #12084
+  and #12139. Their journals retain focused unit, CLI, fresh-state and native
+  consumer evidence, including the final 344-test topology packet, 179 native
+  Dispatch checks, 21 selected Worktrees completion/succession checks and four
+  bounded native allocation process cases.
+- The fresh-state tier uses synthetic stores and real local consumers;
+  installer/provisioning behavior did not change. No live external venue was
+  exercised in any phase because the assignment authorized source and isolated
+  validation only. Live adoption, materialization, installation, pilot and
+  derived-board deployment remain separately owned and authorized concerns,
+  not hidden incomplete source items.
+- Every source Plan and Validation Plan item is reconciled. Archived Done for
+  source scope; promotion and any authorized rollout remain distinct facts.
 
 ### 2026-11-11 - Qualify all retained custody before ranking
 
