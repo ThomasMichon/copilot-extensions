@@ -247,6 +247,8 @@ from test_plugin_readiness import (
 from test_portable_mux_joined import (
     test_bridge_provider_receiver_and_extensions_share_one_conversation
     as test_bridge_provider_receiver_and_extensions_share_one_conversation,
+    test_carrier_failures_settle_owned_tree_and_streams
+    as test_carrier_failures_settle_owned_tree_and_streams,
 )
 from test_receiving_bundle import (
     test_provider_owner_uses_the_actual_client_interface

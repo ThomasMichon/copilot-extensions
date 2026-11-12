@@ -157,13 +157,13 @@ exception or automatic reclassification.
 
 ### Prerequisite plan and validation
 
-- [ ] Review and land this amendment before implementation.
-- [ ] Add the bounded ownership reader to existing native repair admission;
+- [x] Review and land this amendment before implementation.
+- [x] Add the bounded ownership reader to existing native repair admission;
   document its exact producer contract and fail-closed old-consumer behavior.
-- [ ] Test a real script-only fixture alongside a required owner, incomplete
+- [x] Test a real script-only fixture alongside a required owner, incomplete
   and ambiguous declarations, duplicate runtime writers, changed plans and
   ordinary/core refusal. No installer/probe may run before admission.
-- [ ] Retain a control proving an unsupported required platform remains
+- [x] Retain a control proving an unsupported required platform remains
   unsatisfied. Do not repair first-touch qualification by dropping that gate.
 - [ ] Exercise the actual CLI with a cold disposable HOME and independently
   acquired payload sources. Preserve all original failed observations and
@@ -195,6 +195,36 @@ exception or automatic reclassification.
   Keep #356/#8545 and parent effort acceptance open after this finite slice.
 
 ## Journal
+
+- 2026-11-11: Review of #12142 found that a declaration below a hash-excluded
+  payload directory could evade full-plan invalidation. The full-mode digest
+  now binds parsed script-owner metadata independently, while retaining the
+  existing generated-command digest behavior. Normal and readiness-only
+  excluded-directory regressions join the final 34-control passing packet;
+  persistent PATH remained unchanged. One older-protocol apply exceeded its
+  original 20-second fixture parent limit. The final functional fixture uses
+  a 30-second apply bound and 60-second whole-test observer, without changing
+  production action or runner aggregate limits. This is not a pass of the
+  earlier timing bound. Updated exact-head review and CI remain required.
+- 2026-11-11: The focused ownership packet passed 32 controls, including actual
+  installed-console first touch for both protocols and both selection forms.
+  A distinct prior-reader process loaded the exact accepted pre-change source
+  and refused the new producer before apply effects. The existing required
+  unsupported-platform control remains satisfied as a negative.
+  Initial tests exposed a compound fixture's excessive native work, an
+  incorrect observation-status assertion and an outer observer shorter than
+  its unchanged child deadlines; those test issues were corrected. A broad
+  file run exhausted its unchanged 900-second aggregate and is not a full pass.
+  One functional pass was separately rejected for persistent user-PATH drift;
+  no writer was attributed and no rollback was attempted. A distinct focused
+  run passed the containment guard with matching independent before/after PATH
+  hashes. Complete caller qualification and provider publication remain open.
+- 2026-11-11: Readiness amendment #12128 merged as
+  `f4d72a34fe242928aae3cb3814adfb705a2c630d` after exact-head Copilot approval
+  and successful required CI. Implementation now adds the bounded script-only
+  ownership reader inside existing repair admission. Validation, provider
+  publication/release and the distinct complete caller run remain open; the
+  original first-touch refusal remains a failed observation.
 
 - 2026-11-11: Provider #12007 merged as
   `c0f5eccf8bb9eb0361b26cc7515c3320a4481bda` after exact-head Copilot approval,

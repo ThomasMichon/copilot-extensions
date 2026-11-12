@@ -471,7 +471,8 @@ def move(worktree_id: str, destination: str, config) -> dict:
         if report["phase"] == "prepared":
             if stage.exists():
                 raise ValueError("stage creation outcome is uncertain; original retained for inspection")
-            stage.mkdir(mode=0o700)
+            # Windows must inherit the admitted parent's ACL; Python 3.13 special-cases 0700.
+            stage.mkdir(mode=0o777 if os.name == "nt" else 0o700)
             report["phase"] = "copying"
             state.write(ledger, report)
         if report["phase"] == "copying":

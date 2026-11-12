@@ -2441,7 +2441,7 @@ concurrent stderr draining and its list/progress consumer settlement. Existing
 provider/renderer, persistent-channel, Inbox, native and installation owners
 retain their scopes; this does not reopen or transfer their programs.
 
-- [ ] **SSTD:** Review the finite proposal before functional edits, then
+- [x] **SSTD:** Review the finite proposal before functional edits, then
   deliver bounded concurrent stderr capture with real noisy-child, failure,
   compatibility and cleanup proof through exact-head review/CI and merge.
 
@@ -2576,7 +2576,7 @@ _(Agent-recommended direct tracking under existing Phase 7; all rows unchecked.)
 
 ## Validation Plan
 
-- [ ] **VSSTD:** Qualify every local
+- [x] **VSSTD:** Qualify every local
   [stream-drain control](stream-stderr-drain.md#validation-plan), preserving
   provider data authority, existing deadlines and exact child/reader custody;
   source acceptance is not installed/live-provider qualification.
@@ -2954,6 +2954,15 @@ receiver readback; all other source-specific intake conditions remain in their
 own scopes. No source/resource/physical custody or updater authority transfers.
 
 ## Journal
+
+### 2026-11-12 - Registered-stream finite source accepted
+
+Reviewed plan #12121 and implementation #12141 are merged. The
+[finite acceptance receipt](stream-stderr-drain.md#2026-11-12---finite-source-accepted)
+records 127 affected cases, both corrected High findings, genuine final-head
+approval and actual required CI before the source merge. Only SSTD/VSSTD are
+accepted; the parent and its independent native/provider/installation gates
+retain their owners. No rollout or blanket live-pivot health is claimed.
 
 ### 2026-11-10 - Registered action-progress finite source accepted
 
