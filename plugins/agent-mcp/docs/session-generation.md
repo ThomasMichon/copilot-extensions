@@ -124,7 +124,10 @@ The separate Linux native packet
 the same physical runtime constructor and the real optional receiver. A private
 upstream emits the standard tool-list change notification; subsequent discovery
 must traverse replacement, rollback and same-slot replacement without replacing
-the native client, original conduit, keeper or upstream. Fixture-only witnesses
+the native client, original conduit, keeper or upstream. Revision-specific
+pagination cursors require a client-generated follow-up after the actual response;
+a dropped-page control must produce no such acknowledgement. Fresh discovery
+and identity checks also run after each predecessor exits. Fixture-only witnesses
 record actual response code, physical interpreter/module and native lifetimes.
 This tests discovery, not model-driven tool invocation or accepted mutations;
 it requires `COPILOT_NATIVE_TEST_EXECUTABLE` on a disposable runner. The existing

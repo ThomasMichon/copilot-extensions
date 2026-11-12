@@ -149,6 +149,7 @@ async def test_actual_native_client_rediscovers_through_replacement_and_rollback
             }
             environment.update(
                 **lifetime, HOME=str(home), USERPROFILE=str(home),
+                PWD=str(workspace), COPILOT_DISABLE_LOGIN_SHELL_ENV="1",
                 COPILOT_HOME=str(home / ".copilot"), COPILOT_OFFLINE="true",
                 COPILOT_PROVIDER_TYPE="openai", COPILOT_PROVIDER_BASE_URL="http://127.0.0.1:1",
                 COPILOT_PROVIDER_MODEL_ID="gpt-4.1", COPILOT_MODEL="gpt-4.1", USE_TGREP="false",
@@ -230,7 +231,7 @@ async def test_actual_native_client_rediscovers_through_replacement_and_rollback
                 client = await asyncio.create_subprocess_exec(
                     str(python), "-I", "-m", "agent_mcp", "exec-client",
                     "--mcp-config", str(entries), "--server", "physical-fixture", "--",
-                    str(executable), "--acp", "--stdio", "--no-auto-update",
+                    str(executable), "-C", str(workspace), "--acp", "--stdio", "--no-auto-update",
                     "--disable-builtin-mcps", "--no-custom-instructions", "--no-color", "--no-ask-user",
                     "--log-dir", str(tmp_path / "logs"),
                     cwd=workspace, env=environment, stdin=asyncio.subprocess.PIPE,
