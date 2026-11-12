@@ -37,12 +37,14 @@ class RelevanceSource:
             for decl in observation
             if decl.kind == "emitter" and not runs_on_machine(decl, machine)
         )
-        direct, other = [], {}
+        direct, local_direct, other = [], [], {}
         for row in conn.execute("SELECT * FROM registrations").fetchall():
             if row["id"].startswith("declared:"):
                 continue
             item = dict(row)
             item["spec"] = json.loads(row["spec"])
+            if (row["machine"], row["env"]) == (machine, env):
+                local_direct.append(item)
             if (row["machine"], row["env"], row["status"]) == (machine, env, "active"):
                 direct.append(item)
             else:
@@ -52,8 +54,9 @@ class RelevanceSource:
             raise TaskError("relevance direct registration is superseded by its effective declaration")
         registrations = {**other, **merged.registrations}
         predecessors: dict[str, frozenset[str]] = {}
-        for reg in direct:
-            if replacement := merged.replacements.get(reg["id"]):
+        hold_replacements = merge_registration_sources(local_direct, declared).replacements
+        for reg in local_direct:
+            if replacement := hold_replacements.get(reg["id"]):
                 predecessors[replacement] = (
                     predecessors.get(replacement, frozenset()) | registration_override_ids(reg)
                 )

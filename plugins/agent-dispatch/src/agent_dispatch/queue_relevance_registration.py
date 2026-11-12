@@ -113,7 +113,6 @@ def resolve_registration(
             (item["spec"], item) for item in registrations.values()
             if item["kind"] == RegistrationKind.EVALUATOR
             and _local_active(item, selector)
-            and not _held(item, disabled_ids, predecessor_overrides)
         ]
         selected = _evaluator_for_task(
             candidates, repo=task.repo, evaluator_ref=task.evaluator_ref,

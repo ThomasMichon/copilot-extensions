@@ -165,6 +165,9 @@ Replacement declarations inherit their superseded direct registrations' override
 tokens, for both the selected evaluator and its companion emitter. Fresh
 foreign-machine emitter declarations remain visible for provenance collision
 detection, without becoming eligible local callers or trusting stale mirrors.
+Predecessor hold correlation also includes paused local rows without admitting
+them as callers. Evaluator repo/ref selection precedes hold exclusion: an
+all-repos reporter cannot take over a held repo-specific evaluator's work.
 Legacy/manual tasks without matching emitter provenance remain outside scope.
 
 Opt-in client methods check support on their bound running peer before sending

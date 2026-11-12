@@ -281,6 +281,53 @@ def test_fresh_foreign_declaration_provenance_cannot_look_unique(q, venue, repor
     assert q.relevance_receipt(t.id, "closed-object") is None
 
 
+@pytest.mark.parametrize("held", [False, True])
+@pytest.mark.parametrize("bound", [False, True])
+def test_paused_evaluator_predecessor_carries_hold_without_becoming_eligible(
+    q, venue, held, bound,
+) -> None:
+    api, trusted, override_path = venue
+    declaration(trusted, "review-source", "emitter", {**SPEC, "evaluator_ref": "review-loop"})
+    evaluator(q, venue, declared=False)
+    q.set_registration_status("evaluator-a", "paused")
+    rid = evaluator(q, venue)
+    t = emitted(q, evaluator_ref="review-loop")
+    if bound:
+        q.claim_one("host/worker", task_id=t.id)
+        q.start(t.id, "host/worker", owner_session_id="original-native")
+    report = request(api, t.id, rid)
+    if held:
+        set_override(override_path, "evaluator-a", reason="paused predecessor held")
+    response = api.post(f"/task-relevance/tasks/{t.id}", headers=_headers(), json=report)
+    assert response.status_code == (409 if held else 200), response.text
+    if held:
+        assert "operator override" in response.json()["detail"]
+        assert q.get(t.id).status == (Status.STARTED if bound else Status.QUEUED)
+        assert q.steer_log(t.id) == q.list_wakes(t.id) == []
+        assert q.relevance_receipt(t.id, "closed-object") is None
+    else:
+        assert response.json()["result"]["decision"] == ("closeout_pending" if bound else "abandoned")
+
+
+@pytest.mark.parametrize("hold", ["declared:example:review-evaluator", "evaluator-a"])
+def test_held_repo_evaluator_does_not_authorize_all_repos_fallback(q, venue, hold) -> None:
+    api, trusted, override_path = venue
+    declaration(trusted, "review-source", "emitter", {**SPEC, "evaluator_ref": "review-loop"})
+    exact_id = evaluator(q, venue)
+    evaluator(q, venue, declared=False)
+    global_id = declaration(trusted, "global-evaluator", "evaluator", {
+        "all_repos": True, "evaluator_ref": "review-loop", "evaluator_spec": {"rules": []},
+    })
+    t = emitted(q, evaluator_ref="review-loop")
+    set_override(override_path, hold, reason="repo evaluator held")
+    for rid in (exact_id, global_id):
+        response = api.get(
+            f"/task-relevance/tasks/{t.id}", headers=_headers(), params={"registration_id": rid},
+        )
+        assert response.status_code == 409, response.text
+    assert q.get(t.id).status == Status.QUEUED
+
+
 def test_new_client_refuses_prior_scope_before_report_and_keeps_old_reads(q, venue) -> None:
     api, trusted, _ = venue
     rid = declaration(trusted, "review-source", "emitter", SPEC)
