@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import ExitStack
 import importlib.util
 import json
 import os
@@ -127,7 +128,9 @@ emit({"jsonrpc":"2.0", "method":"notifications/upstream-eof",
 """
 
 
-def build_runtimes(private, retained):
+def build_runtimes(
+    private: Path, retained: ExitStack, *, observations: Path | None = None,
+) -> tuple[Path, dict[str, tuple[str, Path]]]:
     """Use the construction owner, not a copied venv or patched launch identity."""
     for library in ("installer-engine", "versioned-runtime"):
         sys.path.insert(0, str(REPOSITORY / "libs" / library))
@@ -160,6 +163,13 @@ def build_runtimes(private, retained):
         body = pipeline.read_text(encoding="utf-8")
         needle = f"response['result']['pipeline_code']={label!r}"
         assert body.count(needle) == 1
+        witness = ""
+        if observations is not None:
+            witness = (
+                f"\n            with open({str(observations)!r},'a') as witness:\n"
+                "                witness.write(__import__('json').dumps({"
+                "'method':request.get('method'),'response':response})+'\\n')"
+            )
         pipeline.write_text(body.replace(
             needle,
             needle + "\n"
@@ -167,8 +177,21 @@ def build_runtimes(private, retained):
             "            response['result']['backend_prefix']=__import__('sys').prefix\n"
             "            response['result']['backend_module']=__file__\n"
             "            response['result']['backend_trace']=__import__('os').environ.get("
-            "'COPILOT_EXTENSIONS_BOOT_TRACE_SHIM_START_MS')",
+            "'COPILOT_EXTENSIONS_BOOT_TRACE_SHIM_START_MS')" + witness,
         ), encoding="utf-8")
+        if observations is not None:
+            receiver = payload / "src" / "agent_mcp" / "owner_entry.py"
+            body = receiver.read_text(encoding="utf-8")
+            needle = "        return args.func(args)"
+            assert body.count(needle) == 1
+            receiver.write_text(body.replace(
+                needle,
+                "        from agent_procutil._daemon_instance_identity import birth_identity\n"
+                f"        Path({str(observations.with_suffix('.owner.json'))!r}).write_text("
+                "json.dumps({'owner_pid':request['pid'],'owner_birth':request['birth'],"
+                "'conduit_pid':os.getpid(),'conduit_birth':birth_identity(os.getpid())}))\n"
+                + needle,
+            ), encoding="utf-8")
         package = source.payload_package_version(payload, "agent-mcp")
         digest = source.assembly_hash(payload)
         identity = source.SourceIdentity(

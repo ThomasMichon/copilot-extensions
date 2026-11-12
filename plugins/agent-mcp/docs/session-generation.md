@@ -119,6 +119,19 @@ through `python tools/run-plugin-tests.py agent-mcp --test-file
 tests/test_generation_handover.py --allow-explicit-tiers --timeout 240
 --plugin-timeout 260 --test-timeout 180`.
 
+The separate Linux native packet
+`tests/native/test_generation_handover_copilot.py` uses actual offline Copilot,
+the same physical runtime constructor and the real optional receiver. A private
+upstream emits the standard tool-list change notification; subsequent discovery
+must traverse replacement, rollback and same-slot replacement without replacing
+the native client, original conduit, keeper or upstream. Fixture-only witnesses
+record actual response code, physical interpreter/module and native lifetimes.
+This tests discovery, not model-driven tool invocation or accepted mutations;
+it requires `COPILOT_NATIVE_TEST_EXECUTABLE` on a disposable runner. The existing
+path-gated `mcp-owner-exec` workflow supplies the pinned asset. A platform or asset
+skip is not qualification, and this source packet does not enable installed
+adoption or qualify Windows.
+
 An explicitly custody-bound single-stdio `BridgeSession` can export quiescent
 JSON data and reconstruct its decorator pipeline over a supplied retained
 transport. The private binding covers the logical custody session and the
