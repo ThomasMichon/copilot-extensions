@@ -116,11 +116,11 @@ def test_preflight_ignores_mapped_non_codespace_account_for_other_owner():
     with patch("subprocess.run") as run, \
          patch("agent_codespaces.account_binding.list_bindings", return_value=[]), \
          patch("agent_codespaces.config.load_merged_config") as load_cfg, \
-         patch("agent_codespaces.gh_account.account_for_repo") as account_for_repo:
+         patch("agent_codespaces.gh_account.account_inventory") as account_inventory:
         load_cfg.return_value = MagicMock(
             repos={"example-org/example-codespaces": object()},
         )
-        account_for_repo.side_effect = lambda repo: {
+        account_inventory.return_value.account_for.side_effect = lambda repo: {
             "example-tools/example-extension": "bob",
             "example-org/example-codespaces": "alice",
         }.get(repo)
@@ -129,6 +129,25 @@ def test_preflight_ignores_mapped_non_codespace_account_for_other_owner():
     joined = "\n".join(msgs)
     assert "alice" in joined and "codespace" in joined
     assert "bob" not in joined
+
+
+def test_scope_accounts_reads_one_routing_snapshot_for_every_repo():
+    from agent_codespaces.auth_preflight import codespace_scope_accounts
+
+    repos = {f"example-org/repo-{index}": object() for index in range(6)}
+    with patch("agent_codespaces.account_binding.list_bindings", return_value=[]), \
+         patch("agent_codespaces.config.load_merged_config", return_value=MagicMock(repos=repos)), \
+         patch("agent_codespaces.gh_account._account_inventory") as read, \
+         patch("agent_codespaces.gh_account._legacy_account_for_repo",
+               side_effect=AssertionError("per-repo lookup")), \
+         patch("agent_codespaces.lifecycle.list_codespaces", return_value=[]) as listing:
+        read.return_value.account_for.side_effect = (
+            lambda repo: "alice" if repo.endswith(("-0", "-1")) else "bob"
+        )
+        accounts, uses_ambient = codespace_scope_accounts(live_only=True)
+    assert read.call_count == 1
+    assert accounts == ("alice", "bob") and not uses_ambient
+    listing.assert_called_once_with(concurrent=True)
 
 
 def test_preflight_checks_active_account_when_no_codespace_accounts():
