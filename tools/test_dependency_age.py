@@ -565,6 +565,23 @@ def test_declared_project_inventory_audits_dependencies_and_policy_without_core_
     assert errors and any("[tool.uv]" in error and "7 days" in error for error in errors)
 
 
+@pytest.mark.parametrize("relative", ["libs/consumer", "apps/other/libs/consumer"])
+def test_declared_library_cannot_gain_application_source_audit_exemptions(tmp_path, relative):
+    write(tmp_path / "pyproject.toml", (
+        '[tool.copilot-extensions.python-projects]\n'
+        f'consumer="{relative}"\n'
+    ))
+    write(tmp_path / relative / "pyproject.toml", (
+        '[project]\nname="consumer"\nversion="1"\ndependencies=["owned-sdk>=1"]\n'
+        '[tool.copilot-extensions.application-sources]\nowned-sdk="standalone:fleet-manager"\n'
+    ))
+    write(tmp_path / "fleet-manager/pyproject.toml", (
+        '[project]\nname="owned-sdk"\nversion="1"\n'
+    ))
+    with pytest.raises(ValueError, match="cannot be a vendored library"):
+        age.audit(tmp_path, fetch=lambda _: pytest.fail("invalid source must refuse before lookup"), now=NOW)
+
+
 @pytest.mark.parametrize("plugin,dependency,source", [
     ("agent-index", "fleet-manager", "fleet-manager"),
     ("agent-worktrees", "fleet-manager", "fleet-manager"),

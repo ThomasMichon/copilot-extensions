@@ -20,7 +20,7 @@ from artifact_source_build import (
     PromotionArtifactError, validate_static_build,
     validate_runtime_metadata as validate_runtime_metadata,
 )
-from promotion_bundle_members import _write_bundle_members
+from promotion_bundle_members import _write_bundle_members, candidate_projects as candidate_projects
 from standalone_python_artifacts import COMPONENTS, artifact_label, project_key
 from artifact_attestation import INDEX_LIMIT as INDEX_LIMIT, INDEX_NAME, INDEX_SCHEMA as SCHEMA
 
@@ -68,15 +68,6 @@ def _digest(path: Path) -> str:
         for chunk in iter(lambda: stream.read(1 << 20), b""):
             digest.update(chunk)
     return digest.hexdigest()
-
-
-def candidate_projects(root: Path) -> dict[str, str]:
-    from application_sources import project_versions
-
-    try:
-        return project_versions(root)
-    except (OSError, ValueError) as exc:
-        raise PromotionArtifactError(f"invalid repository Python project declarations: {exc}") from exc
 
 
 def _bundle_filename(manifest: dict) -> str:

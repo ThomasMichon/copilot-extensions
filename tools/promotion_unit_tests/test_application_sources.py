@@ -119,6 +119,12 @@ def test_repository_declares_independent_projects_without_scanning_their_marketp
     assert canonical_application(tmp_path, "second") == second
     assert is_application(tmp_path, first) and is_application(tmp_path, second)
     assert not is_application(tmp_path, tmp_path / ".marketplace/unselected")
+    for relative in ("libs/example", "applications/second/libs/example"):
+        (tmp_path / "pyproject.toml").write_text(
+            f'[tool.copilot-extensions.python-projects]\nexample = "{relative}"\n',
+        )
+        with pytest.raises(ValueError, match="cannot be a vendored library"):
+            is_application(tmp_path, tmp_path / relative)
 
 
 @pytest.mark.parametrize("locations", [

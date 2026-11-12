@@ -418,6 +418,85 @@ def test_native_build_workspace_binds_repository_declaration_even_without_compac
             declaration.write_text('[tool.copilot-extensions.python-projects]\nexample="apps/other"\n')
 
 
+@pytest.mark.parametrize("projects", [None, ("example",)], ids=["suite", "selected"])
+@pytest.mark.parametrize("attribute", ["export-ignore", "export-subst"])
+def test_source_refuses_archived_project_declaration_changes(
+    repository, tmp_path, monkeypatch, projects, attribute,
+):
+    repo, _ = repository
+    (repo / "pyproject.toml").write_text(
+        '# $Format:%H$\n[tool.copilot-extensions.python-projects]\nexample = "apps/example"\n',
+    )
+    for relative in ("apps/example", "plugins/example"):
+        directory = repo / relative
+        directory.mkdir(parents=True)
+        (directory / "pyproject.toml").write_text(
+            '[project]\nname = "example"\nversion = "1.0"\n',
+        )
+    (repo / ".gitattributes").write_text(f"pyproject.toml {attribute}\n")
+    local.preparation._git(repo, "add", ".")
+    local.preparation._git(
+        repo, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+        "commit", "--quiet", "-m", "Archive declaration transformation",
+    )
+    commit = local.preparation._git(repo, "rev-parse", "HEAD")
+    for owner, name in (
+        (local.materialization, "materialize"),
+        (local.preparation, "materialize_consumer"),
+    ):
+        monkeypatch.setattr(owner, name, lambda *args, **kwargs: pytest.fail(
+            "changed project selection must refuse before materialization",
+        ))
+    with pytest.raises(ValueError, match="project declaration differs from the source commit"):
+        local.compose(repo, commit, None, tmp_path / "refused", projects=projects)
+
+
+@pytest.mark.parametrize("projects", [None, ("example",)], ids=["suite", "selected"])
+def test_source_materializes_declared_project_assets_and_libraries(repository, tmp_path, projects):
+    repo, _ = repository
+    directory = repo / "apps" / "example"
+    directory.mkdir(parents=True)
+    (repo / "pyproject.toml").write_text(
+        '[tool.copilot-extensions.python-projects]\nexample = "apps/example"\n',
+    )
+    (directory / "pyproject.toml").write_text(
+        '[project]\nname = "example"\nversion = "1.0"\n'
+        '[tool.uv.sources]\nshared = {path = "../../libs/shared", editable = true}\n',
+    )
+    shared = repo / "libs" / "shared"
+    (shared / "src" / "shared").mkdir(parents=True)
+    (shared / "pyproject.toml").write_text(
+        '[project]\nname = "shared"\nversion = "1.0"\n',
+    )
+    (shared / "src" / "shared" / "__init__.py").write_text('VALUE = "shared"\n')
+    (repo / "resources").mkdir()
+    (repo / "resources" / "example.txt").write_text("packaged application data\n")
+    (directory / "packaged-assets.json").write_text(json.dumps({
+        "schema": "copilot-extensions.packaged-assets", "version": 2,
+        "groups": [{
+            "canonicalDir": "resources", "payloadDir": "data", "files": ["example.txt"],
+        }],
+    }))
+    local.preparation._git(repo, "add", ".")
+    local.preparation._git(
+        repo, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+        "commit", "--quiet", "-m", "Independent project resource closure",
+    )
+    commit = local.preparation._git(repo, "rev-parse", "HEAD")
+    output = tmp_path / "prepared"
+    local.compose(repo, commit, None, output, projects=projects)
+    payload = output / "source" / "apps" / "example"
+    assert (payload / "data" / "example.txt").read_bytes() == (
+        repo / "resources" / "example.txt"
+    ).read_bytes()
+    assert (payload / "libs" / "shared" / "src" / "shared" / "__init__.py").read_bytes() == (
+        shared / "src" / "shared" / "__init__.py"
+    ).read_bytes()
+    metadata = tomllib.loads((payload / "pyproject.toml").read_text())
+    assert metadata["tool"]["uv"]["sources"]["shared"] == {"path": "libs/shared"}
+    assert local.materialization.uer.materialized_local_source_problems(payload) == []
+
+
 @pytest.fixture
 def repository(tmp_path):
     repository = tmp_path / "repository"

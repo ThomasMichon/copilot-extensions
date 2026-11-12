@@ -5263,8 +5263,8 @@
         "tools/typecheck_bootstrap_views.py"
     ],
     "sources": {
-        "tools/application_sources.py": "449f1b5319210d67e07a5a986e60a62887e6564e3ba424aa10599bf234d550ef",
-        "tools/promotion_unit_tests/test_application_sources.py": "315e7a54f69d7e920307a51e824e34c73bb23579fe1f9d112ac5c689bcf3fc61",
+        "tools/application_sources.py": "b99405162a56c0a98d9cba587d0ee9e98c99f43d7dd2f6a4a26fe961ff4658ff",
+        "tools/promotion_unit_tests/test_application_sources.py": "e54a8d337813e28ae9dcad7c4066c70e21db3d4116a342e4f956239fa49fb3b7",
         "tools/promotion_unit_tests/test_prepared_cell_membership.py": "0d46c2ef80b1507fb8f80beda2a903f25c4dda86ca38974d8ccd6bbdf1905be5",
         "plugins/agent-worktrees/scripts/managed_session.py": "373989e7c6c72b629f9e3e48093077ae758752bb16c7989a5589ec2febe2e09e",
         "plugins/agent-worktrees/scripts/execution_platform.py": "d04e459a34cba4d21d73cbdea6f22a1635f2a8ef504d98c6b4482c60aea2344a",
@@ -5660,8 +5660,8 @@
         "tools/promotion_dispatch.py": "2055ff12c13a7b976dd4882be1473f9dc103a5072af1cfedf07c667353ddca56",
         "tools/promotion_frozen_candidate.py": "4f1401d36c9e432928815788cb21e8991f2da543e4c92030cb6e826df6bc072e",
         "tools/promotion_lifecycle.py": "8492254aaaf02f227d83d2882fe96d01e50c8161b3d94476b8870dd4501f42d4",
-        "tools/promotion_bundle_members.py": "b4e8c2455f1de09d8a3a794c077e9cb34d2ed3ce6171a60254f13d3f6daab23d",
-        "tools/promotion_python_artifacts.py": "9bac062011e6b266325047fd721769fc825340592038fb96fec12575751f9e17",
+        "tools/promotion_bundle_members.py": "1c02fa49896d2e7442df39127b31e1e84b1fd31635be8d64e31d9f3b2bea4905",
+        "tools/promotion_python_artifacts.py": "fabed6a906c78107d38c69960fd5b713751380d1d9c837458e7169dd280eaa9b",
         "tools/promotion_release_evidence.py": "e905ca27bb247ae5822f812aedcb3531b0fc46fb5386782a05baafad53c683f5",
         "tools/promotion_release_helpers.py": "b110cec1f135e59027f07e159e18663eaf232c864542016758a1efeb7ae65990",
         "tools/promotion_source_alias.py": "efefb7b81cc8993fb0d296ca3e9c0590064e55d548fe3c87c598cab86247c88a",

@@ -31,6 +31,35 @@ MANIFEST = "install-source.json"
 SCHEMA = "copilot-extensions.install-source"
 
 
+def _verify_project_declaration(
+    repository: Path, commit: str, source: Path, deadline: float,
+) -> None:
+    entry = preparation._git(
+        repository, "ls-tree", commit, "--", "pyproject.toml", deadline=deadline,
+    )
+    declaration = source / "pyproject.toml"
+    if not entry:
+        if declaration.exists() or declaration.is_symlink():
+            raise ValueError("repository project declaration differs from the source commit")
+        return
+    fields = entry.split()
+    if (
+        fields[0] not in {"100644", "100755"}
+        or declaration.is_symlink() or not declaration.is_file()
+    ):
+        raise ValueError("repository project declaration differs from the source commit")
+    content = declaration.read_bytes()
+    digest = hashlib.new("sha1" if len(fields[2]) == 40 else "sha256")
+    digest.update(f"blob {len(content)}\0".encode("ascii"))
+    digest.update(content)
+    if digest.hexdigest() != fields[2]:
+        raise ValueError("repository project declaration differs from the source commit")
+    preparation._remaining(deadline)
+    from application_sources import declared_projects
+
+    declared_projects(source)
+
+
 def _selected_project_paths(
     repository: Path, commit: str, projects: tuple[str, ...] | None, deadline: float,
 ) -> tuple[str, ...] | None:
@@ -192,6 +221,7 @@ def compose(
             **({"include_paths": composition.export_paths}
                if composition is not None and composition.export_paths is not None else {}),
         )
+    _verify_project_declaration(repository, commit, source, deadline)
     archive.unlink()
     source_tree = preparation._git(repository, "rev-parse", f"{commit}^{{tree}}", deadline=deadline)
     if not finalized_main and composition is None:
@@ -204,15 +234,20 @@ def compose(
                 refused = [line for line in log if line.startswith("SKIP")]
                 if refused:
                     raise ValueError("source materialization refused:\n" + "\n".join(refused))
-            else:
-                for relative in project_paths:
-                    consumer = source / relative
-                    preparation.materialize_consumer(
-                        source, consumer, consumer, deadline=deadline,
-                        file_pointer_candidates=[
-                            path for path in file_pointer_candidates if path.is_relative_to(consumer)
-                        ],
-                    )
+                from application_sources import declared_projects
+
+                project_paths = tuple(
+                    directory.relative_to(source).as_posix()
+                    for directory in declared_projects(source).values()
+                )
+            for relative in project_paths:
+                consumer = source / relative
+                preparation.materialize_consumer(
+                    source, consumer, consumer, deadline=deadline,
+                    file_pointer_candidates=[
+                        path for path in file_pointer_candidates if path.is_relative_to(consumer)
+                    ],
+                )
     preparation._remaining(deadline)
     return {
         "schema": SCHEMA, "version": 1,

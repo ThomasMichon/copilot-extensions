@@ -131,8 +131,11 @@ does not group projects into one application or select undeclared neighbors.
 The existing builder, profile preparation, project emitter and installer retain
 their normal responsibilities and produce separate application outputs.
 
-Declarations are read from the selected Git commit, not dirty checkout edits.
-Locations must be contained ordinary directories; aliases, built-in identity
+Declarations are read from the selected Git commit, not dirty checkout edits,
+and must survive archive extraction unchanged. Both suite and explicit project
+selection materialize their declared dependencies and packaged assets.
+Locations must be contained ordinary directories outside `libs/` trees;
+applications cannot also be vendored libraries. Aliases, built-in identity
 collisions, traversal and linked paths refuse. Existing built-in selection and
 the governed feed, toolchain, seasoning and source/wheel association checks are
 unchanged. This declaration is source discovery, not installation authority or

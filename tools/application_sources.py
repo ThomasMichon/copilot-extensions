@@ -42,6 +42,8 @@ def project_locations(metadata: dict) -> dict[str, str]:
             or any(part.lower() in {"", ".", "..", ".git"} for part in relative.split("/"))
         ):
             raise ValueError("Python project location must be a contained relative directory")
+        if "libs" in {part.lower() for part in relative.split("/")}:
+            raise ValueError("Python application project cannot be a vendored library")
         if relative in result.values():
             raise ValueError("Python project locations alias the same directory")
         result[name] = relative
@@ -68,33 +70,6 @@ def declared_projects(root: Path) -> dict[str, Path]:
         ):
             raise ValueError("Python project location collides with a built-in project")
         result[name] = directory
-    return result
-
-
-def project_versions(root: Path) -> dict[str, str]:
-    from standalone_python_artifacts import COMPONENTS
-    from core_python_artifacts import enabled, release_version
-
-    locations = {
-        path.parent.name: path.parent for path in (root / "plugins").glob("*/pyproject.toml")
-    }
-    locations.update(declared_projects(root))
-    locations = dict(sorted(locations.items()))
-    locations.update({
-        "standalone:" + component: root / relative
-        for component, relative in COMPONENTS.items() if (root / relative).exists()
-    })
-    result = {}
-    for name, directory in locations.items():
-        project = directory / "pyproject.toml"
-        try:
-            data = tomllib.loads(project.read_text(encoding="utf-8"))
-            result[name] = data["project"]["version"]
-        except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError, KeyError, TypeError) as exc:
-            kind = "standalone Python project" if name.startswith("standalone:") else "Python project"
-            raise ValueError(f"{project}: invalid {kind}") from exc
-    if enabled(root):
-        result["composition:core"] = release_version(root)
     return result
 
 
