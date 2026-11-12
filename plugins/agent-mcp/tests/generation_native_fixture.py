@@ -32,6 +32,28 @@ from agent_mcp.custody_launch import attach
 from agent_mcp.serve import Server
 
 role, root, handle, fixed, config = sys.argv[1:6]
+if role == "conduit-optional":
+    import subprocess
+    from agent_procutil import no_window_kwargs
+    from agent_procutil._daemon_instance_identity import birth_identity
+    from agent_mcp.owner_exec import overlay
+    owner_birth = birth_identity(os.getpid())
+    entry = overlay(
+        {"mcpServers": {"fixture": {
+            "command": sys.executable,
+            "args": ["-I", "-m", "agent_mcp", "bridge", "--config", config],
+        }}}, ["fixture"], pid=os.getpid(), birth=owner_birth,
+        environment=dict(os.environ),
+    )["mcpServers"]["fixture"]
+    # This controlled caller holds the originating lifetime, not a production launcher.
+    with subprocess.Popen(
+        [entry["command"], *entry["args"]], **no_window_kwargs(),
+    ) as conduit:
+        Path(f"{os.getpid()}.owner.json").write_text(json.dumps({
+            "owner_pid": os.getpid(), "owner_birth": owner_birth,
+            "conduit_pid": conduit.pid, "conduit_birth": birth_identity(conduit.pid),
+        }), encoding="utf-8")
+        raise SystemExit(conduit.wait())
 if role.startswith("conduit"):
     if len(sys.argv) > 6:
         from agent_mcp.custody_launch import run_adopted
