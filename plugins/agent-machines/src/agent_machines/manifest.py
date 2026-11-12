@@ -70,7 +70,7 @@ BOOTSTRAP_CRITICAL_MARKETPLACES = ("copilot-extensions",)
 #: handlers.
 KNOWN_RESOURCE_TYPES = (
     "package", "file", "registry", "feature", "power-setting", "self-update",
-    "fleet-update", "copilot-cli-update", "gh-account", "git-config",
+    "fleet-update", "copilot-cli-update", "gh-account", "git-config", "health-job",
 )
 
 #: Minimal required identity fields per resource type (checked at load).
@@ -81,6 +81,7 @@ REQUIRED_FIELDS = {
     "feature": ("id", "manager"),
     "power-setting": ("subgroup", "setting"),
     "self-update": ("tier",),
+    "health-job": (),
     "fleet-update": ("tier",),
     "copilot-cli-update": (),
     "gh-account": ("host", "login", "credential_source"),
@@ -438,6 +439,10 @@ def load_package(
             f"resource {res.get('type')!r}:{res.get('id') or res.get('path')!r}",
         )
         rtype = res.get("type")
+        if rtype == "health-job" and set(res) - {
+            "type", "state", "platforms", "gate", "owner", "maintenance_safe", "authority",
+        }:
+            raise ManifestError(f"{path}: health-job accepts no collection policy or executable fields")
         if rtype not in KNOWN_RESOURCE_TYPES:
             raise ManifestError(
                 f"{path}: resource type {rtype!r} is not one of {KNOWN_RESOURCE_TYPES}"

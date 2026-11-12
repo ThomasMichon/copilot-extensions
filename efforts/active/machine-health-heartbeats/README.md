@@ -1473,3 +1473,39 @@ The [owner comparison](architecture.md#owner-decision) explains this choice.
   Source merge, release availability, installed adoption and live connectivity
   remain separate evidence. No production task, service or carrier was changed
   by this merge.
+- #12059 merged as `1375dcef5d46f7f2148c7d0c5f52fa5ca4ad4d0f` after
+  current-head Copilot approval with no findings, green required checks and no
+  open threads, using the same authorized Maintainer CODEOWNER exception.
+  The installed Windows enrollment amendment and current delivery lane are
+  reviewed; this is not implementation or deployment evidence.
+- Continue with the configuration-owned enrollment implementation and its real
+  installed-closure/replacement/rollback consumer flow. Keep the parent Active;
+  broader carrier/preferences, Linux and actual host activation remain open.
+
+### 2026-11-11 - Installed enrollment implementation and first native proof
+- Implemented local preview/confirmation, installed collection support
+  qualification, create-disabled/readback/enable, matching no-op, reversible
+  replacement, disable and removal under the existing runtime-reference owner.
+  The declared `health-job` resource only converges a prior local opt-in.
+- The finite installed GUI root no longer depends on a checkout or replaceable
+  marketplace payload. The canonical retained bootstrap binds the exact build
+  identity and Windows virtual environment before site imports.
+- Focused native fixtures proved two calendar cycles, immutable build-input
+  removal, matching convergence, replacement and rollback, failed-replacement
+  restoration, successor execution and exact task/reference cleanup. Windows
+  default-field/UTC serialization and observer sharing/settlement races found
+  during qualification now have focused controls. Visual attendance was not
+  required. Forty-nine focused consent/schema controls passed as well.
+- Declaration/materialization and source checks remain part of the unpublished
+  implementation gate. These are isolated fixture results, not release,
+  production enrollment, actual hourly host results or peer access evidence.
+  The parent remains Active; no production task, service or carrier was changed.
+- Final source checks passed for install contract, headless launch,
+  documentation consistency, lint and module size; all 41 existing enforced
+  typing projects passed on both targets without expanding admission.
+- Recovery now compares cached actions with the qualified selected runtime's
+  definition before any rollback enable. Lifecycle management uses its
+  executing retained manager independently of current collector readiness.
+  Focused unit/actor-free controls and the native CLI flow verify refusal of an
+  unsupported collector while retaining safe disable/removal; native cleanup
+  settled every fixture task and retained consumer lease.

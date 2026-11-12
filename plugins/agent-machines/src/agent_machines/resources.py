@@ -1817,6 +1817,7 @@ def _build_handlers() -> dict[str, ResourceHandler]:
     from .resource_git_config import GitConfigResourceHandler
     from .resource_power import PowerSettingResourceHandler
     from .resource_self_update import SelfUpdateResourceHandler
+    from .resource_health_job import HealthJobResourceHandler
 
     return {
         "package": PackageResourceHandler(),
@@ -1825,6 +1826,7 @@ def _build_handlers() -> dict[str, ResourceHandler]:
         "feature": FeatureResourceHandler(),
         "power-setting": PowerSettingResourceHandler(),
         "self-update": SelfUpdateResourceHandler(),
+        "health-job": HealthJobResourceHandler(),
         "fleet-update": FleetUpdateResourceHandler(),
         "copilot-cli-update": CopilotCliUpdateResourceHandler(),
         "gh-account": GhAccountResourceHandler(),

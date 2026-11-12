@@ -123,3 +123,38 @@ def prepare(
         "platform": platform, "artifacts": artifacts, "registered": False, "enabled": False,
         "qualification": "native-scheduler-not-qualified", "carrier_publication": "not-requested",
     }
+
+
+def installed_definition(
+    *, slot: str, python: str, gui_python: str, identity: str, store: str,
+    policy_token: str, user_id: str, windows_root: str, owner: str, enabled: bool,
+) -> str:
+    """Render only an installation-selected closure, never a configurable action."""
+    if re.fullmatch(r"[a-f0-9]{32}:[a-f0-9]{64}", identity) is None:
+        raise JobError("installed-build-identity-required")
+    if re.fullmatch(r"urn:copilot-extensions:health-job:[a-f0-9]{64}", owner) is None:
+        raise JobError("installed-job-owner-required")
+    directory = PureWindowsPath(slot)
+    if not directory.is_absolute() or directory.parent.name != "versions" or directory.name == "dev":
+        raise JobError("immutable-job-runtime-required")
+    prepared = prepare(
+        platform="win32", payload=slot, store=store, policy_token=policy_token,
+        user_id=user_id, windows_root=windows_root, gui_python=gui_python,
+        runtime_site=str(PureWindowsPath(python).parent.parent / "Lib" / "site-packages"),
+    )
+    root = ET.fromstring(prepared["artifacts"][f"{NAME}.xml"])
+    info = ET.Element(f"{{{NS}}}RegistrationInfo")
+    ET.SubElement(info, f"{{{NS}}}Description").text = owner
+    root.insert(0, info)
+    ET.SubElement(root.find(f"{{{NS}}}Settings"), f"{{{NS}}}UseUnifiedSchedulingEngine").text = "true"
+    action = root.find(f"{{{NS}}}Actions/{{{NS}}}Exec")
+    action.find(f"{{{NS}}}Arguments").text = subprocess.list2cmdline([
+        "-I", "-S", "-B", "-X", "utf8", str(directory / ".runtime-bootstrap" / "runtime_launcher.py"),
+        "--gui-runtime", "--runtime-identity", identity, "-m", "agent_machines.health_job",
+        "--store", store, "--expect-policy", policy_token,
+    ])
+    for path in ("Triggers/TimeTrigger/Enabled", "Settings/Enabled"):
+        root.find("/".join(f"{{{NS}}}{part}" for part in path.split("/"))).text = (
+            "true" if enabled else "false"
+        )
+    return ET.tostring(root, encoding="unicode")

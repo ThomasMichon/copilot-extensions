@@ -29,6 +29,15 @@ age-preserving collection pass.
 
 ## Selector sharing on Windows
 
+The slot-local `runtime_launcher.py` retains a completed generation before site
+imports. Its additive Windows `--gui-runtime` mode requires an exact
+`--runtime-identity` and a physical base `pythonw.exe` matching the slot's
+`pyvenv.cfg`. It binds the selected environment before `site.main()`; Task
+Scheduler need not carry `__PYVENV_LAUNCHER__`, a payload path or a venv
+console redirector. Existing console invocations are unchanged.
+Callers qualify `GUI_BOOTSTRAP_VERSION == 1` before preparing this launch.
+It is a finite launch mechanism, not scheduling or enrollment authority.
+
 Selector publication uses `FileRenameInfoEx` with replace and POSIX semantics.
 Cooperating Python and PowerShell resolvers open `current-version` and
 `last-known-good` with read, write and delete sharing: a held reader keeps its

@@ -61,6 +61,11 @@ state is removed only after every synthetic linked checkout and fixture root
 has been cleaned successfully; a failing case retains the original recovery
 state with its external copies.
 
+The contained runner suppresses only pytest's optional `*current` temporary
+directory convenience links on Windows. RedirectionGuard may permit creating
+such a link but refuse pytest's later cleanup traversal. Native symlink APIs,
+symlink-specific tests, fixture cleanup and containment remain unchanged.
+
 This page is a reference catalog, not a sequential checklist. Read the lane
 needed for the changed behavior; optional packets below do not all become
 prerequisites for one contribution.
@@ -6612,6 +6617,18 @@ receipt/parser and pending-withdrawal suites still cover malformed legacy proof;
 the new constructor must not repair it.
 
 ## Unit-only promotion packet
+
+The actor-free health composition packet also admits installed Windows
+enrollment preview/installation binding, native default normalization,
+GUI-environment binding, collection support loss, finite-root result/timeout/
+cleanup propagation and exact native request framing. Storage, runtime,
+process and scheduler owners are substituted; required CI registers no task
+and starts no child. The opt-in
+`tests/native/test_health_windows_enrollment.py` packet separately proves closed
+installed inputs, actual CLI selection, two calendar cycles, matching no-op,
+replacement/rollback, failed replacement with restored dependencies, successor
+execution and lease-settled withdrawal. Those native results are not production
+hourly publication, carrier delivery or another platform's qualification.
 
 The actor-free `test_health_composition.py` packet executes the existing domain
 age projection, normal report/parser and SVG composition. Substituted storage

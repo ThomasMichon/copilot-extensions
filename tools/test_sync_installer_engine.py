@@ -77,6 +77,20 @@ def test_native_cleanup_ships_its_engine_and_finite_process_supervisor(plugin: s
         ).read_bytes()
 
 
+def test_native_machines_materializes_its_declared_retained_gui_bootstrap(tmp_path):
+    import materialize_installer_engine
+
+    scripts = tmp_path / "plugins" / "agent-machines" / "scripts"
+    scripts.mkdir(parents=True)
+    log = materialize_installer_engine.materialize_derived_files(
+        tmp_path, canonical_root=REPO, file_names=frozenset({"runtime_launcher.py"}),
+    )
+    assert not any(line.startswith("SKIP") for line in log), log
+    launcher = scripts / "runtime_launcher.py"
+    assert launcher.read_bytes() == (REPO / "libs" / "installer-engine" / launcher.name).read_bytes()
+    assert not (tmp_path / "plugins" / "agent-containers" / "scripts" / launcher.name).exists()
+
+
 @pytest.mark.parametrize("shell", ["pwsh", "powershell"])
 def test_native_deploy_manifest_can_build_without_publishing(tmp_path, shell):
     executable = shutil.which(shell)
