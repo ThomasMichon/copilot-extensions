@@ -65,7 +65,13 @@ def owners(monkeypatch):
     owned.OwnedCleanupError = type("OwnedCleanupError", (RuntimeError,), {})
     owned.run_caller_owned = forbidden
     budget = package(proc.__name__ + ".owned_budget")
-    budget.OwnedExecutionBudget = SimpleNamespace
+
+    class Budget(SimpleNamespace):
+        @classmethod
+        def from_timeout(cls, timeout, *, cleanup_reserve):
+            return cls(timeout=timeout, cleanup_reserve=cleanup_reserve)
+
+    budget.OwnedExecutionBudget = Budget
     for name in ("health_task_native", "health_enrollment", "health_job"):
         modules[name] = load(machines.__name__ + "." + name, sources + name + ".py")
     modules["runtime_launcher"] = load(

@@ -1544,3 +1544,10 @@ The [owner comparison](architecture.md#owner-decision) explains this choice.
   its native fence, never blindly replays the operation. Failed settlement
   preserves the fence and error. The boundary controls cover both confirmed
   and unconfirmed cleanup on both surfaces; all 33 focused unit cases passed.
+- Native shutdown disables future admission and waits for the installed finite
+  root's normal child-Job settlement result, rather than force-stopping the root
+  and treating an empty scheduler list as tree termination. Unknown/crash/
+  native-timeout outcomes remain fenced. An actual delayed collector control
+  proved its final write and normal result precede successful disable, followed
+  by exact task/lease cleanup. Fresh COM readback preserves the intended Enabled
+  change while detecting all other definition drift during bounded waiting.

@@ -43,7 +43,7 @@ def _module(path, name):
     return module
 
 
-def _installed(root, version, *, collection_supported=True):
+def _installed(root, version, *, collection_supported=True, delayed_apply=False):
     """Use the ordinary completion/retention owner, with closed fixture inputs."""
     inputs = root.parent / ("build-input-" + version)
     helpers = inputs / "helpers"
@@ -86,6 +86,17 @@ def _installed(root, version, *, collection_supported=True):
         value = json.loads(declaration.read_text(encoding="utf-8"))
         value["operations"].remove("installed-job")
         declaration.write_text(json.dumps(value), encoding="utf-8")
+    if delayed_apply:
+        implementation = site / "agent_machines" / "health_run.py"
+        marker = "def run(store: Path, *, apply=False, expected=\"\") -> dict:\n"
+        text = implementation.read_text(encoding="utf-8")
+        assert text.count(marker) == 1
+        implementation.write_text(text.replace(marker, marker + (
+            "    if apply:\n"
+            "        (store / 'fixture-started').write_text('started')\n"
+            "        time.sleep(12)\n"
+            "        (store / 'fixture-finished').write_text('finished')\n"
+        )), encoding="utf-8")
     runtime.retain_runtime_helpers(slot, complete=False)
     runtime.mark_complete(root, version, payload_hash="fixture-closed-input")
     runtime.activate(root, version, link_free=True)
@@ -386,6 +397,45 @@ def test_native_failed_withdrawal_stays_disabled_and_recovers_idempotently(tmp_p
         owner.backend.call = call
         cleanup = owner.converge(remove=True)
         (tmp_path / "withdrawal-cleanup.json").write_text(json.dumps(cleanup), encoding="utf-8")
+        assert not cleanup["configured"] and not cleanup["instances"], cleanup
+        leases = installed.runtime._runtime_component("versioned_runtime_leases")
+        with leases._kernel_lease(root, "1.0", kind="retention", shared=False, timeout=10):
+            pass
+
+
+@pytest.mark.timeout(120)
+def test_native_disable_waits_for_retained_collector_to_finish(tmp_path, monkeypatch):
+    from agent_machines import health_task_native
+
+    execute = health_task_native.run_caller_owned
+    failures = []
+
+    def observe(*args, **fields):
+        response = execute(*args, **fields)
+        if response.returncode:
+            failures.append(response.stderr)
+        return response
+
+    monkeypatch.setattr(health_task_native, "run_caller_owned", observe)
+    root = tmp_path / "runtime"
+    installed = FixtureInstallation(_installed(root, "1.0", delayed_apply=True))
+    owner = enrollment.Enrollment(installed, selector=lambda *_args: installed)
+    try:
+        store = _store(tmp_path, None)
+        desired = {
+            "store": str(store), "policy_token": health_run.policy_preview(store)[2],
+            "user_id": owner.backend.call("read")["account_sid"], "enabled": True,
+        }
+        preview = owner.configure(desired)
+        assert owner.configure(desired, apply=True, expected=preview["preview_token"])["status"] == "converged"
+        _until(lambda: (store / "fixture-started").exists(), 30)
+        assert not (store / "fixture-finished").exists()
+        result = owner.disable()
+        assert result["status"] == "disabled" and not result["instances"], (result, failures)
+        assert (store / "fixture-finished").read_text() == "finished"
+        assert owner.backend.call("read")["last_result"] == 0
+    finally:
+        cleanup = owner.converge(remove=True)
         assert not cleanup["configured"] and not cleanup["instances"], cleanup
         leases = installed.runtime._runtime_component("versioned_runtime_leases")
         with leases._kernel_lease(root, "1.0", kind="retention", shared=False, timeout=10):

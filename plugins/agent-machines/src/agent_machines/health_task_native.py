@@ -9,6 +9,7 @@ from pathlib import Path
 import sys
 
 from agent_procutil.owned_process import run_caller_owned
+from agent_procutil.owned_budget import OwnedExecutionBudget
 
 
 class NativeTask:
@@ -28,9 +29,11 @@ class NativeTask:
         if len(command) > 30000:
             raise ValueError("native-health-task-definition-oversize")
         host = Path(os.environ["SystemRoot"]) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+        timeout = 60 if operation in {"disable", "remove"} else 20
         completed = run_caller_owned(
             [str(host), "-NoProfile", "-NonInteractive", "-EncodedCommand", command],
-            timeout=20, max_stdout_bytes=128 * 1024, max_stderr_bytes=4096,
+            timeout=timeout, budget=OwnedExecutionBudget.from_timeout(timeout, cleanup_reserve=5),
+            max_stdout_bytes=128 * 1024, max_stderr_bytes=4096,
         )
         if completed.returncode != 0:
             raise RuntimeError("native-health-task-operation-unconfirmed")
@@ -72,6 +75,14 @@ function Digest([string]$text) {
     try { return ([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($text)))).Replace('-', '').ToLowerInvariant() }
     finally { $sha.Dispose() }
 }
+function Disabled-DefinitionDigest([string]$text) {
+    [xml]$xml = $text
+    $ns = New-Object Xml.XmlNamespaceManager($xml.NameTable)
+    $ns.AddNamespace('t', 'http://schemas.microsoft.com/windows/2004/02/mit/task')
+    $enabled = $xml.SelectSingleNode('/t:Task/t:Settings/t:Enabled', $ns)
+    if ($null -ne $enabled) { $null = $enabled.ParentNode.RemoveChild($enabled) }
+    return Digest $xml.OuterXml
+}
 $task = Read-Task
 if ($r.operation -ne 'read') {
     if ($null -eq $task) {
@@ -96,12 +107,25 @@ if ($r.operation -ne 'read') {
         $null = $folder.RegisterTask($r.name, $candidate.OuterXml, $flags, $sid, $null, 3, $null)
     } elseif ($r.operation -in @('disable', 'remove')) {
         if ($null -ne $task) {
+            $settlingDigest = Disabled-DefinitionDigest $task.Xml
             $task.Enabled = $false
-            $task.Stop(0)
-            $deadline = [DateTime]::UtcNow.AddSeconds(10)
-            while ($task.GetInstances(0).Count -ne 0) {
+            $task = Read-Task
+            if ($null -eq $task -or $task.Enabled) { throw 'Task disable not confirmed' }
+            Check-Owner $task
+            $deadline = [DateTime]::UtcNow.AddSeconds(50)
+            while ($task.GetInstances(0).Count -ne 0 -or $task.LastTaskResult -eq 267009) {
                 if ([DateTime]::UtcNow -ge $deadline) { throw 'Task instances did not settle' }
                 Start-Sleep -Milliseconds 50
+                $task = Read-Task
+                if ($null -eq $task) { throw 'Task disappeared during settlement' }
+                Check-Owner $task
+                if ((Disabled-DefinitionDigest $task.Xml) -cne $settlingDigest) { throw 'Task changed during settlement' }
+            }
+            if ($task.Enabled -or (Disabled-DefinitionDigest $task.Xml) -cne $settlingDigest) { throw 'Task changed during settlement' }
+            # Only these installed-root results attest whole child-Job settlement.
+            # A native hard stop or cleanup-unknown result never proves shutdown.
+            if ($task.LastTaskResult -notin @(0, 2, 124, 267011)) {
+                throw 'Owned collector termination is unconfirmed'
             }
             if ($r.operation -eq 'remove') { $folder.DeleteTask($r.name, 0) }
         }

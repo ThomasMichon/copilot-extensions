@@ -435,6 +435,13 @@ separately. Unsupported old code or policy drift cannot re-enable a rollback.
 `disable` and `remove` do not require collection-policy readiness: they settle
 only the owned task. Removal releases its references after confirmed absence,
 withdraws local adoption and preserves policy/history and unrelated tasks.
+Native shutdown disables future launches and waits for the finite installed
+root to complete its own child-Job settlement. It does not force-stop the root
+and infer descendant exit from an empty scheduler list. Only normal root
+results that attest settlement (or a never-run task) permit completion; a
+native crash, cleanup-unknown result or bounded wait expiry preserves an
+unknown outcome and retained dependencies. The shutdown helper reserves cleanup
+inside a 60-second caller budget, with at most 50 seconds of native waiting.
 Lifecycle control uses its executing immutable manager; collection convergence
 separately qualifies the current collector. After an incompatible collector
 rollback, the installation owner's retained capable manager can still perform
