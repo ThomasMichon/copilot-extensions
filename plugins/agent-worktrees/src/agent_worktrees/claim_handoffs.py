@@ -182,25 +182,13 @@ def _bundle_from_dict(raw: object) -> ClaimBundle:
     )
 
 
-def _load_registry_strict(path: Path) -> list[ClaimBundle]:
-    if not path.exists():
-        return []
-    try:
-        data = yaml.safe_load(tracking._read_text_with_retry(path))
-    except (OSError, UnicodeError, yaml.YAMLError) as exc:
-        raise ClaimHandoffError(
-            f"cannot read claim-handoff registry {path}: {exc}"
-        ) from exc
-    if not isinstance(data, dict) or data.get("version") != REGISTRY_VERSION:
-        raise ClaimHandoffError(f"invalid claim-handoff registry: {path}")
-    raw_bundles = data.get("bundles")
-    if not isinstance(raw_bundles, list):
-        raise ClaimHandoffError(f"invalid claim-handoff bundle list: {path}")
-    bundles = [_bundle_from_dict(raw) for raw in raw_bundles]
-    ids = [bundle.bundle_id for bundle in bundles]
-    if len(set(ids)) != len(ids):
-        raise ClaimHandoffError("claim-handoff registry contains duplicate bundle ids")
-    return bundles
+def _load_registry_strict(path: Path, *, maximum_bytes: int | None = None) -> list[ClaimBundle]:
+    from .claim_handoff_snapshot import load
+
+    return load(
+        path, maximum_bytes=maximum_bytes, version=REGISTRY_VERSION,
+        parse_bundle=_bundle_from_dict, error_type=ClaimHandoffError,
+    )
 
 
 def _save_registry(path: Path, bundles: list[ClaimBundle]) -> None:
@@ -762,10 +750,14 @@ def active_bundle_ids_for_source(source: str) -> tuple[str, ...]:
     )
 
 
-def active_bundle_for_claim(source: str, claim_ref: str) -> str:
+def active_bundle_for_claim(source: str, claim_ref: str, *, maximum_bytes: int | None = None) -> str:
     """Return the nonterminal bundle reserving ``claim_ref``, or empty."""
     canonical = _canonical_ref(_qualified_ref(source, "source"))
-    for bundle in _load_registry_strict(registry_path()):
+    path = registry_path()
+    bundles = _load_registry_strict(path) if maximum_bytes is None else _load_registry_strict(
+        path, maximum_bytes=maximum_bytes,
+    )
+    for bundle in bundles:
         if bundle.source != canonical or bundle.state in TERMINAL_STATES:
             continue
         if any(claim["ref"] == claim_ref for claim in bundle.claims):

@@ -56,9 +56,13 @@ and actual retained-checkout selection or movement.
   closed local creator obligation. Missing metadata is never rehydrated by
   planning or movement merely to make admission pass.
 - `execution_spaces.require_record_mutation(..., recover_receiving=False)`
-  refuses missing receiving metadata on an owner-ref/nonce record. Read-only
-  planning must retain that refusal; it must not migrate an index, save a
-  sidecar, rewrite a receipt or finish a pending creation.
+  refuses missing receiving metadata when original receiving evidence identifies
+  that protocol. Generic ownership plus a creation nonce is not itself a
+  receiving-allocation marker. An ordinary local parent's exact settled generic
+  claim and bounded, stable original-journal classification distinguish that
+  existing ordinary case; ambiguous evidence remains held. Read-only planning
+  never migrates an index, saves a sidecar, rewrites a receipt or finishes a
+  pending creation. Ordinary immutable creation receipts remain excluded.
 - `receiving_allocation.require_record` and
   `receiving_creation_journal.concluded_identity` bind the original journaled
   allocation, nonce, branch, creator and path. A new checkout location cannot
