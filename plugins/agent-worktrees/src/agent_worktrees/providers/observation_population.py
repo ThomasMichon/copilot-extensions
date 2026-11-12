@@ -111,7 +111,7 @@ def _read(url, credentials, deadline):
     if remaining <= 0:
         raise ProviderError("population deadline exhausted")
     result = run_cli(
-        ["curl", "-q", "--silent", "--show-error", "--request", "GET",
+        ["curl", "-q", "--globoff", "--silent", "--show-error", "--request", "GET",
          "--proto", "=https", "--max-redirs", "0", "--max-time", str(remaining),
          "--url", url, "--header", "@-", "--header", "Accept: application/json",
          "--write-out", "\n%{http_code}"],

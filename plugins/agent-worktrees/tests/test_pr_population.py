@@ -1,6 +1,8 @@
 """Synthetic selected native ADO populations, with actual parser/credential processes."""
 
 import json
+import shutil
+import socket
 import subprocess
 import sys
 import time
@@ -106,6 +108,34 @@ def test_union_author_reviewer_deduplicates_and_normalizes_all_available_fields(
     assert requests[-1][1]["input_text"] == "Authorization: " + scheme + "synthetic-5\n"
     assert all(kwargs["max_stdout_bytes"] == 1_048_584 for _, kwargs in requests)
     assert all(argv[1] == "-q" and "--location" not in argv for argv, _ in requests)
+
+
+def test_actual_curl_cannot_expand_selected_endpoint_into_multiple_requests(monkeypatch):
+    from agent_worktrees.providers.base import run_cli
+    if not shutil.which("curl"):
+        pytest.skip("native curl unavailable")
+    outputs = []
+
+    def invoke(argv, **kwargs):
+        # Reserve a private non-listening loopback port and bypass every proxy;
+        # no provider or unrelated listener can receive this synthetic request.
+        completed = run_cli([*argv, "--noproxy", "*"], **kwargs)
+        outputs.append(completed.stdout)
+        return completed
+
+    monkeypatch.setattr(pop, "run_cli", invoke)
+    calls = []
+    with socket.socket() as reservation:
+        reservation.bind(("127.0.0.1", 0))
+        endpoint = f"https://127.0.0.1:{reservation.getsockname()[1]}/{{first,second}}"
+        result = pop.population(
+            "azure-devops", REPO, api_base=endpoint, expression=expression(),
+            credential_source=credential(calls, endpoint=endpoint),
+            deadline=time.monotonic() + 5,
+        )
+    assert result["outcome"] == "unavailable"
+    assert calls == ["credential"]
+    assert len(outputs) == 1 and outputs[0].count("\n000") == 1
 
 
 def test_created_age_changes_without_head_change_and_all_residuals(monkeypatch):

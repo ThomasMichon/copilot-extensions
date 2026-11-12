@@ -20,7 +20,7 @@ credential or provider call. The filter narrows only this exact repository.
 The credential command uses the existing absolute JSON argv contract and returns
 a fresh typed `observe` credential for every request. Its provider, endpoint,
 repository, permission and expiry must agree. Secrets travel on curl stdin,
-not argv; curl configuration and redirects are disabled.
+not argv; curl configuration, URL glob expansion and redirects are disabled.
 
 ## Compatibility and caller custody
 
