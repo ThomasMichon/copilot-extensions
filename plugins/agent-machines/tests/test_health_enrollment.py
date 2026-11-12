@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 import sys
+import subprocess
 from xml.etree import ElementTree as ET
 
 import pytest
@@ -211,6 +212,85 @@ def test_failed_replacement_restores_known_good_definition_and_references(case):
     assert refs.owners[enrollment.REFERENCE] == ["1.0"]
     assert owner.read()["confirmed"]["version"] == "1.0"
     assert not owner.read()["pending"]
+
+
+def test_failed_removal_never_reenables_and_later_convergence_finishes_withdrawal(case):
+    owner, desired, native, refs, *_ = case
+    adopt(owner, desired)
+    native.calls.clear()
+    native.fail = "remove"
+    result = owner.converge(remove=True)
+    assert result["status"] == "unknown" and not result["enabled"]
+    assert owner.read()["pending"]["candidate"] is None
+    assert refs.owners[enrollment.REFERENCE] == ["1.0"]
+    assert "enable" not in native.calls
+    assert owner.converge()["status"] == "removed"
+    assert not native.xml and not refs.owners[enrollment.REFERENCE]
+    assert "enable" not in native.calls
+
+
+def test_repeated_removal_is_noop_only_after_references_are_settled(case):
+    owner, desired, native, refs, *_ = case
+    adopt(owner, desired)
+    assert owner.converge(remove=True)["changed"]
+    native.calls.clear()
+    assert owner.converge(remove=True)["changed"] is False
+    assert not native.calls and refs.pending is None
+    refs.owners[enrollment.REFERENCE] = ["1.0"]
+    assert owner.converge(remove=True)["changed"] is True
+    assert not refs.owners[enrollment.REFERENCE]
+
+
+def test_interrupted_disable_recovers_without_replacement_or_enable(case):
+    owner, desired, native, _, *_ = case
+    adopt(owner, desired)
+    call = native.call
+
+    def lose_disable_reply(operation, **fields):
+        result = call(operation, **fields)
+        if operation == "disable":
+            raise RuntimeError("reply unavailable")
+        return result
+
+    native.call = lose_disable_reply
+    assert owner.disable()["status"] == "unknown"
+    native.call = call
+    native.calls.clear()
+    assert owner.converge()["status"] == "recovered-candidate"
+    assert not native.calls and not native.snapshot()["enabled"]
+    assert owner.converge()["status"] == "unchanged"
+    assert not native.calls
+
+
+@pytest.mark.parametrize("kind", ["timeout", "cleanup"])
+def test_cli_and_resource_subprocess_failures_preserve_recovery_state(case, monkeypatch, capsys, kind):
+    from agent_machines import cli_health
+    from agent_machines.resources import HANDLERS, ResolvedResource
+    from agent_procutil.owned_process import OwnedCleanupError
+
+    owner, desired, native, *_ = case
+    adopt(owner, desired)
+    native.fail = "remove"
+    assert owner.converge(remove=True)["status"] == "unknown"
+    before = owner.path.read_bytes()
+
+    def fail(*_args, **_fields):
+        if kind == "timeout":
+            raise subprocess.TimeoutExpired(["fixture"], 1)
+        raise OwnedCleanupError(None)
+
+    monkeypatch.setattr(owner, "converge", fail)
+    monkeypatch.setattr(enrollment, "select", lambda **_fields: owner.installation)
+    monkeypatch.setattr(enrollment, "Enrollment", lambda *_args: owner)
+    monkeypatch.setenv("AGENT_RT_ROOT", str(owner.root))
+    result = HANDLERS["health-job"].apply(
+        ResolvedResource("health-job", "health-job", ("health-job",), {"state": "present"}),
+        SimpleNamespace(home=owner.root), False,
+    )
+    assert not result.ok
+    assert cli_health.run_job(SimpleNamespace(job_operation="converge")) == 2
+    assert json.loads(capsys.readouterr().err)["error"] == "job-lifecycle-unavailable"
+    assert owner.path.read_bytes() == before
 
 
 def test_recovery_refuses_cached_action_outside_its_qualified_runtime(case):

@@ -153,8 +153,6 @@ def installed_definition(
         "--gui-runtime", "--runtime-identity", identity, "-m", "agent_machines.health_job",
         "--store", store, "--expect-policy", policy_token,
     ])
-    for path in ("Triggers/TimeTrigger/Enabled", "Settings/Enabled"):
-        root.find("/".join(f"{{{NS}}}{part}" for part in path.split("/"))).text = (
-            "true" if enabled else "false"
-        )
+    root.find(f"{{{NS}}}Triggers/{{{NS}}}TimeTrigger/{{{NS}}}Enabled").text = "true"
+    root.find(f"{{{NS}}}Settings/{{{NS}}}Enabled").text = "true" if enabled else "false"
     return ET.tostring(root, encoding="unicode")

@@ -397,6 +397,12 @@ class Enrollment:
             desired = desired if desired is not None else state["desired"]
             if desired is None and not remove:
                 return self._result("not-adopted", native, state, changed=False)
+            if (
+                remove and desired is None and state["confirmed"] is None
+                and not native["configured"]
+                and not self.leases.read_runtime_references(self.root).get(REFERENCE, [])
+            ):
+                return self._result("removed", native, state, changed=False)
             candidate = None
             if not remove:
                 self._policy(desired, native)
@@ -433,6 +439,8 @@ class Enrollment:
                 # Read back the exact task before deciding whether rollback is safe.
                 try:
                     native = self.backend.call("read")
+                    if remove:
+                        return self._result("unknown", native, working, changed=None, rollback="unconfirmed")
                     return self._recover(working, native, rollback=True)
                 except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
                     return self._result("unknown", native, working, changed=None, rollback="unconfirmed")
@@ -517,10 +525,8 @@ class Enrollment:
             "references": transaction["owners"].get(REFERENCE, []),
         }}
         slots._write(self.path, state)
-        if remove:
+        if remove or candidate is None:
             return self._settle(state, self._switch(native, None), None, status="removed")
-        if candidate is None and not native["configured"]:
-            return self._settle(state, native, None, status="recovered-removal")
         if not rollback and candidate and matched == candidate and (
             signature(native["xml"]) == signature(candidate["definition"])
         ):

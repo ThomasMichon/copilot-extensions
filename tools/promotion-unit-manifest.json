@@ -1,6 +1,8 @@
 {
     "profile": "copilot-extensions.promotion-units/v1",
     "nodes": [
+        "tools/promotion_unit_tests/test_health_composition.py::test_withdrawal_recovery_cannot_select_or_enable_an_incumbent",
+        "tools/promotion_unit_tests/test_health_composition.py::test_removed_enrollment_convergence_is_noop_after_reference_settlement",
         "tools/promotion_unit_tests/test_health_composition.py::test_installed_enrollment_preview_binds_installation_and_refuses_foreign_state_without_effects",
         "tools/promotion_unit_tests/test_health_composition.py::test_installed_job_native_defaults_preserve_matching_but_not_changed_execution",
         "tools/promotion_unit_tests/test_health_composition.py::test_installed_lifecycle_cli_uses_retained_manager_without_collector_readiness",
@@ -4806,10 +4808,10 @@
         "tools/promotion_unit_tests/test_local_finalize.py::test_cleanup_requires_positive_local_branch_observation[remote]"
     ],
     "sources": {
-        "tools/promotion_unit_tests/test_health_composition.py": "b9b47061463bc24446a3e771158f5fb71dd899dd4b239d7215fbc0b5b60e4f5e",
+        "tools/promotion_unit_tests/test_health_composition.py": "d78f5e37a1b21baaaa1b8d973489ff4501daad647d3c0d87f1d0c225af4700aa",
         "plugins/agent-machines/tests/native/health_task_desktop.py": "742086a0c8ded805f6e9e2b519009b2d31872e936752f6e08051ba973a1c2d84",
-        "plugins/agent-machines/src/agent_machines/cli_health.py": "230cfb76acf033180c527b56bfd0baea49f82e60ffe578de5a09f9ef9ae9ad91",
-        "plugins/agent-machines/src/agent_machines/health_jobs.py": "44691a5cc44dcdd2fdcd659f9557555a65662a997e102009c0b3dbdef3eaefe5",
+        "plugins/agent-machines/src/agent_machines/cli_health.py": "90a69e9c46dd6aed7d388e7439539d14faa67e42c5724c0b96fb32f678dd8901",
+        "plugins/agent-machines/src/agent_machines/health_jobs.py": "ec135a55725a1f29fa4688fa380e24bd6b703a46ae977c8ad416881a4ca6e75d",
         "plugins/agent-machines/src/agent_machines/health_chart.py": "4ff6dcdf1189ff903f55ceb0445e4853974b6b3981d9f9ee455552a8f5a4b2bf",
         "plugins/agent-machines/src/agent_machines/health_report.py": "8e1684c9466b2d0d2a3065787ab2ffcc0232c14b0b01ae25f11605e70260f2da",
         "plugins/agent-machines/src/agent_machines/health_slots.py": "9317a16c7d6d70cce4afb93b5e9fb692d2a0dc25d8b5c19797ad5d0e00bb1149",
@@ -5494,7 +5496,7 @@
         "plugins/agent-machines/src/agent_machines/health_collect.py": "856c65d53b5146b9d80c4eeb81df7c350b3a18e1dbc844c2d2d3d9a3d18adcab",
         "tools/promotion_unit_tests/test_local_finalize.py": "9ccbe15278f853bd3e4280c150c86d6f4816159591b24660eb24ab2ba10d7edb",
         "plugins/agent-worktrees/src/agent_worktrees/finalize_local.py": "9fea9450ace2ee3461166bf5d6efcd9058414609f46e3c4614bb92e077486fbe",
-        "plugins/agent-machines/src/agent_machines/health_enrollment.py": "27b65d64459542704ef2f9144b8c521d1622620beb22d5e67b55769c479f22a0",
+        "plugins/agent-machines/src/agent_machines/health_enrollment.py": "26c0cf39a777fba85463c3964458395ac1cf75905855ce880f1df01b391d613a",
         "plugins/agent-machines/src/agent_machines/health_job.py": "69f6b2ffd86adc4c8d262b6a42c59c9036e7d8eef88e6433f2b8fdc29cdbf1ca",
         "plugins/agent-machines/src/agent_machines/health_task_native.py": "e1039544a8f05e14917c7e4e468e6ec17c193a3b923b859902ad763bb322f3e6",
         "libs/installer-engine/runtime_launcher.py": "0cd1ac9fd75cff85f605345ec958fabc70f59796343b798aceec253ecc0b7cde"

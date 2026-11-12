@@ -330,3 +330,51 @@ def test_failed_installed_replacement_restores_known_good_and_runs_successor(tmp
         for version in versions:
             with leases._kernel_lease(root, version, kind="retention", shared=False, timeout=10):
                 pass
+
+
+@pytest.mark.timeout(180)
+def test_native_failed_withdrawal_stays_disabled_and_recovers_idempotently(tmp_path):
+    root = tmp_path / "runtime"
+    installed = FixtureInstallation(_installed(root, "1.0"))
+    owner = enrollment.Enrollment(installed, selector=lambda *_args: installed)
+    call = owner.backend.call
+    try:
+        store = _store(tmp_path, None)
+        desired = {
+            "store": str(store), "policy_token": health_run.policy_preview(store)[2],
+            "user_id": call("read")["account_sid"], "enabled": True,
+        }
+        preview = owner.configure(desired)
+        assert owner.configure(desired, apply=True, expected=preview["preview_token"])["status"] == "converged"
+        failed_remove = []
+
+        def lose_remove_reply(operation, **fields):
+            if operation == "remove" and not failed_remove:
+                failed_remove.append(True)
+                raise RuntimeError("fixture deletion fault")
+            return call(operation, **fields)
+        owner.backend.call = lose_remove_reply
+        withdrawal = owner.converge(remove=True)
+        assert withdrawal["status"] == "unknown" and not call("read")["enabled"]
+        owner.backend.call = call
+        manager = enrollment._peer_launch.retained_runtime_prefix(
+            root, installed.python, "agent_machines", runtime_identity=installed.identity,
+        )
+        for operation in ("converge", "remove"):
+            result = run_caller_owned(
+                [*manager, "health", "job", operation], timeout=30,
+                max_stdout_bytes=64 * 1024, max_stderr_bytes=4096,
+            )
+            assert result.returncode == 0, result.stderr
+            row = json.loads(result.stdout)
+            assert row["status"] == "removed" and not row["enabled"] and not row["configured"]
+            if operation == "remove":
+                assert row["changed"] is False
+    finally:
+        owner.backend.call = call
+        cleanup = owner.converge(remove=True)
+        (tmp_path / "withdrawal-cleanup.json").write_text(json.dumps(cleanup), encoding="utf-8")
+        assert not cleanup["configured"] and not cleanup["instances"], cleanup
+        leases = installed.runtime._runtime_component("versioned_runtime_leases")
+        with leases._kernel_lease(root, "1.0", kind="retention", shared=False, timeout=10):
+            pass

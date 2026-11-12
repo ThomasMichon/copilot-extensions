@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import stat
+import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -97,7 +98,7 @@ def run_job(args) -> int:
             result = owner.converge(remove=args.job_operation == "remove")
         print(json.dumps(result, separators=(",", ":"), allow_nan=False), flush=True)
         return 2 if result["status"] in {"unknown", "rolled-back"} else 0
-    except (OSError, ValueError, RuntimeError) as error:
+    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
         print(json.dumps({
             "ok": False, "error": str(error) if isinstance(error, HealthError) else "job-lifecycle-unavailable",
             "carrier_publication": "not-requested",

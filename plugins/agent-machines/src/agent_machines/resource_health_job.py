@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import subprocess
 from pathlib import Path
 
 from .resources import (
@@ -66,7 +67,7 @@ class HealthJobResourceHandler(ResourceHandler):
                 "error" if result["status"] in {"unknown", "rolled-back"} else "install" if result["changed"] else "none",
                 detail="local health job: " + result["status"],
             )
-        except (OSError, ValueError, RuntimeError):
+        except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
             return ResourceResult(
                 self.TYPE, resolved.id, False, dry_run, "error",
                 detail="health-job lifecycle unavailable; no new local enrollment adopted",

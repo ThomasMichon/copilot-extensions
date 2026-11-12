@@ -1509,3 +1509,16 @@ The [owner comparison](architecture.md#owner-decision) explains this choice.
   Focused unit/actor-free controls and the native CLI flow verify refusal of an
   unsupported collector while retaining safe disable/removal; native cleanup
   settled every fixture task and retained consumer lease.
+- Withdrawal recovery retains removal intent after a failed native deletion;
+  it never restores an enabled incumbent. Repeated absence converges without
+  mutation once task, adoption and references are cleared. Disabled enrollment
+  retains an enabled trigger and changes only the task-level setting, so
+  interrupted disable recovers without replacement. CLI/resource boundaries
+  report subprocess timeout/cleanup failures without clearing recovery state.
+  The focused native withdrawal plus unit packet passed 21 cases, and the
+  actor-free packet plus runner controls passed 41.
+- A broader replacement rerun reached its unchanged test deadline while
+  observing successor completion, before the new withdrawal assertions. The
+  exact abandoned fixture task was identity-checked, removed and read back.
+  Changed withdrawal behavior was then isolated under the original bounds;
+  this does not promote the timed-out rerun into a passing result.

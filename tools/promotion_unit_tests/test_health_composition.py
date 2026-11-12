@@ -135,6 +135,14 @@ def test_installed_job_native_defaults_preserve_matching_but_not_changed_executi
     normalized = ElementTree.tostring(root, encoding="unicode")
     assert enrollment.signature(normalized) == enrollment.signature(xml)
     assert enrollment.signature(enrollment.disabled(normalized))["Settings/Enabled"] == "false"
+    disabled_xml = jobs.installed_definition(
+        slot=r"C:\fixture\versions\1.0", python=r"C:\fixture\versions\1.0\Scripts\python.exe",
+        gui_python=r"C:\Python\pythonw.exe", identity="a" * 32 + ":" + "b" * 64,
+        store=r"C:\fixture\store", policy_token="c" * 64,
+        user_id="S-1-5-21-1-2-3-1000", windows_root=r"C:\Windows",
+        owner="urn:copilot-extensions:health-job:" + "d" * 64, enabled=False,
+    )
+    assert enrollment.signature(disabled_xml) == enrollment.signature(enrollment.disabled(xml))
     root.find("t:Actions/t:Exec/t:Command", ns).text = r"C:\Python\python.exe"
     changed = ElementTree.tostring(root, encoding="unicode")
     assert enrollment.signature(changed) != enrollment.signature(xml)
@@ -166,6 +174,41 @@ def test_installed_lifecycle_cli_uses_retained_manager_without_collector_readine
     assert args.func(args) == 0
     assert selections == [{"executing": True, "for_collection": False}]
     assert json.loads(output.getvalue())["status"] == "disabled"
+
+
+def test_withdrawal_recovery_cannot_select_or_enable_an_incumbent(owners):
+    module = owners[0]["health_enrollment"]
+    owner = object.__new__(module.Enrollment)
+    owner.root = ROOT
+    owner.path = ROOT / "unused-state"
+    owner.leases = SimpleNamespace(begin_runtime_reference_transaction=lambda *_args: {
+        "token": "a" * 64, "owners": {},
+    })
+    writes, switches = [], []
+    module.slots._write = lambda *args: writes.append(args)
+    owner._qualify_record = lambda *_args: pytest.fail("withdrawal qualified an incumbent")
+    owner._switch = lambda native, candidate: switches.append(candidate) or native
+    owner._settle = lambda *_args, **fields: fields
+    state = {"pending": {
+        "before": {"retained": "incumbent"}, "candidate": None, "references": [], "token": "a" * 64,
+    }}
+    result = owner._recover(state, {"configured": False}, rollback=True)
+    assert result["status"] == "removed" and switches == [None] and len(writes) == 1
+
+
+def test_removed_enrollment_convergence_is_noop_after_reference_settlement(owners):
+    module = owners[0]["health_enrollment"]
+    owner = object.__new__(module.Enrollment)
+    owner.root = ROOT
+    owner.read = module.empty
+    native = {"configured": False, "enabled": False, "instances": []}
+    owner.backend = SimpleNamespace(call=lambda operation: native)
+    owner._owned = owner._recover_reference_fence = lambda *_args: None
+    owner.leases = SimpleNamespace(
+        reference_transaction_custody=lambda *_args, **_fields: nullcontext(),
+        read_runtime_references=lambda *_args: {},
+    )
+    assert owner.converge(remove=True)["changed"] is False
 
 
 @pytest.mark.parametrize("outcome,expected", [("unsupported", 2), ("failed", 2), ("timeout", 124), ("cleanup", 125)])
