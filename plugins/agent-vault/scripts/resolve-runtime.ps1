@@ -221,9 +221,12 @@ if ($_rtRoot) {
   # numeric run zero-padded so 0.1.0-dev185 > 0.1.0-dev50, not lexicographic).
   if (-not $AgentRtPy) {
     $_rtSlots = @(Get-ChildItem (Join-Path $_rtRoot 'versions') -Directory -ErrorAction SilentlyContinue)
-    $_rtSourceSlots = @($_rtSlots | Where-Object { $_.Name -cmatch '[+.]source\.' })
+    $_rtSourceSlots = @($_rtSlots | Where-Object {
+      $_.Name -cmatch '[+.]source\.|\.profile\.[0-9a-f]{16}(?:[.+]repair\.[0-9a-f]{32})?$'
+    })
     if ($_rtSourceSlots.Count) {
-      [Console]::Error.WriteLine('Source-qualified runtime recovery requires an exact current-version or last-known-good selector; refusing unordered source fallback')
+      $_rtKind = if (@($_rtSourceSlots | Where-Object { $_.Name -cmatch '[+.]source\.' }).Count) { 'source' } else { 'profile' }
+      [Console]::Error.WriteLine("Qualified runtime recovery requires an exact current-version or last-known-good selector; refusing unordered $_rtKind fallback")
     } else {
         foreach ($_rtSlot in ($_rtSlots | Sort-Object { _Rt-VersionKey $_.Name })) {
           $p = _Rt-TrySlot $_rtSlot.Name

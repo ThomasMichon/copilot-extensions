@@ -343,6 +343,33 @@ def test_native_driver_binds_and_rechecks_actual_closed_profile(tmp_path, engine
     assert not args.root.exists()
 
 
+@pytest.mark.parametrize("binding", ["driver-selection", "profile-digest"])
+def test_native_construction_refuses_a_replacement_profile_after_admission(
+    tmp_path, engine, plugin, monkeypatch, binding,
+):
+    import install_source
+
+    monkeypatch.delenv("COPILOT_EXTENSIONS_NATIVE_WHEEL_SELECTION", raising=False)
+    with snapshot(tmp_path) as retained:
+        record = json.loads(inspected(retained).binding_json)
+    profile = tmp_path / "profile.json"
+    profile.write_text(json.dumps(record), encoding="utf-8")
+    expected = hashlib.sha256(json.dumps(record, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    with install_source.wheel_inputs(profile, tmp_path) as inputs:
+        admitted = install_source.wheel_selection(plugin, "demo-pkg", inputs)
+    record["release"]["identity"] = "replacement-release"
+    profile.write_text(json.dumps(record), encoding="utf-8")
+    if binding == "driver-selection":
+        monkeypatch.setenv("COPILOT_EXTENSIONS_NATIVE_WHEEL_SELECTION", json.dumps(admitted))
+    with pytest.raises(ValueError, match="changed after driver admission"):
+        with install_source.wheel_inputs(
+            profile, tmp_path,
+            **({"expected_profile_sha256": expected} if binding == "profile-digest" else {}),
+        ) as inputs:
+            install_source.wheel_selection(plugin, "demo-pkg", inputs)
+    assert not (tmp_path / "runtime").exists()
+
+
 def test_owner_validation_precedes_completion_and_rechecks_read_only_reuse(
     tmp_path, engine, plugin, monkeypatch,
 ):

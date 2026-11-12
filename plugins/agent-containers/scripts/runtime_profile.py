@@ -626,12 +626,12 @@ def main() -> int:
             if (
                 not args.expected_source_version or not args.expected_source_identity
                 or args.python or args.uv or args.profile or args.tsv
+                or args.wheel_profile or args.wheel_directory
             ):
                 raise RuntimeError("Source target planning requires only the exact source selection")
             print(json.dumps(plan_source(
                 args.root, args.payload, expected_source_version=args.expected_source_version,
                 expected_source_identity=args.expected_source_identity,
-                wheel_profile=args.wheel_profile, wheel_directory=args.wheel_directory,
             ), sort_keys=True))
             return 0
         if args.stamp_source:
@@ -651,6 +651,7 @@ def main() -> int:
             args.root, args.payload, python=args.python, uv=args.uv, requested=args.profile,
             expected_source_version=args.expected_source_version,
             expected_source_identity=args.expected_source_identity,
+            wheel_profile=args.wheel_profile, wheel_directory=args.wheel_directory,
         )
     except (OSError, ValueError, RuntimeError) as exc:
         print(f"[agent-containers] {exc}", file=sys.stderr)

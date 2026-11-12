@@ -240,14 +240,18 @@ if [ -n "$_rt_root" ]; then
   # plain POSIX sort version-aware (dev185 > dev50) without GNU `sort -V`.
   if [ -z "$AGENT_RT_PY" ]; then
     _rt_source_present=0
+    _rt_qualified_kind=source
     for _rt_dir in "$_rt_root"/versions/*; do
       [ -d "$_rt_dir" ] || continue
       case "${_rt_dir##*/}" in
         *+source.*|*.source.*) _rt_source_present=1; break ;;
       esac
+      if printf '%s\n' "${_rt_dir##*/}" | grep -Eq '\.profile\.[0-9a-f]{16}([.+]repair\.[0-9a-f]{32})?$'; then
+        _rt_source_present=1; _rt_qualified_kind=profile
+      fi
     done
     if [ "$_rt_source_present" = 1 ]; then
-      printf '%s\n' 'Source-qualified runtime recovery requires an exact current-version or last-known-good selector; refusing unordered source fallback' >&2
+      printf '%s\n' "Qualified runtime recovery requires an exact current-version or last-known-good selector; refusing unordered $_rt_qualified_kind fallback" >&2
     else
       # shellcheck disable=SC2046  # version names never contain whitespace
       for _rt_v in $(
@@ -276,7 +280,7 @@ if [ -n "$_rt_root" ]; then
     fi
   fi
 
-  unset _rt_root _rt_ver _rt_lkg _rt_sub _rt_v _rt_dir _rt_source_present _rt_environment \
+  unset _rt_root _rt_ver _rt_lkg _rt_sub _rt_v _rt_dir _rt_source_present _rt_qualified_kind _rt_environment \
     _rt_trace_buffer \
     _rt_trace_source _rt_trace_version _rt_bt_raw _rt_bt_plugin _rt_bt_extra \
     _rt_bt_log_path _rt_bt_log_dir _rt_bt_line _rt_bt_iso \

@@ -118,8 +118,9 @@ def test_native_release_keeps_its_inputs_held_without_a_source_association(tmp_p
     wheels = object()
 
     @contextmanager
-    def retain(profile, directory):
+    def retain(profile, directory, **options):
         assert profile == tmp_path / "profile.json" and directory == tmp_path / "wheels"
+        assert options == {"expected_profile_sha256": "a" * 64}
         held.append(wheels)
         try:
             yield wheels
@@ -136,7 +137,7 @@ def test_native_release_keeps_its_inputs_held_without_a_source_association(tmp_p
     monkeypatch.setattr(installer, "_install_payload", install)
     args = SimpleNamespace(
         wheel_profile=tmp_path / "profile.json", wheel_directory=tmp_path / "wheels",
-        payload=tmp_path / "payload",
+        payload=tmp_path / "payload", wheel_profile_sha256="a" * 64,
     )
     assert installer._install(args) == tmp_path / "selected"
     assert not held

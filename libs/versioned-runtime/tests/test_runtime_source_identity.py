@@ -337,15 +337,16 @@ def test_unreadable_versions_root_is_unavailable_to_read_only_resolution(tmp_pat
 @pytest.mark.parametrize("selector", [None, "current-version", "last-known-good"])
 @pytest.mark.parametrize("owner", ["canonical", "agent-worktrees"])
 @pytest.mark.parametrize("trace_mode", ["normal", "read-only", "ready"])
+@pytest.mark.parametrize("source", [False, True], ids=["profile", "source"])
 def test_native_source_recovery_matches_explicit_python_selection(
-    tmp_path: Path, host: str, selector: str | None, owner: str, trace_mode: str,
+    tmp_path: Path, host: str, selector: str | None, owner: str, trace_mode: str, source,
 ) -> None:
     executable = _bash() if host == "bash" else (
         shutil.which(host) if host != "powershell" or os.name == "nt" else None
     )
     if not executable:
         pytest.skip(f"{host} unavailable")
-    _, first, _ = _source_slots(tmp_path)
+    _, first, _ = _source_slots(tmp_path, source=source)
     if selector:
         (tmp_path / selector).write_text(first, encoding="utf-8")
     scripts = LIBRARY if owner == "canonical" else (
@@ -379,7 +380,8 @@ def test_native_source_recovery_matches_explicit_python_selection(
         assert f"/versions/{first}/{suffix}" in selected
     else:
         assert result.stdout == ""
-        assert "refusing unordered source fallback" in result.stderr
+        kind = "source" if source else "profile"
+        assert f"refusing unordered {kind} fallback" in result.stderr
     logs = tmp_path / "logs"
     if trace_mode == "read-only" or (trace_mode == "ready" and not selector):
         assert not logs.exists()

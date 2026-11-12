@@ -4,6 +4,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 import argparse
 from dataclasses import dataclass
+import hashlib
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -130,7 +131,10 @@ def select(snapshot: Path) -> ProjectSource:
 
 
 @contextmanager
-def wheel_inputs(profile_path: Path, wheel_directory: Path, *, deadline: float | None = None):
+def wheel_inputs(
+    profile_path: Path, wheel_directory: Path, *, deadline: float | None = None,
+    expected_profile_sha256: str | None = None,
+):
     """Retain an independently admitted profile; this receiver grants no approval."""
     if not profile_path.is_absolute() or not wheel_directory.is_absolute():
         raise ValueError("wheel inputs require absolute profile and directory paths")
@@ -138,6 +142,10 @@ def wheel_inputs(profile_path: Path, wheel_directory: Path, *, deadline: float |
         raise ValueError("wheel input directory must not be linked")
     deadline = deadline or time.monotonic() + 600
     profile = _read(profile_path)
+    if expected_profile_sha256 is not None and hashlib.sha256(json.dumps(
+        profile, sort_keys=True, separators=(",", ":"), allow_nan=False,
+    ).encode()).hexdigest() != expected_profile_sha256:
+        raise ValueError("Native wheel profile changed after driver admission")
     rows = profile.get("wheels")
     if not isinstance(rows, list) or not rows or len(rows) > 256:
         raise ValueError("project requires a complete bounded wheel profile")
@@ -262,7 +270,11 @@ def wheel_selection(payload: Path, component: str, inputs: engine.WheelInstallIn
     }
     if any(environment.get(key) != value for key, value in actual.items()):
         raise ValueError("wheel profile target differs from the selected native interpreter")
-    return {"identity": {}, **_wheel_selection(payload, version, inputs)}
+    selection = {"identity": {}, **_wheel_selection(payload, version, inputs)}
+    admitted = os.environ.get("COPILOT_EXTENSIONS_NATIVE_WHEEL_SELECTION")
+    if admitted is not None and json.loads(admitted) != selection:
+        raise ValueError("Native wheel selection changed after driver admission")
+    return selection
 
 
 def native_current(root: Path, payload: Path, component: str) -> bool:

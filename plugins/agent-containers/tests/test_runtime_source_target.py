@@ -88,6 +88,43 @@ def test_fresh_target_plan_does_not_create_the_runtime_root(profiles, prepared, 
     assert _plan(profiles, root, prepared)["profile"] == "base"
     assert not root.exists()
 
+def test_source_planning_cli_does_not_forward_native_wheel_keywords(
+    profiles, prepared, tmp_path, monkeypatch, capsys,
+):
+    root = tmp_path / "runtime"
+    payload, identity = prepared
+    expected = _plan(profiles, root, prepared)
+    monkeypatch.setattr(sys, "argv", [
+        "runtime_profile.py", "--root", str(root), "--payload", str(payload), "--plan-source",
+        "--expected-source-version", identity.runtime_version,
+        "--expected-source-identity", json.dumps(profiles.source.manifest_fields(identity), sort_keys=True),
+    ])
+    assert profiles.main() == 0
+    assert json.loads(capsys.readouterr().out) == expected
+    assert not root.exists()
+
+
+def test_native_wheel_cli_passes_inputs_to_the_existing_provision_owner(
+    profiles, tmp_path, monkeypatch, capsys,
+):
+    calls = []
+
+    def provision(root, payload, **options):
+        calls.append(options)
+        return {"profile": "base"}
+
+    monkeypatch.setattr(profiles, "provision", provision)
+    monkeypatch.setattr(sys, "argv", [
+        "runtime_profile.py", "--root", str(tmp_path / "runtime"),
+        "--payload", str(tmp_path / "payload"), "--python", sys.executable,
+        "--uv", str(tmp_path / "uv"), "--wheel-profile", str(tmp_path / "profile.json"),
+        "--wheel-directory", str(tmp_path / "wheels"),
+    ])
+    assert profiles.main() == 0
+    assert json.loads(capsys.readouterr().out) == {"profile": "base"}
+    assert calls[0]["wheel_profile"] == tmp_path / "profile.json"
+    assert calls[0]["wheel_directory"] == tmp_path / "wheels"
+
 
 def test_old_transaction_caller_cannot_ignore_required_profile_target(
     profiles, prepared, tmp_path, monkeypatch,

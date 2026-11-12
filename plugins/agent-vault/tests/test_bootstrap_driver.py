@@ -33,6 +33,42 @@ def native_bootstrap(plugin, project, native_directory):
     ]
 
 
+@pytest.mark.skipif(os.name != "nt", reason="native PowerShell interpreter floor")
+@pytest.mark.parametrize("kind,minimum", [("wheel", 11), ("source", 10)])
+def test_native_profile_readiness_selects_the_required_python_floor(tmp_path, kind, minimum):
+    home, project = tmp_path / "home", tmp_path / "project"
+    home.mkdir()
+    project.mkdir()
+    plugin = _make_fake_plugin(tmp_path, "agent-vault")
+    installation = _make_fake_install(home, "agent-vault")
+    (installation / "deploy-manifest.json").write_text(json.dumps({
+        "source": {"version": "1.0.1"},
+        "runtime_version": "1.0.1.profile." + "a" * 16 if kind == "wheel" else "1.0.1",
+    }), encoding="utf-8")
+    if kind == "source":
+        (plugin / "runtime-source.json").write_text("{}", encoding="utf-8")
+    (plugin / "scripts" / "versioned_runtime_native.ps1").write_text(
+        "function Resolve-NativeBootstrapPython { param([int]$MinimumMinor)\n"
+        " [IO.File]::WriteAllText($env:BOOTSTRAP_TEST_FLOOR, [string]$MinimumMinor)\n"
+        " return 'fixture-python'\n}\n"
+        "function Invoke-Hidden { param([string]$FilePath, [string[]]$ArgList)\n"
+        " $global:LASTEXITCODE=0\n}\n",
+        encoding="utf-8",
+    )
+    floor = tmp_path / "floor.txt"
+    env = _clean_env({
+        "HOME": str(home), "USERPROFILE": str(home), "BOOTSTRAP_TEST_FLOOR": str(floor),
+        "BOOTSTRAP_KILLSWITCH_STATE_FILE": str(home / "killswitch.json"),
+    })
+    result = subprocess.run(
+        native_bootstrap(plugin, project, home), env=env, cwd=project,
+        stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=15, **no_window_kwargs(),
+    )
+    assert result.returncode == 0 and json.loads(result.stdout) == {}, result.stderr
+    assert floor.read_text() == str(minimum)
+    assert not (project / "handoff").exists()
+
+
 @pytest.mark.skipif(
     os.environ.get("COPILOT_EXTENSIONS_ALLOW_EXPLICIT_TEST_TIERS") != "1",
     reason="explicit isolated bootstrap performance measurement",

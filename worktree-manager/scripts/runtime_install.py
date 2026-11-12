@@ -662,7 +662,9 @@ def _install(args) -> Path | int:
     if getattr(args, "wheel_profile", None) is not None:
         from install_source import wheel_inputs, wheel_selection
 
-        with wheel_inputs(args.wheel_profile, args.wheel_directory) as wheels:
+        with wheel_inputs(
+            args.wheel_profile, args.wheel_directory, expected_profile_sha256=args.wheel_profile_sha256,
+        ) as wheels:
             wheel_selection(args.payload, "worktree-manager", wheels)
             return _install_payload(args, native_wheel_inputs=wheels)
     if getattr(args, "install_source", None) is None:

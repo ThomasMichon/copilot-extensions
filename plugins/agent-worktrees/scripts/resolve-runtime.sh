@@ -231,14 +231,18 @@ fi
 # Tier 3: true first-run -> newest complete installed slot.
 if [ -z "$AW_PY" ]; then
   _aw_source_present=0
+  _aw_qualified_kind=source
   for _slot in "$_awr"/versions/*; do
     [ -d "$_slot" ] || continue
     case "${_slot##*/}" in
       *+source.*|*.source.*) _aw_source_present=1; break ;;
     esac
+    if printf '%s\n' "${_slot##*/}" | grep -Eq '\.profile\.[0-9a-f]{16}([.+]repair\.[0-9a-f]{32})?$'; then
+      _aw_source_present=1; _aw_qualified_kind=profile
+    fi
   done
   if [ "$_aw_source_present" = 1 ]; then
-    printf '%s\n' 'Source-qualified runtime recovery requires an exact current-version or last-known-good selector; refusing unordered source fallback' >&2
+    printf '%s\n' "Qualified runtime recovery requires an exact current-version or last-known-good selector; refusing unordered $_aw_qualified_kind fallback" >&2
   else
     for _awv in $(
       for _slot in "$_awr"/versions/*; do
@@ -265,7 +269,7 @@ if [ "${AGENT_RT_RESOLVE_TRACE_MODE:-}" = ready ] &&
     { printf '%s' "$_aw_trace_buffer" >> "$_aw_bt_log_path"; } 2>/dev/null || true
   fi
 fi
-unset _awr _awv _awlkg _sub _slot _aw_environment _aw_source_present _aw_trace_source _aw_trace_version \
+unset _awr _awv _awlkg _sub _slot _aw_environment _aw_source_present _aw_qualified_kind _aw_trace_source _aw_trace_version \
   _aw_trace_buffer \
   _aw_bt_raw _aw_bt_plugin _aw_bt_extra _aw_bt_log_path _aw_bt_log_dir \
   _aw_bt_line _aw_bt_iso _aw_phase _aw_now_ms _aw_emitter \
