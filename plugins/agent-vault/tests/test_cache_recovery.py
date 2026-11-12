@@ -319,7 +319,7 @@ def test_exclusively_open_legacy_lock_does_not_veto_fresh_state(isolated, name):
 
 
 @pytest.mark.skipif(os.name != "nt", reason="actual Windows deny-sharing handle")
-def test_exclusively_open_original_is_retained_and_fresh_state_is_usable(isolated):
+def test_exclusively_open_original_retains_pending_coordination(isolated):
     import ctypes
 
     before = corrupt(isolated)
@@ -332,10 +332,13 @@ def test_exclusively_open_original_is_retained_and_fresh_state_is_usable(isolate
         cache = PersistentCache(isolated)
         result = cache.prepare()
         assert result["original"]["state"] == "preserved-in-place"
-        assert cache.recover_missing("Example/current", "password", "live", 2)
-        assert PersistentCache(isolated).get("Example/current", readonly=True) == "live"
+        assert not cache.recover_missing("Example/current", "password", "unconfirmed", 2)
+        assert not (cache._base_dir.parent / "coordinated.json").exists()
     finally:
         windows.kernel.CloseHandle(handle)
+    cache.prepare()
+    assert cache.recover_missing("Example/current", "password", "live", 2)
+    assert PersistentCache(isolated).get("Example/current", readonly=True) == "live"
     assert {name: (isolated / name).read_bytes() for name in before} == before
 
 
@@ -359,7 +362,140 @@ def test_real_finite_owner_settles_blocked_decoder(isolated, monkeypatch):
     assert result["original"] == {
         "state": "preserved-in-place", "reason": "legacy-read-timeout",
     }
+    cache = PersistentCache(isolated)
+    assert not (cache._base_dir.parent / "coordinated.json").exists()
+    assert not cache.recover_missing("Example/current", "password", "unconfirmed", 2)
     assert {name: (isolated / name).read_bytes() for name in before} == before
+
+
+def test_adoption_during_old_store_transaction_cannot_overwrite_current_journal(
+    isolated, monkeypatch,
+):
+    legacy = PersistentCache(isolated)
+    assert legacy.put("Example/rotating", "password", "previous")
+    stale = PersistentCache(isolated)
+    read_store = stale._read_store
+    selected = []
+
+    def publish_before_read(**kwargs):
+        current = PersistentCache(isolated)
+        current.prepare()
+        assert current._base_dir != isolated
+        compartment = PersistentCache(current._base_dir)
+        assert compartment.begin_replace("Example/rotating", "password", "candidate", 2)
+        selected.append(compartment)
+        return read_store(**kwargs)
+
+    monkeypatch.setattr(stale, "_read_store", publish_before_read)
+    with legacy.replacement_lock():
+        assert stale.put("Example/rotating", "password", "late old write")
+    current = selected[0]
+    assert current.pending_replace("Example/rotating", "password")["operation"] == 2
+    assert current.get("Example/rotating", readonly=True) is None
+
+
+@pytest.mark.parametrize(("name", "value"), [
+    ("AGENT_VAULT_ENDPOINT", "tcp://127.0.0.1:41234"),
+    ("AGENT_VAULT_HOST", "192.0.2.10"),
+    ("KPDB", "other.kdbx"),
+])
+def test_changed_authority_never_falls_back_to_readable_originals(
+    isolated, monkeypatch, name, value,
+):
+    original = PersistentCache(isolated)
+    assert original.put("Example/shared", "password", "stale original", 1)
+    preserved = {filename: (isolated / filename).read_bytes() for filename in cache_recovery.FILES}
+    original._cache_file.write_bytes(b"fixture invalid ciphertext")
+    active = PersistentCache(isolated)
+    active.prepare()
+    assert active.recover_missing("Example/shared", "password", "current authority", 2)
+    for filename, raw in preserved.items():
+        (isolated / filename).write_bytes(raw)
+    if name == "KPDB":
+        value = str(isolated.parent / value)
+    monkeypatch.setenv(name, value)
+    with pytest.raises(CacheProtectionError):
+        active.get("Example/shared", readonly=True)
+    new = PersistentCache(isolated)
+    with pytest.raises(cache_recovery.CacheSelectionRequired):
+        new.get("Example/shared", readonly=True)
+    assert not new.put("Example/shared", "password", "unprepared")
+    assert new.prepare()["original"]["reason"] == "unselected-source"
+    assert new.get("Example/shared", readonly=True) is None
+    assert new._base_dir != active._base_dir
+    assert new.recover_missing("Example/shared", "password", "new authority", 3)
+    assert new.get("Example/shared", readonly=True) == "new authority"
+    assert preserved == {
+        filename: (isolated / filename).read_bytes() for filename in cache_recovery.FILES
+    }
+
+
+def test_missing_recovery_marker_never_exposes_originals(isolated):
+    corrupt(isolated)
+    cache = PersistentCache(isolated)
+    cache.prepare()
+    assert cache.recover_missing("Example/current", "password", "current")
+    (cache._base_dir.parent / "recovery.json").unlink()
+    before = {name: (isolated / name).read_bytes() for name in cache_recovery.FILES}
+    reopened = PersistentCache(isolated)
+    with pytest.raises(cache_recovery.CacheSelectionRequired):
+        reopened.get("Example/current", readonly=True)
+    with pytest.raises(cache_recovery.CacheSelectionRequired):
+        reopened.prepare()
+    assert not reopened.put("Example/current", "password", "must not write originals")
+    assert before == {name: (isolated / name).read_bytes() for name in cache_recovery.FILES}
+
+
+@pytest.mark.parametrize("error", [OSError, ImportError])
+def test_transient_original_read_failure_keeps_pending_journal_until_retry(
+    isolated, monkeypatch, error,
+):
+    legacy = PersistentCache(isolated)
+    assert legacy.put("Example/rotating", "password", "previous", 1)
+    assert legacy.begin_replace("Example/rotating", "password", "candidate", 2)
+    before = {name: (isolated / name).read_bytes() for name in cache_recovery.FILES}
+    original_read = PersistentCache._read_store
+    unavailable = True
+
+    def fail_original(self, **kwargs):
+        if self._root_dir == isolated and unavailable:
+            raise CacheProtectionError("fixture decoder failed") from error("fixture unavailable")
+        return original_read(self, **kwargs)
+
+    monkeypatch.setattr(PersistentCache, "_read_store", fail_original)
+    monkeypatch.setattr(cache_recovery, "_inspect_bounded", cache_recovery._inspect_original)
+    current = PersistentCache(isolated)
+    assert current.prepare()["state"] == "recovering"
+    assert not (current._base_dir.parent / "coordinated.json").exists()
+    assert not current.recover_missing("Example/rotating", "password", "unconfirmed", 3)
+    current.prepare()
+    assert not (current._base_dir.parent / "coordinated.json").exists()
+    unavailable = False
+    current.prepare()
+    assert current.pending_replace("Example/rotating", "password")["operation"] == 2
+    assert current.get("Example/rotating", readonly=True) is None
+    assert before == {name: (isolated / name).read_bytes() for name in cache_recovery.FILES}
+
+
+@pytest.mark.skipif(os.name != "nt", reason="actual Windows deny-sharing handle")
+def test_lock_open_failure_does_not_break_optional_raw_key_migration(isolated):
+    import ctypes
+    from agent_vault import kek
+
+    cache = PersistentCache(isolated)
+    assert cache.put("Example/current", "password", "cached")
+    key = kek.unwrap_bytes(cache._key_file.read_bytes())
+    cache._key_file.write_bytes(key)
+    windows = cache_recovery.WindowsSecurity()
+    handle = windows.kernel.CreateFileW(
+        str(cache._lock_file), 0x80000000, 0, None, 3, 0x80, None,
+    )
+    assert handle != ctypes.c_void_p(-1).value
+    try:
+        assert cache.get("Example/current") == "cached"
+        assert cache._key_file.read_bytes() == key
+    finally:
+        windows.kernel.CloseHandle(handle)
 
 
 def test_unknown_cleanup_is_not_a_fresh_start(isolated, monkeypatch):

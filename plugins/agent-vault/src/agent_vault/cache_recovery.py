@@ -32,6 +32,14 @@ _HELPER_BOOTSTRAP = (
 )
 
 
+class CacheSelectionRequired(CacheProtectionError):
+    """Recovery is active, but this authority has no published compartment."""
+
+    def __init__(self, *, missing_compartment: bool):
+        super().__init__("selected Vault requires explicit cache preparation")
+        self.missing_compartment = missing_compartment
+
+
 def _json(raw):
     def unique(pairs):
         result = {}
@@ -58,6 +66,8 @@ def source_key(base: Path) -> str:
     value = json.dumps([
         identity, os.path.normcase(str(base.absolute())), context.group or "",
         context.vault_name or "", context.port,
+        os.environ.get(config.ENDPOINT_ENV, ""),
+        os.environ.get("AGENT_VAULT_HOST", "127.0.0.1"),
     ], separators=(",", ":")).encode()
     return hashlib.sha256(value).hexdigest()
 
@@ -114,7 +124,9 @@ def _validate_record(record, source: str) -> dict:
     elif (
         original.get("state") != "preserved-in-place"
         or set(original) != {"state", "reason"}
-        or original["reason"] not in {"legacy-read-timeout", "legacy-lock-busy", "legacy-io"}
+        or original["reason"] not in {
+            "legacy-read-timeout", "legacy-lock-busy", "legacy-io", "unselected-source",
+        }
     ):
         raise CacheProtectionError("invalid protected cache preservation record")
     return record
@@ -135,10 +147,10 @@ def selected_cache(base: Path) -> tuple[Path, dict | None]:
     source = source_key(base)
     _, compartment, marker = _paths(base, source)
     if not _path_exists(compartment):
-        return base, None
+        raise CacheSelectionRequired(missing_compartment=True)
     _require(compartment, windows, directory=True)
     if not _path_exists(marker):
-        return base, None
+        raise CacheSelectionRequired(missing_compartment=False)
     try:
         record = _validate_record(_json(_read(marker, windows)), source)
     except (ValueError, UnicodeError) as exc:
@@ -261,16 +273,24 @@ def _inspect_original(
                     if _path_exists(path):
                         _bytes(path, MAX_CACHE_BYTES if name.endswith(".enc") else 65536)
                 store = cache._read_store(readonly=True, strict=True)
-            except (OSError, RuntimeError, ValueError, ImportError):
+            except (OSError, RuntimeError, ValueError, ImportError) as exc:
+                unavailable = False
+                cause = exc
+                while cause is not None:
+                    unavailable |= isinstance(cause, (OSError, ImportError))
+                    cause = cause.__cause__
                 if coordinate:
-                    return {"state": "coordinated"}
+                    return {"state": "waiting" if unavailable else "coordinated"}
                 if source is None:
                     return {"state": "unreadable"}
                 try:
                     original = _copy_originals(base, compartment, snapshot, windows)
                 except OSError:
                     original = {"state": "preserved-in-place", "reason": "legacy-io"}
-                return {"state": "recovering", "original": original}
+                return {
+                    "state": "recovering", "original": original,
+                    "coordinated": not unavailable,
+                }
             if coordinate:
                 _import_pending(store, compartment / "current")
                 return {"state": "coordinated"}
@@ -281,6 +301,7 @@ def _inspect_original(
         return {
             "state": "recovering",
             "original": {"state": "preserved-in-place", "reason": "legacy-lock-busy"},
+            "coordinated": False,
         }
 
 
@@ -308,6 +329,7 @@ def _inspect_bounded(
         return {
             "state": "recovering",
             "original": {"state": "preserved-in-place", "reason": "legacy-read-timeout"},
+            "coordinated": False,
         }
     if result.returncode:
         raise CacheProtectionError("protected cache adoption helper failed; originals retained")
@@ -323,7 +345,10 @@ def _inspect_bounded(
         return report
     if source is None and report == {"state": "unreadable"}:
         return report
-    if not isinstance(report, dict) or set(report) != {"state", "original"}:
+    if (
+        not isinstance(report, dict) or set(report) != {"state", "original", "coordinated"}
+        or type(report["coordinated"]) is not bool
+    ):
         raise CacheProtectionError("invalid protected cache adoption response")
     _validate_record({
         "version": 1, "source": source, "created_at": "", "original": report["original"],
@@ -357,8 +382,12 @@ def _coordinate_selected(base: Path, record: dict) -> dict:
     with _publication_lock(compartment, windows):
         with _replacement_guard(base) as acquired:
             if acquired:
-                report = _inspect_bounded(
-                    base, record["source"], uuid.uuid4().hex, coordinate=True,
+                report = (
+                    {"state": "coordinated"}
+                    if record["original"].get("reason") == "unselected-source"
+                    else _inspect_bounded(
+                        base, record["source"], uuid.uuid4().hex, coordinate=True,
+                    )
                 )
                 require_source(base, record)
                 if report == {"state": "coordinated"}:
@@ -370,11 +399,18 @@ def prepare_cache(base: Path) -> dict:
     from .cache import PersistentCache
 
     base = base.absolute()
-    current, record = selected_cache(base)
+    unselected = False
+    try:
+        current, record = selected_cache(base)
+    except CacheSelectionRequired as exc:
+        if not exc.missing_compartment:
+            raise
+        current, record = base, None
+        unselected = True
     if record is not None:
         return _coordinate_selected(base, record)
     try:
-        if not any(_path_exists(base / name) for name in FILES):
+        if not unselected and not any(_path_exists(base / name) for name in FILES):
             return {"state": "ready"}
     except OSError:
         pass  # The bounded reader owns inaccessible legacy state, not the incoming cache.
@@ -391,17 +427,29 @@ def prepare_cache(base: Path) -> dict:
     _private_directory(parent, windows)
     _private_directory(compartment, windows)
     with _publication_lock(compartment, windows):
-        _, record = selected_cache(base)
+        try:
+            _, record = selected_cache(base)
+        except CacheSelectionRequired as exc:
+            if not unselected and not exc.missing_compartment:
+                raise
+            record = None
+            unselected = True
         if record is not None:
             return {"state": "recovering", "original": record["original"]}
         with _replacement_guard(base) as acquired:
-            report = (
-                _inspect_bounded(base, source, uuid.uuid4().hex)
-                if acquired else {
+            if unselected:
+                report = {
+                    "state": "recovering", "coordinated": True,
+                    "original": {"state": "preserved-in-place", "reason": "unselected-source"},
+                }
+            elif acquired:
+                report = _inspect_bounded(base, source, uuid.uuid4().hex)
+            else:
+                report = {
                     "state": "recovering",
                     "original": {"state": "preserved-in-place", "reason": "legacy-lock-busy"},
+                    "coordinated": False,
                 }
-            )
             if source != source_key(base):
                 raise CacheProtectionError("selected Vault changed during cache recovery")
             if report["state"] == "compatible":
@@ -420,9 +468,9 @@ def prepare_cache(base: Path) -> dict:
                 "original": report["original"],
             }
             require_source(base, record)
-            _write(parent, parent / "active.json", b'{"version":1}', windows)
             _write(compartment, marker, json.dumps(record, sort_keys=True).encode(), windows)
-            if acquired and record["original"].get("reason") != "legacy-lock-busy":
+            _write(parent, parent / "active.json", b'{"version":1}', windows)
+            if acquired and report["coordinated"]:
                 _write(compartment, compartment / "coordinated.json", COORDINATED, windows)
             return {"state": "recovering", "original": record["original"]}
 

@@ -97,9 +97,14 @@ class PersistentCache:
         self._recovery = None
         self._replacement_mutex = threading.RLock()
         self._replacement_state = threading.local()
+        self._selection_mutex = threading.RLock()
+        self._store_pinned = False
         self._replacement_lock_file = base / "credential-replacement.lock"
         self._select_base(base)
-        self._refresh_selection()
+        from .cache_recovery import CacheSelectionRequired
+
+        with contextlib.suppress(CacheSelectionRequired):
+            self._refresh_selection()
 
     def _select_base(self, base: Path) -> None:
         if self._base_dir != base:
@@ -112,17 +117,31 @@ class PersistentCache:
     def _refresh_selection(self) -> None:
         if not cache_enabled():
             return
-        from .cache_recovery import selected_cache
+        from .cache_recovery import require_source, selected_cache
 
-        base, recovery = selected_cache(self._root_dir)
-        if self._recovery is not None and (
-            recovery is None or recovery["source"] != self._recovery["source"]
-        ):
-            from .cache_dpapi import CacheProtectionError
+        with self._selection_guard():
+            if self._store_pinned:
+                if self._recovery is not None:
+                    require_source(self._root_dir, self._recovery)
+                return
+            base, recovery = selected_cache(self._root_dir)
+            if self._recovery is not None and (
+                recovery is None or recovery["source"] != self._recovery["source"]
+            ):
+                from .cache_dpapi import CacheProtectionError
 
-            raise CacheProtectionError("selected Vault changed during cache recovery")
-        self._recovery = recovery
-        self._select_base(base)
+                raise CacheProtectionError("selected Vault changed during cache recovery")
+            self._recovery = recovery
+            self._select_base(base)
+
+    @contextlib.contextmanager
+    def _selection_guard(self):
+        if not self._selection_mutex.acquire(timeout=2.0):
+            raise TimeoutError("protected cache is busy")
+        try:
+            yield
+        finally:
+            self._selection_mutex.release()
 
     def prepare(self) -> dict:
         """Bound legacy adoption; only explicit population/setup calls this."""
@@ -224,6 +243,10 @@ class PersistentCache:
     # -- atomic file I/O ---------------------------------------------------
 
     def _read_store(self, *, readonly: bool = False, strict: bool = False) -> dict:
+        with self._selection_guard():
+            return self._read_selected_store(readonly=readonly, strict=strict)
+
+    def _read_selected_store(self, *, readonly: bool, strict: bool) -> dict:
         self._refresh_selection()
         if not _path_exists(self._cache_file):
             if strict:
@@ -303,16 +326,21 @@ class PersistentCache:
 
     @contextlib.contextmanager
     def _store_lock(self):
-        self._refresh_selection()
         from .cache_recovery import require_coordinated
 
-        require_coordinated(self._root_dir, self._recovery)
-        with self._file_lock(self._lock_file):
-            selected = self._base_dir
+        with self._selection_guard():
             self._refresh_selection()
-            if selected != self._base_dir:
-                raise RuntimeError("protected cache selection changed; retry the operation")
-            yield
+            require_coordinated(self._root_dir, self._recovery)
+            with self._file_lock(self._lock_file):
+                selected = self._base_dir
+                self._refresh_selection()
+                if selected != self._base_dir:
+                    raise RuntimeError("protected cache selection changed; retry the operation")
+                self._store_pinned = True
+                try:
+                    yield
+                finally:
+                    self._store_pinned = False
 
     @contextlib.contextmanager
     def replacement_lock(self, *, readonly: bool = False):
@@ -320,7 +348,6 @@ class PersistentCache:
         if not self.enabled:
             yield
             return
-        self._refresh_selection()
         if not self._replacement_mutex.acquire(timeout=2.0):
             raise TimeoutError("protected cache is busy")
         try:
@@ -452,17 +479,18 @@ class PersistentCache:
         """Read a cached value; readonly mode refuses migration and corrupt data."""
         if not self.enabled:
             return None
-        self._refresh_selection()
         from .cache_recovery import require_coordinated
 
-        with (
-            self.replacement_lock(readonly=readonly)
-            if self._recovery else contextlib.nullcontext()
-        ):
-            require_coordinated(self._root_dir, self._recovery)
-            return self._get_value(
-                entry, field, max_age_seconds, legacy_entry=legacy_entry, readonly=readonly,
-            )
+        with self._selection_guard():
+            self._refresh_selection()
+            with (
+                self.replacement_lock(readonly=readonly)
+                if self._recovery else contextlib.nullcontext()
+            ):
+                require_coordinated(self._root_dir, self._recovery)
+                return self._get_value(
+                    entry, field, max_age_seconds, legacy_entry=legacy_entry, readonly=readonly,
+                )
 
     def _get_value(
         self, entry, field, max_age_seconds, *, legacy_entry, readonly,
@@ -476,7 +504,7 @@ class PersistentCache:
 
             if not kek.is_wrapped(self._key_file.read_bytes()):
                 # Only a successfully decoded, still-locked store may migrate its key.
-                with contextlib.suppress(TimeoutError):
+                with contextlib.suppress(OSError):
                     with self._store_lock():
                         self._read_store(readonly=True, strict=True)
                         blob = self._key_file.read_bytes()

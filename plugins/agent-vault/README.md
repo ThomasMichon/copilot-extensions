@@ -571,11 +571,18 @@ The helper uses isolated Python imports and the selected runtime's package
 root, never packages or startup hooks supplied by the caller's directory or
 `PYTHONPATH`. Replacement coordination stays at the original cache root across
 selection changes. If an old transaction or inaccessible lock prevents that
-coordination, the fresh empty cache may exist, but credential reads and writes
-remain pending. A later explicit population/setup retries the bounded
+coordination, or the original reader times out, cannot open the data, or lacks
+its decoder backend, the fresh empty cache may exist, but credential
+reads and writes remain pending. A later explicit population/setup retries the bounded
 assessment under the same replacement lock and carries readable pending
 journals into the current cache before permitting use. Unreadable originals
 remain preserved. An unresolved journal is never a recovered credential.
+
+Recovered compartments include the selected endpoint and host in their authority
+binding. Once recovery is active, an authority without a published compartment
+cannot fall back to the original cache. Explicit population/setup prepares a
+separate empty compartment without importing another authority's original values
+or journals. Reads alone never prepare it.
 
 Recovery uses the same live `get` request as ordinary population. Only missing
 current records are inserted: newer writes, existing values and pending
