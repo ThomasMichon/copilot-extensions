@@ -971,6 +971,7 @@ def create_app(
     )
     register_registry_routes(
         app, queue, control_token=control_token, cohort_source=cohort_source,
+        relevance_sources=cohort_sources,
     )
     register_execution_scope_routes(app, queue, bus, control_token=control_token)
     register_execution_runtime_routes(app, queue, bus, control_token=control_token)

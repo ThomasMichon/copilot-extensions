@@ -29,6 +29,8 @@ class AuthPaneChild:
         self._job_empty = False
         self.retirement_started = False
         self._cleanup_task: asyncio.Task | None = None
+        self._native_scope: object | None = None
+        self._cleanup_completed = False
 
     def launch(self, argv: list[str], **kwargs) -> None:
         if self.proc is not None:
@@ -36,7 +38,23 @@ class AuthPaneChild:
         self.proc, self.job = spawn_sync_in_kill_on_close_job(
             argv, require_job=True, allow_breakaway=False, **kwargs,
         )
+        self._native_scope = object()
         self.started.set()
+
+    @property
+    def native_scope(self) -> object | None:
+        """Opaque identity for this launch's retained Popen handle and Job.
+
+        It is local to this retained owner, not a serialized descriptor or an
+        environment/boot/conversation mapping that can be reacquired after loss.
+        """
+        return self._native_scope
+
+    def scope_settled(self, native_scope: object) -> bool | None:
+        """Read successful owned cleanup only; never poll, wait or retire here."""
+        if native_scope is not None and native_scope is self._native_scope:
+            return True if self._cleanup_completed else None
+        return None
 
     @property
     def pid(self) -> int | None:
@@ -65,6 +83,7 @@ class AuthPaneChild:
             self._settled = True
             if self.job is not None:
                 self.job.close()
+            self._cleanup_completed = True
         except BaseException as error:
             raise OwnedCleanupError(self.proc, self.job) from error
 
