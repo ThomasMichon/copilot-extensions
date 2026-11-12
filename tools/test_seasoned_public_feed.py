@@ -122,7 +122,8 @@ def test_deadline_bounds_connection_establishment_and_reaps_worker(monkeypatch, 
     assert len(processes) == 1 and processes[0].poll() is not None
 
 
-def test_deadline_bounds_trickling_https_proxy_connect(monkeypatch):
+@pytest.mark.parametrize("early_eof", [False, True])
+def test_deadline_bounds_trickling_https_proxy_connect(monkeypatch, early_eof):
     listener = socket.socket()
     listener.bind(("127.0.0.1", 0))
     listener.listen(1)
@@ -140,8 +141,13 @@ def test_deadline_bounds_trickling_https_proxy_connect(monkeypatch):
             with listener.accept()[0] as connection:
                 connection.settimeout(1)
                 request = b""
-                while b"\r\n\r\n" not in request:
-                    request += connection.recv(4096)
+                while b"\r\n\r\n" not in request and not stop.is_set():
+                    block = connection.recv(4096)
+                    if not block:
+                        return
+                    request += block
+                if stop.is_set():
+                    return
                 request_data.append(request)
                 connection.sendall(b"HTTP/1.1 200 Connection established\r\nX-Slow: ")
                 connected.set()
@@ -155,10 +161,17 @@ def test_deadline_bounds_trickling_https_proxy_connect(monkeypatch):
     producer.start()
     started = time.monotonic()
     try:
-        with pytest.raises(spf.SeasonedVersionError, match="deadline exceeded"):
-            spf._default_fetch("https://example.invalid/metadata", deadline=started + 1)
-        assert connected.is_set()
-        assert request_data[0].startswith(b"CONNECT example.invalid:443 ")
+        if early_eof:
+            with socket.create_connection(listener.getsockname(), timeout=1) as connection:
+                connection.sendall(b"CONNECT example.invalid:443 HTTP/1.1\r\n")
+            producer.join(timeout=1)
+            assert not producer.is_alive()
+            assert not connected.is_set()
+        else:
+            with pytest.raises(spf.SeasonedVersionError, match="deadline exceeded"):
+                spf._default_fetch("https://example.invalid/metadata", deadline=started + 1)
+            assert connected.is_set()
+            assert request_data[0].startswith(b"CONNECT example.invalid:443 ")
         assert time.monotonic() - started < 2
     finally:
         stop.set()
