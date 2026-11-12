@@ -1,0 +1,9 @@
+{
+  "comment": "Allow an explicitly lower typed snapshot credential-acquisition budget with passive native capability discovery.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
