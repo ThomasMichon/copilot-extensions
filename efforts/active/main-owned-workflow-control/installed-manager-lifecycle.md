@@ -2939,3 +2939,28 @@ can run; its expected missing-fixture refusal is not acceptance or merge
 authority. Windows installed-suite execution remains separate and on hold until
 the current required CI gate is green. Actual review 5883441074 on `5675e3704a`
 still retains both threads and requires exact-head native acceptance.
+
+Run 43328413912, attempt 1, succeeds at the published declaration checkpoint
+`37662d62d2370eff7bf5e45be8e6384c55a57d27`. The existing Ubuntu owner passes
+controlled artifact boundaries, the immutable peer-prefix consumer, actual
+HTTP-52 writer, independent no-write replay, historical publication guards,
+canonical validation and artifact export. The export records 403 controlled
+cases and 184 outputs. This is source-only compatibility evidence, not native
+Copilot or installed Manager acceptance.
+
+The repository-scoped provider verifies the run/source/job identity and artifact
+13995330579; the downloaded manifest matches the authenticated export digest
+`9785d29c9d20d9fc7383c4177bff817cb8815741e356fc21c9ba7acdfa3513f6`.
+The existing artifact adapter validates every output and source preimage at the
+same frozen HEAD, then materializes through its locked, registry-last
+publication owner. No raw log, environment, request, credential or executable
+artifact is imported. Historical generations, immutable provenance prefixes,
+protocol generation 52 and earlier capability floors are unchanged.
+
+The actual contract guard now passes both contracts and all 1,096 fixtures.
+Only current HTTP-52 evidence and its registry change; the unit-source manifest
+does not bind these repository-only outputs and needs no change. Publish the
+coherent capture delta and obtain current required CI before the separate
+Windows installed-suite attempt. The original fatal CIM failure and both review
+threads remain unwaived; no current native success or parent completion is
+inferred from this capture.
