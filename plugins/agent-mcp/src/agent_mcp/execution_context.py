@@ -62,6 +62,9 @@ def semantic_environment(cfg):
         "AGENT_MCP_INSTALL_DIR",
         # Exact scratch variables declared by the shipped CMD wrapper.
         "_ROOT", "_PY", "_VER", "_SNAP", "_INST", "_PSX",
+        # Per-launch diagnostics stay physical, but do not distinguish shared callers.
+        "COPILOT_EXTENSIONS_BOOT_TRACE", "COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN",
+        "COPILOT_EXTENSIONS_BOOT_TRACE_SHIM_START_MS",
     ):
         if not _references(cfg, key):
             environment.pop(key, None)

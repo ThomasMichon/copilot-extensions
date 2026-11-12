@@ -2,8 +2,10 @@
 
 import asyncio
 from contextlib import asynccontextmanager
+from collections.abc import Mapping
 import contextvars
 import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -184,6 +186,71 @@ async def test_shared_host_moves_settled_session_without_upstream_reinitialize(t
         writer.write_eof()
         assert await asyncio.wait_for(reader.read(), 2) == b""
         await ipc.aclose_writer(writer)
+
+
+@pytest.mark.parametrize("referenced", [False, True], ids=["bookkeeping", "explicit-config-use"])
+async def test_two_launch_trace_timestamps_against_one_shared_host(tmp_path, monkeypatch, referenced):
+    initial = {
+        **os.environ, "COPILOT_EXTENSIONS_BOOT_TRACE": "1",
+        "COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN": "agent-mcp",
+        "COPILOT_EXTENSIONS_BOOT_TRACE_SHIM_START_MS": "1000",
+    }
+    process_environment = contextvars.ContextVar("fixture_process_environment", default=initial)
+
+    class Environment(Mapping):
+        def __getitem__(self, key):
+            return process_environment.get()[key]
+
+        def __iter__(self):
+            return iter(process_environment.get())
+
+        def __len__(self):
+            return len(process_environment.get())
+
+    monkeypatch.setattr(ec, "os", SimpleNamespace(
+        name=os.name, environ=Environment(), getcwd=os.getcwd,
+    ))
+    async with shared(tmp_path, monkeypatch) as fixture:
+        if referenced:
+            fixture.cfg.server.env["EXPLICIT_TRACE"] = "${COPILOT_EXTENSIONS_BOOT_TRACE_SHIM_START_MS}"
+        configure = fixture.host._configuration
+
+        def configured_in_host(request):
+            # Listener tasks retain the first process environment; only the caller advances.
+            assert process_environment.get()["COPILOT_EXTENSIONS_BOOT_TRACE_SHIM_START_MS"] == "1000"
+            return configure(request)
+        monkeypatch.setattr(fixture.host, "_configuration", configured_in_host)
+        writers = []
+        try:
+            first, writer1, ack1, _ = await fixture.attach()
+            writers.append(writer1)
+            assert ack1["attached"] is True
+            await send(writer1, {"jsonrpc": "2.0", "id": 0, "method": "initialize"})
+            assert (await receive(first))["id"] == 0
+            first_entry = next(iter(fixture.host.sessions))
+            await settled(first_entry.owner)
+            process_environment.set({
+                **initial, "COPILOT_EXTENSIONS_BOOT_TRACE_SHIM_START_MS": "2000",
+            })
+            assert ec.inherited_environment(fixture.cfg)[
+                "COPILOT_EXTENSIONS_BOOT_TRACE_SHIM_START_MS"
+            ] == "2000"
+            second, writer2, ack2, _ = await fixture.attach()
+            writers.append(writer2)
+            if referenced:
+                assert ack2["ok"] is False and ack2["shared_execution"] is False
+                assert len(fixture.upstreams) == 1
+            else:
+                assert ack2["attached"] is True
+                await send(writer2, {"jsonrpc": "2.0", "id": 1, "method": "initialize"})
+                assert (await receive(second))["id"] == 1
+                assert len(fixture.host.sessions) == 2 and len(fixture.upstreams) == 2
+                await settled(next(
+                    entry for entry in fixture.host.sessions if entry is not first_entry
+                ).owner)
+        finally:
+            for writer in writers:
+                await ipc.aclose_writer(writer)
 
 
 async def test_shared_host_adopts_same_slot_backend_replacement(tmp_path, monkeypatch):

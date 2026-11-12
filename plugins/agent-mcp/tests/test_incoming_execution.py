@@ -145,6 +145,24 @@ def test_daemon_bookkeeping_is_not_caller_authority_but_explicit_use_is(monkeypa
     assert execution_context._identity(cfg, key) != explicit
 
 
+@pytest.mark.parametrize("name", [
+    "COPILOT_EXTENSIONS_BOOT_TRACE", "COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN",
+    "COPILOT_EXTENSIONS_BOOT_TRACE_SHIM_START_MS",
+])
+def test_trace_fields_remain_physical_but_only_explicit_use_changes_context(monkeypatch, name):
+    cfg = BridgeConfig(server=ServerSpec(type="stdio", command=["unused"]), auth=AuthSpec())
+    key = execution_context.descriptor()["key"]
+    monkeypatch.setenv(name, "first-launch")
+    first = execution_context._identity(cfg, key)
+    monkeypatch.setenv(name, "second-launch")
+    assert execution_context.inherited_environment(cfg)[name] == "second-launch"
+    assert execution_context._identity(cfg, key) == first
+    cfg.server.env["EXPLICIT_TRACE"] = "${" + name + "}"
+    explicit = execution_context._identity(cfg, key)
+    monkeypatch.setenv(name, "third-launch")
+    assert execution_context._identity(cfg, key) != explicit
+
+
 @pytest.mark.parametrize("platform,reference,significant", [
     ("nt", "agent_mcp_install_dir", True),
     ("posix", "agent_mcp_install_dir", False),

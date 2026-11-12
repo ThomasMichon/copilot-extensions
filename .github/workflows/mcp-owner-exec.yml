@@ -10,8 +10,11 @@ on:
       - "plugins/agent-mcp/src/agent_mcp/owner_bootstrap.py"
       - "plugins/agent-mcp/src/agent_mcp/owner_entry.py"
       - "plugins/agent-mcp/src/agent_mcp/owner_capabilities.py"
+      - "plugins/agent-mcp/src/agent_mcp/execution_context.py"
       - "plugins/agent-mcp/tests/test_owner_exec.py"
       - "plugins/agent-mcp/tests/test_owner_entry.py"
+      - "plugins/agent-mcp/tests/test_custody_host.py"
+      - "plugins/agent-mcp/tests/test_incoming_execution.py"
       - "plugins/agent-mcp/tests/native/test_owner_exec_copilot.py"
 
 permissions:
@@ -37,6 +40,8 @@ jobs:
           --test-file tests/test_owner_handoff.py
           --test-file tests/test_owner_entry.py
           --test-file tests/test_owner_capabilities.py
+          --test-file tests/test_custody_host.py
+          --test-file tests/test_incoming_execution.py
           --junit-dir "${{ runner.temp }}/mcp-owner-exec-${{ github.run_id }}"
       - name: Retain source controls, not installed-client acceptance
         if: always()

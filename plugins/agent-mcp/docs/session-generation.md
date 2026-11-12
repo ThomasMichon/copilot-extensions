@@ -44,6 +44,11 @@ optional fallback. A lost or unverifiable originating owner also refuses rather
 than becoming an unowned ordinary call. Interpolated and already ownership-bound
 entries are not overridden.
 
+Unreferenced bootstrap-trace fields remain in the physical upstream environment
+but are excluded from shared-context identity. Otherwise, each launch timestamp
+would reject an equivalent second client against the existing custodian.
+Explicit configuration references keep those values semantically significant.
+
 The session-only `--additional-mcp-config` overlay is a sealed anonymous file,
 read through the client's inherited Linux descriptor. Configuration and env
 values stay in the entry environment, not the bootstrap request or a persistent
