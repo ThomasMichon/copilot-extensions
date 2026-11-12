@@ -23,8 +23,11 @@ class Binding:
 
     session: str
     key: str = field(repr=False)
+    trace_bookkeeping: int = 0
 
     def __post_init__(self):
+        if type(self.trace_bookkeeping) is not int or self.trace_bookkeeping not in (0, 1):
+            raise CheckpointRefused("unsupported checkpoint identity mode")
         for value in (self.session, self.key):
             if (
                 not isinstance(value, str)
@@ -34,14 +37,34 @@ class Binding:
                 raise CheckpointRefused("invalid private checkpoint binding")
 
     @classmethod
-    def issue(cls):
+    def issue(cls, *, trace_bookkeeping=0):
         """Allocate one session identity and an independent private comparison key."""
-        return cls(secrets.token_hex(32), secrets.token_hex(32))
+        return cls(secrets.token_hex(32), secrets.token_hex(32), trace_bookkeeping)
+
+    @classmethod
+    def from_wire(cls, value):
+        """Missing mode retains the original strict two-field binding semantics."""
+        if (
+            not isinstance(value, dict)
+            or set(value) not in (
+                {"session", "key"}, {"session", "key", "trace_bookkeeping"},
+            )
+        ):
+            raise CheckpointRefused("private checkpoint binding is required")
+        return cls(**value)
+
+    def wire(self) -> dict[str, str | int]:
+        value: dict[str, str | int] = {"session": self.session, "key": self.key}
+        if self.trace_bookkeeping:
+            value["trace_bookkeeping"] = self.trace_bookkeeping
+        return value
 
     def identity(self, cfg):
         """Use the existing complete config/environment/cwd equivalence owner."""
         try:
-            return execution_context._identity(cfg, self.key)
+            return execution_context._identity(
+                cfg, self.key, trace_bookkeeping=self.trace_bookkeeping == 1,
+            )
         except (OSError, ValueError, TypeError) as exc:
             raise CheckpointRefused("checkpoint execution context cannot be qualified") from exc
 
@@ -62,22 +85,23 @@ def envelope(cfg, state: dict, binding: Binding) -> dict:
     from .custody_contract import CONTRACT, MAX_SEQUENCE
     from .custody_wire import Peer
 
-    snapshot = data_copy(
-        {
-            "schema": SCHEMA,
-            "version": VERSION,
-            "session": binding.session,
-            "configuration": binding.identity(cfg),
-            "state": state,
-        }
-    )
+    value = {
+        "schema": SCHEMA,
+        "version": VERSION,
+        "session": binding.session,
+        "configuration": binding.identity(cfg),
+        "state": state,
+    }
+    if binding.trace_bookkeeping:
+        value["trace_bookkeeping"] = binding.trace_bookkeeping
+    snapshot = data_copy(value)
     try:
         Peer._encode({"receipt": MAX_SEQUENCE, "result": snapshot})
         Peer._encode({
             "sequence": MAX_SEQUENCE, "operation": "prepare",
             "data": {
                 "epoch": MAX_SEQUENCE, "contract": CONTRACT,
-                "binding": {"session": binding.session, "key": binding.key},
+                "binding": binding.wire(),
                 "checkpoint": snapshot,
             },
         })
@@ -89,9 +113,19 @@ def envelope(cfg, state: dict, binding: Binding) -> dict:
 def unpack(cfg, snapshot: dict, binding: Binding) -> dict:
     """Validate session, version and actual caller context before importing data."""
     snapshot = data_copy(snapshot)
+    fields = {"schema", "version", "session", "configuration", "state"}
+    if binding.trace_bookkeeping:
+        fields.add("trace_bookkeeping")
     if (
         not isinstance(snapshot, dict)
-        or set(snapshot) != {"schema", "version", "session", "configuration", "state"}
+        or set(snapshot) != fields
+        or (
+            binding.trace_bookkeeping
+            and (
+                type(snapshot.get("trace_bookkeeping")) is not int
+                or snapshot["trace_bookkeeping"] != binding.trace_bookkeeping
+            )
+        )
         or snapshot["schema"] != SCHEMA
         or type(snapshot["version"]) is not int
         or snapshot["version"] != VERSION

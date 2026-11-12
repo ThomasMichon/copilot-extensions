@@ -11,6 +11,16 @@ CONTRACT = {
     "capabilities": ["quiescent-checkpoint", "retained-upstream", "exclusive-epoch"],
 }
 
+CHECKPOINT_TRACE_CAPABILITY = "checkpoint-trace-bookkeeping/1"
+
+
+def backend_descriptor() -> dict:
+    """Expand backend readers without changing the legacy custody baseline."""
+    return {
+        **CONTRACT,
+        "capabilities": [*CONTRACT["capabilities"], CHECKPOINT_TRACE_CAPABILITY],
+    }
+
 
 def supports(value) -> bool:
     return (

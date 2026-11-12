@@ -100,12 +100,14 @@ async def test_quiesce_joins_pipeline_then_rebuilds_objects_without_initialize_r
 @pytest.mark.parametrize(
     "change", ["configuration", "version", "state", "session", "cwd", "environment"]
 )
+@pytest.mark.parametrize("mode", [0, 1])
 async def test_import_refuses_changed_context_before_starting_any_transport(
     change,
     tmp_path,
     monkeypatch,
+    mode,
 ):
-    cfg, binding = configuration(), cp.Binding.issue()
+    cfg, binding = configuration(), cp.Binding.issue(trace_bookkeeping=mode)
     old = BridgeSession(
         cfg,
         lambda _: None,
@@ -141,8 +143,9 @@ async def test_import_refuses_changed_context_before_starting_any_transport(
     await old.aclose()
 
 
-async def test_context_is_bound_at_initial_admission_not_recomputed_for_export(monkeypatch):
-    cfg, binding = configuration(), cp.Binding.issue()
+@pytest.mark.parametrize("mode", [0, 1])
+async def test_context_is_bound_at_initial_admission_not_recomputed_for_export(monkeypatch, mode):
+    cfg, binding = configuration(), cp.Binding.issue(trace_bookkeeping=mode)
     old = BridgeSession(
         cfg,
         lambda _: None,
@@ -154,6 +157,57 @@ async def test_context_is_bound_at_initial_admission_not_recomputed_for_export(m
     with pytest.raises(cp.CheckpointRefused, match="changed after"):
         old.checkpoint()
     await old.aclose()
+
+
+def test_legacy_binding_keeps_its_wire_shape_and_hash(monkeypatch):
+    from agent_mcp import execution_context
+
+    cfg, binding = configuration(), cp.Binding.issue()
+    wire = {"session": binding.session, "key": binding.key}
+    assert binding.wire() == wire
+    assert cp.Binding.from_wire(wire) == binding
+    assert binding.identity(cfg) == execution_context._identity(cfg, binding.key)
+    snapshot = cp.envelope(cfg, {}, binding)
+    assert "trace_bookkeeping" not in snapshot
+    monkeypatch.setenv("COPILOT_EXTENSIONS_BOOT_TRACE_SHIM_START_MS", "legacy-change")
+    with pytest.raises(cp.CheckpointRefused, match="incompatible"):
+        cp.unpack(cfg, snapshot, binding)
+
+
+@pytest.mark.parametrize("key", [
+    "COPILOT_EXTENSIONS_BOOT_TRACE", "COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN",
+    "COPILOT_EXTENSIONS_BOOT_TRACE_SHIM_START_MS",
+])
+def test_trace_mode_ignores_only_unreferenced_launch_bookkeeping(key, monkeypatch):
+    cfg, binding = configuration(), cp.Binding.issue(trace_bookkeeping=1)
+    monkeypatch.setenv(key, "first")
+    snapshot = cp.envelope(cfg, {"retained": True}, binding)
+    monkeypatch.setenv(key, "replacement")
+    assert cp.unpack(cfg, snapshot, binding) == {"retained": True}
+    cfg.server.env["EXPLICIT_TRACE"] = "${" + key + "}"
+    snapshot = cp.envelope(cfg, {}, binding)
+    monkeypatch.setenv(key, "rollback")
+    with pytest.raises(cp.CheckpointRefused, match="incompatible"):
+        cp.unpack(cfg, snapshot, binding)
+
+
+@pytest.mark.parametrize("mode", [0, 1])
+def test_snapshot_identity_mode_cannot_be_upgraded_or_downgraded(mode, monkeypatch):
+    for key in (
+        "COPILOT_EXTENSIONS_BOOT_TRACE", "COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN",
+        "COPILOT_EXTENSIONS_BOOT_TRACE_SHIM_START_MS",
+    ):
+        monkeypatch.delenv(key, raising=False)
+    cfg, binding = configuration(), cp.Binding.issue(trace_bookkeeping=mode)
+    other = cp.Binding(binding.session, binding.key, 1 - mode)
+    assert binding.identity(cfg) == other.identity(cfg)
+    snapshot = cp.envelope(cfg, {}, binding)
+    with pytest.raises(cp.CheckpointRefused, match="incompatible"):
+        cp.unpack(cfg, snapshot, other)
+    if mode:
+        snapshot["trace_bookkeeping"] = True
+        with pytest.raises(cp.CheckpointRefused, match="incompatible"):
+            cp.unpack(cfg, snapshot, binding)
 
 
 async def test_resume_cannot_create_a_replacement_upstream():
@@ -224,11 +278,12 @@ async def test_cancelled_quiescence_wait_does_not_cancel_accepted_mutation():
     await session.aclose()
 
 
-def test_export_budgets_complete_receipt_and_prepare_frames(monkeypatch):
+@pytest.mark.parametrize("mode", [0, 1])
+def test_export_budgets_complete_receipt_and_prepare_frames(monkeypatch, mode):
     from agent_mcp import custody_wire
     from agent_mcp.custody_contract import CONTRACT, MAX_SEQUENCE
 
-    cfg, binding = configuration(), cp.Binding.issue()
+    cfg, binding = configuration(), cp.Binding.issue(trace_bookkeeping=mode)
 
     def frames(snapshot):
         return (
@@ -237,7 +292,7 @@ def test_export_budgets_complete_receipt_and_prepare_frames(monkeypatch):
                 "sequence": MAX_SEQUENCE, "operation": "prepare",
                 "data": {
                     "epoch": MAX_SEQUENCE, "contract": CONTRACT,
-                    "binding": {"session": binding.session, "key": binding.key},
+                    "binding": binding.wire(),
                     "checkpoint": snapshot,
                 },
             },

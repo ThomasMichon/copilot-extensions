@@ -9,7 +9,9 @@ import hmac
 from . import execution_context, incoming
 from .checkpoint import Binding, CheckpointRefused
 from .config import load_config
-from .custody_contract import CONTRACT, MAX_APPLICATION, MAX_CONTROL, MAX_SEQUENCE, supports
+from .custody_contract import (
+    MAX_APPLICATION, MAX_CONTROL, MAX_SEQUENCE, backend_descriptor, supports,
+)
 from .custody_wire import Peer
 from .request_context import request_root
 from .session import BridgeSession
@@ -26,7 +28,7 @@ def capability(server):
         and not server._draining and not server._closing
         and incoming.accepts(server, {})
     ):
-        return {"custody_backend": CONTRACT}
+        return {"custody_backend": backend_descriptor()}
     return {}
 
 
@@ -85,10 +87,7 @@ class BackendSession:
     async def _prepare(self, data):
         if self.state != "new" or not supports(data.get("contract")):
             raise ValueError("unsupported or repeated custody preparation")
-        raw = data.get("binding")
-        if not isinstance(raw, dict) or set(raw) != {"session", "key"}:
-            raise CheckpointRefused("private checkpoint binding is required")
-        binding = Binding(**raw)
+        binding = Binding.from_wire(data.get("binding"))
         cfg = self.qualify()
         binding.identity(cfg)
         self.state = "preparing"
@@ -103,7 +102,7 @@ class BackendSession:
             self.state = "failed"
             raise
         self.state = "prepared"
-        return {"contract": CONTRACT, "prepared": True, "epoch": self.epoch}
+        return {"contract": backend_descriptor(), "prepared": True, "epoch": self.epoch}
 
     async def _settle(self, task, sequence, control):
         await task
@@ -289,7 +288,7 @@ async def run_backend(server, request, reader, writer):
     try:
         await server._send(
             writer,
-            {"ok": True, "contract": CONTRACT, "generation": server._version,
+            {"ok": True, "contract": backend_descriptor(), "generation": server._version,
              "runtime_root": str(server._runtime_root), "epoch": request["epoch"]},
         )
         await BackendSession(reader, writer, request, qualify).run()

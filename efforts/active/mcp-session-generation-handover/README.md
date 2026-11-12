@@ -344,7 +344,7 @@ handover. Preserve held sessions and the separate pre-feature adoption hold.
     [source-pinned query qualification](journal/2026/11.10-explicit-owner-cli.md#discovery-provider-qualification-and-merge)
     passed. Caller discovery/capture integration and rollback adoption remain
     open.
-  - [ ] **Explicit Linux exec caller:** capture the exec owner's native pair
+  - [x] **Explicit Linux exec caller:** capture the exec owner's native pair
     and pass a sealed, session-only overlay for explicitly named configured
     entries, with actual-start discovery bound to a physical optional receiver.
     Preserve probe-only self-provisioning inhibition, cold-context fallback
@@ -353,12 +353,20 @@ handover. Preserve held sessions and the separate pre-feature adoption hold.
     separately from the synthetic native-exec fixture. Preserve
     ordinary selection for unsupported entries and leave Windows capture,
     default caller adoption and installed acceptance open.
+    #12192 merged at `5a9594df3a03a5294db2bcaa6182dbf8cba93fcd` after
+    current-head approval, required CI and the exact-source Linux/native
+    configuration-consumption packet. This closes the bounded source producer,
+    not trace-sensitive checkpoint adoption or the parent lifetime boundary.
   - [ ] **Trace-sensitive checkpoint adoption:** qualify the private binding
     across physical replacement and rollback when launch diagnostics differ,
     without silently changing legacy identities. Until then, the optional
     receiver retains ordinary execution when trace normalization changes the
     existing checkpoint identity. This is separate from request-context
     negotiation and actual configuration consumption.
+    Provider expansion accepts an explicitly selected trace-bookkeeping mode
+    and advertises it from the actual backend; legacy custodians and bindings
+    remain unchanged. Caller migration, supported old-provider rollback and
+    native trace-varying qualification remain required before removing that guard.
   - [x] **Explicit-owner source merged:** #11935 landed at
     `c0eab0d952a37607f6cf7030ac1a77f377f98a74` after current-head automated
     approval, required CI and resolution of addressed findings. The source
