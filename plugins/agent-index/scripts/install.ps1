@@ -43,7 +43,11 @@ param(
 
     # Preview mode for the 'uninstall' action: print what WOULD be removed
     # without touching the filesystem, scheduled tasks, or services.
-    [switch]$DryRun
+    [switch]$DryRun,
+    [string]$WheelProfile,
+    [string]$WheelDirectory,
+    [string]$WheelPython,
+    [string]$WheelUv
 )
 
 Set-StrictMode -Version 2.0
@@ -55,6 +59,15 @@ if ($env:COPILOT_EXTENSIONS_HUMAN_UTF8 -eq '1') {
     }
     . (Join-Path $PSScriptRoot 'installer-human-output.ps1')
 }
+
+if ($WheelProfile -or $WheelDirectory -or $WheelPython -or $WheelUv) {
+    if (-not $WheelProfile -or -not $WheelDirectory -or -not $WheelPython -or -not $WheelUv -or
+        $Action -notin @('install', 'update', 'provision') -or $Context) {
+        throw 'Closed wheels require profile, directory, Python and UV for install, update or provision'
+    }
+}
+$NativeWheelSelection = $null
+
 
 # === install-contract:v4 payload-copy -- keep byte-identical across plugins ===
 function Copy-InstallerStageDirectory {
@@ -196,7 +209,8 @@ if ($env:OS -eq 'Windows_NT' -and
         }
     }
     $driverEntry = Enter-NativeInstallerDriver -Payload $driverPayload -Root $driverRoot `
-        -Plugin 'agent-index' -Action $Action -Options $driverOptions
+        -Plugin 'agent-index' -Action $Action -Options $driverOptions `
+        -WheelProfile $WheelProfile -WheelDirectory $WheelDirectory -WheelPython $WheelPython -WheelUv $WheelUv
     if (-not $driverEntry.Participant -or $driverEntry.ExitCode -ne 0) { exit $driverEntry.ExitCode }
     $driverPython = $driverEntry.Python
     $driverArguments = $driverEntry.Arguments
@@ -790,6 +804,7 @@ function Invoke-VersionedGc {
 # === install-contract:v4 marker/toss helpers (#935) ===
 function Get-BootstrapPython {
     param([switch]$ExternalOnly)
+    if ($WheelProfile) { return $WheelPython }
     # Source/construction helpers require 3.11; the signed runtime retains
     # its separate package floor. Construction must not depend on its slot.
     $probe = @'
@@ -881,6 +896,12 @@ function Get-PayloadHash(
     [long]$MaxPathBytes = 4096,
     [long]$MaxContentBytes = 4294967296
 ) {
+    if ($NativeWheelSelection) {
+        return (Get-NativeWheelSelection -Python $WheelPython `
+            -Helper (Join-Path $PSScriptRoot 'install_source.py') -Profile $WheelProfile `
+            -Directory $WheelDirectory -Payload $PluginDir -Plugin 'agent-index' `
+            -Expected $NativeWheelSelection).payload_hash
+    }
     if (Get-Variable -Name SourceRuntimeIdentity -Scope Script -ValueOnly -ErrorAction SilentlyContinue) {
         Assert-SourceRuntime
         $sha = [Security.Cryptography.SHA256]::Create()
@@ -1189,9 +1210,15 @@ function Invoke-VersionedSlotClean {
         if ($LASTEXITCODE -ne 0) { throw 'Canonical construction adapter is unavailable' }
         Invoke-Expression $helpers
     }
+    $wheelOptions = Get-NativeWheelConstructionOptions -Profile $WheelProfile `
+        -Directory $WheelDirectory -Payload $PluginDir -Plugin 'agent-index' `
+        -Uv $WheelUv -HealthModule 'agent_index' -Repair:$Force
     $script:RuntimeConstructionReuse = Start-RuntimeConstruction `
         -Python $py -Helper $vr -Root $InstallDir -Version $SrcVersion `
-        -PayloadHash (Get-PayloadHash) -LinkName (Split-Path -Leaf $LinkDir)
+        -PayloadHash (Get-PayloadHash) -LinkName (Split-Path -Leaf $LinkDir) @wheelOptions
+    if ($NativeWheelSelection) {
+        Set-NativeWheelRuntimeVersion -Root $InstallDir -Version $script:RuntimeConstructionSession.Version
+    }
     Assert-SourceRuntime
 
 }
@@ -1869,6 +1896,7 @@ function Write-Manifest {
     $sourcePath = $env:COPILOT_PLUGIN_STAGED_FROM
     $gitInfo = { param($path) Get-GitInfo -Path (Split-Path $path) }
     $extra = @{}
+    if ($NativeWheelSelection) { $extra['runtime_version'] = $SrcVersion }
     if ($script:SourceRuntimeIdentity) {
         if (-not $sourcePath) { $sourcePath = $PluginDir }
         $PluginDir = Join-Path (Join-Path $InstallDir 'snapshots') $SrcVersion
@@ -2759,6 +2787,7 @@ function Enter-IndexBuildLock {
 }
 
 function Get-IndexUv {
+    if ($WheelProfile) { return (Get-Command $WheelUv -CommandType Application -ErrorAction Stop).Source }
     $mutex = Enter-IndexStampLock -Scope 'Uv' -LockRoot $InstallDir -TimeoutSeconds 180
     try {
         return (Ensure-Uv -InstallRoot $InstallDir)
@@ -3048,6 +3077,10 @@ $PackageVersion = $SrcVersion
 $script:SourceRuntimeIdentity = $null
 if ($Action -in @('install', 'update', 'provision', 'stamp')) {
     Initialize-SourceRuntime
+    if ($WheelProfile) {
+        Initialize-NativeWheelRuntime -Python $WheelPython -Profile $WheelProfile `
+            -Directory $WheelDirectory -Payload $PluginDir -Plugin 'agent-index' -Root $InstallDir
+    }
     Assert-SourceRuntime
 }
 if ($Action -notin @('uninstall', 'stamp', 'engine', 'engine-update') -and

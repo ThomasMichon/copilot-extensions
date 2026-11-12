@@ -97,7 +97,11 @@ try {
         }
         Exit-SessionStart
     }
-    $deployed = "" + (Get-Content $Manifest -Raw | ConvertFrom-Json).source.version
+    $deployed = Get-Content $Manifest -Raw | ConvertFrom-Json
+    $runtimeVersion = if ($deployed.PSObject.Properties['runtime_version']) {
+        "" + $deployed.runtime_version
+    } else { '' }
+    $deployed = "" + $deployed.source.version
     $current = $deployed
     $pyproj = Join-Path $PluginDir 'pyproject.toml'
     if (Test-Path $pyproj) {
@@ -117,7 +121,7 @@ try {
             # ...and only when it names the CURRENT payload version: the marker is
             # authoritative for the ACTIVE slot, so a stale/corrupt marker naming an
             # older slot must NOT suppress reconcile and strand the wrong runtime.
-            if ($cv -and $cv -eq $current -and ((Test-Path (Join-Path $InstallDir "versions\$cv\Scripts\python.exe")) -or (Test-Path (Join-Path $InstallDir "versions/$cv/bin/python")))) { $provisioned = $true }
+            if ($cv -and ($cv -eq $current -or $cv -eq $runtimeVersion) -and ((Test-Path (Join-Path $InstallDir "versions\$cv\Scripts\python.exe")) -or (Test-Path (Join-Path $InstallDir "versions/$cv/bin/python")))) { $provisioned = $true }
         }
     }
     if ($provisioned -and $deployed -eq $current) { Exit-SessionStart }

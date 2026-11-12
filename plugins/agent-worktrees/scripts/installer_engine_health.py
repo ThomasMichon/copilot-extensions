@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 import subprocess
 
-from installer_dependency_policy import DependencyPolicyError
+from installer_dependency_policy import DependencyPolicyError, _native_retained_path
 from installer_engine_process import ChildLaunchError, ChildTimeoutExpired
 from installer_source_build import SourceWheelInputs
 from installer_wheel_inputs import _ordinary
@@ -47,7 +47,7 @@ def verify_installed_inputs(
             f"Runtime {slot.name} has no installed interpreter; "
             "use distinct-generation health repair, not an in-place rebuild."
         )
-    nested = python.parent.parent.name == ".venv"
+    nested = python.parent.parent.name == ".venv" and (slot / "application.json").is_file()
     if nested and wheel_inputs is not None:
         verify_application_wheels(wheel_inputs, slot)
     wheel_receipt = wheel_inputs.receipt() if wheel_inputs is not None else None
@@ -68,7 +68,7 @@ def verify_installed_inputs(
 import hashlib, importlib, importlib.metadata, importlib.util, json, pathlib, re, sys
 from urllib.parse import unquote, urlsplit
 slot = pathlib.Path(sys.argv[1]).resolve()
-nested = (slot / ".venv").is_dir() and pathlib.Path(sys.prefix).samefile(slot / ".venv")
+nested = (slot / "application.json").is_file() and (slot / ".venv").is_dir() and pathlib.Path(sys.prefix).samefile(slot / ".venv")
 if nested:
     spec = importlib.util.spec_from_file_location(
         "_installed_runtime_paths", slot / "runtime" / "versioned_runtime.py",
@@ -81,6 +81,20 @@ if nested:
     slot = resolved(slot)
 else:
     resolved = lambda path: pathlib.Path(path).resolve()
+if sys.platform == "win32":
+    # Metadata and imports need the same physical long-path spelling as construction.
+    native_slot = pathlib.Path(sys.argv[11]).resolve()
+    original_resolved = resolved
+    def resolved(path):
+        physical = pathlib.Path(path).resolve()
+        if physical.is_relative_to(native_slot):
+            return slot / physical.relative_to(native_slot)
+        return original_resolved(physical)
+    sys.path[:] = [
+        str(native_slot / resolved(entry).relative_to(slot))
+        if entry and resolved(entry).is_relative_to(slot) else entry
+        for entry in sys.path
+    ]
 assert sys.version_info >= (3, 11), "installer runtime requires Python 3.11+"
 wheel_binding = sys.argv[9]
 expected_origins = None if wheel_binding else json.loads(sys.argv[3])
@@ -89,7 +103,7 @@ expected_selection = json.loads(sys.argv[7])
 excluded_packages = json.loads(sys.argv[8])
 expected_wheels = None
 source_wheels = None
-proof = slot / ".runtime-input-origins.json"
+proof = pathlib.Path(sys.argv[11]) / ".runtime-input-origins.json"
 assert not proof.is_symlink(), "frozen origin evidence is a symlink"
 if sys.argv[5] == "fresh" or expected_extras or expected_selection is not None or wheel_binding:
     assert proof.is_file(), "fresh runtime has no frozen origin evidence"
@@ -228,7 +242,7 @@ if sys.argv[4]:
                  "receipt-reuse" if isinstance(wheel_inputs, WheelReuseInputs) else "reuse"
              ),
              json.dumps(extras), json.dumps(local_packages), json.dumps(excluded_packages),
-             wheel_argument, source_argument],
+             wheel_argument, source_argument, _native_retained_path(slot)],
         )
         if nested and wheel_inputs is not None:
             verify_application_wheels(wheel_inputs, slot)

@@ -95,6 +95,9 @@ function Publish-SourcePayload {
 function Get-SourceRuntimeFields {
     Assert-SourceRuntime
     $fields = @{}
+    if (Get-Variable -Name NativeWheelSelection -Scope Script -ValueOnly -ErrorAction SilentlyContinue) {
+        $fields['runtime_version'] = $SrcVersion
+    }
     if ($script:SourceRuntimeIdentity) {
         $data = $script:SourceRuntimeIdentity | ConvertFrom-Json
         foreach ($property in $data.PSObject.Properties) { $fields[$property.Name] = $property.Value }

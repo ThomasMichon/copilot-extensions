@@ -112,6 +112,36 @@ def test_local_source_keeps_wheels_held_until_native_installer_returns(snapshot,
     assert not held
 
 
+def test_native_release_keeps_its_inputs_held_without_a_source_association(tmp_path, monkeypatch):
+    installer = self_install._runtime_installer()
+    held = []
+    wheels = object()
+
+    @contextmanager
+    def retain(profile, directory):
+        assert profile == tmp_path / "profile.json" and directory == tmp_path / "wheels"
+        held.append(wheels)
+        try:
+            yield wheels
+        finally:
+            held.pop()
+
+    monkeypatch.setattr(inputs, "wheel_inputs", retain)
+    monkeypatch.setattr(inputs, "wheel_selection", lambda *args: {})
+
+    def install(args, **options):
+        assert held == [wheels] and options == {"native_wheel_inputs": wheels}
+        return tmp_path / "selected"
+
+    monkeypatch.setattr(installer, "_install_payload", install)
+    args = SimpleNamespace(
+        wheel_profile=tmp_path / "profile.json", wheel_directory=tmp_path / "wheels",
+        payload=tmp_path / "payload",
+    )
+    assert installer._install(args) == tmp_path / "selected"
+    assert not held
+
+
 def test_source_input_discovery_has_no_installation_or_old_runtime_dependency(monkeypatch, capsys):
     installer = self_install._runtime_installer()
     monkeypatch.setattr(installer, "_execution_driver", lambda *a: pytest.fail("discovery needs no driver"))

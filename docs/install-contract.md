@@ -114,6 +114,35 @@ They distinguish environment staging, candidate readiness, activation and
 release; they do not claim that every app already implements the target flow.
 Existing plugin-native installation remains supported during the migration.
 
+## Native closed-wheel inputs
+
+The Windows native recipes accept `WheelProfile`, `WheelDirectory`,
+`WheelPython` and `WheelUv` together for installation/update/provisioning
+(`init` where that is the recipe's existing action). Manager's Python entry
+uses the corresponding `--wheel-profile`, `--wheel-directory`,
+`--wheel-python` and `--wheel-uv` options.
+
+These are construction inputs, not release/feed approval or a Source
+association. The caller admits the selected release, complete dependency
+closure, actual target and applicable local restrictions. A Source-qualified
+payload still requires its real `--install-source` association; raw wheel
+inputs cannot replace or manufacture it.
+
+The complete profile and inspected wheel bytes participate in the immutable
+generation and payload hash. Construction is offline, no-index, no-deps,
+no-build and hash-required. The existing native owner retains the candidate
+through health, activation, command/manifest publication and settlement;
+service cutover, task policy, disabled holds, data and recovery keep their
+existing owners. MCP keeps its nested environment; Manager remains independent.
+Bootstrap readiness recognizes the completed profile generation rather than
+mistaking it for package-version drift. Package comparisons strip the generated
+profile suffix; recovery still requires an exact current/last-known-good
+selection instead of choosing a dependency profile by hash order.
+
+Unsupported native capability/dependency profiles may use only the caller's
+permitted ordinary fallback. A failed native installation or changed retained
+input is an actual failure, not permission to hide it with a source rebuild.
+
 ## Manager first-party artifact and retained hosts
 
 Manager's wheel-first target embeds its selected in-process first-party library

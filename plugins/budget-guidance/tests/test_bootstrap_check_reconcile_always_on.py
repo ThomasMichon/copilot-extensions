@@ -68,6 +68,48 @@ def test_sh_has_no_opt_in_gate():
     assert "background reconcile SKIPPED" not in text
 
 
+@pytest.mark.skipif(os.name != "nt", reason="native Windows generation selection")
+@pytest.mark.parametrize("selected", ["matching-profile", "different-generation"])
+def test_ps1_profile_generation_uses_its_deployed_package_version(tmp_path, selected):
+    host = shutil.which("powershell.exe")
+    if host is None:
+        pytest.skip("native PowerShell unavailable")
+    payload = tmp_path / "payload"
+    payload.mkdir()
+    (payload / "pyproject.toml").write_text('[project]\nversion = "1.0.1"\n', encoding="utf-8")
+    root = tmp_path / "runtime"
+    version = "1.0.1.profile." + "a" * 16
+    python = root / "versions" / version / "Scripts" / "python.exe"
+    python.parent.mkdir(parents=True)
+    python.touch()
+    (root / "current-version").write_text(version, encoding="utf-8")
+    (root / "deploy-manifest.json").write_text(json.dumps({
+        "source": {"version": "1.0.1"},
+        "runtime_version": version if selected == "matching-profile" else "1.0.0",
+    }), encoding="utf-8")
+    text = _PS1.read_text(encoding="utf-8")
+    start = text.index('    $deployed =')
+    end = text.index("\n    $init =", start)
+    script = tmp_path / "admit-generation.ps1"
+    script.write_text(
+        "$ErrorActionPreference='Stop'\n"
+        "$PluginDir=$env:BUDGET_TEST_PAYLOAD\n"
+        "$InstallDir=$env:BUDGET_TEST_RUNTIME\n"
+        "$Manifest=Join-Path $InstallDir 'deploy-manifest.json'\n"
+        "function Exit-SessionStart { exit 0 }\n"
+        + text[start:end] + "\nexit 17\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [host, "-NoProfile", "-NonInteractive", "-File", str(script)],
+        env={**os.environ, "BUDGET_TEST_PAYLOAD": str(payload), "BUDGET_TEST_RUNTIME": str(root)},
+        capture_output=True, text=True, timeout=15, creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    assert result.returncode == (0 if selected == "matching-profile" else 17), (
+        result.stdout + result.stderr
+    )
+
+
 def _make_fake_install(home: Path, name: str) -> Path:
     """A minimally 'drifted' install dir: deployed=1.0.0, payload=1.0.1.
 

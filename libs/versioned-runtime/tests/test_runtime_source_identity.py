@@ -179,6 +179,14 @@ def test_source_and_repair_slots_preserve_the_declared_package_version(version, 
     assert identity._runtime().package_version(qualified) == version
 
 
+@pytest.mark.parametrize("repair", [False, True])
+def test_native_profile_slots_preserve_the_declared_package_version(repair):
+    version = VERSION + ".profile." + "c" * 16
+    if repair:
+        version += ".repair." + "b" * 32
+    assert identity._runtime().package_version(version) == VERSION
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [
@@ -221,10 +229,12 @@ def test_cell_provenance_is_separate_from_assembled_source_bytes(payload: Path) 
         identity.read_source_identity(payload, VERSION)
 
 
-def _source_slots(root: Path):
+def _source_slots(root: Path, *, source=True):
     runtime = identity._runtime()
     first = identity.runtime_version(VERSION, "f" * 40, "a" * 64)
     second = identity.runtime_version(VERSION + "+base", "a" * 40, "b" * 64)
+    if not source:
+        first, second = (VERSION + ".profile." + value * 16 for value in ("f", "a"))
     for version in ("0.1.0", first, second):
         python = root / "versions" / version / (
             "Scripts/python.exe" if os.name == "nt" else "bin/python"
@@ -237,10 +247,11 @@ def _source_slots(root: Path):
 
 
 @pytest.mark.parametrize("selector", [None, "current-version", "last-known-good"])
+@pytest.mark.parametrize("source", [False, True])
 def test_source_recovery_uses_explicit_identity_never_hash_order(
-    tmp_path: Path, selector: str | None, capsys,
+    tmp_path: Path, selector: str | None, capsys, source,
 ) -> None:
-    runtime, first, _ = _source_slots(tmp_path)
+    runtime, first, _ = _source_slots(tmp_path, source=source)
     if selector:
         (tmp_path / selector).write_text(first, encoding="utf-8")
     python = runtime.resolve_python(tmp_path)
@@ -248,7 +259,8 @@ def test_source_recovery_uses_explicit_identity_never_hash_order(
         assert python is not None and python.parent.parent == tmp_path / "versions" / first
     else:
         assert python is None
-        assert "refusing unordered source fallback" in capsys.readouterr().err
+        kind = "source" if source else "profile"
+        assert f"refusing unordered {kind} fallback" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize("broken", ["current-version", "last-known-good"])

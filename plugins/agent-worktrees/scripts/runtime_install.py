@@ -416,6 +416,7 @@ def install(
     frontend: dict | None = None,
     recover_adopted_manager: bool = False,
     wheel_inputs: engine.WheelInstallInputs | None = None,
+    native_wheel_inputs: engine.WheelInstallInputs | None = None,
     repair: bool = False,
     source_descriptor: dict | None = None,
 ) -> dict:
@@ -438,6 +439,18 @@ def install(
         raise InstallationRefused("Source identity changed after frontend runtime selection")
     version = source_identity.runtime_version if source_identity is not None else package_version
     wheel_options = {}
+    if native_wheel_inputs is not None:
+        if wheel_inputs is not None or source_identity is not None:
+            raise InstallationRefused("Native release wheels cannot replace a Source association")
+        from install_source import wheel_selection
+
+        selection = wheel_selection(plugin, "agent-worktrees", native_wheel_inputs)
+        version = selection["runtime_version"]
+        wheel_options = {
+            "wheel_inputs": native_wheel_inputs,
+            "local_packages": tuple(selection["local_packages"]),
+            "extras": tuple(selection["extras"]),
+        }
     if wheel_inputs is not None:
         if source_identity is None or not isinstance(wheel_inputs, engine.WheelInstallInputs):
             raise InstallationRefused("Closed source wheels require an attributed retained source selection")
@@ -458,7 +471,7 @@ def install(
             )),
         }
     if repair:
-        if wheel_inputs is None:
+        if wheel_inputs is None and native_wheel_inputs is None:
             raise InstallationRefused("Direct source repair requires complete wheel inputs")
         version += ".repair." + uuid.uuid4().hex
     provenance = _source_provenance(governance.payload, package_version, source_identity)
@@ -486,7 +499,7 @@ def install(
                     construction_callable="agent_worktrees.runtime_candidate:prepare_runtime_candidate",
                     construction_data=provenance,
                     process_retention=True,
-                    reuse_generations=source_identity is None,
+                    reuse_generations=source_identity is None and not wheel_options,
                     expected_source_identity=runtime_source.manifest_fields(source_identity),
                     wait_timeout=wait_timeout, child_timeout=child_timeout,
                     **wheel_options,
@@ -838,17 +851,42 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--owner", type=Path)
     parser.add_argument("--mode-owner", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--install-source", type=Path)
+    parser.add_argument("--wheel-profile", type=Path)
+    parser.add_argument("--wheel-directory", type=Path)
     parser.add_argument("--input-timeout", type=install_driver.positive_input_timeout)
     parser.add_argument("--construction-provenance", type=json.loads, help=argparse.SUPPRESS)
     arguments = parser.parse_args(argv)
-    if arguments.input_timeout is not None and not arguments.install_source:
-        parser.error("--input-timeout requires --install-source")
+    if arguments.input_timeout is not None and not (arguments.install_source or arguments.wheel_profile):
+        parser.error("--input-timeout requires an explicit installation input")
     required = ("root", "plugin") if (
         arguments.inspect_helper_publication or arguments.complete_helper_publication
     ) else ("root", "plugin", "payload", "uv", "base_python", "result")
     if any(getattr(arguments, name) is None for name in required):
         parser.error("required arguments: " + ", ".join("--" + name.replace("_", "-") for name in required))
-    if arguments.install_source:
+    if arguments.wheel_profile is not None or arguments.wheel_directory is not None:
+        if (
+            arguments.wheel_profile is None or arguments.wheel_directory is None
+            or arguments.install_source is not None or arguments.mode not in ("ordinary", "repair")
+            or any((arguments.mode_owner, arguments.settle_slot,
+                    arguments.inspect_helper_publication, arguments.complete_helper_publication))
+        ):
+            parser.error("closed wheels require a complete independent ordinary installation input")
+        from install_source import wheel_inputs
+
+        with wheel_inputs(
+            arguments.wheel_profile, arguments.wheel_directory,
+            deadline=time.monotonic() + (arguments.input_timeout or 600),
+        ) as wheels:
+            result = install(
+                arguments.root, arguments.plugin, payload=arguments.payload,
+                uv=arguments.uv, base_python=arguments.base_python,
+                wait_timeout=arguments.wait_timeout, child_timeout=arguments.child_timeout,
+                expected_source_identity=arguments.expected_source_identity,
+                frontend=arguments.frontend,
+                recover_adopted_manager=arguments.recover_adopted_manager,
+                native_wheel_inputs=wheels, repair=arguments.mode == "repair",
+            )
+    elif arguments.install_source:
         if arguments.mode not in ("ordinary", "repair") or any((
             arguments.mode_owner, arguments.settle_slot,
             arguments.inspect_helper_publication, arguments.complete_helper_publication,

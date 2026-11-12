@@ -58,6 +58,11 @@ def current(root: Path, payload: Path, package_version: str) -> bool:
         raise ValueError("Vault deployment metadata must name its source")
     fields = expected["source_identity"]
     version = expected["runtime_version"]
+    if fields is None and expected["profile"] == "base":
+        from install_source import native_current
+
+        if native_current(root, payload, "agent-vault"):
+            version = manifest["runtime_version"]
     if (
         manifest["source"].get("version") != package_version
         or manifest.get("runtime_profile", "base") != expected["profile"]

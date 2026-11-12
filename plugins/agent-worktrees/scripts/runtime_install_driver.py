@@ -22,6 +22,7 @@ CONTEXT_KEYS = (
     "COPILOT_EXTENSIONS_CONTEXT", "COPILOT_PLUGIN_ROOT", "WORKTREE_MANAGER_ROOT",
     "WORKTREE_MANAGER_ENGINE_ARGV", "WORKTREE_MANAGER_ENGINE_CMD", "CE_UPDATE_AUTH",
     "COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT", "COPILOT_PROJECT_DIR",
+    "COPILOT_EXTENSIONS_NATIVE_WHEEL_SELECTION",
 )
 TRANSIENT_KEYS = (
     "COPILOT_EXTENSIONS_COMMAND_LIFECYCLE", "COPILOT_PLUGIN_INSTALL_STAGED",
@@ -223,7 +224,10 @@ def _admission_digest(args) -> str:
 
 def _native_arguments(args) -> list[str]:
     values = ["-Action", args.action, "-InstallDir", str(args.root.resolve())]
-    for option in ("project_name", "bootstrap_python", "owner", "install_source", "input_timeout"):
+    for option in (
+        "project_name", "bootstrap_python", "owner", "install_source", "input_timeout",
+        "wheel_profile", "wheel_directory", "wheel_python", "wheel_uv",
+    ):
         value = getattr(args, option, None)
         if value is not None:
             values.extend(["-" + "".join(word.title() for word in option.split("_")), str(value)])
@@ -366,7 +370,10 @@ def _foreground(args, driver) -> int:
         "--payload", str(args.payload), "--root", str(args.root),
         "--shell", str(args.shell), "--action", args.action, "--participant",
     ]
-    for option in ("project_name", "bootstrap_python", "owner", "install_source", "input_timeout"):
+    for option in (
+        "project_name", "bootstrap_python", "owner", "install_source", "input_timeout",
+        "wheel_profile", "wheel_directory", "wheel_python", "wheel_uv",
+    ):
         value = getattr(args, option, None)
         if value is not None:
             command.extend(["--" + option.replace("_", "-"), str(value)])
@@ -432,6 +439,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--bootstrap-python", type=Path)
     parser.add_argument("--owner", type=Path)
     parser.add_argument("--install-source", type=Path)
+    for name in ("wheel-profile", "wheel-directory", "wheel-python", "wheel-uv"):
+        parser.add_argument("--" + name, type=Path)
     parser.add_argument("--input-timeout", type=positive_input_timeout)
     parser.add_argument("--source-descriptor", type=json.loads, help=argparse.SUPPRESS)
     parser.add_argument("--force", action="store_true")
@@ -459,8 +468,8 @@ def main(argv: list[str] | None = None) -> int:
         or (args.selected_snapshot is not None and not args.selected_snapshot.is_absolute())
     ):
         parser.error("--selected-snapshot requires an absolute first-use provision source")
-    if args.input_timeout is not None and not args.install_source:
-        parser.error("--input-timeout requires --install-source")
+    if args.input_timeout is not None and not (args.install_source or args.wheel_profile):
+        parser.error("--input-timeout requires an explicit installation input")
     if args.install_source and args.action not in ("install", "update", "provision", "repair"):
         parser.error("--install-source selects only installation, update, provisioning or independent repair")
     if args.install_source and not args.install_source.is_absolute():
@@ -489,6 +498,26 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("Native Worktrees installation requires an exact PowerShell executable")
     if args.payload != SCRIPTS.parent:
         parser.error("Native installation uses only this executing payload")
+    wheel_values = (args.wheel_profile, args.wheel_directory, args.wheel_python, args.wheel_uv)
+    if any(value is not None for value in wheel_values):
+        if (
+            not all(wheel_values) or args.install_source is not None
+            or args.action not in ("install", "update", "provision", "repair")
+            or any(not value.is_absolute() for value in wheel_values)
+            or args.wheel_python.resolve(strict=True) != Path(sys.executable).resolve(strict=True)
+        ):
+            parser.error("closed wheels require complete independent native inputs")
+        from install_source import wheel_inputs, wheel_selection
+
+        with wheel_inputs(args.wheel_profile, args.wheel_directory) as inputs:
+            selected_wheels = json.dumps(
+                wheel_selection(args.payload, "agent-worktrees", inputs),
+                sort_keys=True, separators=(",", ":"),
+            )
+        key = "COPILOT_EXTENSIONS_NATIVE_WHEEL_SELECTION"
+        if key in os.environ and os.environ[key] != selected_wheels:
+            raise RuntimeError("Native wheel selection changed after driver admission")
+        os.environ[key] = selected_wheels
     if args.install_source:
         from install_source import select_project
         import versioned_runtime_source as sources

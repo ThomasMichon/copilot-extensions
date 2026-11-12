@@ -11,7 +11,11 @@ param(
 
     # Preview mode for the 'uninstall' action: print what WOULD be removed
     # without touching the filesystem.
-    [switch]$DryRun
+    [switch]$DryRun,
+    [string]$WheelProfile,
+    [string]$WheelDirectory,
+    [string]$WheelPython,
+    [string]$WheelUv
 )
 
 Set-StrictMode -Version 2.0
@@ -22,6 +26,13 @@ if ($env:COPILOT_EXTENSIONS_HUMAN_UTF8 -eq '1') {
         throw 'Required installer human-output initializer is unavailable.'
     }
     . (Join-Path $PSScriptRoot 'installer-human-output.ps1')
+}
+
+if ($WheelProfile -or $WheelDirectory -or $WheelPython -or $WheelUv) {
+    if (-not $WheelProfile -or -not $WheelDirectory -or -not $WheelPython -or -not $WheelUv -or
+        $Action -notin @('install', 'update', 'provision')) {
+        throw 'Closed wheels require profile, directory, Python and UV for install, update or provision'
+    }
 }
 
 # === install-contract:v4 payload-copy -- keep byte-identical across plugins ===
@@ -559,6 +570,7 @@ function Get-BootstrapPython {
        mark-complete before the link is swapped), then the active link's
        python, then a real base python via the `py` launcher -- avoiding the
        Windows Store 'python' alias stub. Returns $null if none. #>
+    if ($WheelProfile) { return $WheelPython }
     foreach ($d in @($VenvDir, $LinkDir)) {
         # Windows venv layout first; `bin/python` is the POSIX layout pwsh sees off Windows.
         if ($d) { foreach ($rel in 'Scripts\python.exe', 'bin/python') { $p = Join-Path $d $rel; if (Test-Path $p) { return $p } } }
@@ -578,6 +590,13 @@ function Get-BootstrapPython {
 function Get-PayloadHash {
     <# Cheap payload fingerprint for the completion marker (#935): sha256 of
        pyproject.toml + the vendored-lib version set. Never throws -> '' on error. #>
+    if ($NativeWheelSelection) {
+        $observed = Get-NativeWheelSelection -Python $WheelPython `
+            -Helper (Join-Path $PSScriptRoot 'install_source.py') -Profile $WheelProfile `
+            -Directory $WheelDirectory -Payload $PluginDir -Plugin 'agent-ssh' `
+            -Expected $NativeWheelSelection
+        return $observed.payload_hash
+    }
     if ($SourceRuntimeIdentity) {
         Assert-SourceRuntimeIdentity
         return ($SourceRuntimeIdentity | ConvertFrom-Json).runtime_source.assembly_hash
@@ -609,9 +628,20 @@ function Invoke-VersionedSlotClean {
         if ($LASTEXITCODE -ne 0) { throw 'Canonical construction adapter is unavailable' }
         Invoke-Expression $helpers
     }
+    $wheelOptions = @{}
+    if ($NativeWheelSelection) {
+        $wheelOptions = @{
+            WheelProfile = $WheelProfile; WheelDirectory = $WheelDirectory
+            Payload = $PluginDir; Plugin = 'agent-ssh'
+            UvCommand = $WheelUv; HealthModule = 'agent_ssh'; Repair = $Force
+        }
+    }
     $script:RuntimeConstructionReuse = Start-RuntimeConstruction `
         -Python $py -Helper $vr -Root $InstallDir -Version $SrcVersion `
-        -PayloadHash (Get-PayloadHash) -LinkName (Split-Path -Leaf $LinkDir)
+        -PayloadHash (Get-PayloadHash) -LinkName (Split-Path -Leaf $LinkDir) @wheelOptions
+    if ($NativeWheelSelection) {
+        Set-SshRuntimeVersion $script:RuntimeConstructionSession.Version
+    }
     Assert-SourceRuntimeIdentity
 }
 
@@ -622,7 +652,7 @@ function Invoke-VersionedMarkComplete {
     if ($PayloadHash -and $PayloadHash -ne $actualHash) {
         throw 'Payload changed during construction; completion refused'
     }
-    Complete-RuntimeConstruction -PayloadHash $actualHash
+    Complete-RuntimeConstruction -PayloadHash $actualHash -RetainHelpers:([bool]$NativeWheelSelection)
     return $true
 }
 # === end install-contract:v4 marker/toss helpers ===
@@ -1099,8 +1129,25 @@ function Exit-InstallLock {
 }
 # === end install-transaction lock ===
 
+function Set-SshRuntimeVersion([string]$Version) {
+    $script:SrcVersion = $Version
+    $script:VenvDir = Join-Path (Join-Path $InstallDir 'versions') $Version
+    $script:VenvPython = if ($env:OS -eq 'Windows_NT') {
+        Join-Path $VenvDir 'Scripts\python.exe'
+    } else { Join-Path $VenvDir 'bin/python' }
+    $script:LinkDir = $VenvDir
+    $script:LinkPython = $VenvPython
+}
+
 $PackageVersion = $SrcVersion
+$NativeWheelSelection = $null
 Initialize-SourceRuntime
+if ($WheelProfile) {
+    $NativeWheelSelection = Get-NativeWheelSelection -Python $WheelPython `
+        -Helper (Join-Path $PSScriptRoot 'install_source.py') -Profile $WheelProfile `
+        -Directory $WheelDirectory -Payload $PluginDir -Plugin 'agent-ssh'
+    Set-SshRuntimeVersion $NativeWheelSelection.runtime_version
+}
 if ($Action -eq 'uninstall') {
     . (Join-Path $PSScriptRoot 'uninstall-runtime.ps1')
     Invoke-StatePreservingUninstall -AdmissionOnly
@@ -1148,15 +1195,19 @@ if (-not (Test-Path $PkgSrcDir)) {
     exit 1
 }
 
-$pythonCmd = Resolve-PythonCommand
+$pythonCmd = if ($WheelProfile) { $WheelPython } else { Resolve-PythonCommand }
 if (-not $pythonCmd) {
     Write-Fail 'Python not found on PATH (need 3.10+)'
     exit 1
 }
 Write-Ok "Python: $pythonCmd"
 
-Ensure-UvIndex
-$uvPath = Ensure-Uv -InstallRoot $InstallDir
+if ($WheelProfile) {
+    $uvPath = (Get-Command $WheelUv -CommandType Application -ErrorAction Stop).Source
+} else {
+    Ensure-UvIndex
+    $uvPath = Ensure-Uv -InstallRoot $InstallDir
+}
 
 foreach ($dir in @($InstallDir, $LocalBin)) {
     if (-not (Test-Path $dir)) {
@@ -1317,7 +1368,7 @@ $manifest = Write-DeployManifest `
         $fields = @{}
         ($SourceRuntimeIdentity | ConvertFrom-Json).PSObject.Properties | ForEach-Object { $fields[$_.Name] = $_.Value }
         $fields
-    } else { @{} }) `
+    } elseif ($NativeWheelSelection) { @{runtime_version = $SrcVersion} } else { @{} }) `
     -PayloadHash $(if ($SourceRuntimeIdentity) { $sourceManifestHash } else { Get-PayloadHash }) `
     -PassThru:$sourcePublication
 if ($sourcePublication) {

@@ -423,6 +423,8 @@ def provision(
     requested: str | None = None,
     expected_source_version: str | None = None,
     expected_source_identity: str | None = None,
+    wheel_profile: Path | None = None,
+    wheel_directory: Path | None = None,
 ) -> dict:
     """Called under the installer's installation-wide transaction lock."""
     if not uv:
@@ -434,6 +436,57 @@ def provision(
     )
     version, identity = target.package_version, target.identity
     profile, runtime_version = target.profile, target.runtime_version
+    if wheel_profile is not None or wheel_directory is not None:
+        if wheel_profile is None or wheel_directory is None or identity is not None:
+            raise RuntimeError("Containers closed wheels require a complete non-Source input")
+        import installer_engine as engine
+        from install_source import wheel_inputs, wheel_selection
+
+        with wheel_inputs(wheel_profile, wheel_directory) as inputs:
+            selection = wheel_selection(payload, "agent-containers", inputs)
+            extras = tuple(selection["extras"])
+            if ("provider-exec" in extras) != (profile == "provider-exec"):
+                raise RuntimeError("Containers wheel closure differs from its selected dependency profile")
+            runtime_version = selection["runtime_version"]
+            fingerprint = selection["payload_hash"]
+            expected = {
+                "packageVersion": version, "profile": profile, "payloadHash": fingerprint,
+                "executionContract": _execution_contract(),
+            }
+
+            def validate(slot):
+                evidence = slot / PROFILE_FILE
+                if evidence.exists():
+                    if _read_json(evidence) != expected:
+                        raise RuntimeError("Completed Containers slot has a conflicting profile")
+                elif runtime.is_complete(root, slot.name):
+                    raise RuntimeError("Completed Containers slot lacks its profile evidence")
+                else:
+                    _write_json(evidence, expected)
+
+            with engine.numbered_candidate(
+                root, runtime_version, plugin=payload, uv=Path(uv), base_python=Path(python),
+                health_module="agent_containers", wheel_inputs=inputs, extras=extras,
+                local_packages=tuple(selection["local_packages"]),
+                validate_candidate=validate, process_retention=True,
+                expected_source_identity={},
+            ) as ready:
+                venv_python = ready.slot / (
+                    "Scripts/python.exe" if os.name == "nt" else "bin/python"
+                )
+                _health(venv_python, profile, cwd=payload)
+                inputs.verify()
+                _write_json(root / PROFILE_FILE, {
+                    "schema": PROFILE_SCHEMA, "version": 1, "profile": profile,
+                })
+                runtime.activate(
+                    root, ready.slot.name, link_name=".venv", replace_nonlink=True, link_free=True,
+                )
+                return {
+                    "profile": profile, "runtimeVersion": ready.slot.name,
+                    "venv": str(ready.slot), "python": str(venv_python),
+                    "reused": ready.reused, "runtimeSource": None,
+                }
     if identity is not None and source.SOURCE_PIN_ENV in os.environ and TARGET_ENV not in os.environ:
         raise RuntimeError(
             "Prepared-source transaction requires a frozen source target; "
@@ -562,6 +615,8 @@ def main() -> int:
     parser.add_argument("--tsv", action="store_true")
     parser.add_argument("--expected-source-version")
     parser.add_argument("--expected-source-identity")
+    parser.add_argument("--wheel-profile", type=Path)
+    parser.add_argument("--wheel-directory", type=Path)
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--stamp-source", action="store_true")
     mode.add_argument("--plan-source", action="store_true")
@@ -576,6 +631,7 @@ def main() -> int:
             print(json.dumps(plan_source(
                 args.root, args.payload, expected_source_version=args.expected_source_version,
                 expected_source_identity=args.expected_source_identity,
+                wheel_profile=args.wheel_profile, wheel_directory=args.wheel_directory,
             ), sort_keys=True))
             return 0
         if args.stamp_source:

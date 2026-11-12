@@ -43,7 +43,14 @@ try {
     $Manifest = Join-Path $InstallDir 'deploy-manifest.json'
     $installerAction = 'stamp'
     if (Test-Path -LiteralPath $Manifest) {
-        $deployed = ([IO.File]::ReadAllText($Manifest) | ConvertFrom-Json).source.version
+        $deployment = [IO.File]::ReadAllText($Manifest) | ConvertFrom-Json
+        $deployed = $deployment.source.version
+        if ($deployment.runtime_version -cmatch '\.profile\.[0-9a-f]{16}') {
+            . (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')
+            if (Test-NativeWheelRuntimeCurrent -Root $InstallDir -Payload $PluginDir -Plugin $name) {
+                Exit-SessionStart
+            }
+        }
         if ($deployed -isnot [string] -or -not $deployed) {
             throw 'The deployed runtime version is unavailable.'
         }

@@ -44,6 +44,40 @@ def test_driver_governance_uses_current_scripts(driver):
     assert governance.SCRIPTS == scripts
 
 
+def test_native_release_entry_retains_inputs_without_a_source_association(driver, tmp_path, monkeypatch):
+    import install_source
+
+    held = []
+    wheels = object()
+
+    @contextmanager
+    def retain(profile, directory, **_options):
+        assert profile == tmp_path / "profile.json" and directory == tmp_path / "wheels"
+        held.append(wheels)
+        try:
+            yield wheels
+        finally:
+            held.pop()
+
+    def install(root, plugin, **options):
+        assert held == [wheels]
+        assert options["native_wheel_inputs"] is wheels
+        assert "wheel_inputs" not in options
+        return {"installed": True}
+
+    monkeypatch.setattr(install_source, "wheel_inputs", retain)
+    monkeypatch.setattr(driver, "install", install)
+    result = tmp_path / "result.json"
+    assert driver.main([
+        "--root", str(tmp_path / "runtime"), "--plugin", str(tmp_path / "payload"),
+        "--payload", str(tmp_path / "payload"), "--uv", str(tmp_path / "uv"),
+        "--base-python", sys.executable, "--result", str(result),
+        "--wheel-profile", str(tmp_path / "profile.json"),
+        "--wheel-directory", str(tmp_path / "wheels"),
+    ]) == 0
+    assert not held and json.loads(result.read_text()) == {"installed": True}
+
+
 def test_application_preparation_uses_wheel_assets_without_rewriting_wheel(
     tmp_path, monkeypatch,
 ):

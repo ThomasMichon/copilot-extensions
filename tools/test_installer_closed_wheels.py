@@ -267,6 +267,82 @@ def snapshot(tmp_path, *, closure=False, version="1.0", transport="loose"):
     )
 
 
+@pytest.mark.parametrize("changed", ["digest", "metadata", "target"])
+def test_native_wheel_receiver_refuses_changed_inputs(tmp_path, engine, plugin, changed):
+    import install_source
+
+    with snapshot(tmp_path) as retained:
+        record = json.loads(inspected(retained).binding_json)
+    if changed == "digest":
+        record["wheels"][0]["sha256"] = "sha256:" + "0" * 64
+    elif changed == "metadata":
+        record["wheels"][0]["requires_dist"] = ["unselected-package==1.0"]
+    else:
+        record["target"]["environment"]["python_version"] = "0.0"
+    profile = tmp_path / "profile.json"
+    profile.write_text(json.dumps(record), encoding="utf-8")
+    with pytest.raises(ValueError, match="digest|metadata|target"):
+        with install_source.wheel_inputs(profile, tmp_path) as inputs:
+            install_source.wheel_selection(plugin, "demo-pkg", inputs)
+    assert not (tmp_path / "versions").exists()
+
+
+def test_native_wheel_receiver_rechecks_profile_after_native_setup(tmp_path, engine):
+    import install_source
+
+    with snapshot(tmp_path) as retained:
+        record = json.loads(inspected(retained).binding_json)
+    profile = tmp_path / "profile.json"
+    profile.write_text(json.dumps(record), encoding="utf-8")
+    with pytest.raises(ValueError, match="profile changed"):
+        with install_source.wheel_inputs(profile, tmp_path):
+            record["approval_source"] = "changed-input"
+            profile.write_text(json.dumps(record), encoding="utf-8")
+
+
+def test_native_wheel_receiver_accepts_admitted_compatible_patch_target(tmp_path, engine, plugin):
+    import install_source
+
+    with snapshot(tmp_path) as retained:
+        record = json.loads(inspected(retained).binding_json)
+    environment = record["target"]["environment"]
+    environment["python_full_version"] = environment["python_version"] + ".999"
+    profile = tmp_path / "profile.json"
+    profile.write_text(json.dumps(record), encoding="utf-8")
+    with install_source.wheel_inputs(profile, tmp_path) as inputs:
+        selection = install_source.wheel_selection(plugin, "demo-pkg", inputs)
+        assert selection["runtime_version"].startswith("1.0.profile.")
+
+
+def test_native_driver_binds_and_rechecks_actual_closed_profile(tmp_path, engine, plugin, monkeypatch):
+    from types import SimpleNamespace
+    import installer_driver
+
+    monkeypatch.setitem(installer_driver.RECIPES, "demo-pkg", frozenset())
+    monkeypatch.delenv(installer_driver.WHEEL_SELECTION_ENV, raising=False)
+    monkeypatch.delenv(installer_driver.SOURCE_SELECTION_ENV, raising=False)
+    with snapshot(tmp_path) as retained:
+        record = json.loads(inspected(retained).binding_json)
+    profile = tmp_path / "profile.json"
+    profile.write_text(json.dumps(record), encoding="utf-8")
+    args = SimpleNamespace(
+        payload=plugin, root=tmp_path / "runtime", plugin="demo-pkg", action="install",
+        options=[], wheel_profile=profile, wheel_directory=tmp_path,
+        wheel_python=Path(sys.executable), wheel_uv=tmp_path / "uv",
+    )
+    arguments = installer_driver.native_arguments(args)
+    assert arguments[-8:] == [
+        "-WheelProfile", str(profile), "-WheelDirectory", str(tmp_path),
+        "-WheelPython", sys.executable, "-WheelUv", str(tmp_path / "uv"),
+    ]
+    assert installer_driver.native_arguments(args) == arguments
+    record["approval_source"] = "changed-after-driver-admission"
+    profile.write_text(json.dumps(record), encoding="utf-8")
+    with pytest.raises(ValueError, match="selection changed after driver admission"):
+        installer_driver.native_arguments(args)
+    assert not args.root.exists()
+
+
 def test_owner_validation_precedes_completion_and_rechecks_read_only_reuse(
     tmp_path, engine, plugin, monkeypatch,
 ):
@@ -424,8 +500,9 @@ def test_native_closed_transaction_ignores_poisoned_config_and_cache(tmp_path):
 
 
 @pytest.mark.parametrize("transport", ["loose", "bundle"])
+@pytest.mark.parametrize("nested", [False, True])
 def test_native_existing_constructor_builds_and_reuses_exact_closed_wheels(
-    tmp_path, engine, plugin, monkeypatch, transport,
+    tmp_path, engine, plugin, monkeypatch, transport, nested,
 ):
     monkeypatch.setenv("UV_INDEX_URL", "http://127.0.0.1:1/unavailable")
     monkeypatch.setenv("UV_CONFIG_FILE", str(tmp_path / "missing-config"))
@@ -453,11 +530,13 @@ def test_native_existing_constructor_builds_and_reuses_exact_closed_wheels(
         slots = []
         for name in ("first-runtime", "second-runtime"):
             root = tmp_path / name
-            with candidate(engine, root, plugin, wheels) as built:
+            with candidate(engine, root, plugin, wheels, nested_environment=nested) as built:
                 assert not built.reused
                 assert engine.runtime.is_complete(root, "1.0.0", expect_hash=built.payload_hash)
                 assert engine.runtime.current_version(root) is None
                 slots.append(built.slot)
+                python = engine.runtime.slot_python(root, built.slot.name)
+                assert python.parent.parent == (built.slot / ".venv" if nested else built.slot)
                 receipt = json.loads((built.slot / ".runtime-input-origins.json").read_text())
                 assert receipt["version"] == 2
                 assert receipt["wheel_inputs"] == wheels.receipt()
@@ -475,13 +554,21 @@ def test_native_existing_constructor_builds_and_reuses_exact_closed_wheels(
             pytest.fail("complete healthy wheel runtime must not be rebuilt")
 
         monkeypatch.setattr(engine, "_construct", no_reconstruction)
-        with candidate(engine, tmp_path / "first-runtime", plugin, wheels) as reused:
+        with candidate(
+            engine, tmp_path / "first-runtime", plugin, wheels, nested_environment=nested,
+        ) as reused:
             assert reused.reused
             assert reused.slot == slots[0]
+        if not nested:
+            with pytest.raises(engine.HealthRepairRequired, match="nested environment layout"):
+                with candidate(
+                    engine, tmp_path / "first-runtime", plugin, wheels, nested_environment=True,
+                ):
+                    pytest.fail("a flat runtime cannot satisfy the native nested layout")
     assert [name for name, _timeout in leases] == [
         "construction_lease", "retention_custody",
         "construction_lease", "retention_custody", "retention_custody",
-    ]
+    ] + ([] if nested else ["retention_custody"])
     assert leases[1][1] < leases[0][1]
 
 

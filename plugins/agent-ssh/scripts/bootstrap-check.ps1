@@ -41,7 +41,11 @@ try {
     $Manifest = Join-Path $InstallDir 'deploy-manifest.json'
     $installerAction = 'stamp'
     if (Test-Path -LiteralPath $Manifest) {
-        $source = ([IO.File]::ReadAllText($Manifest) | ConvertFrom-Json).source
+        $deployment = [IO.File]::ReadAllText($Manifest) | ConvertFrom-Json
+        $source = $deployment.source
+        $runtimeVersion = if ($deployment.PSObject.Properties['runtime_version']) {
+            "" + $deployment.runtime_version
+        } else { '' }
         if ($source.path -isnot [string] -or -not $source.path -or
             $source.version -isnot [string] -or -not $source.version) {
             throw 'The deployed runtime source or version is unavailable.'
@@ -60,7 +64,7 @@ try {
         $marker = Join-Path $InstallDir 'current-version'
         if (-not $provisioned -and (Test-Path -LiteralPath $marker)) {
             $selected = [IO.File]::ReadAllText($marker).Trim()
-            if ($selected -and $selected -ceq $current -and (
+            if ($selected -and ($selected -ceq $current -or $selected -ceq $runtimeVersion) -and (
                 (Test-Path -LiteralPath (Join-Path $InstallDir "versions\$selected\Scripts\python.exe")) -or
                 (Test-Path -LiteralPath (Join-Path $InstallDir "versions/$selected/bin/python"))
             )) { $provisioned = $true }

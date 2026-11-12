@@ -746,6 +746,8 @@ def test_every_shipped_installer_checks_its_completion_marker() -> None:
     (".sh", '_runtime_construction_complete "$actual_hash"\nreturn 0\n', False),
     (".ps1", "Complete-RuntimeConstruction -PayloadHash $actualHash\nreturn $true\n", True),
     (".ps1", "Complete-RuntimeConstruction -PayloadHash $actualHash -RetainHelpers\nreturn $true\n", True),
+    (".ps1", "Complete-RuntimeConstruction -PayloadHash $actualHash -RetainHelpers:([bool]$NativeWheelSelection)\nreturn $true\n", True),
+    (".ps1", "Complete-RuntimeConstruction -PayloadHash $actualHash -RetainHelpers:([bool]$NativeWheelSelection) | Out-Null\nreturn $true\n", False),
     (".ps1", "try {\nComplete-RuntimeConstruction -PayloadHash $actualHash -RetainHelpers\n} catch {}\nreturn $true\n", False),
     (".ps1", "Complete-RuntimeConstruction -PayloadHash $actualHash -RetainHelpers | Out-Null\nreturn $true\n", False),
     (".ps1", "try {\nComplete-RuntimeConstruction -PayloadHash $actualHash\n} catch {}\nreturn $true\n", False),

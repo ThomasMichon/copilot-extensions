@@ -381,6 +381,7 @@ def runtime_version(package_version: str, commit: str, assembly_hash: str) -> st
 def package_version(slot_name: str) -> str:
     """Separate generated source/repair identities from the package version."""
     ordinary = re.sub(r"[+.]repair\.[0-9a-f]{32}$", "", slot_name)
+    ordinary = re.sub(r"\.profile\.[0-9a-f]{16}$", "", ordinary)
     return re.sub(
         r"[+.]source\.(?:[0-9a-f]{40}|[0-9a-f]{64})\.[0-9a-f]{16}"
         r"(?:\.profile\.[0-9a-f]{16})?$", "", ordinary,
@@ -406,11 +407,15 @@ def version_key(version: str):
 
 def requires_exact_selection(versions: list[str]) -> bool:
     """Refuse unordered source recovery, including implicit plain-slot downgrade."""
-    if not any(re.search(r"[+.]source\.", version) for version in versions):
+    source = any(re.search(r"[+.]source\.", version) for version in versions)
+    profiled = any(re.search(r"\.profile\.[0-9a-f]{16}(?:[.+]repair\.[0-9a-f]{32})?$", version)
+                   for version in versions)
+    if not source and not profiled:
         return False
+    kind = "Source" if source else "Profile"
     print(
-        "Source-qualified runtime recovery requires an exact current-version or "
-        "last-known-good selector; refusing unordered source fallback",
+        f"{kind}-qualified runtime recovery requires an exact current-version or "
+        f"last-known-good selector; refusing unordered {kind.lower()} fallback",
         file=sys.stderr,
     )
     return True
@@ -468,6 +473,8 @@ def assembly_hash(payload: Path, *, on_progress=None) -> str:
             raise SourceIdentityError("Materialized runtime inputs must not be linked")
 
     require_plain(payload)
+    runtime = _runtime()
+    payload = runtime._runtime_component("versioned_runtime_construction").native_path(payload)
     for directory, directories, names in os.walk(payload, onerror=scan_error, followlinks=False):
         project_root = (Path(directory) / "pyproject.toml").is_file()
         directories[:] = [
@@ -491,7 +498,7 @@ def assembly_hash(payload: Path, *, on_progress=None) -> str:
                 on_progress()
     if not files:
         raise SourceIdentityError("Materialized runtime payload is empty")
-    return _runtime().fingerprint_source(
+    return runtime.fingerprint_source(
         files, **({"on_progress": on_progress} if on_progress is not None else {}),
     )
 

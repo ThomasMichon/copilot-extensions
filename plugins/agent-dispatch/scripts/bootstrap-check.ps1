@@ -175,7 +175,14 @@ try {
         }
         Exit-SessionStart
     }
-    $deployed = "" + (Get-Content $Manifest -Raw | ConvertFrom-Json).source.version
+    $deployment = Get-Content $Manifest -Raw | ConvertFrom-Json
+    $deployed = "" + $deployment.source.version
+    if ($deployment.runtime_version -cmatch '\.profile\.[0-9a-f]{16}') {
+        . (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')
+        if (Test-NativeWheelRuntimeCurrent -Root $InstallDir -Payload $PluginDir -Plugin $name) {
+            Exit-SessionStart
+        }
+    }
     $current = $deployed
     $pyproj = Join-Path $PluginDir 'pyproject.toml'
     if (Test-Path $pyproj) {

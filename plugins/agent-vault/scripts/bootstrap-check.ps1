@@ -71,7 +71,8 @@ try {
         }
         $sourceSelected = $sourcePresent -or (Test-Path Env:COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN)
         $expectedRuntime = $current
-        if ($profilePresent -or $sourceSelected) {
+        if ($profilePresent -or $sourceSelected -or
+            $deployment.runtime_version -cmatch '\.profile\.[0-9a-f]{16}') {
             . (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')
             $minimumMinor = if ($profilePresent) { 11 } else { 10 }
             $profilePython = Resolve-NativeBootstrapPython -MinimumMinor $minimumMinor

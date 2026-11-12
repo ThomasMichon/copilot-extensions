@@ -392,6 +392,10 @@ def _child(
         for name in ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV"):
             env.pop(name, None)
     procutil = _procutil(inputs)
+    native_argv = (
+        [_native_retained_path(argv[0]), *argv[1:]]
+        if os.name == "nt" and Path(argv[0]).is_absolute() else argv
+    )
     for attempt in range(len(delays) + 1):
         decoders = {name: codecs.getincrementaldecoder("utf-8")(errors="replace")
                     for name in ("stdout", "stderr")}
@@ -413,7 +417,7 @@ def _child(
             remaining = min(timeout, inputs.wheel_inputs.deadline - time.monotonic())
         try:
             result = run_owned(
-                argv, cwd=cwd or Path(Path(argv[0]).resolve().anchor), env=env, timeout=remaining,
+                native_argv, cwd=cwd or Path(Path(argv[0]).resolve().anchor), env=env, timeout=remaining,
                 procutil=procutil, construction_fd=descriptor,
                 on_output=relay if on_progress is not None or not output_fds else None,
                 output_fds=output_fds,
@@ -511,7 +515,7 @@ def _verify_application_wheels(inputs: FrozenInputs, slot: Path) -> None:
 
 def _construct(
     inputs: FrozenInputs, slot: Path, uv: Path, base_python: Path,
-    descriptor: int, timeout: float, *, refresh: bool = False,
+    descriptor: int, timeout: float, *, refresh: bool = False, nested_environment: bool = False,
 ) -> Path:
     uv = Path(_select_uv_executable(str(Path.cwd() / uv))).resolve(strict=True)
     base_python = base_python.resolve(strict=True)
@@ -590,15 +594,18 @@ def _construct(
             raise RuntimeError("Application staging did not produce its slot-local interpreter")
         inputs.wheel_inputs.verify()
         return python
-    python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-    if not refresh or not python.is_file() or not (slot / "pyvenv.cfg").is_file():
+    environment = slot / ".venv" if nested_environment else slot
+    python = environment / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    native_python = Path(_native_retained_path(python))
+    configuration = Path(_native_retained_path(environment / "pyvenv.cfg"))
+    if not refresh or not native_python.is_file() or not configuration.is_file():
         _child(
-            [str(base_python), "-I", "-m", "venv", "--without-pip", "--copies", str(slot)],
+            [str(base_python), "-I", "-m", "venv", "--without-pip", "--copies", _native_retained_path(environment)],
             inputs=inputs, descriptor=descriptor, timeout=timeout, candidate=slot,
             delays=(0.75, 0.75) if os.name == "nt" else (),
             transient=r"Access is denied|failed to persist temporary file",
         )
-    if not python.is_file() or not (slot / "pyvenv.cfg").is_file():
+    if not native_python.is_file() or not configuration.is_file():
         raise RuntimeError(f"Runtime construction did not produce a complete interpreter: {slot}")
     transaction = inputs.transaction
     if transaction is None:
@@ -689,6 +696,7 @@ def numbered_candidate(
     local_packages: tuple[str, ...] | None = None,
     wheel_inputs: WheelInstallInputs | WheelReuseInputs | None = None,
     application: Path | None = None,
+    nested_environment: bool = False,
     source_wheel_cache_root: Path | None = None,
     expected_payload_hash: str | None = None,
     wait_timeout: float = 180, child_timeout: float = 180,
@@ -711,6 +719,7 @@ def numbered_candidate(
         local_packages=local_packages,
         wheel_inputs=wheel_inputs,
         application=application,
+        nested_environment=nested_environment,
         source_wheel_cache_root=source_wheel_cache_root,
         expected_payload_hash=expected_payload_hash,
         wait_timeout=wait_timeout, child_timeout=child_timeout,
@@ -746,6 +755,7 @@ def _candidate(
     local_packages: tuple[str, ...] | None = None,
     wheel_inputs: WheelInstallInputs | WheelReuseInputs | None = None,
     application: Path | None = None,
+    nested_environment: bool = False,
     source_wheel_cache_root: Path | None = None,
     expected_payload_hash: str | None = None,
     wait_timeout: float = 180, child_timeout: float = 180,
@@ -753,12 +763,23 @@ def _candidate(
     if expected_payload_hash is not None and not re.fullmatch(r"[0-9a-f]{64}", expected_payload_hash):
         raise ValueError("Expected runtime payload hash must be a full source SHA256")
     root = root.resolve()
+    if type(nested_environment) is not bool or (nested_environment and (
+        application is not None or not isinstance(wheel_inputs, (WheelInstallInputs, WheelReuseInputs))
+    )):
+        raise ValueError("Nested native construction requires closed wheels without an application project")
     if application is not None and (
         dev_owner is not None or not isinstance(wheel_inputs, (WheelInstallInputs, WheelReuseInputs))
     ):
         raise ValueError("Application construction requires immutable inspected wheel inputs")
     _assert_source_pin(plugin, expected_source_identity)
     extras = _selected_extras(plugin, extras)
+    def installed_python(slot):
+        python = runtime.slot_python(root, slot.name)
+        if nested_environment and (
+            python is None or python.parent.parent != slot / ".venv"
+        ):
+            raise HealthRepairRequired("Native construction requires its selected nested environment layout")
+        return python
     if dev_owner is not None and (extras or local_packages is not None or wheel_inputs is not None):
         raise ValueError("Dependency profiles require an immutable numbered runtime")
     packages = _package_roots(plugin)
@@ -830,7 +851,7 @@ def _candidate(
                     _revalidate_input_content(inputs)
                 _assert_source_pin(plugin, expected_source_identity)
                 _verify_installed(
-                    inputs, slot, runtime.slot_python(root, version), health_module,
+                    inputs, slot, installed_python(slot), health_module,
                     descriptor, child_timeout, health_callable=health_callable,
                     require_frozen_origin=False,
                 )
@@ -856,7 +877,7 @@ def _candidate(
                 reused = decision == runtime.ADMIT_REUSE
                 if not reused:
                     slot = runtime.slot(root, version)
-                    environment = slot / ".venv" if application is not None else slot
+                    environment = slot / ".venv" if application is not None or nested_environment else slot
                     python = environment / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
                     if construction_callable is not None:
                         # UV's non-editable metadata projection is a build input,
@@ -889,8 +910,11 @@ def _candidate(
                             inputs, cache_root, uv, base_python,
                             run=run_source_build, timeout=child_timeout,
                         ))
-                    python = _construct(inputs, slot, uv, base_python, descriptor, child_timeout)
-                    origin_proof = slot / ".runtime-input-origins.json"
+                    python = _construct(
+                        inputs, slot, uv, base_python, descriptor, child_timeout,
+                        **({"nested_environment": True} if nested_environment else {}),
+                    )
+                    origin_proof = Path(_native_retained_path(slot / ".runtime-input-origins.json"))
                     if origin_proof.is_symlink():
                         raise RuntimeError("Frozen installation origin evidence cannot be a symlink")
                     origin_proof.write_text(json.dumps({
@@ -906,7 +930,7 @@ def _candidate(
                            if inputs.local_packages is not None else {}),
                     }, indent=2) + "\n", encoding="utf-8")
                     if process_retention:
-                        bootstrap = slot / ".runtime-bootstrap"
+                        bootstrap = Path(_native_retained_path(slot / ".runtime-bootstrap"))
                         if bootstrap.is_symlink():
                             raise RuntimeError("Runtime bootstrap cannot be a symlink")
                         bootstrap.mkdir()
@@ -959,7 +983,7 @@ def _candidate(
                 if expected_payload_hash is not None:
                     _revalidate_input_content(inputs)
                 _verify_installed(
-                    inputs, slot, runtime.slot_python(root, version), health_module,
+                    inputs, slot, installed_python(slot), health_module,
                     retention_descriptor, child_timeout, health_callable=health_callable,
                     require_frozen_origin=False,
                 )
