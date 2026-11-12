@@ -370,8 +370,17 @@ handover. Preserve held sessions and the separate pre-feature adoption hold.
     and advertises it from the actual backend; legacy custodians and bindings
     remain unchanged. #12222 merged the provider expansion at
     `938a59d60efc3f263245b241784d3c5e31869c01` after exact-head approval and
-    required CI. Caller migration, supported old-provider rollback and
-    native trace-varying qualification remain required before removing that guard.
+    required CI. Release and optional-launcher adoption remain required before
+    removing that guard.
+    #12224 merged conditional custodian selection at
+    `8418036f427ca65b7977c4a598512cc418112f91` after current-head approval,
+    required CI and trace-varying physical source qualification on Windows and
+    Linux. This qualifies the internal connector/custodian path, not the
+    optional launcher's old-running-custodian boundary or installed adoption.
+    The next provider expansion declares required-mode enforcement from the
+    running keeper's authenticated ping and verifies the actual selected
+    binding in attach acknowledgment. Legacy keeper and backend controls remain
+    separate; the optional receiver's guard and adoption gate stay open.
   - [x] **Explicit-owner source merged:** #11935 landed at
     `c0eab0d952a37607f6cf7030ac1a77f377f98a74` after current-head automated
     approval, required CI and resolution of addressed findings. The source
@@ -477,6 +486,11 @@ withdrawal authorizes no GUI effect or change to the SDK's own admission rules.
   checkpoint identity through update and rollback, with no upstream
   reinitialization or replay. Constant-environment composed controls do not
   qualify this case; until qualified, optional adoption refuses before effects.
+  - [x] **Internal conditional custody source:** two Windows cases and two
+  Linux cases qualify trace-varying physical replacement, capable rollback
+  and same-slot process replacement with original upstream state preserved.
+  The optional-launcher guard and old-running-custodian selection remain
+  separate open adoption work; this is not installed-consumer acceptance.
 - [ ] Failed candidate health, changed owner/route/selection and an old
   generation's late cleanup cannot corrupt or retire the current generation.
 - [ ] EOF/disconnect and verified owner death settle exact client resources;

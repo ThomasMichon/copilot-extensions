@@ -12,7 +12,7 @@ from types import SimpleNamespace
 import pytest
 
 from agent_mcp import backend, custody_conduit, custody_host, custody_session, execution_context as ec, incoming, ipc, serve
-from agent_mcp.custody_contract import CONTRACT, supports
+from agent_mcp.custody_contract import CONTRACT, host_descriptor, supports
 from agent_mcp.custody_host import CustodyHost
 from agent_mcp.custody_wire import MAX_FRAME
 from agent_mcp.request_context import capture_context
@@ -219,6 +219,64 @@ async def test_shared_host_moves_settled_session_without_upstream_reinitialize(t
         writer.write_eof()
         assert await asyncio.wait_for(reader.read(), 2) == b""
         await ipc.aclose_writer(writer)
+
+
+@pytest.mark.parametrize("capable", [False, True])
+async def test_required_trace_mode_uses_actual_backend_before_preparation(tmp_path, monkeypatch, capable):
+    async with shared(tmp_path, monkeypatch) as fixture:
+        if not capable:
+            monkeypatch.setattr(backend, "backend_descriptor", lambda: CONTRACT)
+        reader, writer, ack, ping = await fixture.attach(
+            lambda request: request.update(checkpoint_trace_bookkeeping=1),
+        )
+        try:
+            assert ping["custody_host"] == host_descriptor()
+            if capable:
+                assert ack["attached"] is True
+                assert ack["checkpoint_trace_bookkeeping"] == 1
+                assert ack["custody"] == host_descriptor()
+                owner = next(iter(fixture.host.sessions)).owner
+                assert owner.binding.trace_bookkeeping == 1
+                await send(writer, {"jsonrpc": "2.0", "id": 0, "method": "initialize"})
+                assert (await receive(reader))["id"] == 0
+                assert len(fixture.upstreams) == 1 and fixture.upstreams[0].starts == 1
+            else:
+                assert ack["ok"] is False
+                assert ack["shared_execution"] is False
+                assert "required checkpoint identity mode" in ack["error"]
+                assert not fixture.pipelines and not fixture.upstreams
+        finally:
+            await ipc.aclose_writer(writer)
+
+
+@pytest.mark.parametrize("mode", [True, -1, 2, "1", None])
+async def test_invalid_required_mode_refuses_before_configuration(tmp_path, monkeypatch, mode):
+    async with shared(tmp_path, monkeypatch) as fixture:
+        def unexpected(_request):
+            pytest.fail("invalid checkpoint mode reached configuration loading")
+        monkeypatch.setattr(fixture.host, "_configuration", unexpected)
+        _, writer, ack, _ = await fixture.attach(
+            lambda request: request.update(checkpoint_trace_bookkeeping=mode),
+        )
+        try:
+            assert ack["ok"] is False and ack["shared_execution"] is False
+            assert "identity mode is invalid" in ack["error"]
+            assert not fixture.pipelines and not fixture.upstreams
+        finally:
+            await ipc.aclose_writer(writer)
+
+
+async def test_legacy_attach_keeps_baseline_with_legacy_backend(tmp_path, monkeypatch):
+    async with shared(tmp_path, monkeypatch) as fixture:
+        monkeypatch.setattr(backend, "backend_descriptor", lambda: CONTRACT)
+        reader, writer, ack, _ = await fixture.attach()
+        try:
+            assert ack == {"ok": True, "attached": True, "custody": CONTRACT}
+            assert next(iter(fixture.host.sessions)).owner.binding.trace_bookkeeping == 0
+            await send(writer, {"jsonrpc": "2.0", "id": 0, "method": "initialize"})
+            assert (await receive(reader))["id"] == 0
+        finally:
+            await ipc.aclose_writer(writer)
 
 
 @pytest.mark.parametrize("referenced", [False, True], ids=["bookkeeping", "explicit-config-use"])
@@ -540,10 +598,14 @@ async def test_early_upstream_notification_follows_attach_ack(tmp_path, monkeypa
         await ipc.aclose_writer(writer)
 
 
-async def test_sync_conduit_keeps_early_notification_and_live_stream_across_handover(tmp_path, monkeypatch):
+@pytest.mark.parametrize("required_mode", [0, 1])
+async def test_sync_conduit_keeps_early_notification_and_live_stream_across_handover(
+    tmp_path, monkeypatch, required_mode,
+):
     async with shared(tmp_path, monkeypatch, early=True) as fixture:
         connection = await asyncio.to_thread(
             custody_conduit.attach, fixture.host.socket_path, "fixture", fixture.root,
+            required_trace_bookkeeping=required_mode,
         )
         assert connection.gettimeout() is None
         reader, writer = await asyncio.open_connection(sock=connection, limit=MAX_FRAME)
@@ -561,6 +623,25 @@ async def test_sync_conduit_keeps_early_notification_and_live_stream_across_hand
         writer.write_eof()
         assert await asyncio.wait_for(reader.read(), 2) == b""
         await ipc.aclose_writer(writer)
+
+
+async def test_bad_mode_ack_after_actual_upstream_start_never_permits_fallback(tmp_path, monkeypatch):
+    async with shared(tmp_path, monkeypatch) as fixture:
+        original_send = fixture.host._send
+
+        async def send_without_mode(writer, reply):
+            if reply.get("attached") is True:
+                reply = {key: value for key, value in reply.items() if key != "checkpoint_trace_bookkeeping"}
+            await original_send(writer, reply)
+        monkeypatch.setattr(fixture.host, "_send", send_without_mode)
+        with pytest.raises(ConnectionError) as failure:
+            await asyncio.to_thread(
+                custody_conduit.attach, fixture.host.socket_path, "fixture", fixture.root,
+                required_trace_bookkeeping=1,
+            )
+        assert not isinstance(failure.value, ec.SharingUnavailable)
+        assert len(fixture.upstreams) == 1 and fixture.upstreams[0].starts == 1
+        await until(lambda: fixture.upstreams[0].closes == 1 and not fixture.host.sessions)
 
 
 async def test_backend_link_loss_is_terminal_not_a_new_upstream(tmp_path, monkeypatch):
@@ -651,7 +732,7 @@ async def test_keeper_listener_lifecycle_never_publishes_central_backend_route(t
         try:
             await send(writer, {"op": "ping", "token": token})
             reply = await receive(reader)
-            assert reply["ready"] is True and reply["custody_host"] == CONTRACT
+            assert reply["ready"] is True and reply["custody_host"] == host_descriptor()
             assert host._control_server is None and not (host.socket_path.parent / "active.json").exists()
             assert sentinel.read_text(encoding="utf-8") == "unchanged-backend-publication"
         finally:
