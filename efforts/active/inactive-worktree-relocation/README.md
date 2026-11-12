@@ -121,8 +121,14 @@ The [scoped prerequisite proposal](receiving-continuity.md) preserves the
 old-final-first ordering. It is agent-recommended realization of the original
 request, not a new migration or runtime-effect grant.
 
-- [ ] Obtain a qualified non-mutating native mux-ownership observation through
-  its existing owner; unavailable evidence remains a hold, not inactive proof.
+- Separate pure inspection from explicitly requested bounded live admission.
+  Existing owner queries may refresh native activity timestamps where the
+  caller permits that effect. Exclude active and dependent owners and retain
+  unknown cases individually; do not require every other server to terminate.
+  Pure planning never gains live queries, locks or receipt recovery implicitly.
+- [ ] Qualify bounded native live-owner admission through existing owners,
+  preserving mux, bound Copilot, pending launch/lifecycle, process/CWD and
+  responsibility fences. Unavailable evidence remains a hold, not inactivity.
 - [x] Complete the independent pure planning/refusal source boundary without action
   probes, original-proof recovery or mutation leases. Its local qualification
   is not native inactivity proof. #11706 and reconciliation #11731 are merged;

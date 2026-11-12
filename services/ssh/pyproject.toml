@@ -12,7 +12,7 @@ agent-zdd = { path = "libs/zdd" }
 
 [project]
 name = "agent-ssh-service"
-version = "0.2.14-dev1"
+version = "0.2.15-dev1"
 description = "Gateway-registered SSH enrollment and public-directory service."
 readme = "README.md"
 license = "MIT"

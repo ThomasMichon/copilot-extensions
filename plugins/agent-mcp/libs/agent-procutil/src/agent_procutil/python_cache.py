@@ -8,7 +8,17 @@ import re
 import stat
 import sys
 import uuid
+from functools import lru_cache
 from pathlib import Path
+
+POLICY_VERSION = 2
+
+
+@lru_cache(maxsize=1)
+def _store():
+    from . import python_cache_store
+
+    return python_cache_store
 
 
 def _read_regular(path: Path) -> bytes:
@@ -106,3 +116,29 @@ def cache_arguments(
     if os.name == "nt" and not prefix.startswith("\\\\?\\"):
         prefix = "\\\\?\\UNC\\" + prefix[2:] if prefix.startswith("\\\\") else "\\\\?\\" + prefix
     return ["-X", "pycache_prefix=" + prefix]
+
+
+def policy_arguments(
+    root: str | os.PathLike[str], *, runtime: str | os.PathLike[str] | None = None,
+) -> list[str]:
+    """Use private OS-cache bytecode for completed slots, otherwise disable writes."""
+    if not os.path.isabs(root):
+        raise ValueError("Python cache requires an absolute owned runtime root")
+    target = Path(sys.prefix if runtime is None else runtime)
+    if not target.is_absolute():
+        raise ValueError("Python cache requires an absolute target runtime")
+    if target.parent.name in {"Scripts", "bin"}:
+        target = target.parent.parent
+    if target.name == ".venv" and target.parent.parent.name == "versions":
+        target = target.parent
+    identity = _installed_identity(target)
+    if identity is None or target.parent.name != "versions":
+        return ["-B"]
+    try:
+        store = _store()
+        if store.normalized(target.parent.parent) != store.normalized(root):
+            return ["-B"]
+        prefix = store.prepare(Path(root), target, identity, read_record=_read_regular)
+    except (OSError, ValueError, ImportError, RuntimeError):
+        return ["-B"]
+    return ["-X", "pycache_prefix=" + str(prefix)]
