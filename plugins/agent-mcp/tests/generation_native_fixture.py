@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import ExitStack
 import importlib.util
 import json
 import os
@@ -127,7 +128,10 @@ emit({"jsonrpc":"2.0", "method":"notifications/upstream-eof",
 """
 
 
-def build_runtimes(private, retained):
+def build_runtimes(
+    private: Path, retained: ExitStack, *, observations: Path | None = None,
+    caller_context: Path | None = None,
+) -> tuple[Path, dict[str, tuple[str, Path]]]:
     """Use the construction owner, not a copied venv or patched launch identity."""
     for library in ("installer-engine", "versioned-runtime"):
         sys.path.insert(0, str(REPOSITORY / "libs" / library))
@@ -160,6 +164,13 @@ def build_runtimes(private, retained):
         body = pipeline.read_text(encoding="utf-8")
         needle = f"response['result']['pipeline_code']={label!r}"
         assert body.count(needle) == 1
+        witness = ""
+        if observations is not None:
+            witness = (
+                f"\n            with open({str(observations)!r},'a') as witness:\n"
+                "                witness.write(__import__('json').dumps({"
+                "'method':request.get('method'),'request':request,'response':response})+'\\n')"
+            )
         pipeline.write_text(body.replace(
             needle,
             needle + "\n"
@@ -167,8 +178,94 @@ def build_runtimes(private, retained):
             "            response['result']['backend_prefix']=__import__('sys').prefix\n"
             "            response['result']['backend_module']=__file__\n"
             "            response['result']['backend_trace']=__import__('os').environ.get("
-            "'COPILOT_EXTENSIONS_BOOT_TRACE_SHIM_START_MS')",
+            "'COPILOT_EXTENSIONS_BOOT_TRACE_SHIM_START_MS')" + witness,
         ), encoding="utf-8")
+        if observations is not None:
+            receiver = payload / "src" / "agent_mcp" / "owner_entry.py"
+            body = receiver.read_text(encoding="utf-8")
+            needle = "        return args.func(args)"
+            assert body.count(needle) == 1
+            receiver.write_text(body.replace(
+                needle,
+                "        from agent_procutil._daemon_instance_identity import birth_identity\n"
+                f"        Path({str(observations.with_suffix('.owner.json'))!r}).write_text("
+                "json.dumps({'owner_pid':request['pid'],'owner_birth':request['birth'],"
+                "'conduit_pid':os.getpid(),'conduit_birth':birth_identity(os.getpid())}))\n"
+                + needle,
+            ).replace(
+                "        except (OSError, ValueError):",
+                "        except (OSError, ValueError) as refusal:\n"
+                f"            Path({str(observations.with_suffix('.refusal'))!r}).write_text(str(refusal))",
+            ), encoding="utf-8")
+            if caller_context is not None:
+                body = receiver.read_text(encoding="utf-8")
+                needle = "            args = _qualify(request)"
+                assert body.count(needle) == 1
+                receiver.write_text(body.replace(
+                    needle,
+                    "            import time\n"
+                    f"            Path({str(caller_context)!r}).write_text(json.dumps(dict(os.environ)))\n"
+                    "            deadline = time.monotonic() + 10\n"
+                    f"            while not Path({str(caller_context.with_suffix('.ready'))!r}).exists():\n"
+                    "                if time.monotonic() >= deadline:\n"
+                    "                    raise RuntimeError('fixture backend preparation deadline expired')\n"
+                    "                time.sleep(.02)\n"
+                    + needle,
+                ), encoding="utf-8")
+            capabilities = payload / "src" / "agent_mcp" / "owner_capabilities.py"
+            body = capabilities.read_text(encoding="utf-8")
+            needle = "    print(json.dumps(result, sort_keys=True))"
+            assert body.count(needle) == 1
+            capabilities.write_text(body.replace(
+                needle,
+                f"    Path({str(observations.with_suffix('.capabilities'))!r}).write_text(json.dumps(result))\n"
+                + needle,
+            ), encoding="utf-8")
+            host = payload / "src" / "agent_mcp" / "custody_host.py"
+            body = host.read_text(encoding="utf-8")
+            needle = "execution_context.config_failure(exc)"
+            assert body.count(needle) == 2
+            host.write_text(body.replace(
+                needle, "(print('fixture custody refusal:', repr(exc), flush=True) or "
+                + needle + ")",
+            ), encoding="utf-8")
+            connector = payload / "src" / "agent_mcp" / "custody_connector.py"
+            body = connector.read_text(encoding="utf-8")
+            needle = 'AdmissionRefused("backend attachment admission was not confirmed")'
+            assert body.count(needle) == 1
+            connector.write_text(body.replace(
+                needle,
+                'AdmissionRefused("backend attachment admission was not confirmed: " + repr(ack))',
+            ), encoding="utf-8")
+            backend = payload / "src" / "agent_mcp" / "backend.py"
+            body = backend.read_text(encoding="utf-8")
+            needle = '            raise ConnectionError("upstream send outcome is unknown; no replay")'
+            assert body.count(needle) == 1
+            body = body.replace(
+                needle,
+                needle + "\n"
+                f"        with open({str(observations)!r},'a') as witness:\n"
+                "            witness.write(__import__('json').dumps({"
+                "'method':'client/reply','request':message,'response':{'result':{"
+                f"'pipeline_code':{label!r},"
+                "'backend_pid':__import__('os').getpid(),"
+                "'backend_prefix':__import__('sys').prefix,'backend_module':__file__,"
+                "'backend_trace':__import__('os').environ.get("
+                "'COPILOT_EXTENSIONS_BOOT_TRACE_SHIM_START_MS')}}})+'\\n')",
+            )
+            needle = "    async def output(self, message):\n"
+            assert body.count(needle) == 1
+            backend.write_text(body.replace(
+                needle,
+                needle
+                + f"        drop=__import__('pathlib').Path({str(observations.with_suffix('.drop'))!r})\n"
+                "        if (message.get('method')=='ping' and drop.is_file()\n"
+                "            and message.get('id')==drop.read_text()):\n"
+                f"            __import__('pathlib').Path({str(observations.with_suffix('.dropped'))!r}).write_text(message['id'])\n"
+                "            async with asyncio.timeout(5):\n"
+                f"                while not __import__('pathlib').Path({str(observations.with_suffix('.release'))!r}).is_file():\n"
+                "                    await asyncio.sleep(.02)\n",
+            ), encoding="utf-8")
         package = source.payload_package_version(payload, "agent-mcp")
         digest = source.assembly_hash(payload)
         identity = source.SourceIdentity(
