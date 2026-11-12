@@ -74,6 +74,12 @@ Linked parents and existing or partial output roots are refused without repair.
 Readback verifies the emitted application's wheel copies against the retained
 construction inputs, not just the snapshot's separate wheel directory.
 Progress goes to stderr. No runtime is installed, selected or started.
+Profile preparation runs with the preparer's already-running tooling interpreter,
+not the minimal wheel-build environment. The build toolchain and application
+target environment retain their separate identities. Concurrent compositions
+bind changefile readers to their own scratch modules without replacing a
+process-global import alias, and reserve distinct scratch paths atomically.
+
 Windows application preparation selects a standard CPython interpreter from
 the native version and wheel-platform tags. Unsupported interpreter variants
 refuse before application output; no cross-target marker environment is added.

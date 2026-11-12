@@ -419,6 +419,7 @@ def test_profile_worker_only_reports_a_miss_for_explicit_reuse(tmp_path, monkeyp
     else:
         assert local._prepare_profiles(*args, **options) == (expected if outcome == "success" else None)
     assert len(commands) == 1 and "--reuse-applications" in commands[0]
+    assert commands[0][0] == sys.executable
     if outcome == "miss":
         with pytest.raises(ValueError, match="preparation failed"):
             local._prepare_profiles(*args, uv="uv", deadline=deadline)

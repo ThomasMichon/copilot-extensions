@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import time
 from contextlib import contextmanager
 from types import SimpleNamespace
@@ -14,6 +15,35 @@ from types import SimpleNamespace
 import pytest
 
 import local_install_source as local
+
+
+def test_profile_worker_starts_in_preparer_runtime_not_build_only_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import build_toolchain_lock as locks
+    from packaging.markers import default_environment
+
+    deadline = time.monotonic() + 30
+    output = tmp_path / "prepared"
+    expected = {"demo": str(output / "profiles/demo/snapshot")}
+    run = local.preparation_process.run
+    calls = []
+
+    def start_worker(argv, **options):
+        started = run([*argv[:2], "--help"], **options)
+        assert started.returncode == 0, started.stderr
+        assert "--application-components" in started.stdout
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0, json.dumps(expected), "")
+
+    monkeypatch.setattr(locks, "_query_marker_environment", lambda *a, **k: default_environment())
+    monkeypatch.setattr(local.preparation_process, "run", start_worker)
+    assert local._prepare_profiles(
+        tmp_path, {}, output, ("demo",), {},
+        SimpleNamespace(venv_python=tmp_path / "build-only-python", record={}),
+        uv="unused", deadline=deadline,
+    ) == expected
+    assert len(calls) == 1 and calls[0][0] == sys.executable
 
 
 @pytest.fixture

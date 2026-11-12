@@ -1,11 +1,14 @@
 """Real Git containment controls for the source-only composition adapter."""
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 import json
 import os
 from pathlib import Path
 import shlex
 import subprocess
+import sys
+import threading
 import time
 
 import pytest
@@ -14,6 +17,61 @@ import local_runtime_promotion as local
 import test_promote_release as support
 
 repo = support.repo
+
+
+def test_concurrent_compositions_keep_changefile_readers_in_their_own_scratch(
+    repo: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import changefile
+
+    main = support._git(["rev-parse", "main"], repo)
+    support._write_changefile(repo, "pending.json", "demo-plugin", "patch")
+    source = support._commit(repo, "pending source change")
+    original_changefile = changefile
+    load = local.promotion._load_module
+    lock = threading.Lock()
+    events = [threading.Event() for _ in range(3)]
+    arrivals = []
+
+    def interleaved_load(path, name):
+        if path.name != "accumulate_bumps.py":
+            return load(path, name)
+        with lock:
+            order = len(arrivals)
+            arrivals.append(path)
+        if order == 0:
+            events[0].set()
+            assert events[1].wait(10)
+            module = load(path, name)
+            events[2].set()
+            assert events[0].wait(10)
+            return module
+        assert events[0].wait(10)
+        events[0].clear()
+        events[1].set()
+        assert events[2].wait(10)
+        module = load(path, name)
+        events[0].set()
+        return module
+
+    monkeypatch.setattr(local.promotion, "_load_module", interleaved_load)
+    worktrees = support._git(["worktree", "list", "--porcelain"], repo)
+    with ThreadPoolExecutor(max_workers=2) as workers:
+        futures = [
+            workers.submit(
+                local.compose, repo, source_commit=source, main_seed=main,
+                deadline=time.monotonic() + 60,
+            ) for _ in range(2)
+        ]
+        results = [future.result(timeout=65) for future in futures]
+
+    assert len(arrivals) == 2 and results[0].tree == results[1].tree
+    assert ".changefiles/pending.json" not in support._git(
+        ["ls-tree", "-r", "--name-only", results[0].tree], repo,
+    )
+    assert (repo / ".changefiles/pending.json").is_file()
+    assert sys.modules.get("changefile") is original_changefile
+    assert support._git(["worktree", "list", "--porcelain"], repo) == worktrees
 
 
 @pytest.mark.parametrize("hooks_path", ["relative", "absolute"])

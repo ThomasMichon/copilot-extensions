@@ -604,7 +604,7 @@ def _prepare_profiles(
     preparation._remaining(deadline)
     result = preparation_process.run(
         [
-            str(toolchain.venv_python), str(Path(__file__).with_name("local_install_profile.py")),
+            sys.executable, str(Path(__file__).with_name("local_install_profile.py")),
             "--install-source", str(built), "--output", str(output / "profiles"),
             "--uv", uv, "--deadline", str(deadline),
             "--application-components", json.dumps(components),

@@ -15,7 +15,9 @@ from promotion_unit_tests.test_complete_source import case
 
 def test_scratch_creation_disables_hooks_only_for_the_checkout_command(tmp_path, monkeypatch):
     import promote_release as promotion
+    import time
 
+    monkeypatch.setattr(time, "time", lambda: 100.0)
     calls = []
 
     def git(arguments, **options):
@@ -29,6 +31,9 @@ def test_scratch_creation_disables_hooks_only_for_the_checkout_command(tmp_path,
         (["-c", f"core.hooksPath={os.devnull}", "worktree", "add",
           "--detach", str(scratch), "a" * 40], {"cwd": tmp_path}),
     ]
+    other = promotion.add_scratch_worktree("a" * 40, repo=tmp_path)
+    assert other != scratch and other.parent == scratch.parent
+    assert other.is_dir() and scratch.is_dir()
 
 
 def test_composition_budget_bounds_git_and_restores_the_original_transport(tmp_path, monkeypatch):
