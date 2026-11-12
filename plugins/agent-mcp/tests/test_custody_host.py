@@ -7,11 +7,14 @@ import contextvars
 import json
 import os
 from pathlib import Path
+import socket
+import sys
+import time
 from types import SimpleNamespace
 
 import pytest
 
-from agent_mcp import backend, custody_conduit, custody_host, custody_session, execution_context as ec, incoming, ipc, serve
+from agent_mcp import backend, custody_conduit, custody_host, custody_session, execution_context as ec, incoming, ipc, owner_entry, serve
 from agent_mcp.custody_contract import CONTRACT, host_descriptor, supports
 from agent_mcp.custody_host import CustodyHost
 from agent_mcp.custody_wire import MAX_FRAME
@@ -247,6 +250,106 @@ async def test_required_trace_mode_uses_actual_backend_before_preparation(tmp_pa
                 assert not fixture.pipelines and not fixture.upstreams
         finally:
             await ipc.aclose_writer(writer)
+
+
+@pytest.mark.parametrize("capable", [False, True])
+async def test_optional_receiver_probes_actual_keeper_before_any_application_start(
+    tmp_path, monkeypatch, capable,
+):
+    async with shared(tmp_path, monkeypatch) as fixture:
+        from agent_mcp import config, sockio
+        monkeypatch.setattr(owner_entry.sys, "platform", "linux")
+        monkeypatch.setenv("AGENT_MCP_HOME", str(tmp_path))
+        monkeypatch.setenv("COPILOT_EXTENSIONS_BOOT_TRACE_SHIM_START_MS", "new-launch")
+        for key in ("AGENT_MCP_NO_MULTIPLEX", "AGENT_MCP_NO_SERVE", "AGENT_MCP_NO_ENSURE_SERVE"):
+            monkeypatch.delenv(key, raising=False)
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(config, "load_config", lambda *_args, **_kwargs: fixture.cfg)
+        monkeypatch.setattr(incoming, "require_selected", lambda: (
+            "outgoing", fixture.root / "versions" / "outgoing", fixture.root,
+        ))
+        monkeypatch.setattr(sockio, "default_home_dir", lambda: tmp_path)
+        # The backend remains capable; only the separately running keeper varies.
+        if not capable:
+            monkeypatch.setattr(custody_host, "host_descriptor", lambda: CONTRACT)
+        request = {
+            "receiver": {
+                "python": str(Path(sys.executable).absolute()),
+                "prefix": str(Path(sys.prefix).resolve()),
+                "module": str(Path(owner_entry.__file__).resolve()), "cwd": os.getcwd(),
+            },
+            "selection": {
+                "generation": "outgoing", "root": str(fixture.root.resolve()),
+                "prefix": str(Path(sys.prefix).resolve()), "python": str(Path(sys.executable).resolve()),
+            },
+            "arguments": ["forward", "fixture", "--socket", str(fixture.handle)],
+            "pid": 42, "birth": "fixture",
+        }
+        monkeypatch.setattr(
+            "agent_mcp.custody_launch.probe_conduit",
+            lambda _handle, root, **kwargs: custody_conduit.probe(
+                fixture.host.socket_path, root, **kwargs,
+            ),
+        )
+        if capable:
+            args = await asyncio.to_thread(owner_entry._qualify, request)
+            assert args.checkpoint_trace_bookkeeping == 1
+        else:
+            with pytest.raises(ec.SharingUnavailable, match="cannot enforce"):
+                await asyncio.to_thread(owner_entry._qualify, request)
+        assert not fixture.host.sessions and fixture.host.attached == 0
+        assert not fixture.pipelines and not fixture.upstreams
+
+
+@pytest.mark.parametrize("state", ["cold", "warm", "unreachable", "slow"])
+async def test_optional_keeper_probe_cost_and_pre_effect_boundary(
+    tmp_path, monkeypatch, record_testsuite_property, state,
+):
+    async with shared(tmp_path, monkeypatch) as fixture:
+        handle = fixture.host.socket_path
+        timeout = 2
+        error = None
+        reserved = None
+        if state == "cold":
+            handle = tmp_path / "cold" / "custody.sock"
+            error = OSError
+        elif state == "unreachable":
+            handle = tmp_path / "unreachable" / "custody.sock"
+            handle.parent.mkdir()
+            reserved = socket.socket()
+            reserved.bind(("127.0.0.1", 0))
+            ipc._endpoint_path(handle).write_text(json.dumps({
+                "port": reserved.getsockname()[1], "token": "private-unreachable-token",
+            }), encoding="utf-8")
+            error = OSError
+        elif state == "slow":
+            dispatch = fixture.host._dispatch
+            async def delayed(request):
+                if request.get("op") == "ping":
+                    await asyncio.sleep(timeout + 0.1)
+                return await dispatch(request)
+            monkeypatch.setattr(fixture.host, "_dispatch", delayed)
+            error = TimeoutError
+        started = time.perf_counter()
+        try:
+            if error is None:
+                await asyncio.to_thread(
+                    custody_conduit.probe, handle, fixture.root,
+                    required_trace_bookkeeping=1, timeout=timeout,
+                )
+            else:
+                with pytest.raises(error):
+                    await asyncio.to_thread(
+                        custody_conduit.probe, handle, fixture.root,
+                        required_trace_bookkeeping=1, timeout=timeout,
+                    )
+        finally:
+            record_testsuite_property(
+                f"optional_keeper_probe_{state}_seconds", time.perf_counter() - started,
+            )
+            if reserved is not None:
+                reserved.close()
+        assert not fixture.host.sessions and not fixture.pipelines and not fixture.upstreams
 
 
 @pytest.mark.parametrize("mode", [True, -1, 2, "1", None])

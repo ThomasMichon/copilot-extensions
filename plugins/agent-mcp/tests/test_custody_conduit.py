@@ -132,6 +132,21 @@ def test_required_trace_mode_refuses_old_running_host_before_attach(admission):
     assert [item["op"] for item in connection.requests] == ["ping"]
 
 
+@pytest.mark.parametrize("capable", [False, True])
+def test_trace_preflight_reads_actual_keeper_without_attaching(admission, capable):
+    root, ping, _, connect = admission
+    if capable:
+        ping["custody_host"] = host_descriptor()
+    connection = connect()
+    if capable:
+        conduit.probe(root / "custody.sock", root, required_trace_bookkeeping=1)
+    else:
+        with pytest.raises(ec.SharingUnavailable, match="cannot enforce"):
+            conduit.probe(root / "custody.sock", root, required_trace_bookkeeping=1)
+    assert connection.closed
+    assert [item["op"] for item in connection.requests] == ["ping"]
+
+
 @pytest.mark.parametrize("confirmation", [None, 0, True, 2, "1", 1])
 def test_required_mode_needs_actual_attach_confirmation(admission, confirmation):
     root, ping, ack, connect = admission

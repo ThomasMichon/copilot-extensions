@@ -63,12 +63,28 @@ second client against an older custodian. Explicit configuration references
 always keep those values semantically significant.
 
 Request-context negotiation does not upgrade the private checkpoint binding.
-Existing bindings retain their original identity mode. The optional
-receiver still declines custody when trace normalization would change the legacy
-checkpoint identity, using ordinary execution before effects. Qualifying that
-trace-sensitive binding across physical replacement remains an open #10486
-adoption item, not an incoming-installation gate. The configuration-consumption
-fixture does not assert that this retained-session gap is closed.
+Existing bindings retain their original identity mode. When trace normalization
+changes the legacy identity, the optional receiver first probes the actual
+running keeper through its existing authenticated ping. An older or incompatible
+keeper retains ordinary execution before backend startup or session preparation.
+A capable keeper selects the strict required-mode path; an unreachable keeper
+may use the existing cold-start owner, with actual backend and keeper admission
+still required before attach. This read-only preflight starts no software and
+creates no upstream. The attach handshake independently rechecks the live
+keeper, requires the current backend's support and confirms the selected mode.
+A replacement between preflight and attach can fail that strict path, but
+cannot re-enable ordinary fallback after startup. Installed acceptance remains
+an open #10486 adoption item, not an incoming-installation gate. The
+configuration-consumption fixture does not establish installed reattachment.
+
+This adds one synchronous local connect/ping per trace-sensitive optional entry
+start, with a two-second protocol deadline and no steady-state message work.
+The existing attach revalidates the serving peer after startup instead of
+caching the earlier capability fact. The source host packet's
+`test_optional_keeper_probe_cost_and_pre_effect_boundary` records cold, warm,
+non-listening and slow-peer probe segments in JUnit properties. These isolated
+transport measurements are not complete native caller-launch latency or Linux
+AF_UNIX composition qualification.
 
 The session-only `--additional-mcp-config` overlay is a sealed anonymous file,
 read through the client's inherited Linux descriptor. Configuration and env
@@ -145,9 +161,9 @@ without initialization replay; they are not physical replacement or rollback
 qualification. The separate physical packet varies launch diagnostics for
 every actual keeper, backend and conduit, checks observed backend/upstream
 values, and retains the original upstream through update, capable rollback
-and same-slot backend-process replacement. Supported-platform qualification
-and optional-launcher custodian selection remain required before removing that
-launcher's pre-effect guard. No caller emits this mode
+and same-slot backend-process replacement. Optional-launcher admission now
+selects the requirement only after the separate running-keeper preflight above.
+No caller emits this mode
 to an unqualified peer, and no existing session's binding is rewritten.
 
 The authenticated connector records optional binding support only when both the
@@ -178,9 +194,9 @@ failure, invalid acknowledgment, or changed caller context is a terminal
 
 Absent requirements preserve the existing attach request and acknowledgment.
 Legacy backends remain usable for legacy attachments; their missing optional
-capability cannot reject unrelated baseline work. This provider expansion does
-not migrate the optional launcher, remove its trace guard, replace a running
-keeper, enable ordinary callers or establish installed acceptance.
+capability cannot reject unrelated baseline work. Conditional optional-launcher
+selection does not replace a running keeper, enable default callers, upgrade
+existing bindings or establish installed acceptance.
 
 The backend entrypoint validates the existing private endpoint
 authentication, actual immutable launch generation, selected installation,
