@@ -137,7 +137,11 @@ function Invoke-Runtime([string]$Python) {
     }
     $previous = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
-    try { & $Python -m $module @nativeArgs } finally { $ErrorActionPreference = $previous }
+    $pythonOptions = @()
+    if ($forwardArgs.Count -gt 0 -and $forwardArgs[0] -in @('installer-readiness', 'invocation-contract')) {
+        $pythonOptions = @('-I', '-B', '-X', 'utf8')
+    }
+    try { & $Python @pythonOptions -m $module @nativeArgs } finally { $ErrorActionPreference = $previous }
     exit $LASTEXITCODE
 }
 $python = if ($configurationOnly) { Resolve-Runtime read-only } else { Resolve-Runtime }

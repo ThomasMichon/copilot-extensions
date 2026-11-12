@@ -68,6 +68,9 @@ run_runtime() {
     else
         unset COPILOT_EXTENSIONS_CONTEXT
     fi
+    case "${1:-}" in
+        installer-readiness|invocation-contract) exec "$AGENT_RT_PY" -I -B -X utf8 -m agent_containers "$@" ;;
+    esac
     exec "$AGENT_RT_PY" -m agent_containers "$@"
 }
 

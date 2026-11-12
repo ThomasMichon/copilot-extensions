@@ -36,7 +36,7 @@ def _run(arguments, *, cwd, env, input=None):
 def _configuration_bundle(payload):
     scripts = payload / "scripts"
     scripts.mkdir(parents=True, exist_ok=True)
-    for name in ("resolve-activation-role.py", "resolve_effective_config.py"):
+    for name in ("resolve-activation-role.py", "resolve_effective_config.py", "config_commands.py"):
         shutil.copy2(PLUGIN / "scripts" / name, scripts / name)
     ignore = shutil.ignore_patterns("__pycache__", "*.pyc")
     shutil.copytree(PLUGIN / "scripts" / "configuration-layers", scripts / "configuration-layers", ignore=ignore)

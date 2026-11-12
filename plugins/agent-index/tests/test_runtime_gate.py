@@ -211,6 +211,7 @@ def _fixture(
         PLUGIN / "scripts" / "resolve_effective_config.py",
         scripts / "resolve_effective_config.py",
     )
+    shutil.copy2(PLUGIN / "scripts" / "config_commands.py", scripts / "config_commands.py")
     shutil.copy2(
         PLUGIN / "scripts" / "resolve-activation-role.py",
         scripts / "resolve-activation-role.py",

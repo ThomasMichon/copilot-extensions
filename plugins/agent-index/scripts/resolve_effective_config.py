@@ -5,11 +5,10 @@ from __future__ import annotations
 
 import argparse
 import base64
+from functools import cache
 import json
 import os
 import platform
-import re
-import shutil
 import stat
 import subprocess
 import sys
@@ -631,48 +630,25 @@ def _configuration_knowledge_root(root):
     return _layer_adapter().knowledge_root_from_owner(root)
 
 
+@cache
+def _command_adapter() -> Any:
+    import importlib.util
+
+    path = Path(__file__).with_name("config_commands.py")
+    spec = importlib.util.spec_from_file_location("_index_config_commands", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("agent-index configuration commands are unavailable")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def _run_git(git: str, start: Path, *args: str) -> subprocess.CompletedProcess[str] | None:
-    try:
-        return subprocess.run(
-            # `-c safe.bareRepository=all` only widens what `-C start` itself
-            # is explicitly allowed to inspect (an already-known, registered
-            # repository path from this machine's own repository registry --
-            # never an ambient/inherited cwd), so it doesn't reopen the
-            # ambient-bare-repo attack surface that setting guards against.
-            [git, "-c", "safe.bareRepository=all", "-C", str(start), *args],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=5,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
-
-
-def _path_command(name: str) -> str | None:
-    names = [name]
-    if os.name == "nt":
-        names = [
-            name + extension
-            for extension in os.environ.get("PATHEXT", ".COM;.EXE;.BAT;.CMD").split(os.pathsep)
-            if re.fullmatch(r"\.[a-zA-Z0-9]+", extension)
-        ]
-    for entry in os.get_exec_path():
-        directory = Path(entry)
-        if not directory.is_absolute():
-            continue
-        # A directory-qualified candidate also bypasses implicit Windows cwd lookup.
-        for candidate in names:
-            command = shutil.which(str(directory / candidate))
-            if command:
-                return command
-    return None
+    return _command_adapter().run_git(git, start, *args)
 
 
 def _git_root(start: Path) -> Path | None:
-    git = _path_command("git")
+    git = _command_adapter().path_command("git")
     if not git:
         return None
     result = _run_git(git, start, "rev-parse", "--show-toplevel")
@@ -726,7 +702,7 @@ def _worktrees_command() -> str | None:
     if explicit is not None:
         value = explicit.strip()
         return value or None
-    return _path_command("agent-worktrees")  # marketplace-isolation: allow legacy-compatibility
+    return _command_adapter().path_command("agent-worktrees")  # marketplace-isolation: allow legacy-compatibility
 
 
 def _load_peer_launch() -> Any:
@@ -806,7 +782,7 @@ def _run_state_root_same_cell(
 
 def _worktrees_argv(command: str, *arguments: str) -> list[str]:
     if os.name == "nt" and Path(command).suffix.casefold() == ".ps1":
-        shell = _path_command("pwsh") or str(
+        shell = _command_adapter().path_command("pwsh") or str(
             Path(os.environ.get("SystemRoot", r"C:\Windows"))
             / "System32"
             / "WindowsPowerShell"

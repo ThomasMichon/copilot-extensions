@@ -111,6 +111,9 @@ run_runtime() {
         )" || exit 126
         export AGENT_VAULT_CACHE_DIR="$validated_cache"
     fi
+    case "${command_arguments[0]:-}" in
+        installer-readiness|invocation-contract) exec "$AGENT_RT_PY" -I -B -X utf8 -m agent_vault "$@" ;;
+    esac
     exec "$AGENT_RT_PY" -I -X utf8 -m agent_vault "$@"
 }
 

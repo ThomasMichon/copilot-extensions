@@ -725,6 +725,49 @@ def test_readiness_project_context_does_not_change_installer_working_directory(
     ).status == "exited"
 
 
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.parametrize("relative,absolute", (("", True), (".", True), ("tools", True), (".", False)))
+def test_readonly_environment_excludes_checkout_git_before_actual_index_gate(
+    repair_fixture, relative, absolute,
+):
+    from dataclasses import replace
+
+    home, project, _, _, _ = repair_fixture
+    subprocess.run(["git", "init", "-q", str(project)], check=True, **no_window_kwargs())
+    shell = shutil.which("pwsh") or shutil.which("powershell") if os.name == "nt" else shutil.which("bash")
+    if shell is None:
+        pytest.skip("native gate interpreter is unavailable")
+    local = project / relative if relative else project
+    local.mkdir(exist_ok=True)
+    marker = project / "checkout-git-executed"
+    shadow = local / ("git.cmd" if os.name == "nt" else "git")
+    shadow.write_text(
+        f'@echo shadow>"{marker}"\r\n@exit /b 99\r\n' if os.name == "nt" else
+        f'#!/bin/sh\nprintf shadow > "{marker.as_posix()}"\nexit 99\n',
+        encoding="utf-8",
+    )
+    shadow.chmod(0o755)
+    owner = next(iter(admit_host(project, home=home, readiness_only=True).bindings.values()))
+    source = dict(owner.environment)
+    source["PATH"] = relative + (os.pathsep + source["PATH"] if absolute else "")
+    environment = repair_api._environment(replace(owner, environment=source), readonly=True)
+    assert all(Path(entry).is_absolute() for entry in environment["PATH"].split(os.pathsep))
+    assert environment["NoDefaultCurrentDirectoryInExePath"] == "1"
+    scripts = Path(__file__).resolve().parents[3] / "plugins/agent-index/scripts"
+    command = (
+        [shell, "-NoProfile", "-File", str(scripts / "runtime-gate.ps1")] if os.name == "nt"
+        else [shell, str(scripts / "runtime-gate.sh")]
+    )
+    result = subprocess.run(
+        [*command, "installer-readiness"], cwd=project, env=environment,
+        capture_output=True, text=True, timeout=20, **no_window_kwargs(),
+    )
+    assert result.returncode == (0 if absolute else 1), result.stdout + result.stderr
+    assert json.loads(result.stdout)["state"] == ("configuration-empty" if absolute else "failed")
+    assert not marker.exists()
+
+
 @pytest.mark.timeout(30)
 @pytest.mark.portfolio_tier("T2")
 @pytest.mark.effect("process")

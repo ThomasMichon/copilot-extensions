@@ -137,6 +137,14 @@ def _environment(owner: OwnerBinding, *, readonly: bool) -> dict[str, str]:
         result[owner.no_self_provision] = "1"
     elif owner.no_self_provision:
         result.pop(owner.no_self_provision, None)
+    if readonly:
+        paths = [entry for entry in os.get_exec_path(result) if Path(entry).is_absolute()]
+        for key in list(result):
+            if key.upper() == "PATH":
+                result.pop(key)
+        # An empty PATH would re-enable current-directory lookup on POSIX.
+        result["PATH"] = os.pathsep.join(paths) or str(Path(os.devnull).absolute())
+        result["NoDefaultCurrentDirectoryInExePath"] = "1"
     return result
 
 

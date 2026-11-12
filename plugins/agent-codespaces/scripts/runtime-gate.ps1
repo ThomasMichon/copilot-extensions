@@ -269,7 +269,11 @@ function Invoke-Runtime {
             $bootstrap = "import base64,json,runpy,sys;sys.argv=['agent_codespaces']+json.loads(base64.b64decode(sys.argv[1]));runpy.run_module('agent_codespaces',run_name='__main__',alter_sys=True)"
             & $Python -c $bootstrap $encoded
         } else {
-            & $Python -m agent_codespaces @forwardArgs
+            $pythonOptions = @()
+            if ($forwardArgs.Count -gt 0 -and $forwardArgs[0] -in @('installer-readiness', 'invocation-contract')) {
+                $pythonOptions = @('-I', '-B', '-X', 'utf8')
+            }
+            & $Python @pythonOptions -m agent_codespaces @forwardArgs
         }
     } finally {
         $ErrorActionPreference = $previousEap

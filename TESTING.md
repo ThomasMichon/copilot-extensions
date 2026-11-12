@@ -99,6 +99,23 @@ that remaining gate, real assertions, cleanup and resource bounds. Required
 CI and review remain unchanged; a shared native quiet window still needs its
 affected owners' agreement.
 
+### Selected read-only readiness execution
+
+Machines' `tests/test_installation_repair.py -k readonly_environment` runs the
+actual platform-native Index gate from a Git checkout with marker-writing local
+Git commands and relative PATH entries. It also checks an all-relative PATH
+refuses rather than restoring cwd lookup. The existing project-context controls
+retain selected-project semantics and unchanged installer cwd.
+
+Vault's explicit T3 selection is
+`tests/test_identity_payload_gate.py -k installed_readiness_does_not_import`
+with `--allow-explicit-tiers`. It creates a private namespaced payload/runtime,
+places a shadow module in the checkout, and invokes the real payload front door.
+The installed module must report missing private service readiness, not import
+the shadow. No service is provisioned. Windows covers the CMD/Windows PowerShell
+entry and PowerShell 7; POSIX covers its native gate, with unavailable platform
+cases skipped rather than credited.
+
 ### Selected native ADO discussion resolution
 
 The focused Worktrees packet `--test-file tests/test_ado_thread_resolution.py

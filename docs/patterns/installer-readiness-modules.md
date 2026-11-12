@@ -91,6 +91,18 @@ runnable installer and probe without copying their behavior into the consumer.
 one, while the first payload command requires the canonical command-manifest
 shape and rejects mixed legacy `command` fields with `commands[]`.
 
+Repository-aware probes may run from the selected project, but that directory
+is configuration input, not an executable or Python import search root.
+The native Machines consumer strips relative/empty PATH entries for read-only
+children and disables implicit Windows cwd lookup, without changing installer
+environments. Payload module gates use `-I -B -X utf8` for readiness and
+invocation-contract metadata reads to load the selected
+installed package rather than a checkout-local module, including on Python
+3.10 where `PYTHONSAFEPATH` is unavailable. This preserves project-aware
+configuration and explicit UTF-8 output; it neither grants provisioning
+authority nor changes the selected runtime. Normal operational command caching
+and installer behavior are unchanged.
+
 ### Script-only runtime ownership
 
 Native `agent-machines installation-repair` also needs an attributable runtime

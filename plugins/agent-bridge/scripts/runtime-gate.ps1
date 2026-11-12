@@ -260,12 +260,16 @@ function Invoke-Runtime {
     $previousEap = $ErrorActionPreference
     $previousRoot = $env:AGENT_RT_ROOT
     $ErrorActionPreference = 'Continue'
+    $pythonOptions = @()
+    if ($forwardArgs.Count -gt 0 -and $forwardArgs[0] -in @('installer-readiness', 'invocation-contract')) {
+        $pythonOptions = @('-I', '-B', '-X', 'utf8')
+    }
     try {
         $env:AGENT_RT_ROOT = $runtimeRoot
         if ($hasPipelineInput) {
-            $pipelineInput | & $Python -m agent_bridge @nativeArgs
+            $pipelineInput | & $Python @pythonOptions -m agent_bridge @nativeArgs
         } else {
-            & $Python -m agent_bridge @nativeArgs
+            & $Python @pythonOptions -m agent_bridge @nativeArgs
         }
     } finally {
         $env:AGENT_RT_ROOT = $previousRoot

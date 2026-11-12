@@ -1980,6 +1980,75 @@ syntax, service, network lookup, new runtime or per-call child process.
 New-head CI, review and installed-consumer validation remain required; the
 successful `e2d824d` run is not silently relabeled.
 
+### November 11 - Complete the read-only execution boundary fix
+
+Frozen `f799e52` native run 43152583500 passes all three jobs. Its actual fresh
+artifact binds that source/tree, all five lifecycle outcomes, unchanged payloads,
+all stages zero, seven daemon instances settled and no remaining tasks. The
+census records 2,619 successful scans and zero errors, with a 1249-ms maximum
+query pipeline, session closure and observed stop/window. This again shows why
+pipeline elapsed time alone cannot classify the earlier generic CIM exceptions
+as provider timeouts. Neither this pass nor the earlier `e2d824d` evidence
+qualifies subsequent source changes.
+
+Both `f799e52` CI runs pass units/type contracts but fail the module-size guard:
+the reader grew past its shrink-only ceiling. Extract command lookup and bounded
+Git invocation into the payload-owned `config_commands.py`, loaded once per
+reader instance by absolute sibling path. Copied-reader fixtures include that
+helper. Canonical baseline refresh only tightens/removes existing ceilings;
+the complete source tree passes afterward. No ceiling is widened or guard
+bypassed.
+
+Copilot review 5868981392 identifies two remaining execution seams: Index's
+shell gate invokes Git before the Python reader, and Vault can import a
+checkout-local module. Machines read-only child environments now retain only
+absolute PATH directories and disable implicit Windows cwd lookup. An
+all-relative PATH becomes a non-directory null-device path, not an empty PATH
+that would restore cwd lookup. Installer environments and selected-project
+binding remain unchanged.
+
+The six declared readiness consumers with module-forwarding gates (Bridge,
+CodeSpaces, Containers, Dispatch, MCP and Vault) use `-I -B -X utf8` only for
+readiness and invocation-contract metadata. This excludes checkout/user-site
+imports on Python 3.10+, preserves explicit UTF-8 output and prevents metadata
+bytecode writes. Normal operational caching and arguments remain unchanged.
+Index already isolates its installed module; its bounded reader behavior stays
+native. The central pattern, Machines/Vault READMEs and TESTING.md describe the
+boundary. New patch changefiles cover Vault, CodeSpaces and Containers; existing
+ones cover the other changed plugins. MCP producer refresh preserves contract
+revision 36.
+
+Four actual platform-native Index gate cases cover empty/dot/relative PATH
+entries and all-relative refusal without executing a checkout-local Git.
+Together with preserved project-context cases, seven pass on Windows. The
+attempt to use Git Bash initially exposed a WindowsApps interpreter alias,
+not a supported POSIX result; the fixture now selects each platform's native
+gate. POSIX native execution is not inferred from the Windows result.
+
+Two explicit T3 cases run actual installed Vault entry points through Windows
+PowerShell and PowerShell 7, with a shadow module in a real checkout and a fresh
+private installation namespace. Both use the installed module, leave the shadow
+marker absent and truthfully report missing private service readiness. They do
+not provision a service. Earlier directory-only/legacy and malformed-config
+variants stopped at a different boundary or depended on the well-known service
+endpoint; they are not credited as the final import-isolation proof.
+
+Focused owner readiness controls pass Bridge 4, MCP 9, Dispatch 4, CodeSpaces 11
+and Containers 48. MCP's initial input-retention refusal occurred while this
+worker refreshed its generated footprint; no tests ran in that attempt. The
+stable-input residual passes. The Index component selection passes 69 cases
+with three platform skips; its one recovery fixture initially omitted the
+activation-role reader. A literal diagnostic confirms valid forwarded config
+followed by the missing role-reader failure. The completed reader bundle and
+declared fixture machine preserve real validation; the isolated recovery and
+cutover residual then passes. No assertion, native policy or deadline is waived.
+
+This closes the local fix/validation stretch, not the PR or parent objective.
+Publish one coherent source revision, obtain its actual CI, installed-consumer
+result and review, and retain every earlier result at its original source.
+Admitted-baseline upgrade, mandatory frozen enforcement, Main adoption and all
+other parent obligations remain open.
+
 ### November 11 - Identify and stop snapshot-guidance payload bytecode
 
 Required CI 43069145815 is green at

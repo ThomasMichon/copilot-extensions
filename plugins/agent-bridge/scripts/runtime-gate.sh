@@ -93,6 +93,9 @@ apply_runtime_env() {
 
 run_runtime() {
     apply_runtime_env
+    case "${1:-}" in
+        installer-readiness|invocation-contract) exec "$AGENT_RT_PY" -I -B -X utf8 -m agent_bridge "$@" ;;
+    esac
     exec "$AGENT_RT_PY" -m agent_bridge "$@"
 }
 

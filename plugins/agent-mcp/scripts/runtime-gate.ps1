@@ -187,8 +187,12 @@ function Invoke-Runtime {
     # a terminating exception here (copilot-extensions#5494).
     $previousEap = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
+    $pythonOptions = @()
+    if ($forwardArgs.Count -gt 0 -and $forwardArgs[0] -in @('installer-readiness', 'invocation-contract')) {
+        $pythonOptions = @('-I', '-B', '-X', 'utf8')
+    }
     try {
-        & $Python -m agent_mcp @forwardArgs
+        & $Python @pythonOptions -m agent_mcp @forwardArgs
     } finally {
         $ErrorActionPreference = $previousEap
     }
