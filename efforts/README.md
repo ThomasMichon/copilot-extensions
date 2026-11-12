@@ -19,6 +19,7 @@ rewriting historical journal evidence or treating a source merge as rollout.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
+| [Dispatch Slot Service Launchers](active/dispatch-slot-service-launchers/README.md) | Draft; short-lived stable entrypoints and bounded outgoing central-service conflict resolution proposed before code | #11875; preserves contributor-owned #11960 reader correction and native hold, #10847 retirement and #10377 upgrade owners; no live repair or rollout |
 | [Standing Pairing and Lifetime](active/standing-pairing-lifetime/README.md) | Draft; manual no-pool responsibility, supported local admission and explicitly granted retained-agent recovery | #12171; existing native custody and finite pools retained; no live enrollment or rollout |
 | [Python Bytecode Cache Lifecycle](active/python-bytecode-cache-lifecycle/README.md) | Active; design accepted, additive private user-cache provider under implementation; consumer migration and retirement/update relief remain | #10968 bytecode follow-on; preserves runtime retention, other hygiene tracks and normal update authority; no real cleanup or rollout |
 | [Latest Waiting Update](active/latest-waiting-update/README.md) | Done; reviewed queue source merged and actual Main release verified; pending archive | #11985 under #7758; existing execution, component provisioning and maintenance owners retained; no rollout |
