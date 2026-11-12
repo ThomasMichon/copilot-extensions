@@ -474,11 +474,11 @@ def provision(
     if wheel_profile is not None or wheel_directory is not None:
         if wheel_profile is None or wheel_directory is None or identity is not None:
             raise RuntimeError("Containers closed wheels require a complete non-Source input")
-        import installer_engine as engine
-        from install_source import wheel_inputs, wheel_selection
+        wheel_source = runtime._runtime_component("install_source")
+        engine = wheel_source.engine
 
-        with wheel_inputs(wheel_profile, wheel_directory) as inputs:
-            selection = wheel_selection(payload, "agent-containers", inputs)
+        with wheel_source.wheel_inputs(wheel_profile, wheel_directory) as inputs:
+            selection = wheel_source.wheel_selection(payload, "agent-containers", inputs)
             extras = tuple(selection["extras"])
             if ("provider-exec" in extras) != (profile == "provider-exec"):
                 raise RuntimeError("Containers wheel closure differs from its selected dependency profile")

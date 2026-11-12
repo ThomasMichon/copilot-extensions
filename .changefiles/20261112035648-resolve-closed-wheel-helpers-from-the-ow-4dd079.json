@@ -1,0 +1,9 @@
+{
+  "comment": "Resolve closed-wheel helpers from the owning payload under isolated Python",
+  "changes": [
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    }
+  ]
+}
