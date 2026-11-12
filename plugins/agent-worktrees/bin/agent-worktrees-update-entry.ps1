@@ -106,8 +106,8 @@ namespace CopilotExtensions {
 }
 function Wait-AgentQueuedSubmission($ProcessId, [DateTime]$SubmittedAt, [string]$ExitFile) {
     # Returns the submission's exit code, or $null when it reported none. The
-    # code the submission records before exiting is authoritative; the process
-    # is watched only to notice a submission that ended without recording one,
+    # code the submission records before exiting is the only result; the process
+    # is watched only to stop waiting once it ends without recording one,
     # so a reused PID can neither delay the result nor supply its own code.
     $recordedCode = {
         # Published by an atomic rename, so the name never refers to a partial
@@ -139,9 +139,9 @@ function Wait-AgentQueuedSubmission($ProcessId, [DateTime]$SubmittedAt, [string]
         }
         if ($null -eq $process -or [DateTime]::UtcNow -ge $deadline) { return $null }
         if ($process.WaitForExit(250)) {
-            $code = & $recordedCode
-            if ($null -ne $code) { return $code }
-            return $process.ExitCode
+            # A missing record is reported as no result: the watched PID may have
+            # been reused, so its exit code is never taken as the submission's.
+            return (& $recordedCode)
         }
     }
 }

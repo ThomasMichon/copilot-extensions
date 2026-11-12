@@ -1579,13 +1579,13 @@ if ($null -eq $result) { 'none' } else { "code=$result" }
 """
 
 
-@pytest.mark.parametrize("case", ["exited", "reused", "late-reuse", "unreported"])
+@pytest.mark.parametrize("case", ["exited", "reused", "late-reuse", "unreported", "reuse-unreported"])
 def test_queued_submission_that_exits_before_it_is_opened_reports_its_recorded_code(
     tmp_path, native_powershell, case,
 ):
     """A fast-exiting submission is judged by its recorded exit code, never a reused PID."""
     exit_file = tmp_path / "submission.exit"
-    if case != "unreported":
+    if case not in ("unreported", "reuse-unreported"):
         exit_file.write_text("3", encoding="utf-8")
     submitted_at = time.strftime("%Y-%m-%dT%H:%M:%S")
     unrelated = None
@@ -1595,11 +1595,13 @@ def test_queued_submission_that_exits_before_it_is_opened_reports_its_recorded_c
             capture_output=True, text=True, check=True, **no_window_kwargs(),
         )
         submission_pid = int(finished.stdout.strip())
-    elif case == "late-reuse":
-        # A live, unrelated process that took the PID after the submission was queued.
+    elif case in ("late-reuse", "reuse-unreported"):
+        # An unrelated process that took the PID after the submission was queued;
+        # its own exit, even a successful one, is never the submission's result.
         time.sleep(1.5)
         unrelated = subprocess.Popen(
-            [native_powershell, "-NoProfile", "-Command", "Start-Sleep 120; exit 9"],
+            [native_powershell, "-NoProfile", "-Command",
+             "Start-Sleep 120; exit 9" if case == "late-reuse" else "Start-Sleep 3; exit 0"],
             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             **no_window_kwargs(),
         )
@@ -1626,6 +1628,6 @@ def test_queued_submission_that_exits_before_it_is_opened_reports_its_recorded_c
             unrelated.kill()
             unrelated.wait(timeout=15)
     assert result.returncode == 0, result.stdout + result.stderr
-    expected = "none" if case == "unreported" else "code=3"
+    expected = "none" if case in ("unreported", "reuse-unreported") else "code=3"
     assert result.stdout.strip().splitlines()[-1] == expected, result.stdout + result.stderr
     assert elapsed < 30, "a reused PID must never be waited on"
