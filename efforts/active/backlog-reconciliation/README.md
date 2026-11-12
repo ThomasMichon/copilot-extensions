@@ -342,6 +342,15 @@ the non-public approval conversation.
 
 ## Plan
 
+The [next twenty-primary checkpoint](journal/2026/11.12-oldest-contracts-and-finite-delivery.md)
+records three source completions, one accepted tracking fold and sixteen
+retained oldest contracts. It corrects the campaign's overreading of #3367's
+historical remaining-ask statement as a numeric-tracker veto, credits #3418's
+released wait leaf and #3581's completed full-title lane, and retains #3511's
+configured whole-current-tree validation gap without inventing history erasure.
+The complete 915-open census remains 186 above the fixed target; all parent
+Plan/Validation and actual custody gates remain unresolved.
+
 The [worker-witness and safe Resume study](<journal/2026/11.08 worker-witness-and-safe-resume.md>)
 preserves the independent retirement witness, claimed native acceptance and
 documentary coordination contracts without implementation or closure credit.
@@ -3193,6 +3202,13 @@ sources, transferring owners or turning partial/planning gains into completion.
   normal publication flow.
 
 ## Validation Plan
+
+The [twenty-primary follow-through](journal/2026/11.12-oldest-contracts-and-finite-delivery.md)
+distinguishes actual source fulfillment from #3367's planned, unchecked
+receiving clauses. All four dispositions have fresh qualification and exact
+public/provider readback. The original source owner's words, campaign-generated
+judgments and bounded contributor scope remain distinct; no generic
+implementation, native, acknowledgment or historical-erasure gate is added.
 
 The [source-completion checkpoint](journal/2026/11.12-source-completions-and-migration-residuals.md)
 retains #12272's independently read existing real-exec CI evidence, #12276's
