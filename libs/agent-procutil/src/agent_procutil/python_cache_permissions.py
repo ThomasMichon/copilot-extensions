@@ -1,7 +1,6 @@
 """Native protection for executable, user-owned bytecode cache entries."""
 from __future__ import annotations
 
-import importlib.util
 import os
 import stat
 import sys
@@ -11,13 +10,9 @@ from pathlib import Path
 
 @lru_cache(maxsize=1)
 def _owner():
-    name = __name__ + "._owner"
-    spec = importlib.util.spec_from_file_location(
-        name, Path(__file__).with_name("_daemon_instance_owner.py"),
-    )
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    from . import _daemon_instance_owner
+
+    return _daemon_instance_owner
 
 
 def mkdir(path: Path) -> None:

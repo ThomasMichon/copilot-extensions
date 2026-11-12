@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import hashlib
-import importlib.util
 import json
 import os
 import sys
@@ -14,12 +13,15 @@ SCHEMA = "copilot-extensions.python-bytecode"
 
 @lru_cache(maxsize=8)
 def component(name: str):
-    """Load an adjacent stdlib helper in package and standalone layouts."""
-    spec = importlib.util.spec_from_file_location(
-        __name__ + "." + name, Path(__file__).with_name(name + ".py"),
-    )
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    """Resolve a declared companion from this independently installed package."""
+    if name == "python_cache_permissions":
+        from . import python_cache_permissions as module
+    elif name == "_daemon_instance_owner":
+        from . import _daemon_instance_owner as module
+    elif name == "python_cache_catalog":
+        from . import python_cache_catalog as module
+    else:
+        raise ValueError("unknown Python cache companion")
     return module
 
 

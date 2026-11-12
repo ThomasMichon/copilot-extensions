@@ -16,14 +16,9 @@ POLICY_VERSION = 2
 
 @lru_cache(maxsize=1)
 def _store():
-    import importlib.util
+    from . import python_cache_store
 
-    spec = importlib.util.spec_from_file_location(
-        __name__ + "._store", Path(__file__).with_name("python_cache_store.py"),
-    )
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return python_cache_store
 
 
 def _read_regular(path: Path) -> bytes:
