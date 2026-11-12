@@ -344,6 +344,14 @@ handover. Preserve held sessions and the separate pre-feature adoption hold.
     [source-pinned query qualification](journal/2026/11.10-explicit-owner-cli.md#discovery-provider-qualification-and-merge)
     passed. Caller discovery/capture integration and rollback adoption remain
     open.
+  - [ ] **Windows controlled caller:** expand and qualify the optional
+    physical receiver before emitting Windows caller overlays. Capture the
+    actual native client's PID/birth from its creation handle before execution;
+    do not reuse the Linux launcher's own identity or the observer-only native
+    admission callback. Qualify private handoff lifetime, delayed MCP start
+    after launcher exit, original stdio, rollback and exact cleanup without a
+    new per-client supervisor. Native handle retention is an explicit
+    qualification obligation, not a documented client guarantee.
   - [x] **Explicit Linux exec caller:** capture the exec owner's native pair
     and pass a sealed, session-only overlay for explicitly named configured
     entries, with actual-start discovery bound to a physical optional receiver.
@@ -360,6 +368,19 @@ handover. Preserve held sessions and the separate pre-feature adoption hold.
     All 18 affected non-changefile blobs are present byte-for-byte on Main
     `d6a55e39950de6cd40204f8c9ff581dd7b547308` (MCP `0.2.241-dev1`);
     this is released source, not installed or productive adoption.
+    #12273 subsequently merged the #12272 standalone-Python portability fix
+    at `60221d0d568282a347f702250b570a0ad205bdff`: real Linux exec succeeds
+    with normal or omitted Python memfd/sealing bindings, retaining owner
+    identity and mandatory seals. Native libc refusal, seal failure/readback
+    and descriptor cleanup remain enforced. The isolated candidate helper also
+    passes on the actual missing-binding interpreter. Main
+    `2c7828b3cb61dd3df0d39c34b20edb999cd3a122` releases the exact correction
+    as MCP `0.2.252-dev1`; an ordinary update delivered it without a package
+    patch. The installed, contained Linux baseline now completes an actual
+    native tool invocation through custody with one initialization, one
+    invocation and verified owned cleanup. #12272 is closed. This is not a
+    subsequent installed generation handover, production lifetime or default
+    adoption result.
   - [ ] **Trace-sensitive checkpoint adoption:** qualify the private binding
     across physical replacement and rollback when launch diagnostics differ,
     without silently changing legacy identities. Conditional optional-receiver
