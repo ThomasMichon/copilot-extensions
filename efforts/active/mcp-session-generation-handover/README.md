@@ -337,10 +337,28 @@ handover. Preserve held sessions and the separate pre-feature adoption hold.
     [source-pinned CLI packet](journal/2026/11.10-explicit-owner-cli.md#qualification-and-merge-follow-up)
     passed. Selected-runtime discovery, controlled production launcher capture
     and automatic adoption remain separate work.
-  - [ ] **Selected-runtime discovery provider:** report owner-handoff support
+  - [x] **Selected-runtime discovery provider:** report owner-handoff support
     from the actual physical selected executable without MCP startup, and
-    qualify both selected and stale-slot queries across replacement. Caller
-    discovery/capture integration and rollback adoption remain open.
+    qualify both selected and stale-slot queries across replacement. #12052
+    merged at `59a739fce374514aaec89b65957c17a5bf6b2b29`; its
+    [source-pinned query qualification](journal/2026/11.10-explicit-owner-cli.md#discovery-provider-qualification-and-merge)
+    passed. Caller discovery/capture integration and rollback adoption remain
+    open.
+  - [ ] **Explicit Linux exec caller:** capture the exec owner's native pair
+    and pass a sealed, session-only overlay for explicitly named configured
+    entries, with actual-start discovery bound to a physical optional receiver.
+    Preserve probe-only self-provisioning inhibition, cold-context fallback
+    before effects and strict existing paired CLI semantics. Qualify actual
+    Copilot consumption against an ordinary same-environment baseline,
+    separately from the synthetic native-exec fixture. Preserve
+    ordinary selection for unsupported entries and leave Windows capture,
+    default caller adoption and installed acceptance open.
+  - [ ] **Trace-sensitive checkpoint adoption:** qualify the private binding
+    across physical replacement and rollback when launch diagnostics differ,
+    without silently changing legacy identities. Until then, the optional
+    receiver retains ordinary execution when trace normalization changes the
+    existing checkpoint identity. This is separate from request-context
+    negotiation and actual configuration consumption.
   - [x] **Explicit-owner source merged:** #11935 landed at
     `c0eab0d952a37607f6cf7030ac1a77f377f98a74` after current-head automated
     approval, required CI and resolution of addressed findings. The source
@@ -442,6 +460,10 @@ withdrawal authorizes no GUI effect or change to the SDK's own admission rules.
 - [ ] Exercise current/prior peers, supported rollback and a pre-feature peer
   lacking reattachment. Unsupported support is explicit; live legacy clients
   are preserved rather than forcibly migrated.
+- [ ] Trace-varying physical keeper/backend generations retain compatible
+  checkpoint identity through update and rollback, with no upstream
+  reinitialization or replay. Constant-environment composed controls do not
+  qualify this case; until qualified, optional adoption refuses before effects.
 - [ ] Failed candidate health, changed owner/route/selection and an old
   generation's late cleanup cannot corrupt or retire the current generation.
 - [ ] EOF/disconnect and verified owner death settle exact client resources;

@@ -214,6 +214,8 @@ class FenceHistoryBody(BaseModel):
     permitted: bool = False
     confirmed_no_live_holder: bool = False
     reason: str = ""
+    reservation_keys: list[str] | None = None
+    expected_preview: str | None = None
 
 
 def _reservation_dict(res: SpawnReservation) -> dict:
