@@ -16,6 +16,7 @@ Composed into :class:`agent_dispatch.queue.TaskQueue`; relies on
 from __future__ import annotations
 
 import collections
+import hashlib
 import json
 import math
 from typing import Any
@@ -27,16 +28,36 @@ from .queue_records import SpawnState, Status, TaskError
 _SAMPLE = 20
 
 
+def _selected_history_keys(
+    keys: list[str] | None, expected_preview: str | None, apply: bool,
+) -> frozenset[str] | None:
+    if keys is None:
+        if expected_preview is not None:
+            raise TaskError("an expected history preview requires explicit reservation keys")
+        return None
+    if (
+        not isinstance(keys, list) or not keys
+        or any(not isinstance(key, str) or not key or key.strip() != key for key in keys)
+        or len(set(keys)) != len(keys)
+    ):
+        raise TaskError("history selection requires distinct nonempty reservation keys")
+    if apply and not expected_preview:
+        raise TaskError("selected history application requires an expected preview revision")
+    return frozenset(keys)
+
+
 class SpawnHistoryMixin:
     """``fence_legacy_history`` for :class:`TaskQueue`."""
 
     def fence_legacy_history(
         self, *, before: float, apply: bool = False, permitted: bool = False,
         confirmed_no_live_holder: bool = False, reason: str = "",
+        reservation_keys: list[str] | None = None, expected_preview: str | None = None,
     ) -> dict[str, Any]:
         """Preview, or apply, startup fencing and native retirement for old history."""
         if type(before) not in (int, float) or not math.isfinite(before) or before <= 0:
             raise TaskError("history reconciliation requires a finite positive cutoff")
+        selected = _selected_history_keys(reservation_keys, expected_preview, apply)
         if apply and (not permitted or not confirmed_no_live_holder or not reason.strip()):
             raise TaskError(
                 "history reconciliation requires permission, verified no-live-holder attestation and reason",
@@ -49,16 +70,30 @@ class SpawnHistoryMixin:
                 " LEFT JOIN pool_reservation_bindings b ON b.reservation_key = s.key"
                 " ORDER BY s.reserved_at, s.key",
             ).fetchall()
+            if selected is not None and selected - {row["key"] for row in rows}:
+                raise TaskError("selected history reservation does not exist")
             identities = {row["key"]: self._history_identities(conn, accounting, row) for row in rows}
             protected = self._protected_identities(conn, accounting, rows, identities)
             excluded: collections.Counter[str] = collections.Counter()
             eligible: list[Any] = []
+            observed: list[dict[str, Any]] = []
             for row in rows:
+                if selected is not None and row["key"] not in selected:
+                    continue
                 if row["bound_key"] is not None:
+                    if selected is not None:
+                        raise TaskError("selected history reservation is already pool-bound")
                     continue
                 reason_key = self._history_exclusion(
                     row, before, accounting, identities[row["key"]], protected,
                 )
+                if selected is not None:
+                    recorded = self._recorded_identities(accounting, row)
+                    observed.append({
+                        "reservation": dict(row), "exclusion": reason_key,
+                        "identities": sorted(identities[row["key"]]) if identities[row["key"]] is not None else None,
+                        "protected": {native: protected[native] for native in sorted(recorded) if native in protected},
+                    })
                 if reason_key is None:
                     eligible.append(row)
                 elif reason_key != "not_accountable":
@@ -68,6 +103,14 @@ class SpawnHistoryMixin:
                 "excluded": dict(sorted(excluded.items())),
                 "sample": [row["key"] for row in eligible[:_SAMPLE]],
             }
+            if selected is not None:
+                revision = hashlib.sha256(json.dumps(
+                    {"before": float(before), "observed": observed},
+                    sort_keys=True, separators=(",", ":"), allow_nan=False,
+                ).encode("utf-8")).hexdigest()
+                result["selection"] = {"reservation_keys": sorted(selected), "revision": revision}
+                if apply and expected_preview != revision:
+                    raise TaskError("selected history preview changed; nothing was changed")
             if not apply:
                 conn.rollback()
                 return result

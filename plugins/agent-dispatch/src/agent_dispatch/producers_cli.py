@@ -334,6 +334,8 @@ def _cmd_reservations(args: argparse.Namespace) -> int:
             return _emit(c.fence_legacy_history(
                 before=_history_cutoff(args.before), apply=args.apply, permitted=args.permit,
                 confirmed_no_live_holder=args.confirm_no_live_holder, reason=args.reason or "",
+                reservation_keys=getattr(args, "reservation_keys", None),
+                expected_preview=getattr(args, "expected_preview", None),
             ))
         if args.reservations_command == "adopt-legacy":
             return _emit(c.adopt_legacy_capacity(
@@ -536,6 +538,9 @@ def register_reservations_command(subparsers: Any) -> None:
         "unbound legacy reservations created before a cutoff; preserves history",
     )
     rp.add_argument("--before", required=True, help="epoch seconds or ISO-8601 with offset")
+    rp.add_argument("--reservation-key", dest="reservation_keys", action="append",
+                    help="select a reservation; repeat for a verified subset")
+    rp.add_argument("--expected-preview", help="selected preview revision required for --apply")
     rp.add_argument("--apply", action="store_true")
     rp.add_argument("--permit", action="store_true")
     rp.add_argument("--confirm-no-live-holder", action="store_true")
