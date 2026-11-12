@@ -619,6 +619,7 @@ def _attributed_library_sources(tmp_path: Path, layout: str):
     try:
         import materialize_main as mm
         import uv_editable_ref as uer
+        import installer_engine_ref as ier
     finally:
         sys.path.pop(0)
     repository = tmp_path / "publisher-repo"
@@ -630,6 +631,12 @@ def _attributed_library_sources(tmp_path: Path, layout: str):
         shutil.copyfile(manifest, library / "pyproject.toml")
         (library / "src" / "fixture_source.py").write_text(
             "value = 'retained-source-contract'\n", encoding="utf-8",
+        )
+    (repository / "libs" / "installer-engine").mkdir(exist_ok=True)
+    for name in (*ier.FILES, *ier.SUPPORT_FILES, *ier.PYTHON_FILES, ier.HUMAN_HELPER):
+        shutil.copyfile(
+            REPO / "libs" / "installer-engine" / name,
+            repository / "libs" / "installer-engine" / name,
         )
     payload = repository / "plugins" / PLUGIN.name
     (payload / "scripts").mkdir(parents=True)
