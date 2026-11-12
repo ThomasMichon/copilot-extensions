@@ -86,6 +86,16 @@ def test_lazy_coordinator_spawn_does_not_inherit_profile_registrar(tmp_path, mon
     assert daemon_calls[0][1]["env"]["AGENT_DISPATCH_REGISTRAR_DIR"] == str(tmp_path / "registrar")
 
 
+def test_coordinator_registrar_remains_absolute_after_child_changes_directory(tmp_path, monkeypatch):
+    from pathlib import Path
+    from agent_dispatch.install_paths import coordinator_service_environment
+
+    monkeypatch.chdir(tmp_path)
+    root = Path("runtime")
+    env = coordinator_service_environment({}, root)
+    assert env["AGENT_DISPATCH_REGISTRAR_DIR"] == str(tmp_path / root / "registrar")
+
+
 @pytest.mark.parametrize("windows_keys", [False, True])
 def test_service_env_overlay_matches_native_key_semantics(tmp_path, monkeypatch, windows_keys):
     from agent_dispatch import install_paths

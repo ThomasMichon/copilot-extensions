@@ -141,7 +141,7 @@ def coordinator_service_environment(
     key = "AGENT_DISPATCH_REGISTRAR_DIR"
     if os.name == "nt":
         env = {name: value for name, value in env.items() if name.upper() != key}
-    env[key] = str(root / "registrar")
+    env[key] = str(root.expanduser().absolute() / "registrar")
     return apply_service_env_overlay(env, root, strict=strict)
 
 
