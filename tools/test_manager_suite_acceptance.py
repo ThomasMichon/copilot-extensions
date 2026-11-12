@@ -47,6 +47,7 @@ def test_runtime_inputs_overlap_construction_and_settle_before_consumers(tmp_pat
             self.returncode = -1
 
     def launch(command, **kwargs):
+        assert kwargs["stdout"] is sys.stdout and kwargs["stderr"] is sys.stderr
         assert "--timeout=30" in command
         assert "-p" in command and "pytest_portfolio_guard" in command
         assert command[-2:] == ["-k", " or ".join(adapter_runner.RUNTIME_INPUT_CONTROLS)]
@@ -55,6 +56,7 @@ def test_runtime_inputs_overlap_construction_and_settle_before_consumers(tmp_pat
         return Controls()
 
     def run(command, **kwargs):
+        assert kwargs["stdout"] is sys.stdout and kwargs["stderr"] is sys.stderr
         if "--prepare" in command:
             calls.append("prepare")
             if outcome == "exception":

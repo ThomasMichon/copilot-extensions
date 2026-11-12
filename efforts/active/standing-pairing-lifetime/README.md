@@ -138,7 +138,8 @@ synthetic stores and native fixture owners.
   original recovery journal. The regression completes supported native recovery,
   performs an ordinary resume through the retained writer, and verifies a real
   permission request remains pending. All 71 connected creation/writer controls
-  passed. The canonical capture selection now contains 403 cases.
+  passed, as did six actual Host restart/reconnect permission cases. The
+  canonical capture selection now contains 403 cases.
 - The [third native lane](https://github.com/ThomasMichon/copilot-extensions/actions/runs/43232865903)
   passed Linux entry/installed, Linux seed, macOS seed and Windows terminal/mux
   stages. Windows Manager construction consumed about 263 seconds, leaving too
@@ -149,6 +150,12 @@ synthetic stores and native fixture owners.
   Five scheduling/failure controls and all 24 focused wrapper controls passed;
   the broader native-suite coordinator file passed 31 controls. Cold native
   acceptance remains open until the complete group actually passes.
+- The first local overlapped attempt still reached 300 seconds without usable
+  child-phase diagnostics and is unqualified. The coordinator now explicitly
+  forwards native child streams when suppressing Windows console allocation,
+  and emits the independent-control/construction and serial-consumer boundaries.
+  A complete source-pinned native run remains required; no deadline is enlarged
+  or failure waived.
 - A subsequent review found stale claim timing under write contention, a headed
   record fence held past confirmed creation and a preserved-seed checker that
   could reacquire its parent's sidecar. Preparation/claim now sample time after

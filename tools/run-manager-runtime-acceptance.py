@@ -54,23 +54,26 @@ def _runtime_group(python: Path, sandbox: Path) -> int:
         "--timeout=30", "-o", "timeout_func_only=false", "-o", "addopts=",
     ]
     selection = " or ".join(RUNTIME_INPUT_CONTROLS)
+    streams = {"stdin": subprocess.DEVNULL, "stdout": sys.stdout, "stderr": sys.stderr}
+    print("Manager runtime: starting independent input controls and cold construction", flush=True)
     controls = subprocess.Popen(
         [*assertions, f"--basetemp={sandbox / 'input-controls'}", str(native), "-k", selection],
-        cwd=REPO, **no_window_kwargs(),
+        cwd=REPO, **streams, **no_window_kwargs(),
     )
     try:
         prepared = subprocess.run(
             [str(python), "-I", "-B", str(native), "--prepare", str(sandbox)],
-            cwd=REPO, check=False, **no_window_kwargs(),
+            cwd=REPO, check=False, **streams, **no_window_kwargs(),
         )
         if prepared.returncode:
             return prepared.returncode
         result = controls.wait()
         if result:
             return result
+        print("Manager runtime: construction and input controls passed; running consumers", flush=True)
         return subprocess.run(
             [*assertions, f"--basetemp={sandbox / 'assertions'}", str(native), "-k", f"not ({selection})"],
-            cwd=REPO, check=False, **no_window_kwargs(),
+            cwd=REPO, check=False, **streams, **no_window_kwargs(),
         ).returncode
     finally:
         if controls.poll() is None:
