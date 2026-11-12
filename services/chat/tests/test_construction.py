@@ -56,21 +56,26 @@ def test_client_policy_delegates_one_canonical_candidate(tmp_path, monkeypatch):
         "project": tmp_path / "project", "uv": tmp_path / "uv", "python": tmp_path / "python",
         "wait_timeout": 12, "child_timeout": 34,
     }
-    root = tmp_path / "runtime"
-    with construction.client_candidate(root, "1.2.3", **arguments) as actual:
-        assert actual is candidate
-        assert calls == [((root, "1.2.3"), {
-            "plugin": arguments["project"], "uv": arguments["uv"],
-            "base_python": arguments["python"],
-            "extras": ("client",),
-            "local_packages": ("agent-endpoint-rendezvous", "agent-procutil"),
-            "health_module": "agent_chat_service.construction",
-            "health_callable": "validate_client",
-            "construction_callable": "agent_chat_service.construction:_prepare_client",
-            "construction_data": {"slot": str(root / "versions" / "1.2.3")},
-            "wait_timeout": 12, "child_timeout": 34,
-        })]
-    assert calls[-1] == "settled" and not root.exists()
+    for role, packages in (
+        ("client", ("agent-endpoint-rendezvous", "agent-procutil")),
+        ("service", ("agent-endpoint-rendezvous", "agent-procutil", "agent-single-instance-lease")),
+    ):
+        calls.clear()
+        root = tmp_path / role
+        with getattr(construction, role + "_candidate")(root, "1.2.3", **arguments) as actual:
+            assert actual is candidate
+            assert calls == [((root, "1.2.3"), {
+                "plugin": arguments["project"], "uv": arguments["uv"],
+                "base_python": arguments["python"],
+                "extras": (role,),
+                "local_packages": packages,
+                "health_module": "agent_chat_service.construction",
+                "health_callable": "validate_" + role,
+                "construction_callable": "agent_chat_service.construction:_prepare_client",
+                "construction_data": {"slot": str(root / "versions" / "1.2.3")},
+                "wait_timeout": 12, "child_timeout": 34,
+            })]
+        assert calls[-1] == "settled" and not root.exists()
 
 
 def installed_slot(tmp_path, monkeypatch):
@@ -109,7 +114,52 @@ def test_installed_health_refuses_bootstrap_drift(tmp_path, monkeypatch, damage)
     bootstrap.mkdir()
     for name in construction._BOOTSTRAP.values():
         (bootstrap / name).write_bytes(value)
+
+    def refuse_effect(*args, **kwargs):
+        pytest.fail("installed service validation must not enter hosting")
+
+    modules = {}
+    for name in (
+        "agent_chat_service.hosting", "agent_procutil.daemon_instances",
+        "single_instance_lease", "endpoint_rendezvous",
+    ):
+        module = ModuleType(name)
+        path = slot / (name.replace(".", "-") + ".py")
+        path.write_bytes(b"synthetic installed module")
+        module.__file__ = str(path)
+        for attribute in (
+            "HostedChat", "ChatStore", "SingleInstance", "admit_daemon_instance",
+            "write_endpoint", "initialize_storage", "probe_health",
+        ):
+            setattr(module, attribute, refuse_effect)
+        monkeypatch.setitem(sys.modules, name, module)
+        modules[name] = module
     construction.validate_client()
+    construction.validate_service()
+    runtime = construction.importlib.import_module("agent_chat_service._versioned_runtime")
+    runtime.mark_complete(slot.parent.parent, slot.name, payload_hash="synthetic-inputs")
+    construction.validate_client()
+    construction.validate_service()
+    generation = bootstrap / "runtime-generation"
+    original_generation = generation.read_bytes()
+    generation.write_bytes(b"invalid-generation\n")
+    with pytest.raises(ClientError) as caught:
+        construction.validate_client()
+    assert caught.value.code == "construction_bootstrap_invalid"
+    generation.write_bytes(original_generation)
+    if damage == "changed":
+        foreign = tmp_path / "foreign.py"
+        foreign.write_bytes(b"foreign module")
+        for name, module in modules.items():
+            for unavailable in (True, False):
+                with monkeypatch.context() as patch:
+                    if unavailable:
+                        patch.setitem(sys.modules, name, None)
+                    else:
+                        patch.setattr(module, "__file__", str(foreign))
+                    with pytest.raises(ClientError) as caught:
+                        construction.validate_service()
+                    assert caught.value.code == "construction_service_unavailable"
     launcher = bootstrap / "runtime_launcher.py"
     if damage == "missing":
         launcher.unlink()
@@ -118,7 +168,8 @@ def test_installed_health_refuses_bootstrap_drift(tmp_path, monkeypatch, damage)
     else:
         (bootstrap / "foreign.py").touch()
     before = {path.name: path.read_bytes() for path in bootstrap.iterdir()}
-    with pytest.raises(ClientError) as caught:
-        construction.validate_client()
-    assert caught.value.code == "construction_bootstrap_invalid"
-    assert {path.name: path.read_bytes() for path in bootstrap.iterdir()} == before
+    for validate in (construction.validate_client, construction.validate_service):
+        with pytest.raises(ClientError) as caught:
+            validate()
+        assert caught.value.code == "construction_bootstrap_invalid"
+        assert {path.name: path.read_bytes() for path in bootstrap.iterdir()} == before

@@ -497,6 +497,39 @@ shared-multiplex contracts above.
 
 ## Journal
 
+### 2026-11-10 - Nonactivating service candidate prepared; qualification pending
+
+- Inspected canonical `numbered_candidate`: construction and installed validation
+  precede immutable completion and retained candidate yield; neither fresh nor
+  reuse paths activate a service or publish an active selection. Chat now supplies
+  a service-only dependency closure and installed host/helper import validation
+  through that existing constructor and the unchanged retention bootstrap.
+- Extended existing construction and installed-distribution regression families
+  without changing their node membership or qualification classes. Controls cover
+  separate client/service closure, immutable reuse and incompatible-role refusal,
+  source-absent retained invocation, bootstrap/import refusal and zero hosting
+  effects. Real construction and subprocess controls remain full-only artifact
+  qualification, not actor-free promotion-unit evidence.
+- This source slice is untested and unpublished. No tests, builds, installations
+  or native/image qualification were run for it. It does not supply passive
+  readiness, promotion, selected service setup, cutover or Unix-socket recovery.
+  Keep the service lifecycle and all parent Plan/Validation gates open.
+
+### 2026-11-10 - Image qualification documentation merged
+
+- #11833 merged at 02:03:10Z as
+  `d3f858afcf1d308e2e553e1bd64d83dcde5f74a3`, from published head
+  `7bebd3dedc2828048ecbf2c5c9381750b2ef87f3`, after current-head Copilot
+  approval, required CI and source-attribution checks, with no unresolved
+  review threads. Completion used the configured additional-CODEOWNER-vote
+  exception, not a CI bypass. #7238 remained open before and after merge.
+- This completes only the documentation delivery recording #8726; it adds no
+  runtime, release, lifecycle or adoption qualification. Re-read the canonical
+  Goal, Plan and Validation Plan after pulling forward. The effort remains
+  Active, with the Chat-owned service adapter still the next implementation
+  slice. Retain this journal annotation with the next substantive change,
+  rather than opening another journal-only PR.
+
 ### 2026-11-06 - Independent image merged; parent graduation remains active
 
 - #8726 merged at05:50:27Z as
