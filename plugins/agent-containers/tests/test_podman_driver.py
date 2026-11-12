@@ -53,6 +53,7 @@ def engine(monkeypatch):
 
     monkeypatch.setattr(podman_driver, "run_caller_owned", run)
     monkeypatch.setattr(podman_driver.shutil, "which", lambda name: name)
+    monkeypatch.setattr(podman_driver, "_resolve_executable", lambda name: name)
     return calls
 
 
@@ -296,7 +297,10 @@ def test_real_provider_and_driver_process_roundtrip(tmp_path, monkeypatch):
         RuntimeError("Docker is not part of this fixture"),
     ))
     selected = FleetConfig(
-        driver="podman", driver_options={"image": "configured-alias", "executable": sys.executable},
+        # The fake native engine is stdlib-only, not another plugin consumer.
+        driver="podman", driver_options={
+            "image": "configured-alias", "executable": sys._base_executable,
+        },
         size=1, workspace_folder="/workspaces/example", exec_user="vscode",
     )
     config = ContainersConfig(fleets={"example": selected})

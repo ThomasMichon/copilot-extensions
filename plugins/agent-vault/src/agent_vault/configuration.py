@@ -66,6 +66,9 @@ def _legacy_report(root: Path) -> dict | None:
     environment = _peer_launch.legacy_peer_environment(dict(os.environ))
     environment.pop("AGENT_CONFIGURATION_CONTEXT", None)
     if path.is_file():
+        from configuration_context.readiness import qualify_resolver
+
+        qualify_resolver(path, "agent-vault", "agent_vault")
         resolver = _peer_launch._load_primitive(path, "_vault_configuration_runtime")
         prefix = ready_owner_prefix(peer, "agent_worktrees", resolver=resolver.resolve_python)
     else:
@@ -84,7 +87,7 @@ def _legacy_report(root: Path) -> dict | None:
     if not prefix:
         return None
     return read_owner_context(
-        [prefix[0], "-I", "-B", "-X", "utf8", *prefix[1:]], root,
+        prefix, root,
         environment=environment,
     )
 

@@ -741,6 +741,58 @@ def test_external_state_root_same_cell_refusal_is_not_swallowed_to_unavailable(
         module._external_state_root(tmp_path)
 
 
+def test_readonly_legacy_state_root_refuses_before_raw_command(tmp_path, monkeypatch):
+    module = _module()
+    monkeypatch.setenv("COPILOT_EXTENSIONS_READONLY_PROBE", "isolated-imports-v1")
+    monkeypatch.setattr(
+        module.subprocess, "run",
+        lambda *args, **kwargs: pytest.fail("unqualified legacy command executed"),
+    )
+    readiness = module._readiness_support()
+    with pytest.raises(readiness.ProbeContractError, match="no qualified probe provenance"):
+        module._run_state_root("legacy-worktrees", dict(os.environ), cwd=tmp_path, project=None)
+
+
+def test_readonly_index_resolver_refuses_before_import(tmp_path, monkeypatch):
+    from agent_index import configuration_layers
+    from configuration_context.readiness import PROBE_CONTRACT, PROBE_ENV, ProbeContractError
+
+    payload = tmp_path / "payload"
+    resolver = payload / "scripts" / "versioned_runtime.py"
+    resolver.parent.mkdir(parents=True)
+    resolver.write_text("raise AssertionError('unqualified resolver imported')\n", encoding="utf-8")
+    (payload / "plugin.json").write_text('{"name":"agent-index"}', encoding="utf-8")
+    monkeypatch.setattr(configuration_layers, "__file__", str(payload / "src" / "agent_index" / "configuration_layers.py"))
+    monkeypatch.setattr(sys, "prefix", str(tmp_path / "non-retained"))
+    monkeypatch.setenv(PROBE_ENV, PROBE_CONTRACT)
+    with pytest.raises(ProbeContractError, match="unqualified"):
+        configuration_layers._legacy_owner_prefix(
+            lambda *args, **kwargs: pytest.fail("unqualified resolver selected"),
+        )
+
+
+@pytest.mark.parametrize("typed", [False, True])
+def test_readonly_same_cell_state_root_preserves_compatibility_refusal(
+    tmp_path, monkeypatch, typed,
+):
+    module = _module()
+    monkeypatch.setenv("COPILOT_EXTENSIONS_READONLY_PROBE", "isolated-imports-v1")
+    readiness = module._readiness_support()
+    monkeypatch.setattr(module, "_load_peer_launch", lambda: _FakePeerLaunch)
+    monkeypatch.setattr(
+        module.subprocess, "run",
+        lambda argv, **kwargs: subprocess.CompletedProcess(
+            argv, 126, stdout=json.dumps(readiness.REFUSAL) if typed else "",
+            stderr="peer context refused",
+        ),
+    )
+    expected = readiness.ProbeContractError if typed else _FakePeerLaunch.ContextRefused
+    with pytest.raises(expected):
+        module._run_state_root_same_cell(
+            {"pluginRoot": str(tmp_path)}, "explicit", cwd=tmp_path, project=None,
+        )
+
+
 def test_worktrees_command_override_still_wins_over_explicit_context(
     tmp_path: Path, monkeypatch
 ) -> None:

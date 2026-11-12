@@ -253,15 +253,27 @@ function Invoke-Runtime {
     $ErrorActionPreference = 'Continue'
     try {
         $pythonOptions = @()
+        $probeEntry = ''
         if ($forwardArgs.Count -gt 0 -and $forwardArgs[0] -in @('installer-readiness', 'invocation-contract')) {
             $pythonOptions = @('-I', '-B', '-X', 'utf8')
+            $probeEntry = Join-Path $scriptDir 'versioned_runtime_probe.py'
         }
         if (-not $argumentMode -or $argumentMode -eq 'Legacy') {
             # Match Codespaces' lossless forwarding across legacy native argument passing.
-            $json = ConvertTo-Json -InputObject @($forwardArgs) -Compress
+            if ($probeEntry) {
+                $json = ConvertTo-Json -InputObject @{
+                    entry = $probeEntry
+                    arguments = @($forwardArgs)
+                } -Compress
+                $runtimeBootstrap = "import base64,json,runpy,sys;p=json.loads(base64.b64decode(sys.argv[1]));sys.argv=[p['entry'],'--plugin','agent-containers','--module','agent_containers','--']+p['arguments'];runpy.run_path(p['entry'],run_name='__main__')"
+            } else {
+                $json = ConvertTo-Json -InputObject @($forwardArgs) -Compress
+                $runtimeBootstrap = "import base64,json,runpy,sys;sys.argv=['agent_containers']+json.loads(base64.b64decode(sys.argv[1]));runpy.run_module('agent_containers',run_name='__main__',alter_sys=True)"
+            }
             $encoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($json))
-            $runtimeBootstrap = "import base64,json,runpy,sys;sys.argv=['agent_containers']+json.loads(base64.b64decode(sys.argv[1]));runpy.run_module('agent_containers',run_name='__main__',alter_sys=True)"
             & $Python @pythonOptions -c $runtimeBootstrap $encoded
+        } elseif ($probeEntry) {
+            & $Python @pythonOptions $probeEntry --plugin agent-containers --module agent_containers -- @forwardArgs
         } else {
             & $Python @pythonOptions -m agent_containers @forwardArgs
         }

@@ -91,7 +91,8 @@ run_runtime() {
     fi
     case "${1:-}" in
         installer-readiness|invocation-contract)
-            exec "$AGENT_RT_PY" -I -B -X utf8 -m agent_machines "$@" ;;
+            exec "$AGENT_RT_PY" -I -B -X utf8 "$SCRIPT_DIR/versioned_runtime_probe.py" \
+                --plugin agent-machines --module agent_machines -- "$@" ;;
     esac
     exec "$AGENT_RT_PY" -m agent_machines "$@"
 }

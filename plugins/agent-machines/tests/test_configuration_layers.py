@@ -518,7 +518,7 @@ def test_deployed_legacy_resolver_requalifies_delivered_configuration(tmp_path, 
     actor = tmp_path / "owner.py"
     actor.write_text(
         "import json, os, sys\n"
-        "assert sys.argv[1:] == ['-I', '-X', 'utf8', '-B', '-m', 'agent_worktrees', "
+        "assert sys.argv[1:] == ['-I', '-B', '-X', 'utf8', '-m', 'agent_worktrees', "
         "'state-root', '--configuration', '--json']\n"
         "assert not any(key in os.environ for key in "
         "['AGENT_CONFIGURATION_CONTEXT', 'AGENT_RT_ROOT', 'PYTHONPATH', 'GITHUB_TOKEN'])\n"

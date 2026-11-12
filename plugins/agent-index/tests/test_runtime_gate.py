@@ -52,6 +52,14 @@ DEFAULT_FAKE_RUNTIME = (
 )
 
 
+def _qualify_probe(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({
+        "schema": "copilot-extensions.readiness-isolation", "version": 1,
+        "plugin": "agent-index", "module": "agent_index",
+    }), encoding="utf-8")
+
+
 def test_installer_readiness_uses_supported_update_arguments() -> None:
     manifest = json.loads((PLUGIN / "plugin.json").read_text(encoding="utf-8"))
     readiness = json.loads(
@@ -165,6 +173,16 @@ def _fixture(
     payload = tmp_path / f"payload-{shell}"
     scripts = payload / "scripts"
     scripts.mkdir(parents=True)
+    shutil.copy2(
+        PLUGIN / "scripts" / "versioned_runtime_probe.py",
+        scripts / "versioned_runtime_probe.py",
+    )
+    shutil.copytree(
+        PLUGIN / "scripts" / "configuration-layers",
+        scripts / "configuration-layers",
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+    )
+    _qualify_probe(payload / "readiness-isolation.json")
     shutil.copytree(
         SOURCE_ROOT, payload / "src",
         ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
@@ -211,7 +229,8 @@ def _fixture(
         PLUGIN / "scripts" / "resolve_effective_config.py",
         scripts / "resolve_effective_config.py",
     )
-    shutil.copy2(PLUGIN / "scripts" / "config_commands.py", scripts / "config_commands.py")
+    for name in ("config_commands.py", "resolve_effective_probe.py"):
+        shutil.copy2(PLUGIN / "scripts" / name, scripts / name)
     shutil.copy2(
         PLUGIN / "scripts" / "resolve-activation-role.py",
         scripts / "resolve-activation-role.py",
@@ -402,6 +421,7 @@ def _fake_runtime(
     package.mkdir()
     (package / "__init__.py").write_text("", encoding="utf-8")
     (package / "__main__.py").write_text(main_source, encoding="utf-8")
+    _qualify_probe(slot / "share" / "copilot-extensions" / "agent_index" / "readiness-isolation.json")
     return interpreter
 
 
@@ -634,7 +654,10 @@ def test_bootstrap_does_not_import_any_runtime_or_repo_shadow(
     shutil.copy2(PLUGIN / "scripts" / bootstrap.name, bootstrap)
     shutil.copy2(PLUGIN / "scripts" / f"bootstrap-killswitch-guard.{suffix}", scripts)
     shutil.copy2(PLUGIN / "scripts" / f"runtime-gate.{suffix}", scripts)
-    for name in ("resolve_effective_config.py", "config_commands.py", "resolve-activation-role.py"):
+    for name in (
+        "resolve_effective_config.py", "resolve_effective_probe.py",
+        "config_commands.py", "resolve-activation-role.py",
+    ):
         shutil.copy2(PLUGIN / "scripts" / name, scripts)
     plugin_name = "agent-index-bootstrap-probe"
     (payload / "plugin.json").write_text(
@@ -908,6 +931,62 @@ def test_installer_readiness_never_provisions_at_session_start(
     assert not list(script.parent.parent.rglob("__pycache__"))
 
 
+@pytest.mark.parametrize("shell", ["bash", "powershell", "pwsh"])
+@pytest.mark.parametrize("qualification", ["bootstrap-missing", "payload-missing", "runtime-missing", "qualified"])
+def test_readiness_qualifies_early_readers_and_runtime_before_import(
+    tmp_path: Path, shell: str, qualification: str,
+) -> None:
+    script, env = _fixture(tmp_path, shell, native_configuration_owner=False)
+    python = Path(env["TEST_PYTHON"])
+    runtime = python.parent.parent
+    package = next(runtime.rglob("agent_index/__init__.py"))
+    imported = tmp_path / "runtime-imported"
+    package.write_text(
+        f"from pathlib import Path\nPath({str(imported)!r}).touch()\n", encoding="utf-8",
+    )
+    (package.parent / "__main__.py").write_text(
+        "import json, os, sys\n"
+        "assert (sys.flags.isolated, sys.flags.dont_write_bytecode) == (1, 1)\n"
+        "assert os.environ['COPILOT_EXTENSIONS_READONLY_PROBE'] == 'isolated-imports-v1'\n"
+        "print(json.dumps({'state':'configuration-empty','cwd':os.getcwd()}))\n",
+        encoding="utf-8",
+    )
+    early = tmp_path / "early-reader-executed"
+    reader = script.parent / "resolve_effective_config.py"
+    reader.write_text(
+        f"from pathlib import Path\nPath({str(early)!r}).touch()\n"
+        + reader.read_text(encoding="utf-8").replace(
+            "from __future__ import annotations", "",
+        ), encoding="utf-8",
+    )
+    if qualification == "bootstrap-missing":
+        (script.parent / "versioned_runtime_probe.py").unlink()
+    elif qualification == "payload-missing":
+        (script.parent.parent / "readiness-isolation.json").unlink()
+    elif qualification == "runtime-missing":
+        (runtime / "share" / "copilot-extensions" / "agent_index" / "readiness-isolation.json").unlink()
+    shadow = tmp_path / "shadow-imported"
+    (tmp_path / "agent_index.py").write_text(
+        f"from pathlib import Path\nPath({str(shadow)!r}).touch()\n", encoding="utf-8",
+    )
+    result = _run(shell, script, env, "installer-readiness", cwd=tmp_path)
+    observed = json.loads(result.stdout)
+    if qualification == "qualified":
+        assert result.returncode == 0, result.stderr
+        assert observed["state"] == "configuration-empty"
+        assert Path(observed["cwd"]) == tmp_path
+        assert imported.exists()
+    else:
+        assert result.returncode == 126, result.stderr
+        assert observed["schema"] == "copilot-extensions.probe-compatibility"
+        assert observed["status"] == "unknown"
+        assert not imported.exists()
+    assert early.exists() is (qualification not in {"bootstrap-missing", "payload-missing"})
+    assert not shadow.exists()
+    assert not list(script.parent.parent.rglob("*.pyc"))
+    assert not list(runtime.rglob("*.pyc"))
+
+
 @pytest.mark.parametrize("shell", ["bash", "pwsh"])
 def test_status_without_runtime_is_non_mutating_setup_required(
     tmp_path: Path, shell: str
@@ -1112,7 +1191,8 @@ def test_real_resolver_absent_or_explicit_false_preserves_legacy(
         PLUGIN / "scripts" / "resolve_effective_config.py",
         scripts / "resolve_effective_config.py",
     )
-    shutil.copy2(PLUGIN / "scripts" / "config_commands.py", scripts)
+    for name in ("config_commands.py", "resolve_effective_probe.py"):
+        shutil.copy2(PLUGIN / "scripts" / name, scripts)
     shutil.copy2(
         PLUGIN / "scripts" / "resolve-activation-role.py",
         scripts / "resolve-activation-role.py",

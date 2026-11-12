@@ -11,7 +11,7 @@ REPO = Path(__file__).resolve().parents[1]
 
 
 def vendor_pairs():
-    return [
+    pairs = [
         (
             REPO / "libs" / "configuration-layers" / "src" / package / filename,
             REPO / "plugins" / plugin / "scripts" / "configuration-layers"
@@ -19,8 +19,18 @@ def vendor_pairs():
         )
         for plugin in ("agent-conduct-guidance", "agent-index", "agent-vault")
         for package in ("configuration_layers", "configuration_context")
-        for filename in (("__init__.py", "runtime.py") if package == "configuration_context" else ("__init__.py",))
+        for filename in (
+            ("__init__.py", "runtime.py", "readiness.py")
+            if package == "configuration_context" else ("__init__.py",)
+        )
     ]
+    probe = REPO / "libs" / "configuration-layers" / "src" / "configuration_context" / "readiness.py"
+    pairs.extend(
+        (probe, plugin / "scripts" / "versioned_runtime_probe.py")
+        for plugin in sorted((REPO / "plugins").iterdir())
+        if (plugin / "pyproject.toml").is_file() and (plugin / "installer-readiness.json").is_file()
+    )
+    return pairs
 
 
 def main():

@@ -2,6 +2,7 @@
 
 vault_runtime_activation() {
     local reader_dir python="${2:-}"
+    local installed_python="$python"
     reader_dir="$(cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || return 3
     if [[ -z "$python" ]]; then
         local candidate
@@ -18,5 +19,14 @@ vault_runtime_activation() {
     fi
     local project="${1:-$PWD}"
     if [[ $# -ge 2 ]]; then shift 2; elif [[ $# -gt 0 ]]; then shift; fi
-    "$python" -I -B -X utf8 "$reader_dir/runtime-activation.py" --cwd "$project" "$@" </dev/null
+    if [[ -n "${COPILOT_EXTENSIONS_READONLY_PROBE+x}" ]]; then
+        local probe_args=(
+            --plugin agent-vault --module agent_vault --script "$reader_dir/runtime-activation.py"
+        )
+        [[ -n "$installed_python" ]] || probe_args+=(--payload-only)
+        "$python" -I -B -X utf8 "$reader_dir/versioned_runtime_probe.py" \
+            "${probe_args[@]}" -- --cwd "$project" "$@" </dev/null
+    else
+        "$python" -I -B -X utf8 "$reader_dir/runtime-activation.py" --cwd "$project" "$@" </dev/null
+    fi
 }

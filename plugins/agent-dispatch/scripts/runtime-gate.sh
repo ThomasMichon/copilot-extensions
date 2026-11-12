@@ -130,7 +130,7 @@ run_runtime() {
         unset COPILOT_EXTENSIONS_CONTEXT
     fi
     case "${1:-}" in
-        installer-readiness|invocation-contract) exec "$AGENT_RT_PY" -I -B -X utf8 -m "$MODULE" "$@" ;;
+        installer-readiness|invocation-contract) exec "$AGENT_RT_PY" -I -B -X utf8 "$PAYLOAD_ROOT/scripts/versioned_runtime_probe.py" --plugin agent-dispatch --module "$MODULE" -- "$@" ;;
     esac
     exec "$AGENT_RT_PY" -m "$MODULE" "$@"
 }

@@ -263,8 +263,19 @@ function Invoke-Runtime {
             "--source-home=$identitySourceHome", "--source-id=$identitySourceId",
             "--cache-dir=$identityCacheDir"
         )
+        if ($readOnlyProbe) {
+            $validationArgs = @(
+                '-I', '-B', '-X', 'utf8',
+                (Join-Path $scriptDir 'versioned_runtime_probe.py'),
+                '--plugin', 'agent-vault', '--module', 'agent_vault',
+                '--script', (Join-Path $scriptDir 'validate_identity_cache_context.py'), '--'
+            ) + $validationArgs[2..($validationArgs.Count - 1)]
+        }
         $validatedCache = @(& $Python @validationArgs)
-        if ($LASTEXITCODE -ne 0) { exit 126 }
+        if ($LASTEXITCODE -ne 0) {
+            if ($readOnlyProbe -and $LASTEXITCODE -eq 126) { $validatedCache | Write-Output }
+            exit 126
+        }
         $env:AGENT_VAULT_CACHE_DIR = ($validatedCache -join "`n").Trim()
     }
     # Relax EAP for just this forwarding call: the wrapped module's own
@@ -278,13 +289,19 @@ function Invoke-Runtime {
         $pythonOptions = @('-I', '-B', '-X', 'utf8')
     }
     try {
-        & $Python @pythonOptions -m agent_vault @forwardArgs
+        if ($readOnlyProbe) {
+            $probeEntry = Join-Path $scriptDir 'versioned_runtime_probe.py'
+            & $Python @pythonOptions $probeEntry --plugin agent-vault --module agent_vault -- @forwardArgs
+        } else {
+            & $Python -m agent_vault @forwardArgs
+        }
     } finally {
         $ErrorActionPreference = $previousEap
     }
     exit $LASTEXITCODE
 }
 
+$readOnlyProbe = $commandArguments.Count -gt 0 -and $commandArguments[0] -in @('installer-readiness', 'invocation-contract')
 $runtimePython = Resolve-RuntimePython
 if ($commandArguments.Count -gt 0 -and $commandArguments[0] -ceq 'invocation-contract') {
     if ($commandArguments.Count -ne 2 -or $commandArguments[1] -cne '--json') {
@@ -298,8 +315,12 @@ if ($commandArguments.Count -gt 0 -and $commandArguments[0] -ceq 'invocation-con
 if (-not (Test-Path Env:AGENT_VAULT_PINNED_CONTEXT)) {
     try {
         . (Join-Path $scriptDir 'runtime-activation.ps1')
-        $activation = Get-VaultRuntimeActivation -Project $project -InvocationDirectory $invocationDirectory -RuntimeRoot $runtimeRoot -Context $context -Python $runtimePython -RetainNativeSelector
+        $activation = Get-VaultRuntimeActivation -Project $project -InvocationDirectory $invocationDirectory -RuntimeRoot $runtimeRoot -Context $context -Python $runtimePython -RetainNativeSelector -ReadOnlyProbe:$readOnlyProbe
     } catch {
+        if ($_.Exception.Data['VaultProbeCompatibility']) {
+            [Console]::Out.WriteLine([string]$_.Exception.Data['VaultProbeCompatibility'])
+            exit 126
+        }
         if ($_.Exception.Data['VaultRepositoryContextMissing']) {
             [Console]::Error.WriteLine("[agent-vault] repository context is missing. Run from an adopted repository or use '<repo> vault unlock' from any directory.")
         } else {

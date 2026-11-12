@@ -1,0 +1,6 @@
+{
+  "schema": "copilot-extensions.readiness-isolation",
+  "version": 1,
+  "plugin": "agent-vault",
+  "module": "agent_vault"
+}

@@ -82,6 +82,9 @@ def _legacy_owner_prefix(ready_owner_prefix):
         path = payload / "scripts" / "versioned_runtime.py"
         if not path.is_file() or path.is_symlink():
             return []
+    from configuration_context.readiness import qualify_resolver
+
+    qualify_resolver(path, "agent-index", "agent_index")
     peer = cfg._knowledge_overlay._load_peer_launch()
     sdk = peer._load_primitive(path, "_index_configuration_versioned_runtime")
     return ready_owner_prefix(

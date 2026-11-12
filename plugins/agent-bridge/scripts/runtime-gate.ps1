@@ -245,11 +245,19 @@ function Set-RuntimeEnvironment {
 function Invoke-Runtime {
     param([Parameter(Mandatory)][string]$Python)
     Set-RuntimeEnvironment
-    $nativeArgs = $forwardArgs
+    $pythonOptions = @()
+    $nativeArgs = @('-m', 'agent_bridge') + $forwardArgs
+    if ($forwardArgs.Count -gt 0 -and $forwardArgs[0] -in @('installer-readiness', 'invocation-contract')) {
+        $pythonOptions = @('-I', '-B', '-X', 'utf8')
+        $nativeArgs = @(
+            (Join-Path $payloadRoot 'scripts\versioned_runtime_probe.py'),
+            '--plugin', 'agent-bridge', '--module', 'agent_bridge', '--'
+        ) + $forwardArgs
+    }
     $argumentMode = Get-Variable PSNativeCommandArgumentPassing -ValueOnly -ErrorAction SilentlyContinue
     if (-not $argumentMode -or $argumentMode -eq 'Legacy') {
         # Legacy PowerShell reparses native arguments, including literal quotes.
-        $nativeArgs = @($forwardArgs | ForEach-Object {
+        $nativeArgs = @($nativeArgs | ForEach-Object {
             '"' + [regex]::Replace([regex]::Replace([string]$_, '(\\*)"', '$1$1\"'), '(\\+)$', '$1$1') + '"'
         })
     }
@@ -260,16 +268,12 @@ function Invoke-Runtime {
     $previousEap = $ErrorActionPreference
     $previousRoot = $env:AGENT_RT_ROOT
     $ErrorActionPreference = 'Continue'
-    $pythonOptions = @()
-    if ($forwardArgs.Count -gt 0 -and $forwardArgs[0] -in @('installer-readiness', 'invocation-contract')) {
-        $pythonOptions = @('-I', '-B', '-X', 'utf8')
-    }
     try {
         $env:AGENT_RT_ROOT = $runtimeRoot
         if ($hasPipelineInput) {
-            $pipelineInput | & $Python @pythonOptions -m agent_bridge @nativeArgs
+            $pipelineInput | & $Python @pythonOptions @nativeArgs
         } else {
-            & $Python @pythonOptions -m agent_bridge @nativeArgs
+            & $Python @pythonOptions @nativeArgs
         }
     } finally {
         $env:AGENT_RT_ROOT = $previousRoot

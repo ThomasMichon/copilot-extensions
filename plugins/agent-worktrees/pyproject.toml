@@ -160,5 +160,8 @@ select = ["E", "F", "W", "I", "UP", "B", "RUF"]
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.data-files]
+"share/copilot-extensions/agent_worktrees" = ["readiness-isolation.json"]
+
 [tool.setuptools.package-data]
 agent_worktrees = ["pre_push.sh", "repository-authentication-v1.json", "new-admission-v1.json", "sync-progress-v1.json"]

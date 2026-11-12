@@ -289,7 +289,10 @@ def test_process_trace_does_not_consume_its_bound_before_the_baseline_window(tmp
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows native diagnostic script")
-@pytest.mark.parametrize("kind", ("non-cim", "cim", "timeout", "access-denied"))
+@pytest.mark.parametrize("kind", (
+    "non-cim", "cim", "timeout", "access-denied",
+    "cim-data", "cim-string-code", "cim-inner", "cim-inner-deep",
+))
 @pytest.mark.parametrize("stage", ("session", "scan"))
 def test_process_trace_retains_sanitized_scan_failure_and_still_refuses(
     tmp_path: Path, kind: str, stage: str,
@@ -305,9 +308,37 @@ def test_process_trace_retains_sanitized_scan_failure_and_still_refuses(
         f"[Microsoft.Management.Infrastructure.CimException]::new('{private} {code}')"
         if kind != "non-cim" else f"'{private}'"
     )
+    setup = ""
+    if kind in {"cim-data", "cim-string-code"}:
+        setup = (
+            "$data=[Microsoft.Management.Infrastructure.CimInstance]::new('CIM_Error');"
+            "foreach($pair in @(@('CIMStatusCode',[uint32]1),"
+            "@('ErrorType',[uint16]2),@('PerceivedSeverity',[uint16]5),"
+            "@('ProbableCause',[uint16]7),@('ErrorSourceFormat',[uint16]0),"
+            "@('error_Category',[uint16]3),"
+            f"@('Message','{private}'),@('ErrorSource','{private}'),"
+            "@('PrivateNumericField',[uint32]42))){"
+            "$data.CimInstanceProperties.Add("
+            "[Microsoft.Management.Infrastructure.CimProperty]::Create("
+            "$pair[0],$pair[1],[Microsoft.Management.Infrastructure.CimFlags]::None))};"
+            "$data.CimInstanceProperties.Add("
+            "[Microsoft.Management.Infrastructure.CimProperty]::Create('error_Code',"
+            + ("[uint32]0x80041069L" if kind == "cim-data" else "'2147749993'") +
+            ",[Microsoft.Management.Infrastructure.CimFlags]::None));"
+            "$script:fixtureError=[Microsoft.Management.Infrastructure.CimException]::new($data);"
+        )
+        error = "$script:fixtureError"
+    elif kind in {"cim-inner", "cim-inner-deep"}:
+        setup = (
+            "$inner=$null;"
+            f"foreach($index in 1..{5 if kind == 'cim-inner-deep' else 1}){{"
+            f"$inner=[InvalidOperationException]::new('{private}',$inner)}};"
+            f"$script:fixtureError=[Microsoft.Management.Infrastructure.CimException]::new('{private}',$inner);"
+        )
+        error = "$script:fixtureError"
     target = "New-CimSession" if stage == "session" else "Get-CimInstance"
     prefix = (
-        _trace_session_fixture() +
+        _trace_session_fixture() + setup +
         f"function {target} {{throw {error}}};"
         "function Start-Sleep {param($Milliseconds);"
         f"[IO.File]::WriteAllText('{str(stop).replace(chr(39), chr(39) * 2)}','stop');}}"
@@ -330,8 +361,22 @@ def test_process_trace_retains_sanitized_scan_failure_and_still_refuses(
     assert failure["records_at_failure"] == 0
     assert failure["phase"] == ("session-create" if stage == "session" else "query-pipeline")
     assert failure["error_category"]
-    assert failure["classification"] == {"cim": "cim-error", "non-cim": "non-cim-error"}.get(kind, kind)
+    assert failure["classification"] == {
+        "timeout": "timeout", "access-denied": "access-denied", "non-cim": "non-cim-error",
+    }.get(kind, "cim-error")
     assert failure["embedded_hresult"] == (int(code, 16) if code else None)
+    expected_data = {
+        "CIMStatusCode": 1, "ErrorType": 2, "PerceivedSeverity": 5,
+        "ProbableCause": 7, "ErrorSourceFormat": 0, "error_Category": 3,
+    } if kind in {"cim-data", "cim-string-code"} else {}
+    if kind == "cim-data":
+        expected_data["error_Code"] = 0x80041069
+    assert failure["numeric_error_data"] == expected_data
+    assert failure["error_data_status"] == ("captured" if expected_data else "absent")
+    inner_count = {"cim-inner": 1, "cim-inner-deep": 4}.get(kind, 0)
+    assert failure["inner_hresults"] == [-2146233079] * inner_count
+    assert failure["inner_chain_truncated"] is (kind == "cim-inner-deep")
+    assert "PrivateNumericField" not in raw
     assert trace["timing"]["scan_attempts"] == 1 and trace["timing"]["scan_successes"] == 0
     assert trace["timing"]["query_pipeline_attempts"] == int(stage == "scan")
     if kind != "non-cim":

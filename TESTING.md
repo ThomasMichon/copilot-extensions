@@ -10236,6 +10236,11 @@ has recorded readiness; constructor processes cannot consume the lifecycle
 record allowance. Scan failures retain at most eight exception types and
 HRESULTs and numeric CIM native/status codes, never exception messages or
 argument values, and still fail the lane.
+The already-caught exception also supplies only allowlisted UInt16/UInt32
+error-data fields and at most four inner HRESULTs, with explicit unavailable
+and truncated indicators. String-valued codes, arbitrary properties and inner
+messages are omitted; diagnostic codes do not change failure classification
+or acceptance. No extra provider query is issued to obtain them.
 The census requests only its four consumed process properties. Scan-error
 samples also retain elapsed milliseconds and the record count at failure;
 query timeout, polling cadence and failure policy remain unchanged.

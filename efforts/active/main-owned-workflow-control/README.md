@@ -20,7 +20,7 @@ The November 9 priority extends installed release qualification through the
 [Manager Create/Resume/Open lifecycle](installed-manager-lifecycle.md), reusing
 the existing #11377 native and #3336/#7529 release owners.
 
-## Guiding Intent
+## Goal
 
 Reduce redundant status checks and overall pipeline executions so Copilot review
 can run more often without unnecessary throttling. Preserve validation assurance
@@ -44,6 +44,20 @@ dev-backed-deployment consideration.
 The November 9 request explicitly adds the bounded installed-Manager lifecycle
 exception to that portfolio policy. It does not restore unrelated integration
 suites to fast PR CI or transfer the promotion writer.
+
+The November 12 readiness-compatibility amendment selects
+`refuse-unqualified-probes`: return unknown before executing an unqualified
+older probe, with the owning updater as recovery. Preserve ordinary commands,
+separately authorized installer actions and the older-baseline qualification
+requirement. The exact decision and its limits are recorded in the
+[installed-lifecycle scope approval](installed-manager-lifecycle.md#november-12-readiness-compatibility-approval).
+This adds no rollout, shared-repair or Main-activation authority.
+
+## Guiding Intent
+
+The former Guiding Intent is retained verbatim in Goal above. The
+[Request](#request) preserves the originating operator wording and subsequent
+campaign amendments.
 
 ## Participants
 

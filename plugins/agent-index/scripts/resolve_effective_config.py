@@ -738,6 +738,23 @@ def _validate_index_owner_or_refuse(raw_context: str) -> dict[str, Any]:
         ) from error
 
 
+@cache
+def _probe_support() -> Any:
+    import importlib.util
+
+    path = Path(__file__).with_name("resolve_effective_probe.py")
+    spec = importlib.util.spec_from_file_location("_index_probe_support", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("agent-index probe boundary is unavailable")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _readiness_support():
+    return _probe_support()._readiness_support()
+
+
 def _run_state_root_same_cell(
     own: dict[str, Any], raw_context: str, *, cwd: Path | None, project: str | None,
 ) -> subprocess.CompletedProcess[str] | None:
@@ -774,6 +791,7 @@ def _run_state_root_same_cell(
             f"Same-cell worktrees state-root invocation failed: {error}"
         ) from error
     if result.returncode == 126:
+        _probe_support().refuse_unqualified(result)
         raise peer_launch.ContextRefused(
             result.stderr.strip() or "Same-cell worktrees context refused"
         )
@@ -841,28 +859,9 @@ def _project_name_for_root(root: Path) -> str | None:
 def _run_state_root(
     command: str, environment: dict[str, str], *, cwd: Path | None, project: str | None
 ) -> subprocess.CompletedProcess[str] | None:
-    arguments = ("state-root", "--json") if project is None else (
-        "--project", project, "state-root", "--json",
+    return _probe_support().run_state_root(
+        command, environment, cwd=cwd, project=project, argv=_worktrees_argv,
     )
-    try:
-        return subprocess.run(
-            _worktrees_argv(command, *arguments),
-            cwd=str(cwd) if cwd is not None else None,
-            env=environment,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=20,
-            check=False,
-            # `command` can resolve to the PATH `.cmd` binstub (shutil.which
-            # prefers .cmd over .ps1 on Windows), which Windows must interpret
-            # through a fresh cmd.exe -- CREATE_NO_WINDOW keeps that console
-            # invisible instead of flashing on every runtime-resolution probe.
-            creationflags=(0x08000000 if os.name == "nt" else 0),
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
 
 
 def _external_state_root_runner(

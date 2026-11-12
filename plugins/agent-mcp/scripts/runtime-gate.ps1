@@ -192,7 +192,12 @@ function Invoke-Runtime {
         $pythonOptions = @('-I', '-B', '-X', 'utf8')
     }
     try {
-        & $Python @pythonOptions -m agent_mcp @forwardArgs
+        if ($pythonOptions.Count) {
+            $probeEntry = Join-Path $payloadRoot 'scripts\versioned_runtime_probe.py'
+            & $Python @pythonOptions $probeEntry --plugin agent-mcp --module agent_mcp -- @forwardArgs
+        } else {
+            & $Python -m agent_mcp @forwardArgs
+        }
     } finally {
         $ErrorActionPreference = $previousEap
     }

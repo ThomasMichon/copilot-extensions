@@ -72,6 +72,33 @@ activation. A private fixture backend is not the operator's PSMux namespace.
 No new daemon, scheduler, promotion writer or competing qualification effort
 is introduced. Plan approval does not imply acceptance of a source handoff.
 
+## Scope Approvals
+
+### November 12 readiness compatibility approval
+
+The decision prompt was:
+
+> Older-payload compatibility needs a behavior decision. A current dispatcher
+> can still select older runtime code with unisolated nested imports. Should
+> readiness return `unknown` before executing such an unqualified probe, with
+> the owning updater as recovery? Ordinary commands and explicitly authorized
+> installer actions would remain available; this would not count as qualifying
+> an older upgrade baseline.
+
+The selected option was:
+
+> Return unknown until payload and runtime meet the isolation contract
+> (recommended)
+
+The operator's exact response was `refuse-unqualified-probes`.
+
+This authorizes implementing that read-only compatibility policy in the
+existing source slice, with qualification of both the selected payload and
+installed runtime before probe execution. It does not authorize a live update,
+probe replay, operator installation, shared repair, baseline admission or
+Main activation. Ordinary commands and separately authorized installer actions
+remain available. The parent's older-baseline upgrade proof remains open.
+
 ## Plan
 
 The following implementation decomposition is **agent-recommended**.
@@ -2576,3 +2603,272 @@ settle, no task remains, and no payload-difference report is present. These
 facts do not override the failed observer. The Bash correction passes F/E9,
 module limits, all 13 install contracts, strict runtime resolution, documentation
 and whitespace checks; source admission changes exactly one digest, not a gate.
+
+### November 12 - Trace host and nested driver isolation
+
+The actual review on `38ac` clears the Bash startup finding but retains the
+import finding, naming Windows host discovery, Podman execution and older
+installed-payload compatibility. Trace those paths rather than treating the
+summary as a proved cause or a clean verdict.
+
+Three native Windows controls reproduce Machines selecting a checkout-local
+PowerShell executable through empty, dot and relative-tools PATH entries.
+Python 3.11's `shutil.which` prepends the current directory even when the child
+environment disables implicit Windows lookup. Interpreter admission now
+enumerates absolute PATH directories and directory-qualified PATHEXT candidates
+before hashing the selected executable. Twelve host, environment, context and
+fallback controls pass, including actual PowerShell execution. Installer
+working-directory semantics and process-scoped execution policy are unchanged.
+
+Containers' bundled Podman command is another Python process boundary. Two
+actual protocol controls fail before the fix with checkout/PYTHONPATH shadows,
+then pass with isolated, bytecode-disabled UTF-8 module dispatch. Two further
+native lookup controls reproduce checkout-local Podman engine and external
+driver selection despite the read-only flag. Those lookups now honor that flag
+by enumerating absolute PATH directories; ordinary unflagged lookup and
+explicit manifest precedence remain unchanged.
+
+The two driver files pass 126 controls with ten platform skips after updating
+the native-engine mock seam, excluding one existing full fake-provider
+roundtrip for diagnosis. The broader initial run times out in that roundtrip
+at its unchanged 30-second limit. Isolated execution passes in 26.82 seconds.
+This separates the observed results; it does not establish a cause, waive the
+earlier timeout or claim a clean combined run.
+
+Compatibility remains unresolved. Current legacy dispatch can select an older
+completed runtime, whose nested code need not contain the new import flags.
+An older enabled payload can itself contain an unisolated dispatcher; its
+declared no-self-provision variable alone is not an import-isolation contract.
+Do not claim these source fixes rewrite frozen older bytes, invent an admitted
+baseline or silently raise a support floor. An agent-proposed compatibility
+policy is to report unknown before executing an unqualified older probe,
+with an explicit owning update as recovery, while preserving ordinary commands
+and separately authorized installer actions. The operator then selects
+`refuse-unqualified-probes` under the scope approval above. Its producer/
+consumer qualification mechanism is not yet implemented.
+
+These are local source corrections and evidence, not publication, native
+qualification or rollout. The fatal native CIM observation, actual review,
+admitted-baseline upgrade, frozen enforcement and Main adoption remain open.
+
+### November 12 - Explicit probe-contract reader and payload admission
+
+The compatibility implementation begins with the existing read-only owner
+transport. Its new stdlib-only helper reads a versioned behavioral declaration,
+not a package-version floor. Payload qualification reads the exact selected
+payload. Runtime qualification reads wheel-owned metadata beneath the selected
+interpreter's environment prefix, not a mutable root stamp or a newer payload.
+Missing, invalid, foreign, linked or unknown-version declarations refuse before
+provider execution. Ordinary calls without the recursive-probe marker retain
+their prior path.
+
+The same helper can serve as the trusted payload bootstrap: use isolated,
+no-bytecode Python, validate the actual selected runtime's descriptor, then
+enter its module in that one process. This avoids a new handshake or separate
+preflight child. A typed version-1 compatibility refusal carries unknown support
+and owning-update recovery; it does not masquerade as module readiness.
+Current payload dispatchers, wheel descriptor producers and nested peer
+admission still need integration and qualification before this policy is
+complete. No production descriptor has yet been added, and no older baseline
+has been admitted.
+
+Machines now binds the selected payload's declaration digest to read-only
+execution, refuses absent/unqualified support before invoking its action, and
+recognizes the typed runtime refusal as unknown with owning-update recovery.
+Installer bindings and working directory are unchanged; installer environments
+do not inherit the recursive-probe requirement. An initial control exposed
+changed refusal ordering when the project directory disappeared or became a
+reparse point. Checking the existing project-context admission first preserves
+that prior refusal and its pre-execution boundary.
+
+Validation so far: 20 owner-transport controls pass, including the real
+single-process bootstrap refusing an unqualified runtime before its module
+runs, then observing a qualified installed module from a shadow-bearing
+project with no bytecode writes. The focused Machines packet passes 17 cases,
+including five new compatibility controls, prior project-context refusal,
+real host discovery and checkout/startup-file exclusion. These run through the
+existing isolated environment and process-containment APIs. The reader's
+standalone source copies are synchronized; the broader runtime/dispatcher
+integration, ordinary full-file regressions, combined driver timeout diagnosis,
+strict native observation and publication gates remain open. No live update,
+probe replay, shared repair, baseline admission or Main activation occurred.
+
+The next local delta wires that single-process bootstrap into the actual
+Machines and Containers payload dispatchers on both shell families. Containers
+retains its encoded Legacy native-argument path instead of retokenizing user
+arguments. The shared source synchronizer delivers the identical helper to all
+nine readiness-declaring Python runtime payloads, but delivering a helper does
+not declare those providers qualified.
+
+The focused real-dispatch packet passes 27 cases with 11 platform/argument-mode
+skips. It includes a current Machines payload refusing an older, unqualified
+runtime before importing its marker-writing module, and the same Containers
+refusal through native and forced Legacy argument modes. Qualified-module
+controls retain cwd, installed site packages, isolation, UTF-8, no bytecode and
+payload immutability. The 20 owner-transport controls pass again after this
+integration; all changed Python passes F/E9 and whitespace checks pass.
+
+Recursive peer admission, the other provider entry paths and wheel-owned
+descriptor production remain unfinished. In particular, nested compatibility
+refusals must survive ordinary configuration/readiness error adapters as
+unknown, not be collapsed into failed module readiness. Early provider use
+inside native activation/configuration helpers must also be qualified, rather
+than stamping a provider solely because its final CLI invocation is guarded.
+No production descriptors have been added and none of these local deltas has
+been published or merged. The original combined driver timeout and fatal
+native CIM observation remain unresolved and unwaived.
+
+### November 12 - Recursive refusal propagation and early Vault readers
+
+The source-only transport now preserves a distinct compatibility exception
+through nested configuration reads and peer bootstrap execution. Same-cell
+resolution checks the peer payload before importing its installation primitive
+or resolver, then qualifies the exact selected installed runtime before use.
+Ordinary peer calls without the requirement marker retain their prior path.
+The installed-package and standalone bootstrap copies have separate Python
+class identities; the real nested bootstrap control proves that the refusal
+still returns typed unknown rather than a traceback or failed readiness.
+
+Bridge, CodeSpaces, Dispatch, MCP and Worktrees now use the same qualified
+module entry as Machines and Containers. CodeSpaces preserves its encoded
+Legacy argument path. Vault additionally uses the qualified script entry for
+activation and pinned identity-cache validation before its final module call.
+An evaluator with no selected runtime may run only an explicitly selected
+script from the qualified payload; nested installed providers still require
+their own exact-runtime qualification. The early activation adapter preserves
+typed unknown instead of reporting a generic configuration failure.
+
+Validation: 47 contained owner-transport and peer controls pass, including
+actual installed Python/bootstrap execution, payload-script containment and
+ordinary-call preservation. The expanded real-dispatch packet initially has
+16 failures, 42 passes and 26 platform/argument-mode skips. All failures occur
+before the new bootstrap because the added Bridge/Dispatch fixtures lack the
+existing required read-only resolver header. Correcting those fixtures,
+without changing that guard, yields 16 passes and eight platform skips in the
+residual packet. Six real Vault payload controls pass: missing payload/runtime
+qualification refuses before activation code runs, while qualified execution
+retains the expected service-readiness failure. Python F/E9 and whitespace
+checks pass. These synthetic declarations are not an admitted upgrade baseline.
+
+Index remains unfinished: its early effective-configuration reader, nested
+state-root calls and selected-runtime origin import precede final dispatch.
+Legacy configuration resolver fallbacks and remaining readiness error adapters
+also require a final path audit. No production declaration or wheel producer
+has been added, and there is no new commit, push, merge, live probe replay,
+installation, shared repair or Main activation. Combined driver timeout and
+strict native CIM failure remain unresolved and unwaived.
+
+### November 12 - Index early qualification and borrowed resolver provenance
+
+Index's effective-configuration and activation-role scripts now run through
+the qualified payload-only reader. Its selected runtime is qualified before
+origin discovery and final module dispatch; top-level origin discovery no
+longer imports the package as a preliminary check. The installation-cell
+validator retains its own admission checks and runs without bytecode writes.
+Nested state-root reads preserve typed compatibility refusals. An unqualified
+legacy command is refused before execution, not tried as a fallback.
+
+Borrowed configuration SDKs now require either the actually executing
+interpreter's retained resolver or a qualified payload before import. Mutable
+deployed shell resolvers refuse inside this read-only tree before spawning;
+their ordinary completion-selection path remains available outside it.
+Conduct routing also qualifies its own and the selected peer's scripts before
+loading them. Four legacy callers now consume the canonical isolated prefix
+directly instead of prepending duplicate interpreter flags.
+
+Validation: 68 contained transport/resolver/peer controls pass with two POSIX
+skips. Real Index dispatcher and nested-owner controls pass 20 cases with seven
+platform skips. Routing passes 38, MCP configuration 30, Vault configuration
+68, Machines configuration 45 with six skips, SSH configuration 30 with five
+skips, and the focused Logger pre-import refusal passes. Windows PowerShell
+initially converted the helper's stderr into a terminating error; scoped
+native forwarding now preserves exit 126 and its typed stdout, including
+inside assignments and conditions. Configuration regression runs exposed and
+corrected the callers' duplicate-prefix expectations and a stale Vault
+capability expectation. Changed Python F/E9, whitespace and shared-helper
+synchronization checks pass.
+
+These are source and synthetic consumer results, not native lifecycle
+acceptance or an admitted older baseline. Production declarations, wheel
+delivery, full mixed-version and installer regression evidence, and source
+binding refresh remain pending. No new commit, push, merge, live probe replay,
+installation, shared repair or Main activation occurred. The original
+combined driver timeout and strict native CIM failure remain unresolved and
+unwaived.
+
+The subsequent adapter trace found no additional generic-exception conversion
+on the readiness entries inspected. Source declarations are now added for the
+nine guarded runtime providers and the payload-only Conduct reader; each
+runtime's setuptools declaration maps the file to its wheel-owned
+`share/copilot-extensions` prefix. Static schema, identity and data-file mapping
+checks pass. Actual wheel delivery is not yet verified and remains the next
+packaging check. The install-contract gate currently refuses MCP's changed
+script/source producer digests; refresh those bindings only after the remaining
+source changes are settled. This is not a waived gate or published declaration.
+
+### November 12 - Real wheel delivery and shared-prefix ownership
+
+The canonical artifact builder, using an existing prepared setuptools 84.2.1
+backend without network resolution or a relaxed build floor, built all nine
+provider wheels. Installing those wheels without dependencies in disposable
+environments delivered the exact descriptor bytes at the selected prefix.
+These are packaging controls, not runnable full-provider installations or
+an admitted older upgrade baseline.
+
+Reviewing the shared-core consumer exposed a collision in the initial mapping:
+every provider would have installed the same data-file path. Each ordinary
+wheel now owns `share/copilot-extensions/<module>/readiness-isolation.json`.
+The runtime reader selects only that module's declaration beneath the exact
+interpreter prefix. An actual two-provider wheel installation proves both
+declarations coexist and removing one provider does not invalidate the other.
+No mutable aggregate declaration or root stamp is introduced.
+
+Validation: the real wheel, shared-prefix and canonical transport controls pass
+78 cases with two platform skips. The actual dispatcher packet passes 58 with
+26 platform/argument-mode skips; Index's early-reader selection passes 20 with
+seven platform skips, and Vault's activation boundary passes six. The expanded
+Machines packet passes 14 but exposes one generic-provider fixture that renamed
+its plugin without renaming its new support declaration; that fixture is now
+corrected and its residual result is pending. No production guard was relaxed.
+MCP's source producer hashes are refreshed without changing contract revision
+36; all 13 installation contracts and shared-helper synchronization pass.
+
+Documentation now records module-scoped delivery, typed unknown, mixed
+payload/runtime and rollback refusal, ordinary-command preservation and the
+provider-first rollout requirement. Changefiles cover all 13 touched plugins.
+Publication and deployment remain pending: there is no new commit, push,
+merge, operator installation, probe replay, shared repair or Main activation.
+The original combined driver timeout, strict native CIM failure, admitted
+older-baseline proof, frozen enforcement and separate Main adoption remain
+unresolved and unwaived.
+
+The corrected Machines selection subsequently passes all 15 cases; four
+additional module-path controls reject traversal and invalid module names.
+All changed Python passes F/E9. The original two-file driver packet also now
+passes 127 cases with ten platform skips under its unchanged limits.
+Streaming diagnostics showed 17 sequential driver operations consuming nearly
+the entire 30-second test budget, not a single blocked operation. The fixture
+now uses base Python only for its stdlib-only fake native engine instead of
+reloading the plugin test environment for every fake engine invocation. The
+actual provider CLI, native process boundary, lifecycle assertions and cleanup
+remain intact. This closes the combined driver packet failure; it does not
+explain or waive the separate hosted CIM error.
+
+The existing diagnostic seam belongs to this campaign's earlier commit
+`9d700b8a57`; no foreign helper hunk is changed. Its caught CIM exception can
+carry structured error data that was previously omitted. The trace now retains
+only seven named numeric CIM/WMI fields and at most four inner HRESULTs, with
+explicit unavailable/truncated indicators. Existing classification, one-second
+queries, cadence, caps and fatal scan/close policy remain unchanged. No extra
+provider query or native retry is performed. All 21 controlled trace cases
+pass; these diagnose serialization/refusal, not the hosted failure's cause.
+
+The size guard found that the Index reader exceeded its shrink-only ceiling.
+The standalone reader's Worktrees invocation and typed-refusal boundary now
+lives in its payload-owned `resolve_effective_probe.py`, loaded by absolute
+sibling path. Existing reader call signatures, ordinary subprocess behavior
+and typed versus unrelated exit-126 handling remain intact. Copied-reader
+fixtures include the helper. The focused packet passes 23 cases with 11
+platform skips; three accessor failures are corrected by preserving the
+existing private reader accessor and their residual passes all three cases.
+The whole-source size guard passes without a baseline increase.

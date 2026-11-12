@@ -58,7 +58,9 @@ def _qualified_peer_payload(sdk, own, home, repo, environment):
 
 def _ready_owner_prefix(payload, runtime_root):
     from configuration_context import ready_owner_prefix
+    from configuration_context.readiness import qualify_resolver
 
+    qualify_resolver(payload / "scripts" / "versioned_runtime.py", "agent-worktrees", "agent_worktrees")
     runtime = _load_owned_module(
         payload / "scripts" / "versioned_runtime.py", "_conduct_configuration_versioned_runtime",
     )
@@ -68,7 +70,12 @@ def _ready_owner_prefix(payload, runtime_root):
 def qualified_owner_report(repo, payload, home, environment):
     """Reacquire actual owner mode and configuration; placement is not activation."""
     from configuration_context import context_from_owner, read_owner_context
+    from configuration_context.readiness import qualify_payload_code
 
+    qualify_payload_code(
+        payload / "scripts" / "installation-context" / "installation_context.py",
+        payload, "agent-conduct-guidance", "model_configuration", environment=environment,
+    )
     sdk = _installation_sdk(payload)
     own = sdk.resolve_payload_source(
         payload_root=payload, plugin_id="agent-conduct-guidance",
@@ -78,6 +85,10 @@ def qualified_owner_report(repo, payload, home, environment):
     source_environment.pop("COPILOT_PLUGIN_ROOT", None)
     peer = _qualified_peer_payload(sdk, own, home, repo, source_environment)
     peer_payload = Path(peer["payloadRoot"])
+    qualify_payload_code(
+        peer_payload / "scripts" / "registry_root.py", peer_payload,
+        "agent-worktrees", "agent_worktrees", environment=environment,
+    )
     registry = _load_owned_module(
         peer_payload / "scripts" / "registry_root.py", "_conduct_configuration_registry",
     )

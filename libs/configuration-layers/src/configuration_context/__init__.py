@@ -58,6 +58,10 @@ def ready_owner_prefix(
     executable = Path(python)
     if not executable.is_absolute():
         raise ConfigurationError("configuration owner resolver returned a relative interpreter")
+    from .readiness import required, runtime_contract
+
+    if required():
+        runtime_contract(executable, module)
     return [str(executable), "-I", "-B", "-X", "utf8", "-m", module]
 
 
@@ -143,6 +147,15 @@ def read_owner_context(
     except (OSError, subprocess.SubprocessError) as error:
         raise ConfigurationError("configuration owner read failed") from error
     if result.returncode:
+        from .readiness import ProbeContractError, unqualified_output
+
+        if (
+            result.returncode == 126 and len(result.stdout) <= MAX_REPORT_BYTES
+            and unqualified_output(result.stdout)
+        ):
+            raise ProbeContractError(
+                "Configuration owner import isolation is unqualified; update the owning installation."
+            )
         diagnostic = result.stderr[:MAX_REPORT_BYTES].decode("utf-8", errors="replace")
         unsupported = result.returncode == 2 and (
             "unrecognized arguments: --configuration" in diagnostic
