@@ -8,6 +8,7 @@ on:
       - ".github/workflows/mcp-owner-exec.yml"
       - "plugins/agent-mcp/src/agent_mcp/owner_exec.py"
       - "plugins/agent-mcp/tests/test_owner_exec.py"
+      - "plugins/agent-mcp/tests/native/test_owner_exec_copilot.py"
 
 permissions:
   contents: read
@@ -37,5 +38,52 @@ jobs:
         with:
           name: mcp-owner-exec-source-controls
           path: ${{ runner.temp }}/mcp-owner-exec-${{ github.run_id }}
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Prepare pinned native client on this disposable runner only
+        env:
+          COPILOT_ASSET_URL: https://github.com/github/copilot-cli/releases/download/v1.0.105/copilot-linux-x64.tar.gz
+          COPILOT_ASSET_SHA256: aba1f06f27bc0447656647f76e0a4cf58b4b2a341c75ff04a750982b6aeb6bd2
+        run: |
+          python - <<'PY'
+          import hashlib
+          import os
+          from pathlib import Path
+          import shutil
+          import tarfile
+          import urllib.request
+          root = Path(os.environ["RUNNER_TEMP"]) / (
+              "mcp-owner-native-" + os.environ["GITHUB_RUN_ID"] + "-" + os.environ["GITHUB_RUN_ATTEMPT"]
+          )
+          root.mkdir()
+          archive = root / "copilot.tar.gz"
+          with urllib.request.urlopen(os.environ["COPILOT_ASSET_URL"], timeout=60) as source:
+              with archive.open("wb") as target:
+                  shutil.copyfileobj(source, target)
+          if hashlib.sha256(archive.read_bytes()).hexdigest() != os.environ["COPILOT_ASSET_SHA256"]:
+              raise SystemExit("Native client digest mismatch")
+          target = root / "copilot"
+          with tarfile.open(archive) as contents:
+              members = [member for member in contents if member.isfile() and Path(member.name).name == "copilot"]
+              if len(members) != 1:
+                  raise SystemExit("Expected one native client executable")
+              with contents.extractfile(members[0]) as source, target.open("xb") as output:
+                  shutil.copyfileobj(source, output)
+          target.chmod(0o700)
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as output:
+              output.write("COPILOT_NATIVE_TEST_EXECUTABLE=" + str(target) + "\n")
+          PY
+      - name: Exercise actual offline native client configuration consumption
+        run: >-
+          python tools/run-plugin-tests.py agent-mcp
+          --allow-explicit-tiers --test-timeout 120
+          --test-file tests/native/test_owner_exec_copilot.py
+          --junit-dir "${{ runner.temp }}/mcp-owner-copilot-${{ github.run_id }}"
+      - name: Retain native client qualification
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mcp-owner-native-client
+          path: ${{ runner.temp }}/mcp-owner-copilot-${{ github.run_id }}
           if-no-files-found: warn
           retention-days: 7
