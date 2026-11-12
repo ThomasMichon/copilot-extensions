@@ -22,6 +22,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import stat
 import sys
 import time
 import uuid
@@ -39,6 +40,7 @@ def _slugify(text: str) -> str:
 
 
 def write_changefile(changes: list[dict], comment: str) -> Path:
+    _check_changefile_path(CHANGEFILES_DIR)
     CHANGEFILES_DIR.mkdir(parents=True, exist_ok=True)
     stamp = time.strftime("%Y%m%d%H%M%S")
     name = f"{stamp}-{_slugify(comment)}-{uuid.uuid4().hex[:6]}.json"
@@ -48,11 +50,29 @@ def write_changefile(changes: list[dict], comment: str) -> Path:
     return path
 
 
+def _check_changefile_path(path: Path) -> None:
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        return
+    if (
+        stat.S_ISLNK(info.st_mode)
+        or getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT
+        or (not stat.S_ISDIR(info.st_mode) if path == CHANGEFILES_DIR
+            else not stat.S_ISREG(info.st_mode))
+    ):
+        raise ValueError(f"unsafe changefile path: {path}")
+
+
 def read_changefiles() -> list[tuple[Path, dict]]:
+    _check_changefile_path(CHANGEFILES_DIR)
     if not CHANGEFILES_DIR.is_dir():
         return []
     out = []
-    for f in sorted(CHANGEFILES_DIR.glob("*.json")):
+    paths = sorted(CHANGEFILES_DIR.glob("*.json"))
+    for path in paths:
+        _check_changefile_path(path)
+    for f in paths:
         try:
             out.append((f, json.loads(f.read_text(encoding="utf-8"))))
         except (json.JSONDecodeError, OSError) as exc:

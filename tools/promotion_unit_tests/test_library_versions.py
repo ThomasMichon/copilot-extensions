@@ -47,10 +47,9 @@ def test_library_identifiers_do_not_alias_other_projects(library, name):
 
 
 def test_library_seed_preserves_shipped_version_without_reapplying_old_change(library, monkeypatch):
-    monkeypatch.setattr(promotion, "_git", lambda *args, **kwargs: "")
     monkeypatch.setattr(
-        acc, "_project_version_at",
-        lambda ref, path: "0.1.0-dev8" if path == "libs/agent-procutil/pyproject.toml" else None,
+        promotion, "_main_version_inputs",
+        lambda *args: {"libs/agent-procutil/pyproject.toml": '[project]\nversion="0.1.0-dev8"\n'},
     )
     promotion._seed_versions_from_main(library, "shipped", acc=acc, repo=library)
     for root in acc.library_roots("libs/agent-procutil"):
@@ -148,6 +147,7 @@ def test_library_apply_failure_is_not_accepted(library):
 
 
 def test_shipped_version_seed_failure_refuses(monkeypatch, tmp_path):
+    monkeypatch.setattr(promotion, "_main_version_inputs", lambda *args: {})
     fake = SimpleNamespace(
         iter_standalone_consumer_names=lambda: [],
         iter_library_consumer_names=lambda: ["libs/agent-procutil"],
@@ -157,6 +157,45 @@ def test_shipped_version_seed_failure_refuses(monkeypatch, tmp_path):
     )
     with pytest.raises(promotion.PromotionError, match="cannot seed shipped versions"):
         promotion._seed_versions_from_main(tmp_path, "shipped", acc=fake, repo=tmp_path)
+
+
+@pytest.mark.parametrize("target", [
+    "plugin.json", "pyproject.toml", "src", "src/package",
+    "src/package/__init__.py", "src/package/_build_info.py",
+    "instruction-projections.json", "template.md", "marketplace.json",
+])
+def test_all_version_write_targets_are_admitted_before_any_change(library, monkeypatch, target):
+    _packaged_projects(library)
+    marketplace = library / ".github/plugin/marketplace.json"
+    marketplace.parent.mkdir(parents=True)
+    marketplace.write_text(json.dumps({"plugins": [
+        {"name": name, "version": version}
+        for name, version in (("producer", "0.1.0-dev1"), ("receiver", "0.4.0-dev1"))
+    ]}), encoding="utf-8")
+    monkeypatch.setattr(acc, "MARKETPLACE", marketplace)
+    root = library / "plugins/receiver"
+    (root / "src/package").mkdir(parents=True)
+    (root / "src/package/__init__.py").write_text(
+        '__version__ = "0.4.0-dev1"\n', encoding="utf-8",
+    )
+    (root / "instruction-projections.json").write_text(json.dumps({
+        "projections": [{"template": "template.md"}],
+    }), encoding="utf-8")
+    (root / "template.md").write_text("[owner: receiver@0.4.0-dev1]\n", encoding="utf-8")
+    linked = marketplace if target == "marketplace.json" else root / target
+    before = {path.relative_to(library): path.read_bytes()
+              for path in library.rglob("*") if path.is_file()}
+    original = type(linked).is_symlink
+    monkeypatch.setattr(type(linked), "is_symlink", lambda path: path == linked or original(path))
+
+    with pytest.raises(acc.VersionError, match="unsafe library version"):
+        acc.apply({
+            "producer": ("0.1.0-dev1", "0.1.1-dev1"),
+            "receiver": ("0.4.0-dev1", "0.4.1-dev1"),
+        })
+
+    assert {path.relative_to(library): path.read_bytes()
+            for path in library.rglob("*") if path.is_file()} == before
 
 
 @pytest.mark.parametrize("kind", ["manifest", "ancestor", "source-directory", "fallback"])

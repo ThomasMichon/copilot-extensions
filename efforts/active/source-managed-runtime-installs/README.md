@@ -21,7 +21,7 @@ Keep Copilot content delivery independent and establish one consented, bounded
 source-maintenance flow. Source merges do not qualify native lifecycle, release
 or installed adoption.
 
-**Finite-scope amendment: proposed, pending normal review.** The consolidated
+**Finite-scope amendment: reviewed in #11708.** The consolidated
 Plan and global Validation Plan below replace duplicated acceptance inventories,
 not the operator's original request or later refinements. The
 [scope and evidence dispositions](finite-scope.md) retain the prior public
@@ -100,7 +100,7 @@ service-supervision ownership changes.
 
 ## Coordination
 
-The [proposed scope amendment](finite-scope.md) consolidates the parent completion
+The [reviewed scope amendment](finite-scope.md) consolidates the parent completion
 gate. Historical #2822/#4010/#4015/#4058/#5353 intake and the
 [retained keeper/selector record](retained-source-selector.md) remain public
 provenance and requirement sources, not a second recursive checklist. Their
@@ -476,8 +476,7 @@ disposable scope while preserving config and durable data.
 
 ## Plan
 
-**Proposed consolidated acceptance.** Review this amendment before executing
-against its reduced gate. Existing checked foundations below retain only their
+**Reviewed consolidated acceptance (#11708).** Existing checked foundations below retain only their
 recorded evidence; the open rows are finite work, not new completion claims.
 The [disposition map](finite-scope.md) identifies replaced gate families and
 preserves the complete pre-amendment record.
@@ -486,7 +485,8 @@ preserves the complete pre-amendment record.
 
 - [ ] S1: Complete the next independent deadline and Git-isolation source
   increments, keeping each bug class, affected canonical copies and focused
-  regressions together under the existing owners.
+  regressions together under the existing owners. Deadline acquisition merged
+  in #12195; local composition/Git isolation remains in progress.
 - [ ] S2: Verify combined replacement coverage against preserved #11121 source
   before superseding its implementation; retain its history and ten-review-round
   limit. A small diff or passing review alone is not replacement completeness.
@@ -610,9 +610,10 @@ adoption. Other completed source slices remain credited in the
 
 ### Completion and scope control
 
-- [ ] C1: Obtain normal review of this proposed scope amendment before retiring
+- [x] C1: Obtain normal review of this proposed scope amendment before retiring
   a prior acceptance gate; preserve original request/refinement capture and
   record dispositions without marking retired criteria passed or closing issues.
+  Reviewed in #11708; this is documentary scope-review credit only.
 - [ ] C2: Resolve the direct Plan and global Validation against attributable
   source, release and authorized installed evidence. Keep explicit remaining
   adopter holds visible; neither paper consolidation nor a source merge makes
@@ -626,10 +627,11 @@ bounds; add only missing, directly relevant qualification through already
 authorized owners and lanes. Linked historical checklists are evidence and
 independent objectives, not recursively imported completion gates.
 
-- [ ] V1: Review the finite scope and requirement-to-evidence dispositions against
+- [x] V1: Review the finite scope and requirement-to-evidence dispositions against
   the unchanged Guiding Intent and original/later request record. Preserve every
   necessary installation outcome and separately owned adopter condition without
-  converting documentary retirement into a technical pass.
+  converting documentary retirement into a technical pass. Review merged in
+  #11708; technical rows below remain open.
 - [ ] V2: Record a finite addressed inventory of installed commands/services,
   roles/profiles, global roots, configuration/data and relevant protected
   dependencies. No uninstalled optional role, every runtime root or unrelated
@@ -713,6 +715,8 @@ independent configuration choice rather than forcing the Manager and suite
 onto one branch.
 
 ## Journal
+
+- [2026-11-11 - Bounded public metadata acquisition delivered](journal/2026/11.11%20bounded-metadata-acquisition.md)
 
 ### 2026-10-30 - Proposed combined-trigger admission case
 

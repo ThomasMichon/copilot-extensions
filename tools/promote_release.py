@@ -50,6 +50,13 @@ from promotion_candidate import (
     CandidateIdentityError, candidate_clock, candidate_environment, format_promotion_message,
     push_candidate,
 )
+from promotion_source_archive import (
+    changefile_existed_at as _changefile_existed_at,
+    git_environment,
+    git_text,
+    is_ancestor,
+    main_version_inputs as _main_version_inputs,
+)
 
 REPO = Path(__file__).resolve().parent.parent
 
@@ -77,14 +84,10 @@ def _git(
     args: list[str], *, cwd: Path | None = None, check: bool = True,
     env: dict[str, str] | None = None, input_text: str | None = None,
 ) -> str:
-    result = subprocess.run(
-        ["git", *args], cwd=str(cwd or REPO), capture_output=True, env=env,
-        input=input_text.encode("utf-8") if input_text is not None else None,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
-    )
-    if check and result.returncode != 0:
-        raise PromotionError(f"git {' '.join(args)} failed: {result.stderr.decode('utf-8').strip()}")
-    return result.stdout.decode("utf-8").strip()
+    try:
+        return git_text(cwd or REPO, args, check=check, env=env, input_text=input_text)
+    except ValueError as exc:
+        raise PromotionError(str(exc)) from exc
 
 
 def _rev_parse(ref: str, *, cwd: Path | None = None) -> str | None:
@@ -95,16 +98,7 @@ def _rev_parse(ref: str, *, cwd: Path | None = None) -> str | None:
 
 
 def _is_ancestor(ancestor: str, descendant: str, *, cwd: Path | None = None) -> bool:
-    """True when ``ancestor`` is reachable from ``descendant`` (``git
-    merge-base --is-ancestor``) -- includes the equal-commit case."""
-    result = subprocess.run(
-        ["git", "merge-base", "--is-ancestor", ancestor, descendant],
-        cwd=str(cwd or REPO),
-        capture_output=True,
-        text=True,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
-    )
-    return result.returncode == 0
+    return is_ancestor(cwd or REPO, ancestor, descendant)
 
 
 def _load_module(path: Path, name: str) -> types.ModuleType:
@@ -132,20 +126,6 @@ def remove_scratch_worktree(scratch: Path, *, repo: Path = REPO) -> None:
     _git(["worktree", "remove", "--force", str(scratch)], cwd=repo, check=False)
 
 
-def _changefile_existed_at(rev: str, name: str, *, repo: Path) -> bool:
-    """True if ``.changefiles/<name>`` was already present in ``dev`` at
-    ``rev`` (a real, historical commit -- typically the last promotion's own
-    ``dev_head``). Uses the real repo's object store, which a scratch
-    worktree shares (``git worktree add`` never creates a second store), so
-    this works regardless of which checkout the caller passes."""
-    result = subprocess.run(
-        ["git", "cat-file", "-e", f"{rev}:.changefiles/{name}"],
-        cwd=str(repo), capture_output=True, text=True,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
-    )
-    return result.returncode == 0
-
-
 def _seed_versions_from_main(scratch: Path, main_head: str, *, acc, repo: Path) -> None:
     """Overwrite every plugin's version-bearing surfaces in the scratch tree
     with whatever ``main`` last actually shipped for it, BEFORE any new bump
@@ -168,34 +148,40 @@ def _seed_versions_from_main(scratch: Path, main_head: str, *, acc, repo: Path) 
     not sufficient on its own; this seed step is the other required half."""
     plugins_dir = scratch / "plugins"
     seed_result: dict[str, tuple[str, str]] = {}
-    if plugins_dir.is_dir():
-        for plugin_dir in sorted(plugins_dir.iterdir()):
-            if not plugin_dir.is_dir():
-                continue
-            plugin = plugin_dir.name
-            main_pj_raw = _git(
-                ["show", f"{main_head}:plugins/{plugin}/plugin.json"], cwd=repo, check=False,
-            )
-            if not main_pj_raw:
-                continue  # never shipped on main yet -- dev's own literal stands as-is
-            try:
-                main_version = json.loads(main_pj_raw)["version"]
-            except (json.JSONDecodeError, KeyError):
-                continue
-            dev_version = acc.read_plugin_json_version(plugin)
-            if dev_version is None or dev_version == main_version:
-                continue
-            seed_result[plugin] = (dev_version, main_version)
+    plugin_dirs = (
+        [path for path in sorted(plugins_dir.iterdir()) if path.is_dir()]
+        if plugins_dir.is_dir() else []
+    )
+    consumers = acc.iter_standalone_consumer_names() + acc.iter_library_consumer_names()
+    metadata = _main_version_inputs(repo, main_head, [
+        *(f"plugins/{path.name}/plugin.json" for path in plugin_dirs),
+        *(f"{consumer}/pyproject.toml" for consumer in consumers),
+    ])
+    for plugin_dir in plugin_dirs:
+        plugin = plugin_dir.name
+        main_pj_raw = metadata.get(f"plugins/{plugin}/plugin.json", "").strip()
+        if not main_pj_raw:
+            continue  # never shipped on main yet -- dev's own literal stands as-is
+        try:
+            main_version = json.loads(main_pj_raw)["version"]
+        except (json.JSONDecodeError, KeyError):
+            continue
+        dev_version = acc.read_plugin_json_version(plugin)
+        if dev_version is None or dev_version == main_version:
+            continue
+        seed_result[plugin] = (dev_version, main_version)
     # A standalone, out-of-plugin consumer (e.g. `worktree-manager`) ships
     # its own `pyproject.toml` [project].version instead of a plugin.json --
     # it needs the exact same main-is-truth seeding, or a promotion round
     # with no new changefile for it would regress it back to dev's stale
     # literal (or repeat an already-shipped bump) the same way an
     # un-seeded plugin would (PR #4514 review).
-    for consumer in (
-        acc.iter_standalone_consumer_names() + acc.iter_library_consumer_names()
-    ):
-        main_version = acc._project_version_at(main_head, f"{consumer}/pyproject.toml")
+    parser = getattr(acc, "_project_version_from_text", None)
+    for consumer in consumers:
+        main_version = (
+            parser(metadata.get(f"{consumer}/pyproject.toml", "")) if parser is not None
+            else acc._project_version_at(main_head, f"{consumer}/pyproject.toml")
+        )
         if main_version is None:
             continue  # never shipped on main yet -- dev's own literal stands as-is
         dev_version = acc.read_consumer_version(consumer)
@@ -239,7 +225,7 @@ def _sync_instruction_projections(
         return []
     proc = subprocess.run(
         [sys.executable, str(script), "sync", str(scratch), "--json"],
-        capture_output=True, text=True,
+        capture_output=True, text=True, env=git_environment(),
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
     try:
@@ -261,11 +247,12 @@ def _sync_instruction_projections(
 
 def consume_pending_changes(
     scratch: Path, *, last_dev_head: str | None = None, main_head: str, repo: Path = REPO,
-    trusted_source: Path | None = None,
+    trusted_source: Path | None = None, allocate_versions: bool = True,
 ) -> dict:
     """Compose candidate data using its tooling, or explicitly trusted tooling
     for candidate-independent signing validation. Returns a summary used for
-    the tag/commit message and tests.
+    the tag/commit message and tests. ``allocate_versions=False`` retains Main
+    versions and removes changefiles only from scratch; Dev is unchanged.
 
     ``last_dev_head`` is the ``dev`` commit the PREVIOUS promotion actually
     promoted (persisted as ``last_promotion.dev_head`` in the pipeline state
@@ -310,11 +297,12 @@ def consume_pending_changes(
             acc.PLUGINS_DIR = scratch / "plugins"
             acc.MARKETPLACE = scratch / ".github" / "plugin" / "marketplace.json"
 
-        _seed_versions_from_main(scratch, main_head, acc=acc, repo=repo)
-
         all_changefiles = list(acc.read_changefiles())
+        _seed_versions_from_main(scratch, main_head, acc=acc, repo=repo)
         changefile_names = [p.name for p, _data in all_changefiles]
-        if last_dev_head is None:
+        if not allocate_versions:
+            new_entries = []
+        elif last_dev_head is None:
             new_entries = all_changefiles
         else:
             new_entries = [
@@ -594,7 +582,7 @@ def _tree_excluding_state(tree_sha: str, *, repo: Path) -> str:
     baseline with no real code change behind it as a real promotion."""
     with tempfile.TemporaryDirectory() as tmp:
         index_file = Path(tmp) / "index"
-        env = {**os.environ, "GIT_INDEX_FILE": str(index_file)}
+        env = git_environment(GIT_INDEX_FILE=str(index_file))
         subprocess.run(
             ["git", "read-tree", tree_sha], cwd=str(repo), env=env,
             check=True, capture_output=True,

@@ -25,6 +25,11 @@ _spec = importlib.util.spec_from_file_location(
 )
 fixture = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(fixture)
+_spec = importlib.util.spec_from_file_location(
+    "copilot_canned_provider", Path(__file__).with_name("generation_copilot_provider.py"),
+)
+provider = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(provider)
 
 pytestmark = [
     pytest.mark.portfolio_tier("T3"),
@@ -34,7 +39,7 @@ pytestmark = [
 UPSTREAM = r"""
 import json, os, signal, sys, threading
 from pathlib import Path
-trigger, receipt, replies = map(Path, sys.argv[1:])
+trigger, receipt, replies, calls = map(Path, sys.argv[1:])
 lock = threading.Lock()
 stopped = threading.Event()
 initialized = revision = 0
@@ -85,8 +90,15 @@ try:
             else:
                 result.update(nextCursor=str(revision), tools=[{
                     "name":"fixture_"+str(revision),"description":"Offline discovery fixture",
-                    "inputSchema":{"type":"object","properties":{}},
+                    "inputSchema":{"type":"object","properties":{"nonce":{"type":"string"}},
+                                   "required":["nonce"]},
                 }])
+        elif method == "tools/call":
+            assert message["params"]["name"] == "fixture_0"
+            nonce = message["params"]["arguments"]["nonce"]
+            with calls.open("a") as output:
+                output.write(json.dumps({"nonce":nonce,"pid":os.getpid()})+"\n")
+            result.update(content=[{"type":"text","text":"fixture-result:"+nonce}])
         emit({"jsonrpc":"2.0","id":message["id"],"result":result})
     boundary = "stdin-eof"
 finally:
@@ -96,23 +108,6 @@ finally:
         "pid":os.getpid(),"initialized":initialized,"boundary":boundary,
     }))
 """
-
-
-async def rpc(
-    process: asyncio.subprocess.Process, stderr: asyncio.Task[bytes], identifier: int,
-    method: str, params: dict,
-) -> dict:
-    process.stdin.write((json.dumps({
-        "jsonrpc": "2.0", "id": identifier, "method": method, "params": params,
-    }) + "\n").encode())
-    await process.stdin.drain()
-    while True:
-        line = await asyncio.wait_for(process.stdout.readline(), 30)
-        assert line, (await asyncio.wait_for(stderr, 5)).decode("utf-8", "replace")
-        message = json.loads(line)
-        if message.get("id") == identifier and "method" not in message:
-            assert "error" not in message, message
-            return message["result"]
 
 
 @pytest.mark.timeout(180)
@@ -136,12 +131,13 @@ async def test_actual_native_client_responds_through_replacement_and_rollback(
     upstream.write_text(UPSTREAM, encoding="utf-8")
     trigger, receipt = tmp_path / "refresh", tmp_path / "upstream-exit.json"
     replies = tmp_path / "client-replies.jsonl"
+    calls = tmp_path / "tool-calls.jsonl"
     observations = tmp_path / "responses.jsonl"
     caller_context = tmp_path / "caller-context.json"
     config = home / "bridge.json"
     config.write_text(json.dumps({
         "server": {"type": "stdio", "command": [
-            sys.executable, str(upstream), str(trigger), str(receipt), str(replies),
+            sys.executable, str(upstream), str(trigger), str(receipt), str(replies), str(calls),
         ]}, "auth": {"kind": "none"},
     }), encoding="utf-8")
     fixed = workspace / "current" / "serve.sock"
@@ -149,6 +145,7 @@ async def test_actual_native_client_responds_through_replacement_and_rollback(
     client = stderr = session = None
     identities = []
     sequence = 0
+    model = provider.CannedProvider()
     with contextlib.ExitStack() as retained:
         root, slots = fixture.build_runtimes(
             tmp_path, retained, observations=observations, caller_context=caller_context,
@@ -258,6 +255,11 @@ async def test_actual_native_client_responds_through_replacement_and_rollback(
                 return result
 
             try:
+                await model.start()
+                environment.update(
+                    COPILOT_PROVIDER_BASE_URL=model.url,
+                    COPILOT_PROVIDER_WIRE_API="completions",
+                )
                 (root / "current-version").write_text(slots["old"][0], encoding="utf-8")
                 python = slots["old"][1] / "bin" / "python"
                 entries = home / "entries.json"
@@ -272,6 +274,7 @@ async def test_actual_native_client_responds_through_replacement_and_rollback(
                     "--mcp-config", str(entries), "--server", "physical-fixture", "--",
                     str(executable), "-C", str(workspace), "--acp", "--stdio", "--no-auto-update",
                     "--disable-builtin-mcps", "--no-custom-instructions", "--no-color", "--no-ask-user",
+                    "--allow-tool=physical-fixture(fixture_0)",
                     "--log-dir", str(tmp_path / "logs"),
                     cwd=workspace, env=environment, stdin=asyncio.subprocess.PIPE,
                     stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
@@ -279,12 +282,12 @@ async def test_actual_native_client_responds_through_replacement_and_rollback(
                 )
                 stderr = asyncio.create_task(client.stderr.read())
                 client_birth = birth_identity(client.pid)
-                initialized = await rpc(client, stderr, 1, "initialize", {
+                initialized, _ = await provider.rpc(client, stderr, 1, "initialize", {
                     "protocolVersion": 1, "clientCapabilities": {},
                     "clientInfo": {"name": "physical-owner-fixture", "version": "1"},
                 })
                 assert initialized["protocolVersion"] == 1
-                session = asyncio.create_task(rpc(
+                session = asyncio.create_task(provider.rpc(
                     client, stderr, 2, "session/new", {"cwd": str(workspace), "mcpServers": []},
                 ))
 
@@ -298,7 +301,7 @@ async def test_actual_native_client_responds_through_replacement_and_rollback(
                 backend_environment = await fixture.eventually(prepared_context)
                 old, old_handle, old_pid = await backend("old")
                 caller_context.with_suffix(".ready").write_text("ready", encoding="utf-8")
-                await session
+                opened, _ = await session
                 first = await exchange("old", old_pid, refresh=False)
                 upstream_identity = first["pid"], birth_identity(first["pid"])
                 owner = json.loads(observations.with_suffix(".owner.json").read_text(encoding="utf-8"))
@@ -319,6 +322,32 @@ async def test_actual_native_client_responds_through_replacement_and_rollback(
                     assert identity_state(*conduit_identity) == "matching"
                     assert identity_state(*upstream_identity) == "matching"
 
+                async def tool_call(label: str, pid: int) -> None:
+                    nonce = "native-fixture-" + str(len(model.calls) + 1)
+                    model.nonce = nonce
+                    result, text = await provider.rpc(client, stderr, 10 + len(model.calls), "session/prompt", {
+                        "sessionId": opened["sessionId"],
+                        "prompt": [{"type": "text", "text": "Run the fixture tool with nonce " + nonce}],
+                    })
+                    assert not model.errors, model.errors
+                    assert result["stopReason"] == "end_turn", result
+                    assert "fixture-complete:" + nonce in text
+                    assert nonce in model.results
+                    accepted = list(map(json.loads, calls.read_text().splitlines()))
+                    assert [row["nonce"] for row in accepted] == model.calls
+                    assert all(row["pid"] == upstream_identity[0] for row in accepted)
+                    witnessed = [
+                        json.loads(line) for line in observations.read_text().splitlines()
+                        if json.loads(line)["method"] == "tools/call"
+                        and json.loads(line)["request"]["params"]["arguments"]["nonce"] == nonce
+                    ]
+                    assert len(witnessed) == 1
+                    response = witnessed[0]["response"]["result"]
+                    assert response["backend_pid"] == pid and response["pipeline_code"] == label
+                    assert response["content"] == [{"type": "text", "text": "fixture-result:" + nonce}]
+                    retained_identities()
+
+                await tool_call("old", old_pid)
                 for label in ("new", "old", "old"):
                     incoming, _, incoming_pid = await backend(label)
                     await exchange(label, incoming_pid)
@@ -328,6 +357,7 @@ async def test_actual_native_client_responds_through_replacement_and_rollback(
                     assert old.returncode == 0
                     await exchange(label, incoming_pid)
                     retained_identities()
+                    await tool_call(label, incoming_pid)
                     old, old_handle = incoming, handles[-1]
                 sequence += 1
                 dropped = "fixture-ping-" + str(sequence)
@@ -359,7 +389,9 @@ async def test_actual_native_client_responds_through_replacement_and_rollback(
                     label: generation for label, (generation, _) in slots.items()
                 }))
                 record_testsuite_property("native_ping_roundtrips_after_handover", 3)
+                record_testsuite_property("actual_native_tool_calls_consumed", len(model.results))
             finally:
+                await model.close()
                 if session is not None and not session.done():
                     session.cancel()
                     with contextlib.suppress(asyncio.CancelledError):
