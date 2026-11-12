@@ -177,6 +177,13 @@ if (-not $_probeExcluded -and $_probePossible -and $_awUpdateCaller) {
     $_probeWorker = if ($_probePayload) {
         Join-Path $_probePayload 'scripts\update_controller_probe.py'
     } else { '' }
+    if (-not $_awUpdatePayload -and (
+        -not $_probeHelper -or -not (Test-Path -LiteralPath $_probeHelper -PathType Leaf) -or
+        -not $_probeWorker -or -not (Test-Path -LiteralPath $_probeWorker -PathType Leaf)
+    )) {
+        $_probeHelper = Join-Path $_runtimeRoot 'bin\installation-context\shell-caller-owned.ps1'
+        $_probeWorker = Join-Path $_runtimeRoot 'bin\update_controller_probe.py'
+    }
     $_controller = ''
     if ($_probeHelper -and (Test-Path -LiteralPath $_probeHelper -PathType Leaf) -and
         (Test-Path -LiteralPath $_probeWorker -PathType Leaf)) {

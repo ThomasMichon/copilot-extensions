@@ -12,7 +12,9 @@ import time
 
 import pytest
 from agent_procutil import no_window_kwargs
-from test_update_entry import PLUGIN, _SUPPORTED_UPDATE_SHELL, _assert_cache_arguments
+from test_update_entry import (
+    PLUGIN, _SUPPORTED_UPDATE_SHELL, _assert_cache_arguments, _copy_native_global_tools,
+)
 from test_update_entry import update_entry_case as shared_update_entry_case
 
 update_entry_case = shared_update_entry_case
@@ -461,7 +463,9 @@ def test_admitted_git_sh_no_manager_reaches_installed_runtime(
 
 
 @pytest.mark.parametrize("project_position", ["before", "after"])
-@pytest.mark.parametrize("front", ["global", "installed-global", "git-sh", "git-bash"])
+@pytest.mark.parametrize("front", [
+    "global", "installed-global", "native-global", "git-sh", "git-bash", "native-git-bash",
+])
 @pytest.mark.parametrize("runtime_source", ["marketplace", "git"])
 def test_configured_project_update_routes_before_manager_bootstrap(
     update_entry_case, native_powershell, monkeypatch, project_position, front, runtime_source,
@@ -504,13 +508,16 @@ def test_configured_project_update_routes_before_manager_bootstrap(
         if project_position == "before"
         else ["update", "--force", "--project", "sample", "--skip-modules", "a b"]
     )
-    if front in ("global", "installed-global"):
-        if front == "installed-global":
+    if front.startswith("native-"):
+        _copy_native_global_tools(home, monkeypatch, "ps1")
+    if front in ("global", "installed-global", "native-global"):
+        if front in ("installed-global", "native-global"):
             user_bin = home / ".local" / "bin"
-            user_bin.mkdir(parents=True)
-            for name in ("agent-worktrees.ps1", "agent-worktrees-update-entry.ps1"):
-                shutil.copy2(PLUGIN / "bin" / name, user_bin / name)
-            (runtime / "payload-dir").write_text(str(PLUGIN), encoding="utf-8")
+            if front == "installed-global":
+                user_bin.mkdir(parents=True)
+                for name in ("agent-worktrees.ps1", "agent-worktrees-update-entry.ps1"):
+                    shutil.copy2(PLUGIN / "bin" / name, user_bin / name)
+                (runtime / "payload-dir").write_text(str(PLUGIN), encoding="utf-8")
             entry_path = user_bin / "agent-worktrees.ps1"
         else:
             entry_path = PLUGIN / "bin" / "agent-worktrees.ps1"
@@ -549,7 +556,9 @@ def test_configured_project_update_routes_before_manager_bootstrap(
         _stub_admission_for_bash(tmp, native_powershell, bash)
         monkeypatch.setenv("WORKTREE_MANAGER_BOOTSTRAP_REPO", "-disabled-for-test")
         command = [
-            bash, bash_path(bash, PLUGIN / "bin" / "agent-worktrees"), *arguments,
+            bash, bash_path(bash, (
+                home / ".local" / "bin" if front == "native-git-bash" else PLUGIN / "bin"
+            ) / "agent-worktrees"), *arguments,
         ]
     result = subprocess.run(
         command, capture_output=True, timeout=30, **no_window_kwargs(),

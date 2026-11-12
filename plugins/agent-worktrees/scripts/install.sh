@@ -2559,6 +2559,10 @@ deploy_tool_binstub() {
     _assert_source_runtime || return 1
     mkdir -p "$LOCAL_BIN" || return 1
     local stub stub_src
+    for stub in update_controller_probe.py installation-context/shell-caller-owned.ps1 installation-context/daemon_instance_runtime.pyz; do
+        mkdir -p "$(dirname "$BIN_DIR/$stub")" || return 1
+        _publish_runtime_file "$SCRIPT_DIR/$stub" "$BIN_DIR/$stub" || return 1
+    done
     for stub in agent-worktrees-update-entry.sh agent-worktrees-update-entry.ps1 agent-worktrees-update-json.awk agent-worktrees agent-worktrees.cmd agent-worktrees.ps1; do
         stub_src="$PLUGIN_DIR/bin/$stub"
         [[ "$stub" != agent-worktrees-update-json.awk ]] || stub_src="$SCRIPT_DIR/installation-context/json-query.awk"
@@ -3471,8 +3475,8 @@ case "$ACTION" in
             --root "$INSTALL_DIR" --plugin "$PLUGIN_DIR" \
             --inspect-helper-publication "$RUNTIME_PUBLICATION_PLAN" \
             --publication-digest "$RUNTIME_PUBLICATION_DIGEST")" || exit 1
-        fields="$("$RUNTIME_PUBLICATION_PYTHON" -I -X utf8 -c \
-            'import json,sys; d=json.loads(sys.argv[1]); print(d["scope"]); print(d["python"]); print(d["copies"])' "$publication")" || exit 1
+        fields="$(printf '%s' "$publication" | "$RUNTIME_PUBLICATION_PYTHON" -I -X utf8 -c \
+            'import json,sys; d=json.load(sys.stdin); print(d["scope"]); print(d["python"]); print(d["copies"])')" || exit 1
         fields="${fields//$'\r'/}"
         scope="${fields%%$'\n'*}"; fields="${fields#*$'\n'}"
         VENV_PYTHON="${fields%%$'\n'*}"; RUNTIME_PUBLICATION_COPIES="${fields#*$'\n'}"
