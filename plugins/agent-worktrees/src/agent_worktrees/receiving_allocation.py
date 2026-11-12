@@ -130,12 +130,18 @@ def parsed_receipt(record: tracking.WorktreeRecord) -> ReceivingAllocation:
     return admission
 
 
-def require_record(record: tracking.WorktreeRecord, config: cfg.Config) -> None:
+def require_record(
+    record: tracking.WorktreeRecord, config: cfg.Config, *, local_record: bool = False,
+) -> None:
     """Prove the local creation journal; no origin connection or linked phase needed."""
     from . import creation_requests
 
     admission = parsed_receipt(record)
-    admission.require_current(config)
+    if local_record:
+        if admission.target["project"] != config.repo_name:
+            raise ValueError("receiving allocation does not select this local project")
+    else:
+        admission.require_current(config)
     row = creation_requests.inspect(config, admission.key)
     if row is None or row["status"] not in {"pending", "complete", "terminal"}:
         raise ValueError("receiving allocation has no retained creation operation")

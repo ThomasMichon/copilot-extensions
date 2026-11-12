@@ -78,7 +78,7 @@ def canonicalize_legacy_config(config: Any, *, configured: bool = False) -> Any:
 
 
 def resolve_owner_record_path(owner_ref: str, config: Any) -> tuple[Path | None, str, str | None]:
-    from . import config as cfg, legacy_wsl_record_locality, tracking
+    from . import config as cfg, legacy_wsl_record_locality, retained_checkout, tracking
 
     parsed = tracking.parse_claim_ref(owner_ref)
     if parsed is None or not parsed.is_qualified:
@@ -86,6 +86,9 @@ def resolve_owner_record_path(owner_ref: str, config: Any) -> tuple[Path | None,
             None, "",
             f"--owner-ref must be a qualified machine/project/worktree_id ref (got {owner_ref!r})",
         )
+    local = retained_checkout.resolve_owner(parsed, config)
+    if local is not None:
+        return local, parsed.worktree_id, None
     legacy = legacy_wsl_record_locality.resolve_legacy_wsl_owner_ref(parsed, config)
     if legacy is not None:
         return legacy, parsed.worktree_id, None
@@ -107,7 +110,7 @@ def resolve_owner_record_path(owner_ref: str, config: Any) -> tuple[Path | None,
 
 
 def settle_parent_obligation(record: Any, config: Any, worktree_id: str, *, output: Any) -> None:
-    from . import config as cfg, legacy_wsl_record_locality, obligations, paired_claims, tracking
+    from . import config as cfg, legacy_wsl_record_locality, obligations, paired_claims, retained_checkout, tracking
 
     try:
         owner = record.owner_claim_ref
@@ -119,8 +122,12 @@ def settle_parent_obligation(record: Any, config: Any, worktree_id: str, *, outp
         if owner is None or not owner.is_qualified:
             return
         require_record_mutation(record, config)
-        caller_key = current_execution_context(config).execution_machine
-        if owner.machine in (config.machine, caller_key):
+        local_child = retained_checkout.is_local(record, config)
+        caller_key = record.execution_machine if local_child else current_execution_context(config).execution_machine
+        local_parent = retained_checkout.resolve_owner(owner, config)
+        if local_parent is not None:
+            parent_path, legacy_parent = local_parent, False
+        elif owner.machine in (config.machine, caller_key):
             parent_path = cfg.project_dir(owner.project) / "worktrees" / f"{owner.worktree_id}.yaml"
             legacy_parent = False
         else:
@@ -138,7 +145,7 @@ def settle_parent_obligation(record: Any, config: Any, worktree_id: str, *, outp
                 return
             receiving_config = project_record_config(parent)
             require_record_mutation(parent, receiving_config)
-            if not require_owner_identity(caller_key, receiving_config):
+            if not local_child and not require_owner_identity(caller_key, receiving_config):
                 raise ExecutionSpaceError("caller is not local to the parent receiving execution space")
             child_ref = tracking.format_claim_ref(
                 getattr(record, "execution_machine", record.machine), config.repo_name, worktree_id,
@@ -300,7 +307,11 @@ def require_record_mutation(record: Any, config: Any, *, recover_receiving: bool
             require_idle(path)
         except (ValueError, OSError) as exc:
             raise ExecutionSpaceError(str(exc)) from exc
-    require_current_execution_space(config)
+    from . import retained_checkout
+
+    local_record = retained_checkout.is_local(record, config)
+    if not local_record:
+        require_current_execution_space(config)
     if (
         not getattr(record, "receiving_allocation_present", False)
         and getattr(record, "owner_ref", None) and getattr(record, "creation_nonce", None)
@@ -320,9 +331,15 @@ def require_record_mutation(record: Any, config: Any, *, recover_receiving: bool
         from .receiving_allocation import require_record
 
         try:
-            require_record(record, config)
+            require_record(record, config, local_record=local_record)
         except (ValueError, OSError, RuntimeError) as exc:
             raise ExecutionSpaceError(f"receiving allocation authority is unproven: {exc}") from exc
+    if local_record:
+        if record.owner_ref:
+            owner = tracking.parse_claim_ref(record.owner_ref)
+            if owner is None or not owner.is_qualified:
+                raise ExecutionSpaceError("owned record has an unqualified owner reference")
+        return
     entries = registry_for_config(config)
     from .legacy_wsl_record_locality import resolve_legacy_wsl_owner_ref
 

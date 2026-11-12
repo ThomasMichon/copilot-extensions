@@ -100,6 +100,11 @@ def resolve_legacy_wsl_owner_ref(ref: "ClaimRef", config: cfg.Config) -> Path | 
 
     if ref is None or not ref.is_qualified:
         return None
+    from . import retained_checkout
+
+    local = retained_checkout.resolve_owner(ref, config)
+    if local is not None:
+        return local
     actual = cfg.detect_platform()
     if actual not in ("windows", "wsl", "linux"):
         return None

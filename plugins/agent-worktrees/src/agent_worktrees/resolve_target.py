@@ -9,11 +9,34 @@ from . import config as cfg, machine_identity
 from .execution_spaces import current_execution_context, registry_for_config
 
 
+def retained_target_is_local(
+    config: cfg.Config, worktree_id: str | None, name: str | None,
+    environment: str | None = None,
+) -> bool:
+    from . import retained_checkout, tracking, worktree_identity
+
+    if not worktree_id or not name or (
+        environment and normalize_environment(environment) != cfg.detect_platform()
+    ):
+        return False
+    identity = worktree_identity._resolve_worktree_id(worktree_id)
+    record = tracking.load_record_by_id(identity)
+    return bool(
+        record is not None
+        and name.casefold() in {
+            value.casefold() for value in (
+                record.machine, record.execution_machine, config.machine, cfg.socket.gethostname(),
+            ) if value
+        }
+        and retained_checkout.is_local(record, config)
+    )
+
+
 def target_is_local(
     config: cfg.Config, name: str | None, environment: str | None = None,
 ) -> bool:
     if not name:
-        return False
+        return not environment or normalize_environment(environment) == cfg.detect_platform()
     if (
         not environment and config.machine and name.casefold() == config.machine.casefold()
         and name.casefold() != cfg.socket.gethostname().casefold()

@@ -242,12 +242,15 @@ def load_project_authority_config(
     )
     from .machine_identity import resolve_execution_machine
 
-    return replace(config, machine=resolve_execution_machine(
-        configured_machine or cfg.socket.gethostname(),
-        guest=cfg.detect_platform() == "wsl", configured=bool(configured_machine),
-        load_entries=lambda: cfg.load_machines_yaml(str(anchor), config=config),
-        preserve_native_hostname=True,
-    ))
+    try:
+        return replace(config, machine=resolve_execution_machine(
+            configured_machine or cfg.socket.gethostname(),
+            guest=cfg.detect_platform() == "wsl", configured=bool(configured_machine),
+            load_entries=lambda: cfg.load_machines_yaml(str(anchor), config=config),
+            preserve_native_hostname=True,
+        ))
+    except (OSError, ValueError, cfg.yaml.YAMLError):
+        return config
 
 
 def registration_record_config(record) -> Config:

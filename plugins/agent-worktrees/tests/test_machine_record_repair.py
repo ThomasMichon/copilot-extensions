@@ -172,30 +172,39 @@ def test_no_roster_requires_observed_hostname(local_record, monkeypatch):
 
 @pytest.mark.guard
 @pytest.mark.parametrize("target", ["canonical-host-wsl", "canonical-host (WSL)"])
-def test_no_roster_guest_target_cannot_relabel_native_record(
+def test_native_checkout_labels_do_not_select_an_execution_environment(
     local_record, capsys, monkeypatch, target,
 ):
-    config, path, _ = local_record
+    config, path, data = local_record
     monkeypatch.setattr(repair.execution_spaces, "registry_for_config", lambda _: {})
     monkeypatch.setattr(cfg, "load_config", lambda **kwargs: replace(config, machine=target))
-    before = path.read_bytes()
-    assert repair.targeted_doctor(arguments(fix=True)) == 1
-    assert "environment" in json.loads(capsys.readouterr().out)["error"]
-    assert path.read_bytes() == before
-    assert not list(path.parent.glob("*.bak"))
+    assert repair.targeted_doctor(arguments(fix=True)) == 0
+    assert json.loads(capsys.readouterr().out)["repaired"]
+    assert yaml.safe_load(path.read_bytes()) == {**data, "machine": target}
 
 
 @pytest.mark.guard
-def test_ambiguous_roster_refuses(local_record, capsys, monkeypatch):
+def test_ambiguous_roster_does_not_veto_existing_checkout(local_record, capsys, monkeypatch):
     _, path, _ = local_record
     entries = {name: cfg.MachineEntry(
         key=name, display_name=name, hostname="old-host",
     ) for name in ("canonical-host", "another-host")}
     monkeypatch.setattr(repair.execution_spaces, "registry_for_config", lambda _: entries)
+    assert repair.targeted_doctor(arguments(fix=True)) == 0
+    assert json.loads(capsys.readouterr().out)["repaired"]
+
+
+def test_scalar_repair_never_partially_relabels_a_versioned_identity(local_record, capsys):
+    _, path, data = local_record
+    path.write_text(yaml.safe_dump({
+        **data, "machine_identity_version": 1, "environment": "windows",
+        "execution_machine": "retained-owner",
+    }), encoding="utf-8")
     before = path.read_bytes()
     assert repair.targeted_doctor(arguments(fix=True)) == 1
-    assert json.loads(capsys.readouterr().out)["error"]
+    assert "must be preserved" in json.loads(capsys.readouterr().out)["error"]
     assert path.read_bytes() == before
+    assert not list(path.parent.glob("*.bak"))
 
 
 @pytest.mark.guard

@@ -140,7 +140,6 @@ def _inspect(project: str, record_id: str, previous: str, target: str | None):
         raise ValueError("resolved project does not match the selected project")
     if target is not None and target != config.machine:
         raise ValueError("--to-machine must exactly match the configured local target")
-    _prove_local_alias(config, previous)
     path = cfg.tracking_dir() / f"{record_id}.yaml"
     if path.is_symlink() or path.resolve() != path.absolute():
         raise ValueError("tracking record path indirection refused")
@@ -152,6 +151,11 @@ def _inspect(project: str, record_id: str, previous: str, target: str | None):
         raise ValueError("record machine does not match --from-machine or the local target")
     if data.get("repo") != project or data.get("platform") != config.platform:
         raise ValueError("record project/platform does not match the selected local project")
+    if "machine_identity_version" in data:
+        raise ValueError(
+            "versioned record identity must be preserved; local checkout authority "
+            "does not require machine-label normalization"
+        )
     checkout = Path(data.get("worktree_path") or "")
     if checkout.is_symlink():
         raise ValueError("worktree path indirection refused")
@@ -159,6 +163,7 @@ def _inspect(project: str, record_id: str, previous: str, target: str | None):
         _prove_checkout(data, config)
         proof = "existing-linked-git"
     else:
+        _prove_local_alias(config, previous)
         _prove_history(data, config)
         proof = "removed-registered-namespace"
     if data["machine"] == config.machine:

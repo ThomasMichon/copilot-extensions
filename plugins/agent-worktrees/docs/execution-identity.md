@@ -104,19 +104,53 @@ JSON. `platform` must agree with `environment`; missing version metadata keeps
 the original legacy machine/platform interpretation. Unsupported, partial or
 conflicting explicit tuples are errors, never fallback execution authority.
 
+### Retained local checkout authority
+
+A checkout already registered in this machine's receiving project store is
+local by that store and its actual Git checkout, not by a machine-topology
+lookup. The retained proof checks the selected project, exact tracking path
+and snapshot, absolute nonredirected checkout, repository family and reciprocal
+Git worktree registration. It reads Git's marker, common-directory and
+backpointer files directly, without starting Git or acquiring optional topology.
+It also covers adopted linked checkouts and retained managed checkouts outside
+a newer allocation root.
+
+Existing local resolve/resume, folder trust, original-owner lookup and producer
+settlement use that proof before machine-name selection. A renamed, missing,
+malformed or incorrectly platform-mapped optional topology cannot veto the
+retained checkout. Ordinary configuration retains the configured/detected name
+when optional topology resolution fails; acquisition diagnostics still retain
+the failed observation. Explicit remote routing and new allocation continue to
+validate their selected execution context.
+
+No identity migration is necessary. IDs, historical physical and execution
+names, sessions, pairs, claims and owner references remain intact. Qualified
+owner lookup still must name the actual retained record's physical or execution
+owner; an unrelated remote name does not select a coincident local ID.
+Receipt-backed ownership continues to require its original receiving creation
+journal, incarnation, relationships and finality. Locality neither releases a
+claim nor waives live process, launch, handoff or lifecycle ownership.
+`doctor` reports `local_registration` for the project's records, distinguishing
+proven local checkouts, absent checkouts and present but unproven paths, without
+rewriting historical identities.
+
+### Unretained records and new execution
+
 The typed tracking accessor preserves the exact historical machine label for
 legacy records. Ordinary saves do not migrate their format or alter a versioned
 identity. Concurrent changes to environment, execution owner or identity version
 invalidate a loaded writer even when its physical host is unchanged. Mutation
-still requires the receiving project's current execution context and actual
-platform; sharing a physical host does not make native and guest owners equal.
+without retained-local proof requires the receiving project's current execution
+context and actual platform; sharing a physical host does not make native and
+guest owners equal.
 The optional receiving registry customizes that context rather than enrolling
 the local machine. The complete physical/environment/execution tuple must match
 the validated context, and explicit registered execution keys retain their
 canonical-key and platform checks. Project and actual-ledger snapshot checks
 remain independent of naming; a detected name is not a receiving-record grant.
-Cleanup, including forced removal, applies that tuple check before any missing,
-empty or unscoped registry fallback retained for historical records. Resolved
+Without retained-local proof, cleanup, including forced removal, applies that
+tuple check before any missing, empty or unscoped registry fallback retained for
+historical records. Resolved
 controller navigation and strict resource-owner scans use the execution owner;
 malformed explicit tuples make the scan incomplete rather than borrowing the
 physical host or disappearing behind an owner filter.

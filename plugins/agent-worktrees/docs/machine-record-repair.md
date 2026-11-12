@@ -5,6 +5,13 @@ historical machine label to the receiving configuration's local identity. It is
 not a transfer, a record-ID rename or an automatic alias migration. Ordinary
 `doctor --fix` never performs it.
 
+Existing local checkout use does not require this normalization.
+[Retained local authority](execution-identity.md#retained-local-checkout-authority)
+survives hostname and optional topology drift while preserving original owner
+references. `doctor` reports that proof as `local_registration`. Versioned
+physical/environment/execution tuples refuse scalar label repair, which would
+otherwise leave a conflicting partial identity.
+
 Use the attributable command from the session catalog and select the receiving
 project, exact record ID and exact previous label:
 
@@ -22,11 +29,9 @@ multiline machine scalars refuse in both modes without a backup or audit write.
 
 ## Proof and historical records
 
-The configured identity, previous label and observed hostname must resolve to
-one native execution space. Windows and Linux are supported; WSL and native/guest
-crossings remain refused. An ambiguous roster or another machine's label cannot
-authorize repair. Without a roster, only the actual observed hostname is an
-eligible previous label.
+Windows and Linux are supported; WSL and native/guest crossings remain refused.
+For an existing checkout, receiving-project and linked-Git evidence establish
+locality independently of historical hostname mapping.
 
 **Existing checkout:** retain the linked-Git proof. The checkout must have a
 `.git` file, no path indirection, the expected Git top-level, and the same Git
@@ -35,6 +40,9 @@ checkout from another repository never falls back to historical proof.
 
 **Removed checkout:** require stronger independent registration evidence:
 
+- the configured identity, previous label and observed hostname resolve to one
+  native execution space (without a roster, the previous label must be the
+  actual observed hostname);
 - the configured target is an explicit canonical native execution-space key;
 - the receiving repository has canonical worktree/knowledge registration, even
   when a knowledge-only repository has no adopted-project entry;

@@ -414,7 +414,7 @@ def test_machine_registry_original_source_selection_is_borrowed_once(tmp_path, m
     def resolve(value, **kwargs):
         assert value is config and kwargs == {"cwd": None}
         calls.append("state-root")
-        return SimpleNamespace(requires_external=True, bound=True, path=str(knowledge))
+        return SimpleNamespace(requires_external=True, bound=True, path=str(knowledge), repo="knowledge")
 
     def open_source(path, *args, **kwargs):
         if Path(path) == selected:
