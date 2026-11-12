@@ -335,12 +335,14 @@ def _start_service_systemd() -> bool:
         result = subprocess.run(
             ["systemctl", "--user", "is-enabled", unit],
             capture_output=True, text=True, timeout=5,
+            **no_window_kwargs(),
         )
         if result.returncode != 0:
             return False
         subprocess.run(
             ["systemctl", "--user", "start", unit],
             capture_output=True, timeout=10,
+            **no_window_kwargs(),
         )
         for _ in range(20):
             time.sleep(0.25)

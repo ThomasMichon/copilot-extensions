@@ -532,6 +532,11 @@ diagnostics or plaintext artifacts.
 
 ## Locking, prompting, and robustness
 
+On Windows, KeePassXC and credential-helper console children run without creating
+terminal windows, including when their parent is a windowless service. Explicit
+password dialogs remain visible; console suppression does not enable prompting,
+detach children from their caller or change credential stdin/output handling.
+
 - The daemon keeps KeePass master passwords in memory **per database**. `VAULT_PASSWORD_TTL` controls the password TTL (default `3600` seconds). `agent-vault lock` drops the cached password immediately.
 - Credential reads fail fast by default when locked: they return an actionable error instead of hanging on a hidden prompt. Use `agent-vault unlock`, `agent-vault unlock --terminal`, or `agent-vault get --prompt ...` when you want an interactive prompt.
 - Unlock-source extensions run before prompts, so a configured provider can satisfy locked reads without UI.
