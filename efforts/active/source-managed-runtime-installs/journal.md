@@ -36,6 +36,17 @@ receiver does not by itself select the ordinary suite's source or produce its
 complete admitted profile. The next acceptance remains the real ordinary
 producer-to-consumer flow, with the three prerequisite owners kept distinct.
 
+A focused read of #11121 at
+`c3770520b3cbde2fc86e23251b393b8832b51c55` confirms that its suite caller
+already replaces the legacy `prepare()` route with `prepare_applications()`.
+That caller requires version-2 engine support, prepares the selected portfolio
+under one Main-seeded source identity, and emits snapshot/profile records.
+The unchanged legacy helper is not the proposed caller's execution path.
+This credits the existing implementation without treating its unmerged source
+as released or natively accepted. Default marketplace policy, final-tree
+qualification and entrypoint adoption remain distinct convergence gates;
+another producer implementation is not needed while this owner retains it.
+
 - [2026-11-05 - MCP bootstrap adoption proposed](<journal/2026/11.05 mcp-bootstrap.md>)
 - [2026-11-03 - Clean-break wheel migration intent reviewed](<journal/2026/11.03 clean-break wheel migration.md>)
 - [2026-11-03 - Manager-first repository registration entry](<journal/2026/11.03 manager-register.md>)
