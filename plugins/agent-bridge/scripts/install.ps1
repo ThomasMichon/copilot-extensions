@@ -64,7 +64,11 @@ param(
     # Preview mode for the 'uninstall' action: print what WOULD be removed (or
     # preserved) without touching the filesystem, scheduled task, or registry.
     # No other action honors this switch.
-    [switch]$DryRun
+    [switch]$DryRun,
+    [string]$WheelProfile,
+    [string]$WheelDirectory,
+    [string]$WheelPython,
+    [string]$WheelUv
 )
 
 Set-StrictMode -Version 2.0
@@ -76,6 +80,15 @@ if ($env:COPILOT_EXTENSIONS_HUMAN_UTF8 -eq '1') {
     }
     . (Join-Path $PSScriptRoot 'installer-human-output.ps1')
 }
+
+if ($WheelProfile -or $WheelDirectory -or $WheelPython -or $WheelUv) {
+    if (-not $WheelProfile -or -not $WheelDirectory -or -not $WheelPython -or -not $WheelUv -or
+        $Action -notin @('install', 'update', 'provision') -or $ForceTaskRepair) {
+        throw 'Closed wheels require profile, directory, Python and UV for install, update or provision'
+    }
+}
+$NativeWheelSelection = $null
+
 
 if ($RequireGracefulCutover -and $Action -ne 'update') {
     throw '-RequireGracefulCutover requires update'
@@ -124,7 +137,8 @@ if ($env:OS -eq 'Windows_NT' -and
         }
     }
     $driverEntry = Enter-NativeInstallerDriver -Payload $driverPayload -Root $driverRoot `
-        -Plugin 'agent-bridge' -Action $Action -Options $driverOptions
+        -Plugin 'agent-bridge' -Action $Action -Options $driverOptions `
+        -WheelProfile $WheelProfile -WheelDirectory $WheelDirectory -WheelPython $WheelPython -WheelUv $WheelUv
     if (-not $driverEntry.Participant -or $driverEntry.ExitCode -ne 0) { exit $driverEntry.ExitCode }
     $driverPython = $driverEntry.Python
     $driverArguments = $driverEntry.Arguments
@@ -555,6 +569,7 @@ function Ensure-RuntimeSlotRetention {
 }
 
 function Get-BootstrapPython {
+    if ($WheelProfile) { return $WheelPython }
     <# A python to run the stdlib-only versioned_runtime.py helper BEFORE the
        slot venv exists (e.g. the pre-build toss). Prefers a signed base python,
        then python3/python on PATH. Returns $null if none found. #>
@@ -656,6 +671,7 @@ function Invoke-UvVenvResilient {
 }
 
 function Ensure-Uv {
+    if ($WheelProfile) { return [bool](Get-Command $WheelUv -CommandType Application -ErrorAction Stop) }
     if (-not ($env:AGENT_BRIDGE_UV_BOOTSTRAP_URL -or $env:AGENT_BRIDGE_UV_BOOTSTRAP_SHA256)) {
         return [bool](Ensure-UvShared -InstallRoot $InstallDir -ToolDirectory 'tool' -AcquireIfMissing $true)
     }
@@ -848,6 +864,12 @@ function Get-PayloadLibRoots {
 }
 
 function Get-PayloadHash {
+    if ($NativeWheelSelection) {
+        return (Get-NativeWheelSelection -Python $WheelPython `
+            -Helper (Join-Path $PSScriptRoot 'install_source.py') -Profile $WheelProfile `
+            -Directory $WheelDirectory -Payload $PluginDir -Plugin 'agent-bridge' `
+            -Expected $NativeWheelSelection).payload_hash
+    }
     <# Content fingerprint of EVERY source this installer installs into the
        runtime slot (#935/#776/ce#811, #5472): pyproject.toml, src/, the
        plugin-local libs/, and each shared library resolved outside $PluginDir
@@ -947,9 +969,15 @@ function Invoke-VersionedSlotClean {
         if ($LASTEXITCODE -ne 0) { throw 'Canonical construction adapter is unavailable' }
         Invoke-Expression $helpers
     }
+    $wheelOptions = Get-NativeWheelConstructionOptions -Profile $WheelProfile `
+        -Directory $WheelDirectory -Payload $PluginDir -Plugin 'agent-bridge' `
+        -Uv $WheelUv -HealthModule 'agent_bridge'
     $script:RuntimeConstructionReuse = Start-RuntimeConstruction `
         -Python $py -Helper $vr -Root $InstallDir -Version $SrcVersion `
-        -PayloadHash $PayloadHash -LinkName (Split-Path -Leaf $LinkDir)
+        -PayloadHash $PayloadHash -LinkName (Split-Path -Leaf $LinkDir) @wheelOptions
+    if ($NativeWheelSelection) {
+        Set-NativeWheelRuntimeVersion -Root $InstallDir -Version $script:RuntimeConstructionSession.Version
+    }
     return $true
 }
 
@@ -1742,6 +1770,7 @@ function Write-DeployManifest {
     # the manifest records the same content the slot was admitted/built for.
     param([string]$PayloadHash = '')
     $fields = @{}
+    if ($NativeWheelSelection) { $fields['runtime_version'] = $SrcVersion }
     $selectedIdentity = Get-Variable -Name SourceRuntimeIdentity -Scope Script -ValueOnly -ErrorAction SilentlyContinue
     if ($selectedIdentity) {
         $data = $selectedIdentity | ConvertFrom-Json
@@ -3973,6 +4002,10 @@ $script:InstallerLifecycleOutcome = 'fail'
 if ($script:InstallerLifecycleAction) { Write-InstallerLifecycle begin }
 try {
     if ($Action -ne 'schedule' -and -not $ForceTaskRepair) { Initialize-SourceRuntime }
+    if ($WheelProfile) {
+        Initialize-NativeWheelRuntime -Python $WheelPython -Profile $WheelProfile `
+            -Directory $WheelDirectory -Payload $PluginDir -Plugin 'agent-bridge' -Root $InstallDir
+    }
     if ($Action -in @('install', 'update', 'provision') -and -not $ForceTaskRepair) {
         . (Join-Path $PSScriptRoot 'installer-instance-reconcile.ps1')
         Invoke-InstallerInstanceReconcile -HelperRoot $PSScriptRoot -RuntimeRoot $InstallDir

@@ -43,7 +43,15 @@ try {
     $Manifest = Join-Path $InstallDir 'deploy-manifest.json'
     $installerAction = 'stamp'
     if (Test-Path -LiteralPath $Manifest) {
-        $deployed = ([IO.File]::ReadAllText($Manifest) | ConvertFrom-Json).source.version
+        $deployment = [IO.File]::ReadAllText($Manifest) | ConvertFrom-Json
+        $deployed = $deployment.source.version
+        $wheelGeneration = $deployment.runtime_version -cmatch '\.profile\.[0-9a-f]{16}'
+        if ($wheelGeneration) {
+            . (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')
+            if (Test-NativeWheelRuntimeCurrent -Root $InstallDir -Payload $PluginDir -Plugin $name) {
+                Exit-SessionStart
+            }
+        }
         if ($deployed -isnot [string] -or -not $deployed) {
             throw 'The deployed runtime version is unavailable.'
         }
@@ -60,7 +68,7 @@ try {
                 (Test-Path -LiteralPath (Join-Path $InstallDir "versions/$selected/bin/python"))
             )) { $provisioned = $true }
         }
-        if ($provisioned -and $deployed -ceq $current) { Exit-SessionStart }
+        if (-not $wheelGeneration -and $provisioned -and $deployed -ceq $current) { Exit-SessionStart }
         $installerAction = 'provision'
     }
     if ((Test-Path Env:AGENT_PULL_REQUESTS_NO_SELFPROVISION) -or (Test-Path Env:AGENT_PULL_REQUESTS_PINNED_CONTEXT)) {

@@ -292,7 +292,7 @@ def retain_closed_wheels(
             (uv, "pip", "install", "--no-config", "--no-cache", "--offline",
              "--no-python-downloads", "--no-index", "--no-deps", "--no-build",
              "--no-sources", "--require-hashes", "--link-mode", "copy",
-             "--python", str(python), "--requirements", str(requirements)),
+             "--python", native_retained_path(python), "--requirements", str(requirements)),
             environment, root, {}, {},
         )
         snapshot.verify()

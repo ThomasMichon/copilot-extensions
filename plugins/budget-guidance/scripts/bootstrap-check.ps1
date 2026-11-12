@@ -97,7 +97,11 @@ try {
         }
         Exit-SessionStart
     }
-    $deployed = "" + (Get-Content $Manifest -Raw | ConvertFrom-Json).source.version
+    $deployed = Get-Content $Manifest -Raw | ConvertFrom-Json
+    $runtimeVersion = if ($deployed.PSObject.Properties['runtime_version']) {
+        "" + $deployed.runtime_version
+    } else { '' }
+    $deployed = "" + $deployed.source.version
     $current = $deployed
     $pyproj = Join-Path $PluginDir 'pyproject.toml'
     if (Test-Path $pyproj) {
@@ -109,15 +113,17 @@ try {
     # Windows (RedirectionGuard), so a healthy current runtime has no `.venv` there.
     # Treat a marker whose slot python exists as provisioned too -- otherwise a
     # current runtime needlessly background-rebuilds every session.
-    $provisioned = Test-Path (Join-Path $InstallDir '.venv')
-    if (-not $provisioned) {
-        $cvMarker = Join-Path $InstallDir 'current-version'
-        if (Test-Path $cvMarker) {
-            $cv = ('' + (Get-Content $cvMarker -Raw)).Trim()
-            # ...and only when it names the CURRENT payload version: the marker is
-            # authoritative for the ACTIVE slot, so a stale/corrupt marker naming an
-            # older slot must NOT suppress reconcile and strand the wrong runtime.
-            if ($cv -and $cv -eq $current -and ((Test-Path (Join-Path $InstallDir "versions\$cv\Scripts\python.exe")) -or (Test-Path (Join-Path $InstallDir "versions/$cv/bin/python")))) { $provisioned = $true }
+    if ($runtimeVersion -cmatch '\.profile\.[0-9a-f]{16}') {
+        . (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')
+        $provisioned = Test-NativeWheelRuntimeCurrent -Root $InstallDir -Payload $PluginDir -Plugin $name
+    } else {
+        $provisioned = Test-Path (Join-Path $InstallDir '.venv')
+        if (-not $provisioned) {
+            $cvMarker = Join-Path $InstallDir 'current-version'
+            if (Test-Path $cvMarker) {
+                $cv = ('' + (Get-Content $cvMarker -Raw)).Trim()
+                if ($cv -and ($cv -eq $current -or $cv -eq $runtimeVersion) -and ((Test-Path (Join-Path $InstallDir "versions\$cv\Scripts\python.exe")) -or (Test-Path (Join-Path $InstallDir "versions/$cv/bin/python")))) { $provisioned = $true }
+            }
         }
     }
     if ($provisioned -and $deployed -eq $current) { Exit-SessionStart }

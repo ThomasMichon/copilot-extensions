@@ -99,6 +99,13 @@ try {
         Exit-SessionStart
     }
     $manifestData = Get-Content $Manifest -Raw | ConvertFrom-Json
+    if ($manifestData.runtime_version -cmatch '\.profile\.[0-9a-f]{16}') {
+        . (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')
+        if (Test-NativeWheelRuntimeCurrent -Root $InstallDir -Payload $PluginDir -Plugin $name) {
+            $desired = Get-Content -LiteralPath (Join-Path $InstallDir 'runtime-profile.json') -Raw | ConvertFrom-Json
+            if ($desired.profile -ceq $manifestData.runtime_profile) { Exit-SessionStart }
+        }
+    }
     $deployed = "" + $manifestData.source.version
     $current = $deployed
     $pyproj = Join-Path $PluginDir 'pyproject.toml'

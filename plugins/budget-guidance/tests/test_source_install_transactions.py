@@ -152,6 +152,7 @@ $VenvDir = $LinkDir
 $PackageVersion = '{VERSION}'
 $SrcVersion = $PackageVersion
 $SourceRuntimeIdentity = $null
+$NativeWheelSelection = $null
 $VersionedRuntime = $true
 $utf8NoBom = [Text.UTF8Encoding]::new($false)
 $RealPython = {q(sys.executable)}
@@ -456,7 +457,8 @@ try {{
     slot = tmp_path / "install" / "versions" / runtime
     assert (tmp_path / "install" / "current-version").read_text().strip() == runtime
     assert (slot / ".install-complete.json").is_file()
-    shutil.rmtree(snapshot)
+    native_path = source._runtime()._runtime_component("installer_dependency_config").native_retained_path
+    shutil.rmtree(native_path(snapshot))
     python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     result = subprocess.run(  # noqa: S603 - interpreter belongs to the isolated fixture slot
         [str(python), "-I", "-c", "from budget_guidance import VALUE; assert VALUE == 42"],

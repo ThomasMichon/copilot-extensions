@@ -478,7 +478,8 @@ def _helper_propagates_writer_status(body: str, suffix: str) -> bool:
         code = re.sub(r"<#.*?#>", "", code, flags=re.S)
         attached = re.search(
             r"(?m)^[ \t]*Complete-RuntimeConstruction[ \t]+-PayloadHash[ \t]+"
-            r"(?:\$\w+|\(Get-PayloadHash\))(?:[ \t]+-RetainHelpers)?[ \t]*$",
+            r"(?:\$\w+|\(Get-PayloadHash\))"
+            r"(?:[ \t]+-RetainHelpers(?::\(\[bool\]\$NativeWheelSelection\))?)?[ \t]*$",
             code,
         )
         if attached:

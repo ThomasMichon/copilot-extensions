@@ -175,7 +175,15 @@ try {
         }
         Exit-SessionStart
     }
-    $deployed = "" + (Get-Content $Manifest -Raw | ConvertFrom-Json).source.version
+    $deployment = Get-Content $Manifest -Raw | ConvertFrom-Json
+    $deployed = "" + $deployment.source.version
+    $wheelGeneration = $deployment.runtime_version -cmatch '\.profile\.[0-9a-f]{16}'
+    if ($wheelGeneration) {
+        . (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')
+        if (Test-NativeWheelRuntimeCurrent -Root $InstallDir -Payload $PluginDir -Plugin $name) {
+            Exit-SessionStart
+        }
+    }
     $current = $deployed
     $pyproj = Join-Path $PluginDir 'pyproject.toml'
     if (Test-Path $pyproj) {
@@ -198,7 +206,7 @@ try {
             if ($cv -and $cv -eq $current -and ((Test-Path (Join-Path $InstallDir "versions\$cv\Scripts\python.exe")) -or (Test-Path (Join-Path $InstallDir "versions/$cv/bin/python")))) { $provisioned = $true }
         }
     }
-    if ($provisioned -and $deployed -eq $current) { Exit-SessionStart }
+    if (-not $wheelGeneration -and $provisioned -and $deployed -eq $current) { Exit-SessionStart }
 
     $init = Join-Path $PluginDir 'scripts\init.ps1'
     if (Test-Path $init) {

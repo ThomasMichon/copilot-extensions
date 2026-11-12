@@ -1,3 +1,78 @@
+function Get-NativeWheelSelection {
+    param(
+        [Parameter(Mandatory)][string]$Python,
+        [Parameter(Mandatory)][string]$Helper,
+        [Parameter(Mandatory)][string]$Profile,
+        [Parameter(Mandatory)][string]$Directory,
+        [Parameter(Mandatory)][string]$Payload,
+        [Parameter(Mandatory)][string]$Plugin,
+        [object]$Expected
+    )
+    $nativeError = ''
+    $result = Invoke-Hidden -FilePath $Python -ArgList @(
+        '-I', '-B', $Helper, '--native-inputs', '--wheel-profile', $Profile,
+        '--wheel-directory', $Directory, '--payload', $Payload, '--component', $Plugin
+    ) -ErrorOutput ([ref]$nativeError)
+    if ($LASTEXITCODE -ne 0) {
+        throw "Native wheel selection failed (exit ${LASTEXITCODE}): $result$nativeError"
+    }
+    $selection = $result | ConvertFrom-Json
+    if ($selection.runtime_version -cnotmatch '^[0-9][A-Za-z0-9._+-]*$' -or
+        $selection.payload_hash -cnotmatch '^[0-9a-f]{64}$') {
+        throw 'Native wheel selection returned an invalid generation or content identity'
+    }
+    if ($Expected -and ($selection.runtime_version -cne $Expected.runtime_version -or
+        $selection.payload_hash -cne $Expected.payload_hash)) {
+        throw 'Native wheel inputs changed after runtime selection'
+    }
+    return $selection
+}
+
+function Initialize-NativeWheelRuntime {
+    param(
+        [string]$Python, [string]$Profile, [string]$Directory,
+        [string]$Payload, [string]$Plugin, [string]$Root
+    )
+    $script:NativeWheelSelection = Get-NativeWheelSelection -Python $Python `
+        -Helper (Join-Path $Payload 'scripts\install_source.py') -Profile $Profile `
+        -Directory $Directory -Payload $Payload -Plugin $Plugin
+    Set-NativeWheelRuntimeVersion -Root $Root -Version $script:NativeWheelSelection.runtime_version
+}
+
+function Set-NativeWheelRuntimeVersion {
+    param([string]$Root, [string]$Version)
+    $script:SrcVersion = $Version
+    $script:VenvDir = Join-Path (Join-Path $Root 'versions') $Version
+    $script:VenvPython = Join-Path $script:VenvDir 'Scripts\python.exe'
+    $script:LinkDir = $script:VenvDir
+    $script:LinkPython = $script:VenvPython
+}
+
+function Get-NativeWheelConstructionOptions {
+    param(
+        [string]$Profile, [string]$Directory, [string]$Payload,
+        [string]$Plugin, [string]$Uv, [string]$HealthModule, [switch]$Repair
+    )
+    if (-not $Profile) { return @{} }
+    return @{
+        WheelProfile = $Profile; WheelDirectory = $Directory; Payload = $Payload
+        Plugin = $Plugin; UvCommand = $Uv; HealthModule = $HealthModule; Repair = $Repair
+    }
+}
+
+function Test-NativeWheelRuntimeCurrent {
+    param([string]$Root, [string]$Payload, [string]$Plugin)
+    $python = Resolve-NativeBootstrapPython -Root $Root
+    if (-not $python) { throw 'Closed-wheel readiness requires an existing Python 3.11+ interpreter' }
+    $nativeError = ''
+    [void](Invoke-Hidden -FilePath $python -ArgList @(
+        '-I', '-B', (Join-Path $Payload 'scripts\install_source.py'),
+        '--native-current', '--root', $Root, '--payload', $Payload, '--component', $Plugin
+    ) -ErrorOutput ([ref]$nativeError))
+    if ($LASTEXITCODE -notin @(0, 1)) { throw "Closed-wheel readiness failed: $nativeError" }
+    return $LASTEXITCODE -eq 0
+}
+
 function Resolve-NativeBootstrapPython {
     param(
         [ValidateSet(10, 11)][int]$MinimumMinor = 11,
@@ -89,9 +164,14 @@ function Enter-NativeInstallerDriver {
         [string[]]$Options = @(),
         [string]$RetainedRuntime,
         [string]$RetainedRuntimeSha256,
-        [string]$InstallSource
+        [string]$InstallSource,
+        [string]$WheelProfile,
+        [string]$WheelDirectory,
+        [string]$WheelPython,
+        [string]$WheelUv
     )
-    $python = Resolve-NativeBootstrapPython -Action $Action -Root $Root
+    $python = if ($WheelProfile) { $WheelPython }
+        else { Resolve-NativeBootstrapPython -Action $Action -Root $Root }
     if (-not $python) { throw 'Native install and uninstall require an existing Python 3.11+ bootstrap interpreter; removal requires it outside the runtime' }
     $arguments = @('-I', '-S', '-B', '-X', 'utf8',
         (Join-Path $Payload 'scripts\installer_driver.py'),
@@ -102,6 +182,10 @@ function Enter-NativeInstallerDriver {
     if ($RetainedRuntime) { $arguments += @('--retained-runtime', $RetainedRuntime) }
     if ($RetainedRuntimeSha256) { $arguments += @('--retained-runtime-sha256', $RetainedRuntimeSha256) }
     if ($InstallSource) { $arguments += @('--install-source', $InstallSource) }
+    if ($WheelProfile -or $WheelDirectory -or $WheelPython -or $WheelUv) {
+        $arguments += @('--wheel-profile', $WheelProfile, '--wheel-directory', $WheelDirectory,
+            '--wheel-python', $WheelPython, '--wheel-uv', $WheelUv)
+    }
     $participant = $env:COPILOT_EXTENSIONS_NATIVE_INSTALLER -eq $Plugin
     if ($participant) { $arguments += '--check-native' }
     $previousErrorAction = $ErrorActionPreference

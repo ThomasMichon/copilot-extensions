@@ -7,7 +7,11 @@ param(
     [ValidateSet('install', 'update', 'status', 'uninstall', 'stamp', 'provision')]
     [string]$Action = 'install',
     [string]$InstallDir,
-    [switch]$Force
+    [switch]$Force,
+    [string]$WheelProfile,
+    [string]$WheelDirectory,
+    [string]$WheelPython,
+    [string]$WheelUv
 )
 
 Set-StrictMode -Version 2.0
@@ -18,6 +22,13 @@ if ($env:COPILOT_EXTENSIONS_HUMAN_UTF8 -eq '1') {
         throw 'Required installer human-output initializer is unavailable.'
     }
     . (Join-Path $PSScriptRoot 'installer-human-output.ps1')
+}
+
+if ($WheelProfile -or $WheelDirectory -or $WheelPython -or $WheelUv) {
+    if (-not $WheelProfile -or -not $WheelDirectory -or -not $WheelPython -or -not $WheelUv -or
+        $Action -notin @('install', 'update', 'provision')) {
+        throw 'Closed wheels require profile, directory, Python and UV for install, update or provision'
+    }
 }
 
 # === install-contract:v4 payload-copy -- keep byte-identical across plugins ===
@@ -437,6 +448,7 @@ if ($true) {  # always versioned (junction-free marker model; COPILOT_EXT_NO_VER
 
 $PackageVersion = $SrcVersion
 $SourceRuntimeIdentity = $null
+$NativeWheelSelection = $null
 $script:InstallLockHandle = $null
 
 function Invoke-VersionedActivate {
@@ -510,6 +522,7 @@ function Get-BootstrapPython {
        Uses the active link's python or a real base python via the `py`
        launcher, never the candidate owned by construction -- avoiding the
        Windows Store 'python' alias stub. Returns $null if none. #>
+    if ($WheelProfile) { return $WheelPython }
     foreach ($d in @($LinkDir)) {
         if ($d) { foreach ($rel in 'Scripts\python.exe', 'bin/python') { $p = Join-Path $d $rel; if (Test-Path $p) { return $p } } }
     }
@@ -606,6 +619,13 @@ function Test-SourceRuntimeUnchanged {
 }
 
 function Get-PayloadHash {
+    if ($NativeWheelSelection) {
+        $observed = Get-NativeWheelSelection -Python $WheelPython `
+            -Helper (Join-Path $PSScriptRoot 'install_source.py') -Profile $WheelProfile `
+            -Directory $WheelDirectory -Payload $PluginDir -Plugin 'budget-guidance' `
+            -Expected $NativeWheelSelection
+        return $observed.payload_hash
+    }
     <# Cheap payload fingerprint for the completion marker (#935): sha256 of
        pyproject.toml + the vendored-lib version set. Never throws -> '' on error. #>
     try {
@@ -646,9 +666,20 @@ function Invoke-VersionedSlotClean {
         if ($LASTEXITCODE -ne 0) { throw 'Canonical construction adapter is unavailable' }
         Invoke-Expression $helpers
     }
+    $wheelOptions = @{}
+    if ($NativeWheelSelection) {
+        $wheelOptions = @{
+            WheelProfile = $WheelProfile; WheelDirectory = $WheelDirectory
+            Payload = $PluginDir; Plugin = 'budget-guidance'
+            UvCommand = $WheelUv; HealthModule = 'budget_guidance'; Repair = $Force
+        }
+    }
     $script:RuntimeConstructionReuse = Start-RuntimeConstruction `
         -Python $py -Helper $vr -Root $InstallDir -Version $SrcVersion `
-        -PayloadHash (Get-PayloadHash) -LinkName (Split-Path -Leaf $LinkDir)
+        -PayloadHash (Get-PayloadHash) -LinkName (Split-Path -Leaf $LinkDir) @wheelOptions
+    if ($NativeWheelSelection) {
+        Set-BudgetRuntimeVersion $script:RuntimeConstructionSession.Version
+    }
     Test-SourceRuntimeUnchanged
 }
 
@@ -660,7 +691,7 @@ function Invoke-VersionedMarkComplete {
     if (-not $VersionedRuntime) { return $true }
     $actualHash = Get-PayloadHash
     Test-SourceRuntimeUnchanged
-    Complete-RuntimeConstruction -PayloadHash $actualHash
+    Complete-RuntimeConstruction -PayloadHash $actualHash -RetainHelpers:([bool]$NativeWheelSelection)
     return $true
 }
 # === end install-contract:v4 marker/toss helpers ===
@@ -939,7 +970,23 @@ function Exit-InstallLock {
     }
 }
 
+function Set-BudgetRuntimeVersion([string]$Version) {
+    $script:SrcVersion = $Version
+    $script:VenvDir = Join-Path (Join-Path $InstallDir 'versions') $Version
+    $script:VenvPython = if ($env:OS -eq 'Windows_NT') {
+        Join-Path $VenvDir 'Scripts\python.exe'
+    } else { Join-Path $VenvDir 'bin/python' }
+    $script:LinkDir = $VenvDir
+    $script:LinkPython = $VenvPython
+}
+
 if ($Action -in @('install', 'update', 'stamp', 'provision')) { Initialize-SourceRuntime }
+if ($WheelProfile) {
+    $NativeWheelSelection = Get-NativeWheelSelection -Python $WheelPython `
+        -Helper (Join-Path $PSScriptRoot 'install_source.py') -Profile $WheelProfile `
+        -Directory $WheelDirectory -Payload $PluginDir -Plugin 'budget-guidance'
+    Set-BudgetRuntimeVersion $NativeWheelSelection.runtime_version
+}
 $needsInstallLock = $Action -in @('install', 'update', 'stamp', 'provision', 'uninstall')
 if ($needsInstallLock -and -not (Enter-InstallLock)) {
     Write-Fail "Could not acquire the install transaction lock ($(Join-Path $InstallDir '.install.lock')) within $(Get-InstallLockTimeoutSec)s -- refusing to proceed unlocked"
@@ -1003,7 +1050,7 @@ if (-not (Test-Path $PkgSrcDir)) {
 }
 
 $hasWinget = $null -ne (Get-Command winget -ErrorAction SilentlyContinue)
-if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
+if (-not $WheelProfile -and -not (Get-Command uv -ErrorAction SilentlyContinue)) {
     if ($hasWinget) {
         Write-Step 'uv not found -- installing via winget...'
         $prevEAP = $ErrorActionPreference
@@ -1014,10 +1061,12 @@ if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
         if (Get-Command uv -ErrorAction SilentlyContinue) { Write-Ok 'uv installed' }
     }
 }
-$uvCommand = Get-Command uv -ErrorAction SilentlyContinue
+$uvCommand = if ($WheelProfile) {
+    Get-Command $WheelUv -CommandType Application -ErrorAction Stop
+} else { Get-Command uv -ErrorAction SilentlyContinue }
 
-$pythonCmd = $null
-foreach ($candidate in @('python', 'python3', 'py')) {
+$pythonCmd = if ($WheelProfile) { $WheelPython } else { $null }
+foreach ($candidate in $(if ($WheelProfile) { @() } else { @('python', 'python3', 'py') })) {
     $found = Get-Command $candidate -ErrorAction SilentlyContinue
     if ($found) {
         $prevEAP = $ErrorActionPreference
@@ -1171,6 +1220,10 @@ if ($SourceRuntimeIdentity) {
     foreach ($property in ($SourceRuntimeIdentity | ConvertFrom-Json).PSObject.Properties) {
         $manifest[$property.Name] = $property.Value
     }
+}
+if ($NativeWheelSelection) {
+    $manifest['runtime_version'] = $SrcVersion
+    $manifest['source']['content_hash'] = $NativeWheelSelection.payload_hash
 }
 $tmp = "$ManifestPath.tmp"
 $manifest | ConvertTo-Json -Depth 8 | Set-Content -Path $tmp -Encoding UTF8

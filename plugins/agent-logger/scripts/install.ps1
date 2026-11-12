@@ -37,7 +37,11 @@ param(
 
     # Preview mode for uninstall/task-retire: print what WOULD be removed
     # without touching the scheduled task or binstubs.
-    [switch]$DryRun
+    [switch]$DryRun,
+    [string]$WheelProfile,
+    [string]$WheelDirectory,
+    [string]$WheelPython,
+    [string]$WheelUv
 )
 
 Set-StrictMode -Version Latest
@@ -49,6 +53,16 @@ if ($env:COPILOT_EXTENSIONS_HUMAN_UTF8 -eq '1') {
     }
     . (Join-Path $PSScriptRoot 'installer-human-output.ps1')
 }
+
+if ($WheelProfile -or $WheelDirectory -or $WheelPython -or $WheelUv) {
+    if (-not $WheelProfile -or -not $WheelDirectory -or -not $WheelPython -or -not $WheelUv -or
+        $Action -notin @('install', 'update', 'provision')) {
+        throw 'Closed wheels require profile, directory, Python and UV for install, update or provision'
+    }
+    $BootstrapPython = $WheelPython
+}
+$NativeWheelSelection = $null
+
 
 if ($Action -eq 'uninstall' -and $InstallDir) {
     if (($InstallDir -split '[\\/]') -contains '..') {
@@ -811,6 +825,7 @@ function Get-GitInfo {
 # same place.
 # === install-contract:v4 marker/toss helpers (#935) ===
 function Get-BootstrapPython {
+    if ($WheelProfile) { return $WheelPython }
     # Keep publication, construction and command ownership on the admitted
     # interpreter rather than reselecting an unsupported launcher default.
     $admitted = Get-Variable publicationPython -Scope Script -ValueOnly -ErrorAction SilentlyContinue
@@ -819,6 +834,12 @@ function Get-BootstrapPython {
 }
 
 function Get-PayloadHash {
+    if ($NativeWheelSelection) {
+        return (Get-NativeWheelSelection -Python $WheelPython `
+            -Helper (Join-Path $PSScriptRoot 'install_source.py') -Profile $WheelProfile `
+            -Directory $WheelDirectory -Payload $PluginDir -Plugin 'agent-logger' `
+            -Expected $NativeWheelSelection).payload_hash
+    }
     <# Cheap payload fingerprint for the completion marker (#935): sha256 of
        pyproject.toml + the vendored-lib version set. Never throws -> '' on error. #>
     try {
@@ -848,9 +869,17 @@ function Invoke-VersionedSlotClean {
         if ($LASTEXITCODE -ne 0) { throw 'Canonical construction adapter is unavailable' }
         Invoke-Expression $helpers
     }
+    $wheelOptions = Get-NativeWheelConstructionOptions -Profile $WheelProfile `
+        -Directory $WheelDirectory -Payload $PluginDir -Plugin 'agent-logger' `
+        -Uv $WheelUv -HealthModule 'agent_logger'
     $script:RuntimeConstructionReuse = Start-RuntimeConstruction `
         -Python $py -Helper $vr -Root $InstallDir -Version $SrcVersion `
-        -PayloadHash (Get-PayloadHash) -LinkName (Split-Path -Leaf $LinkDir)
+        -PayloadHash (Get-PayloadHash) -LinkName (Split-Path -Leaf $LinkDir) @wheelOptions
+    if ($NativeWheelSelection) {
+        Set-NativeWheelRuntimeVersion -Root $InstallDir -Version $script:RuntimeConstructionSession.Version
+        $script:VenvPythonw = Join-Path $VenvDir 'Scripts\pythonw.exe'
+        $script:LinkPythonw = $script:VenvPythonw
+    }
     Assert-SourceRuntime
 }
 
@@ -861,7 +890,7 @@ function Invoke-VersionedMarkComplete {
     if ($PayloadHash -and $PayloadHash -ne $actualHash) {
         throw 'Payload changed during construction; completion refused'
     }
-    Complete-RuntimeConstruction -PayloadHash $actualHash
+    Complete-RuntimeConstruction -PayloadHash $actualHash -RetainHelpers:([bool]$NativeWheelSelection)
     return $true
 }
 # === end install-contract:v4 marker/toss helpers ===
@@ -1366,8 +1395,8 @@ function Install-Package {
     if (-not (Test-Path $LocalBin))   { New-Item -ItemType Directory -Path $LocalBin -Force | Out-Null }
 
     # Prerequisite: uv (venv + package management per the install contract).
-    Ensure-UvIndex
-    $uvPath = Ensure-Uv -InstallRoot $InstallDir
+    if (-not $WheelProfile) { Ensure-UvIndex }
+    $uvPath = if ($WheelProfile) { $WheelUv } else { Ensure-Uv -InstallRoot $InstallDir }
     if (-not $uvPath) {
         Write-Fail 'uv is required but could not be resolved or acquired'
         exit 1
@@ -1989,6 +2018,12 @@ try {
     $PackageVersion = $SrcVersion
     $SourceRuntimeIdentity = $null
     if ($Action -in @('install', 'update', 'provision', 'stamp')) { Initialize-SourceRuntime }
+    if ($WheelProfile) {
+        Initialize-NativeWheelRuntime -Python $WheelPython -Profile $WheelProfile `
+            -Directory $WheelDirectory -Payload $PluginDir -Plugin 'agent-logger' -Root $InstallDir
+        $script:VenvPythonw = Join-Path $VenvDir 'Scripts\pythonw.exe'
+        $script:LinkPythonw = $script:VenvPythonw
+    }
     if ($Action -ne 'status') { Enter-LoggerInstallLock }
     if ($Action -in @('install', 'update', 'provision', 'stamp')) { Assert-SourceRuntime }
     if ($Action -in @('install', 'update', 'provision')) {
