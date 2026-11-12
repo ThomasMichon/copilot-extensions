@@ -1,7 +1,6 @@
 """Adapt source preparation to the existing native process and permission owners."""
 from __future__ import annotations
 
-import importlib
 from pathlib import Path
 import subprocess
 import sys
@@ -17,7 +16,16 @@ def procutil_module(name: str) -> ModuleType:
     previous = sys.path.copy()
     try:
         sys.path.insert(0, str(source))
-        module = importlib.import_module("agent_procutil." + name)
+        from agent_procutil import (
+            _daemon_instance_owner, owned_budget, owned_process, python_cache_permissions,
+        )
+
+        module = {
+            "_daemon_instance_owner": _daemon_instance_owner,
+            "owned_budget": owned_budget,
+            "owned_process": owned_process,
+            "python_cache_permissions": python_cache_permissions,
+        }[name]
     finally:
         sys.path[:] = previous
     if Path(module.__file__).resolve() != (source / "agent_procutil" / (name + ".py")).resolve():

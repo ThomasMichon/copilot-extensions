@@ -5565,7 +5565,7 @@
         "plugins/agent-machines/src/agent_machines/health_task_native.py": "1c35c28bc8ac167bf1be29f2dd2f8f17489215f72fb4b2691c9d6d7549266cd1",
         "libs/installer-engine/runtime_launcher.py": "0cd1ac9fd75cff85f605345ec958fabc70f59796343b798aceec253ecc0b7cde",
         "plugins/agent-machines/src/agent_machines/resource_health_job.py": "fd1ce6396b8a3ab3dc034001a2d135427350ab56de092416a7d53876244e4dd7",
-        "tools/source_preparation_process.py": "c5125ce17684d781cae807531a109ef1a80b185b03428e11214609e1775b6c08"
+        "tools/source_preparation_process.py": "eb014eeac9aa37a7accc40a71aa8c39f364df25634ab77d3d3eb34e3bd0e39cd"
     },
     "coverage_targets": [
         "tools/local_install_source.py",
