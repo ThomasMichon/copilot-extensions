@@ -1882,6 +1882,64 @@ No native provider operation or venv construction runs in that default lane.
 The preceding exact-source CI and hosted burst success are retained at `c9e546`,
 not relabeled as evidence for this new residual.
 
+### November 11 - Close the short-profile investigation without waiving census
+
+The venv-only request `f45dea5b1cae41f995cd2ec1a5f8c33d`, run 43146338506
+attempt 1, qualifies exact source
+`5eacaa4c961dd0bfffaffc3f22a8294a9518accb` on protected controller
+`3c0e071e2113d7934b32f288d5400b02b9016b2b`. Its retained JUnit summary
+confirms actual venv execution, 128 short-lived children, 253 observed
+incarnations and 37 successful scans. Query-pipeline total/max is 1542/126 ms,
+with session creation 220 ms. Scan errors are zero, the session closes,
+the window and stop are observed, and no truncation occurs.
+
+All four short diagnostic dimensions now have real hosted evidence, but none
+reproduces the original long-workload failure. Stop growing this synthetic
+load matrix: buffering, short concurrent load and venv launch pairs have no
+positive causal evidence. No provider replacement, census exemption or
+larger timeout follows from these passes.
+
+Publication of `5eacaa4` was initially interrupted by local PowerShell
+startup stack-overflow/out-of-memory failures. Independent Git/provider reads
+prove that attempt had not published; the native profile was not submitted.
+After read-only host measurements show memory recovered, the normal managed
+publication and one new request succeed. No shared process termination,
+configuration change, runtime repair or bypass is performed.
+
+Dev moves during that interruption. A backup preserves `5eacaa4` before
+reconciling onto `8426b0512190e1c2944d2721714e9229af20f2e9`. The two
+conflicts are additive: Machines retains this branch's selected-project
+binding and the upstream script-only installer-runtime declaration/digest;
+MCP's canonical producer refresh preserves the merged scripts with revision
+36 unchanged. Range-diff retains all 35 owned commits, with only those
+two integration seams changed. Frozen profiles remain evidence for their
+original commits, not the reconciled tip.
+
+The remaining diagnostic criterion requires the original workload: capture
+the new passive failure phase, safe numeric embedded HRESULT/category and
+query-pipeline timing when the complete installed consumer executes. One
+instrumented exact-candidate run through the existing disposable native
+owner is justified after focused integration validation and publication.
+This is not an unchanged retry hoping for zero errors. Keep the existing
+60-minute job, 1800/900/300/90-second stage limits, one-second CIM operations,
+100-ms cadence, record/failure caps, fatal errors, strict payload comparison
+and exact owned cleanup. A pass cannot erase the earlier failed run or prove
+its root cause; a failure must be diagnosed from the new retained fields.
+No new workflow, runner capacity, operator installation or Main activation
+is authorized. Full acceptance, admitted-baseline upgrade, frozen enforcement
+and the parent's other open validation obligations remain separate.
+
+Reconciled validation passes 30 focused Machines installer-runtime/project-context
+cases and 33 MCP bootstrap/readiness/provider cases. The initial broader
+Machines file selection reaches its unchanged 180-second subsuite limit before
+completion; that full file is not credited as passing. The narrower selection
+exercises the actual merged seam without enlarging deadlines. All contributed
+Python passes F/E9 lint; strict runtime resolution, 13 install contracts,
+documentation consistency and whitespace pass. Documentation impact remains
+the testing reference and this journal; there is no new runtime command,
+configuration or policy. The pending exact-source CI is independent of these
+source controls and frozen earlier results.
+
 ### November 11 - Identify and stop snapshot-guidance payload bytecode
 
 Required CI 43069145815 is green at
