@@ -1,15 +1,15 @@
 """Native recipe admission before any installation effects."""
 from __future__ import annotations
 
-import os
 import hashlib
 import json
-from pathlib import Path
+import os
 import shutil
 import subprocess
-import tomllib
+from pathlib import Path
 
 import pytest
+import tomllib
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -45,7 +45,7 @@ def test_incomplete_wheel_input_refuses_before_native_effects(tmp_path, plugin, 
          "-Action", action, "-InstallDir", str(runtime),
          "-WheelProfile", str(tmp_path / "not-selected.json")],
         cwd=home, env=environment, capture_output=True, text=True,
-        timeout=20, creationflags=subprocess.CREATE_NO_WINDOW,
+        timeout=20, creationflags=subprocess.CREATE_NO_WINDOW, check=False,
     )
     assert result.returncode != 0
     assert "Closed wheels require" in result.stderr
@@ -54,7 +54,10 @@ def test_incomplete_wheel_input_refuses_before_native_effects(tmp_path, plugin, 
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows native bootstrap readiness")
-@pytest.mark.parametrize("plugin", ["agent-ssh", "budget-guidance"])
+@pytest.mark.parametrize("plugin", [
+    "agent-ssh", "budget-guidance", "agent-bridge", "agent-codespaces",
+    "agent-dispatch", "agent-logger", "agent-pull-requests",
+])
 def test_native_bootstrap_validates_evidence_but_keeps_ordinary_presence(tmp_path, monkeypatch, plugin):
     assert_native_bootstrap(tmp_path, monkeypatch, plugin)
 
@@ -84,7 +87,8 @@ def assert_native_bootstrap(tmp_path, monkeypatch, plugin):
     ).encode()).hexdigest()
     native_version = version + ".profile." + lock[7:23]
     root = home / ("." + plugin)
-    if plugin == "budget-guidance":
+    publication_guard = plugin in {"budget-guidance", "agent-dispatch"}
+    if publication_guard:
         publication = payload / "scripts" / "installation-context" / "plugin-publication-probe.ps1"
         publication.write_text(
             "[Console]::Error.WriteLine('fixture: reconcile admission reached'); exit 19\n",
@@ -94,12 +98,13 @@ def assert_native_bootstrap(tmp_path, monkeypatch, plugin):
         key: value for key, value in os.environ.items()
         if not key.startswith(("AGENT_", "COPILOT_", "BUDGET_GUIDANCE_"))
     }
+    no_self_provision = json.loads((payload / "payload-invocation.json").read_text())["noSelfProvisionEnv"]
     environment.update(
-        HOME=str(home), USERPROFILE=str(home), AGENT_SSH_NO_SELFPROVISION="1",
-        COPILOT_EXTENSIONS_TEST_CONTAINED="1",
+        HOME=str(home), USERPROFILE=str(home), COPILOT_EXTENSIONS_TEST_CONTAINED="1",
+        **{no_self_provision: "1"},
     )
-    for fault in (None, "completion", "binding", "ordinary", "different-generation"):
-        generation = version if fault == "ordinary" else native_version
+    for fault in (None, "completion", "binding", "ordinary", "different-generation", "same-version-rollback"):
+        generation = version if fault in {"ordinary", "same-version-rollback"} else native_version
         slot = root / "versions" / generation
         python = slot / "Scripts" / "python.exe"
         python.parent.mkdir(parents=True, exist_ok=True)
@@ -119,18 +124,19 @@ def assert_native_bootstrap(tmp_path, monkeypatch, plugin):
             "wheel_inputs": receipt, "local_packages": [plugin],
         }))
         (root / "current-version").write_text(generation)
+        manifest_generation = native_version if fault == "same-version-rollback" else generation
         (root / "deploy-manifest.json").write_text(json.dumps({
-            "runtime_version": "0.0.0" if fault == "different-generation" else generation,
+            "runtime_version": "0.0.0" if fault == "different-generation" else manifest_generation,
             "source": {"version": version, "plugin": plugin, "path": str(payload), "content_hash": "b" * 64},
         }))
         result = subprocess.run(
             [host, "-NoProfile", "-NonInteractive", "-File",
              str(payload / "scripts" / "bootstrap-check.ps1")],
             cwd=home, env=environment, capture_output=True, text=True,
-            timeout=30, creationflags=subprocess.CREATE_NO_WINDOW,
+            timeout=30, creationflags=subprocess.CREATE_NO_WINDOW, check=False,
         )
-        invalid = fault in {"completion", "binding", "different-generation"}
-        expected = 3 if invalid and plugin == "budget-guidance" else 0
-        message = "bootstrap deferred" if plugin == "agent-ssh" else "reconcile admission reached"
+        invalid = fault in {"completion", "binding", "different-generation", "same-version-rollback"}
+        expected = 3 if invalid and publication_guard else 0
+        message = "reconcile admission reached" if publication_guard else "bootstrap deferred"
         assert result.returncode == expected, result.stdout + result.stderr
         assert (message in result.stderr) == invalid, result.stderr

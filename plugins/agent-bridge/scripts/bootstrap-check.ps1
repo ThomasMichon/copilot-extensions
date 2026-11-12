@@ -49,7 +49,8 @@ try {
     if (Test-Path -LiteralPath $Manifest) {
         $deployment = [IO.File]::ReadAllText($Manifest) | ConvertFrom-Json
         $deployed = $deployment.source.version
-        if ($deployment.runtime_version -cmatch '\.profile\.[0-9a-f]{16}') {
+        $wheelGeneration = $deployment.runtime_version -cmatch '\.profile\.[0-9a-f]{16}'
+        if ($wheelGeneration) {
             . (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')
             if (Test-NativeWheelRuntimeCurrent -Root $InstallDir -Payload $PluginDir -Plugin $name) {
                 Exit-SessionStart
@@ -84,7 +85,7 @@ try {
             $runtimeHealthy = (Test-Path -LiteralPath (Join-Path $InstallDir '.venv')) -or
                 (Test-Path -LiteralPath (Join-Path $InstallDir 'venv'))
         }
-        if ($runtimeHealthy -and $deployed -ceq $current -and
+        if (-not $wheelGeneration -and $runtimeHealthy -and $deployed -ceq $current -and
             (-not $curVer -or $curVer -ceq $deployed)) { Exit-SessionStart }
         $installerAction = 'install'
     }
