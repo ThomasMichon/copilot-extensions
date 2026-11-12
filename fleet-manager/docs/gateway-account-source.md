@@ -85,8 +85,13 @@ Responses are `no-store`. Request bodies are limited to 16 KiB, use strict
 duplicate/nonfinite/unknown-field rejection and are never logged by the adapter.
 The source result must exactly match the requested account and host and the
 implemented account wire format. Provider output and exceptions are replaced
-by fixed error codes, never relayed as diagnostics. Acquisition is bounded by
-20 seconds and the caller's remaining admission. Cancellation propagates.
+by fixed error codes, never relayed as diagnostics. The async acquisition
+deadline is 20 seconds or the caller's remaining admission, whichever is
+smaller. Cancellation propagates. As with other service handlers, the custodian
+must cooperate: this deadline cannot preempt synchronous filesystem I/O or
+noncooperative cleanup. The existing account custodian reads bounded local
+policy/capability files and invokes its existing headless token command;
+deployment must qualify those blocking stages on the selected source host.
 
 Unavailable or withdrawn sources return `503`, without ambient-account fallback
 or cache reuse. Channel loss or replacement retains the existing transport's
