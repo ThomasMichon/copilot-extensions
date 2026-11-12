@@ -309,7 +309,8 @@ The accepted generic expansion is specified in
 It composes the existing #11783 cache/observer/service rather than replacing
 its implementation or authorizing production activation.
 
-- [ ] Review and land the filter/subscription contract before implementing it.
+- [x] Review and land the filter/subscription contract before implementing it
+  (#12161; approved current head and green required CI).
 - [ ] Deliver the linked expression, driver, demand/storage and actual
   service/client slices with their complete validation plan; source completion
   does not close the parent service/fleet or live-provider acceptance.
