@@ -37,9 +37,9 @@ pytestmark = [
 ]
 
 UPSTREAM = r"""
-import json, os, signal, sys, threading
+import json, os, signal, sys, threading, time
 from pathlib import Path
-trigger, receipt, replies, calls = map(Path, sys.argv[1:])
+trigger, receipt, replies, calls, hold, release = map(Path, sys.argv[1:])
 lock = threading.Lock()
 stopped = threading.Event()
 initialized = revision = 0
@@ -98,6 +98,12 @@ try:
             nonce = message["params"]["arguments"]["nonce"]
             with calls.open("a") as output:
                 output.write(json.dumps({"nonce":nonce,"pid":os.getpid()})+"\n")
+            if hold.is_file() and hold.read_text() == nonce:
+                deadline = time.monotonic() + 10
+                while not release.is_file() or release.read_text() != nonce:
+                    if time.monotonic() >= deadline:
+                        raise RuntimeError("fixture tool release deadline expired")
+                    time.sleep(.02)
             result.update(content=[{"type":"text","text":"fixture-result:"+nonce}])
         emit({"jsonrpc":"2.0","id":message["id"],"result":result})
     boundary = "stdin-eof"
@@ -132,17 +138,20 @@ async def test_actual_native_client_responds_through_replacement_and_rollback(
     trigger, receipt = tmp_path / "refresh", tmp_path / "upstream-exit.json"
     replies = tmp_path / "client-replies.jsonl"
     calls = tmp_path / "tool-calls.jsonl"
+    hold, release = tmp_path / "hold-tool", tmp_path / "release-tool"
     observations = tmp_path / "responses.jsonl"
     caller_context = tmp_path / "caller-context.json"
     config = home / "bridge.json"
     config.write_text(json.dumps({
         "server": {"type": "stdio", "command": [
-            sys.executable, str(upstream), str(trigger), str(receipt), str(replies), str(calls),
+            sys.executable, str(upstream), str(trigger), str(receipt), str(replies),
+            str(calls), str(hold), str(release),
         ]}, "auth": {"kind": "none"},
     }), encoding="utf-8")
     fixed = workspace / "current" / "serve.sock"
     processes, handles, cleanup = [], [], []
     client = stderr = session = None
+    pending = None
     identities = []
     sequence = 0
     model = provider.CannedProvider()
@@ -348,8 +357,35 @@ async def test_actual_native_client_responds_through_replacement_and_rollback(
                     retained_identities()
 
                 await tool_call("old", old_pid)
+                previous_label = "old"
                 for label in ("new", "old", "old"):
+                    nonce = "native-fixture-" + str(len(model.calls) + 1)
+                    hold.write_text(nonce, encoding="utf-8")
+                    pending = asyncio.create_task(tool_call(previous_label, old.pid))
+
+                    async def accepted_call() -> bool:
+                        return any(
+                            row["nonce"] == nonce
+                            for row in map(json.loads, calls.read_text().splitlines())
+                        )
+
+                    await fixture.eventually(accepted_call)
                     incoming, _, incoming_pid = await backend(label)
+
+                    async def quiescing_call() -> bool:
+                        path = observations.with_suffix(".quiescing")
+                        return path.is_file() and any(
+                            row["backend_pid"] == old.pid and row["accepted"] > 0
+                            and row["settlers"] > 0
+                            for row in map(json.loads, path.read_text().splitlines())
+                        )
+
+                    await fixture.eventually(quiescing_call)
+                    assert not pending.done() and nonce not in model.results
+                    assert model.calls.count(nonce) == 1
+                    retained_identities()
+                    release.write_text(nonce, encoding="utf-8")
+                    await pending
                     await exchange(label, incoming_pid)
                     retained_identities()
                     await fixture.shutdown(old_handle)
@@ -359,6 +395,7 @@ async def test_actual_native_client_responds_through_replacement_and_rollback(
                     retained_identities()
                     await tool_call(label, incoming_pid)
                     old, old_handle = incoming, handles[-1]
+                    previous_label = label
                 sequence += 1
                 dropped = "fixture-ping-" + str(sequence)
                 observations.with_suffix(".drop").write_text(dropped, encoding="utf-8")
@@ -390,8 +427,13 @@ async def test_actual_native_client_responds_through_replacement_and_rollback(
                 }))
                 record_testsuite_property("native_ping_roundtrips_after_handover", 3)
                 record_testsuite_property("actual_native_tool_calls_consumed", len(model.results))
+                record_testsuite_property("actual_native_inflight_handover_calls", 3)
             finally:
                 await model.close()
+                if pending is not None and not pending.done():
+                    pending.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await pending
                 if session is not None and not session.done():
                     session.cancel()
                     with contextlib.suppress(asyncio.CancelledError):

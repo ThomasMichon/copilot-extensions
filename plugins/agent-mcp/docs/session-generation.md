@@ -138,9 +138,16 @@ fixture tool. Actual Copilot must execute it once initially and after each
 predecessor exits, then submit its real result to that provider and return the
 matching completion over ACP. The private upstream ledger and physical-backend
 witness must agree on each unique argument and retained upstream identity.
+For each transition, an additional accepted tool call is held on the predecessor
+while the incoming backend becomes ready. A copied-backend witness must confirm
+that real handover reached quiescing with accepted work and settlers still
+pending before the release gate opens. The call must remain pending without replay,
+then complete on its original backend after release before fresh traffic is
+required on the incoming backend. This does not simulate an unknown delivery
+outcome.
 The transport uses no API key or external inference and pre-approves only that
 fixture tool; unexpected permission requests fail rather than gain authority.
-This is source qualification, not installed acceptance or in-flight mutation
+This is source qualification, not installed acceptance or unknown-outcome
 recovery; it requires `COPILOT_NATIVE_TEST_EXECUTABLE` on a disposable runner. The existing
 path-gated `mcp-owner-exec` workflow supplies the pinned asset. A platform or asset
 skip is not qualification, and this source packet does not enable installed
