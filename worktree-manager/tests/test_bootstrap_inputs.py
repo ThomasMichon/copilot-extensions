@@ -287,6 +287,34 @@ def test_grouped_preparation_assets_retain_each_declared_root(preparation_assets
     assert helper.retain(payload, driver)[0] != retained
 
 
+def test_manager_assets_materialize_for_pre_upgrade_group_reader(tmp_path, monkeypatch):
+    root = Path(__file__).resolve().parents[2]
+    monkeypatch.syspath_prepend(str(root / "tools"))
+    assets = importlib.import_module("launch_wrapper_assets_ref")
+    materializer = importlib.import_module("materialize_main")
+    consumer = root / "worktree-manager"
+    manifest = consumer / assets.PACKAGED_MANIFEST_NAME
+    declaration = json.loads(manifest.read_text(encoding="utf-8"))
+    expected = {}
+    for group in declaration["groups"]:
+        # A running pre-upgrade consumer has the original relative-root grammar.
+        assets._manifest_group(manifest, group, manifest_name=assets.PACKAGED_MANIFEST_NAME)
+        for name in group["files"]:
+            destination = Path(group["payloadDir"]) / name
+            expected[destination] = (root / group["canonicalDir"] / name).read_bytes()
+    destination = tmp_path / "worktree-manager"
+    destination.mkdir()
+    report = materializer.materialize_launch_wrapper_assets_into(
+        source_consumer_dir=consumer, dest_consumer_dir=destination, canonical_root=root,
+    )
+    assert report and all(line.startswith("OK ") for line in report), report
+    actual = {
+        path.relative_to(destination): path.read_bytes()
+        for path in destination.rglob("*") if path.is_file()
+    }
+    assert actual == expected
+
+
 @pytest.mark.parametrize("failure", [
     "traversal", "absolute", "duplicate", "overlap", "case-duplicate", "case-overlap",
 ])
