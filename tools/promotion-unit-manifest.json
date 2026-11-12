@@ -5805,7 +5805,7 @@
         "tools/artifact_release_discovery.py": "96d96fce933c6354714ede8f92ff3b941406789210d9e797bbadbe10a28d3157",
         "tools/update_machine_gate_contract.py": "286c31e2b5099e2e774617f86779dcec4917ebb332525722bc994ae9cda9bb74",
         "tools/check-install-contract.py": "ad583ad987d1d841d6ffefb24b533e859e775f31532d81cd38e1651b8bbdcc3d",
-        "tools/promotion_unit_tests/test_update_receipt_contract.py": "af14589c316669a93b8d20f9f99526a0f155031624a68f6ad5fdcfcbeac0179e",
+        "tools/promotion_unit_tests/test_update_receipt_contract.py": "373b1a5fdc2485573f222eabb7c8371249335e499efb1346a5c744f10a785f67",
         "tools/promotion_unit_tests/test_monitor_outcome_contract.py": "aeec028e93d677a3e9e6c20ee3acb980ad82a7b8fd8bd621f68753e9058bb64e",
         "plugins/agent-worktrees/src/agent_worktrees/status_monitor_cutover.py": "c8587364c1cd9b8444e544fce6536ef30f548e6f5e04ef477a78039c93732e3c",
         "tools/promotion_unit_tests/test_daemon_cwd_contract.py": "a48c87d1835969aa7f40a72a000e6081821028cd6500355a19ced798331e3e25",
