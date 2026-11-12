@@ -173,6 +173,20 @@ def test_traversable_bytecode_root_cannot_expose_writable_cached_files(tmp_path,
     assert compiled.read_bytes() == b"untouched cache fixture"
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX sticky shared ancestor")
+def test_fresh_override_under_sticky_parent_matches_warm_selection(tmp_path, local_cache):
+    root = tmp_path / "installation"
+    target = _installed(root)
+    tmp_path.chmod(0o1777)
+    try:
+        selected = cache.policy_arguments(root, runtime=target)
+        assert selected[0] == "-X"
+        assert selected == cache.policy_arguments(root, runtime=target)
+        assert local_cache.stat().st_mode & 0o077 == 0
+    finally:
+        tmp_path.chmod(0o700)
+
+
 def test_conflicting_or_oversized_owner_record_is_preserved(tmp_path, local_cache):
     root = tmp_path / "installation"
     target = _installed(root)
@@ -269,3 +283,44 @@ def test_macos_named_user_acl_does_not_override_private_mode(tmp_path, local_cac
     )
     assert bytecode.stat().st_mode & 0o077 == 0
     assert cache.policy_arguments(root, runtime=target) == ["-B"]
+
+
+@pytest.mark.parametrize("tags,accepted", [([], True), ([2, 2], True), ([1], False), ([2, 1], False)])
+def test_darwin_acl_abi_uses_zero_success_and_negative_next_entry(monkeypatch, tags, accepted):
+    import ctypes
+    import errno
+
+    calls = []
+
+    class Function:
+        def __init__(self, callback):
+            self.callback = callback
+
+        def __call__(self, *args):
+            return self.callback(*args)
+
+    def entry(_acl, selector, output):
+        assert selector == (0 if not calls else -1)
+        calls.append(selector)
+        if len(calls) > len(tags):
+            ctypes.set_errno(errno.EINVAL)
+            return -1
+        output._obj.value = len(calls)
+        return 0
+
+    def tag(pointer, output):
+        output._obj.value = tags[pointer.value - 1]
+        return 0
+
+    from types import SimpleNamespace
+    library = SimpleNamespace(
+        acl_get_file=Function(lambda *_: 1), acl_get_entry=Function(entry),
+        acl_get_tag_type=Function(tag), acl_free=Function(lambda *_: 0),
+    )
+    monkeypatch.setattr(ctypes, "CDLL", lambda *_a, **_kw: library)
+    if accepted:
+        permissions._macos_check(Path("fixture"))
+        assert len(calls) == len(tags) + 1
+    else:
+        with pytest.raises(PermissionError, match="ACL grant"):
+            permissions._macos_check(Path("fixture"))

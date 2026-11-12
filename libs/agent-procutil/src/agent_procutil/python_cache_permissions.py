@@ -85,6 +85,7 @@ def _windows_check(path: Path, *, ancestor: bool, private: bool) -> None:
 
 def _macos_check(path: Path) -> None:
     import ctypes
+    import errno
 
     library = ctypes.CDLL("/usr/lib/libSystem.B.dylib", use_errno=True)
     library.acl_get_file.argtypes = [ctypes.c_char_p, ctypes.c_uint]
@@ -104,16 +105,19 @@ def _macos_check(path: Path) -> None:
         entry, tag = ctypes.c_void_p(), ctypes.c_uint()
         selector = 0
         while True:
+            ctypes.set_errno(0)
             found = library.acl_get_entry(acl, selector, ctypes.byref(entry))
-            if found == 0:
-                return
-            if found < 0 or library.acl_get_tag_type(entry, ctypes.byref(tag)) != 0:
+            if found != 0:
+                if found == -1 and ctypes.get_errno() == errno.EINVAL:
+                    return
+                raise PermissionError("macOS bytecode cache ACL could not be verified")
+            if library.acl_get_tag_type(entry, ctypes.byref(tag)) != 0:
                 raise PermissionError("macOS bytecode cache ACL could not be verified")
             # Denials cannot expand access. Other extended entries remain
             # unsupported rather than being inferred safe from mode bits.
-            if tag.value != 0x200:
+            if tag.value != 2:
                 raise PermissionError("macOS bytecode cache has an unverified ACL grant")
-            selector = 1
+            selector = -1
     finally:
         library.acl_free(acl)
 

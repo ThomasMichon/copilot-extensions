@@ -84,11 +84,11 @@ def user_cache() -> Path:
     return native(base)
 
 
-def _directory(path: Path, permissions, *, private: bool = False) -> None:
+def _directory(path: Path, permissions, *, private: bool = False, ancestor: bool = False) -> None:
     if not os.path.lexists(path):
-        _directory(path.parent, permissions)
+        _directory(path.parent, permissions, ancestor=True)
         permissions.mkdir(path)
-    permissions.check(path, private=private)
+    permissions.check(path, private=private, ancestor=ancestor)
 
 
 def prepare(root: Path, target: Path, identity: str, *, read_record) -> Path:
