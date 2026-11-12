@@ -107,25 +107,30 @@ namespace CopilotExtensions {
 function Submit-AgentDurableUpdate([string]$Preflight) {
     # WMI durable launch is reserved for work that must outlive its launcher;
     # here the queued update itself. Nothing is inherited, so the environment,
-    # directory and log are passed explicitly.
+    # directory and logs are passed explicitly.
     $hint = 'WMI process creation may be blocked by policy, for example the Microsoft Defender ' +
         'ASR rule ''Block process creations originating from PSExec and WMI commands''.'
     $forward = @($_originalUpdateArgs | Where-Object { $_ -cne '--wait' })
     $logDirectory = $null
     if ($forward -cnotcontains '--detach') { $forward += '--detach' }
-    $quote = { param($text) "'" + ([string]$text).Replace("'", "''") + "'" }
+    $asJson = $forward -ccontains '--json'
+    # The caller and arguments travel as base64 JSON data, never as PowerShell
+    # source, so no quote character (ASCII or typographic) can end a literal.
+    $payload = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(
+        (ConvertTo-Json -Compress -InputObject @{ caller = [string]$_awUpdateCaller; args = [string[]]$forward })))
     $script = "`$ErrorActionPreference = 'Continue'`n`$ProgressPreference = 'SilentlyContinue'`n" +
         "`$env:AGENT_WORKTREES_INTERNAL_DURABLE_UPDATE = '1'`n" +
-        '& ' + (& $quote $_awUpdateCaller) + ' ' +
-        (($forward | ForEach-Object { & $quote $_ }) -join ' ') + "`nexit `$LASTEXITCODE`n"
+        "`$spec = ConvertFrom-Json ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('$payload')))`n" +
+        "`$forward = [string[]]@(`$spec.args)`n& ([string]`$spec.caller) @forward`nexit `$LASTEXITCODE`n"
     try {
         $logDirectory = New-UpdateScratchDirectory 'agent-update-queued-'
+        $out = Join-Path $logDirectory 'submission.out'
         $log = Join-Path $logDirectory 'submission.log'
-        if ($log -match '["%!^&|<>]') { throw 'The update log path is not safe for redirection.' }
+        if ($logDirectory -match '["%!^&|<>]') { throw 'The update log path is not safe for redirection.' }
         $shell = (Get-Process -Id $PID).Path
         $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($script))
         $command = "`"$env:ComSpec`" /d /s /c `"`"$shell`" -NoProfile -NonInteractive " +
-            "-ExecutionPolicy Bypass -OutputFormat Text -EncodedCommand $encoded > `"$log`" 2>&1`""
+            "-ExecutionPolicy Bypass -OutputFormat Text -EncodedCommand $encoded > `"$out`" 2> `"$log`"`""
         $environment = @(Get-ChildItem Env: | Where-Object {
             $_.Name -and -not $_.Name.StartsWith('=') -and $_.Name -cne 'MSYS2_ARG_CONV_EXCL'
         } | ForEach-Object { "$($_.Name)=$($_.Value)" })
@@ -150,25 +155,42 @@ function Submit-AgentDurableUpdate([string]$Preflight) {
             "$($created.ReturnValue). $hint No update was started or request submitted.")
         return 1
     }
-    Write-Host ("$Preflight The update was queued outside the caller's Job through WMI " +
-        "(process $($created.ProcessId)); submission log: $log")
+    $notice = "$Preflight The update was queued outside the caller's Job through WMI " +
+        "(process $($created.ProcessId)); submission output: $out; submission log: $log"
+    # With --json, stdout carries only the submission's own JSON document.
+    if (-not $asJson) { Write-Host $notice }
     $exitCode = $null
     try {
         $process = [Diagnostics.Process]::GetProcessById([int]$created.ProcessId)
         $null = $process.Handle
         if ($process.WaitForExit(300000)) { $exitCode = $process.ExitCode }
     } catch {}
-    $text = if (Test-Path -LiteralPath $log -PathType Leaf) { [IO.File]::ReadAllText($log) } else { '' }
-    if ($text) { Write-Host $text.TrimEnd() }
-    if ($text -match 'Update request ([A-Za-z0-9._-]+)') {
+    $read = { param($path) if (Test-Path -LiteralPath $path -PathType Leaf) { [IO.File]::ReadAllText($path) } else { '' } }
+    $stdout = & $read $out
+    $stderr = & $read $log
+    $request = $null
+    if ($asJson) {
+        try { $request = [string](ConvertFrom-Json $stdout -ErrorAction Stop).request_id } catch {}
+        # Returned to the caller's scope: output here would become the return value.
+        if ($stdout) { Set-Variable -Name _queuedUpdateJson -Value $stdout.TrimEnd() -Scope 1 }
+    } else {
+        if ($stdout) { Write-Host $stdout.TrimEnd() }
+        if ($stderr) { Write-Host $stderr.TrimEnd() }
+    }
+    if (-not $request -and ($stderr + "`n" + $stdout) -match 'Update request ([A-Za-z0-9._-]+)') {
         $request = $Matches[1]
-        Write-Host ("Update request $request submitted. Check it with: " +
-            "agent-worktrees update --request-status $request")
+    }
+    if ($exitCode -eq 0 -and $request) {
+        if (-not $asJson) {
+            Write-Host ("Update request $request submitted. Check it with: " +
+                "agent-worktrees update --request-status $request")
+        }
         return 0
     }
     $state = if ($null -eq $exitCode) { 'did not report a result' } else { "exited $exitCode" }
-    Write-AgentUpdateEntryError ("[agent-worktrees] The queued update submission $state " +
-        "without a request id; see $log.")
+    $detail = if ($request) { "for request $request; check it with: agent-worktrees update --request-status $request" } else { 'without a request id' }
+    Write-AgentUpdateEntryError ("$(if ($asJson) { "$notice " })[agent-worktrees] The queued update " +
+        "submission $state $detail. See $out and $log.")
     return 1
 }
 if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT -and
@@ -240,6 +262,7 @@ namespace CopilotExtensions {
     } catch {
         $_preflightMessage = "[agent-worktrees] Update launch preflight failed: $($_.Exception.Message)"
         $_queuedRc = 1
+        $_queuedUpdateJson = $null
         if ($env:AGENT_WORKTREES_INTERNAL_DURABLE_UPDATE -ceq '1') {
             Write-AgentUpdateEntryError ($_preflightMessage +
                 ' The durable outside-Job update shell is itself contained; no update was started.')
@@ -253,6 +276,7 @@ namespace CopilotExtensions {
             # The caller's Job forbids breakaway, so the update is queued through
             # WMI, whose process is outside every caller Job (see #12117).
             $_queuedRc = Submit-AgentDurableUpdate -Preflight $_preflightMessage
+            if ($_queuedUpdateJson) { Write-Output $_queuedUpdateJson }
         }
         if ($_awUpdateStandalone) { exit $_queuedRc }
         $_awUpdateHandled = $true

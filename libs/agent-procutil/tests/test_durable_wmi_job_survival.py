@@ -6,7 +6,9 @@ durable daemon through :func:`agent_procutil.spawn_daemon` and one ordinary
 bounded child. Closing the Job must end the launcher and the bounded child,
 while the daemon keeps the same PID and creation time and belongs to no Job.
 
-Only processes started by this test are terminated. Windows-only.
+Only processes started by this test are terminated: each cleanup handle is
+verified against the creation time the launcher captured through its own
+process handle, so a reused PID is never touched. Windows-only.
 """
 
 from __future__ import annotations
@@ -38,6 +40,7 @@ _LAUNCHER = """
 import json, subprocess, sys, time
 from pathlib import Path
 import agent_procutil
+from agent_procutil._daemon_instance_identity import _windows_birth
 from agent_procutil.daemon_instances import DaemonInstanceSpec, DaemonLeasePolicy
 spec = json.loads(sys.argv[1])
 root = Path(spec["root"])
@@ -52,7 +55,13 @@ try:
         ),
     )
     bounded = subprocess.Popen(sleeper, stdin=subprocess.DEVNULL, creationflags=0x08000000)
-    result = {"daemon": daemon.pid, "bounded": bounded.pid}
+    result = {
+        "daemon": daemon.pid, "bounded": bounded.pid,
+        "births": {
+            "daemon": _windows_birth(daemon._handle),
+            "bounded": _windows_birth(int(bounded._handle)),
+        },
+    }
 except agent_procutil.DaemonSpawnError as error:
     result = {"daemon_spawn_error": str(error)}
 Path(spec["result"]).write_text(json.dumps(result), encoding="utf-8")
@@ -74,12 +83,45 @@ def _kernel32():
     return kernel32
 
 
-def _open(kernel32, pid: int):
+def _open_verified(kernel32, pid: int, birth: str):
+    """Open ``pid`` only if the handle names the process the launcher recorded."""
+    from agent_procutil._daemon_instance_identity import _windows_birth
+
     handle = kernel32.OpenProcess(
         _SYNCHRONIZE | _PROCESS_QUERY_LIMITED_INFORMATION | _PROCESS_TERMINATE, False, pid,
     )
-    assert handle, f"process {pid} exited before it could be observed"
+    if not handle:
+        return None
+    try:
+        matches = _windows_birth(handle) == birth
+    except OSError:
+        matches = False
+    if not matches:
+        kernel32.CloseHandle(handle)
+        return None
     return handle
+
+
+def _release(kernel32, handle) -> None:
+    """Terminate (if still running) and close a verified fixture handle."""
+    if kernel32.WaitForSingleObject(handle, 0) != _WAIT_OBJECT_0:
+        kernel32.TerminateProcess(handle, 1)
+        kernel32.WaitForSingleObject(handle, 5000)
+    kernel32.CloseHandle(handle)
+
+
+def test_cleanup_never_terminates_a_process_with_a_different_identity():
+    kernel32 = _kernel32()
+    bystander = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(60)"],
+        stdin=subprocess.DEVNULL, creationflags=0x08000000,
+    )
+    try:
+        assert _open_verified(kernel32, bystander.pid, "windows:0") is None
+        assert bystander.poll() is None, "a mismatched identity must never be terminated"
+    finally:
+        bystander.kill()
+        bystander.wait(timeout=10)
 
 
 def test_durable_daemon_survives_closing_a_strict_kill_on_close_caller_job(tmp_path, monkeypatch):
@@ -113,8 +155,11 @@ def test_durable_daemon_survives_closing_a_strict_kill_on_close_caller_job(tmp_p
             time.sleep(0.05)
         result = json.loads(result_path.read_text(encoding="utf-8"))
         assert "daemon_spawn_error" not in result, result.get("daemon_spawn_error")
-        handles = {name: _open(kernel32, result[name]) for name in ("daemon", "bounded")}
-        birth = birth_identity(result["daemon"])
+        births = result["births"]
+        for name in ("daemon", "bounded"):
+            handle = _open_verified(kernel32, result[name], births[name])
+            assert handle, f"{name} exited or its PID no longer names the launched process"
+            handles[name] = handle
         in_job = wintypes.BOOL()
         assert kernel32.IsProcessInJob(handles["bounded"], job.handle, ctypes.byref(in_job))
         assert in_job.value, "the bounded child must stay in its caller's Job"
@@ -129,13 +174,10 @@ def test_durable_daemon_survives_closing_a_strict_kill_on_close_caller_job(tmp_p
         assert kernel32.WaitForSingleObject(handles["bounded"], 15000) == _WAIT_OBJECT_0
         time.sleep(1)
         assert kernel32.WaitForSingleObject(handles["daemon"], 0) == _WAIT_TIMEOUT
-        assert birth_identity(result["daemon"]) == birth
+        assert birth_identity(result["daemon"]) == births["daemon"]
     finally:
         for handle in handles.values():
-            if kernel32.WaitForSingleObject(handle, 0) != _WAIT_OBJECT_0:
-                kernel32.TerminateProcess(handle, 1)
-                kernel32.WaitForSingleObject(handle, 5000)
-            kernel32.CloseHandle(handle)
+            _release(kernel32, handle)
         if launcher.poll() is None:
             launcher.kill()
             try:

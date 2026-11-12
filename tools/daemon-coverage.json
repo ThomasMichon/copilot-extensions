@@ -519,6 +519,7 @@
       "r:plugins/agent-ssh/transports/dtssh/scripts/install-host.ps1::<script>::New-ScheduledTaskAction": 1,
       "r:plugins/agent-ssh/transports/dtssh/scripts/install-host.ps1::<script>::Start-Process": 4,
       "r:plugins/agent-ssh/transports/dtssh/scripts/install-host.ps1::<script>::Win32_Process.Create": 1,
+      "r:plugins/agent-worktrees/bin/agent-worktrees-update-entry.ps1::<script>::Win32_Process.Create": 1,
       "r:plugins/agent-vault/scripts/install.ps1::<script>::Start-Process": 2,
       "r:plugins/agent-vault/scripts/install.ps1::<script>::New-ScheduledTaskAction": 1,
       "r:plugins/agent-vault/scripts/install.sh::<script>::ExecStart": 1,

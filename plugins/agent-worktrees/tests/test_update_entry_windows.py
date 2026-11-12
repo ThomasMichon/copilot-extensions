@@ -155,18 +155,18 @@ public static class QueuedUpdateJobProbe {
 $proof = @{ args = @($args); in_job = [QueuedUpdateJobProbe]::InJob() }
 [IO.File]::WriteAllText($env:QUEUED_PROOF, (ConvertTo-Json -Compress -InputObject $proof))
 [Console]::Error.WriteLine('Update request queued-req-7; log: example.log')
-exit 0
+if ($args -ccontains '--json') {
+    [Console]::Out.WriteLine('{"request_id": "queued-req-7", "state": "pending"}')
+}
+exit [int]$env:QUEUED_EXIT
 """
 
 
-@pytest.mark.parametrize("front", ["global", "git-bash"])
-@pytest.mark.parametrize("observer", ["--wait", "--detach"])
-def test_update_preflight_queues_detached_update_outside_strict_caller_job(
-    update_entry_case, native_powershell, monkeypatch, front, observer,
-):
-    """The queued update runs through WMI outside the caller's no-breakaway kill-on-close Job."""
-    from agent_procutil import spawn_sync_in_kill_on_close_job
+# Typographic single quotes end PowerShell literals too; they must stay data.
+_HOSTILE_PROJECT = "a\u2019; Set-Content -LiteralPath $env:QUEUED_INJECTED x; \u2018"
 
+
+def _queued_update_case(update_entry_case, monkeypatch, *, exit_code=0):
     git = shutil.which("git.exe") or shutil.which("git")
     if git is None:
         pytest.skip("Git is required for the local bootstrap source")
@@ -185,7 +185,72 @@ def test_update_preflight_queues_detached_update_outside_strict_caller_job(
     monkeypatch.setenv("WORKTREE_MANAGER_BOOTSTRAP_REPO", str(source))
     monkeypatch.setenv("WORKTREE_MANAGER_BOOTSTRAP_REF", "main")
     monkeypatch.setenv("QUEUED_PROOF", str(tmp / "queued.json"))
+    monkeypatch.setenv("QUEUED_INJECTED", str(tmp / "injected.txt"))
+    monkeypatch.setenv("QUEUED_EXIT", str(exit_code))
     (tmp / "tools" / "git").unlink()
+    return tmp, home
+
+
+def _run_in_strict_job(command, timeout=180):
+    from agent_procutil import spawn_sync_in_kill_on_close_job
+
+    process, job = spawn_sync_in_kill_on_close_job(
+        command, require_job=True, allow_breakaway=False,
+        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        **no_window_kwargs(),
+    )
+    try:
+        stdout, stderr = process.communicate(timeout=timeout)
+        return process.returncode, stdout.decode(errors="replace"), stderr.decode(errors="replace")
+    finally:
+        if job is not None:
+            job.terminate_and_wait(15)
+        process.wait(timeout=15)
+        process.stdout.close()
+        process.stderr.close()
+
+
+def test_queued_update_keeps_typographic_quotes_as_data_and_json_on_stdout(
+    update_entry_case, native_powershell, monkeypatch,
+):
+    tmp, home = _queued_update_case(update_entry_case, monkeypatch)
+    entry, _ = _job_preflight_entry(tmp, home, "global", "--detach")
+    arguments = ["--project", _HOSTILE_PROJECT, "update", "--detach", "--json"]
+    code, stdout, stderr = _run_in_strict_job(
+        [native_powershell, "-NoProfile", "-File", str(entry), *arguments],
+    )
+    assert code == 0, stdout + stderr
+    assert json.loads(stdout) == {"request_id": "queued-req-7", "state": "pending"}
+    proof = json.loads((tmp / "queued.json").read_text(encoding="utf-8-sig"))
+    assert proof["args"] == [
+        "--bootstrap-update", "update", "--project", _HOSTILE_PROJECT, "--detach", "--json",
+    ]
+    assert not (tmp / "injected.txt").exists(), "a typographic quote ended a PowerShell literal"
+
+
+def test_queued_update_reports_a_failed_submission_even_with_a_request_id(
+    update_entry_case, native_powershell, monkeypatch,
+):
+    tmp, home = _queued_update_case(update_entry_case, monkeypatch, exit_code=1)
+    entry, arguments = _job_preflight_entry(tmp, home, "global", "--detach")
+    code, stdout, stderr = _run_in_strict_job(
+        [native_powershell, "-NoProfile", "-File", str(entry), *arguments],
+    )
+    output = " ".join((stdout + stderr).split())
+    assert code == 1, output
+    assert "submission exited 1 for request queued-req-7" in output
+    assert "Update request queued-req-7 submitted" not in output
+
+
+@pytest.mark.parametrize("front", ["global", "git-bash"])
+@pytest.mark.parametrize("observer", ["--wait", "--detach"])
+def test_update_preflight_queues_detached_update_outside_strict_caller_job(
+    update_entry_case, native_powershell, monkeypatch, front, observer,
+):
+    """The queued update runs through WMI outside the caller's no-breakaway kill-on-close Job."""
+    from agent_procutil import spawn_sync_in_kill_on_close_job
+
+    tmp, home = _queued_update_case(update_entry_case, monkeypatch)
     entry, arguments = _job_preflight_entry(tmp, home, "global", observer)
     command = [native_powershell, "-NoProfile", "-File", str(entry), *arguments]
     if front == "git-bash":

@@ -280,7 +280,7 @@ def _bootstrap_python() -> str:
 
 
 def _cleanup_process(
-    process: WindowsDaemonProcess, *, terminate: bool,
+    process: WindowsDaemonProcess, *, terminate: bool, retain_unconfirmed: bool = False,
 ) -> tuple[bool, list[str]]:
     problems = []
     if terminate:
@@ -294,6 +294,10 @@ def _cleanup_process(
         exited = True
     except (OSError, subprocess.SubprocessError):
         problems.append("wait")
+    if not exited and retain_unconfirmed:
+        # Keep the pinned handle: the caller transfers it with the failure so
+        # a possibly live daemon remains controllable.
+        return exited, problems
     try:
         process.close()
     except OSError:
@@ -433,9 +437,11 @@ def spawn_brokered_daemon(
         exited, cleanup = _cleanup_process(bootstrap, terminate=False)
         cleanup_confirmed &= exited
         problems.extend("bootstrap-" + problem for problem in cleanup)
+    child_retained = False
     if problems and child is not None:
-        exited, cleanup = _cleanup_process(child, terminate=True)
+        exited, cleanup = _cleanup_process(child, terminate=True, retain_unconfirmed=True)
         cleanup_confirmed &= exited
+        child_retained = not exited
         problems.extend("child-" + problem for problem in cleanup)
     if problems:
         if activation_detail:
@@ -454,7 +460,7 @@ def spawn_brokered_daemon(
             admission_sent=admission_sent,
             process_identity=child_identity,
         )
-        if child is not None and not cleanup_confirmed:
+        if child_retained:
             failure.process = child
         raise failure from None
     if child is None:

@@ -552,8 +552,37 @@ def test_cleanup_failures_are_normalized_and_do_not_skip_other_cleanup(
         _launch(tmp_path)
     assert caught.value.cleanup_confirmed is (method == "close")
     processes[100].close.assert_called_once()
-    processes[200].close.assert_called_once()
+    if (pid, method) == (200, "wait"):
+        # An unconfirmed child exit keeps its pinned handle for the caller.
+        processes[200].close.assert_not_called()
+        assert caught.value.process is processes[200]
+    else:
+        processes[200].close.assert_called_once()
+        assert getattr(caught.value, "process", None) is None
     processes[200].terminate.assert_called_once()
+
+
+def test_failed_child_termination_transfers_live_process_control(
+    monkeypatch, broker_channel, tmp_path,
+):
+    processes, _ = broker_channel
+    original = broker.WindowsDaemonProcess
+
+    def process(number, args):
+        result = original(number, args)
+        if number == 200:
+            result.terminate.side_effect = OSError("access denied")
+            result.wait.side_effect = subprocess.TimeoutExpired(args, 5)
+        return result
+
+    monkeypatch.setattr(broker, "WindowsDaemonProcess", process)
+    monkeypatch.setattr(broker, "_outside_job", lambda process: process.pid != 200)
+    with pytest.raises(pu.DaemonSpawnError) as caught:
+        _launch(tmp_path)
+    assert caught.value.cleanup_confirmed is False
+    assert caught.value.process is processes[200]
+    processes[200].close.assert_not_called()
+    processes[100].close.assert_called_once()
 
 
 @pytest.mark.parametrize("failure", ["lost-pid", "adoption"])
