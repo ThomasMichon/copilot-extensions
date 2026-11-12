@@ -2,6 +2,51 @@
 
 [Back to the effort](README.md). The Plan and Validation Plan remain the completion gate.
 
+## 2026-11-11 - Ordinary suite convergence preflight
+
+Integration lead `lopsided-anvil` retains entrypoint wiring and whole-flow
+acceptance under #7028. The
+[current preflight](https://github.com/ThomasMichon/copilot-extensions/issues/7028#issuecomment-6807533102)
+checks exact Dev `2bf1e4f0722f651d5d77b3e1bc5c5231d7a0d570`.
+The source policy still defaults to marketplace; the explicit-source suite
+producer returns payload and identity without an install-source wheel profile.
+This is a failed static readiness gate, not a native whole-flow result.
+
+The [producer coordination](https://github.com/ThomasMichon/copilot-extensions/pull/11121#issuecomment-6807559710)
+retains #11121's canonical construction owner. The
+[consumer coordination](https://github.com/ThomasMichon/copilot-extensions/pull/10570#issuecomment-6807561002)
+retains #10570's independent prepared Worktrees updater and its remaining real
+association, automatic selection and profile-admission gates. Neither open
+contribution is superseded or qualified by this check.
+
+The next observable outcome is one ordinary suite caller carrying the selected
+Git source and complete wheel profile through the existing construction and
+consumer owners. Fresh bootstrap and install-capable first-use adapters follow
+that real flow rather than introducing another preparation owner. Per-slot
+construction, source/feed custody, readiness, selection and component lifecycle
+boundaries remain intact. Missing additional CODEOWNER approval alone does not
+hold an otherwise eligible Maintainer PR; drafts, findings, required CI and
+explicit holds remain independent gates. No installation or rollout ran.
+
+On resumption, #11121 and draft #10570 retain the same published heads.
+The independently claimed #12116 now owns the additive closed-wheel input to
+existing native recipes, including its construction/reuse binding; convergence
+work must consume that receiver rather than duplicate it. This additional
+receiver does not by itself select the ordinary suite's source or produce its
+complete admitted profile. The next acceptance remains the real ordinary
+producer-to-consumer flow, with the three prerequisite owners kept distinct.
+
+A focused read of #11121 at
+`c3770520b3cbde2fc86e23251b393b8832b51c55` confirms that its suite caller
+already replaces the legacy `prepare()` route with `prepare_applications()`.
+That caller requires version-2 engine support, prepares the selected portfolio
+under one Main-seeded source identity, and emits snapshot/profile records.
+The unchanged legacy helper is not the proposed caller's execution path.
+This credits the existing implementation without treating its unmerged source
+as released or natively accepted. Default marketplace policy, final-tree
+qualification and entrypoint adoption remain distinct convergence gates;
+another producer implementation is not needed while this owner retains it.
+
 - [2026-11-05 - MCP bootstrap adoption proposed](<journal/2026/11.05 mcp-bootstrap.md>)
 - [2026-11-03 - Clean-break wheel migration intent reviewed](<journal/2026/11.03 clean-break wheel migration.md>)
 - [2026-11-03 - Manager-first repository registration entry](<journal/2026/11.03 manager-register.md>)
