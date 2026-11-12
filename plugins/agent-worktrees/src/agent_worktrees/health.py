@@ -63,7 +63,7 @@ from .handoff_diagnostics import HANDOFF_STAGES
 
 def audit_retirement_holds(records: list[tracking.WorktreeRecord]) -> dict:
     """Report retained terminal worktrees without concluding or releasing them."""
-    from . import procs, retirement_safety
+    from . import procs, retained_checkout, retirement_safety
     from .execution_spaces import require_owner_identity
 
     items = []
@@ -83,6 +83,8 @@ def audit_retirement_holds(records: list[tracking.WorktreeRecord]) -> dict:
         local = False
         if not record.checkout_managed:
             pass
+        elif config is not None and retained_checkout.is_local(record, config):
+            local = True
         elif record.platform != cfg.detect_platform():
             other_spaces += 1
         else:
@@ -118,6 +120,33 @@ def audit_retirement_holds(records: list[tracking.WorktreeRecord]) -> dict:
     return {
         "checked": checked, "found": len(items), "report_only": True,
         "other_execution_spaces": other_spaces, "items": items,
+    }
+
+
+def audit_local_registration(records: list[tracking.WorktreeRecord]) -> dict:
+    """Report retained checkout authority without migrating historical identities."""
+    from . import retained_checkout
+
+    items = []
+    try:
+        config = cfg.load_config(include_control_plane_related_pr=False)
+    except (OSError, ValueError, RuntimeError, yaml.YAMLError) as exc:
+        return {
+            "checked": 0, "local": 0, "unproven": 0, "identity_preserved": True,
+            "items": [], "error": str(exc),
+        }
+    for record in records:
+        if not record.worktree_path or not Path(record.worktree_path).exists():
+            status = "absent"
+        else:
+            status = "local" if retained_checkout.is_local(record, config) else "unproven"
+        items.append({"worktree_id": record.worktree_id, "status": status})
+    return {
+        "checked": len(items),
+        "local": sum(item["status"] == "local" for item in items),
+        "unproven": sum(item["status"] == "unproven" for item in items),
+        "identity_preserved": True,
+        "items": items,
     }
 
 

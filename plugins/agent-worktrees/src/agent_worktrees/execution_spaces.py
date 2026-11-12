@@ -78,7 +78,7 @@ def canonicalize_legacy_config(config: Any, *, configured: bool = False) -> Any:
 
 
 def resolve_owner_record_path(owner_ref: str, config: Any) -> tuple[Path | None, str, str | None]:
-    from . import config as cfg, legacy_wsl_record_locality, tracking
+    from . import config as cfg, legacy_wsl_record_locality, retained_checkout, tracking
 
     parsed = tracking.parse_claim_ref(owner_ref)
     if parsed is None or not parsed.is_qualified:
@@ -86,6 +86,9 @@ def resolve_owner_record_path(owner_ref: str, config: Any) -> tuple[Path | None,
             None, "",
             f"--owner-ref must be a qualified machine/project/worktree_id ref (got {owner_ref!r})",
         )
+    local = retained_checkout.resolve_owner(parsed, config)
+    if local is not None:
+        return local, parsed.worktree_id, None
     legacy = legacy_wsl_record_locality.resolve_legacy_wsl_owner_ref(parsed, config)
     if legacy is not None:
         return legacy, parsed.worktree_id, None
@@ -100,14 +103,19 @@ def resolve_owner_record_path(owner_ref: str, config: Any) -> tuple[Path | None,
             else None
         )
         return None, parsed.worktree_id, error
-    return (
-        cfg.project_dir(parsed.project) / "worktrees" / f"{parsed.worktree_id}.yaml",
-        parsed.worktree_id, None,
-    )
+    path = cfg.project_dir(parsed.project) / "worktrees" / f"{parsed.worktree_id}.yaml"
+    if path.exists():
+        try:
+            record = tracking.load_record(path)
+        except (OSError, ValueError, KeyError, TypeError, yaml.YAMLError):
+            return None, parsed.worktree_id, "owner record cannot be verified"
+        if parsed.machine != getattr(record, "execution_machine", record.machine):
+            return None, parsed.worktree_id, "owner reference conflicts with the record execution owner"
+    return path, parsed.worktree_id, None
 
 
 def settle_parent_obligation(record: Any, config: Any, worktree_id: str, *, output: Any) -> None:
-    from . import config as cfg, legacy_wsl_record_locality, obligations, paired_claims, tracking
+    from . import config as cfg, legacy_wsl_record_locality, obligations, paired_claims, retained_checkout, tracking
 
     try:
         owner = record.owner_claim_ref
@@ -119,8 +127,12 @@ def settle_parent_obligation(record: Any, config: Any, worktree_id: str, *, outp
         if owner is None or not owner.is_qualified:
             return
         require_record_mutation(record, config)
-        caller_key = current_execution_context(config).execution_machine
-        if owner.machine in (config.machine, caller_key):
+        local_child = retained_checkout.is_local(record, config)
+        caller_key = record.execution_machine if local_child else current_execution_context(config).execution_machine
+        local_parent = retained_checkout.resolve_owner(owner, config)
+        if local_parent is not None:
+            parent_path, legacy_parent = local_parent, False
+        elif owner.machine in (config.machine, caller_key):
             parent_path = cfg.project_dir(owner.project) / "worktrees" / f"{owner.worktree_id}.yaml"
             legacy_parent = False
         else:
@@ -138,7 +150,13 @@ def settle_parent_obligation(record: Any, config: Any, worktree_id: str, *, outp
                 return
             receiving_config = project_record_config(parent)
             require_record_mutation(parent, receiving_config)
-            if not require_owner_identity(caller_key, receiving_config):
+            if owner.machine != getattr(parent, "execution_machine", parent.machine):
+                alias = None
+                if getattr(parent, "machine_identity", None) is None:
+                    alias = legacy_wsl_record_locality.resolve_legacy_wsl_owner_ref(owner, config)
+                if alias is None or alias.resolve() != parent_path.resolve():
+                    raise ValueError("parent reference conflicts with the record execution owner")
+            if not local_child and not require_owner_identity(caller_key, receiving_config):
                 raise ExecutionSpaceError("caller is not local to the parent receiving execution space")
             child_ref = tracking.format_claim_ref(
                 getattr(record, "execution_machine", record.machine), config.repo_name, worktree_id,
@@ -185,7 +203,7 @@ def registry_for_config(config: Any) -> dict[str, MachineEntry]:
         return cfg.load_machines_yaml(anchor, config=config)
     except FileNotFoundError:
         return {}
-    except (OSError, ValueError, yaml.YAMLError) as exc:
+    except (OSError, ValueError, TypeError, yaml.YAMLError) as exc:
         raise ExecutionSpaceError(f"execution-space registry is invalid: {exc}") from exc
 
 
@@ -284,6 +302,11 @@ def require_record_mutation(record: Any, config: Any, *, recover_receiving: bool
 
     if record is None:
         return
+    if getattr(record, "platform", cfg.detect_platform()) != cfg.detect_platform():
+        raise ExecutionSpaceError(
+            "record snapshot identity/platform belongs to a different execution space/platform; "
+            "native execution platform required"
+        )
     from .checkout_relocation_state import require_idle
 
     paths = {Path(record.yaml_path)} if getattr(record, "yaml_path", None) is not None else set()
@@ -300,7 +323,11 @@ def require_record_mutation(record: Any, config: Any, *, recover_receiving: bool
             require_idle(path)
         except (ValueError, OSError) as exc:
             raise ExecutionSpaceError(str(exc)) from exc
-    require_current_execution_space(config)
+    from . import retained_checkout
+
+    local_record = retained_checkout.is_local(record, config)
+    if not local_record:
+        require_current_execution_space(config)
     if (
         not getattr(record, "receiving_allocation_present", False)
         and getattr(record, "owner_ref", None) and getattr(record, "creation_nonce", None)
@@ -320,9 +347,19 @@ def require_record_mutation(record: Any, config: Any, *, recover_receiving: bool
         from .receiving_allocation import require_record
 
         try:
-            require_record(record, config)
+            require_record(record, config, local_record=local_record)
         except (ValueError, OSError, RuntimeError) as exc:
             raise ExecutionSpaceError(f"receiving allocation authority is unproven: {exc}") from exc
+    if local_record:
+        if record.owner_ref:
+            owner = tracking.parse_claim_ref(record.owner_ref)
+            if owner is None or not owner.is_qualified:
+                raise ExecutionSpaceError("owned record has an unqualified owner reference")
+            if not has_receiving_allocation and retained_checkout.resolve_owner(owner, config) is None:
+                raise ExecutionSpaceError(
+                    "owned local record requires its original receiving allocation or proven local parent"
+                )
+        return
     entries = registry_for_config(config)
     from .legacy_wsl_record_locality import resolve_legacy_wsl_owner_ref
 
@@ -464,10 +501,22 @@ def require_cleanup_identity(record: Any, anchor: str | Path) -> None:
     unscoped/legacy registry would make ``require_record_mutation``
     silently no-op, letting a foreign record be reaped.
     """
-    from . import config as cfg, record_machine_identity
+    from . import config as cfg, record_machine_identity, retained_checkout
 
     if record_machine_identity.machine_identity(record) is not None:
-        require_project_record_mutation(record)
+        config = project_record_config(record)
+        require_record_mutation(record, config)
+        root = Path(config.default_repo.worktree_root).expanduser()
+        checkout = Path(record.worktree_path)
+        current_namespace = (
+            checkout == root / record.worktree_id
+            and checkout.resolve() == root.resolve() / record.worktree_id
+        )
+        if (
+            record.worktree_id != "@anchor" and getattr(record, "checkout_managed", True) and not current_namespace
+            and retained_checkout.recorded_branch_matches(record, config) is not True
+        ):
+            raise ExecutionSpaceError("retained checkout branch conflicts with its receiving incarnation")
         return
 
     try:
