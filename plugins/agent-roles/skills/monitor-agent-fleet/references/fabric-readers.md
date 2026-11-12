@@ -100,6 +100,12 @@ agenda locators without parsing private owner databases.
 
 ## Remote reads
 
+For exceptional inspection of one explicitly selected session's instruction
+listing/guidance or a requested maintenance notice, use the canonical
+[bounded selected-session reader](selected-session-reader.md), not handwritten
+shell collectors. Its host-local deadline remains effective after client loss;
+it starts no child readers. Never add guidance-body inspection to routine cycles.
+
 For cross-machine reads, first resolve the configured machine alias and shell
 through the topology reader. For a re-resolved roster, read the manifest and
 the SSH capability's read-only reachability check fresh each cycle; do not
@@ -121,8 +127,8 @@ When an ad hoc remote read is still necessary, keep it bounded and headless:
 - Run `ssh -o BatchMode=yes -o ConnectTimeout=<seconds>` with stdin closed, so
   it never prompts or reads the caller's input.
 - Set `AGENT_WORKTREES_NO_SELFPROVISION=1` in the remote command's environment.
-- Bound the command on the remote side, for example with `timeout` on POSIX or
-  a PowerShell wait that stops its child at the deadline. A local timeout ends
+- Bound the command on the remote side using its owner's finite reader and
+  whole-child-tree cleanup when it starts children. A local timeout ends
   only the client; some SSH servers keep the remote process running after the
   client disconnects.
 - Print the reader's own JSON. Avoid deep object serialization on the remote
