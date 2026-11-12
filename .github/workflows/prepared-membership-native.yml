@@ -50,7 +50,7 @@ jobs:
           - packet: write-name-policy
             select: "registered_file_local_write_reuses_original_guard_facts and write-name and real-policy"
           - packet: patch-positive
-            select: "registered_file_local_write_reuses_original_guard_facts and (patch-input or patch-patch or patch-command or patch-json or patch-freeform or patch-crlf or patch-headers or patch-union or patch-batch or patch-duplicates or patch-limit or patch-field-bound) and not (protected or overflow or nonobject)"
+            select: "native_write_fixture_launch or native_write_fixture_stderr_survives_timeout or (registered_file_local_write_reuses_original_guard_facts and (patch-input or patch-patch or patch-command or patch-json or patch-freeform or patch-crlf or patch-headers or patch-union or patch-batch or patch-duplicates or patch-limit or patch-field-bound) and not (protected or overflow or nonobject))"
           - packet: patch-protected
             select: "registered_file_local_write_reuses_original_guard_facts and patch and protected"
           - packet: patch-fallback

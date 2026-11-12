@@ -590,6 +590,18 @@ and arrange those records for the next justified run, rather than inventing
 numbers or repeating the same blind packet. Keep preparation and cleanup out
 of test-call timing while retaining their total cost.
 
+The registered Windows write fixture also reports a strictly framed native
+launch observation: the child's own creation FILETIME, UTC observation, QPC
+and frequency, and cumulative process CPU. The existing patch-positive packet
+executes its parser, native birth and real timeout/error-preservation controls
+on both shells. Malformed or duplicate frames retain their original stderr;
+genuine errors are never consumed as observations. The launch observation runs
+after command entry, so absent data cannot establish a process's birth or a
+startup cause. Parent UTC, child UTC and child-local elapsed spans have distinct
+clock limits; cumulative multithreaded CPU can exceed a wall interval. Neither
+host load nor elapsed-minus-CPU identifies a scheduler, I/O or JIT cause.
+These diagnostics do not retry failed cases or change their deadlines.
+
 Use concrete action names such as "measure fixture copying" or "test Windows
 Resume", not an unexplained "qualification round". These are ordinary
 within-scope decisions, not a new per-command approval ceremony. Preserve

@@ -61,6 +61,22 @@ function Write-NativeWriteFixtureCpuPhase([string]$Name) {
         ' cpu_ticks=' + $cpu.ToString([Globalization.CultureInfo]::InvariantCulture))
 }
 """
+NATIVE_WRITE_LAUNCH_WRITER = """
+$fixtureProcess = [Diagnostics.Process]::GetCurrentProcess()
+try {
+    $fixtureBirth = $fixtureProcess.StartTime.ToUniversalTime().ToFileTimeUtc()
+    $fixtureCpu = $fixtureProcess.TotalProcessorTime.Ticks
+} finally { $fixtureProcess.Dispose() }
+[Console]::Error.WriteLine('NATIVE_WRITE_FIXTURE_LAUNCH birth_filetime=' +
+    $fixtureBirth.ToString([Globalization.CultureInfo]::InvariantCulture) +
+    ' entry_utc_ms=' + [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds().ToString(
+        [Globalization.CultureInfo]::InvariantCulture) +
+    ' qpc=' + [Diagnostics.Stopwatch]::GetTimestamp().ToString(
+        [Globalization.CultureInfo]::InvariantCulture) +
+    ' frequency=' + [Diagnostics.Stopwatch]::Frequency.ToString(
+        [Globalization.CultureInfo]::InvariantCulture) +
+    ' cpu_ticks=' + $fixtureCpu.ToString([Globalization.CultureInfo]::InvariantCulture))
+"""
 # Prior reader retained to exercise additive-declaration compatibility.
 NATIVE_READ_V1 = r"""
 function Test-NativePreToolSources([bool]$WriteProof = $false) {
@@ -151,6 +167,26 @@ function Test-NativePreToolRead([object]$Payload, [bool]$PreparedMembership = $f
     return Test-NativePreToolSources -ShellCommand $command
 }
 """
+
+
+def native_write_fixture_launch(stderr):
+    launch, errors = None, []
+    fields = ("birth_filetime", "entry_utc_ms", "qpc", "frequency", "cpu_ticks")
+    for line in stderr.splitlines(keepends=True):
+        if not line.startswith(b"NATIVE_WRITE_FIXTURE_LAUNCH"):
+            errors.append(line)
+            continue
+        match = re.fullmatch(
+            rb"NATIVE_WRITE_FIXTURE_LAUNCH birth_filetime=([0-9]{1,20})"
+            rb" entry_utc_ms=([0-9]{1,20}) qpc=([0-9]{1,20})"
+            rb" frequency=([0-9]{1,20}) cpu_ticks=([0-9]{1,20})\r?\n", line,
+        )
+        if launch is not None or not match:
+            return None, stderr
+        launch = dict(zip(fields, map(int, match.groups())))
+        if any(launch[field] <= 0 for field in fields[:-1]):
+            return None, stderr
+    return launch, b"".join(errors)
 
 
 def native_write_fixture_stderr(stderr):
@@ -523,6 +559,65 @@ def test_native_write_fixture_stderr_preserves_errors(newline):
     )
 
 
+@pytest.mark.parametrize("newline", [b"\n", b"\r\n"])
+def test_native_write_fixture_launch_preserves_phases_and_errors(newline):
+    launch = (
+        b"NATIVE_WRITE_FIXTURE_LAUNCH birth_filetime=134125000000000000"
+        b" entry_utc_ms=1768026400000 qpc=123456 frequency=10000000 cpu_ticks=0" + newline
+    )
+    phases = b"NATIVE_WRITE_FIXTURE_PHASE 123 command-entry" + newline
+    errors = b"real error\xff" + newline + b"NATIVE_WRITE_FIXTURE_LAUNCHER unrelated" + newline
+    record, remaining = native_write_fixture_launch(phases + launch + errors)
+    # A lookalike frame must not hide an error or leave an apparently valid launch.
+    assert record is None and remaining == phases + launch + errors
+    record, remaining = native_write_fixture_launch(phases + launch + errors.splitlines(keepends=True)[0])
+    assert record == {
+        "birth_filetime": 134125000000000000, "entry_utc_ms": 1768026400000,
+        "qpc": 123456, "frequency": 10000000, "cpu_ticks": 0,
+    }
+    assert native_write_fixture_stderr(remaining) == (
+        "123 command-entry", errors.splitlines(keepends=True)[0],
+    )
+
+
+@pytest.mark.parametrize("change", ["duplicate", "frequency", "overflow", "truncated"])
+def test_native_write_fixture_launch_rejects_malformed_or_duplicate_frame(change):
+    launch = (
+        b"NATIVE_WRITE_FIXTURE_LAUNCH birth_filetime=134125000000000000"
+        b" entry_utc_ms=1768026400000 qpc=123456 frequency=10000000 cpu_ticks=1\n"
+    )
+    invalid = {
+        "duplicate": launch + launch,
+        "frequency": launch.replace(b"frequency=10000000", b"frequency=0"),
+        "overflow": launch.replace(b"cpu_ticks=1", b"cpu_ticks=" + b"1" * 21),
+        "truncated": launch.rstrip(b"\n"),
+    }[change]
+    original = b"real error\xff\n" + invalid
+    assert native_write_fixture_launch(original) == (None, original)
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows launch observation")
+@pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
+def test_native_write_fixture_launch_observes_native_birth(tmp_path, shell):
+    executable = shutil.which(shell)
+    if not executable:
+        pytest.skip(f"{shell} is unavailable")
+    result = subprocess.run(
+        [executable, "-NoProfile", "-NonInteractive", "-Command",
+         NATIVE_WRITE_PHASE_WRITER + NATIVE_WRITE_LAUNCH_WRITER
+         + "[Console]::Error.WriteLine('real fixture error')"],
+        input=b"", capture_output=True, timeout=10, cwd=tmp_path, **no_window_kwargs(),
+    )
+    assert result.returncode == 0 and result.stdout == b""
+    launch, remaining = native_write_fixture_launch(result.stderr)
+    assert launch is not None, result.stderr
+    progress, errors = native_write_fixture_stderr(remaining)
+    assert re.fullmatch(r"[0-9]+ command-entry", progress), progress
+    assert errors == b"real fixture error\r\n"
+
+
 @pytest.mark.portfolio_tier("T2")
 @pytest.mark.effect("process")
 @pytest.mark.skipif(os.name != "nt", reason="Native Windows timeout diagnostics")
@@ -532,7 +627,7 @@ def test_native_write_fixture_stderr_survives_timeout(tmp_path, shell):
     if not executable:
         pytest.skip(f"{shell} is unavailable")
     command = (
-        NATIVE_WRITE_PHASE_WRITER + NATIVE_WRITE_LOAD_WRITER
+        NATIVE_WRITE_PHASE_WRITER + NATIVE_WRITE_LAUNCH_WRITER + NATIVE_WRITE_LOAD_WRITER
         + "Write-NativeWriteFixtureCpuPhase 'json-web-load'; "
         + "Write-NativeWriteFixtureCpuPhase 'json-deserialize'; "
         + "[Console]::Error.WriteLine('real fixture error'); [Threading.Thread]::Sleep(60000)"
@@ -542,7 +637,9 @@ def test_native_write_fixture_stderr_survives_timeout(tmp_path, shell):
             [executable, "-NoProfile", "-NonInteractive", "-Command", command],
             input=b"", capture_output=True, timeout=10, cwd=tmp_path, **no_window_kwargs(),
         )
-    progress, errors = native_write_fixture_stderr(captured.value.stderr)
+    launch, remaining = native_write_fixture_launch(captured.value.stderr)
+    assert launch is not None, captured.value.stderr
+    progress, errors = native_write_fixture_stderr(remaining)
     assert re.fullmatch(
         r"[0-9]+ command-entry\n[0-9]+ json-web-load cpu_ticks=[0-9]+\n"
         r"[0-9]+ json-deserialize cpu_ticks=[0-9]+", progress,
@@ -2213,17 +2310,22 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
     started_ms = time.time_ns() // 1_000_000
     try:
         result = subprocess.run(
-            [executable, "-NoProfile", "-NonInteractive", "-Command", NATIVE_WRITE_PHASE_WRITER + entry["powershell"]],
+            [executable, "-NoProfile", "-NonInteractive", "-Command",
+             NATIVE_WRITE_PHASE_WRITER + NATIVE_WRITE_LAUNCH_WRITER + entry["powershell"]],
             input=raw, capture_output=True, timeout=10,
             cwd=workspace, env=env, **no_window_kwargs(),
         )
     except subprocess.TimeoutExpired as error:
-        progress, diagnostic = native_write_fixture_stderr(error.stderr or b"")
+        launch, remaining = native_write_fixture_launch(error.stderr or b"")
+        progress, diagnostic = native_write_fixture_stderr(remaining)
         raise AssertionError(
             f"{shell} native write exceeded the original 10s child limit; start_ms={started_ms}; "
-            f"phases={progress or 'no command entry'!r}; stdout={error.stdout!r}; stderr={diagnostic!r}"
+            f"launch={launch!r}; phases={progress or 'no command entry'!r}; "
+            f"stdout={error.stdout!r}; stderr={diagnostic!r}"
         ) from error
     native_seconds = time.monotonic() - started
+    launch, result.stderr = native_write_fixture_launch(result.stderr)
+    assert launch is not None, result.stderr
     progress, result.stderr = native_write_fixture_stderr(result.stderr)
     assert " command-entry" in progress, result.stderr
     phase_names = [line.split(" ", 1)[1] for line in progress.splitlines()]
@@ -2231,6 +2333,15 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
         assert "prepared-marker-opened" in phase_names, progress
         assert phase_names.index("prepared-marker-opened") < phase_names.index("prepared-marker-json"), progress
     assert result.returncode == 0 and not result.stderr, result.stdout + result.stderr
+    with capsys.disabled():
+        print(json.dumps({"native_write_launch": {
+            "shell": shell, "case": case, "start_ms": started_ms,
+            "native_entry_seconds": native_seconds, "launch": launch,
+            "executable_sha256": hashlib.sha256(Path(executable).read_bytes()).hexdigest(),
+            "registered_command_sha256": hashlib.sha256(
+                entry["powershell"].encode("utf-8"),
+            ).hexdigest(),
+        }}), flush=True)
     assert not membership.exists()
     if case == "ordinary-unrelated-inventory":
         assert native_membership.read_text() == "True"
