@@ -10,6 +10,7 @@ import subprocess
 import sys
 import venv
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -65,7 +66,7 @@ def test_readiness_failure_never_becomes_optional_absence(tmp_path: Path) -> Non
         ready_owner_prefix(tmp_path, "agent_worktrees", resolver=lambda root: Path("python"))
 
 
-def _probe_contract(path: Path, **fields) -> Path:
+def _probe_contract(path: Path, **fields: object) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({
         "schema": "copilot-extensions.readiness-isolation", "version": 1,
@@ -124,7 +125,7 @@ def test_probe_contract_refuses_linked_descriptor(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("module", ["../agent_worktrees", "agent_worktrees/child", "", None])
-def test_runtime_contract_path_refuses_non_module_names(module) -> None:
+def test_runtime_contract_path_refuses_non_module_names(module: Any) -> None:
     with pytest.raises(ProbeContractError, match="qualified provider module"):
         runtime_contract_path(module)
 
@@ -146,7 +147,9 @@ def test_probe_prefix_qualification_does_not_block_ordinary_calls(
 
 
 @pytest.mark.parametrize("layout", ["retained", "nested-retained", "payload", "mutable"])
-def test_probe_resolver_is_qualified_before_loading_code(tmp_path, monkeypatch, layout):
+def test_probe_resolver_is_qualified_before_loading_code(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, layout: str,
+) -> None:
     from configuration_context.readiness import qualify_resolver
 
     prefix = tmp_path / "slot"

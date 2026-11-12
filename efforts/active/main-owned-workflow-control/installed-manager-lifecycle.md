@@ -2903,3 +2903,20 @@ failure remains unproven and fatal; no local full suite, native retry, extra
 provider query, profiling matrix or waiver is performed here. The parent
 admitted-baseline, frozen-enforcement and separate Main-adoption gates remain
 open.
+
+CI 43323857767 at `2c65e2bd1d` passes actual eligible units with coverage in
+2m37s, but its guard job stops on strict type errors in the new canonical
+readiness/peer code and fixtures. The annotations and optional module reference
+are corrected without a suppression or admission downgrade; both affected
+projects now pass their Python 3.10 Linux and Windows strict targets. All 72
+affected canonical tests pass with two platform skips. Canonical vendors and
+MCP revision-36 producer hashes are refreshed, and only the four affected
+unit-source digests change. Nodes, coverage targets, effect limits and deadlines
+remain unchanged.
+
+Actual review 5883284695 on the same head still retains both open threads and
+explicitly requires exact-head installed-suite acceptance. No new inline code
+finding accompanies it. The disclosed fatal CIM failure cannot be closed by
+these source controls; the changed source must be assessed by the existing
+bounded disposable Windows owner, with any recurring failure retaining its new
+numeric diagnostics and original fatal policy.

@@ -247,7 +247,7 @@ def test_probe_admits_peer_payload_before_import_and_exact_runtime_before_use(
 def test_peer_entry_preserves_typed_unknown(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
 ) -> None:
-    def refuse(*args, **kwargs):
+    def refuse(*args: object, **kwargs: object) -> None:
         raise ProbeContractError("unqualified peer")
 
     monkeypatch.setattr(peer_launch, "launch", refuse)

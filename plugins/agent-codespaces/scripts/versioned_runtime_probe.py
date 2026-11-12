@@ -12,6 +12,7 @@ import sys
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 CONTRACT_FILE = "readiness-isolation.json"
 CONTRACT_SCHEMA = "copilot-extensions.readiness-isolation"
@@ -47,8 +48,8 @@ def required(environment: Mapping[str, str] | None = None) -> bool:
     return value == PROBE_CONTRACT
 
 
-def _unique(pairs):
-    result = {}
+def _unique(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
     for key, value in pairs:
         if key in result:
             raise ValueError("duplicate contract field")

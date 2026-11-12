@@ -497,10 +497,11 @@ def _resolve_peer(
     peer_receipt = Path(own["cellRoot"]) / "plugins" / plugin / "install.json"
     peer = _active_context(primitive, peer_receipt, durable, plugin, cell, {})
     environment = peer_environment(peer, dict(os.environ))
-    support = None
+    support: ModuleType | None = None
     if "COPILOT_EXTENSIONS_READONLY_PROBE" in environment:
-        from configuration_context import readiness as support
+        from configuration_context import readiness
 
+        support = readiness
         if support.required(environment):
             payload = support.payload_contract(Path(peer["payloadRoot"]), plugin)
             if payload.module != PEERS[plugin]:
