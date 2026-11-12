@@ -42,7 +42,7 @@ def test_ready_prefix_retains_qualified_interpreter_and_module(tmp_path: Path) -
         return selected
 
     assert ready_owner_prefix(tmp_path, "agent_worktrees", resolver=resolve) == [
-        str(selected), "-B", "-m", "agent_worktrees",
+        str(selected), "-I", "-B", "-X", "utf8", "-m", "agent_worktrees",
     ]
     assert roots == [tmp_path]
     assert not selected.exists()
@@ -73,17 +73,29 @@ def test_native_owner_read_preserves_package_and_startup_bytecode(tmp_path: Path
     (module / "payload.py").write_text("VALUE = 'native-owner'\n", encoding="utf-8")
     (packages / "startup_witness.py").write_text("VALUE = 'startup'\n", encoding="utf-8")
     (packages / "sitecustomize.py").write_text("import startup_witness\n", encoding="utf-8")
+    project = tmp_path / "selected-project"
+    project.mkdir()
+    marker = tmp_path / "checkout-import-executed"
+    for name in ("configuration_owner_fixture", "json", "startup_witness"):
+        (project / f"{name}.py").write_text(
+            f"from pathlib import Path\nPath({str(marker)!r}).touch()\n"
+            "raise RuntimeError('checkout module executed during configuration read')\n",
+            encoding="utf-8",
+        )
     report = {
         "schema": "agent-worktrees.configuration", "version": 1,
         "context": {
             "repository_id": "fixture-repo", "execution_machine": "fixture-worker",
             "installation_cell": "fixture-cell", "binding": "unbound",
-            "base_root": str(tmp_path),
+            "base_root": str(project),
         },
     }
     (module / "__main__.py").write_text(
-        "import json, sys\nfrom . import payload\n"
+        "import json, os, sys\nfrom . import payload\n"
         "assert sys.argv[1:] == ['state-root', '--configuration', '--json']\n"
+        "assert (sys.flags.isolated, sys.flags.dont_write_bytecode, sys.flags.utf8_mode) == (1, 1, 1)\n"
+        "assert not sys.flags.no_site\n"
+        f"assert os.getcwd() == {str(project)!r}\n"
         "assert payload.VALUE == 'native-owner'\n"
         f"print(json.dumps({report!r}))\n",
         encoding="utf-8",
@@ -92,9 +104,12 @@ def test_native_owner_read_preserves_package_and_startup_bytecode(tmp_path: Path
               for path in packages.rglob("*") if path.is_file()}
     child_env = {key: value for key, value in os.environ.items()
                  if key not in {"PYTHONPYCACHEPREFIX", "PYTHONDONTWRITEBYTECODE", "PYTHONPATH"}}
+    child_env["PYTHONPATH"] = str(project)
     prefix = ready_owner_prefix(tmp_path / "owner", "configuration_owner_fixture",
                                 resolver=lambda _: python)
-    assert read_owner_context(prefix, tmp_path, required=True, environment=child_env) == report
+    assert read_owner_context(prefix, project, required=True, environment=child_env) == report
+    assert not marker.exists()
+    assert not list(project.rglob("*.pyc"))
     after = {path.relative_to(packages): path.read_bytes()
              for path in packages.rglob("*") if path.is_file()}
     assert after == before

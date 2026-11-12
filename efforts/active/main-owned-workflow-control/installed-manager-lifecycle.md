@@ -2467,3 +2467,60 @@ Touched Python passes F/E9 lint after removing one unused test import.
 All source modules remain within the existing ceilings; strict runtime
 resolution, all 13 install contracts, documentation consistency and whitespace
 checks pass. No baseline ceiling or required gate is weakened.
+
+### November 12 - Preserve isolation through the nested configuration owner
+
+Exact `dc1` CI 43164194507 passes eligible units, guards and the required PR
+gate. The existing manager-suite lane is dispatched once as run 43164869963
+against exact source `dc1caba05c6c724fad1f14ac6d9345cb5da8739a`, after
+checking the published ref and absence of another dispatch for that source.
+It remains owned and frozen; later source changes are not relabeled into it.
+
+Actual Copilot review 5869814210 is a Comment on `dc1`, not an approval.
+It retains High finding 4546199089 and specifically describes a nested
+readiness import through legacy runtimes and Index configuration.
+Trace the full Index configuration adapter: its qualified legacy Worktrees
+owner prefix comes from the canonical configuration-context library, which
+still returns `-B -m`. Top-level probe isolation does not protect that new
+interpreter. The same-cell peer prefix already uses isolated Python; no peer
+launch or operational dispatcher change is needed for this nested path.
+
+The canonical ready-only prefix now supplies `-I -B -X utf8`. The existing
+`sync-configuration-layers.py` propagates exactly three standalone payload
+copies. Installed site packages, qualified runtime selection, project cwd,
+required/optional owner semantics and read-only deadlines remain unchanged.
+The strengthened real-process owner test places module, JSON and startup-hook
+shadows in the selected checkout and on PYTHONPATH, while the actual installed
+owner emits the configuration report. It fails before the prefix fix with a
+configuration-owner refusal; all eight context contracts pass afterward.
+The test also retains its complete before/after package-byte comparison.
+These are source/private-venv controls, not installed-suite release evidence.
+
+The plugin CLI runner has no configuration-layers alias and refuses that
+selection before collecting tests. The successful library run therefore uses
+the existing `TestSandbox`, `isolated_environment` and `run_contained` APIs
+with an already-provisioned pytest interpreter, not an uncontained host run
+or newly installed dependencies.
+
+Meanwhile Dev moves and creates a real conflict. Preserve `dc1` on a local
+backup before rebasing onto `abb86e1c9d`. All 40 owned patches survive.
+The only conflicts are MCP's generated producer hashes at two replay points;
+canonical footprint refresh retains the newer upstream source digest and
+the contributed script digest. Range-diff confirms no other owned patch
+changes, with revision 36 and contract semantics unchanged.
+
+Shared-library consumer discovery includes both physical and canonical/
+transitive maps. Existing PR changefiles cover the other affected runtimes;
+fresh library, Logger and Conduct Guidance intents supply the remaining
+coverage. Versions are not hand-edited. This new combined source still needs
+focused post-rebase checks, required CI, actual current-head review and
+exact-source native qualification. No prior result waives those gates or the
+parent's upgrade, frozen-enforcement or Main-adoption obligations.
+
+The combined post-rebase dispatcher packet passes 44 cases with eight explicit
+skips (125.04 seconds). MCP's complete flat/nested bootstrap file passes
+28 cases with 14 native-POSIX skips (82.96 seconds). The eight configuration
+context controls, canonical-copy check, F/E9 lint, existing module ceilings,
+all 13 install contracts, strict runtime resolution, documentation and
+whitespace checks also pass. No skipped platform is credited as executed,
+and no acceptance predicate or budget changes.

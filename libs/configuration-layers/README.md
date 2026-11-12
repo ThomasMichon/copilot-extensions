@@ -186,10 +186,11 @@ binding/identity adapter; this SDK does not discover one or guess a legacy ID.
 ### Ready-only owner transport
 
 `configuration_context.ready_owner_prefix` composes a native module invocation
-using a caller-qualified completion resolver. Its interpreter receives `-B`
-before module execution, so read-only owner queries do not create bytecode in
-the selected installation, including imports performed by Python startup hooks.
-This does not change the selected runtime, its environment or readiness rules.
+using a caller-qualified completion resolver. Its interpreter receives
+`-I -B -X utf8` before module execution. Read-only owner queries exclude
+checkout-local imports and ambient Python paths, retain installed site packages,
+emit UTF-8 and do not create bytecode, including during Python startup hooks.
+This does not change the selected runtime, configuration cwd or readiness rules.
 Legacy Machines and SSH supply
 `configuration_context.runtime.deployed_runtime_python`, passing their actual
 installed `bin/resolve-runtime.sh` or `.ps1`, the explicitly admitted peer root,

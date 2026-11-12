@@ -58,7 +58,7 @@ def ready_owner_prefix(
     executable = Path(python)
     if not executable.is_absolute():
         raise ConfigurationError("configuration owner resolver returned a relative interpreter")
-    return [str(executable), "-B", "-m", module]
+    return [str(executable), "-I", "-B", "-X", "utf8", "-m", module]
 
 
 def context_from_owner(report: object) -> dict[str, Any]:

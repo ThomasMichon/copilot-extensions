@@ -128,6 +128,11 @@ and immutable payload files. Index's
 `tests/test_runtime_gate.py -k posix_readiness_parser_never`
 separately exercises its inline JSON parser from a checkout containing
 `json.py`; a Windows skip is not POSIX evidence.
+`libs/configuration-layers/tests/test_configuration_context.py` additionally
+launches the actual nested owner prefix against a private installed package
+from a shadow-bearing selected project. It checks startup-hook imports,
+isolation, UTF-8, site packages, cwd and bytecode immutability through the
+canonical sandbox/environment/process-containment APIs.
 
 ### Selected native ADO discussion resolution
 

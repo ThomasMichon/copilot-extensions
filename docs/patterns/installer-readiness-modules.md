@@ -106,6 +106,8 @@ The same options apply to legacy PowerShell's encoded-argument bootstrap and
 the Machines/Worktrees payload dispatchers, not only direct `-m` branches.
 Worktrees' metadata-only path skips operational cache selection. Inline
 standard-library parsers also exclude the project from their import path.
+Nested configuration-owner reads preserve that isolation through the canonical
+`configuration_context.ready_owner_prefix`, including qualified legacy runtimes.
 
 ### Script-only runtime ownership
 
