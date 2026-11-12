@@ -27,6 +27,8 @@ Read [cohorts and acquisition](references/cohorts-and-acquisition.md) before int
 and [acceptance and continuity](references/acceptance-and-continuity.md) before
 dispositions or recovery. A charter records original authority; it grants none.
 Reactivation needs a current charter, not another campaign's defaults or budget.
+The [synthetic walkthroughs](assets/scenarios.json) connect failure cases to
+their controlling guidance; they are not executable decisions or live qualification.
 
 ## 1. Establish one finite campaign
 
