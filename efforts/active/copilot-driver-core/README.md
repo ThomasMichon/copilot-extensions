@@ -228,6 +228,9 @@ this proposal's review gate.
 
 ## Journal
 
+- [2026-11-12 - Recordless normalized caller converges on the core](journal/2026/11.12%20recordless%20caller%20core%20acceptance.md)
+- [2026-11-12 - Original-owner recovery store reviewed and merged](journal/2026/11.12%20original-owner%20recovery%20store.md)
+- [2026-11-12 - Recovery contract reviewed; original-owner store next](journal/2026/11.12%20recovery%20contract%20acceptance.md)
 - [2026-11-11 - Portable mux receiving converges on the common core](journal/2026/11.11%20portable%20mux%20core%20acceptance.md)
 - [2026-11-11 - Uncertainty-preserving crash recovery proposed](journal/2026/11.11%20uncertainty-preserving%20recovery.md)
 - [2026-11-11 - Refactor source history](journal/2026/11.11%20refactor%20source%20history.md)
