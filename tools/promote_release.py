@@ -43,7 +43,6 @@ import os
 import subprocess
 import sys
 import tempfile
-import time
 import types
 from pathlib import Path
 from promotion_candidate import (
@@ -54,6 +53,7 @@ from promotion_source_archive import (
     changefile_existed_at as _changefile_existed_at,
     git_environment,
     git_text,
+    git_timeout_options,
     is_ancestor,
     main_version_inputs as _main_version_inputs,
 )
@@ -116,9 +116,16 @@ def add_scratch_worktree(dev_ref: str, *, repo: Path = REPO) -> Path:
     # in (``repo``), not the caller's own process cwd -- resolve it against
     # ``repo`` explicitly rather than Python's own working directory.
     common_dir = (repo / _git(["rev-parse", "--git-common-dir"], cwd=repo)).resolve()
-    scratch = common_dir.parent / ".promote-scratch" / f"promote-{int(time.time() * 1000)}"
-    scratch.parent.mkdir(parents=True, exist_ok=True)
-    _git(["worktree", "add", "--detach", str(scratch), dev_ref], cwd=repo)
+    scratch_parent = common_dir.parent / ".promote-scratch"
+    scratch_parent.mkdir(parents=True, exist_ok=True)
+    scratch = Path(tempfile.mkdtemp(prefix="promote-", dir=scratch_parent))
+    try:
+        _git(
+            ["-c", f"core.hooksPath={os.devnull}", "worktree", "add", "--detach", str(scratch), dev_ref],
+            cwd=repo,
+        )
+    except subprocess.TimeoutExpired as error:
+        raise PromotionError(f"scratch creation timed out; retain and inspect {scratch}") from error
     return scratch
 
 
@@ -223,10 +230,13 @@ def _sync_instruction_projections(
     script = (trusted_source or scratch) / relative
     if not (scratch / relative).exists() or not script.exists():
         return []
-    proc = subprocess.run(
+    from promotion_source_archive import run_composition_child
+
+    proc = run_composition_child(
         [sys.executable, str(script), "sync", str(scratch), "--json"],
         capture_output=True, text=True, env=git_environment(),
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        **git_timeout_options(),
     )
     try:
         payload = json.loads(proc.stdout) if proc.stdout.strip() else None
@@ -273,87 +283,75 @@ def consume_pending_changes(
     "agent-bridge 0.4.0-dev551 -> 0.4.1-dev1"). Every changefile physically
     present is still deleted from the scratch tree regardless -- main must
     never carry any, newly-applied or not."""
-    # accumulate_bumps.py does a bare ``from changefile import
-    # read_changefiles`` -- a plain import checks sys.modules by name FIRST,
-    # before consulting sys.path, so if anything else in this process has
-    # already imported a "changefile" module (e.g. a sibling test module,
-    # or a previous promotion's own scratch copy), accumulate_bumps would
-    # silently bind to *that* stale module -- reading/writing the wrong
-    # repo's .changefiles/ entirely. Force the scratch worktree's own
-    # changefile.py into sys.modules under its bare name before loading
-    # accumulate_bumps, then restore whatever was there afterward.
+    # Bind this accumulator's reader directly; a process-global import alias
+    # lets concurrent compositions consume another scratch tree's changefiles.
     tool_root = (trusted_source or scratch) / "tools"
     changefile_mod = _load_module(tool_root / "changefile.py", "promote_changefile")
     if trusted_source is not None:
         changefile_mod.REPO = scratch
         changefile_mod.CHANGEFILES_DIR = scratch / ".changefiles"
-    previous_changefile_mod = sys.modules.get("changefile")
-    sys.modules["changefile"] = changefile_mod
-    try:
-        acc = _load_module(tool_root / "accumulate_bumps.py", "promote_accumulate_bumps")
-        mm = _load_module(tool_root / "materialize_main.py", "promote_materialize_main")
-        if trusted_source is not None:
-            acc.REPO = scratch
-            acc.PLUGINS_DIR = scratch / "plugins"
-            acc.MARKETPLACE = scratch / ".github" / "plugin" / "marketplace.json"
+    acc = _load_module(tool_root / "accumulate_bumps.py", "promote_accumulate_bumps")
+    acc.read_changefiles = changefile_mod.read_changefiles
+    mm = _load_module(tool_root / "materialize_main.py", "promote_materialize_main")
+    if trusted_source is not None:
+        acc.REPO = scratch
+        acc.PLUGINS_DIR = scratch / "plugins"
+        acc.MARKETPLACE = scratch / ".github" / "plugin" / "marketplace.json"
 
-        all_changefiles = list(acc.read_changefiles())
-        _seed_versions_from_main(scratch, main_head, acc=acc, repo=repo)
-        changefile_names = [p.name for p, _data in all_changefiles]
-        if not allocate_versions:
-            new_entries = []
-        elif last_dev_head is None:
-            new_entries = all_changefiles
-        else:
-            new_entries = [
-                (path, data) for path, data in all_changefiles
-                if not _changefile_existed_at(last_dev_head, path.name, repo=repo)
-            ]
-        newly_applied_names = [path.name for path, _data in new_entries]
+    all_changefiles = list(acc.read_changefiles())
+    _seed_versions_from_main(scratch, main_head, acc=acc, repo=repo)
+    changefile_names = [p.name for p, _data in all_changefiles]
+    if not allocate_versions:
+        new_entries = []
+    elif last_dev_head is None:
+        new_entries = all_changefiles
+    else:
+        new_entries = [
+            (path, data) for path, data in all_changefiles
+            if not _changefile_existed_at(last_dev_head, path.name, repo=repo)
+        ]
+    newly_applied_names = [path.name for path, _data in new_entries]
 
-        grouped: dict[str, list[str]] = {}
-        for _path, data in new_entries:
-            for change in data.get("changes", []):
-                grouped.setdefault(change["plugin"], []).append(change["type"])
-        computed = acc.compute(grouped)
-        applied = acc.apply(computed) if computed else []
-        unapplied = sorted(set(computed) - set(applied))
-        if unapplied:
-            # A computed bump that `apply()` could not actually write (a
-            # manifest-format edge case `apply()` doesn't recognize, a
-            # missing file, etc.) must never be silently accepted --
-            # consuming the changefile below regardless would ship the OLD
-            # version on `main` while permanently discarding the bump
-            # intent (PR #4514 review, a recurring finding across several
-            # prior rounds' individual TOML-format fixes; this is the
-            # structural fix instead of another one-off format patch).
-            raise PromotionError(
-                f"promotion refused: computed a version bump for "
-                f"{', '.join(unapplied)} but apply() could not write it -- "
-                "fix the underlying manifest(s) before promoting again."
-            )
-        if all_changefiles:
-            # Delete every changefile physically present, not just the ones
-            # that drove a bump this round -- an already-consumed changefile
-            # left un-deleted here would otherwise leak straight into main's
-            # generated tree (main must never carry any .changefiles/*).
-            acc._consume_changefiles()
+    grouped: dict[str, list[str]] = {}
+    for _path, data in new_entries:
+        for change in data.get("changes", []):
+            grouped.setdefault(change["plugin"], []).append(change["type"])
+    computed = acc.compute(grouped)
+    applied = acc.apply(computed) if computed else []
+    unapplied = sorted(set(computed) - set(applied))
+    if unapplied:
+        # A computed bump that `apply()` could not actually write (a
+        # manifest-format edge case `apply()` doesn't recognize, a
+        # missing file, etc.) must never be silently accepted --
+        # consuming the changefile below regardless would ship the OLD
+        # version on `main` while permanently discarding the bump
+        # intent (PR #4514 review, a recurring finding across several
+        # prior rounds' individual TOML-format fixes; this is the
+        # structural fix instead of another one-off format patch).
+        raise PromotionError(
+            f"promotion refused: computed a version bump for "
+            f"{', '.join(unapplied)} but apply() could not write it -- "
+            "fix the underlying manifest(s) before promoting again."
+        )
+    if all_changefiles:
+        # Delete every changefile physically present, not just the ones
+        # that drove a bump this round -- an already-consumed changefile
+        # left un-deleted here would otherwise leak straight into main's
+        # generated tree (main must never carry any .changefiles/*).
+        acc._consume_changefiles()
 
-        materialize_log = mm.materialize(scratch, canonical_root=scratch)
-        unresolved = [line for line in materialize_log if line.startswith("SKIP")]
-        if unresolved:
-            raise PromotionError(
-                "promotion refused: one or more vendor pointers did not "
-                "resolve during materialization -- a malformed, missing, or "
-                "escaping pointer would otherwise ship as an unexpanded stub "
-                "in the main snapshot:\n  " + "\n  ".join(unresolved)
-            )
-        projections_synced = _sync_instruction_projections(scratch, trusted_source=trusted_source)
-    finally:
-        if previous_changefile_mod is not None:
-            sys.modules["changefile"] = previous_changefile_mod
-        else:
-            sys.modules.pop("changefile", None)
+    git_timeout_options()
+    materialize_log = mm.materialize(scratch, canonical_root=scratch)
+    git_timeout_options()
+    unresolved = [line for line in materialize_log if line.startswith("SKIP")]
+    if unresolved:
+        raise PromotionError(
+            "promotion refused: one or more vendor pointers did not "
+            "resolve during materialization -- a malformed, missing, or "
+            "escaping pointer would otherwise ship as an unexpanded stub "
+            "in the main snapshot:\n  " + "\n  ".join(unresolved)
+        )
+    projections_synced = _sync_instruction_projections(scratch, trusted_source=trusted_source)
 
     from promotion_control import ControlPreservationError, preserve_control
 

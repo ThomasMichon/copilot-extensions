@@ -17,6 +17,7 @@ _FLAGS = "run --locked --no-dev --no-editable --link-mode hardlink"
 
 def slot_binstubs(
     name: str, module: str, *, python_platform: str | None = None,
+    python_request: str | None = None,
 ) -> dict[str, str]:
     """Return relocatable app/install stubs without publishing any of them."""
     package, separator, attribute = module.partition(":")
@@ -29,7 +30,15 @@ def slot_binstubs(
         r"[a-z0-9_]+(?:-[a-z0-9_]+){1,4}", python_platform,
     ) is None:
         raise ValueError("application launchers require an ordinary Python platform")
+    if python_request is not None and (
+        python_platform is not None
+        or re.fullmatch(r"cpython-[0-9]+\.[0-9]+\.[0-9]+-windows-(?:x86|x86_64|aarch64)-none",
+                        python_request) is None
+    ):
+        raise ValueError("application launchers require one supported Python interpreter request")
     flags = _FLAGS + (f" --python-platform {python_platform}" if python_platform else "")
+    if python_request is not None:
+        flags += f" --python {python_request}"
     result = {}
     for command, target in (
         (name, f"-I -X utf8 -B -m {module}" if not separator else None),

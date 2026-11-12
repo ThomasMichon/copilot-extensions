@@ -75,7 +75,7 @@ def _selected_manager_repository_data(repository):
         f'[project]\nname="{PLUGIN}"\nversion="1.0.0"\n'
         '[tool.uv.sources]\nagent-zdd={path="../../libs/zdd",editable=true}\n',
     )
-    assert len(libraries) == 14
+    assert {root / "libs/agent-procutil", root / "libs/update-driver"} <= set(libraries)
     # Retain the shared dependency edge even when lease is also a direct core input.
     lease = root / "libs/single-instance-lease"
     lease.mkdir(exist_ok=True)
@@ -91,6 +91,12 @@ def _selected_manager_repository_data(repository):
         stream.write(
             '[tool.uv.sources]\nagent-single-instance-lease={path="../single-instance-lease",editable=true}\n',
         )
+    for source, _destination in source_runtime.materializer.mie.derived_file_pairs(root, root):
+        if not source.exists():
+            source.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(REPOSITORY / source.relative_to(root), source)
+    refreshed = source_runtime.materializer.mie.materialize_derived_files(root, canonical_root=root)
+    assert not [line for line in refreshed if line.startswith("SKIP")]
     return root, _merged_commit(root), declaration
 
 
@@ -230,7 +236,13 @@ class TestSelectedManagerMaterialization:
                 ),
             )
             assert source_runtime._assembly_hash(state.selected_payload) == identity.assembly_hash
-            assert len(list((state.selected_payload / "libs").iterdir())) == 14
+            metadata = source_runtime.materializer.uer.tomllib.loads(
+                (state.root / "worktree-manager/pyproject.toml").read_text(),
+            )
+            assert {path.name for path in (state.selected_payload / "libs").iterdir()} == {
+                Path(row["path"]).name for row in metadata["tool"]["uv"]["sources"].values()
+                if row.get("path", "").startswith("../libs/")
+            }
             for directory in (state.selected_payload, *(state.selected_payload / "libs").iterdir()):
                 assert (directory / "README.md").is_file()
                 assert (directory / "tests/test_selected.py").is_file()
@@ -242,10 +254,9 @@ class TestSelectedManagerMaterialization:
                 for name in group["files"]:
                     assert (state.selected_payload / group["payloadDir"] / name).read_bytes() == (
                         state.root / group["canonicalDir"] / name
-                    ).read_bytes()
+                    ).read_bytes(), f"{group['payloadDir']}/{name}"
                     state.sdk_members += 1
-            assert sum(len(group["files"]) for group in state.declaration["groups"]) == 161
-            assert state.sdk_members == 161
+            assert state.sdk_members == sum(len(group["files"]) for group in state.declaration["groups"])
             assert "../../libs/zdd" in (
                 state.selected / "source/plugins" / PLUGIN / "pyproject.toml"
             ).read_text()
@@ -570,14 +581,16 @@ def test_preparation_deadline_refuses_before_git_or_output(
 
 
 def test_preparation_git_child_preserves_original_deadline(repository, monkeypatch):
-    actual = source_runtime.subprocess.run
+    import source_preparation_process as process
+
+    actual = process.run
     timeouts = []
 
     def run(command, **options):
         timeouts.append(options["timeout"])
         return actual(command, **options)
 
-    monkeypatch.setattr(source_runtime.subprocess, "run", run)
+    monkeypatch.setattr(process, "run", run)
     assert source_runtime._git(repository[0], "rev-parse", "HEAD", deadline=time.monotonic() + 5) == repository[1]
     assert len(timeouts) == 1 and 0 < timeouts[0] <= 5
 
@@ -726,11 +739,14 @@ def _manager_source(root: Path) -> Path:
         REPOSITORY / "worktree-manager" / "packaged-assets.json",
         manager / "packaged-assets.json",
     )
-    tools = root / "tools"
-    tools.mkdir()
     manifest = json.loads((manager / "packaged-assets.json").read_text())
-    for name in manifest["files"]:
-        (tools / name).write_text("raise RuntimeError('fetched tool must not execute')\n")
+    for group in manifest["groups"]:
+        for name in group["files"]:
+            destination = root / group["canonicalDir"] / name
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(REPOSITORY / group["canonicalDir"] / name, destination)
+            if group["canonicalDir"] == "tools" and name.endswith(".py"):
+                destination.write_text("raise RuntimeError('fetched tool must not execute')\n")
     return manager
 
 

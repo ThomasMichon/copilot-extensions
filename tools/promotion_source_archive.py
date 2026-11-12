@@ -2,12 +2,16 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
+from contextvars import ContextVar
 import hashlib
+import math
 import os
 from pathlib import Path
 import re
 import stat
 import subprocess
+import time
 
 from promotion_complete_source import (
     MAX_SOURCE_BYTES, MAX_SOURCE_FILES, canonical_bytes, source_archive, source_asset_name,
@@ -15,12 +19,52 @@ from promotion_complete_source import (
 )
 from promotion_unit_contract import MAX_PACKET_FILE_BYTES, decode_json
 
+_DEADLINE: ContextVar[float | None] = ContextVar("promotion_deadline", default=None)
+
+
+@contextmanager
+def composition_budget(deadline: float | None):
+    if deadline is not None and (
+        isinstance(deadline, bool) or not isinstance(deadline, (float, int))
+        or not math.isfinite(deadline)
+    ):
+        raise ValueError("composition requires a finite deadline")
+    current = _DEADLINE.get()
+    selected = min(current, deadline) if current is not None and deadline is not None else (
+        current if deadline is None else deadline
+    )
+    token = _DEADLINE.set(selected)
+    try:
+        git_timeout_options()
+        yield
+    finally:
+        _DEADLINE.reset(token)
+
+
+def git_timeout_options(cap: float | None = None) -> dict[str, float]:
+    deadline = _DEADLINE.get()
+    if deadline is None:
+        return {} if cap is None else {"timeout": cap}
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise ValueError("composition deadline exceeded")
+    return {"timeout": remaining if cap is None else min(cap, remaining)}
+
 
 def git_environment(**overrides: str) -> dict[str, str]:
     environment = {
         key: value for key, value in os.environ.items() if not key.upper().startswith("GIT_")
     }
     return {**environment, **overrides}
+
+
+def run_composition_child(argv, **options):
+    deadline = _DEADLINE.get()
+    if deadline is None:
+        return subprocess.run(argv, **options)
+    from source_preparation_process import run
+
+    return run(argv, deadline=deadline, **options)
 
 
 def git_text(
@@ -37,13 +81,14 @@ def git_text(
             key: value for key, value in env.items()
             if not key.upper().startswith("GIT_") or key in candidate_identity
         })
-    result = subprocess.run(
-        ["git", "--no-replace-objects",
+    result = run_composition_child(
+        ["git", "--no-replace-objects", "-c", "core.fsmonitor=false",
          *(["-c", "core.longpaths=true", "-c", "checkout.workers=2"] if os.name == "nt" else []),
          *args],
         cwd=str(repo), capture_output=True, env=environment,
         input=input_text.encode("utf-8") if input_text is not None else None,
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        **git_timeout_options(),
     )
     if check and result.returncode:
         raise ValueError(f"git {' '.join(args)} failed: {result.stderr.decode('utf-8').strip()}")
@@ -52,9 +97,10 @@ def git_text(
 
 def _git(repo: Path, args: list[str], *, data: bytes | None = None) -> bytes:
     env = git_environment()
-    result = subprocess.run(
-        ["git", "--no-replace-objects", *args], cwd=repo, env=env, input=data,
-        capture_output=True, timeout=30,
+    result = run_composition_child(
+        ["git", "--no-replace-objects", "-c", "core.fsmonitor=false", *args],
+        cwd=repo, env=env, input=data,
+        capture_output=True, **git_timeout_options(30),
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
     if result.returncode:
@@ -63,20 +109,24 @@ def _git(repo: Path, args: list[str], *, data: bytes | None = None) -> bytes:
 
 
 def is_ancestor(repo: Path, ancestor: str, descendant: str) -> bool:
-    result = subprocess.run(
-        ["git", "--no-replace-objects", "merge-base", "--is-ancestor", ancestor, descendant],
+    result = run_composition_child(
+        ["git", "--no-replace-objects", "-c", "core.fsmonitor=false",
+         "merge-base", "--is-ancestor", ancestor, descendant],
         cwd=str(repo), capture_output=True, text=True, env=git_environment(),
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        **git_timeout_options(),
     )
     return result.returncode == 0
 
 
 def changefile_existed_at(rev: str, name: str, *, repo: Path) -> bool:
     """Read whether a changefile was already present at the previous Dev boundary."""
-    result = subprocess.run(
-        ["git", "--no-replace-objects", "cat-file", "-e", f"{rev}:.changefiles/{name}"],
+    result = run_composition_child(
+        ["git", "--no-replace-objects", "-c", "core.fsmonitor=false",
+         "cat-file", "-e", f"{rev}:.changefiles/{name}"],
         cwd=str(repo), capture_output=True, text=True, env=git_environment(),
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        **git_timeout_options(),
     )
     return result.returncode == 0
 
