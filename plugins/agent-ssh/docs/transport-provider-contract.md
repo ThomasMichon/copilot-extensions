@@ -165,11 +165,13 @@ still match the declaration).
 script paths relative to the module directory). Without `setup`, `agent-ssh
 setup` reports `ready` ("no driver setup"). Without `status`, `agent-ssh status`
 runs the setup entrypoint in plan mode (no `--apply`, never `--interactive`).
-On Windows `.ps1` runs via `powershell -NoProfile -ExecutionPolicy Bypass -File`,
-`.cmd`/`.bat` via `cmd /d /c`, `.py` via the current Python; other files (and
-every POSIX script except `.py`) execute directly. Entrypoints run headless
-(no console window), with stdin closed and output captured, from the module
-directory.
+On Windows `.ps1` runs via `powershell -NoProfile -ExecutionPolicy Bypass -File`
+and `.py` via the current Python; other files (and every POSIX script except
+`.py`) execute directly. Batch (`.cmd`/`.bat`) entrypoints are refused because
+`cmd.exe` would re-parse the machine key and topology path. Entrypoints run
+headless (no console window), with stdin closed and output captured under byte
+budgets enforced while reading (64 KiB each for stdout and stderr; overflow is
+`failed`), from the module directory (the directory holding `module.yaml`).
 
 **Invocation.**
 
@@ -179,6 +181,8 @@ directory.
 
 Without `--apply` the entrypoint plans only. Without `--interactive` it must
 never prompt; anything that needs the operator is reported as an auth request.
+Provider discovery ignores inherited `GIT_*` environment selectors so the
+calling repository is the one containing the working directory.
 stdout must be exactly one JSON object (at most 64 KiB):
 
 ```json
@@ -204,9 +208,11 @@ requests and 64 argv entries are accepted; strings are bounded to 4096 chars.
 **Interactive mode.** `agent-ssh setup --interactive` requires an attached
 console. When the result is `operator-action-required`, agent-ssh runs each
 request's `command` once per distinct `key`, attached to the console (the only
-step that inherits it), then re-runs the setup entrypoint once with the same
-flags and reports that second result (exit `2` if still
-`operator-action-required`).
+step that inherits it; its stdout is redirected to stderr so `--json` output
+stays parseable; `argv0` is resolved on `PATH`, and a resolved batch file is
+refused if any argument contains `cmd.exe` metacharacters), then re-runs the
+setup entrypoint once with the same flags and reports that second result (exit
+`2` if still `operator-action-required`).
 
 `agent-ssh` prints the validated result (`--json`) or a short summary. The
 `auth_requests` list is the input contract for an operator auth queue: unattended

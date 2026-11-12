@@ -255,6 +255,8 @@ def test_parse_result_auth_requests_optional_when_empty():
         (json.dumps(_result(version=2)).encode(), 0),
         (json.dumps(_result(version=True)).encode(), 0),
         (json.dumps(_result(state="unknown")).encode(), 0),
+        (json.dumps(_result(state=[])).encode(), 0),
+        (json.dumps(_result(state={})).encode(), 0),
         (json.dumps(_result(extra=1)).encode(), 0),
         (json.dumps(_result("ready")).encode(), 2),
         (json.dumps(_result("operator-action-required")).encode(), 2),
@@ -296,8 +298,39 @@ def test_setup_plan_invocation_is_headless_and_noninteractive(topology):
     machines = str(topology[0].resolve())
     assert argv[-5:] == ["--machine", "workstation", "--machines", machines, "--json"]
     assert "--apply" not in argv and "--interactive" not in argv
-    assert kwargs["stdin"] is subprocess.DEVNULL
-    assert kwargs["capture_output"] is True
+    assert kwargs["timeout"] == d.ENTRYPOINT_TIMEOUT["setup"]
+
+
+def test_entrypoint_runs_from_module_directory(topology):
+    runner = FakeRunner((_result("planned"), 0))
+    d.run(_request(topology, verb="setup"), runner=runner, hostname="workstation")
+    assert Path(runner.calls[0][1]["cwd"]) == topology[1].parent
+
+
+def test_bounded_runner_enforces_byte_budgets(monkeypatch):
+    from agent_procutil import owned_process
+
+    seen = {}
+
+    def fake(argv, **kwargs):
+        seen.update(kwargs)
+        return SimpleNamespace(returncode=0, stdout=b"", stderr=b"")
+
+    monkeypatch.setattr(owned_process, "run_caller_owned", fake)
+    d.bounded_runner(["x"], timeout=5, cwd=".")
+    assert seen["max_stdout_bytes"] == d.MAX_OUTPUT_BYTES
+    assert seen["max_stderr_bytes"] == d.MAX_STDERR_BYTES
+    assert seen["binary"] is True and seen["cwd"] == "."
+
+
+def test_output_overflow_is_failed(topology):
+    from agent_procutil.owned_process import OutputLimitExceeded
+
+    def _overflow(argv, **kwargs):
+        raise OutputLimitExceeded("stdout", d.MAX_OUTPUT_BYTES)
+
+    result = d.run(_request(topology, verb="setup"), runner=_overflow, hostname="workstation")
+    assert result["state"] == "failed" and d.exit_code(result) == 1
 
 
 def test_setup_apply_passes_flag(topology):
@@ -405,12 +438,64 @@ def test_entrypoint_launch_error_is_failed(topology):
 
 
 def test_script_argv_mapping(tmp_path):
-    assert d.script_argv(tmp_path / "s.ps1", windows=True)[:5] == [
-        "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+    assert d.script_argv(tmp_path / "s.ps1", ["-a"], windows=True) == [
+        "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(tmp_path / "s.ps1"), "-a",
     ]
-    assert d.script_argv(tmp_path / "s.cmd", windows=True)[1:3] == ["/d", "/c"]
+    assert d.script_argv(tmp_path / "s.cmd", ["login"], windows=True)[1:] == [
+        "/d", "/c", str(tmp_path / "s.cmd"), "login",
+    ]
     assert d.script_argv(tmp_path / "s.py", windows=False)[1] == str(tmp_path / "s.py")
     assert d.script_argv(tmp_path / "s.sh", windows=False) == [str(tmp_path / "s.sh")]
+
+
+@pytest.mark.parametrize("arg", ["workstation&echo.INJECTED>marker.txt&rem", "a|b", "%PATH%", 'a"b', "x^y", "(x)"])
+def test_batch_refuses_shell_metacharacters(tmp_path, arg):
+    with pytest.raises(d.DriverError, match="metacharacters"):
+        d.script_argv(tmp_path / "s.cmd", ["--machine", arg], windows=True)
+
+
+def test_batch_entrypoints_are_refused_on_windows(tmp_path):
+    path = _write_module(tmp_path)
+    (path.parent / "scripts" / "setup.cmd").write_text("", encoding="utf-8")
+    module = {"entrypoints": {"setup": {"posix": "scripts/setup.sh", "windows": "scripts/setup.cmd"}}}
+    with pytest.raises(d.DriverError, match="batch"):
+        d.entrypoint_script(path, module, "setup", windows=True)
+
+
+def test_auth_command_stdout_goes_to_stderr(monkeypatch):
+    calls = []
+    monkeypatch.setattr(d.shutil, "which", lambda name: None)
+    monkeypatch.setattr(d, "_stderr_target", lambda: "STDERR")
+
+    def runner(argv, **kwargs):
+        calls.append((argv, kwargs))
+        return SimpleNamespace(returncode=0)
+
+    assert d.run_auth_command(["example-cli", "login"], runner=runner, windows=False) == 0
+    assert calls == [(["example-cli", "login"], {"check": False, "stdout": "STDERR"})]
+
+
+def test_auth_command_batch_with_metacharacters_is_refused(monkeypatch, tmp_path):
+    monkeypatch.setattr(d.shutil, "which", lambda name: str(tmp_path / "example-cli.cmd"))
+
+    def runner(argv, **kwargs):
+        raise AssertionError("must not run")
+
+    assert d.run_auth_command(["example-cli", "a&b"], runner=runner, windows=True) == 126
+
+
+def test_git_toplevel_ignores_inherited_git_selectors(monkeypatch, tmp_path):
+    monkeypatch.setenv("GIT_DIR", str(tmp_path / "elsewhere" / ".git"))
+    monkeypatch.setenv("GIT_WORK_TREE", str(tmp_path / "elsewhere"))
+    seen = {}
+
+    def fake_run(argv, **kwargs):
+        seen.update(kwargs)
+        return SimpleNamespace(returncode=0, stdout=str(tmp_path) + "\n")
+
+    monkeypatch.setattr(d.subprocess, "run", fake_run)
+    assert d._git_toplevel(tmp_path) == tmp_path
+    assert not any(key.upper().startswith("GIT_") for key in seen["env"])
 
 
 def test_cli_json_output_and_exit_code(topology, monkeypatch, capsys):

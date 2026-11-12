@@ -176,6 +176,9 @@ def _git_toplevel(cwd: Path) -> Path | None:
             check=False,
             timeout=10,
             stdin=subprocess.DEVNULL,
+            # Inherited GIT_DIR/GIT_WORK_TREE would override -C and select
+            # another repository's marketplaces.
+            env={key: value for key, value in os.environ.items() if not key.upper().startswith("GIT_")},
             **no_window_kwargs(),
         )
     except (OSError, subprocess.TimeoutExpired):
@@ -316,21 +319,37 @@ def entrypoint_script(module_path: Path, module: dict[str, Any], verb: str, *, w
     script = (base / rel).resolve()
     if Path(rel).is_absolute() or (script != base and base not in script.parents):
         raise DriverError(f"entrypoint '{rel}' must stay inside the module directory")
+    if windows and script.suffix.lower() in _BATCH_SUFFIXES:
+        raise DriverError(f"batch entrypoints are not supported ({rel}); use .ps1, .py or an executable")
     if not script.is_file():
         raise DriverError(f"entrypoint not found: {script}")
     return script
 
 
-def script_argv(script: Path | str, *, windows: bool) -> list[str]:
+_BATCH_SUFFIXES = {".cmd", ".bat"}
+# cmd.exe re-parses the whole command line; these can inject or expand.
+_CMD_UNSAFE = re.compile(r'[&|<>^%!"()\r\n]')
+
+
+def script_argv(script: Path | str, args: list[str] | tuple[str, ...] = (), *, windows: bool) -> list[str]:
+    """Build an argv that runs *script* with *args* without a shell re-parse.
+
+    Batch files (Windows ``.cmd``/``.bat``) can only run through ``cmd /c``,
+    which re-parses the command line, so they are refused when the script
+    path or any argument contains cmd metacharacters.
+    """
     path = str(script)
+    rest = list(args)
     suffix = Path(path).suffix.lower()
     if suffix == ".py":
-        return [sys.executable, path]
+        return [sys.executable, path, *rest]
     if windows and suffix == ".ps1":
-        return ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", path]
-    if windows and suffix in {".cmd", ".bat"}:
-        return [os.environ.get("ComSpec") or "cmd.exe", "/d", "/c", path]
-    return [path]
+        return ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", path, *rest]
+    if windows and suffix in _BATCH_SUFFIXES:
+        if any(_CMD_UNSAFE.search(value) for value in (path, *rest)):
+            raise DriverError(f"refusing to run batch file {Path(path).name} with shell metacharacters")
+        return [os.environ.get("ComSpec") or "cmd.exe", "/d", "/c", path, *rest]
+    return [path, *rest]
 
 
 # --- result parsing ---------------------------------------------------------
@@ -351,7 +370,7 @@ def validate_result(doc: Any, *, driver: Driver, machine: str) -> dict[str, Any]
     if doc.get("schema") != RESULT_SCHEMA or doc.get("version") != RESULT_VERSION or type(doc.get("version")) is not int:
         raise ValueError(f"result must declare schema '{RESULT_SCHEMA}' version {RESULT_VERSION}")
     state = doc.get("state")
-    if state not in STATE_EXIT:
+    if not isinstance(state, str) or state not in STATE_EXIT:
         raise ValueError(f"unknown state {state!r}")
     detail = _text(doc.get("detail"), "detail", allow_empty=True)
     raw_requests = doc.get("auth_requests", [])
@@ -394,7 +413,7 @@ def parse_result(stdout: bytes | str, returncode: int, *, driver: Driver, machin
         return make_result("failed", f"driver output exceeds {MAX_OUTPUT_BYTES} bytes")
     try:
         result = validate_result(json.loads(data.decode("utf-8")), driver=driver, machine=machine)
-    except (ValueError, UnicodeError) as exc:
+    except (ValueError, TypeError, UnicodeError) as exc:
         return make_result("failed", f"malformed driver output (exit {returncode}): {exc}")
     if STATE_EXIT[result["state"]] != returncode:
         return make_result(
@@ -414,34 +433,46 @@ class Invocation:
     machine: str
     machines_file: Path
     script: Path
+    module_dir: Path
     apply: bool = False
     interactive: bool = False
 
 
-def run_entrypoint(inv: Invocation, *, runner=subprocess.run, windows: bool | None = None) -> dict[str, Any]:
-    from agent_procutil import no_window_kwargs
+MAX_STDERR_BYTES = 64 * 1024
 
+
+def bounded_runner(argv: list[str], *, timeout: float, cwd: str) -> Any:
+    """Run headless with stdin closed, enforcing byte budgets while reading."""
+    from agent_procutil.owned_process import run_caller_owned
+
+    return run_caller_owned(
+        argv,
+        timeout=timeout,
+        max_stdout_bytes=MAX_OUTPUT_BYTES,
+        max_stderr_bytes=MAX_STDERR_BYTES,
+        cwd=cwd,
+        binary=True,
+    )
+
+
+def run_entrypoint(inv: Invocation, *, runner=bounded_runner, windows: bool | None = None) -> dict[str, Any]:
     is_windows = os.name == "nt" if windows is None else windows
-    argv = script_argv(inv.script, windows=is_windows) + [
-        "--machine", inv.machine, "--machines", str(inv.machines_file),
-    ]
+    args = ["--machine", inv.machine, "--machines", str(inv.machines_file)]
     if inv.apply:
-        argv.append("--apply")
+        args.append("--apply")
     if inv.interactive:
-        argv.append("--interactive")
-    argv.append("--json")
+        args.append("--interactive")
+    args.append("--json")
     try:
-        done = runner(
-            argv,
-            stdin=subprocess.DEVNULL,
-            capture_output=True,
-            check=False,
-            timeout=ENTRYPOINT_TIMEOUT[inv.verb],
-            cwd=str(inv.script.parent),
-            **no_window_kwargs(),
-        )
+        argv = script_argv(inv.script, args, windows=is_windows)
+        done = runner(argv, timeout=ENTRYPOINT_TIMEOUT[inv.verb], cwd=str(inv.module_dir))
+    except DriverError as exc:
+        return make_result("failed", str(exc))
     except subprocess.TimeoutExpired:
         return make_result("failed", f"driver {inv.verb} timed out after {ENTRYPOINT_TIMEOUT[inv.verb]}s")
+    except subprocess.SubprocessError as exc:
+        # Includes OutputLimitExceeded: a stream overran its byte budget.
+        return make_result("failed", f"driver {inv.verb} failed: {exc}"[:MAX_TEXT])
     except OSError as exc:
         return make_result("failed", f"cannot run driver {inv.verb}: {exc}")
     result = parse_result(done.stdout or b"", done.returncode, driver=inv.driver, machine=inv.machine)
@@ -453,13 +484,29 @@ def run_entrypoint(inv: Invocation, *, runner=subprocess.run, windows: bool | No
     return result
 
 
+def _stderr_target() -> Any:
+    for stream in (sys.stderr, sys.__stderr__):
+        try:
+            return stream.fileno()
+        except (AttributeError, ValueError, OSError):
+            continue
+    return subprocess.DEVNULL
+
+
 def run_auth_command(command: list[str], *, runner=subprocess.run, windows: bool | None = None) -> int:
-    """Run an operator auth command attached to the current console."""
+    """Run an operator auth command attached to the console.
+
+    stdin stays interactive; stdout goes to stderr so prompts and progress
+    never corrupt the final result printed on stdout (``--json``).
+    """
     is_windows = os.name == "nt" if windows is None else windows
     head = shutil.which(command[0]) or command[0]
-    argv = script_argv(head, windows=is_windows) + list(command[1:])
     try:
-        return runner(argv, check=False).returncode
+        argv = script_argv(head, command[1:], windows=is_windows)
+        return runner(argv, check=False, stdout=_stderr_target()).returncode
+    except DriverError as exc:
+        print(f"[FAIL] {exc}", file=sys.stderr)
+        return 126
     except OSError as exc:
         print(f"[FAIL] cannot run auth command {command[0]}: {exc}", file=sys.stderr)
         return 127
@@ -486,7 +533,7 @@ class Request:
 def run(
     req: Request,
     *,
-    runner=subprocess.run,
+    runner=bounded_runner,
     auth_runner: Callable[[list[str]], int] | None = None,
     hostname: str | None = None,
     console: Callable[[], bool] = _console_attached,
@@ -519,6 +566,7 @@ def run(
             machine=machine,
             machines_file=machines_file,
             script=entrypoint_script(module_path, module, verb, windows=windows),
+            module_dir=module_path.parent,
             apply=apply,
             interactive=req.interactive and req.verb == "setup",
         )
