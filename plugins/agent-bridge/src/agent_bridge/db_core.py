@@ -176,6 +176,8 @@ CREATE TABLE IF NOT EXISTS workspace_embodiments (
     native_session_id TEXT,
     turn_index INTEGER
 );
+CREATE INDEX IF NOT EXISTS idx_workspace_embodiments_session
+ON workspace_embodiments(session_id);
 
 CREATE TABLE IF NOT EXISTS provider_embodiments (
     key_digest TEXT PRIMARY KEY,

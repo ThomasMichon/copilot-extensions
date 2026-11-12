@@ -29,6 +29,72 @@ def _mk(db: Database, sid: str, status: str, updated_at: float) -> None:
 
 
 class TestDbGcPrimitives:
+    @pytest.mark.parametrize("query", ["retained", "eligible"])
+    @pytest.mark.parametrize("pending", [False, True])
+    def test_retention_query_work_scales_with_history(self, tmp_db, query, pending):
+        from agent_bridge.acquisition_store import AcquisitionStore
+
+        AcquisitionStore(tmp_db)
+        tmp_db.execute_write(
+            "INSERT INTO acquisition_launch_gates VALUES "
+            "('unbound','unbound','cli',NULL,NULL,'retained-recovery')"
+        )
+        tmp_db.execute_write("DROP INDEX IF EXISTS idx_workspace_embodiments_session")
+        tmp_db._init_schema()
+        counts = []
+        for start, size in ((0, 128), (128, 512)):
+            with tmp_db._runtime_transaction(write=True) as conn:
+                conn.executemany(
+                    "INSERT INTO sessions "
+                    "(id,name,status,target_json,created_at,updated_at) VALUES (?,?,'stopped',?,0,0)",
+                    [
+                        (
+                            f"session-{i}", f"session-{i}",
+                            json.dumps({"venue": {"_agent_bridge_creation_writer": f"key-{0 if i == 1 else i}"}}),
+                        )
+                        for i in range(start, size)
+                    ],
+                )
+                conn.executemany(
+                    "INSERT INTO workspace_embodiments "
+                    "(key_digest,facts_digest,state,session_id,creation_recoveries_json) "
+                    "VALUES (?,?,'allocated',?,?)",
+                    [
+                        (
+                            f"key-{i}", f"facts-{i}", f"session-{i}",
+                            json.dumps({"original": {"state": "unknown"}}) if pending and i == 0 else None,
+                        )
+                        for i in range(start, size)
+                    ],
+                )
+                conn.executemany(
+                    "INSERT INTO acquisition_launch_gates VALUES (?,?, 'cli',?,NULL,'acp')",
+                    [(f"worktree-{i}", f"delivery-{i}", f"session-{i}") for i in range(start, size)],
+                )
+            work = 0
+
+            def progress():
+                nonlocal work
+                work += 1
+                return 0
+
+            conn = tmp_db._get_conn()
+            conn.set_progress_handler(progress, 1000)
+            try:
+                result = (
+                    tmp_db.gc_retained_relationship_session_ids() if query == "retained" else
+                    set(tmp_db.gc_eligible_session_ids(["stopped"], 1))
+                )
+            finally:
+                conn.set_progress_handler(None, 0)
+            retained = {"session-0", "session-1"} if pending else set()
+            assert result == (
+                retained if query == "retained" else
+                {f"session-{i}" for i in range(size)} - retained
+            )
+            counts.append(work)
+        assert counts[1] < 6 * max(counts[0], 1), counts
+
     @pytest.mark.parametrize("state", ["preparing", "unknown"])
     def test_successor_recovery_journal_retains_original_handle(self, tmp_db, tmp_path, state):
         from agent_bridge import creation_writer_schema

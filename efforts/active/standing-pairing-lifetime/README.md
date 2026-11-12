@@ -150,6 +150,15 @@ synthetic stores and native fixture owners.
   native-entry prerequisites from both branches. The installer declaration was
   regenerated through its existing owner. The 389-case portfolio is unchanged,
   but the combined source requires a fresh capture/replay before merge.
+- The next review found repeated full-table retention lookups. Writable schema
+  preparation now adds the original-handle index, and launch-gate membership is
+  collected once per query rather than correlated per session. Null gate handles
+  do not retain unrelated sessions. All 30 GC controls passed, including SQLite
+  VM-work scaling for both retention queries with growing settled and unresolved
+  histories, original/successor retention and existing-database preparation.
+  The reconciled native-installer packet also passed all 92 controls.
+  The intermediate combined-source capture was canceled before publication;
+  final capture/replay and exact-head CI must include this correction.
 
 ### 2026-11-11 - Native boundary review and CI qualification
 

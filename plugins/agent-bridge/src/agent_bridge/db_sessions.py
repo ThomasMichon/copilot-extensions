@@ -25,8 +25,8 @@ class _SessionsMixin:
         ).fetchone() is None:
             return RETAINED_RECOVERY_HELD
         return (
-            "EXISTS (SELECT 1 FROM acquisition_launch_gates AS gate "
-            "WHERE gate.session_id=sessions.id AND gate.driver='retained-recovery') OR "
+            "sessions.id IN (SELECT session_id FROM acquisition_launch_gates "
+            "WHERE driver='retained-recovery' AND session_id IS NOT NULL) OR "
             + RETAINED_RECOVERY_HELD
         )
 
