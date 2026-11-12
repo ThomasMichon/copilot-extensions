@@ -434,6 +434,7 @@ async def test_actual_native_client_responds_through_replacement_and_rollback(
                 incoming, _, incoming_pid = await backend("new")
                 await fixture.eventually(quiescing_call)
                 assert not pending.done() and nonce not in model.results
+                retained_identities()
                 observations.with_suffix(".lose-tool").write_text(nonce, encoding="utf-8")
                 release.write_text(nonce, encoding="utf-8")
 
@@ -464,8 +465,14 @@ async def test_actual_native_client_responds_through_replacement_and_rollback(
                     assert result["stopReason"] == "end_turn", result
                     assert "fixture-unknown:" + nonce in text
                     assert "fixture-complete:" + nonce not in text
-                retained_identities()
+                async def failed_stream_closed() -> bool:
+                    return identity_state(*conduit_identity) == "dead"
+
+                await fixture.eventually(failed_stream_closed)
+                assert client.returncode is None
+                assert identity_state(client.pid, client_birth) == "matching"
                 record_testsuite_property("actual_native_unknown_delivery_calls", 1)
+                record_testsuite_property("unknown_delivery_conduit_exit", "dead")
                 record_testsuite_property("actual_native_client", str(executable.name))
                 record_testsuite_property("physical_generations", json.dumps({
                     label: generation for label, (generation, _) in slots.items()
