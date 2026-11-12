@@ -68,10 +68,14 @@ try:
                 serverInfo={"name":"physical-owner-fixture","version":"1"},
             )
         elif method == "tools/list":
-            result["tools"] = [{
-                "name":"fixture_"+str(revision),"description":"Offline discovery fixture",
-                "inputSchema":{"type":"object","properties":{}},
-            }]
+            cursor = message.get("params",{}).get("cursor")
+            if cursor is not None:
+                result.update(tools=[], acknowledged=cursor)
+            else:
+                result.update(nextCursor=str(revision), tools=[{
+                    "name":"fixture_"+str(revision),"description":"Offline discovery fixture",
+                    "inputSchema":{"type":"object","properties":{}},
+                }])
         emit({"jsonrpc":"2.0","id":message["id"],"result":result})
 finally:
     stopped.set()
@@ -176,6 +180,13 @@ async def test_actual_native_client_rediscovers_through_replacement_and_rollback
 
             async def discovery(label: str, pid: int, *, refresh: bool = True) -> dict:
                 nonlocal sequence
+                previous = sequence if refresh else -1
+
+                def rows() -> list[dict]:
+                    lines = observations.read_text(encoding="utf-8").splitlines() if observations.exists() else []
+                    return [
+                        row for row in map(json.loads, lines) if row["method"] == "tools/list"
+                    ]
 
                 async def observe() -> dict:
                     nonlocal sequence
@@ -183,12 +194,19 @@ async def test_actual_native_client_rediscovers_through_replacement_and_rollback
                         sequence += 1
                         trigger.write_text(str(sequence), encoding="utf-8")
                         await asyncio.sleep(.1)
-                    rows = observations.read_text(encoding="utf-8").splitlines() if observations.exists() else []
-                    results = [
-                        row["response"]["result"] for row in map(json.loads, rows)
-                        if row["method"] == "tools/list"
-                    ]
-                    return results[-1] if results else {}
+                    observed = rows()
+                    for row in reversed(observed):
+                        result = row["response"]["result"]
+                        token = result.get("nextCursor")
+                        if token is None or int(token) <= previous or result.get("backend_pid") != pid:
+                            continue
+                        if any(
+                            ack["request"].get("params", {}).get("cursor") == token
+                            and ack["response"]["result"].get("backend_pid") == pid
+                            for ack in observed
+                        ):
+                            return result
+                    return {}
 
                 result = await fixture.eventually(
                     observe, lambda value: value.get("backend_pid") == pid,
@@ -239,18 +257,44 @@ async def test_actual_native_client_rediscovers_through_replacement_and_rollback
                 ]
                 assert len(keepers) == 1
                 keeper_identity = keepers[0]["pid"], keepers[0]["birth"]
-                for label in ("new", "old", "old"):
-                    incoming, _, incoming_pid = await backend(label)
-                    result = await discovery(label, incoming_pid)
-                    assert result["pid"] == upstream_identity[0]
+
+                def retained_identities() -> None:
                     assert client.returncode is None
                     assert identity_state(client.pid, client_birth) == "matching"
                     assert identity_state(*keeper_identity) == "matching"
                     assert identity_state(*conduit_identity) == "matching"
+                    assert identity_state(*upstream_identity) == "matching"
+
+                for label in ("new", "old", "old"):
+                    incoming, _, incoming_pid = await backend(label)
+                    result = await discovery(label, incoming_pid)
+                    assert result["pid"] == upstream_identity[0]
+                    retained_identities()
                     await fixture.shutdown(old_handle)
                     await asyncio.wait_for(old.wait(), 10)
                     assert old.returncode == 0
+                    result = await discovery(label, incoming_pid)
+                    assert result["pid"] == upstream_identity[0]
+                    retained_identities()
                     old, old_handle = incoming, handles[-1]
+                sequence += 1
+                dropped = str(sequence)
+                observations.with_suffix(".drop").write_text(dropped, encoding="utf-8")
+                trigger.write_text(dropped, encoding="utf-8")
+
+                async def dropped_response() -> bool:
+                    return any(
+                        json.loads(line)["response"]["result"].get("nextCursor") == dropped
+                        for line in observations.read_text(encoding="utf-8").splitlines()
+                    )
+
+                await fixture.eventually(dropped_response)
+                await asyncio.sleep(1)
+                assert not any(
+                    json.loads(line)["request"].get("params", {}).get("cursor") == dropped
+                    for line in observations.read_text(encoding="utf-8").splitlines()
+                )
+                retained_identities()
                 record_testsuite_property("actual_native_client", str(executable.name))
                 record_testsuite_property("physical_generations", json.dumps({
                     label: generation for label, (generation, _) in slots.items()
@@ -266,6 +310,7 @@ async def test_actual_native_client_rediscovers_through_replacement_and_rollback
                         print("Native client stderr:", diagnostic.decode("utf-8", "replace")[-8000:])
                         for path in [
                             observations, observations.with_suffix(".owner.json"),
+                            observations.with_suffix(".refusal"), observations.with_suffix(".capabilities"),
                             *(tmp_path / "logs").glob("**/*.log"),
                         ]:
                             if path.is_file():

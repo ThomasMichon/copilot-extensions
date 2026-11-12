@@ -168,7 +168,11 @@ def build_runtimes(
             witness = (
                 f"\n            with open({str(observations)!r},'a') as witness:\n"
                 "                witness.write(__import__('json').dumps({"
-                "'method':request.get('method'),'response':response})+'\\n')"
+                "'method':request.get('method'),'request':request,'response':response})+'\\n')\n"
+                f"            drop=__import__('pathlib').Path({str(observations.with_suffix('.drop'))!r})\n"
+                "            if (request.get('method')=='tools/list' and drop.is_file()\n"
+                "                and response['result'].get('nextCursor')==drop.read_text()):\n"
+                "                return None"
             )
         pipeline.write_text(body.replace(
             needle,
@@ -190,6 +194,19 @@ def build_runtimes(
                 f"        Path({str(observations.with_suffix('.owner.json'))!r}).write_text("
                 "json.dumps({'owner_pid':request['pid'],'owner_birth':request['birth'],"
                 "'conduit_pid':os.getpid(),'conduit_birth':birth_identity(os.getpid())}))\n"
+                + needle,
+            ).replace(
+                "        except (OSError, ValueError):",
+                "        except (OSError, ValueError) as refusal:\n"
+                f"            Path({str(observations.with_suffix('.refusal'))!r}).write_text(str(refusal))",
+            ), encoding="utf-8")
+            capabilities = payload / "src" / "agent_mcp" / "owner_capabilities.py"
+            body = capabilities.read_text(encoding="utf-8")
+            needle = "    print(json.dumps(result, sort_keys=True))"
+            assert body.count(needle) == 1
+            capabilities.write_text(body.replace(
+                needle,
+                f"    Path({str(observations.with_suffix('.capabilities'))!r}).write_text(json.dumps(result))\n"
                 + needle,
             ), encoding="utf-8")
         package = source.payload_package_version(payload, "agent-mcp")
