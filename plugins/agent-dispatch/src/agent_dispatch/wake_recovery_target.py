@@ -30,11 +30,17 @@ def retained_wake(captured: dict, outbox: str, wake_id: str) -> dict:
         or not isinstance(send.get("delivery_token"), str) or not send["delivery_token"]
         or row["delivery_token"] is not None and row["delivery_token"] != send["delivery_token"]
         or row["execution_scope_key"] is None and not (
-            send.get("protocol") == "pool_recovery_wake/v1"
-            and outbox == "wake_outbox"
-            and type(row.get("pool_recovery_revision")) is int
-            and send.get("recovery_revision") == row["pool_recovery_revision"]
+            outbox == "wake_outbox"
             and isinstance(send.get("reservation_key"), str) and send["reservation_key"]
+            and (
+                send.get("protocol") == "pool_recovery_wake/v1"
+                and type(row.get("pool_recovery_revision")) is int
+                and send.get("recovery_revision") == row["pool_recovery_revision"]
+                or send.get("protocol") == "task_relevance_closeout/v1"
+                and row.get("pool_recovery_revision") is None
+                and type(send.get("closeout_steer_id")) is int
+                and send["closeout_steer_id"] > 0
+            )
         )
     ):
         raise TaskError("wake original send identity is incomplete or conflicting")

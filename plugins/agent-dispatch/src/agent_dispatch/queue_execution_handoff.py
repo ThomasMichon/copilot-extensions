@@ -44,9 +44,9 @@ def closed_execution(conn: sqlite3.Connection, task_id: str) -> sqlite3.Row | No
     ).fetchone()
 
 
-def require_execution_admission(conn: sqlite3.Connection, task_id: str) -> None:
+def require_execution_admission(conn: sqlite3.Connection, task_id: str, *, owner_wake=None) -> None:
     from .queue_relevance import require_relevant_goal
-    require_relevant_goal(conn, task_id)
+    require_relevant_goal(conn, task_id, owner_wake=owner_wake)
     row = closed_execution(conn, task_id)
     if row is not None:
         raise ExecutionAdmissionClosed(
