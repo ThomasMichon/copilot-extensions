@@ -25,6 +25,7 @@ def test_composition_cannot_execute_selected_checkout_hooks(repo, tmp_path, hook
         "#!/bin/sh\nprintf 'selected-hook\\n' >> " + shlex.quote(marker.as_posix()) + "\n",
         encoding="utf-8",
     )
+    hook.chmod(0o755)
     support._git(["add", "tools/hooks/post-checkout"], repo)
     support._git(["update-index", "--chmod=+x", "tools/hooks/post-checkout"], repo)
     support._git(["commit", "-m", "selected checkout hook fixture"], repo)
