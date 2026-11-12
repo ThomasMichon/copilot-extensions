@@ -1,5 +1,9 @@
 # Recover held terminal housekeeping
 
+Source obsolescence is a separate decision from terminal housekeeping. See the
+[internal task relevance receiver](task-relevance.md) for conditional retirement
+and retained owner-closeout intent; it does not grant resource cleanup authority.
+
 Correcting an underlying fault does not reopen a reservation whose cleanup
 retries are exhausted. `reservations retry-cleanup` schedules housekeeping
 through the existing supervisor; it does **not** rearm execution, restart work,
