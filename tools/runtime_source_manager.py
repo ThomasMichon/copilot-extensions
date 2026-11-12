@@ -8,7 +8,7 @@ import shutil
 from build_toolchain_lock import _query_marker_environment
 from runtime_profile import ProfileError
 from runtime_source_build import engine, retain_source_runtime_inputs
-from runtime_source_authentication import retain_authenticated_source
+from runtime_source_authentication import retain_installation_source as retain_authenticated_source
 from runtime_source_lock import dependencies, retain_source_configuration
 
 

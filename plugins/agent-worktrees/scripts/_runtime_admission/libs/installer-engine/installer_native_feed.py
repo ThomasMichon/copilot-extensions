@@ -530,4 +530,35 @@ def capture_native_feed_inputs(
         if value is not None:
             proxies[key.removesuffix("_proxy")] = value
     _check_deadline(deadline)
-    return NativeFeedInputs(profile, feeds, cutoffs, identity, origins, context, proxies)
+    return NativeFeedInputs(
+        profile, feeds, cutoffs, identity, origins, context, proxies,
+    )
+
+
+def recheck_native_feed_inputs(
+    transaction, projection: str, original: str, profile, policy: dict, uv: str,
+    deadline: float, **options,
+) -> NativeFeedInputs:
+    """Recheck the held compiler's settings without resolving dependencies."""
+    expected = capture_native_feed_inputs(
+        transaction, projection, original, profile, policy, uv, deadline, **options,
+    )
+    _check_deadline(deadline)
+    try:
+        observed = subprocess.run(
+            [*transaction.argv, "--show-settings"],
+            env=transaction.environment, cwd=transaction.cwd, capture_output=True, text=True,
+            timeout=min(30, deadline - time.monotonic()),
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        raise NativeFeedError("held native feed configuration probe failed or timed out") from None
+    _check_deadline(deadline)
+    if observed.returncode:
+        raise NativeFeedError("held native feed configuration probe failed")
+    current = capture_native_feed_inputs(
+        transaction, observed.stdout, original, profile, policy, uv, deadline, **options,
+    )
+    if current.policy_id != expected.policy_id:
+        raise NativeFeedError("held native feed configuration changed during consumption")
+    return current

@@ -27,10 +27,12 @@ import versioned_runtime as runtime
 import versioned_runtime_source as runtime_source
 import runtime_install_publication as helper_publication
 import runtime_install_driver as install_driver
+import runtime_input_verifier as verification
+from runtime_install_profiles import runtime_profile_policy
 from runtime_install_governance import Governance, InstallationRefused
 
 
-def helper_publication_plan(path: Path, digest: str) -> dict:
+def helper_publication_plan(path: Path, digest: str, *, prepare_only: bool = False) -> dict:
     """Validate data under the existing live lifecycle, without acquiring its locks."""
     publication = runtime._runtime_component("versioned_runtime_publication")
     before = publication.state_path(path, private=True)
@@ -63,6 +65,13 @@ def helper_publication_plan(path: Path, digest: str) -> dict:
         Path(plan["root"]), Path(plan["owner"]),
         **({"source_descriptor": plan["governance"]["source_descriptor"]}
            if "source_descriptor" in plan["governance"] else {}),
+        **({"runtime_profile_policy": plan["governance"]["runtime_profile_policy"]}
+           if "runtime_profile_policy" in plan["governance"] else {}),
+        **({"runtime_profile_mode": plan["governance"]["runtime_profile_mode"]}
+           if "runtime_profile_mode" in plan["governance"] else {}),
+        **({"runtime_input_verification": plan["governance"]["runtime_input_verification"],
+            "prepare_only": prepare_only}
+           if "runtime_input_verification" in plan["governance"] else {}),
     )
     if governance.signature() != plan["governance"]:
         raise InstallationRefused("Helper publication governance changed")
@@ -423,14 +432,14 @@ def install(
     native_wheel_inputs: engine.WheelInstallInputs | None = None,
     repair: bool = False,
     source_descriptor: dict | None = None,
+    input_verifier=None,
 ) -> dict:
     if base_python.resolve(strict=True) != Path(sys.executable).resolve():
         raise InstallationRefused("The lifecycle driver must run under the selected base interpreter")
-    governance = Governance(
-        root, payload, **({"source_descriptor": source_descriptor} if source_descriptor is not None else {}),
-    )
-    os.environ["AGENT_WORKTREES_PAYLOAD_ROOT"] = str(governance.payload)
-    root = governance.root
+    if input_verifier is not None:
+        if not isinstance(input_verifier, verification.LiveInputVerifier):
+            raise InstallationRefused("Installation requires its live input-verifier owner")
+        verification.require_source_contract(plugin)
     package_version = tomllib.loads(
         (plugin / "pyproject.toml").read_text(encoding="utf-8"),
     )["project"]["version"]
@@ -447,13 +456,18 @@ def install(
         if wheel_inputs is not None or source_identity is not None:
             raise InstallationRefused("Native release wheels cannot replace a Source association")
         version, wheel_options = install_driver.native_construction_options(plugin, native_wheel_inputs)
+    policy = None
     if wheel_inputs is not None:
         if source_identity is None or not isinstance(wheel_inputs, engine.WheelInstallInputs):
             raise InstallationRefused("Closed source wheels require an attributed retained source selection")
         wheel_inputs.verify()
         receipt = wheel_inputs.receipt()
-        profile = receipt["binding"]
-        if profile.get("component") != "agent-worktrees" or profile.get("release") != {
+        policy = runtime_profile_policy(receipt, source_identity)
+        profile = receipt["binding"].get("profile", receipt["binding"])
+        if profile.get("mode") == "artifact":
+            if policy is None or input_verifier is None:
+                raise InstallationRefused("Artifact wheels require their live admission owner")
+        elif profile.get("component") != "agent-worktrees" or profile.get("release") != {
             "identity": "source:" + source_identity.source_commit,
             "sha256": "sha256:" + source_identity.assembly_hash,
         } or profile.get("mode") != "source":
@@ -470,6 +484,16 @@ def install(
         if wheel_inputs is None and native_wheel_inputs is None:
             raise InstallationRefused("Direct source repair requires complete wheel inputs")
         version += ".repair." + uuid.uuid4().hex
+    governance = Governance(
+        root, payload,
+        **({"source_descriptor": source_descriptor} if source_descriptor is not None else {}),
+        **({"runtime_profile_policy": policy, "runtime_profile_mode": profile["mode"]}
+           if policy is not None else {}),
+        **({"runtime_input_verification": input_verifier.identity, "verify_inputs": input_verifier.check}
+           if input_verifier is not None else {}),
+    )
+    os.environ["AGENT_WORKTREES_PAYLOAD_ROOT"] = str(governance.payload)
+    root = governance.root
     provenance = _source_provenance(governance.payload, package_version, source_identity)
     print(f"Runtime {version}: admitting frozen inputs", flush=True)
     with ExitStack() as custody:
@@ -491,6 +515,8 @@ def install(
                     reuse_generations=source_identity is None and not wheel_options,
                     expected_source_identity=runtime_source.manifest_fields(source_identity),
                     wait_timeout=wait_timeout, child_timeout=child_timeout,
+                    **({"validate_candidate": lambda _slot: governance.recheck()}
+                       if policy is not None else {}),
                     **wheel_options,
                 ))
         except engine.HealthRepairRequired:
@@ -503,6 +529,8 @@ def install(
                     expected_source_identity=runtime_source.manifest_fields(source_identity),
                     frontend=frontend, recover_adopted_manager=recover_adopted_manager,
                     wheel_inputs=wheel_inputs, repair=True,
+                    source_descriptor=source_descriptor,
+                    input_verifier=input_verifier,
                 )
             import runtime_install_modes as modes
 
@@ -541,26 +569,14 @@ def install(
             for name in ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV"):
                 environment.pop(name, None)
             environment["PYTHONDONTWRITEBYTECODE"] = "1"
-            process = subprocess.Popen(
-                argv, env=environment, stdin=subprocess.DEVNULL,
-                executable=argv[0] if os.name == "nt" else None,
-                text=True,
-                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
-            )
-            try:
-                stdout, stderr = process.communicate()
-            except BaseException:
-                # This child owns both retained generations and cutover authority.
-                # A caller interruption must not turn its unfinished transition
-                # into permission for cleanup.
-                process.communicate()
-                raise
+            completed = verification.wait_for_settlement(argv, environment, verifier=input_verifier)
+            stdout, stderr = completed.stdout, completed.stderr
             if stdout:
                 print(stdout, end="", flush=True)
             if stderr:
                 print(stderr, end="", file=sys.stderr, flush=True)
-            if process.returncode != 0:
-                raise subprocess.CalledProcessError(process.returncode, argv, stdout, stderr)
+            if completed.returncode != 0:
+                raise subprocess.CalledProcessError(completed.returncode, argv, stdout, stderr)
             result = json.loads(result_path.read_text(encoding="utf-8"))
             result["reused"] = candidate.reused
             return result
@@ -585,6 +601,12 @@ def settle_candidate(
         root, payload,
         **({"source_descriptor": expected_governance["source_descriptor"]}
            if "source_descriptor" in expected_governance else {}),
+        **({"runtime_profile_policy": expected_governance["runtime_profile_policy"]}
+           if "runtime_profile_policy" in expected_governance else {}),
+        **({"runtime_profile_mode": expected_governance["runtime_profile_mode"]}
+           if "runtime_profile_mode" in expected_governance else {}),
+        **({"runtime_input_verification": expected_governance["runtime_input_verification"]}
+           if "runtime_input_verification" in expected_governance else {}),
     )
     if governance.signature() != expected_governance:
         raise InstallationRefused("Installation governance changed before candidate handover")
@@ -905,7 +927,7 @@ def main(argv: list[str] | None = None) -> int:
             )
     elif arguments.inspect_helper_publication or arguments.complete_helper_publication:
         path = arguments.inspect_helper_publication or arguments.complete_helper_publication
-        plan = helper_publication_plan(path, arguments.publication_digest)
+        plan = helper_publication_plan(path, arguments.publication_digest, prepare_only=True)
         if Path(plan["root"]).resolve() != arguments.root.resolve():
             raise InstallationRefused("Helper publication runtime root differs from its invocation")
         try:
@@ -991,4 +1013,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    finally:
+        verification.close_clients()

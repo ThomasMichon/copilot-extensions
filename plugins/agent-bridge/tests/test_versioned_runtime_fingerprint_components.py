@@ -112,6 +112,46 @@ def test_windows_read_only_fingerprint_batches_preserve_exact_framing(tmp_path, 
     assert active == 0 and peak == 4
 
 
+def test_fingerprint_read_window_advances_without_waiting_for_a_batch(tmp_path, monkeypatch):
+    runtime = _fixture_runtime(tmp_path)
+    source = runtime._runtime_component("versioned_runtime_source")
+    entries = {tmp_path / f"input-{index}": "file" for index in range(8)}
+    for path in entries:
+        path.write_bytes(path.name.encode())
+    following_started = threading.Event()
+    reads, labels = [], []
+    lock = threading.Lock()
+    read_bytes = Path.read_bytes
+
+    def read(path):
+        if path.name == "input-3":
+            assert following_started.wait(3), "file reads waited for the whole batch"
+        elif path.name == "input-4":
+            following_started.set()
+        with lock:
+            reads.append(path)
+        return read_bytes(path)
+
+    def label(path):
+        labels.append(path)
+        return path.name
+
+    expected = source.fingerprint_entries(
+        entries, label=lambda path: path.name, root_label=str, roots=[tmp_path],
+        normalize_link=lambda value: value, path_type=Path,
+        file_hashes=None, on_file=lambda *_args: None,
+    )
+    monkeypatch.setattr(Path, "read_bytes", read)
+    observed = source.fingerprint_entries(
+        entries, label=label, root_label=str, roots=[tmp_path],
+        normalize_link=lambda value: value, path_type=Path,
+        file_hashes=None, on_file=None,
+    )
+    assert sorted(reads) == sorted(entries)
+    assert labels == list(entries)
+    assert observed == expected
+
+
 @pytest.mark.parametrize("error", [PermissionError("denied"), FileNotFoundError("missing")])
 def test_windows_fingerprint_worker_read_failures_remain_explicit(tmp_path, monkeypatch, error):
     runtime = _fixture_runtime(tmp_path)

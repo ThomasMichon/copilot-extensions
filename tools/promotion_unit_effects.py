@@ -63,10 +63,13 @@ class UnitRun(CoveragePlugin):
     def guarded_open(self, name, flags, mode=0o777, *, dir_fd=None):
         if not self.active:
             return self._os_open(name, flags, mode, dir_fd=dir_fd)
+        if not isinstance(name, (str, bytes, os.PathLike)):
+            self.refuse("unattributable filesystem mutation")
+        name = os.fspath(name)
         path = self.mutation_path(name, dir_fd)
-        self.audit("open", (str(path), None, flags))
         self._open_paths.append((os.fsdecode(name), path))
         try:
+            self.audit("open", (name, None, flags))
             return self._os_open(name, flags, mode, dir_fd=dir_fd)
         finally:
             self._open_paths.pop()

@@ -59,6 +59,21 @@ def test_seed_reads_only_one_exact_native_witness(kind):
             seed._selected_wheel(content, deadline=time.monotonic() + 2)
 
 
+@pytest.mark.parametrize("auxiliary,admitted", [
+    ('md5 = "' + "b" * 32 + '"', True),
+    ('md5 = "' + "b" * 31 + '"', False),
+    ('md5 = 1', False),
+    ('unknown = "' + "b" * 32 + '"', False),
+])
+def test_seed_keeps_sha256_authority_with_native_auxiliary_hash(auxiliary, admitted):
+    content = native_lock().replace(b'hashes = {', ("hashes = {" + auxiliary + ", ").encode())
+    if admitted:
+        assert seed._selected_wheel(content, deadline=time.monotonic() + 2) == SELECTED
+        content = content.replace(b'sha256 = "' + b"a" * 64 + b'"', b'sha1 = "' + b"a" * 40 + b'"')
+    with pytest.raises(ValueError, match="exact native"):
+        seed._selected_wheel(content, deadline=time.monotonic() + 2)
+
+
 @pytest.mark.parametrize("kind", [
     "valid", "dependency", "extra", "pth", "data", "entry-point", "entry-point-case", "binary",
     "identity", "version", "purelib", "tag", "record", "budget",

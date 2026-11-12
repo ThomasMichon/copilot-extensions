@@ -24,6 +24,7 @@ from packaging.version import InvalidVersion, Version
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "libs" / "installer-engine"))
 from installer_wheel_inputs import bounded_tag, _check_deadline
+from runtime_profile_errors import ProfileError as ProfileError, ProfileUnavailable as ProfileUnavailable
 
 SCHEMA = "copilot-extensions.exact-runtime-profile"
 _HASH = re.compile(r"sha256:[0-9a-f]{64}\Z")
@@ -37,14 +38,6 @@ _TARGET_FAMILY = (
     "implementation_name", "os_name", "platform_machine", "platform_system",
     "platform_python_implementation", "python_version", "sys_platform",
 )
-
-
-class ProfileError(ValueError):
-    """A malformed, incompatible, unapproved or ambiguous selection."""
-
-
-class ProfileUnavailable(ProfileError):
-    """No approved record matches the authority's requested selection."""
 
 
 def _fields(value: Any, keys: set[str], label: str) -> dict:

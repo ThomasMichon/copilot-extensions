@@ -286,14 +286,21 @@ def freeze_inputs(
 
             before = runtime.fingerprint_source(files, on_file=retain_source, **progress)
             # Finish the full baseline before copying, preserving the mutation barrier.
-            for source in files:
+            def retained_sources():
+                for source in files:
+                    if deadline is not None:
+                        _check_deadline(deadline)
+                    offset, length = offsets[source]
+                    buffer.seek(offset)
+                    data = buffer.read(length)
+                    if len(data) != length:
+                        raise OSError("Frozen source buffer read was incomplete")
+                    yield source, data
+
+            def write_source(item):
+                source, data = item
                 if deadline is not None:
                     _check_deadline(deadline)
-                offset, length = offsets[source]
-                buffer.seek(offset)
-                data = buffer.read(length)
-                if len(data) != length:
-                    raise OSError("Frozen source buffer read was incomplete")
                 target = destination / source.relative_to(common)
                 Path(_native_retained_path(target.parent)).mkdir(parents=True, exist_ok=True)
                 Path(_native_retained_path(target)).write_bytes(data)
@@ -301,8 +308,13 @@ def freeze_inputs(
                     _native_retained_path(source), _native_retained_path(target),
                     follow_symlinks=False,
                 )
-                if on_progress is not None:
-                    on_progress()
+                if deadline is not None:
+                    _check_deadline(deadline)
+
+            _bounded_content_map(
+                write_source, retained_sources(),
+                **({"on_result": lambda _result: on_progress()} if on_progress is not None else {}),
+            )
         frozen_roots = tuple(destination / root.relative_to(common) for root in roots)
         frozen_plugin = destination / plugin.relative_to(common)
         frozen_applications = tuple(

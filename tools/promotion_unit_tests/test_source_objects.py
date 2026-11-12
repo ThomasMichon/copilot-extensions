@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import stat
 import subprocess
@@ -10,6 +11,7 @@ from types import SimpleNamespace
 import pytest
 
 import promotion_source_archive as source_io
+import promotion_source_history as history
 from promotion_unit_tests.test_complete_source import case
 
 
@@ -332,3 +334,55 @@ def test_changefile_reader_rejects_indirection_before_consumption(monkeypatch, t
     with pytest.raises(ValueError, match="unsafe changefile path"):
         changefile.read_changefiles()
     assert path.read_text(encoding="utf-8") == '{"changes":[]}\n'
+
+
+@pytest.mark.parametrize("mutation", ["none", "parent", "release", "tag", "duplicate"])
+def test_promoted_source_binds_frozen_identity_before_content_read(tmp_path, monkeypatch, mutation):
+    main, parent, dev, blob, tree = (character * 40 for character in "abcde")
+    promotion = {
+        "dev_head": dev, "main_before": parent, "release_id": dev,
+        "tag": "promote-dev-" + dev,
+    }
+    if mutation == "parent":
+        promotion["main_before"] = main
+    elif mutation == "release":
+        promotion["release_id"] = main
+    elif mutation == "tag":
+        promotion["tag"] = "another"
+    state = json.dumps({
+        "schema": "copilot-extensions.release-pipeline-state", "version": 1,
+        "last_promotion": promotion,
+    }).encode()
+    if mutation == "duplicate":
+        state = state.replace(b'"version": 1', b'"version": 1, "version": 1')
+    replies = {
+        ("cat-file", "-t", main): b"commit\n",
+        ("show", "-s", "--format=%P", main): parent.encode() + b"\n",
+        ("ls-tree", "-z", main, "--", history.PIPELINE_STATE_PATH):
+            f"100644 blob {blob}\t{history.PIPELINE_STATE_PATH}\0".encode(),
+        ("cat-file", "-s", blob): str(len(state)).encode(),
+        ("cat-file", "blob", blob): state,
+        ("cat-file", "-t", dev): b"commit\n",
+        ("rev-parse", main + "^{tree}"): tree.encode(),
+    }
+    content_reads = []
+
+    def git(repo, arguments, *, deadline=None):
+        assert repo == tmp_path and deadline == 99
+        return replies[tuple(arguments)]
+
+    def content(value, *, repo, deadline):
+        content_reads.append((value, repo, deadline))
+        return "f" * 40
+
+    monkeypatch.setattr(history, "_git", git)
+    monkeypatch.setattr(history, "content_tree", content)
+    if mutation != "none":
+        with pytest.raises(history.SourceHistoryError):
+            history.read_promoted_source(tmp_path, main, deadline=99)
+        assert not content_reads
+    else:
+        assert history.read_promoted_source(tmp_path, main, deadline=99) == history.PromotedSource(
+            main, dev, parent, "f" * 40,
+        )
+        assert content_reads == [(tree, tmp_path, 99)]

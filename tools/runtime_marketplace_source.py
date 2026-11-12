@@ -13,10 +13,13 @@ import os
 from pathlib import Path
 import re
 import sys
+from typing import TYPE_CHECKING
 
 import runtime_source_authentication as authentication
-from runtime_profile import ProfileError, ProfileUnavailable
-from runtime_profile_policy import InstallationProfilePlan
+from runtime_profile_errors import ProfileError, ProfileUnavailable
+
+if TYPE_CHECKING:
+    from runtime_profile_policy import InstallationProfilePlan
 
 for _library in ("plugin-resolve", "update-telemetry"):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "libs" / _library / "src"))
@@ -140,7 +143,8 @@ def retain_authenticated_marketplace_source(
                     "source": origin.source, "definition": origin.definition,
                     "provenance": origin.provenance, "ledger": ledger, "inventory": proof,
                 }, sort_keys=True, separators=(",", ":")).encode()).hexdigest(),
-                "mode": "source", "trigger": plan.source_trigger,
+                "mode": "origin" if isinstance(plan, authentication._OriginPolicy) else "source",
+                "trigger": plan.source_trigger,
                 "source": prepared.identity.document(),
             }, sort_keys=True, separators=(",", ":")).encode()
 
@@ -163,5 +167,8 @@ def retain_authenticated_marketplace_source(
                 authentication._check_deadline(deadline)
 
             verify()
-            yield authentication.AuthenticatedSource(prepared.payload, prepared.identity, canonical, verify)
+            yield authentication.AuthenticatedSource(
+                prepared.payload, prepared.identity, canonical, verify, acquired,
+                json.dumps(policy, sort_keys=True, separators=(",", ":"), allow_nan=False).encode(),
+            )
             verify()

@@ -9,6 +9,7 @@ import sys
 import time
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
+import runtime_input_verifier
 
 
 SCRIPTS = Path(__file__).resolve().parent
@@ -19,7 +20,13 @@ class InstallationRefused(RuntimeError):
 
 
 class Governance:
-    def __init__(self, root: Path, payload: Path, *, source_descriptor: dict | None = None):
+    def __init__(
+        self, root: Path, payload: Path, *, source_descriptor: dict | None = None,
+        runtime_profile_policy: dict | None = None,
+        runtime_profile_mode: str = "source",
+        runtime_input_verification: dict | None = None, verify_inputs=None,
+        prepare_only: bool = False,
+    ):
         self.root = root.resolve()
         self.payload = payload.resolve(strict=True)
         helper = SCRIPTS / "installation-context" / "installation_context.py"
@@ -35,6 +42,23 @@ class Governance:
                 "kind": normalized.kind, "canonical": normalized.canonical, "ref": normalized.ref,
             }
         self.source_descriptor = source_descriptor
+        self.runtime_profile_policy = (
+            json.loads(json.dumps(runtime_profile_policy, allow_nan=False))
+            if runtime_profile_policy is not None else None
+        )
+        if runtime_profile_mode not in ("source", "artifact"):
+            raise InstallationRefused("Unsupported Worktrees runtime profile mode")
+        self.runtime_profile_mode = runtime_profile_mode
+        self.runtime_input_verification = (
+            runtime_input_verifier._record(runtime_input_verification)
+            if runtime_input_verification is not None else None
+        )
+        self.prepare_only = prepare_only
+        self.verify_inputs = verify_inputs
+        if self.runtime_input_verification is not None and verify_inputs is None and not prepare_only:
+            self.verify_inputs = runtime_input_verifier.current_client(
+                self.runtime_input_verification,
+            ).check
         self.binding_options = (
             {"mode_arguments": {"source_descriptor": source_descriptor}}
             if source_descriptor is not None else {}
@@ -92,6 +116,9 @@ class Governance:
         return state, receipt
 
     def _publication(self, arguments: dict) -> None:
+        if not self.prepare_only:
+            self._verify_inputs()
+        self._profile_policy(arguments)
         decision = self.helper.resolve_runtime_deployment(**arguments)
         actual_root = decision["runtimeRoot"] or decision["legacy"]["root"]
         if Path(actual_root).resolve() != self.root:
@@ -101,6 +128,14 @@ class Governance:
             self.helper.borrow_runtime_publication(**arguments)
             return
         if policy["allowPluginPublication"] is True:
+            return
+        if (
+            policy["state"] == "valid" and policy["managed"] is False
+            and policy["reason"] == "runtime-profile-consumer-required"
+            and self.runtime_profile_policy is not None
+            and self.runtime_input_verification is not None
+            and (self.prepare_only or callable(self.verify_inputs))
+        ):
             return
         if not self.context and policy["state"] == "valid" and policy["managed"] is True:
             import command_binding as binding
@@ -118,7 +153,33 @@ class Governance:
             f"{policy['diagnostic'] or ''} {policy['recovery'] or ''}".strip()
         )
 
+    def _profile_policy(self, arguments: dict) -> None:
+        expected = self.runtime_profile_policy
+        if expected is None:
+            return
+        observed = self.helper.resolve_runtime_profile_policy(
+            **arguments, backend=expected.get("selection", {}).get("backend"),
+        )["runtimeProfiles"]
+        if (
+            expected.get("owner", {}).get("pluginId") != "agent-worktrees"
+            or observed.get("status") != "ready" or observed != expected
+            or Path(observed["owner"]["runtimeRoot"]).resolve() != self.root
+            or (
+                getattr(self, "runtime_profile_mode", "source") == "source"
+                and observed["selection"]["allowSourceFallback"] is not True
+            )
+        ):
+            raise InstallationRefused("Worktrees runtime profile policy changed or names another owner")
+
+    def bind_runtime_profile(self, policy: dict) -> None:
+        """Bind producer evidence only after checking this actual installation."""
+        self.runtime_profile_policy = json.loads(json.dumps(policy, allow_nan=False))
+        if self.runtime_profile_policy is not None:
+            self.recheck()
+
     def recheck(self) -> None:
+        if getattr(self, "prepare_only", False):
+            raise InstallationRefused("Helper preparation cannot authorize runtime publication")
         state, receipt = self.read()
         previous, previous_receipt = self.initial
         keys = (
@@ -145,47 +206,93 @@ class Governance:
             )},
             **({"source_descriptor": self.source_descriptor}
                if self.source_descriptor is not None else {}),
+            **({"runtime_profile_policy": self.runtime_profile_policy}
+               if self.runtime_profile_policy is not None else {}),
+            **({"runtime_profile_mode": self.runtime_profile_mode}
+               if self.runtime_profile_policy is not None and self.runtime_profile_mode != "source" else {}),
+            **({"runtime_input_verification": self.runtime_input_verification}
+               if self.runtime_input_verification is not None else {}),
         }
+
+    def _verify_inputs(self) -> None:
+        if getattr(self, "runtime_input_verification", None) is not None:
+            if not callable(self.verify_inputs):
+                raise InstallationRefused("Runtime publication has no live input-verifier owner")
+            self.verify_inputs()
+
+    @contextmanager
+    def _legacy_profile_authority(self):
+        if self.context or self.runtime_profile_policy is None:
+            yield
+            return
+        if self.runtime_input_verification is None or not callable(self.verify_inputs):
+            raise InstallationRefused("Profile publication requires a live input-verifier owner")
+        import command_binding as binding
+
+        scope = getattr(binding._load_lifecycle(), "profile_publication_authority", None)
+        if not callable(scope):
+            raise InstallationRefused(
+                "Selected lifecycle helper does not support profile publication authority"
+            )
+        arguments = {
+            "legacy_root": self.root, "payload_root": self.payload,
+            "plugin_id": "agent-worktrees", "project_root": self.project_root,
+            "durable_home": self.durable_home,
+            **({"source_descriptor": self.source_descriptor}
+               if self.source_descriptor is not None else {}),
+        }
+        with scope(
+            runtime_root=self.root, plugin_id="agent-worktrees",
+            authorize=lambda: self._profile_policy(arguments),
+        ):
+            yield
 
     @contextmanager
     def manifest_publication(self, content: bytes):
+        if getattr(self, "prepare_only", False):
+            raise InstallationRefused("Helper preparation cannot publish a runtime manifest")
+        self._verify_inputs()
         if self.context:
             yield content
             return
         import command_binding as binding
 
-        if self.retained_binding is not None:
-            ownership = binding.retained_legacy_binding(
-                self.helper, self.command_lock, payload_root=self.payload,
+        with self._legacy_profile_authority():
+            if self.retained_binding is not None:
+                ownership = binding.retained_legacy_binding(
+                    self.helper, self.command_lock, payload_root=self.payload,
+                    plugin_id="agent-worktrees", legacy_root=self.root,
+                    project_root=self.project_root,
+                    **self.binding_options,
+                )
+                if ownership != self.retained_binding:
+                    raise InstallationRefused("Retained command ownership changed during restoration")
+                manifest = json.loads(content)
+                if (
+                    manifest.get("schema_version") != 3
+                    or manifest.get("service") != "agent-worktrees"
+                    or "commandBinding" in manifest
+                    or "commandLifecycle" in manifest
+                ):
+                    raise InstallationRefused("Restoration requires an unbound Worktrees manifest")
+                if self.runtime_profile_policy is not None:
+                    self.recheck()
+                yield (json.dumps({**manifest, **ownership}, indent=2) + "\n").encode("utf-8")
+                self.command_lock.assert_owned()
+                return
+            with binding.legacy_manifest_publication(
+                self.helper, json.loads(content), payload_root=self.payload,
                 plugin_id="agent-worktrees", legacy_root=self.root,
                 project_root=self.project_root,
                 **self.binding_options,
-            )
-            if ownership != self.retained_binding:
-                raise InstallationRefused("Retained command ownership changed during restoration")
-            manifest = json.loads(content)
-            if (
-                manifest.get("schema_version") != 3
-                or manifest.get("service") != "agent-worktrees"
-                or "commandBinding" in manifest
-                or "commandLifecycle" in manifest
-            ):
-                raise InstallationRefused("Restoration requires an unbound Worktrees manifest")
-            yield (json.dumps({**manifest, **ownership}, indent=2) + "\n").encode("utf-8")
-            self.command_lock.assert_owned()
-            return
-        with binding.legacy_manifest_publication(
-            self.helper, json.loads(content), payload_root=self.payload,
-            plugin_id="agent-worktrees", legacy_root=self.root,
-            project_root=self.project_root,
-            **self.binding_options,
-        ) as (manifest, result, _lock):
-            if result["status"] == "unresolved":
-                print(
-                    f"Command ownership was not published: {result['reason']}",
-                    file=sys.stderr, flush=True,
-                )
-            yield (json.dumps(manifest, indent=2) + "\n").encode("utf-8")
+            ) as (manifest, result, _lock):
+                if result["status"] == "unresolved":
+                    print(
+                        f"Command ownership was not published: {result['reason']}",
+                        file=sys.stderr, flush=True,
+                    )
+                self.recheck()
+                yield (json.dumps(manifest, indent=2) + "\n").encode("utf-8")
 
     def publication_environment(self) -> dict[str, str]:
         environment = dict(os.environ)
@@ -205,6 +312,8 @@ class Governance:
 
     @contextmanager
     def held(self, *, timeout: float = 180):
+        if getattr(self, "prepare_only", False):
+            raise InstallationRefused("Helper preparation cannot acquire publication custody")
         if self.publication_locks or self.command_lock is not None:
             for lock in self.publication_locks:
                 lock.assert_owned()
@@ -215,6 +324,7 @@ class Governance:
             return
         deadline = time.monotonic() + timeout
         with ExitStack() as stack:
+            stack.enter_context(self._legacy_profile_authority())
             locks = []
             command_lock = None
             receipt = self.initial[1]

@@ -51,6 +51,114 @@ def _toolkit(tmp_path):
     return toolkit
 
 
+def test_copied_toolkit_validates_actual_bundle_and_sources_without_publishers(tmp_path):
+    from promotion_python_artifacts import bundle_wheels
+    from test_promotion_python_artifacts import _manifest, _STATIC_BUILD
+
+    toolkit = _toolkit(tmp_path)
+    candidate = tmp_path / "candidate"
+    plugin = candidate / "plugins" / "demo"
+    (plugin / "src" / "demo").mkdir(parents=True)
+    (plugin / "pyproject.toml").write_text(
+        _STATIC_BUILD + '[project]\nname = "demo"\nversion = "1.0"\n',
+        encoding="utf-8",
+    )
+    (plugin / "src" / "demo" / "__init__.py").write_bytes(b"VALUE = 'first-party fixture'\n")
+    (candidate / "tools").mkdir()
+    (candidate / "tools" / "build_python_artifacts.py").write_text(
+        "raise AssertionError('candidate tooling must never execute')", encoding="utf-8",
+    )
+    wheels, bundles = tmp_path / "wheels", tmp_path / "bundles"
+    manifest = _manifest(wheels, candidate_root=candidate)
+    bundles.mkdir()
+    entry = bundle_wheels(manifest, wheels, bundles)
+    script = """
+import hashlib, importlib.abc, json, pathlib, subprocess, sys, zipfile
+root, candidate, bundles = map(pathlib.Path, sys.argv[1:4])
+entry = json.loads(sys.argv[4])
+sys.path.insert(0, str(root.parent))
+import _runtime_admission
+_runtime_admission.activate()
+class RejectPublication(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname in {"publish_python_artifacts", "promotion_python_artifacts", "promote_release"}:
+            raise AssertionError("bundle validation imported a publisher: " + fullname)
+sys.meta_path.insert(0, RejectPublication())
+import artifact_bundle_validation as validation
+import artifact_release_discovery as discovery
+import runtime_artifact_inputs as artifact_inputs
+import build_python_artifacts as builder
+assert pathlib.Path(validation.__file__).resolve().is_relative_to(root)
+assert pathlib.Path(artifact_inputs.__file__).resolve().is_relative_to(root)
+assert pathlib.Path(builder.__file__).resolve().is_relative_to(root)
+original_roots = builder.REPO, builder.PLUGINS_DIR, builder.LIBS_DIR
+bundle = bundles / entry["filename"]
+data = bundle.read_bytes()
+downloaded = bundles / "downloaded"
+downloaded.mkdir()
+index = {
+    "schema": discovery.INDEX_SCHEMA, "schema_version": 2,
+    "dev_head": "a" * 40, "content_tree": "b" * 40, "artifacts": [entry],
+    "admission": {"signer_digest": "c" * 40, "source_digest": "c" * 40,
+                  "source_ref": "refs/heads/main"},
+}
+asset = {"id": 3, "name": bundle.name, "digest": "sha256:" + entry["sha256"],
+         "size": len(data), "state": "uploaded"}
+calls, verified = [], []
+def runner(argv, **options):
+    assert argv == ["api", "repos/example/plugins/releases/assets/3",
+                    "-H", "Accept: application/octet-stream"]
+    assert options == {"verification": True, "binary": True}
+    calls.append(argv)
+    return subprocess.CompletedProcess(argv, 0, data, b"")
+def verify(path, **identity):
+    assert path.read_bytes() == data
+    assert identity == {"repository": "example/plugins", **index["admission"]}
+    verified.append(identity)
+arguments = dict(index=index, assets={bundle.name: asset}, repository="example/plugins",
+                 component="demo", version="1.0", candidate_root=candidate,
+                 runner=runner, verify_subject=verify)
+manifest, digest = discovery.read_selected_source_artifact(downloaded, **arguments)
+assert manifest["artifact_id"] == entry["artifact_id"]
+with zipfile.ZipFile(bundle) as archive:
+    assert digest == "sha256:" + hashlib.sha256(archive.read("manifest.json")).hexdigest()
+assert len(calls) == len(verified) == 1
+assert discovery.read_selected_source_artifact(
+    downloaded, **{**arguments, "component": "actually-absent"},
+) is None
+assert len(calls) == 1, "an absent component downloaded another artifact"
+for changes in (
+    {"version": "2.0"},
+    {"assets": {bundle.name: {**asset, "digest": "sha256:" + "d" * 64}}},
+):
+    try:
+        discovery.read_selected_source_artifact(downloaded, **{**arguments, **changes})
+    except validation.PromotionArtifactError:
+        pass
+    else:
+        raise AssertionError("conflicting artifact evidence became fallback")
+assert len(calls) == 1
+assert (builder.REPO, builder.PLUGINS_DIR, builder.LIBS_DIR) == original_roots
+(candidate / "plugins" / "demo" / "src" / "demo" / "__init__.py").write_text("CHANGED = True")
+try:
+    discovery.read_selected_source_artifact(downloaded, **arguments)
+except validation.PromotionArtifactError as exc:
+    assert "payload hash differs" in str(exc), str(exc)
+else:
+    raise AssertionError("bundle accepted changed independently acquired source")
+assert (builder.REPO, builder.PLUGINS_DIR, builder.LIBS_DIR) == original_roots
+print("copied-bundle-source-validation-ok")
+"""
+    result = subprocess.run(
+        [sys.executable, "-I", "-B", "-c", script, str(toolkit), str(candidate),
+         str(bundles), json.dumps(entry)],
+        cwd=tmp_path, capture_output=True, text=True, timeout=30,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.strip() == "copied-bundle-source-validation-ok"
+
+
 def test_copied_toolkit_discovers_the_source_bound_channel_without_publishers(tmp_path):
     toolkit = _toolkit(tmp_path)
     script = """
@@ -190,6 +298,312 @@ print("copied-delivery-intake-ok")
     )
     assert observed.returncode == 0, observed.stdout + observed.stderr
     assert observed.stdout.strip() == "copied-delivery-intake-ok"
+
+def test_copied_toolkit_maps_real_main_history_before_channel_discovery(tmp_path):
+    toolkit = _toolkit(tmp_path)
+    script = """
+import hashlib, importlib.abc, json, os, pathlib, subprocess, sys, time
+root = pathlib.Path(sys.argv[1]).resolve()
+sys.path.insert(0, str(root.parent))
+import _runtime_admission
+_runtime_admission.activate()
+class RejectPublication(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname in {"publish_python_artifacts", "promotion_python_artifacts", "promote_release"}:
+            raise AssertionError("source mapping imported a publisher: " + fullname)
+sys.meta_path.insert(0, RejectPublication())
+import artifact_release_discovery as discovery
+repo = root.parent / "acquired"
+repo.mkdir()
+def git(*arguments):
+    return subprocess.run(
+        ["git", "-c", "user.name=Test", "-c", "user.email=t@example.com", *arguments],
+        cwd=repo, capture_output=True, text=True, check=True,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    ).stdout.strip()
+git("init", "-b", "main")
+(repo / "content.txt").write_text("actual frozen source")
+git("add", "-A")
+git("commit", "-m", "development source")
+dev = git("rev-parse", "HEAD")
+tree = git("rev-parse", "HEAD^{tree}")
+state = repo / ".github" / "release-pipeline-state.json"
+state.parent.mkdir()
+state.write_text(json.dumps({
+    "schema": "copilot-extensions.release-pipeline-state", "version": 1,
+    "last_promotion": {"dev_head": dev, "main_before": dev,
+                       "release_id": dev, "tag": "promote-dev-" + dev},
+}))
+coverage = state.parent / "coverage-baselines"
+coverage.mkdir()
+(coverage / "packet.json").write_text("{}")
+git("add", "-A")
+git("commit", "-m", "generated Main")
+main = git("rev-parse", "HEAD")
+tag = "python-artifacts-" + dev
+name = "agent-example-1.0-" + "d" * 64 + ".zip"
+subject = json.dumps({
+    "schema": discovery.INDEX_SCHEMA, "schema_version": 2,
+    "dev_head": dev, "content_tree": tree,
+    "admission": {"signer_digest": dev, "source_digest": dev, "source_ref": "refs/heads/main"},
+    "artifacts": [{"filename": name, "sha256": "d" * 64}],
+}).encode()
+assets = [
+    {"name": discovery.INDEX_NAME, "id": 2, "state": "uploaded",
+     "digest": "sha256:" + hashlib.sha256(subject).hexdigest(), "size": len(subject)},
+    {"name": name, "id": 3, "state": "uploaded", "digest": "sha256:" + "d" * 64, "size": 1},
+]
+calls, verified = [], []
+failure = None
+def runner(argv, **options):
+    calls.append(argv)
+    assert argv[0] == "api"
+    endpoint = next(value for value in argv[1:] if value.startswith("repos/"))
+    if endpoint.endswith("/releases/tags/" + tag):
+        if failure is not None:
+            return subprocess.CompletedProcess(argv, 1, "", "gh: refused (HTTP " + str(failure) + ")")
+        value = {"id": 1, "tag_name": tag, "draft": False, "prerelease": True, "assets": assets}
+    elif endpoint.endswith("/git/ref/tags/" + tag):
+        value = {"object": {"type": "commit", "sha": dev}}
+    elif endpoint.endswith("/releases/1/assets?per_page=100"):
+        value = [assets]
+    elif endpoint.endswith("/releases/assets/2"):
+        return subprocess.CompletedProcess(argv, 0, subject, b"")
+    else:
+        raise AssertionError("unexpected channel: " + endpoint)
+    return subprocess.CompletedProcess(argv, 0, json.dumps(value), "")
+def verify(path, **identity):
+    assert path.read_bytes() == subject
+    verified.append(identity)
+for failure in (None, 404, 403):
+    directory = root.parent / ("mapped-" + str(failure))
+    directory.mkdir()
+    arguments = dict(
+        repository="example/plugins", repo=repo, main_commit=main,
+        deadline=time.monotonic() + 20, runner=runner, verify_subject=verify,
+    )
+    if failure == 403:
+        try:
+            discovery.discover_promoted_source(directory, **arguments)
+        except discovery.PromotionArtifactError:
+            pass
+        else:
+            raise AssertionError("permission failure became source fallback")
+    else:
+        result = discovery.discover_promoted_source(directory, **arguments)
+        assert (result is None) == (failure == 404)
+        if result is not None:
+            assert result[0]["dev_head"] == dev and result[0]["content_tree"] == tree
+assert len(verified) == 1
+assert all("python-artifacts-" + main not in " ".join(call) for call in calls)
+print("copied-real-history-discovery-ok")
+"""
+    result = subprocess.run(
+        [sys.executable, "-I", "-S", "-B", "-c", script, str(toolkit)],
+        cwd=tmp_path, capture_output=True, text=True, timeout=60,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.strip() == "copied-real-history-discovery-ok"
+
+def test_copied_toolkit_acquires_actual_origin_before_packaging_or_source_fallback(
+    adopter, configured_source, tmp_path,
+):
+    toolkit = _toolkit(tmp_path)
+    from test_runtime_profile_policy import owned_policy
+
+    owned_policy(adopter[0], adopter[1], allowSourceFallback=False)
+    script = """
+import importlib.abc, json, pathlib, sys, time
+root = pathlib.Path(sys.argv[1]).resolve()
+sys.path.insert(0, str(root.parent))
+import _runtime_admission
+_runtime_admission.activate()
+class RejectSemanticTooling(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname.split(".")[0] in {
+            "packaging", "runtime_profile", "runtime_profile_policy", "runtime_source_lock",
+            "publish_python_artifacts", "promotion_python_artifacts", "promote_release",
+        }:
+            raise AssertionError("origin acquisition required semantic/publisher tooling: " + fullname)
+sys.meta_path.insert(0, RejectSemanticTooling())
+from runtime_source_authentication import retain_installation_origin
+installation = json.loads(sys.argv[2])
+for key in ("payload_root", "legacy_root", "copilot_home", "project_root"):
+    if installation.get(key) is not None:
+        installation[key] = pathlib.Path(installation[key])
+with retain_installation_origin(
+    installation=installation, deadline=time.monotonic() + 60,
+) as origin:
+    record = origin.record()
+    assert record["mode"] == "origin" and record["trigger"] is None
+    assert origin.acquired.commit == origin.identity.source_commit == sys.argv[3]
+    assert record["source"] == origin.identity.document()
+    origin.verify()
+    prepared = origin.payload
+assert not prepared.exists()
+assert "packaging" not in sys.modules
+print("copied-stdlib-origin-acquisition-ok")
+"""
+    result = subprocess.run(
+        [sys.executable, "-I", "-S", "-B", "-c", script, str(toolkit),
+         json.dumps(adopter[1], default=str), configured_source[2]],
+        cwd=tmp_path, capture_output=True, text=True, timeout=90,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.strip() == "copied-stdlib-origin-acquisition-ok"
+
+def test_copied_stdlib_origin_bootstraps_admitted_tools_and_rechecks_seed_revocation(
+    adopter, configured_source, target, feeds, tmp_path,
+):
+    source_with_process_owner(configured_source, build_only=True)
+    state = feeds(certificate=CERTIFICATE.with_name("wheel-feed-localhost-leaf.pem"))
+    packaging_feed(state)
+    env = environment(adopter, state, tmp_path)
+    toolkit = _toolkit(tmp_path)
+    script = """
+import hashlib, importlib.abc, json, os, pathlib, shutil, subprocess, sys, time
+root = pathlib.Path(sys.argv[1]).resolve()
+sys.path.insert(0, str(root.parent))
+import _runtime_admission
+_runtime_admission.activate()
+class RejectAmbientSemantics(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname.split(".")[0] in {
+            "packaging", "runtime_profile", "runtime_profile_policy", "runtime_source_lock",
+        }:
+            raise AssertionError("bootstrap imported ambient semantics: " + fullname)
+sys.meta_path.insert(0, RejectAmbientSemantics())
+import agent_procutil
+import runtime_admission_bootstrap as bootstrap
+sys.path.insert(0, sys.argv[4])
+import runtime_input_verifier as verification
+from runtime_source_authentication import retain_installation_origin
+from installer_wheel_acquisition import AcquisitionLimits
+from installer_wheel_inputs import WheelLimits
+from installer_packaging_seed import SeedLimits
+from runtime_profile_errors import ProfileError
+bootstrap._opaque_index_identity = lambda value: hashlib.sha256(value.encode()).hexdigest()
+installation = json.loads(sys.argv[2])
+for key in ("payload_root", "legacy_root", "copilot_home", "project_root"):
+    if installation.get(key) is not None:
+        installation[key] = pathlib.Path(installation[key])
+environment = json.loads(sys.argv[3])
+deadline = time.monotonic() + 100
+denied = set()
+observed = False
+with retain_installation_origin(installation=installation, deadline=deadline) as origin:
+    runtime_root = pathlib.Path(origin.policy()["owner"]["runtimeRoot"])
+    assert not (runtime_root / ".source-build-tools").exists()
+    try:
+        with bootstrap.retain_origin_tooling(
+            origin, installation=installation, uv=pathlib.Path(shutil.which("uv")),
+            python=pathlib.Path(sys.executable), env=environment, deadline=deadline,
+            limits=SeedLimits(16_384, 32 << 20, 1 << 20),
+            acquisition_limits=AcquisitionLimits(
+                max_packages=1, max_requests=10, max_redirects=3, max_candidates_per_project=10,
+                max_index_bytes=16_384, max_total_metadata_bytes=32_768,
+                max_wheel_bytes=1 << 20, max_closure_bytes=1 << 20, max_temporary_bytes=4 << 20,
+            ),
+            wheel_limits=WheelLimits(1 << 20, 4 << 20, 1 << 20, 64 << 10, 100, 10, 32 << 10),
+            procutil=agent_procutil, revoked_inputs=lambda: frozenset(denied),
+        ) as ready:
+            assert ready.slot.parent.parent == runtime_root / ".source-build-tools"
+            receipt = json.loads((ready.slot / ".runtime-input-origins.json").read_text())["wheel_inputs"]
+            assert set(receipt["distributions"]) == {"packaging"}
+            assert origin.record()["mode"] == "origin" and origin.record()["trigger"] is None
+            python = ready.slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+            check = '''
+import importlib.metadata, json, pathlib, sys
+sys.path.insert(0, str(pathlib.Path(sys.argv[1]).parent))
+import _runtime_admission
+_runtime_admission.activate()
+assert {d.metadata["Name"] for d in importlib.metadata.distributions()} == {"packaging"}
+from runtime_profile import ProfileError, validate_profile
+from runtime_source_authentication import borrow_installation_origin, runtime_source
+import runtime_input_verifier as verification
+def refuse_acquisition(*args, **kwargs):
+    raise AssertionError("borrowed origin reacquired its exclusive lease")
+runtime_source.acquire = refuse_acquisition
+installation = json.loads(sys.argv[2])
+for key in ("payload_root", "legacy_root", "copilot_home", "project_root"):
+    if installation.get(key) is not None:
+        installation[key] = pathlib.Path(installation[key])
+origin = json.loads(sys.argv[3])
+client = verification.current_client(json.loads(sys.argv[4]))
+signal = pathlib.Path(sys.argv[5])
+try:
+    with borrow_installation_origin(
+        pathlib.Path(origin["payload"]), origin["record"], origin["policy"],
+        installation=installation, verify_owner=client.check,
+        deadline=json.loads(sys.argv[4])["deadline"],
+    ) as borrowed:
+        borrowed.verify()
+        assert borrowed.acquired is None
+        assert borrowed.record()["mode"] == "origin"
+        assert borrowed.identity.document() == origin["record"]["source"]
+        signal.touch()
+        borrowed.verify()
+except verification.VerificationRefused:
+    assert signal.exists(), "origin was refused before its successful live check"
+else:
+    raise AssertionError("borrowed origin ignored current seed revocation")
+try:
+    borrowed.verify()
+except ProfileError as error:
+    assert "custody is closed" in str(error)
+else:
+    raise AssertionError("borrowed origin escaped its invocation lifetime")
+finally:
+    verification.close_clients()
+try:
+    validate_profile({})
+except ProfileError:
+    pass
+else:
+    raise AssertionError("semantic validator did not execute")
+print("admitted-semantic-tools-ok")
+'''
+            signal = root.parent / "revoke-current-seed"
+            def verify_live():
+                if signal.exists():
+                    denied.add(receipt["distributions"]["packaging"]["sha256"])
+                ready.verify()
+            with verification.LiveInputVerifier(verify_live, deadline=deadline) as live:
+                child = dict(os.environ)
+                child["PYTHONPATH"] = str(pathlib.Path(sys.argv[4]))
+                command = [
+                    bootstrap.dependencies._native_retained_path(python), "-I", "-B", "-c",
+                    "import sys;sys.path.insert(0,sys.argv.pop(1));" + check,
+                    sys.argv[4], str(root), json.dumps(installation, default=str),
+                    json.dumps({"payload": str(origin.payload), "record": origin.record(),
+                                "policy": origin.policy()}),
+                    json.dumps(live.identity), str(signal),
+                ]
+                result = verification.wait_for_settlement(command, child, verifier=live)
+                assert result.returncode == 0
+                assert isinstance(live.failure, ProfileError), live.failure
+            assert "packaging" not in sys.modules
+            observed = True
+    except ProfileError as error:
+        assert observed and "revoked" in str(error), str(error)
+    else:
+        raise AssertionError("current seed revocation was ignored at context exit")
+assert not (runtime_root / "current-version").exists()
+assert not (runtime_root / ".source-build-tools" / "current-version").exists()
+print("copied-stdlib-origin-tooling-ok")
+"""
+    result = subprocess.run(
+        [sys.executable, "-I", "-S", "-B", "-c", script, str(toolkit),
+         json.dumps(adopter[1], default=str), json.dumps(env),
+         str(Path(__file__).resolve().parents[1] / "plugins" / "agent-worktrees" / "scripts")],
+        cwd=tmp_path, capture_output=True, text=True, timeout=120,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.strip().endswith("copied-stdlib-origin-tooling-ok")
+
 
 
 def test_copied_toolkit_retains_both_isolated_environments(tmp_path, isolated_manager):  # noqa: F811

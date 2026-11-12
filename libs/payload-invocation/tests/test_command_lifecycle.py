@@ -81,6 +81,65 @@ def test_legacy_lifecycle_refuses_invalid_lock_budget(binding_fixture: dict[str,
     assert not _lifecycle_lock_path(binding_fixture["legacy"]).exists()
 
 
+@pytest.mark.parametrize("change", [None, "root", "plugin", "managed", "revoked"])
+def test_profile_publication_scope_keeps_live_owner_and_resets(
+    binding_fixture: dict, monkeypatch: pytest.MonkeyPatch, change: str | None,
+) -> None:
+    binding, primitive = binding_fixture["binding"], binding_fixture["primitive"]
+    lifecycle = binding._load_lifecycle()
+    arguments = binding_fixture["arguments"]
+    root = binding_fixture["legacy"]
+    deployment = {
+        "state": "valid", "managed": False, "allowPluginPublication": False,
+        "reason": "runtime-profile-consumer-required", "diagnostic": "", "recovery": "",
+    }
+    monkeypatch.setattr(primitive, "resolve_runtime_deployment", lambda **_arguments: {
+        "runtimeRoot": str(root), "deployment": deployment,
+    })
+    checks, revoked = [], []
+
+    def authorize():
+        checks.append(True)
+        if revoked:
+            raise ValueError("fixture profile inputs revoked")
+
+    with pytest.raises(binding.CommandOwnershipConflict, match="profile-consumer-required"):
+        with lifecycle.legacy_lifecycle(binding._rules(), primitive, reserve=False, **arguments):
+            pytest.fail("Unscoped caller published a profile")
+    with lifecycle.profile_publication_authority(
+        runtime_root=root, plugin_id=PLUGIN_ID, authorize=authorize,
+    ):
+        with lifecycle.legacy_lifecycle(
+            binding._rules(), primitive, reserve=False, **arguments,
+        ) as lease:
+            assert checks
+            if change in ("root", "plugin"):
+                with lifecycle.profile_publication_authority(
+                    runtime_root=root if change == "plugin" else root / "foreign",
+                    plugin_id="foreign" if change == "plugin" else PLUGIN_ID,
+                    authorize=lambda: None,
+                ):
+                    with pytest.raises(binding.CommandOwnershipConflict, match="does not match"):
+                        lease.assert_owned()
+            elif change == "managed":
+                deployment["managed"] = True
+                with pytest.raises(binding.CommandOwnershipConflict, match="does not match"):
+                    lease.assert_owned()
+                deployment["managed"] = False
+            elif change == "revoked":
+                revoked.append(True)
+                with lifecycle.profile_publication_authority(
+                    runtime_root=root, plugin_id=PLUGIN_ID, authorize=lambda: None,
+                ):
+                    with pytest.raises(ValueError, match="inputs revoked"):
+                        lease.assert_owned()
+                revoked.clear()
+            lease.assert_owned()
+    with pytest.raises(binding.CommandOwnershipConflict, match="profile-consumer-required"):
+        lifecycle._publication(binding._rules(), primitive, arguments, lifecycle._purpose(binding, {}))
+    assert not _lifecycle_lock_path(root).exists()
+
+
 @pytest.mark.skipif(os.name != "nt", reason="Windows strict containment")
 @pytest.mark.parametrize("parent_exits", [False, True])
 def test_command_binding_deadline_stops_tree_before_releasing_admission(

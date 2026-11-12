@@ -1,36 +1,44 @@
 """Bounded retained-source reads with caller-owned progress and settlement."""
-from concurrent.futures import ThreadPoolExecutor
 import hashlib
+from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 
 def bounded_content_map(check, inputs, *, on_result=None):
-    """Settle four reads at a time, reporting failures in input order."""
+    """Keep up to four reads pending, reporting failures in input order."""
     results = []
     iterator = iter(inputs)
     readers = ThreadPoolExecutor(max_workers=4, thread_name_prefix="retained-content")
-    pending = []
-    failed = False
+    pending = deque()
+    failed = exhausted = False
+    input_failure = None
+
+    def refill():
+        nonlocal exhausted, input_failure
+        if exhausted:
+            return
+        try:
+            pending.append(readers.submit(check, next(iterator)))
+        except StopIteration:
+            exhausted = True
+        except BaseException as error:  # noqa: BLE001 - settle earlier reads before input failure
+            input_failure = error
+            exhausted = True
+
     try:
-        while True:
-            pending = []
-            input_failure = None
-            try:
-                for _ in range(4):
-                    pending.append(readers.submit(check, next(iterator)))
-            except StopIteration:
-                pass
-            except BaseException as error:
-                input_failure = error
-            for future in pending:
-                result = future.result()
-                results.append(result)
-                if on_result is not None:
-                    on_result(result)
-            if input_failure is not None:
-                raise input_failure
-            if len(pending) < 4:
-                return results
+        for _ in range(4):
+            refill()
+        while pending:
+            result = pending[0].result()
+            results.append(result)
+            if on_result is not None:
+                on_result(result)
+            pending.popleft()
+            refill()
+        if input_failure is not None:
+            raise input_failure
+        return results
     except BaseException:
         failed = True
         raise

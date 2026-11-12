@@ -101,17 +101,24 @@ def test_prior_alias_requires_frozen_source_and_main_history(tmp_path, monkeypat
     projections = []
 
     def project_tree(argv, **kwargs):
-        assert argv in [
-            ["git", "read-tree", TREE],
-            ["git", "rm", "--cached", "-f", "-q", "--ignore-unmatch", promotion.PIPELINE_STATE_PATH],
-            ["git", "rm", "--cached", "-f", "-q", "-r", "--ignore-unmatch",
-             promotion.COVERAGE_BASELINES_DIR],
-            ["git", "write-tree"],
+        assert argv[:6] == [
+            "git", "--no-replace-objects", "-c", "core.fsmonitor=false",
+            "-c", "core.longpaths=true",
         ]
-        assert kwargs["cwd"] == str(tmp_path)
+        assert argv[6:] in [
+            ["read-tree", TREE],
+            ["rm", "--cached", "-f", "-q", "--ignore-unmatch", promotion.PIPELINE_STATE_PATH],
+            ["rm", "--cached", "-f", "-q", "-r", "--ignore-unmatch",
+             promotion.COVERAGE_BASELINES_DIR],
+            ["write-tree"],
+        ]
+        assert kwargs["cwd"] == tmp_path
         assert Path(kwargs["env"]["GIT_INDEX_FILE"]).name == "index"
+        assert kwargs["timeout"] == 30
+        assert kwargs["env"]["GIT_OPTIONAL_LOCKS"] == "0"
+        assert kwargs["env"]["GIT_TERMINAL_PROMPT"] == "0"
         projections.append(argv)
-        return subprocess.CompletedProcess(argv, 0, TREE + "\n", "")
+        return subprocess.CompletedProcess(argv, 0, (TREE + "\n").encode(), b"")
 
     monkeypatch.setattr(subprocess, "run", project_tree)
     cache = {("example/plugins", DEV): {

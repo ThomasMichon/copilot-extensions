@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Collection, Iterable, Mapping
 from pathlib import Path
 import os
 import re
@@ -10,6 +10,9 @@ import shutil
 import stat
 import sys
 from typing import TYPE_CHECKING, Any, cast
+
+
+DirectoryIdentities = dict[Path, tuple[int, int, int, int]]
 
 
 HELPER_NAME = "_standalone_runtime_build.py"
@@ -75,10 +78,14 @@ def application_resources(project: Path | str, package: str) -> dict[str, Path |
     }
 
 
-def ordinary_file(path: Path, checked: set[Path] | None = None) -> bool:
+def ordinary_file(
+    path: Path, checked: set[Path] | None = None, *,
+    directories: DirectoryIdentities | None = None,
+) -> bool:
     """Reject linked build inputs, including linked parent directories."""
+    cache = directories if directories is not None else checked
     for entry in (*reversed(path.parents), path):
-        if checked is not None and entry != path and entry in checked:
+        if cache is not None and entry != path and entry in cache:
             continue
         try:
             info = entry.lstat()
@@ -91,7 +98,11 @@ def ordinary_file(path: Path, checked: set[Path] | None = None) -> bool:
             raise RuntimeError("runtime resource build input must not be linked")
         if entry != path and not stat.S_ISDIR(info.st_mode):
             raise RuntimeError("runtime resource build input ancestor must be a directory")
-        if checked is not None and entry != path:
+        if entry != path and directories is not None:
+            directories[entry] = (
+                info.st_dev, info.st_ino, info.st_mode, getattr(info, "st_file_attributes", 0),
+            )
+        elif entry != path and checked is not None:
             checked.add(entry)
     if not stat.S_ISREG(info.st_mode):
         raise RuntimeError("runtime resource build input must be a regular file")
@@ -100,11 +111,11 @@ def ordinary_file(path: Path, checked: set[Path] | None = None) -> bool:
 
 def select_bytes(
     paths: Iterable[Path], label: str, *, optional_paths: Iterable[Path] = (),
-    checked: set[Path] | None = None,
+    checked: set[Path] | None = None, directories: DirectoryIdentities | None = None,
 ) -> bytes:
     candidates = []
     for path in paths:
-        if not ordinary_file(path, checked):
+        if not ordinary_file(path, checked, directories=directories):
             raise RuntimeError(
                 f"{label} is missing; build from the full release checkout or its complete sdist"
             )
@@ -113,7 +124,10 @@ def select_bytes(
         raise RuntimeError(
             f"{label} is missing; build from the full release checkout or its complete sdist"
         )
-    candidates.extend(path.read_bytes() for path in optional_paths if ordinary_file(path, checked))
+    candidates.extend(
+        path.read_bytes() for path in optional_paths
+        if ordinary_file(path, checked, directories=directories)
+    )
     if any(data != candidates[0] for data in candidates[1:]):
         raise RuntimeError(f"included {label} differs from the canonical source")
     return candidates[0]
@@ -228,8 +242,17 @@ def commands(
 ) -> dict[str, Any]:
     """Bind one package's hooks; generated sdist resources are not source mirrors."""
     from setuptools.command.build_py import build_py
+    from setuptools.command.install_lib import install_lib
     from setuptools.command.sdist import sdist
 
+    try:
+        from setuptools.command.bdist_wheel import bdist_wheel
+    except ModuleNotFoundError as error:
+        if error.name != "setuptools.command.bdist_wheel":
+            raise
+        wheel_base = None
+    else:
+        wheel_base = bdist_wheel
     root = Path(project).absolute()
     embedded = embedded_projects(root) if package == "worktree_manager" else {}
     members = embedded_members(root) if embedded else {}
@@ -244,6 +267,7 @@ def commands(
     canonical_directory = Path(canonical_directory) if canonical_directory else None
 
     def inputs() -> tuple[dict[str, bytes], bytes]:
+        directories: DirectoryIdentities = {}
         helper_paths = [root / HELPER_NAME]
         optional_helpers = []
         if canonical_directory is not None:
@@ -257,17 +281,31 @@ def commands(
                 optional = paths
                 paths = [canonical_directory / name]
             label = "runtime primitive" if name == "versioned_runtime.py" else name
-            primitives[resource.name] = select_bytes(paths, label, optional_paths=optional)
+            primitives[resource.name] = select_bytes(
+                paths, label, optional_paths=optional, directories=directories,
+            )
         for name, source in (companion_resources or {}).items():
             included = root / "src" / package / name
             paths = [Path(source)] if source is not None else [included]
             primitives[name] = select_bytes(
                 paths, name, optional_paths=[included] if source is not None else [],
+                directories=directories,
             )
-        return (
+        selected = (
             primitives,
-            select_bytes(helper_paths, "runtime build helper", optional_paths=optional_helpers),
+            select_bytes(
+                helper_paths, "runtime build helper", optional_paths=optional_helpers,
+                directories=directories,
+            ),
         )
+        for directory, expected in directories.items():
+            observed = directory.lstat()
+            if (
+                observed.st_dev, observed.st_ino, observed.st_mode,
+                getattr(observed, "st_file_attributes", 0),
+            ) != expected:
+                raise RuntimeError("runtime resource build input ancestor changed during collection")
+        return selected
 
     class BuildPy(build_py):
         build_lib: str
@@ -325,6 +363,7 @@ def commands(
         def run(self) -> None:
             primitives, _ = inputs()
             super().run()
+
             for name, data in primitives.items():
                 destination = Path(self.build_lib) / package / name
                 destination.parent.mkdir(parents=True, exist_ok=True)
@@ -392,8 +431,6 @@ def commands(
 
     classes: dict[str, Any] = {"build_py": BuildPy, "sdist": BuildSdist}
     if os.name == "nt":
-        from setuptools.command.install_lib import install_lib
-
         class WindowsInstallLib(install_lib):
             build_dir: str
             install_dir: str
@@ -407,15 +444,17 @@ def commands(
         from setuptools import Distribution
         from distutils.errors import DistutilsModuleError
 
-        if TYPE_CHECKING:
-            from setuptools.command.bdist_wheel import bdist_wheel
-        else:
-            try:
-                bdist_wheel = Distribution().get_command_class("bdist_wheel")
-            except (ImportError, DistutilsModuleError):
-                bdist_wheel = None
-        if bdist_wheel is not None:
-            class BdistWheel(bdist_wheel):
+        try:
+            wheel_base = Distribution().get_command_class("bdist_wheel")
+        except (ImportError, DistutilsModuleError):
+            wheel_base = None
+        if wheel_base is not None:
+            if TYPE_CHECKING:
+                from setuptools.command.bdist_wheel import bdist_wheel as WindowsWheelBase
+            else:
+                WindowsWheelBase = wheel_base
+
+            class BdistWheel(WindowsWheelBase):
                 bdist_dir: str
 
                 def finalize_options(self) -> None:
@@ -423,11 +462,57 @@ def commands(
                     self.bdist_dir = _native_build_path(root, self.bdist_dir)
 
             classes["bdist_wheel"] = BdistWheel
+    if wheel_base is not None:
+        if TYPE_CHECKING:
+            from setuptools.command.bdist_wheel import bdist_wheel as BuildWheelBase
+            from setuptools.command.install_lib import install_lib as InstallWheelBase
+        else:
+            BuildWheelBase = classes.get("bdist_wheel", wheel_base)
+            InstallWheelBase = classes.get("install_lib", install_lib)
+
+        class BuildWheel(BuildWheelBase):
+            _runtime_staging_root: Path | None
+
+            def run(self) -> None:
+                self._runtime_staging_root = Path(cast(str, self.bdist_dir)).resolve()
+                try:
+                    super().run()
+                finally:
+                    self._runtime_staging_root = None
+
+        class InstallWheelLib(InstallWheelBase):
+            def copy_tree(
+                self, infile: str | os.PathLike[str], outfile: str, preserve_mode: int = 1,
+                preserve_times: int = 1, preserve_symlinks: int = 0, level: object = 1,
+            ) -> list[str]:
+                wheel = self.distribution.get_command_obj("bdist_wheel", create=False)
+                staging = getattr(wheel, "_runtime_staging_root", None)
+                if (
+                    staging is None or self.dry_run
+                    or cast(Callable[[], Collection[str]], self.get_exclusions)()
+                    or not preserve_mode or not preserve_times or preserve_symlinks
+                    or Path(infile).resolve() != Path(self.build_dir).resolve()
+                    or not Path(outfile).resolve().is_relative_to(staging)
+                ):
+                    return cast(list[str], super().copy_tree(
+                        infile, outfile, cast(bool, preserve_mode), cast(bool, preserve_times),
+                        cast(bool, preserve_symlinks), level,
+                    ))
+                outputs: list[str] = []
+
+                def link_file(source: str, destination: str) -> str:
+                    output, _copied = self.copy_file(source, destination, link="hard", level=level)
+                    outputs.append(output)
+                    return output
+
+                shutil.copytree(infile, outfile, copy_function=link_file, dirs_exist_ok=True)
+                return outputs
+
+        classes.update({"bdist_wheel": BuildWheel, "install_lib": InstallWheelLib})
     if not embedded:
         return classes
 
     from setuptools.command.egg_info import egg_info
-    from setuptools.command.install_lib import install_lib
 
     class EggInfo(egg_info):
         def run(self) -> None:

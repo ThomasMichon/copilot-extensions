@@ -240,8 +240,6 @@ def copy_retained_file(
     return result
 
 
-
-
 def prepare_uv_install(
     uv: str, arguments: list[str], *, environment: dict[str, str], cwd: Path | None,
     now: datetime | None, trusted_source_roots: tuple[Path, ...], projection: list[str] | None,
@@ -694,12 +692,31 @@ def metadata_needs_caller_layout(value: object) -> bool:
 def source_compile_packages(
     projects: Iterable[Path], *, toml: _Toml, identity: Callable[[str], str], error_type: _Error,
 ) -> tuple[str, ...]:
-    names = []
-    omissions = set()
+    manifests = {}
     for path in projects:
         data = cast(_ProjectDocument, toml(path / "pyproject.toml"))
+        manifests[path] = data
+    names = [identity(data["project"]["name"]) for data in manifests.values()]
+    if not names or len(set(names)) != len(names):
+        raise error_type("source lock export needs an unambiguous owned project graph")
+    root_values: object = getattr(projects, "roots", ())
+    if not isinstance(root_values, (set, frozenset, list, tuple)):
+        raise error_type("source lock export lacks its actual project roots")
+    pending: list[Path] = []
+    for root in root_values:
+        if not isinstance(root, Path):
+            raise error_type("source lock export lacks its actual project roots")
+        pending.append(root)
+    if not pending or not set(pending) <= manifests.keys():
+        raise error_type("source lock export lacks its actual project roots")
+    active: set[Path] = set()
+    while pending:
+        path = pending.pop()
+        if path in active:
+            continue
+        active.add(path)
+        data = manifests[path]
         project = data["project"]
-        names.append(identity(project["name"]))
         required = {
             identity(match[1])
             for requirement in project.get("dependencies", [])
@@ -708,12 +725,23 @@ def source_compile_packages(
         }
         for name, mapping in data.get("tool", {}).get("uv", {}).get("sources", {}).items():
             if isinstance(mapping, dict) and "path" in mapping:
-                name = identity(name)
-                if name not in required:
-                    raise error_type("source lock export cannot omit a conditional or unselected local dependency")
-                omissions.add(name)
-    if not names or len(set(names)) != len(names):
-        raise error_type("source lock export needs an unambiguous owned project graph")
+                if identity(name) in required:
+                    relative = mapping["path"]
+                    if not isinstance(relative, str):
+                        raise error_type("source lock export has an invalid local dependency path")
+                    child = (path / relative).resolve()
+                    if child not in manifests:
+                        raise error_type("source lock export lacks an owned local dependency")
+                    pending.append(child)
+    selected = {identity(manifests[path]["project"]["name"]) for path in active}
+    omissions = {
+        identity(name)
+        for data in manifests.values()
+        for name, mapping in data.get("tool", {}).get("uv", {}).get("sources", {}).items()
+        if isinstance(mapping, dict) and "path" in mapping
+    }
+    if not omissions <= selected:
+        raise error_type("source lock export cannot omit a conditional or unselected local dependency")
     return tuple(sorted(omissions))
 
 

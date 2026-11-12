@@ -19,6 +19,7 @@ import installer_engine as engine
 from installer_wheel_inputs import _check_deadline, _ordinary
 from installer_wheel_snapshot import WheelReuseInputs, _open, _unchanged
 from runtime_profile import ProfileError, RuntimeProfile, validate_profile
+from runtime_input_revocation import verify_not_revoked as verify_not_revoked
 from runtime_source_authentication import AuthenticatedSource
 from runtime_source_lock import SourceConfiguration, _source
 from runtime_source_wheels import _selected_projects
@@ -49,37 +50,6 @@ class SourceReuseInputs:
 
     def verify(self) -> None:
         self._verification()
-
-
-def verify_not_revoked(receipt: dict, revoked_inputs: Callable[[], frozenset[str]] | None) -> None:
-    """Consume current deny-only evidence; it cannot approve an installation."""
-    if revoked_inputs is None:
-        return
-    denied = revoked_inputs()
-    if not isinstance(denied, frozenset) or any(
-        not isinstance(value, str) or re.fullmatch(r"sha256:[0-9a-f]{64}", value) is None for value in denied
-    ):
-        raise ProfileError("runtime revocation evidence must be an exact immutable digest set")
-    binding = receipt["binding"]
-    selected = {
-        receipt["lock_id"], "sha256:" + hashlib.sha256(_canonical(binding["profile"]).encode()).hexdigest(),
-        *[wheel["sha256"] for wheel in receipt["distributions"].values()],
-    }
-    if "build_profile" in binding:
-        selected.add("sha256:" + hashlib.sha256(_canonical(binding["build_profile"]).encode()).hexdigest())
-        selected.update(wheel["sha256"] for wheel in binding["build_profile"]["wheels"])
-    locked = binding.get("source_lock", {})
-    if locked:
-        selected.add("sha256:" + hashlib.sha256(_canonical(locked).encode()).hexdigest())
-    selected.update(
-        value for key, value in locked.items()
-        if key.endswith("_sha256") and isinstance(value, str)
-    )
-    selected.update(wheel["sha256"] for wheel in locked.get("files", ()))
-    if isinstance(locked.get("source"), dict):
-        selected.add("sha256:" + locked["source"]["assembly_hash"])
-    if selected & denied:
-        raise ProfileError("selected source runtime inputs have been revoked")
 
 
 def _admit(receipt, configuration, authenticated, *, max_tags, deadline):
