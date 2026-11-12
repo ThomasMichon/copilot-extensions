@@ -38,12 +38,16 @@ def _materialization_path(root: Path, reference: str) -> Path:
 
 def _materialization_command() -> tuple[str, ...]:
     from plugin_activation import resolve_active_plugins
+    from .registrar import RegistrarError
     from .registrar_recipes import _resolve_plugin_ref_path
 
-    script = _resolve_plugin_ref_path(
-        "plugin:agent-roles:skills/managing-agent-topology/scripts/topology.py",
-        activation=resolve_active_plugins(plugin_names=("agent-roles",)),
-    )
+    try:
+        script = _resolve_plugin_ref_path(
+            "plugin:agent-roles:skills/managing-agent-topology/scripts/topology.py",
+            activation=resolve_active_plugins(plugin_names=("agent-roles",)),
+        )
+    except RegistrarError as exc:
+        raise TaskError("native standing materialization owner is unavailable") from exc
     if not script.is_file():
         raise TaskError("native standing materialization owner is unavailable")
     return sys.executable, str(script)

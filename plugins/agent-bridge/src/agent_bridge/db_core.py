@@ -14,7 +14,7 @@ from .owner_membership_signal import MembershipSignal, commit as commit_membersh
 
 log = logging.getLogger("agent-bridge")
 
-SCHEMA_VERSION = 44
+SCHEMA_VERSION = 45
 
 # Post-base ``sessions`` columns ensured idempotently on every init, independent
 # of ``schema_version``. Version-gated ``ALTER TABLE ... ADD COLUMN`` migrations

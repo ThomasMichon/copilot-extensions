@@ -12,7 +12,7 @@ existing agents, workspaces, task obligations and finite-task pool behavior.
 - **Repo:** copilot-extensions
 - **Created:** 2026-11-11
 - **Status:** Active
-- **Current slice:** Rebased source capture, fresh review and exact-head required CI
+- **Current slice:** Native launch qualification and review, then final capture and exact-head CI
 - **Vision:** [Agent topology](../../../visions/agent-fabric/agentic-factory/agent-topology/README.md)
 - **Umbrella issue:** #12171
 
@@ -132,6 +132,22 @@ synthetic stores and native fixture owners.
 
 ### 2026-11-12 - Final source-pinned retention evidence
 
+- A later review required version-appropriate v44-to-v45 database migration,
+  malformed terminal-entry retention, native setup fencing, durable reattached
+  permission holds and resolver failures that advance the reconciliation page.
+  The new integrity guard preserves existing deletion-trigger definitions.
+  Native POSIX holds the actual head-writer lock until kernel exec and consumes
+  its execution marker; Windows holds the interoperable sidecar through actual
+  backend creation, or through the headed native-child receipt. An uncertain
+  headed receipt retains that fence until its owned coordinator exits.
+- The affected Bridge journal/migration/Host packet passed 121 controls;
+  real Host restart/reconnect permission checks passed six cases; local Dispatch
+  admission passed 28 cases. The native packet passed 203 cases with one stale
+  callback-count expectation, then all 30 Windows native-shell cases passed
+  after correcting that expectation and strengthening actual child-creation
+  lock probes. Linux/macOS physical native-exec qualification remains required.
+  The canonical capture now adds 13 migration, malformed-entry and work-growth
+  cases for 402 total; earlier 389-case captures are not substituted.
 - The [389-case capture](https://github.com/ThomasMichon/copilot-extensions/actions/runs/43204632444)
   passed canonical write, independent no-write replay, historical publication
   controls and registry validation against

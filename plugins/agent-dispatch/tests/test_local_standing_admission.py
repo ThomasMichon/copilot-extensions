@@ -39,6 +39,7 @@ def local(admission, monkeypatch, tmp_path):
     monkeypatch.setenv("AGENT_DISPATCH_REGISTRAR_DIR", str(base))
     monkeypatch.setenv("AGENT_DISPATCH_OVERRIDES", str(admission.config.overrides_path))
     monkeypatch.setattr(native, "resolve_machine", lambda: admission.workspace.machine)
+    admission.native_materialization_command = native._materialization_command
     monkeypatch.setattr(native, "_materialization_command", lambda: admission.config.materialization_command)
     monkeypatch.setattr(native, "agent_bridge_launch_prefix", lambda: ("selected-bridge",))
     monkeypatch.setattr(worktree_owner_launch, "retained_selection", lambda: ("selected-worktrees",))
@@ -384,6 +385,32 @@ def test_control_authorized_batch_drives_default_consumer_and_preserves_no_grant
         final = api.post(path, json={**body, "cursor": result["next_cursor"]}, headers=CONTROL)
         assert final.json() == {"version": 1, "reports": [], "next_cursor": None}
     assert len(local.recovery_calls) == 1
+
+
+def test_missing_materialization_owner_holds_candidate_without_stalling_page(local, monkeypatch):
+    from agent_dispatch.registrar import RegistrarError
+    from tests.test_standing_charter_exposure import CONTROL, app
+
+    paired = grant_recovery(local)
+    local.bridge_status = "stopped"
+    monkeypatch.setattr(native, "_materialization_command", local.native_materialization_command)
+    monkeypatch.setattr("plugin_activation.resolve_active_plugins", lambda **kwargs: None)
+
+    def missing(*args, **kwargs):
+        raise RegistrarError("fixture plugin is disabled")
+
+    monkeypatch.setattr("agent_dispatch.registrar_recipes._resolve_plugin_ref_path", missing)
+    with app(local.queue) as api:
+        path = "/standing/recovery/reconcile"
+        response = api.post(path, json={"cursor": None, "limit": 1}, headers=CONTROL)
+        assert response.status_code == 200, response.text
+        result = response.json()
+        assert result["reports"][0]["task_id"] == paired.id
+        assert "unavailable" in json.dumps(result)
+        assert result["next_cursor"] == paired.id
+        final = api.post(path, json={"cursor": paired.id, "limit": 1}, headers=CONTROL)
+        assert final.json() == {"version": 1, "reports": [], "next_cursor": None}
+    assert not local.recovery_calls
 
 
 @pytest.mark.parametrize("deadline", [None, 110.0, 90.0])

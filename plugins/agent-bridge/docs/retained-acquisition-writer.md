@@ -211,7 +211,10 @@ There is no process termination or forced claim release.
 Automatic recovery does not inherit approval authority from a missing upstream
 permission callback. The replacement client holds permission requests in the
 existing manual-resolution path until an owner explicitly resolves them or
-reconnects. The retained-recovery CLI does not start a missing daemon.
+the request is canceled. The durable original recovery journal restores this
+hold before ACP initialization after transport loss or daemon restart;
+reattachment never grants auto-approval. The retained-recovery CLI does not
+start a missing daemon.
 Preparing, invoking, unknown or malformed recovery records protect their
 original session handles from startup collection, periodic garbage collection
 and transactional deletion, so the original outcome remains inspectable.
@@ -220,6 +223,12 @@ an unresolved handle, even with `force`. Persisted SQLite guards also reject
 legacy deletion of a handle retained by a recovery journal or launch gate.
 The retention binding follows the keyed journal through succession; it does not
 assume the journal's initial session is still the exact current handle.
+Malformed terminal entries remain held too: a terminal state string alone is
+not a validated recovery request. Schema 45 installs the recovery column and
+additional deletion guards through writable migration of existing databases,
+validating their earlier writer contract before migration without rewriting its
+guards. Original-handle lookup is indexed and launch-gate membership is collected
+once per query, rather than rescanned for every retained session.
 
 `retained_workspace_creation_writer_inspection: 1` adds the optional
 `BridgeClient.get_session(exact_id, worktree_writer=True)` form on the existing

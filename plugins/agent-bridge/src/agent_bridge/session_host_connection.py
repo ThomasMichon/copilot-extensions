@@ -702,6 +702,10 @@ class _SessionHostConnectionMixin(_SessionHostLaunchCustodyMixin):
                 effort_override=session.effort_override,
                 **client_preferences(session.target, self._db, rec.session_id),
             )
+            from .retained_session_recovery import permission_held
+
+            if permission_held(self._db, session):
+                client.auto_approve = False
             streams.on_transport_lost = client.mark_transport_lost
             streams.on_child_exit = client.mark_host_child_exited
             # Retain the host control channel so the manager can push STATUS

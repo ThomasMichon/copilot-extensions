@@ -347,6 +347,30 @@ function Wait-AwNativeSeedBackend {
     } finally { $childWait.Dispose() }
 }
 
+function Open-AwNativeHeadFence {
+    param([string]$Record)
+    if (-not $IsWindows) { throw 'Native PowerShell head fencing requires Windows.' }
+    $stream = [IO.File]::Open(
+        [IO.Path]::ChangeExtension($Record, '.lock'),
+        [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::ReadWrite
+    )
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    try {
+        while ($true) {
+            try {
+                $stream.Lock(0, 1)
+                return $stream
+            } catch [IO.IOException] {
+                if ($clock.ElapsedMilliseconds -ge 2000) { throw }
+                [Threading.Thread]::Sleep(50)
+            }
+        }
+    } catch {
+        $stream.Dispose()
+        throw
+    }
+}
+
 function Invoke-AwNativeSeedBackend {
     param(
         [string]$Root,
@@ -450,17 +474,40 @@ function Invoke-AwNativeSeedBackend {
     $receiptUncertain = $false
     $outputCopies = [Collections.Generic.List[object]]::new()
     $consoleControl = $null
+    $headFence = $null
     try {
         $consoleControl = Register-AwNativeSeedConsoleControl
         try {
-            if (-not $process.Start()) {
-                [Console]::Error.WriteLine('Native backend start is unconfirmed; the handoff is retained.')
+            if ($NativeResumeSession) {
+                try { $headFence = Open-AwNativeHeadFence $Record }
+                catch {
+                    [Console]::Error.WriteLine('Native head-writer fence is unavailable; no backend started.')
+                    return 3
+                }
+                $admitted = Invoke-AwNativeSeedPhase $Root (
+                    @('--phase', 'admit') + $callbackArgs + $admissionArgs
+                ) -Runtime $runtime
+                if (-not ($admitted -and $admitted.recorded -eq $true)) {
+                    [Console]::Error.WriteLine('Native head admission changed; no backend started.')
+                    return 3
+                }
+                $null = $info.Environment.Remove('AGENT_WORKTREES_RETAINED_NATIVE_RESUME')
+            }
+            try {
+                if (-not $process.Start()) {
+                    [Console]::Error.WriteLine('Native backend start is unconfirmed; the handoff is retained.')
+                    return 3
+                }
+            } catch [ComponentModel.Win32Exception] {
+                $null = Invoke-AwNativeSeedPhase $Root (@('--phase', 'spawn-failed') + $callbackArgs) -Runtime $runtime
+                [Console]::Error.WriteLine('Native backend could not start; inspect its retained launch outcome.')
                 return 3
             }
-        } catch [ComponentModel.Win32Exception] {
-            $null = Invoke-AwNativeSeedPhase $Root (@('--phase', 'spawn-failed') + $callbackArgs) -Runtime $runtime
-            [Console]::Error.WriteLine('Native backend could not start; inspect its retained launch outcome.')
-            return 3
+        } finally {
+            if ($headFence -and -not $prepared.headed) {
+                $headFence.Dispose()
+                $headFence = $null
+            }
         }
         # Explicit output handles also preserve the original stdin handle in
         # consoleless children. Never pipe a real terminal's interactive streams.
@@ -505,6 +552,10 @@ function Invoke-AwNativeSeedBackend {
             } else { $null }
             $receiptUncertain = -not ($spawned -and $spawned.recorded -eq $true)
         } catch { $receiptUncertain = $true }
+        if ($headFence -and -not $receiptUncertain) {
+            $headFence.Dispose()
+            $headFence = $null
+        }
         # Keep the actual child handle until exit; detaching the mux is not exit.
         Wait-AwNativeSeedBackend $process $outputCopies.ToArray()
         $code = $process.ExitCode
@@ -515,6 +566,7 @@ function Invoke-AwNativeSeedBackend {
         if ($code -eq 0 -and $receiptUncertain) { return 3 }
         return $code
     } finally {
+        if ($headFence) { $headFence.Dispose() }
         if ($listener) { $listener.Stop() }
         if ($consoleControl) {
             $null = [AwNativeSeed.ConsoleControl]::SetConsoleCtrlHandler($consoleControl.Pointer, $false)

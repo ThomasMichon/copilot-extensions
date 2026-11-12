@@ -149,20 +149,26 @@ class TestDbGcPrimitives:
     def test_retained_recovery_survives_selection_deletion_startup_and_periodic_gc(
         self, tmp_db, status, state,
     ):
+        from agent_bridge.models import RetainedRecoveryRequest
         from agent_bridge.runtime_custody import RuntimeCustodyError
 
         manager = SessionManager(tmp_db, retention=RetentionConfig(vacuum=False))
         now = time.time()
         _mk(tmp_db, "retained", status, now - 10 * 86400)
+        key = "a" * 64
+        request = RetainedRecoveryRequest(
+            operation_id="original", journal_key=key, native_session_id="original-native",
+            head_revision=1, bridge_installation="fixture-installation",
+        )
         raw = (
             '{"original":"opaque"}' if state == "malformed" else
             None if state == "gate-only" else
-            json.dumps({"original": {"request": {}, "state": state}})
+            json.dumps({"original": {"request": request.model_dump(), "state": state}})
         )
         tmp_db.execute_write(
             "INSERT INTO workspace_embodiments "
             "(key_digest,facts_digest,state,session_id,creation_recoveries_json) "
-            "VALUES ('original-key','original-facts','allocated','retained',?)", (raw,),
+            "VALUES (?,'original-facts','allocated','retained',?)", (key, raw),
         )
         if state == "gate-only":
             from agent_bridge.acquisition_store import AcquisitionStore
@@ -187,6 +193,86 @@ class TestDbGcPrimitives:
             restarted = SessionManager(tmp_db, retention=RetentionConfig(vacuum=False))
             assert restarted.get_session("retained") is not None
             assert "retained" not in restarted.gc(now=now)["pruned"]
+
+    @pytest.mark.parametrize("state", ["complete", "not-started"])
+    @pytest.mark.parametrize("malformed", [
+        "missing-request", "extra-field", "invalid-request", "different-operation",
+    ])
+    def test_malformed_terminal_recovery_retains_original_and_successor(self, tmp_db, state, malformed):
+        from agent_bridge.acquisition_contract import AcquisitionRefused
+        from agent_bridge.creation_worktree_writer import JOURNAL_KEY
+        from agent_bridge.models import RetainedRecoveryRequest
+        from agent_bridge.retained_session_recovery import _operations
+        from agent_bridge.runtime_custody import RuntimeCustodyError
+
+        key = "a" * 64
+        request = RetainedRecoveryRequest(
+            operation_id="original", journal_key=key, native_session_id="original-native",
+            head_revision=1, bridge_installation="fixture-installation",
+        ).model_dump()
+        operation = {"request": request, "state": state}
+        if malformed == "missing-request":
+            del operation["request"]
+        elif malformed == "extra-field":
+            operation["unexpected"] = True
+        elif malformed == "invalid-request":
+            request["head_revision"] = True
+        else:
+            request["operation_id"] = "different"
+        raw = json.dumps({"original": operation})
+        with pytest.raises(AcquisitionRefused, match="unconfirmed"):
+            _operations({"creation_recoveries_json": raw})
+        for sid in ("original", "successor"):
+            _mk(tmp_db, sid, "stopped", 0)
+        tmp_db.update_session_target(
+            "successor", json.dumps({"venue": {JOURNAL_KEY: key}}), ".",
+        )
+        tmp_db.execute_write(
+            "INSERT INTO workspace_embodiments "
+            "(key_digest,facts_digest,state,session_id,creation_recoveries_json) "
+            "VALUES (?,'facts','allocated','original',?)", (key, raw),
+        )
+        assert tmp_db.gc_eligible_session_ids(["stopped"], 1) == []
+        for sid in ("original", "successor"):
+            assert tmp_db.retained_recovery_held(sid)
+            with pytest.raises(RuntimeCustodyError):
+                tmp_db.delete_session(sid)
+            with pytest.raises(sqlite3.IntegrityError, match="retained"):
+                tmp_db.execute_write("DELETE FROM sessions WHERE id=?", (sid,))
+
+    def test_existing_v44_database_prepares_retained_recovery_without_rewriting_guards(self, tmp_db):
+        from agent_bridge import creation_writer_schema
+        from agent_bridge.db_core import SCHEMA_VERSION
+
+        _mk(tmp_db, "existing", "stopped", 0)
+        with tmp_db._runtime_transaction(write=True) as conn:
+            legacy = {
+                row["name"]: row["sql"] for row in conn.execute(
+                    "SELECT name,sql FROM sqlite_master WHERE type='trigger' "
+                    "AND name LIKE 'workspace_writer_%'"
+                )
+            }
+            for name in creation_writer_schema.TRIGGERS:
+                if name.startswith("creation_recovery_"):
+                    conn.execute(f"DROP TRIGGER {name}")
+            conn.execute("ALTER TABLE workspace_embodiments DROP COLUMN creation_recoveries_json")
+            conn.execute("UPDATE schema_version SET version=44")
+            creation_writer_schema.validate_schema(conn, require_recovery=False)
+        tmp_db.close()
+        reopened = Database(tmp_db.db_path)
+        try:
+            assert reopened.get_session("existing") is not None
+            assert reopened.execute_read("SELECT version FROM schema_version")[0]["version"] == SCHEMA_VERSION
+            creation_writer_schema.validate_schema(reopened._get_conn())
+            actual = {
+                row["name"]: row["sql"] for row in reopened.execute_read(
+                    "SELECT name,sql FROM sqlite_master WHERE type='trigger' "
+                    "AND name LIKE 'workspace_writer_%'"
+                )
+            }
+            assert actual == legacy
+        finally:
+            reopened.close()
 
     def test_eligible_ids_filters_status_and_age(self, tmp_db: Database) -> None:
         now = time.time()

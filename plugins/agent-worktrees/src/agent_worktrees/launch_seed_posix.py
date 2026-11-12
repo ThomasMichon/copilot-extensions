@@ -159,7 +159,7 @@ def execute(
         isinstance(argument, str) and "\0" not in argument for argument in command
     ):
         raise ValueError("POSIX exec requires a literal backend command")
-    environment = _backend_environment(backend_environment_fd) if backend_environment_fd is not None else os.environ
+    environment = _backend_environment(backend_environment_fd) if backend_environment_fd is not None else os.environ.copy()
     _execution, saved = native._load(record, correlation, operation_id)
     if any(event["phase"] == "process-spawned" for event in saved["events"]):
         raise ValueError("Backend spawn was already observed; do not replay it")
@@ -244,6 +244,9 @@ def execute(
                 record, correlation, operation_id, admission_only=True,
                 preserve_seed_id=preserve_seed_id, native_resume_session=native_resume_session,
             ) if admission_only else nullcontext():
+                from .retained_native_resume import ENVIRONMENT_KEY
+
+                environment.pop(ENVIRONMENT_KEY, None)
                 os.execvpe(command[0], command, environment)
         except OSError:
             cleaning = True

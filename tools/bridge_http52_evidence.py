@@ -273,6 +273,9 @@ PROBES = {
     "test_retained_recovery_cannot_enter_while_exact_session_end_is_active": 1,
     "test_retained_recovery_gc_preserves_original_inspection_handles": 14,
     "test_successor_recovery_journal_retains_original_handle": 2,
+    "test_retention_query_work_scales_with_history": 4,
+    "test_malformed_terminal_recovery_retains_original_and_successor": 8,
+    "test_existing_v44_database_prepares_retained_recovery_without_rewriting_guards": 1,
 }
 TEST = retained.TEST
 CAPABILITY_VERSIONS = {

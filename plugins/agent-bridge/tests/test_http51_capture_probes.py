@@ -45,6 +45,28 @@ def test_successor_recovery_journal_retains_original_handle(tmp_db, tmp_path, st
     )
 
 
+@pytest.mark.parametrize("query", ["retained", "eligible"])
+@pytest.mark.parametrize("pending", [False, True])
+def test_retention_query_work_scales_with_history(tmp_db, query, pending):
+    gc_controls.TestDbGcPrimitives().test_retention_query_work_scales_with_history(tmp_db, query, pending)
+
+
+@pytest.mark.parametrize("state", ["complete", "not-started"])
+@pytest.mark.parametrize("malformed", [
+    "missing-request", "extra-field", "invalid-request", "different-operation",
+])
+def test_malformed_terminal_recovery_retains_original_and_successor(tmp_db, state, malformed):
+    gc_controls.TestDbGcPrimitives().test_malformed_terminal_recovery_retains_original_and_successor(
+        tmp_db, state, malformed,
+    )
+
+
+def test_existing_v44_database_prepares_retained_recovery_without_rewriting_guards(tmp_db):
+    gc_controls.TestDbGcPrimitives().test_existing_v44_database_prepares_retained_recovery_without_rewriting_guards(
+        tmp_db,
+    )
+
+
 def test_host_status_coalesced_flow(host_status_api, tmp_db):
     host_status.test_real_http_inbox_consumer_gets_one_notice_and_consumption_is_not_ack(host_status_api, tmp_db)
 
