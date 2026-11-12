@@ -2976,6 +2976,12 @@ sources, transferring owners or turning partial/planning gains into completion.
   #5665 handoff remains separate from documentary publication.
 - [ ] Verify and publish supported dispositions, preserving source versus
   release versus rollout distinctions and all active ownership.
+  The [Manager-containment checkpoint](journal/2026/11.12-manager-containment-and-verified-receiving.md)
+  records #4055's separate complete-receiving tracking fold, #11785's bounded
+  source completion and three retained source/provenance outcomes. It proposes
+  direct intake of #4128's later Manager lane into the same existing portfolio
+  ROOT, preserving all incumbent work and actual custody. Its 907-open census
+  remains 178 above the fixed whole target; no proposed fold is counted.
   The [later-receiving checkpoint](journal/2026/11.12-later-receiving-and-source-boundaries.md)
   records two further verified finite source completions, eighteen oldest
   contract assessments and five independent inflow retentions. It credits
