@@ -186,3 +186,49 @@ def test_durable_daemon_survives_closing_a_strict_kill_on_close_caller_job(tmp_p
                 pass
         if job is not None:
             job.close()
+
+
+def test_wmi_launch_transfers_a_pipe_with_output_eof_and_caller_descriptors(tmp_path):
+    """The handle-transfer path ``spawn_daemon(stdio_fds=...)`` uses for session hosts."""
+    import msvcrt
+    import threading
+
+    from agent_procutil import daemon_broker as broker
+
+    python = getattr(sys, "_base_executable", "") or sys.executable
+    code = (
+        "import sys; sys.stdout.write('out-line\\n'); sys.stdout.flush(); "
+        "sys.stderr.write('err-line\\n'); sys.stderr.flush()"
+    )
+    env = {k: v for k, v in os.environ.items() if k != "COPILOT_EXTENSIONS_TEST_CONTAINED"}
+    read_fd, write_fd = os.pipe()
+    stream = os.fdopen(read_fd, "rb")
+    process = None
+    try:
+        with os.fdopen(write_fd, "wb") as output, open(os.devnull, "rb") as null:
+            handles = tuple(
+                msvcrt.get_osfhandle(fd) for fd in (null.fileno(), output.fileno(), output.fileno())
+            )
+            process = broker.spawn_brokered_daemon(
+                [python, "-c", code], cwd=str(tmp_path), env=env,
+                creationflags=pu._CREATE_NO_WINDOW | pu._CREATE_BREAKAWAY_FROM_JOB,
+                log_path=str(tmp_path / "launch.log"), stderr_log_path=None,
+                stdio_handles=handles,
+            )
+            # The caller's descriptors stay open and usable after the transfer.
+            os.fstat(output.fileno())
+            os.fstat(null.fileno())
+            output.write(b"")
+        received: list[bytes] = []
+        reader = threading.Thread(target=lambda: received.append(stream.read()), daemon=True)
+        reader.start()
+        reader.join(30)
+        assert not reader.is_alive(), "the pipe never reached EOF after the daemon exited"
+        assert received[0].replace(b"\r\n", b"\n") == b"out-line\nerr-line\n"
+        assert process.wait(timeout=10) == 0
+    finally:
+        stream.close()
+        if process is not None:
+            if process.poll() is None:
+                process.terminate()
+            process.close()

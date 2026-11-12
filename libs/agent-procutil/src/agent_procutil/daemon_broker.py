@@ -19,13 +19,16 @@ _BOOT_COOKIE = "_CE_DAEMON_BROKER_COOKIE"
 _TIMEOUT = 30.0
 _MAX_FRAME = 16 * 1024 * 1024
 _HELLO_TIMEOUT = 2.0
-_BACKLOG = 16
+_MAX_HELLO = 4096
+_MAX_PENDING = 32
+_BACKLOG = 32
 _SYNCHRONIZE = 0x00100000
 _PROCESS_ACCESS = _SYNCHRONIZE | 0x0001 | 0x0800 | 0x1000
 _WAIT_TIMEOUT = 0x102
 _CREATE_SUSPENDED = 0x00000004
 _PROCESS_DUP_HANDLE = 0x0040
 _DUPLICATE_SAME_ACCESS = 0x00000002
+_DUPLICATE_CLOSE_SOURCE = 0x00000001
 _ProcessT = TypeVar("_ProcessT", bound="WindowsDaemonProcess")
 
 _WMI_CREATE = r"""
@@ -191,36 +194,103 @@ def _receive(connection: socket.socket, deadline: float) -> dict:
     return result
 
 
+def _authenticated(hello: dict, cookie: str) -> bool:
+    received = hello.get("cookie")
+    return isinstance(received, str) and secrets.compare_digest(
+        received.encode("utf-8"), cookie.encode(),
+    )
+
+
+def _hello_frame(buffer: bytearray) -> dict | None:
+    """Return a complete hello frame, ``None`` if incomplete; raise if invalid."""
+    if len(buffer) < 4:
+        return None
+    size = int.from_bytes(buffer[:4], "big")
+    if not 0 < size <= _MAX_HELLO or len(buffer) > 4 + size:
+        raise ValueError("invalid daemon broker hello")
+    if len(buffer) < 4 + size:
+        return None
+    hello = json.loads(bytes(buffer[4:]))
+    if not isinstance(hello, dict):
+        raise ValueError("invalid daemon broker hello")
+    return hello
+
+
 def _accept_bootstrap(
     listener: socket.socket, cookie: str, pid: int, deadline: float,
 ) -> socket.socket:
     """Return the bootstrap's authenticated connection.
 
-    Any local process can connect to the loopback listener, so a client that
-    sends a bad frame or the wrong cookie is dropped and accepting continues;
-    each unauthenticated read is bounded so one stalled client cannot consume
-    the whole startup deadline. A correct cookie with the wrong PID is a real
-    identity failure, not a stray client.
+    Any local process can connect to the loopback listener, so clients are
+    read concurrently with bounded resources: at most ``_MAX_PENDING``
+    unauthenticated connections (the oldest is evicted), each with a small
+    hello size and ``_HELLO_TIMEOUT``. Silent, malformed or wrong-cookie
+    clients are dropped without delaying a ready bootstrap. A correct cookie
+    with the wrong PID is a real identity failure, not a stray client.
     """
-    while True:
-        listener.settimeout(_remaining(deadline))
-        connection = listener.accept()[0]
-        try:
-            hello = _receive(connection, min(deadline, time.monotonic() + _HELLO_TIMEOUT))
-            received_cookie = hello.get("cookie")
-            authenticated = isinstance(received_cookie, str) and secrets.compare_digest(
-                received_cookie.encode("utf-8"), cookie.encode(),
-            )
-        except (OSError, ValueError, UnicodeError):
-            authenticated = False
-        if not authenticated:
-            connection.close()
-            continue
-        if hello.get("pid") != pid:
-            connection.close()
-            raise OSError("daemon broker identity mismatch")
-        return connection
+    import selectors
 
+    pending: dict[socket.socket, tuple[bytearray, float]] = {}
+    selector = selectors.DefaultSelector()
+
+    def drop(connection: socket.socket) -> None:
+        pending.pop(connection, None)
+        selector.unregister(connection)
+        connection.close()
+
+    listener.setblocking(False)
+    selector.register(listener, selectors.EVENT_READ)
+    try:
+        while True:
+            now = time.monotonic()
+            for connection, (_, expiry) in list(pending.items()):
+                if expiry <= now:
+                    drop(connection)
+            wake = min([deadline, *(expiry for _, expiry in pending.values())])
+            _remaining(deadline)
+            for key, _ in selector.select(max(0.0, wake - now)):
+                connection = key.fileobj
+                if connection is listener:
+                    try:
+                        accepted = listener.accept()[0]
+                    except (BlockingIOError, InterruptedError):
+                        continue
+                    if len(pending) >= _MAX_PENDING:
+                        drop(next(iter(pending)))
+                    accepted.setblocking(False)
+                    pending[accepted] = (bytearray(), time.monotonic() + _HELLO_TIMEOUT)
+                    selector.register(accepted, selectors.EVENT_READ)
+                    continue
+                if connection not in pending:
+                    continue
+                buffer = pending[connection][0]
+                try:
+                    data = connection.recv(_MAX_HELLO + 5 - len(buffer))
+                    if not data:
+                        raise OSError("daemon broker client closed")
+                    buffer.extend(data)
+                    hello = _hello_frame(buffer)
+                    if hello is None:
+                        continue
+                    authenticated = _authenticated(hello, cookie)
+                except (BlockingIOError, InterruptedError):
+                    continue
+                except (OSError, ValueError, UnicodeError):
+                    authenticated = False
+                if not authenticated:
+                    drop(connection)
+                    continue
+                pending.pop(connection)
+                selector.unregister(connection)
+                if hello.get("pid") != pid:
+                    connection.close()
+                    raise OSError("daemon broker identity mismatch")
+                connection.setblocking(True)
+                return connection
+    finally:
+        for connection in list(pending):
+            drop(connection)
+        selector.close()
 
 def _outside_caller_job(process: WindowsDaemonProcess) -> bool:
     """Observe immediate membership only; this is not durable lifetime proof."""
@@ -354,15 +424,24 @@ def _duplicate_into(process: WindowsDaemonProcess, handles: list[int]) -> list[i
     if not target:
         raise ctypes.WinError(ctypes.get_last_error())
     try:
-        duplicated = []
-        for handle in handles:
-            copy = wintypes.HANDLE()
-            if not kernel.DuplicateHandle(
-                kernel.GetCurrentProcess(), handle, target, ctypes.byref(copy),
-                0, False, _DUPLICATE_SAME_ACCESS,
-            ):
-                raise ctypes.WinError(ctypes.get_last_error())
-            duplicated.append(int(copy.value or 0))
+        duplicated: list[int] = []
+        try:
+            for handle in handles:
+                copy = wintypes.HANDLE()
+                if not kernel.DuplicateHandle(
+                    kernel.GetCurrentProcess(), handle, target, ctypes.byref(copy),
+                    0, False, _DUPLICATE_SAME_ACCESS,
+                ):
+                    raise ctypes.WinError(ctypes.get_last_error())
+                duplicated.append(int(copy.value or 0))
+        except OSError:
+            # Close the copies already placed in the bootstrap so a partial
+            # transfer never leaves a pipe end open there.
+            for copy_value in duplicated:
+                kernel.DuplicateHandle(
+                    target, copy_value, None, None, 0, False, _DUPLICATE_CLOSE_SOURCE,
+                )
+            raise
         return duplicated
     finally:
         kernel.CloseHandle(target)

@@ -442,6 +442,16 @@ def broker_channel(monkeypatch):
         {"pid": 100, "cookie": "fixture-cookie"}, {"pid": 200}, {"started": 200},
     ]
     monkeypatch.setattr(broker, "_receive", Mock(side_effect=responses))
+
+    def accept(listener, cookie, pid, deadline):
+        hello = broker._receive(connection, deadline)
+        if not broker._authenticated(hello, cookie):
+            raise TimeoutError("only unauthenticated clients connected")
+        if hello.get("pid") != pid:
+            raise OSError("daemon broker identity mismatch")
+        return connection
+
+    monkeypatch.setattr(broker, "_accept_bootstrap", accept)
     return processes, responses
 
 
@@ -511,8 +521,6 @@ def test_identity_mismatch_never_sends_environment(
     monkeypatch, broker_channel, tmp_path, hello,
 ):
     processes, _ = broker_channel
-    # Unauthenticated clients are dropped until the deadline; keep it short.
-    monkeypatch.setattr(broker, "_TIMEOUT", 0.2)
     monkeypatch.setattr(broker, "_receive", Mock(return_value=hello))
     with pytest.raises(pu.DaemonSpawnError, match="lifetime broker failed"):
         _launch(tmp_path)
@@ -521,31 +529,48 @@ def test_identity_mismatch_never_sends_environment(
     processes[100].close.assert_called_once()
 
 
-def test_competing_local_clients_cannot_block_bootstrap_admission(monkeypatch):
-    monkeypatch.setattr(broker, "_HELLO_TIMEOUT", 0.3)
+@pytest.mark.parametrize("max_pending", [4, 32])
+def test_competing_local_clients_cannot_block_bootstrap_admission(monkeypatch, max_pending):
+    # Serial two-second reads of 20 silent peers would far exceed this
+    # 3-second deadline; concurrent bounded handling admits the bootstrap at once.
+    monkeypatch.setattr(broker, "_MAX_PENDING", max_pending)
     cookie, pid = "fixture-cookie", 4242
+    clients = []
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
-        listener.listen(broker._BACKLOG)
+        listener.listen(64)
         address = listener.getsockname()
-        stalled = socket.create_connection(address)
-        garbage = socket.create_connection(address)
-        garbage.sendall(b"\xff\xff\xff\xff")
-        impostor = socket.create_connection(address)
-        broker._send(impostor, {"cookie": "wrong", "pid": pid}, time.monotonic() + 5)
-        genuine = socket.create_connection(address)
-        broker._send(genuine, {"cookie": cookie, "pid": pid}, time.monotonic() + 5)
-        started = time.monotonic()
         try:
+            clients.extend(socket.create_connection(address) for _ in range(20))
+            garbage = socket.create_connection(address)
+            garbage.sendall(b"\xff\xff\xff\xff")
+            oversized = socket.create_connection(address)
+            oversized.sendall((broker._MAX_HELLO + 1).to_bytes(4, "big"))
+            impostor = socket.create_connection(address)
+            broker._send(impostor, {"cookie": "wrong", "pid": pid}, time.monotonic() + 5)
+            genuine = socket.create_connection(address)
+            clients += [garbage, oversized, impostor, genuine]
+            broker._send(genuine, {"cookie": cookie, "pid": pid}, time.monotonic() + 5)
+            started = time.monotonic()
             with broker._accept_bootstrap(
-                listener, cookie, pid, time.monotonic() + 10,
+                listener, cookie, pid, time.monotonic() + 3,
             ) as accepted:
+                elapsed = time.monotonic() - started
                 broker._send(accepted, {"ok": True}, time.monotonic() + 5)
                 assert broker._receive(genuine, time.monotonic() + 5) == {"ok": True}
         finally:
-            for client in (stalled, garbage, impostor, genuine):
+            for client in clients:
                 client.close()
-    assert time.monotonic() - started < 5, "a stalled client consumed the startup deadline"
+    assert elapsed < 1.5, "silent peers delayed a ready authenticated bootstrap"
+
+
+def test_only_silent_clients_fail_at_the_deadline():
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(8)
+        with socket.create_connection(listener.getsockname()):
+            with pytest.raises(TimeoutError):
+                broker._accept_bootstrap(listener, "cookie", 1, time.monotonic() + 0.3)
 
 
 def test_authenticated_client_with_wrong_pid_is_an_identity_failure():
@@ -728,3 +753,75 @@ def test_bootstrap_kills_its_uncommitted_suspended_child(
     assert broker._bootstrap() == 1
     process.kill.assert_called_once()
     process.wait.assert_called_once_with(timeout=5)
+
+
+def test_stdio_transfer_failure_never_stages_a_child(monkeypatch, broker_channel, tmp_path):
+    processes, _ = broker_channel
+    monkeypatch.setattr(broker, "_duplicate_into", Mock(side_effect=OSError("dup failed")))
+    with pytest.raises(pu.DaemonSpawnError, match="child-staging") as raised:
+        broker.spawn_brokered_daemon(
+            ["actual-daemon"], cwd=str(tmp_path), env={}, creationflags=0,
+            log_path=str(tmp_path / "out.log"), stderr_log_path=None,
+            stdio_handles=(11, 12, 13),
+        )
+    assert raised.value.process_created is False
+    broker._send.assert_not_called()
+    assert set(processes) == {100}
+    processes[100].close.assert_called_once()
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows handle duplication")
+def test_partial_handle_duplication_closes_copies_in_the_bootstrap(monkeypatch):
+    closed_in_target, duplicated = [], []
+
+    class Kernel:
+        def __init__(self):
+            self.GetCurrentProcess = Mock(return_value=-1)
+            self.OpenProcess = Mock(return_value=99)
+            self.CloseHandle = Mock(return_value=True)
+            self.DuplicateHandle = Mock(side_effect=self.duplicate)
+
+        @staticmethod
+        def duplicate(source, handle, target, copy, access, inherit, options):
+            if options == broker._DUPLICATE_CLOSE_SOURCE:
+                assert source == 99 and copy is None
+                closed_in_target.append(handle)
+                return True
+            if handle == 13:
+                return False
+            copy._obj.value = handle + 1000
+            duplicated.append(handle + 1000)
+            return True
+
+    kernel = Kernel()
+    monkeypatch.setattr(broker, "_kernel32", lambda: kernel)
+    with pytest.raises(OSError):
+        broker._duplicate_into(Mock(pid=100), [11, 12, 13])
+    assert closed_in_target == duplicated == [1011, 1012]
+    kernel.CloseHandle.assert_called_once_with(99)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows handle reconstruction")
+def test_bootstrap_handle_reconstruction_failure_starts_nothing(
+    monkeypatch, bootstrap_channel,
+):
+    import msvcrt
+
+    process, spec = bootstrap_channel
+    spec["stdio_handles"] = [11, 12, 13]
+    opened = []
+
+    def open_osfhandle(handle, flags):
+        if handle == 12:
+            raise OSError("invalid handle")
+        descriptor = os.open(os.devnull, os.O_RDONLY)
+        opened.append(descriptor)
+        return descriptor
+
+    monkeypatch.setattr(msvcrt, "open_osfhandle", open_osfhandle)
+    assert broker._bootstrap() == 1
+    subprocess.Popen.assert_not_called()
+    process.kill.assert_not_called()
+    assert len(opened) == 1
+    with pytest.raises(OSError):
+        os.fstat(opened[0])
