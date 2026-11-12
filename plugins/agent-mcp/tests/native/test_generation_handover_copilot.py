@@ -31,12 +31,18 @@ pytestmark = [
 ]
 
 UPSTREAM = r"""
-import json, os, sys, threading
+import json, os, signal, sys, threading
 from pathlib import Path
 trigger, receipt, replies = map(Path, sys.argv[1:])
 lock = threading.Lock()
 stopped = threading.Event()
 initialized = revision = 0
+boundary = "interrupted"
+def terminate(number, _frame):
+    global boundary
+    boundary = "signal-" + str(number)
+    raise SystemExit(0)
+signal.signal(signal.SIGTERM, terminate)
 def emit(message):
     with lock:
         print(json.dumps(message), flush=True)
@@ -81,10 +87,13 @@ try:
                     "inputSchema":{"type":"object","properties":{}},
                 }])
         emit({"jsonrpc":"2.0","id":message["id"],"result":result})
+    boundary = "stdin-eof"
 finally:
     stopped.set()
     thread.join(1)
-    receipt.write_text(json.dumps({"pid":os.getpid(),"initialized":initialized}))
+    receipt.write_text(json.dumps({
+        "pid":os.getpid(),"initialized":initialized,"boundary":boundary,
+    }))
 """
 
 
@@ -375,7 +384,21 @@ async def test_actual_native_client_responds_through_replacement_and_rollback(
                         async def upstream_settled() -> bool:
                             return receipt.is_file()
 
-                        await fixture.eventually(upstream_settled)
+                        try:
+                            await fixture.eventually(upstream_settled)
+                        except TimeoutError:
+                            print("Native exit identities:", {
+                                name: identity_state(*pair)
+                                for name, pair in {
+                                    "conduit": conduit_identity, "keeper": keeper_identity,
+                                    "upstream": upstream_identity,
+                                }.items()
+                            })
+                            for path in workspace.glob("**/*.log"):
+                                print(path.name + ":", path.read_text(
+                                    encoding="utf-8", errors="replace",
+                                )[-8000:])
+                            raise
                 for handle in handles:
                     with contextlib.suppress(OSError):
                         await fixture.shutdown(handle)
@@ -388,5 +411,5 @@ async def test_actual_native_client_responds_through_replacement_and_rollback(
         assert identity_state(*conduit_identity) == "dead"
         assert all(identity_state(pid, birth) == "dead" for pid, birth in identities)
         assert json.loads(receipt.read_text(encoding="utf-8")) == {
-            "pid": upstream_identity[0], "initialized": 1,
+            "pid": upstream_identity[0], "initialized": 1, "boundary": "stdin-eof",
         }
