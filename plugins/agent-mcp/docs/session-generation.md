@@ -139,7 +139,9 @@ predecessor exits, then submit its real result to that provider and return the
 matching completion over ACP. The private upstream ledger and physical-backend
 witness must agree on each unique argument and retained upstream identity.
 For each transition, an additional accepted tool call is held on the predecessor
-while the incoming backend becomes ready. It must remain pending without replay,
+while the incoming backend becomes ready. A copied-backend witness must confirm
+that real handover reached quiescing with accepted work and settlers still
+pending before the release gate opens. The call must remain pending without replay,
 then complete on its original backend after release before fresh traffic is
 required on the incoming backend. This does not simulate an unknown delivery
 outcome.

@@ -371,6 +371,16 @@ async def test_actual_native_client_responds_through_replacement_and_rollback(
 
                     await fixture.eventually(accepted_call)
                     incoming, _, incoming_pid = await backend(label)
+
+                    async def quiescing_call() -> bool:
+                        path = observations.with_suffix(".quiescing")
+                        return path.is_file() and any(
+                            row["backend_pid"] == old.pid and row["accepted"] > 0
+                            and row["settlers"] > 0
+                            for row in map(json.loads, path.read_text().splitlines())
+                        )
+
+                    await fixture.eventually(quiescing_call)
                     assert not pending.done() and nonce not in model.results
                     assert model.calls.count(nonce) == 1
                     retained_identities()
