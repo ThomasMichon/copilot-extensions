@@ -2872,3 +2872,34 @@ fixtures include the helper. The focused packet passes 23 cases with 11
 platform skips; three accessor failures are corrected by preserving the
 existing private reader accessor and their residual passes all three cases.
 The whole-source size guard passes without a baseline increase.
+
+### November 12 - Preserve the reviewed source through Dev reconciliation
+
+The coherent compatibility revision `80784fb10e` was published through managed
+incremental publication. GitHub then reported a real merge conflict and did not
+produce required CI. A retained local backup precedes rebase. All 43 owned
+commits survive reconciliation with current Dev; only MCP producer metadata
+and size-baseline hunks conflict. The canonical footprint tool regenerates the
+merged MCP sources with revision 36 unchanged. The final baseline differs from
+Dev only in the existing Index reduction. Whole-source size, synchronization,
+F/E9 and all 13 install contracts pass; all 701 merged canonical unit-source
+bindings verify. MCP's actual flat/nested bootstrap packet passes 28 cases with
+14 platform skips. These are source checks, not native acceptance.
+
+Actual Copilot review 5883130549 on published `80784fb10e` retains the High
+import-isolation thread and adds a Medium finding: Dispatch's PowerShell
+bootstrap still misses a current nested slot. The new Windows control
+reproduces unnecessary policy evaluation on both PowerShell 7 and Windows
+PowerShell while six flat/invalid-selection controls pass. The narrow fix uses
+the existing read-only resolver only for nested recognition, accepting only the
+exact current nested path. Flat/root-link and ordinary reconciliation policy
+are unchanged. Ten controls pass, including incomplete, stale and healthy
+fallback refusal; no installer executes. Dispatch's existing patch changefiles
+cover this correction. README and TESTING document its precise boundary.
+
+The rebased/corrected source still needs its own publication, required CI,
+actual review and strict installed-consumer proof. The generic hosted CIM
+failure remains unproven and fatal; no local full suite, native retry, extra
+provider query, profiling matrix or waiver is performed here. The parent
+admitted-baseline, frozen-enforcement and separate Main-adoption gates remain
+open.

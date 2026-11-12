@@ -2592,6 +2592,14 @@ and unchanged incumbent bytes. The POSIX FIFO adapter requires native POSIX
 Python; Git Bash feeding a Windows Python is not qualified. These controls do
 not perform full installation, old-owner retirement or installed-host rollout.
 
+Dispatch's focused `test_bootstrap_check_reconcile_always_on.py -k
+powershell_current_nested_runtime` runs the actual legacy bootstrap on both
+Windows PowerShell and PowerShell 7. Healthy flat/nested selections must return
+before policy evaluation; incomplete, stale and fallback-only nested selections
+must reach a fixture-owned refusing policy boundary. No installer executes,
+reconcile state is not created and resolver tracing stays read-only. These are
+bootstrap regression controls, not installed-suite acceptance.
+
 The same optional lane separately executes MCP's `test_reap_versions.py` and
 procutil's `test_process_retirement.py` and `test_retirement_custody.py` on Windows and Linux. A real synthetic
 tree (including Windows-owned headless console hosts) must exit through retained

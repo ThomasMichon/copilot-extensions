@@ -194,6 +194,12 @@ slot. Current-version, last-known-good and complete-slot fallback order is
 unchanged. UTF-8 markers may include a Windows BOM; redirected slots and
 environment directories are refused. This does not change daemon cutover.
 
+The legacy PowerShell session-start check also recognizes a healthy current
+nested environment without a root `.venv` link. It uses the canonical resolver
+in read-only mode and accepts only that exact selected nested path; incomplete,
+stale or fallback-only selections do not suppress reconciliation. Existing flat
+and root-link handling is unchanged.
+
 Runtime identity also recognizes flat or nested `.venv` reconstructed slots
 with an exact package-qualified repair suffix, as well as Source profile and
 repair suffixes. An installed standalone wrapper supplies the package
