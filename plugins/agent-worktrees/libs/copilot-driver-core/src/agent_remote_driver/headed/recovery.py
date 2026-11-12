@@ -15,7 +15,7 @@ class RecoveryConflict(ValueError):
 def _reference(value: object) -> None:
     if (
         not isinstance(value, str) or not 1 <= len(value) <= 256
-        or any(ord(char) < 32 for char in value)
+        or any(ord(char) < 32 or 0xD800 <= ord(char) <= 0xDFFF for char in value)
     ):
         raise ValueError("A bounded, nonempty owner reference is required")
 

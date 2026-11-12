@@ -3427,6 +3427,13 @@ Select it through `tools/run-plugin-tests.py agent-remote-driver --test-file
 tests/test_headed_recovery.py`. Existing native/required packet selection is
 unchanged.
 
+`tests/test_headed_recovery_codec.py` roundtrips complete recovery histories at
+every phase, including lost resume acknowledgement and unresolved effects after
+observation restoration. It rejects malformed/oversized/version-skewed records,
+duplicate/unknown/missing fields, invalid Unicode/types and invalid history
+without repair. Its owner-store status fixture fails on any write. These are
+actor-free source controls, not production journal admission or native recovery.
+
 The explicit T3 file `tests/native/test_native_pending_work.py` qualifies
 nonempty client-task and schedule snapshots through the selected native CLI.
 One control registers a client task, observes the same task as running, idle
