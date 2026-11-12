@@ -141,8 +141,10 @@ record shapes are failed optional probes, not a veto on strict remote routing.
 
 No identity migration is necessary. IDs, historical physical and execution
 names, sessions, pairs, claims and owner references remain intact. Qualified
-owner lookup still must name the actual retained record's physical or execution
-owner; an unrelated remote name does not select a coincident local ID.
+owner lookup must name the actual retained record's execution owner. That
+accessor preserves the original machine label for legacy records; a versioned
+guest's physical host is not an alias for its execution owner. An unrelated
+native or remote owner does not select a coincident local ID.
 Receipt-backed ownership continues to require its original receiving creation
 journal, incarnation, relationships and finality. Locality neither releases a
 claim nor waives live process, launch, handoff or lifecycle ownership.

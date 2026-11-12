@@ -175,7 +175,7 @@ def resolve_owner(ref, config) -> Path | None:
         if not path.is_file() or path.is_symlink():
             return None
         record = tracking.load_record(path)
-        if ref.machine not in {record.machine, record.execution_machine}:
+        if ref.machine != record.execution_machine:
             return None
         receiving = config if config.repo_name == ref.project else execution_spaces.project_record_config(record)
         if is_local(record, receiving):

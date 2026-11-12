@@ -168,6 +168,8 @@ def resolve_legacy_wsl_owner_ref(ref: "ClaimRef", config: cfg.Config) -> Path | 
 
         receiving_config = project_record_config(record)
         if record.machine_identity is not None:
+            if ref.machine != record.execution_machine:
+                return None
             require_record_mutation(record, receiving_config)
             if not require_owner_identity(ref.machine, receiving_config):
                 return None

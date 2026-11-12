@@ -669,3 +669,57 @@ def test_retained_local_claimant_survives_invalid_topology(local_worktree):
     ref = f"old-execution/example/{fixture.checkout.name}"
     assert claimant.local_claimant_alive(ref) is True
     assert claimant.resolve_claimant_alive(ref, allow_remote=False) is True
+
+
+@pytest.mark.parametrize("topology", ["scoped", "absent"])
+@pytest.mark.parametrize("status", ["active", "finalized"])
+def test_native_owner_cannot_select_coincident_versioned_guest(
+    local_worktree, monkeypatch, capfd, topology, status,
+):
+    from agent_worktrees import claimant, prune
+
+    fixture = local_worktree
+    execution = "guest-space" if topology == "scoped" else "desk-wsl"
+    if topology == "scoped":
+        fixture.topology.write_text(yaml.safe_dump({"machines": {
+            "desk": {"execution_platform": "windows", "physical_host": "desk"},
+            execution: {"execution_platform": "wsl", "physical_host": "desk"},
+        }}), encoding="utf-8")
+    else:
+        fixture.topology.unlink(missing_ok=True)
+    monkeypatch.setattr(cfg, "detect_platform", lambda: "wsl")
+    fixture.data.update(
+        machine="desk", platform="wsl", environment="wsl",
+        execution_machine=execution, status=status,
+    )
+    fixture.ledger.write_text(yaml.safe_dump(fixture.data), encoding="utf-8")
+    machine = execution if topology == "scoped" else "desk"
+    config = replace(
+        fixture.load(), machine=machine, platform="wsl", configured_machine=machine,
+    )
+    monkeypatch.setattr(cfg, "load_config", lambda *a, **k: config)
+    monkeypatch.setattr(cfg, "load_project_config", lambda *a, **k: config)
+    native_ref = f"desk/example/{fixture.checkout.name}"
+    guest_ref = f"{execution}/example/{fixture.checkout.name}"
+    native = tracking.parse_claim_ref(native_ref)
+    assert retained_checkout.resolve_owner(native, config) is None
+    assert execution_spaces.resolve_owner_record_path(native_ref, config)[0] is None
+    assert retained_checkout.resolve_owner(tracking.parse_claim_ref(guest_ref), config) == fixture.ledger
+    before = fixture.ledger.read_bytes()
+    assert claims_cli._claims_settle(Namespace(
+        claim_owner_ref=native_ref, json=True, released=False,
+    ), "retained-resource") != 0
+    capfd.readouterr()
+    assert fixture.ledger.read_bytes() == before
+    assert claimant.local_claimant_alive(native_ref) is None
+    assert claimant.resolve_claimant_alive(native_ref, allow_remote=False) is None
+    assert claimant.local_claimant_alive(guest_ref) is (status == "active")
+    assert claimant.resolve_claimant_alive(guest_ref, allow_remote=False) is (status == "active")
+    record = tracking.load_record(fixture.ledger)
+    child = replace(record, status="active", owner_ref=native_ref, resources=[])
+    verdict = prune.assess(
+        child, git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.UNUSED),
+        turn_count=0, claimant_alive=claimant.local_claimant_alive,
+    )
+    assert not verdict.safe and verdict.category == "claimed"
+    assert fixture.ledger.read_bytes() == before
