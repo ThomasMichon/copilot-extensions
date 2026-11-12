@@ -12,7 +12,7 @@ CONTRACT = {
     "name": "agent-mcp.session-owner-handoff",
     "minimum": 1,
     "maximum": 1,
-    "capabilities": ["explicit-native-owner-pair"],
+    "capabilities": ["explicit-native-owner-pair", "optional-physical-owner-entry-v1"],
 }
 
 
@@ -28,6 +28,7 @@ def report() -> dict[str, object]:
     from . import forward, incoming
     from .custody_contract import CONTRACT as custody_contract
     from .custody_lifetime import SessionOwner
+    from .owner_entry import launch_environment
 
     layout = incoming.require_selected()
     if layout is None:
@@ -52,6 +53,14 @@ def report() -> dict[str, object]:
             "python": str(Path(sys.executable).resolve()),
         },
         "custody": custody_contract,
+        "entry": {
+            # Resolving the executable symlink would discard its venv selection.
+            "python": str(Path(sys.executable).absolute()),
+            "prefix": str(Path(sys.prefix).resolve()),
+            "module": str(Path(__file__).with_name("owner_entry.py").resolve()),
+            "cwd": os.getcwd(),
+            "environment": launch_environment(),
+        },
         "invocation_allowed": forward._multiplex_enabled() and forward._ensure_serve_enabled(),
     }
 

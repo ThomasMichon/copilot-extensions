@@ -7,6 +7,90 @@ activated production reattachment feature. The serve provider can advertise a
 backend capability only from an admitted physical generation. Paired explicit
 owner CLI arguments select custody; default callers and installers do not.
 
+## Explicit Linux client exec
+
+`exec-client --mcp-config <entries.json> --server <name> -- <native-copilot> ...`
+is an opt-in originating-owner producer. The input contains a `mcpServers`
+object describing already configured entries; repeat `--server` for the exact
+names to override. It does not discover or activate other servers.
+
+The launcher captures its own native PID and birth, then replaces itself with
+the selected native Linux `copilot` executable. The client therefore retains
+that identity instead of inheriting a shell or headed coordinator's identity.
+No parent waiter, new daemon, session-file discovery, owner environment variable,
+SDK extension or desktop observer is introduced.
+
+Each selected entry must have a literal absolute `agent-mcp` command, or an
+absolute Python command with `[-I] -m agent_mcp`, followed by `bridge` or
+`forward`. A stdlib-only bootstrap snapshot runs at the actual MCP start,
+with the entry's unchanged environment and inherited cwd. It queries that
+entry's selected provider with probe-only `AGENT_MCP_NO_SELFPROVISION=1`;
+the eventual server does not inherit that probe-only override.
+The snapshot pins the originating Linux process through a pidfd and its native
+birth before probing. Every physical or ordinary exec path rechecks that retained
+observation, including unsupported-query fallback and failed-exec fallback.
+This keeps origin admission independent of an installed MCP runtime; it adds no
+observer thread or lifetime waiter.
+Pair support alone does not qualify adoption. The new optional-entry
+capability identifies a physical interpreter, prefix, receiver module, actual
+probe cwd and explicit wrapper-owned environment delta, including payload-root
+and bootstrap-trace fields. The bootstrap execs that immutable
+receiver, rather than emitting new syntax through a mutable wrapper.
+
+The receiver rechecks its actual code, probe cwd, selection, startup opt-outs, native
+owner and cold custody context before any backend startup. An incompatible
+cwd or unsupported sharing context executes the original ordinary command
+with its original environment and cwd; it never forces the project into the
+custody home. A changed selection, old provider, failed read-only query or
+unsupported optional contract also retains ordinary behavior before effects.
+No application operation is retried after startup or intake. The existing
+explicit paired `bridge`/`forward` flags remain strict and never acquire this
+optional fallback. A lost or unverifiable originating owner also refuses rather
+than becoming an unowned ordinary call. The receiver pins that owner before any
+context/fallback decision and rechecks the retained native observation immediately
+before either ordinary exec or adopted startup. Interpolated and already
+ownership-bound entries are not overridden.
+
+Unreferenced bootstrap-trace fields remain in the physical upstream environment
+but supporting peers exclude them from shared-context identity. The existing
+`agent-mcp.execution-context/2` descriptor additively declares
+`trace_bookkeeping: 1`; callers select that mode in their context request only
+when the peer advertises it. Missing declarations and old requests retain the
+original v2 hashing algorithm, including its limitations; unknown requested modes
+refuse before configuration loading. There is no package-version inference.
+Without the negotiated mode, each launch timestamp can reject an equivalent
+second client against an older custodian. Explicit configuration references
+always keep those values semantically significant.
+
+Request-context negotiation does not upgrade the private checkpoint binding.
+That binding still uses the original complete identity. The optional receiver
+therefore declines custody when trace normalization would change the legacy
+checkpoint identity, using ordinary execution before effects. Qualifying that
+trace-sensitive binding across physical replacement remains an open #10486
+adoption item, not an incoming-installation gate. The configuration-consumption
+fixture does not assert that this retained-session gap is closed.
+
+The session-only `--additional-mcp-config` overlay is a sealed anonymous file,
+read through the client's inherited Linux descriptor. Configuration and env
+values stay in the entry environment, not the bootstrap request or a persistent
+file. Only the provider's declared wrapper-owned path/interpreter/trace delta travels
+to the physical receiver. Cwd,
+environment and literal native arguments otherwise remain unchanged. The OS
+reclaims the descriptor on client exit; no filesystem artifact needs a cleaner.
+Failed exec closes it and reports failure, without starting a replacement client.
+
+This first eligible caller requires Linux `memfd`/sealing support and a direct
+native ELF client, not a script/forwarder. Existing additional MCP overlays and
+literal `--` delimiters are refused rather than reinterpreted. Windows and
+other unqualified launch paths refuse this new command before client/provider
+effects; existing `bridge`/`forward` behavior is unchanged. The real-process
+fixture proves identity retention and anonymous-overlay reading with a
+synthetic native client. A separate offline native Copilot packet compares
+ordinary and overlay launches in the same environment, checks actual MCP
+consumption and owner identity against a controlled physical receiver, and
+requires exact child settlement. That fixture is not installed custody
+adoption, Windows pre-execution capture or whole-effort acceptance.
+
 An explicitly custody-bound single-stdio `BridgeSession` can export quiescent
 JSON data and reconstruct its decorator pipeline over a supplied retained
 transport. The private binding covers the logical custody session and the
