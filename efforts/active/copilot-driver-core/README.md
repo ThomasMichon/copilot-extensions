@@ -179,7 +179,8 @@ native qualification and activation need their existing separate admission.
   agents or schedules; unknown state is not an empty pending set.
 - [ ] Review and qualify uncertainty-preserving crash recovery through the
   original lifecycle owner, without treating clean SDK detach as a prerequisite
-  or relaxing scope settlement, authorization and no-replay gates.
+  or relaxing scope settlement, authorization and no-replay gates; begin with
+  the [original-owner admission binding](implementation.md#original-owner-recovery-admission-binding).
 - [ ] Qualify ordinary/hoisted receiving, supported skew/rollback, endpoint and
   process identity, exact cleanup and measured cold/warm readiness.
 - [ ] Establish independent POSIX owner-death custody and native Linux/pod
