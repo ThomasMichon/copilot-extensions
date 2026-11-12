@@ -1,0 +1,9 @@
+{
+  "comment": "Route '<repo> ssh setup|status' from the caller's project worktree (else the anchor), like mesh-status/refresh-mesh.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

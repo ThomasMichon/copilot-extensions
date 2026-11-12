@@ -45,12 +45,14 @@
     },
     "capabilities": {
       "type": "object",
-      "description": "Which lifecycle verbs the transport implements. emit-profile + verify are satisfied by the core; install-client and provision-server are transport-owned.",
+      "description": "Which lifecycle verbs the transport implements. emit-profile + verify are satisfied by the core; install-client, provision-server, setup and status are transport-owned.",
       "properties": {
         "install-client":   { "type": "boolean", "description": "Transport installs a client binary. On Windows the install-client entrypoint should prefer a real standalone exe on PATH ahead of WinGet\\Links; App Execution Alias shims fail over non-interactive SSH. See docs/transport-provider-contract.md." },
         "emit-profile":     { "type": "boolean" },
         "verify":           { "type": "boolean" },
-        "provision-server": { "type": "boolean" }
+        "provision-server": { "type": "boolean" },
+        "setup":            { "type": "boolean", "description": "Driver setup: per-machine provider setup run by `agent-ssh setup` through entrypoints.setup. See docs/transport-provider-contract.md (Driver setup and status)." },
+        "status":           { "type": "boolean", "description": "Driver status: read-only per-machine readiness run by `agent-ssh status` through entrypoints.status. When absent, status falls back to setup without --apply." }
       }
     },
     "config_schema": {
@@ -59,7 +61,7 @@
     },
     "entrypoints": {
       "type": "object",
-      "description": "Transport-owned scripts the core shells to for verbs the core does not itself implement (install-client, provision-server). Dual posix/windows per cross-platform-parity.",
+      "description": "Transport-owned scripts the core shells to for verbs the core does not itself implement (install-client, provision-server, setup, status). Dual posix/windows per cross-platform-parity; paths are relative to the module directory. setup/status entrypoints follow the agent-ssh.driver-result v1 protocol.",
       "additionalProperties": {
         "type": "object",
         "properties": {

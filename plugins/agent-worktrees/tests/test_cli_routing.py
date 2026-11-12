@@ -582,7 +582,7 @@ def test_router_non_project_slug_omits_project(monkeypatch):
 
 
 @pytest.mark.parametrize(
-    "slug,verb", [("ssh", "mesh-status")],
+    "slug,verb", [("ssh", "mesh-status"), ("ssh", "setup"), ("ssh", "status")],
 )
 def test_router_project_chdir_verb_selects_checkout(monkeypatch, slug, verb):
     """`<repo> ssh mesh-status` pins the child's cwd to the resolved project
@@ -592,13 +592,16 @@ def test_router_project_chdir_verb_selects_checkout(monkeypatch, slug, verb):
     the plugin-stack tier, so the router resolves+chdirs itself rather than
     forwarding --project for agent-ssh to resolve (which would be a forbidden
     upward call)."""
-    assert m._PROJECT_CHDIR_VERBS["ssh"] == frozenset({"mesh-status", "refresh-mesh"})
+    assert m._PROJECT_CHDIR_VERBS["ssh"] == frozenset(
+        {"mesh-status", "refresh-mesh", "setup", "status"}
+    )
     assert "ssh" not in m._PROJECT_ARG_SLUGS
     import subprocess as _sp
 
     stub = Path(__file__)  # any existing file; _sibling_binstub is stubbed out
     monkeypatch.setattr(m, "_sibling_binstub", lambda slug: stub)
     monkeypatch.setattr(m, "_resolve_project_checkout", lambda project: Path("/resolved/demo"))
+    monkeypatch.setattr(m, "_caller_project_worktree", lambda anchor: None)
     seen = {}
 
     class _R:
@@ -616,6 +619,59 @@ def test_router_project_chdir_verb_selects_checkout(monkeypatch, slug, verb):
     assert seen["cwd"] == str(Path("/resolved/demo"))
     assert "--project" not in seen["cmd"]  # chdir'd, not forwarded as a flag
     assert "AGENT_WORKTREES_PROJECT_ROUTED" not in (seen["env"] or {})
+
+
+def test_router_ssh_setup_prefers_caller_worktree_and_propagates_exit(monkeypatch, tmp_path):
+    """`<repo> ssh setup …` runs agent-ssh from the caller's own worktree when
+    the caller is inside that project, forwards every argument untouched, and
+    returns agent-ssh's exit code (2 = operator action required)."""
+    import subprocess as _sp
+
+    worktree = tmp_path / "worktree"
+    monkeypatch.setattr(m, "_sibling_binstub", lambda slug: Path(__file__))
+    monkeypatch.setattr(m, "_resolve_project_checkout", lambda project: tmp_path / "anchor")
+    monkeypatch.setattr(
+        m, "_caller_project_worktree",
+        lambda anchor: worktree if anchor == tmp_path / "anchor" else None,
+    )
+    seen = {}
+
+    def _fake_run(cmd, *a, **kw):
+        seen["cmd"] = cmd
+        seen["cwd"] = kw.get("cwd")
+        return SimpleNamespace(returncode=2)
+
+    monkeypatch.setattr(_sp, "run", _fake_run)
+    args = ["setup", "--apply", "--interactive", "--machine", "workstation", "--json"]
+    rc = m._route_to_sibling_plugin("ssh", "demo", args)
+    assert rc == 2
+    assert seen["cwd"] == str(worktree)
+    assert seen["cmd"][-len(args):] == args
+    assert "--project" not in seen["cmd"]
+
+
+def test_router_missing_ssh_binstub_fails(monkeypatch, capsys):
+    monkeypatch.setattr(m, "_sibling_binstub", lambda slug: None)
+    assert m._route_to_sibling_plugin("ssh", "demo", ["setup"]) == 1
+    assert "agent-ssh" in capsys.readouterr().err
+
+
+def test_caller_project_worktree_outside_project_is_none(monkeypatch):
+    from agent_worktrees import invocation_project
+
+    monkeypatch.setattr(invocation_project, "_cwd_is_inside_project", lambda anchor: False)
+    assert _fdc._caller_project_worktree(Path("/anchor")) is None
+
+
+def test_caller_project_worktree_inside_project_returns_toplevel(monkeypatch, tmp_path):
+    from agent_worktrees import invocation_project
+    import subprocess as _sp
+
+    monkeypatch.setattr(invocation_project, "_cwd_is_inside_project", lambda anchor: True)
+    monkeypatch.setattr(
+        _sp, "run", lambda *a, **kw: SimpleNamespace(returncode=0, stdout=f"{tmp_path}\n"),
+    )
+    assert _fdc._caller_project_worktree(Path("/anchor")) == tmp_path
 
 
 @pytest.mark.parametrize(

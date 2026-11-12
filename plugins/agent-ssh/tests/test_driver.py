@@ -1,0 +1,422 @@
+"""Driver setup/status contract (agent-ssh setup / agent-ssh status)."""
+
+from __future__ import annotations
+
+import json
+import subprocess
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+from agent_ssh import __main__ as cli
+from agent_ssh import driver as d
+
+DRIVER = d.Driver("example-provider", "example")
+
+
+def _result(state="ready", requests=None, **extra):
+    doc = {
+        "schema": "agent-ssh.driver-result",
+        "version": 1,
+        "state": state,
+        "detail": f"{state} detail",
+        "auth_requests": requests or [],
+    }
+    doc.update(extra)
+    return doc
+
+
+def _auth(key="login", command=None):
+    return {
+        "key": key,
+        "driver": DRIVER.label,
+        "machine": "workstation",
+        "reason": "provider sign-in required",
+        "command": command or ["example-cli", "login"],
+    }
+
+
+def _write_module(root: Path, *, setup=True, status=True, module="example") -> Path:
+    mod_dir = root / "transports" / module
+    (mod_dir / "scripts").mkdir(parents=True)
+    for name in ("setup.sh", "setup.ps1", "status.sh", "status.ps1"):
+        (mod_dir / "scripts" / name).write_text("", encoding="utf-8")
+    lines = [
+        f"module: {module}",
+        "kind: transport",
+        "produces: {ssh_profile: true, keyed_by: machine-name}",
+        "inbound_ports: none",
+        "capabilities:",
+        f"  setup: {str(setup).lower()}",
+        f"  status: {str(status).lower()}",
+        "entrypoints:",
+        "  setup: {posix: scripts/setup.sh, windows: scripts/setup.ps1}",
+        "  status: {posix: scripts/status.sh, windows: scripts/status.ps1}",
+    ]
+    path = mod_dir / "module.yaml"
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return path
+
+
+def _write_machines(root: Path, driver_block="      driver: {plugin: example-provider, module: example}\n") -> Path:
+    path = root / "machines.yaml"
+    path.write_text(
+        "machines:\n"
+        "  workstation:\n"
+        "    hostname: workstation\n"
+        "    ssh:\n"
+        f"{driver_block}"
+        "  laptop:\n"
+        "    hostname: laptop\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+class FakeRunner:
+    """Scripted entrypoint runs; records argv and kwargs."""
+
+    def __init__(self, *outputs):
+        self.outputs = list(outputs)
+        self.calls = []
+
+    def __call__(self, argv, **kwargs):
+        self.calls.append((argv, kwargs))
+        doc, code = self.outputs.pop(0)
+        stdout = doc if isinstance(doc, bytes) else json.dumps(doc).encode()
+        return SimpleNamespace(returncode=code, stdout=stdout, stderr=b"")
+
+
+# --- declaration ------------------------------------------------------------
+
+
+def test_parse_driver_valid_and_absent():
+    assert d.parse_driver("w", {"ssh": {"driver": {"plugin": "example-provider", "module": "example"}}}) == DRIVER
+    assert d.parse_driver("w", {"hostname": "w"}) is None
+    assert d.parse_driver("w", {"ssh": {"ready": True}}) is None
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "example",
+        {"plugin": "example-provider"},
+        {"plugin": "", "module": "example"},
+        {"plugin": "Example", "module": "example"},
+        {"plugin": "example-provider", "module": "../x"},
+        {"plugin": "example-provider", "module": "example", "extra": 1},
+        {"plugin": 1, "module": "example"},
+    ],
+)
+def test_parse_driver_rejects_invalid(raw):
+    with pytest.raises(d.DriverError):
+        d.parse_driver("w", {"ssh": {"driver": raw}})
+
+
+# --- local machine selection -----------------------------------------------
+
+
+MACHINES = {
+    "workstation": {"hostname": "workstation.example.com"},
+    "laptop": {},
+    "twin": {"hostname": "twin"},
+    "twin-copy": {"hostname": "twin"},
+}
+
+
+def test_select_local_machine_matches_hostname_and_key_fallback():
+    assert d.select_local_machine(MACHINES, hostname="workstation") == "workstation"
+    assert d.select_local_machine(MACHINES, hostname="LAPTOP") == "laptop"
+
+
+def test_select_local_machine_none_and_ambiguous():
+    with pytest.raises(d.DriverError, match="no machines.yaml entry"):
+        d.select_local_machine(MACHINES, hostname="elsewhere")
+    with pytest.raises(d.DriverError, match="multiple"):
+        d.select_local_machine(MACHINES, hostname="twin")
+
+
+def test_select_local_machine_override():
+    assert d.select_local_machine(MACHINES, "twin", hostname="elsewhere") == "twin"
+    with pytest.raises(d.DriverError):
+        d.select_local_machine(MACHINES, "missing")
+
+
+# --- module discovery -------------------------------------------------------
+
+
+def _repo_with_directory_marketplace(tmp_path: Path, *, manifest=True) -> Path:
+    repo = tmp_path / "repo"
+    (repo / ".github" / "copilot").mkdir(parents=True)
+    (repo / ".github" / "copilot" / "settings.json").write_text(
+        json.dumps({"extraKnownMarketplaces": {
+            "local": {"source": {"source": "directory", "path": "./plugins-src"}},
+            "remote": {"source": {"source": "github", "repo": "example/remote"}},
+        }}),
+        encoding="utf-8",
+    )
+    market = repo / "plugins-src"
+    if manifest:
+        (market / ".claude-plugin").mkdir(parents=True)
+        (market / ".claude-plugin" / "marketplace.json").write_text(
+            json.dumps({"plugins": [{"name": "example-provider", "source": "./providers/example"}]}),
+            encoding="utf-8",
+        )
+        _write_module(market / "providers" / "example")
+    else:
+        _write_module(market / "example-provider")
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    return repo
+
+
+@pytest.mark.parametrize("manifest", [True, False])
+def test_find_module_directory_marketplace(tmp_path, manifest):
+    repo = _repo_with_directory_marketplace(tmp_path, manifest=manifest)
+    found = d.find_module(DRIVER, repo, home=tmp_path / "home", payload_root=lambda: None)
+    sub = "providers/example" if manifest else "example-provider"
+    assert found == (repo / "plugins-src" / sub / "transports" / "example" / "module.yaml").resolve()
+
+
+def test_directory_marketplace_wins_over_installed_copy(tmp_path):
+    repo = _repo_with_directory_marketplace(tmp_path)
+    home = tmp_path / "home"
+    _write_module(home / ".copilot" / "installed-plugins" / "local" / "example-provider")
+    found = d.find_module(DRIVER, repo, home=home, payload_root=lambda: None)
+    assert "plugins-src" in str(found)
+
+
+def test_find_module_installed_plugins_and_ambiguity(tmp_path):
+    cwd = tmp_path / "plain"
+    cwd.mkdir()
+    home = tmp_path / "home"
+    installed = home / ".copilot" / "installed-plugins"
+    _write_module(installed / "market-a" / "example-provider")
+    found = d.find_module(DRIVER, cwd, home=home, payload_root=lambda: None)
+    assert found == (installed / "market-a" / "example-provider" / "transports" / "example" / "module.yaml").resolve()
+    _write_module(installed / "market-b" / "example-provider")
+    with pytest.raises(d.DriverError, match="ambiguous") as err:
+        d.find_module(DRIVER, cwd, home=home, payload_root=lambda: None)
+    assert "market-a" in str(err.value) and "market-b" in str(err.value)
+
+
+def test_find_module_agent_ssh_payload(tmp_path):
+    payload = tmp_path / "payload"
+    _write_module(payload, module="example")
+    found = d.find_module(
+        d.Driver("agent-ssh", "example"), tmp_path, home=tmp_path / "home", payload_root=lambda: payload,
+    )
+    assert found.parent.name == "example"
+
+
+def test_find_module_missing(tmp_path):
+    with pytest.raises(d.DriverError, match="not found"):
+        d.find_module(DRIVER, tmp_path, home=tmp_path / "home", payload_root=lambda: None)
+
+
+def test_entrypoint_must_stay_inside_module(tmp_path):
+    path = _write_module(tmp_path)
+    module = {"entrypoints": {"setup": {"posix": "../../escape.sh", "windows": "../../escape.ps1"}}}
+    with pytest.raises(d.DriverError, match="inside"):
+        d.entrypoint_script(path, module, "setup", windows=False)
+
+
+# --- result parsing ---------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "state,code", [("ready", 0), ("planned", 0), ("applied", 0), ("failed", 1)],
+)
+def test_parse_result_valid_states(state, code):
+    result = d.parse_result(json.dumps(_result(state)), code, driver=DRIVER, machine="workstation")
+    assert result["state"] == state
+    assert d.exit_code(result) == code
+
+
+def test_parse_result_operator_action():
+    doc = _result("operator-action-required", [_auth()])
+    result = d.parse_result(json.dumps(doc), 2, driver=DRIVER, machine="workstation")
+    assert result["auth_requests"] == [_auth()]
+    assert d.exit_code(result) == 2
+
+
+def test_parse_result_auth_requests_optional_when_empty():
+    doc = _result("ready")
+    del doc["auth_requests"]
+    assert d.parse_result(json.dumps(doc), 0, driver=DRIVER, machine="workstation")["state"] == "ready"
+
+
+@pytest.mark.parametrize(
+    "stdout,code",
+    [
+        (b"not json", 0),
+        (json.dumps(["list"]).encode(), 0),
+        (json.dumps(_result(schema="other")).encode(), 0),
+        (json.dumps(_result(version=2)).encode(), 0),
+        (json.dumps(_result(version=True)).encode(), 0),
+        (json.dumps(_result(state="unknown")).encode(), 0),
+        (json.dumps(_result(extra=1)).encode(), 0),
+        (json.dumps(_result("ready")).encode(), 2),
+        (json.dumps(_result("operator-action-required")).encode(), 2),
+        (json.dumps(_result("ready", [_auth()])).encode(), 0),
+        (json.dumps(_result("operator-action-required", [_auth(command="example-cli login")])).encode(), 2),
+        (json.dumps(_result("operator-action-required", [_auth(command=["example-cli", 1])])).encode(), 2),
+        (json.dumps(_result("operator-action-required", [{**_auth(), "machine": "laptop"}])).encode(), 2),
+        (json.dumps(_result("operator-action-required", [{**_auth(), "driver": "other:example"}])).encode(), 2),
+        (b"{" + b" " * (d.MAX_OUTPUT_BYTES + 1) + b"}", 0),
+    ],
+)
+def test_parse_result_malformed_is_failed(stdout, code):
+    result = d.parse_result(stdout, code, driver=DRIVER, machine="workstation")
+    assert result["state"] == "failed"
+    assert result["auth_requests"] == []
+    assert d.exit_code(result) == 1
+
+
+# --- end-to-end through run() -----------------------------------------------
+
+
+@pytest.fixture
+def topology(tmp_path):
+    machines = _write_machines(tmp_path)
+    module = _write_module(tmp_path / "provider")
+    return machines, module
+
+
+def _request(topology, **kw):
+    machines, module = topology
+    return d.Request(machines=machines, module=module, cwd=machines.parent, **kw)
+
+
+def test_setup_plan_invocation_is_headless_and_noninteractive(topology):
+    runner = FakeRunner((_result("planned"), 0))
+    result = d.run(_request(topology, verb="setup"), runner=runner, hostname="workstation")
+    assert result["state"] == "planned"
+    argv, kwargs = runner.calls[0]
+    machines = str(topology[0].resolve())
+    assert argv[-5:] == ["--machine", "workstation", "--machines", machines, "--json"]
+    assert "--apply" not in argv and "--interactive" not in argv
+    assert kwargs["stdin"] is subprocess.DEVNULL
+    assert kwargs["capture_output"] is True
+
+
+def test_setup_apply_passes_flag(topology):
+    runner = FakeRunner((_result("applied"), 0))
+    d.run(_request(topology, verb="setup", apply=True), runner=runner, hostname="workstation")
+    assert "--apply" in runner.calls[0][0]
+
+
+def test_noninteractive_never_runs_auth_commands(topology):
+    runner = FakeRunner((_result("operator-action-required", [_auth()]), 2))
+
+    def _never(command):
+        raise AssertionError("non-interactive mode must not run auth commands")
+
+    result = d.run(_request(topology, verb="setup", apply=True), runner=runner,
+                   auth_runner=_never, hostname="workstation")
+    assert result["state"] == "operator-action-required"
+    assert d.exit_code(result) == 2
+    assert len(runner.calls) == 1
+
+
+def test_interactive_runs_each_auth_key_once_then_reruns_setup(topology):
+    requests = [_auth("login"), _auth("login"), _auth("enroll", ["example-cli", "enroll"])]
+    runner = FakeRunner(
+        (_result("operator-action-required", requests), 2),
+        (_result("applied"), 0),
+    )
+    ran = []
+    result = d.run(
+        _request(topology, verb="setup", apply=True, interactive=True), runner=runner,
+        auth_runner=lambda command: ran.append(command) or 0, hostname="workstation",
+        console=lambda: True,
+    )
+    assert ran == [["example-cli", "login"], ["example-cli", "enroll"]]
+    assert len(runner.calls) == 2
+    assert all("--interactive" in call[0] and "--apply" in call[0] for call in runner.calls)
+    assert result["state"] == "applied"
+
+
+def test_interactive_still_required_after_rerun_exits_2(topology):
+    pending = (_result("operator-action-required", [_auth()]), 2)
+    runner = FakeRunner(pending, pending)
+    result = d.run(
+        _request(topology, verb="setup", interactive=True), runner=runner,
+        auth_runner=lambda command: 0, hostname="workstation", console=lambda: True,
+    )
+    assert len(runner.calls) == 2
+    assert d.exit_code(result) == 2
+
+
+def test_interactive_requires_console(topology):
+    runner = FakeRunner()
+    result = d.run(_request(topology, verb="setup", interactive=True), runner=runner,
+                   hostname="workstation", console=lambda: False)
+    assert result["state"] == "failed" and "console" in result["detail"]
+    assert runner.calls == []
+
+
+def test_status_uses_status_entrypoint(topology):
+    runner = FakeRunner((_result("ready"), 0))
+    d.run(_request(topology, verb="status"), runner=runner, hostname="workstation")
+    assert "status." in " ".join(runner.calls[0][0])
+
+
+def test_status_falls_back_to_setup_plan(tmp_path):
+    machines = _write_machines(tmp_path)
+    module = _write_module(tmp_path / "provider", status=False)
+    runner = FakeRunner((_result("planned"), 0))
+    req = d.Request(verb="status", machines=machines, module=module, cwd=tmp_path)
+    d.run(req, runner=runner, hostname="workstation")
+    argv = runner.calls[0][0]
+    assert "setup." in " ".join(argv) and "--apply" not in argv and "--interactive" not in argv
+
+
+def test_no_setup_capability_is_ready(tmp_path):
+    machines = _write_machines(tmp_path)
+    module = _write_module(tmp_path / "provider", setup=False, status=False)
+    runner = FakeRunner()
+    req = d.Request(verb="setup", machines=machines, module=module, cwd=tmp_path)
+    result = d.run(req, runner=runner, hostname="workstation")
+    assert result["state"] == "ready" and "no driver setup" in result["detail"]
+    assert runner.calls == []
+
+
+def test_undeclared_driver_is_ready(tmp_path):
+    machines = _write_machines(tmp_path, driver_block="      ready: true\n")
+    result = d.run(d.Request(verb="setup", machines=machines, cwd=tmp_path), runner=FakeRunner(),
+                   hostname="workstation")
+    assert result["state"] == "ready" and "no driver setup" in result["detail"]
+
+
+def test_invalid_driver_declaration_fails(tmp_path):
+    machines = _write_machines(tmp_path, driver_block="      driver: {plugin: example-provider}\n")
+    result = d.run(d.Request(verb="setup", machines=machines, cwd=tmp_path), runner=FakeRunner(),
+                   hostname="workstation")
+    assert result["state"] == "failed"
+
+
+def test_entrypoint_launch_error_is_failed(topology):
+    def _boom(argv, **kwargs):
+        raise OSError("missing interpreter")
+
+    result = d.run(_request(topology, verb="setup"), runner=_boom, hostname="workstation")
+    assert result["state"] == "failed"
+
+
+def test_script_argv_mapping(tmp_path):
+    assert d.script_argv(tmp_path / "s.ps1", windows=True)[:5] == [
+        "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+    ]
+    assert d.script_argv(tmp_path / "s.cmd", windows=True)[1:3] == ["/d", "/c"]
+    assert d.script_argv(tmp_path / "s.py", windows=False)[1] == str(tmp_path / "s.py")
+    assert d.script_argv(tmp_path / "s.sh", windows=False) == [str(tmp_path / "s.sh")]
+
+
+def test_cli_json_output_and_exit_code(topology, monkeypatch, capsys):
+    pending = _result("operator-action-required", [_auth()])
+    monkeypatch.setattr(d, "run", lambda req: pending)
+    machines, module = topology
+    rc = cli.main(["setup", "--machines", str(machines), "--module", str(module), "--json"])
+    assert rc == 2
+    assert json.loads(capsys.readouterr().out) == pending

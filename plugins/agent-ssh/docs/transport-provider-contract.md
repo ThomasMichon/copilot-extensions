@@ -116,10 +116,102 @@ the managed filename namespace are rejected before publication.
 | `doctor` | core (`agent-ssh doctor`, exhaustive human/JSON, report-only) |
 | `install-client` | transport (if it needs a client binary) |
 | `provision-server` | transport (optional; may be operator-manual) |
+| `setup` / `status` | transport driver, run by `agent-ssh setup` / `agent-ssh status` (see below) |
 
 `entrypoints` in `module.yaml` are metadata for installers/orchestrators. The
 core `emit-profile` and `verify` commands do not call transport `install-client`
 or `provision-server` scripts.
+
+## Driver setup and status
+
+Some transports need provider-owned per-machine setup (for example creating or
+enrolling a key, or a one-time interactive provider sign-in). A machine selects
+the transport module that owns this in `machines.yaml`:
+
+```yaml
+machines:
+  workstation:
+    hostname: workstation
+    ssh:
+      driver: { plugin: example-provider, module: example }
+```
+
+Both values must be names matching `^[a-z0-9][a-z0-9-]*$`; the mapping must
+contain exactly `plugin` and `module`. A machine without `ssh.driver` has no
+driver setup (`state: ready`).
+
+**Resolution.** `agent-ssh setup|status` resolve `machines.yaml` like
+`session-snapshot` (`--machines`, else the calling repo, else the bound external
+state root), pick the local machine by matching `socket.gethostname()` against
+each entry's `hostname` (falling back to its key; exactly one match, or pass
+`--machine <key>`), then locate `<plugin-root>/transports/<module>/module.yaml`.
+Plugin roots are searched in tiers; the first tier with a hit wins and must have
+exactly one distinct match (otherwise the result is `failed`, listing the
+candidates):
+
+1. agent-ssh's own payload, when `plugin` is `agent-ssh`;
+2. directory-source marketplaces in the calling repo's
+   `.github/copilot/settings.json` (`extraKnownMarketplaces.<name>.source` with
+   `source: directory` and a repo-relative `path`; plugin directories come from
+   `<path>/.claude-plugin/marketplace.json` or
+   `<path>/.github/plugin/marketplace.json`, else `<path>/<plugin>`);
+3. installed plugins, `~/.copilot/installed-plugins/<marketplace>/<plugin>`.
+
+`--module <path to module.yaml>` overrides discovery (the `module` name must
+still match the declaration).
+
+**Capabilities and entrypoints.** `capabilities.setup` / `capabilities.status`
+(booleans) enable `entrypoints.setup` / `entrypoints.status` (`posix` / `windows`
+script paths relative to the module directory). Without `setup`, `agent-ssh
+setup` reports `ready` ("no driver setup"). Without `status`, `agent-ssh status`
+runs the setup entrypoint in plan mode (no `--apply`, never `--interactive`).
+On Windows `.ps1` runs via `powershell -NoProfile -ExecutionPolicy Bypass -File`,
+`.cmd`/`.bat` via `cmd /d /c`, `.py` via the current Python; other files (and
+every POSIX script except `.py`) execute directly. Entrypoints run headless
+(no console window), with stdin closed and output captured, from the module
+directory.
+
+**Invocation.**
+
+```text
+<entry> --machine <local-key> --machines <absolute machines.yaml> [--apply] [--interactive] --json
+```
+
+Without `--apply` the entrypoint plans only. Without `--interactive` it must
+never prompt; anything that needs the operator is reported as an auth request.
+stdout must be exactly one JSON object (at most 64 KiB):
+
+```json
+{"schema": "agent-ssh.driver-result", "version": 1,
+ "state": "ready|planned|applied|operator-action-required|failed",
+ "detail": "human summary",
+ "auth_requests": [{"key": "<stable collapse key>", "driver": "<plugin>:<module>",
+                    "machine": "<key>", "reason": "...", "command": ["argv0", "arg"]}]}
+```
+
+| state | exit code | auth_requests |
+|---|---|---|
+| `ready`, `planned`, `applied` | `0` | must be empty |
+| `operator-action-required` | `2` | at least one |
+| `failed` | `1` | must be empty |
+
+Validation is strict: unknown fields, a wrong schema/version, non-string argv
+entries, `driver`/`machine` values that differ from the invoked driver and
+machine, oversized output, or an exit code that disagrees with `state` all turn
+the result into `failed`. `auth_requests` may be omitted when empty. At most 32
+requests and 64 argv entries are accepted; strings are bounded to 4096 chars.
+
+**Interactive mode.** `agent-ssh setup --interactive` requires an attached
+console. When the result is `operator-action-required`, agent-ssh runs each
+request's `command` once per distinct `key`, attached to the console (the only
+step that inherits it), then re-runs the setup entrypoint once with the same
+flags and reports that second result (exit `2` if still
+`operator-action-required`).
+
+`agent-ssh` prints the validated result (`--json`) or a short summary. The
+`auth_requests` list is the input contract for an operator auth queue: unattended
+runs (for example renewal) report requests instead of prompting, and the `key`
+lets a queue collapse duplicates.
 
 ## Failure behavior
 

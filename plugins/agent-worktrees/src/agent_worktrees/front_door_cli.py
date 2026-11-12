@@ -159,8 +159,10 @@ _PROJECT_ARG_SLUGS = frozenset({"bridge", "codespaces", "vault"})
 # the plugin-stack tier (docs/patterns/a-la-carte-independence.md), so it must
 # never reach upward to resolve a project name itself; agent-worktrees already
 # owns that registry, so the router resolves it and hands the child an
-# already-correct cwd. Scoped per-verb, not per-slug: only ``mesh-status``/
-# ``refresh-mesh`` resolve ``machines.yaml`` by ascending from cwd -- every
+# already-correct cwd: the caller's own worktree when its cwd is inside that
+# project, else the project anchor. Scoped per-verb, not per-slug: only
+# ``mesh-status``/``refresh-mesh``/``setup``/``status`` resolve
+# ``machines.yaml`` by ascending from cwd -- every
 # other ``ssh`` verb (``emit-profile``, ``doctor``, ``verify``, ``explore``,
 # ``restore-host``, ``copilot-config``) either takes its own explicit paths
 # (relative to the caller's actual cwd, which chdir'ing would silently break)
@@ -170,8 +172,29 @@ _PROJECT_ARG_SLUGS = frozenset({"bridge", "codespaces", "vault"})
 # project fails *only* a matched verb's routed call closed, rather than
 # silently running it against the caller's original cwd.
 _PROJECT_CHDIR_VERBS: dict[str, frozenset[str]] = {
-    "ssh": frozenset({"mesh-status", "refresh-mesh"}),
+    "ssh": frozenset({"mesh-status", "refresh-mesh", "setup", "status"}),
 }
+
+
+def _caller_project_worktree(anchor: Path) -> Path | None:
+    """The caller's own checkout when its cwd is inside ``anchor``'s project
+    (a linked worktree resolves to its anchor), else ``None``. Lets a
+    chdir-pinned verb run against the worktree the operator is working in
+    instead of the anchor."""
+    from . import invocation_project
+
+    try:
+        if not invocation_project._cwd_is_inside_project(anchor):
+            return None
+        done = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            capture_output=True, text=True, timeout=5, stdin=subprocess.DEVNULL,
+            env=git_ops.repository_identity_env(), **no_window_kwargs(),
+        )
+        top = Path(str(done.stdout).strip()) if done.returncode == 0 else None
+    except Exception:
+        return None
+    return top if top is not None and str(top) not in {"", "."} and top.is_dir() else None
 
 
 def _chdir_verb_for(slug: str, rest: list[str]) -> str | None:
@@ -318,7 +341,8 @@ def _route_to_sibling_plugin(slug: str, project: str | None, rest: list[str]) ->
                 file=sys.stderr,
             )
             return 1
-        cwd = str(resolved)
+        worktree = _core_helper("_caller_project_worktree", _caller_project_worktree)(resolved)
+        cwd = str(worktree or resolved)
         child_env.pop("AGENT_WORKTREES_PROJECT_ROUTED", None)
     elif project and slug in _PROJECT_ARG_SLUGS:
         forwarded += ["--project", project]
