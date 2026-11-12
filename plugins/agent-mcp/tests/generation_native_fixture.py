@@ -77,6 +77,7 @@ def emit(message):
 def result(mid):
     return {"jsonrpc":"2.0", "id":mid, "result":{
         "pid":os.getpid(), "initialized":initialized, "mutations":mutations,
+        "upstream_trace":os.environ.get("COPILOT_EXTENSIONS_BOOT_TRACE_SHIM_START_MS"),
         "cancelled":cancelled, "content":[]}}
 for line in sys.stdin:
     message = json.loads(line)
@@ -142,7 +143,9 @@ def build_runtimes(private, retained):
             needle + "\n"
             "            response['result']['backend_pid']=__import__('os').getpid()\n"
             "            response['result']['backend_prefix']=__import__('sys').prefix\n"
-            "            response['result']['backend_module']=__file__",
+            "            response['result']['backend_module']=__file__\n"
+            "            response['result']['backend_trace']=__import__('os').environ.get("
+            "'COPILOT_EXTENSIONS_BOOT_TRACE_SHIM_START_MS')",
         ), encoding="utf-8")
         package = source.payload_package_version(payload, "agent-mcp")
         digest = source.assembly_hash(payload)

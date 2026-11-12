@@ -10,7 +10,7 @@ import pytest
 
 from agent_mcp import backend, execution_context as ec, incoming, ipc
 from agent_mcp.custody_connector import BackendConnector
-from agent_mcp.custody_contract import CONTRACT
+from agent_mcp.custody_contract import CONTRACT, backend_descriptor
 from agent_mcp.custody_session import CustodySession
 from agent_mcp.custody_wire import MAX_FRAME
 from agent_mcp.request_context import CONTEXT_VERSION
@@ -30,6 +30,7 @@ async def endpoint(tmp_path, monkeypatch):
         _draining=False, _closing=False, _attached=0, _touch=lambda: None,
         _send=backend_send, requests=[], writers=[], tasks=[], roots=[],
         change=None, ack=None, hold=False, observed=asyncio.Event(),
+        checkpoint_contract=backend_descriptor(),
     )
     monkeypatch.setattr(ipc, "_HAS_AF_UNIX", False)
     monkeypatch.setattr(incoming, "launch_generation", lambda: fixture._version)
@@ -56,7 +57,8 @@ async def endpoint(tmp_path, monkeypatch):
                         "ok": True, "pong": True, "ready": True, "draining": False,
                         "version": fixture._version, "runtime_root": str(root),
                         "fresh_admission": incoming.CONTRACT,
-                        "custody_backend": CONTRACT, "configuration_context": CONTEXT_VERSION,
+                        "custody_backend": fixture.checkpoint_contract,
+                        "configuration_context": CONTEXT_VERSION,
                         "execution_context": ec.descriptor(),
                     }
                     if fixture.change:
@@ -103,6 +105,7 @@ async def test_connector_composes_with_real_backend_and_preserves_caller_root(tm
         owner = CustodySession(fixture.cfg, output.append, transport=upstream)
         try:
             await owner.start(fixture.connector)
+            assert owner.binding.trace_bookkeeping == 1
             await owner.submit({"jsonrpc": "2.0", "id": 1, "method": "initialize"})
             await settled(owner)
             await owner.handover(fixture.connector)
@@ -119,6 +122,66 @@ async def test_connector_composes_with_real_backend_and_preserves_caller_root(tm
             assert sum(item.get("method") == "initialize" for item in upstream.messages) == 1
         finally:
             await owner.close()
+
+
+async def test_legacy_binding_is_not_upgraded_when_a_capable_backend_arrives(tmp_path, monkeypatch):
+    async with endpoint(tmp_path, monkeypatch) as fixture:
+        fixture.checkpoint_contract = CONTRACT
+        upstream = Upstream()
+        owner = CustodySession(fixture.cfg, lambda _message: None, transport=upstream)
+        try:
+            await owner.start(fixture.connector)
+            binding = owner.binding
+            assert binding.trace_bookkeeping == 0
+            fixture.checkpoint_contract = backend_descriptor()
+            await owner.handover(fixture.connector)
+            assert fixture.connector.checkpoint_trace_bookkeeping == 1
+            assert owner.binding is binding and upstream.starts == 1
+        finally:
+            await owner.close()
+
+
+async def test_unsupported_rollback_retains_the_original_epoch_and_binding(tmp_path, monkeypatch):
+    from agent_mcp.checkpoint import CheckpointRefused
+
+    async with endpoint(tmp_path, monkeypatch) as fixture:
+        upstream, output = Upstream(), []
+        owner = CustodySession(fixture.cfg, output.append, transport=upstream)
+        try:
+            await owner.start(fixture.connector)
+            binding, original = owner.binding, owner.state.current
+            await owner.submit({"jsonrpc": "2.0", "id": 1, "method": "initialize"})
+            await settled(owner)
+            fixture.checkpoint_contract = CONTRACT
+            with pytest.raises(CheckpointRefused, match="cannot import"):
+                await owner.handover(fixture.connector)
+            assert owner.binding is binding and owner.state.current is original
+            assert not owner.state.fenced and not owner.state.uncertain
+            assert owner.state.candidate is None and len(owner._links) == 1
+            await owner.submit({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
+            await settled(owner)
+            assert [item["id"] for item in output] == [1, 2]
+            assert upstream.starts == 1 and upstream.closes == 0
+            assert sum(item.get("method") == "initialize" for item in upstream.messages) == 1
+        finally:
+            await owner.close()
+
+
+@pytest.mark.parametrize("declaration", ["ping", "ack", "both"])
+async def test_binding_support_requires_both_authenticated_backend_declarations(
+    tmp_path, monkeypatch, declaration,
+):
+    async with endpoint(tmp_path, monkeypatch) as fixture:
+        if declaration == "ack":
+            fixture.checkpoint_contract = CONTRACT
+        fixture.ack = {
+            "ok": True, "generation": "incoming",
+            "runtime_root": str(fixture._runtime_root), "epoch": 1,
+            "contract": CONTRACT if declaration == "ping" else backend_descriptor(),
+        }
+        _, writer = await fixture.connector(1)
+        await ipc.aclose_writer(writer)
+        assert fixture.connector.checkpoint_trace_bookkeeping == int(declaration == "both")
 
 
 async def test_connector_does_not_consult_stale_keepers_physical_generation(tmp_path, monkeypatch):
