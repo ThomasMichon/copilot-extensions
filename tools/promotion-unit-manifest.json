@@ -4830,7 +4830,7 @@
         "plugins/agent-worktrees/src/agent_worktrees/status_monitor_drain.py": "4eec0e916a630eca9ceb1b45ac8040a7a0677a58375b31953a1ee014ac8670f7",
         "tools/promotion_unit_tests/test_hook_demand.py": "699e774bfd04d87fd4b4fd7e24f8188cfb7c51557b5bf4c14f7997f418d19a9c",
         "tools/promotion_unit_tests/test_automatic_update_policy.py": "73a271d5c48650a302ef26cf0ddf90673d5d6362a97a1f9ccca7d44fef5bec61",
-        "worktree-manager/scripts/runtime_install.py": "14c4613682c43eb370a7a03af3575db612afefda57e405bf0805926b74c89e57",
+        "worktree-manager/scripts/runtime_install.py": "110ce90d106f09cdda9a6a735ff682d180147521f3ce28e429c3885367b375fd",
         "worktree-manager/src/worktree_manager/update_driver_cli.py": "63923b866274f19c27cc0a18426628fc214180b17e2f69c45d5d70326006b1d9",
         "worktree-manager/src/worktree_manager/project_update_controller.py": "5065025f14813874e60f51fa1ae80be6a18cc02c9cc6991b8a95c3d85bf9a7b9",
         "worktree-manager/src/worktree_manager/engine_acquisition_budget.py": "8184f8974fb1cacb06cdbaeb75bbe4a8995c813a5356e164f362e08da513085d",
@@ -5482,7 +5482,9 @@
         "plugins/agent-machines/src/agent_machines/health_hourly.py": "a04356ea2e0810f2d395fab4a3e10fc537edd0bb6b2c5446bb6e3649ccdc1160",
         "plugins/agent-machines/src/agent_machines/health_collect.py": "856c65d53b5146b9d80c4eeb81df7c350b3a18e1dbc844c2d2d3d9a3d18adcab",
         "tools/promotion_unit_tests/test_local_finalize.py": "9ccbe15278f853bd3e4280c150c86d6f4816159591b24660eb24ab2ba10d7edb",
-        "plugins/agent-worktrees/src/agent_worktrees/finalize_local.py": "9fea9450ace2ee3461166bf5d6efcd9058414609f46e3c4614bb92e077486fbe"
+        "plugins/agent-worktrees/src/agent_worktrees/finalize_local.py": "9fea9450ace2ee3461166bf5d6efcd9058414609f46e3c4614bb92e077486fbe",
+        "worktree-manager/scripts/versioned_runtime_construction.py": "341146e35c15d0eb28a6d67753312b499ec4c45833c89efcb81b12c08c585880",
+        "worktree-manager/scripts/versioned_runtime_publication.py": "ef762e65eb6403c580013ac24808f068e5fc02913035489bbd068c8bf3bae7fc"
     },
     "coverage_targets": [
         "plugins/agent-machines/src/agent_machines/health_run.py",

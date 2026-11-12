@@ -855,25 +855,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--describe-source-inputs", action="store_true")
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args(argv)
-    wheel_values = (args.wheel_profile, args.wheel_directory, args.wheel_python, args.wheel_uv)
-    if any(value is not None for value in wheel_values) or args.wheel_profile_sha256 is not None:
-        if (
-            not all(wheel_values) or args.install_source is not None
-            or any(not value.is_absolute() for value in wheel_values)
-            or any((args.uninstall, args.recover_for_repair, args.recover_adopted,
-                    args.describe_recovery, args.describe_source_inputs))
-            or args.wheel_python.resolve(strict=True) != Path(sys.executable).resolve(strict=True)
-        ):
-            parser.error("closed wheels require complete independent native installation inputs")
-        from install_source import _read
+    from runtime_install_inputs import admit_native_wheels
 
-        profile = _read(args.wheel_profile)
-        digest = hashlib.sha256(json.dumps(
-            profile, sort_keys=True, separators=(",", ":"), allow_nan=False,
-        ).encode()).hexdigest()
-        if args.wheel_profile_sha256 is not None and args.wheel_profile_sha256 != digest:
-            raise RuntimeError("Manager wheel selection changed after driver admission")
-        args.wheel_profile_sha256 = digest
+    admit_native_wheels(args, parser)
     if args.describe_source_inputs:
         if any((
             args.root, args.install_source, args.command, args.uninstall, args.apply,

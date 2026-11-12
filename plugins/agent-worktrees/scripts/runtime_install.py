@@ -442,15 +442,7 @@ def install(
     if native_wheel_inputs is not None:
         if wheel_inputs is not None or source_identity is not None:
             raise InstallationRefused("Native release wheels cannot replace a Source association")
-        from install_source import wheel_selection
-
-        selection = wheel_selection(plugin, "agent-worktrees", native_wheel_inputs)
-        version = selection["runtime_version"]
-        wheel_options = {
-            "wheel_inputs": native_wheel_inputs,
-            "local_packages": tuple(selection["local_packages"]),
-            "extras": tuple(selection["extras"]),
-        }
+        version, wheel_options = install_driver.native_construction_options(plugin, native_wheel_inputs)
     if wheel_inputs is not None:
         if source_identity is None or not isinstance(wheel_inputs, engine.WheelInstallInputs):
             raise InstallationRefused("Closed source wheels require an attributed retained source selection")

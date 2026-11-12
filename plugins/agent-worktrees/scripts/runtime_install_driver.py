@@ -31,6 +31,17 @@ TRANSIENT_KEYS = (
 )
 
 
+def native_construction_options(plugin: Path, inputs) -> tuple[str, dict]:
+    from install_source import wheel_selection
+
+    selection = wheel_selection(plugin, "agent-worktrees", inputs)
+    return selection["runtime_version"], {
+        "wheel_inputs": inputs,
+        "local_packages": tuple(selection["local_packages"]),
+        "extras": tuple(selection["extras"]),
+    }
+
+
 def positive_input_timeout(value: str) -> float:
     seconds = float(value)
     if not math.isfinite(seconds) or seconds <= 0:
