@@ -17,7 +17,7 @@ Keep emitter, pool, task, session and worktree correlation inspectable.
 - **Repo:** copilot-extensions
 - **Branch(es):** per reviewed slice
 - **Created:** 2026-11-12
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** [Dispatch task relevance](../../../visions/plugins/agent-dispatch/README.md#task-relevance-reconciliation)
 - **Umbrella issue:** [#12274](https://github.com/ThomasMichon/copilot-extensions/issues/12274)
 
@@ -80,10 +80,12 @@ merged plan does not establish running adoption.
 
 ### Phase 1 - Reconcile the architecture before implementation
 
-- [ ] Review this plan and the vision extension through the normal PR flow.
-- [ ] Map the actual emitter receipt, evaluator registration, task attachment,
+- [x] Review this plan and the vision extension through the normal PR flow.
+- [x] Map the actual emitter receipt, evaluator registration, task attachment,
       allocation, steering/wake and terminal-workspace seams. Reuse an existing
       capable operation where possible; document any genuinely new boundary.
+      The [receiver map](../../../plugins/agent-dispatch/docs/task-relevance.md)
+      identifies the queue decision as the new boundary; other owners are reused.
 
 ### Phase 2 - One relevance decision, two callers
 
@@ -158,6 +160,26 @@ operator's explicit bulk reset; it must not inherit that reset's broad discard
 authority. Add no universal attestation layer or duplicate lifecycle engine.
 
 ## Journal
+
+### 2026-11-12 - Architecture approved and merged
+
+[PR #12277](https://github.com/ThomasMichon/copilot-extensions/pull/12277)
+merged as `a63dc91abba42015aa2320230c8b8e6f73981fa0` after exact-head
+independent approval and required green checks. The source workspace reconciled
+losslessly onto the contribution branch. The effort remains Active: runtime
+implementation, caller integration, cohort attribution and the Validation Plan
+are still open. Next is mapping the existing owners for the shared relevance
+transaction, not activating a new caller.
+
+### 2026-11-12 - Internal ownership receiver
+
+Implemented source-scope and task-revision matching, atomic resource-free
+abandonment, durable request replay and a single retained closeout/steer.
+Ordinary execution admission preserves accepted closeout across recovery,
+reset and requeue. The source receiver remains internal: no new HTTP/CLI
+capability, emitter/evaluator caller, periodic loop or runtime activation.
+Original-owner wake, suspended-owner closeout consumption and actual
+session/workspace acknowledgement remain open in Phases 2-4.
 
 ### 2026-11-12 - Initial proposal
 

@@ -339,6 +339,7 @@ def test_http_placement_and_affirmative_start_use_real_transactions(q):
         "explicit_start_versions": [1],
         "suspended_recovery_versions": [1],
         "configured_cohort_reservation_fencing_versions": [1],
+        "selected_legacy_history_versions": [1],
         "worker_decline_preparation_versions": [1],
         "worker_decline_local_closeout_versions": [1],
         "worker_decline_readiness_closeout_versions": [1],

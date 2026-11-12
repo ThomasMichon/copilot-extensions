@@ -56,9 +56,19 @@ retain their existing limits.
 
 ## Current decisions and retained boundaries
 
+The [2026-11-12 oldest-cohort refresh](roadmap-oldest-cohort-refresh.md)
+adds 72 current source/ownership assessments and corrects the #1803 framing
+residual below. It does not replace the original twelve selections, invent
+implementation appointments or treat existing canonical keepers as redundant.
+
 ### #1803 - Large-response framing
 
-- **Current result:** Async TCP/Unix constructors and listeners retain the
+- **Current source correction (2026-11-12):** The server now explicitly uses
+  an 8 MiB limit, and `_connect` accepts an optional limit; both application
+  callers still omit it. See the linked refresh for immutable source and
+  retained controls. Outcome-unknown/no-replay progress is separate from
+  client framing acceptance.
+- **Pinned historical result:** Async TCP/Unix constructors and listeners retain the
   default reader limit and line-based consumers. Existing one-op cleanup and
   synchronous multi-chunk forwarding are credited; a receive chunk size does
   not establish a matching aggregate synchronous cap.

@@ -3144,6 +3144,12 @@ sources, transferring owners or turning partial/planning gains into completion.
   [Current slice qualification](roadmap-current-qualification.md) records
   independently admitted source residuals and planned prerequisites without
   transferring their owners or importing unrelated completion gates.
+  The [oldest-cohort refresh](roadmap-oldest-cohort-refresh.md) adds 72 current
+  source/ownership assessments, four concrete finite residual candidates and
+  the verified same-canonical #1323 plan materialization. It records #1838's
+  named intake into #6476 and verified non-actionable retirement, not a fix.
+  Existing keepers,
+  actual parks and withdrawn experiments remain distinguished.
   #9426 publishes those twelve bounded qualifications and the three-arrival
   inflow delta; this broader identification/selection item remains open.
 - [ ] Produce an evidence-backed prerequisite graph and sequencing plan for a
@@ -3153,7 +3159,7 @@ sources, transferring owners or turning partial/planning gains into completion.
   routes nine retired tracking identities to their audited receiving slices
   and leaves #9377 explicitly unqualified. Historical relationship counts,
   scoped alternatives, actual owners and all completion gates remain unchanged.
-- [ ] _(Agent-recommended)_ Run larger, disjoint research waves, initially
+- [x] _(Agent-recommended)_ Run larger, disjoint research waves, initially
   four sets of 50 issues, reusing unchanged admitted evidence and refreshing
   changed source/refinements rather than restarting the entire corpus.
   The [first 200-issue proposal](roadmap-wave-1.md) accounts for 169 researched
@@ -3162,7 +3168,10 @@ sources, transferring owners or turning partial/planning gains into completion.
   assessments without a new code-audit phase. The [third-wave
   proposal](roadmap-wave-3.md) adds 200 further assignments with no new
   product-code audit. The [fourth-wave proposal](roadmap-wave-4.md) adds the
-  frozen census's remaining 82 identities; later inflow remains open.
+  frozen census's remaining 82 identities. The larger-wave method is delivered,
+  with the later 72-identity refresh demonstrating continuing delta use.
+  New inflow and changed acceptance remain open under Phase 2's graph
+  maintenance and whole-queue refresh items; this does not complete them.
 - [ ] _(Agent-recommended)_ Integrate the
   [stabilization roadmap](stabilization-roadmap.md), including per-issue
   coverage, provisional decisions, priority rationale and wave exit criteria,
