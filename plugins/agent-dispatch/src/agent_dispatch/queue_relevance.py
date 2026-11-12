@@ -1,6 +1,6 @@
 """Atomic source-relevance decisions; transport and owner closeout stay separate.
 
-The coordinator also admits local direct emitters through registered scope.
+The coordinator also admits effective local sources through registered scope.
 No automatic emitter or periodic caller is enabled. Callers judge the backing object; queue history
 decides resource-free abandonment or original-owner closeout on existing outboxes.
 """
@@ -16,7 +16,7 @@ import sqlite3
 from .queue_common import CompletionOutcome, Task
 from .queue_records import Status, TaskError
 from .queue_relevance_registration import (
-    RelevanceRegistration, registration_revision, resolve_registration,
+    RelevanceAdmission, RelevanceRegistration, registration_revision, resolve_registration,
 )
 
 
@@ -117,7 +117,7 @@ class QueueRelevanceMixin:
     def relevance_snapshot(
         self, task_id: str, *, registration: RelevanceRegistration | None = None,
         disabled_ids: frozenset[str] = frozenset(),
-        registration_admission: Callable[[sqlite3.Connection, dict], None] | None = None,
+        registration_admission: RelevanceAdmission | None = None,
     ) -> dict:
         """One queue snapshot for a source check; this is not source evidence."""
         with self._connect() as conn:
@@ -125,8 +125,9 @@ class QueueRelevanceMixin:
             task = self._fetch(conn, task_id)
             if task is None:
                 raise TaskError(f"no such task {task_id!r}")
+            resolved = None
             if registration is not None:
-                resolve_registration(
+                resolved = resolve_registration(
                     conn, task, registration, disabled_ids=disabled_ids, require_revision=False,
                     admission=registration_admission,
                 )
@@ -140,6 +141,8 @@ class QueueRelevanceMixin:
                 **({
                     "registration_id": registration.registration_id,
                     "registration_revision": registration_revision(conn),
+                    **({"effective_revision": resolved.effective_revision}
+                       if resolved is not None and resolved.effective_revision is not None else {}),
                 } if registration is not None else {}),
             }
 
@@ -149,7 +152,7 @@ class QueueRelevanceMixin:
         reason: str, observation_ref: str, reporter: str, now: float | None = None,
         disabled_ids: frozenset[str] = frozenset(),
         on_transition: Callable[[CompletionOutcome], None] | None = None,
-        registration_admission: Callable[[sqlite3.Connection, dict], None] | None = None,
+        registration_admission: RelevanceAdmission | None = None,
     ) -> dict:
         """Accept a source judgment and ownership decision in one write.
 
@@ -161,7 +164,7 @@ class QueueRelevanceMixin:
         if not isinstance(scope, (RelevanceScope, RelevanceRegistration)):
             raise TaskError("relevance needs a coordinator-resolved source scope")
         for name, value in asdict(scope).items():
-            if name != "revision":
+            if name != "revision" and not (name == "effective_revision" and value is None):
                 _text(value, name)
         for name, value in (
             ("request_id", request_id), ("reason", reason),
@@ -174,8 +177,11 @@ class QueueRelevanceMixin:
             expected_generation, expected_revision,
         )):
             raise TaskError("relevance generation and revision must be nonnegative integers")
+        scope_fields = asdict(scope)
+        if isinstance(scope, RelevanceRegistration) and scope.effective_revision is None:
+            scope_fields.pop("effective_revision")
         request = {
-            "scope": asdict(scope), "generation": expected_generation,
+            "scope": scope_fields, "generation": expected_generation,
             "revision": expected_revision, "verdict": verdict, "reason": reason,
             "observation_ref": observation_ref, "reporter": reporter,
         }
@@ -200,7 +206,7 @@ class QueueRelevanceMixin:
                 scope = RelevanceScope(*resolve_registration(
                     conn, task, scope, disabled_ids=disabled_ids, require_revision=True,
                     admission=registration_admission,
-                ))
+                ).scope)
             if task.kind != "finite" or (task.repo, task.source, task.origin_ref) != (
                 scope.repo, scope.source, scope.origin_ref,
             ):

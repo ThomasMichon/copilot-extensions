@@ -438,6 +438,16 @@ opaque provider state without wiring effects. Its matching candidate is not
 current-source verification, a native settlement receipt or final admission.
 The source/provider expansion and effectful consumer gates above remain open.
 
+The live-only provider seam in #12299 and passive consumer in #12303 now bind
+settlement inspection to the exact retained provider and its original opaque
+scope token. The token is captured with the original binding, not recaptured
+on inspector reopen; changed tokens refuse or require reconciliation.
+The existing settlement observation alone cannot produce a restoration
+candidate without the same provider's passive completed-cleanup confirmation.
+Older or unconfirmed providers remain unknown. This does not publish the
+complete original launch descriptor, verify current source/controller authority,
+reacquire a lost owner or qualify native recovery.
+
 ## Evidence before each functional promotion
 
 Retain focused tests that fail without the extraction or adapter behavior.

@@ -43,8 +43,11 @@ def report() -> dict[str, object]:
         from .cutover import _require_selected
 
         _require_selected(layout)
+    contract = CONTRACT
+    if platform != "linux":
+        contract = {**CONTRACT, "capabilities": ["explicit-native-owner-pair"]}
     return {
-        "contract": CONTRACT,
+        "contract": contract,
         "supported": True,
         "platform": platform,
         "selection": {

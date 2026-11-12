@@ -1,10 +1,10 @@
 # Task relevance receiver
 
 The queue has a **receiver-first** relevance operation:
-`reconcile_task_relevance`, with control-authorized HTTP admission for local
-direct command-emitter registrations. No automatic emitter, evaluator or
-periodic source calls it yet. Source adapters, broader registered-source
-admission and actual session/workspace closeout remain tracked by
+`reconcile_task_relevance`, with control-authorized HTTP admission for effective
+local command emitters and their registrar-selected evaluators. No automatic emitter, evaluator or
+periodic source calls it yet. Source adapters, periodic selection
+and actual session/workspace closeout remain tracked by
 the [active effort](../../../efforts/active/task-relevance-reconciliation/README.md).
 This is not an automatic task scrubber.
 
@@ -31,8 +31,8 @@ repository lane, source and origin reference. All three must match the finite
 task. This structural scope is not authentication or proof that a registered
 emitter owns a legacy recipe task. An external receiver must derive
 caller scope from the existing registration and attribution owners, not accept
-an arbitrary caller assertion. The local direct-emitter receiver below resolves
-its scope in the queue transaction; declared/evaluator scope is not yet admitted.
+an arbitrary caller assertion. The registered receiver below resolves
+its effective source and evaluator scope in the queue transaction.
 
 `relevance_snapshot` supplies the task generation and latest audit-event
 revision. The caller checks its authoritative backing object and reports
@@ -105,8 +105,9 @@ does not release reservations or delete files.
 ## Registered receiver and compatibility
 
 The actual coordinator's `/health.task_relevance` advertises
-`task_relevance/v1`, supported version `1`, registration scope
-`local-direct-command-emitter` and whether control authority is configured.
+`task_relevance/v1`, supported version `1`, registration scopes
+`local-direct-command-emitter` and `local-effective-emitter-evaluator`,
+and whether control authority is configured.
 This is additive health metadata; older clients keep their existing behavior.
 No CLI command or automatic source adapter is enabled by this capability.
 
@@ -121,7 +122,8 @@ The control-authorized HTTP surface is:
 
 The POST body contains `version`, `registration_id`, `registration_revision`,
 `request_id`, `expected_generation`, `expected_revision`, `verdict`, `reason`
-and `observation_ref`. Unknown fields, boolean revisions and other versions are
+and `observation_ref`. The effective-scope form also supplies `effective_revision`
+from its pre-observation snapshot. Unknown fields, boolean revisions and other versions are
 rejected. Callers cannot choose the reporter, source, origin, machine or
 environment. Ordinary data and task-scoped authority do not authorize this
 surface.
@@ -133,26 +135,49 @@ active local registration, command-emitter task output and the emitter-authored
 source/origin fields. Fresh admission also consults the configured registrar
 reader and existing direct/declaration merge owner. A declaration-superseded
 direct row is refused even before its declaration is mirrored into SQLite;
-missing or incomplete discovery is not eligibility evidence. This does not
-enable relevance reports from declared registrations.
+missing or incomplete discovery is not eligibility evidence. Declared sources
+are read from that current observation, never from their eventually mirrored
+SQLite rows. An equivalent local direct row is superseded, not a second producer.
 It honors concrete and logical local overrides. Another
 registration with the same emitter provenance is ambiguous and refused.
 That check includes conflicting declarations in the fresh merged set before
 their registration rows are mirrored, not only already-published rows.
 An unchanged registration upsert does not invalidate observations; changed,
-removed/recreated or paused registrations do. A draining receiver refuses new
+removed/recreated or paused direct registrations do. The additional effective
+revision correlates the merged registration definitions, excluding timestamp churn;
+declared changes between snapshot and report invalidate the source observation
+even before their mirror changes. It is not a lock on arbitrary document writers
+or evidence about the backing object's current state.
+A draining receiver refuses new
 decisions. A fresh abandonment uses the existing result-free terminal event
 shape and lifecycle telemetry; an identical report replay emits neither twice.
 
 This is structural source attribution within existing trusted control authority,
 not proof that an opaque legacy task was created by a particular process.
-Declared, remote and evaluator registrations are explicitly unsupported until
-their effective registrar/override and attribution owners are integrated. They
-must not be relabelled as local direct registrations to pass admission.
+An evaluator must be the existing verification selector's unique repo/ref match
+(repo-specific before all-repos), in the executing machine/environment. Its task
+must also have one active, non-disabled task-authoring emitter whose source/origin
+and companion `evaluator_ref` match. An evaluator reference alone does not grant
+authority over manual or other-producer tasks. Both selected registrations'
+concrete/logical holds apply. Remote and unqualified registrations remain
+unsupported; they must not be relabelled as local direct sources to pass admission.
+Replacement declarations inherit their superseded direct registrations' override
+tokens, for both the selected evaluator and its companion emitter. Fresh
+foreign-machine emitter declarations remain visible for provenance collision
+detection, without becoming eligible local callers or trusting stale mirrors.
+Predecessor hold correlation also includes paused local rows without admitting
+them as callers or counting an equivalent replaced emitter as a second source.
+Evaluator repo/ref selection precedes hold exclusion: an
+all-repos reporter cannot take over a held repo-specific evaluator's work.
+Selection retains the verification owner's applicable machine-unpinned evaluator
+definitions too. Such a definition can block an all-repos fallback, but does not
+become an eligible local relevance reporter merely by participating in selection.
 Legacy/manual tasks without matching emitter provenance remain outside scope.
 
 Opt-in client methods check support on their bound running peer before sending
-the new form. Missing, invalid or unsupported metadata raises
+the new form. Effective-scope snapshots use `effective_scope=True` (also inferred
+for declared ids); reports carrying `effective_revision` require the new scope.
+Missing, invalid or unsupported metadata raises
 `DispatchUpgradeRequired` before the report; there is no fallback to ordinary
 abandonment. Each effect is sent once. A lost response is recovered from the
 original receipt rather than minting a new request. Identical accepted requests
@@ -162,8 +187,11 @@ Request identities containing slashes remain recoverable through the receipt
 route's path capture; URL quoting alone is not assumed to preserve a segment.
 
 Rollout remains provider-first: release this receiver before migrating source
-callers, then qualify broader scopes and actual owner closeout. A rollback to a
-prior wire receiver refuses the new operation while retaining old operations.
+callers, then qualify periodic selection and actual owner closeout. Previous
+direct-emitter bodies and accepted request encodings remain valid on this receiver.
+New effective-scope callers refuse a prior direct-only receiver before reporting,
+while ordinary reads and old direct-emitter callers retain their baseline.
+A rollback to a prior wire receiver refuses the new operation while retaining old operations.
 An older database consumer must not resume accepted closeout goals without
 preserving their admission fence; rolling back the database or discarding
 closeout history is not a supported recovery. No old surface is retired here.
