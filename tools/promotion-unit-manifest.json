@@ -5273,7 +5273,7 @@
         "tools/runtime_profile_bundle.py": "4710950140ca7f8e7b9a0d497e2ae4225765f9aae25b2d1d34764ef6dc28b876",
         "tools/runtime_profile_delivery.py": "e16d787834f4b8c8a64438fe267d8f1a68d0fcecb5f2e215c72531c7ed157fe8",
         "worktree-manager/scripts/install_source.py": "c03316b2769526346d1230733998789c5cf605f8023b20d3996a5fbe06a61f56",
-        "worktree-manager/scripts/installer_engine.py": "ed05b92e9733dd89f9b94e7d4ff6ab03a1707c20054259858e10c59a4ac219c6",
+        "worktree-manager/scripts/installer_engine.py": "0daff9874295ca36c69d341ab713613c304614721a1e17afdb945654a4a2665c",
         "worktree-manager/scripts/installer_engine_health.py": "16a158d8d4d51d2a19d99e877ecf52dc4fa68a43c407ca02c2bfd622d8414991",
         "worktree-manager/scripts/installer_engine_process.py": "88e40cd277d18daba227d95f3f81d576442f7c2cc4260d7f1e2c91f04ebf6c2c",
         "worktree-manager/scripts/installer_source_build.py": "ddd67630a1ad0084d5aff252e224d73a8bcf566ba4e6f9dbe1ed4bfacac49461",
@@ -5415,7 +5415,7 @@
         "libs/installer-engine/installer_dependency_config.py": "057a2cbf0256a7ca9771c81909ea4206e527f63edeb1b21c0c604950cdadcc40",
         "libs/installer-engine/installer_dependency_arguments.py": "d6b464c3d46f828089992b9da2fed7e30551861863de94c5a9869827f1791bb2",
         "libs/installer-engine/installer_dependency_policy.py": "6e0eca27582b43e812d4a1ec63858b9b4ddfa7181dbdd75a01991d32bcbe16c0",
-        "libs/installer-engine/installer_engine.py": "ed05b92e9733dd89f9b94e7d4ff6ab03a1707c20054259858e10c59a4ac219c6",
+        "libs/installer-engine/installer_engine.py": "0daff9874295ca36c69d341ab713613c304614721a1e17afdb945654a4a2665c",
         "libs/installer-engine/installer_engine_process.py": "88e40cd277d18daba227d95f3f81d576442f7c2cc4260d7f1e2c91f04ebf6c2c",
         "libs/installer-engine/installer_feed_policy.py": "529d45bd6d72cf36ac9b2c75dc56c98d63ad2b0364a26073ed8e355fd02b3c7d",
         "libs/installer-engine/installer_native_feed.py": "2816a406fdd74c59414e65b8a79b41a682df993a4a2bb14790da20b40ed08af8",
@@ -5944,6 +5944,10 @@
         "plugins/agent-machines/src/agent_machines/health_job.py": "69f6b2ffd86adc4c8d262b6a42c59c9036e7d8eef88e6433f2b8fdc29cdbf1ca",
         "plugins/agent-machines/src/agent_machines/health_task_native.py": "1c35c28bc8ac167bf1be29f2dd2f8f17489215f72fb4b2691c9d6d7549266cd1",
         "plugins/agent-machines/src/agent_machines/resource_health_job.py": "fd1ce6396b8a3ab3dc034001a2d135427350ab56de092416a7d53876244e4dd7",
-        "tools/source_preparation_process.py": "eb014eeac9aa37a7accc40a71aa8c39f364df25634ab77d3d3eb34e3bd0e39cd"
+        "tools/source_preparation_process.py": "eb014eeac9aa37a7accc40a71aa8c39f364df25634ab77d3d3eb34e3bd0e39cd",
+        "services/pr/setup.py": "15d8a25ab4035d20648c10a65a339677a3e25f5351060aa89c973218a5277b4a",
+        "services/pr/_build_runtime_resource.py": "59ebf9cd4ebb134f70f8e9b5ef06cbf03f99a6b169e4663daa139df69fa826af",
+        "plugins/ai-attribution/scripts/attribution_profile.py": "25fc4b657a4e0b7b5b2c79a6624c88d750048c81169860fb2ee648e4e2b74668",
+        "plugins/ai-attribution/scripts/comment_preparation.py": "c5a63812f4886c5407b29a5030989b5a6c140174b226b78a0fd11ebde11a723b"
     }
 }
