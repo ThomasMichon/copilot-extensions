@@ -425,7 +425,9 @@ class _SessionResumeMixin:
                             effort_override=session.effort_override,
                             **client_preferences(session.target, self._db, session_id),
                         )
-                        if permission_callback:
+                        from .retained_session_recovery import permission_held
+
+                        if permission_callback or permission_held(self._db, session.target):
                             client.auto_approve = False
                         # Bound each round so a stalled Copilot ACP launch (the
                         # "Resuming…"/extension-reload race, #1468) fails fast and
@@ -654,7 +656,9 @@ class _SessionResumeMixin:
                             effort_override=session.effort_override,
                             **client_preferences(session.target, self._db, session_id),
                         )
-                        if permission_callback:
+                        from .retained_session_recovery import permission_held
+
+                        if permission_callback or permission_held(self._db, session.target):
                             recreate_client.auto_approve = False
                         await asyncio.wait_for(
                             start_client(recreate_client, agent_proc.proc, session),

@@ -27,6 +27,60 @@ adapter_runner = importlib.util.module_from_spec(_ADAPTER_SPEC)
 _ADAPTER_SPEC.loader.exec_module(adapter_runner)
 
 
+@pytest.mark.parametrize("outcome", ("success", "controls", "prepare", "assertions", "exception"))
+def test_runtime_inputs_overlap_construction_and_settle_before_consumers(tmp_path, monkeypatch, outcome):
+    calls = []
+
+    class Controls:
+        returncode = None
+
+        def wait(self, **kwargs):
+            calls.append("settle" if kwargs else "controls")
+            self.returncode = int(outcome == "controls")
+            return self.returncode
+
+        def poll(self):
+            return self.returncode
+
+        def terminate(self):
+            calls.append("terminate")
+            self.returncode = -1
+
+    def launch(command, **kwargs):
+        assert "--timeout=30" in command
+        assert "-p" in command and "pytest_portfolio_guard" in command
+        assert command[-2:] == ["-k", " or ".join(adapter_runner.RUNTIME_INPUT_CONTROLS)]
+        assert f"--basetemp={tmp_path / 'input-controls'}" in command
+        calls.append("launch")
+        return Controls()
+
+    def run(command, **kwargs):
+        if "--prepare" in command:
+            calls.append("prepare")
+            if outcome == "exception":
+                raise OSError("construction failed")
+            return SimpleNamespace(returncode=int(outcome == "prepare"))
+        assert calls == ["launch", "prepare", "controls"]
+        assert "--timeout=30" in command and "pytest_portfolio_guard" in command
+        assert command[-1] == f"not ({' or '.join(adapter_runner.RUNTIME_INPUT_CONTROLS)})"
+        assert f"--basetemp={tmp_path / 'assertions'}" in command
+        calls.append("assertions")
+        return SimpleNamespace(returncode=int(outcome == "assertions"))
+
+    monkeypatch.setattr(adapter_runner.subprocess, "Popen", launch)
+    monkeypatch.setattr(adapter_runner.subprocess, "run", run)
+    if outcome == "exception":
+        with pytest.raises(OSError, match="construction failed"):
+            adapter_runner._runtime_group(Path(sys.executable), tmp_path)
+    else:
+        assert adapter_runner._runtime_group(Path(sys.executable), tmp_path) == int(outcome != "success")
+    assert calls == {
+        "prepare": ["launch", "prepare", "terminate", "settle"],
+        "exception": ["launch", "prepare", "terminate", "settle"],
+        "controls": ["launch", "prepare", "controls", "settle"],
+    }.get(outcome, ["launch", "prepare", "controls", "assertions", "settle"])
+
+
 def _adapter_report(path, fault=None):
     root = ET.Element("testsuite")
     for node in adapter_runner._application_adapter_nodes():

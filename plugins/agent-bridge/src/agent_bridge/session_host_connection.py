@@ -237,7 +237,9 @@ class _SessionHostConnectionMixin(_SessionHostLaunchCustodyMixin):
                 acquisition_launch.retain_client(client)
             if recovery_operation is not None:
                 recovery_operation.session.client = client
-            if permission_callback or recovery_operation is not None:
+            from .retained_session_recovery import permission_held
+
+            if permission_callback or recovery_operation is not None or permission_held(self._db, target):
                 client.auto_approve = False
             with capture_acp_parse_errors() as parse_errors:
                 try:
@@ -704,7 +706,7 @@ class _SessionHostConnectionMixin(_SessionHostLaunchCustodyMixin):
             )
             from .retained_session_recovery import permission_held
 
-            if permission_held(self._db, session):
+            if permission_held(self._db, session.target):
                 client.auto_approve = False
             streams.on_transport_lost = client.mark_transport_lost
             streams.on_child_exit = client.mark_host_child_exited

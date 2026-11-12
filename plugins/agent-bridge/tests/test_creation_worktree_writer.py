@@ -230,6 +230,39 @@ async def test_retained_recovery_resumes_same_native_once_without_prompt_drain(w
 
 
 @pytest.mark.asyncio
+async def test_ordinary_resume_preserves_completed_recovery_permission_hold(writer_creation, monkeypatch):
+    from agent_bridge import acp_client, retained_session_recovery as recovery, session_manager as core
+    from test_session_host import _assert_reattached_permission_waits
+
+    fixture, rig = writer_creation, writer_creation.rig
+    session, request, _command = await recovery_fixture(fixture, monkeypatch)
+    await recovery.resume(
+        rig.manager, session.session_id, request, fixture.requirement, lambda: True,
+    )
+    session.status, session.client = SessionStatus.STOPPED, None
+    rig.db.update_session_status(session.session_id, SessionStatus.STOPPED.value, time.time())
+    clients = []
+
+    def client_factory(**kwargs):
+        client = acp_client.AcpClient(**kwargs)
+        client.start = AsyncMock()
+        client.load_session = AsyncMock()
+        client.shutdown = AsyncMock()
+        clients.append(client)
+        return client
+
+    monkeypatch.setattr(core, "AcpClient", client_factory)
+    monkeypatch.setattr(rig.manager, "_resume_via_new_remote_host", AsyncMock(return_value=None))
+    resumed = await rig.manager.resume_session(
+        session.session_id, drain=False, worktree_writer=fixture.requirement,
+    )
+    assert resumed is session and len(clients) == 1
+    assert session.client is clients[0] and session.acp_session_id == request.native_session_id
+    clients[0].load_session.assert_awaited_once()
+    await _assert_reattached_permission_waits(clients[0], session.acp_session_id)
+
+
+@pytest.mark.asyncio
 async def test_uncertain_retained_recovery_never_relaunches_or_falls_back(writer_creation, monkeypatch):
     from agent_bridge import retained_session_recovery as recovery
 

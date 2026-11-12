@@ -132,6 +132,23 @@ synthetic stores and native fixture owners.
 
 ### 2026-11-12 - Final source-pinned retention evidence
 
+- A subsequent review identified an ordinary-resume gap after completed retained
+  recovery: constructing a new direct or Host-backed client could restore default
+  automatic permission approval. All construction paths now consult the durable
+  original recovery journal. The regression completes supported native recovery,
+  performs an ordinary resume through the retained writer, and verifies a real
+  permission request remains pending. All 71 connected creation/writer controls
+  passed. The canonical capture selection now contains 403 cases.
+- The [third native lane](https://github.com/ThomasMichon/copilot-extensions/actions/runs/43232865903)
+  passed Linux entry/installed, Linux seed, macOS seed and Windows terminal/mux
+  stages. Windows Manager construction consumed about 263 seconds, leaving too
+  little of the unchanged 300-second group for all assertions. Its runtime
+  coordinator now overlaps only the seven disjoint entrypoint/progress controls
+  with genuine construction under one existing containment owner, then runs the
+  remaining consumers serially. No item, quiet, group or resource cap increased.
+  Five scheduling/failure controls and all 24 focused wrapper controls passed;
+  the broader native-suite coordinator file passed 31 controls. Cold native
+  acceptance remains open until the complete group actually passes.
 - A subsequent review found stale claim timing under write contention, a headed
   record fence held past confirmed creation and a preserved-seed checker that
   could reacquire its parent's sidecar. Preparation/claim now sample time after

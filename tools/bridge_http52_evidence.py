@@ -263,6 +263,7 @@ PROBES = {
     "test_keyed_creation_registration_failure_retains_native_and_dormancy": 1,
     "test_keyed_creation_uses_actual_retained_serializer_and_preserves_claim": 1,
     "test_retained_recovery_resumes_same_native_once_without_prompt_drain": 1,
+    "test_ordinary_resume_preserves_completed_recovery_permission_hold": 1,
     "test_uncertain_retained_recovery_never_relaunches_or_falls_back": 1,
     "test_retained_recovery_round_trips_through_actual_http_native_owner": 1,
     "test_native_stop_race_retains_hold_and_records_no_native_entry": 1,

@@ -25,8 +25,8 @@ def _refuse(message: str) -> AcquisitionRefused:
     return AcquisitionRefused("retained_recovery_held", message)
 
 
-def permission_held(db: Any, session: Any) -> bool:
-    row = _read(db, (session.target.venue or {}).get(JOURNAL_KEY))
+def permission_held(db: Any, target: Any) -> bool:
+    row = _read(db, (target.venue or {}).get(JOURNAL_KEY))
     return row is not None and row.get("creation_recoveries_json") is not None
 
 
