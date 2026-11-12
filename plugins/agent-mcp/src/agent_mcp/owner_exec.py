@@ -16,8 +16,12 @@ def _provider(entry: dict) -> list[str] | None:
     if (
         entry.get("type", "local") not in {"local", "stdio"}
         or not isinstance(command, str) or not os.path.isabs(command)
+        or "${" in command or "\0" in command
         or not isinstance(arguments, list)
-        or not all(isinstance(value, str) and "\0" not in value for value in arguments)
+        or not all(
+            isinstance(value, str) and "\0" not in value and "${" not in value
+            for value in arguments
+        )
         or "--" in arguments
         or any(value.startswith("--session-owner-") for value in arguments)
     ):

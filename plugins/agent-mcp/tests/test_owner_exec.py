@@ -58,6 +58,8 @@ def test_overlay_preserves_selected_entry_and_never_activates_unselected_servers
     {"args": ["-I", "-m", "agent_mcp", "forward", "echo", "--session-owner-pid=99"]},
     {"args": ["-I", "-m", "agent_mcp", "bridge", "--", "echo"]},
     {"env": {"KEY": "${UNEXPANDED}"}},
+    {"command": str(Path(sys.executable).parent / "${SLOT}" / "agent-mcp")},
+    {"args": ["-I", "-m", "agent_mcp", "bridge", "--config", "${CONFIG_PATH}"]},
     {"type": "http"},
 ])
 def test_unknown_or_already_owned_entry_is_not_probed_or_overridden(monkeypatch, change):
