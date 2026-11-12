@@ -10,6 +10,7 @@ a live coordinator already answers.
 
 from __future__ import annotations
 
+import os
 from types import SimpleNamespace
 
 import pytest
@@ -159,7 +160,9 @@ def test_coordinator_spawn_resolves_installed_slot_not_sys_executable(
     monkeypatch.delenv("AGENT_DISPATCH_INSTALL_DIR", raising=False)
     monkeypatch.setattr(m.Path, "home", lambda: tmp_path)
     install_dir = tmp_path / ".agent-dispatch"
-    slot_py = install_dir / "versions" / "0.1.2-dev49" / "Scripts" / "python.exe"
+    monkeypatch.setattr("agent_dispatch.runtime_version.install_dir", lambda: install_dir)
+    interpreter = ("Scripts", "python.exe") if os.name == "nt" else ("bin", "python")
+    slot_py = install_dir / "versions" / "0.1.2-dev49" / interpreter[0] / interpreter[1]
     slot_py.parent.mkdir(parents=True)
     slot_py.write_text("")
     (install_dir / "current-version").write_text("0.1.2-dev49")
