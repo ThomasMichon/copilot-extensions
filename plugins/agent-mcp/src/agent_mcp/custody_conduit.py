@@ -33,6 +33,39 @@ def _exchange(connection, token, request, deadline):
     return reply
 
 
+def _qualify_host(connection, token, root, deadline, required_trace_bookkeeping):
+    if connection.family in (socket.AF_INET, socket.AF_INET6) and (
+        not isinstance(token, str) or not token
+    ):
+        raise OSError("custody endpoint authentication is missing")
+    reply = _exchange(connection, token, {"op": "ping"}, deadline)
+    advertised = reply.get("installation_root")
+    if (
+        reply.get("ok") is not True or reply.get("pong") is not True
+        or not supports(reply.get("custody_host")) or not supports_context(reply)
+        or reply.get("ready") is not True or reply.get("draining") is not False
+        or not isinstance(advertised, str) or not Path(advertised).is_absolute()
+        or Path(advertised).resolve() != root
+    ):
+        raise execution_context.SharingUnavailable("custody host did not qualify")
+    if required_trace_bookkeeping and not supports_trace_binding(reply.get("custody_host")):
+        raise execution_context.SharingUnavailable("custody host cannot enforce checkpoint identity mode")
+    return reply
+
+
+def probe(handle, runtime_root, *, required_trace_bookkeeping=0, timeout=2):
+    """Read live keeper support without preparing a session or starting software."""
+    root = Path(runtime_root).resolve()
+    deadline = time.monotonic() + timeout
+    connection, token = sockio._connect(sockio.absolute_handle(handle), timeout=timeout)
+    try:
+        _qualify_host(
+            connection, token, root, deadline, required_trace_bookkeeping,
+        )
+    finally:
+        sockio._close(connection)
+
+
 def attach(handle, bridge, runtime_root, *, timeout=10, required_trace_bookkeeping=0):
     """Adopt only known installation custody; never replay application bytes.
 
@@ -58,22 +91,9 @@ def attach(handle, bridge, runtime_root, *, timeout=10, required_trace_bookkeepi
     deadline = time.monotonic() + timeout
     connection, token = sockio._connect(sockio.absolute_handle(handle), timeout=timeout)
     try:
-        if connection.family in (socket.AF_INET, socket.AF_INET6) and (
-            not isinstance(token, str) or not token
-        ):
-            raise OSError("custody endpoint authentication is missing")
-        reply = _exchange(connection, token, {"op": "ping"}, deadline)
-        advertised = reply.get("installation_root")
-        if (
-            reply.get("ok") is not True or reply.get("pong") is not True
-            or not supports(reply.get("custody_host")) or not supports_context(reply)
-            or reply.get("ready") is not True or reply.get("draining") is not False
-            or not isinstance(advertised, str) or not Path(advertised).is_absolute()
-            or Path(advertised).resolve() != root
-        ):
-            raise execution_context.SharingUnavailable("custody host did not qualify")
-        if required_trace_bookkeeping and not supports_trace_binding(reply.get("custody_host")):
-            raise execution_context.SharingUnavailable("custody host cannot enforce checkpoint identity mode")
+        reply = _qualify_host(
+            connection, token, root, deadline, required_trace_bookkeeping,
+        )
         fields = execution_context.fields_for_peer(cfg, reply)
         if required_trace_bookkeeping:
             fields["checkpoint_trace_bookkeeping"] = required_trace_bookkeeping

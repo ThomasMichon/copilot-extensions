@@ -21,7 +21,7 @@ def launch_environment() -> dict:
 
 
 def _qualify(request):
-    from . import execution_context, forward, incoming, sockio
+    from . import custody_launch, execution_context, forward, incoming, sockio
     from .__main__ import build_parser
     from .config import load_config
     from .cutover import _require_selected
@@ -52,7 +52,8 @@ def _qualify(request):
     cfg = load_config(target, repository_root=Path.cwd())
     legacy = execution_context._identity(cfg, "0" * 64)
     if legacy != execution_context._identity(cfg, "0" * 64, trace_bookkeeping=True):
-        raise SharingUnavailable("legacy checkpoint binding cannot qualify launch-trace normalization")
+        custody_launch.qualify_trace_keeper(forward._serve_handle(getattr(args, "socket", None)), layout[2])
+        args.checkpoint_trace_bookkeeping = 1
     _require_selected(layout)
     args.session_owner_pid, args.session_owner_birth = request["pid"], request["birth"]
     return args

@@ -362,10 +362,11 @@ handover. Preserve held sessions and the separate pre-feature adoption hold.
     this is released source, not installed or productive adoption.
   - [ ] **Trace-sensitive checkpoint adoption:** qualify the private binding
     across physical replacement and rollback when launch diagnostics differ,
-    without silently changing legacy identities. Until then, the optional
-    receiver retains ordinary execution when trace normalization changes the
-    existing checkpoint identity. This is separate from request-context
-    negotiation and actual configuration consumption.
+    without silently changing legacy identities. Conditional optional-receiver
+    admission must preserve ordinary execution against unsupported running
+    keepers before startup and require the selected mode through the complete
+    attach path. This is separate from request-context negotiation and actual
+    configuration consumption.
     Provider expansion accepts an explicitly selected trace-bookkeeping mode
     and advertises it from the actual backend; legacy custodians and bindings
     remain unchanged. #12222 merged the provider expansion at
@@ -377,10 +378,15 @@ handover. Preserve held sessions and the separate pre-feature adoption hold.
     required CI and trace-varying physical source qualification on Windows and
     Linux. This qualifies the internal connector/custodian path, not the
     optional launcher's old-running-custodian boundary or installed adoption.
-    The next provider expansion declares required-mode enforcement from the
-    running keeper's authenticated ping and verifies the actual selected
-    binding in attach acknowledgment. Legacy keeper and backend controls remain
-    separate; the optional receiver's guard and adoption gate stay open.
+    #12226 merged running-keeper enforcement at
+    `912d19227b259d7f5902362d362f45df9b445c45` after current-head approval,
+    required CI and mixed-version socket controls. The live keeper's ping
+    declares enforcement separately from backend support, and its acknowledgment
+    confirms the selected binding mode. Post-attach failures are terminal, not
+    pre-effect fallback signals. Conditional optional-receiver selection now
+    probes that running provider before startup, passes the strict requirement
+    through cold/existing attach and independently checks backend support.
+    Source publication, promoted release and installed adoption remain open.
   - [x] **Explicit-owner source merged:** #11935 landed at
     `c0eab0d952a37607f6cf7030ac1a77f377f98a74` after current-head automated
     approval, required CI and resolution of addressed findings. The source
