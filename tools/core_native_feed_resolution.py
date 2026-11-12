@@ -29,23 +29,17 @@ import installer_native_feed as native_feed
 import installer_wheel_acquisition as acquisition
 import installer_wheel_inputs as inspection
 import installer_wheel_snapshot as snapshots
-from core_native_feed_errors import guarded_stop_reason
-from core_native_feed_target import require_native_target
+from core_native_feed_errors import GuardedSelectionError, guarded_stop_reason
+from core_native_feed_target import project_for_target as _target_project, require_native_target
 from installer_engine_process import ChildLaunchError, ChildTimeoutExpired, run_owned
 from packaging.requirements import InvalidRequirement, Requirement
-from packaging.specifiers import InvalidSpecifier, SpecifierSet
 from packaging.tags import sys_tags
-from packaging.utils import canonicalize_name, parse_wheel_filename
+from packaging.utils import canonicalize_name
 from runtime_wheel_inspection import inspect_wheel_facts
 
 _PLACEHOLDER = "http://127.0.0.1:1/guarded-index-placeholder/simple/"
 _SOURCE_LIMIT = 1 << 20
 _CONTROL_LIMIT = 4 << 20
-_TAG_PART = re.compile(r"[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)*")
-
-
-class GuardedSelectionError(ValueError):
-    """A guarded native selection could not establish its input boundaries."""
 
 
 @contextmanager
@@ -243,7 +237,7 @@ def _fetch_project(feed, name, limits, deadline, context, budget):
     except acquisition.AcquisitionUnavailable:
         return None
     try:
-        content, digest, _size = client.read(response, limits.max_index_bytes)
+        content, _digest, _size = client.read(response, limits.max_index_bytes)
         media = response.headers.get_content_type()
         entries = acquisition._entries(
             content, media, name,
@@ -252,7 +246,7 @@ def _fetch_project(feed, name, limits, deadline, context, budget):
     finally:
         response.close()
     identity = hashlib.sha256(json.dumps(
-        [base, media, digest, chain], sort_keys=True, separators=(",", ":"),
+        [base, media, chain], sort_keys=True, separators=(",", ":"),
     ).encode("utf-8")).hexdigest()
     return entries, base, origin, identity
 
@@ -346,74 +340,26 @@ class _GuardedIndex(ThreadingHTTPServer):
         with project_lock:
             if name in self.projects:
                 return self.projects[name]["page"]
-            project = self._project(name)
+            project = _target_project(
+                self._project(name), name, self.compatible_tags, self.wheel_limits, self.deadline,
+            )
             if project is None:
                 self.projects[name] = {"identity": None, "page": None}
                 return None
             entries, base, origin, identity = project
-            files, seen = [], set()
+            files = []
             for entry in entries:
                 inspection._check_deadline(self.deadline)
-                filename = entry.get("filename")
-                if not isinstance(filename, str):
-                    raise GuardedSelectionError("guarded index contains an invalid filename")
-                if not filename.endswith(".whl"):
+                if entry.get("withdrawn", False):
                     continue
-                if (
-                    re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._+-]{0,250}\.whl", filename) is None
-                    or inspection._unsafe_windows_component(filename)
-                ):
-                    raise GuardedSelectionError("guarded index contains an invalid wheel name")
-                tokens = filename[:-4].split("-")
-                if len(tokens) < 5:
-                    raise GuardedSelectionError("guarded index contains an invalid wheel name")
-                if any(_TAG_PART.fullmatch(part) is None for part in tokens[-3:]):
-                    # Preserve prefix/project validation before omitting an unselectable tag.
-                    prefix_probe = "-".join((*tokens[:-3], "py3", "none", "any")) + ".whl"
-                    wheel_name, _version, _build, _tags = parse_wheel_filename(prefix_probe)
-                    if canonicalize_name(wheel_name) != name:
-                        raise GuardedSelectionError("guarded index contains another project")
-                    continue
-                inspection.bounded_tag(
-                    "-".join(tokens[-3:]), limit=self.wheel_limits.max_tags, deadline=self.deadline,
-                )
-                wheel_name, _version, _build, tags = parse_wheel_filename(filename)
-                if canonicalize_name(wheel_name) != name:
-                    raise GuardedSelectionError("guarded index contains another project")
-                location, hashes = entry.get("url"), entry.get("hashes", {})
-                if not isinstance(location, str) or not location or not isinstance(hashes, dict):
-                    raise GuardedSelectionError("guarded index contains an invalid wheel entry")
-                fragment = urlsplit(location).fragment
+                filename = entry["filename"]
+                hashes = entry.get("hashes", {})
+                fragment = urlsplit(entry["url"]).fragment
                 fragment_digest = fragment.removeprefix("sha256=") if fragment.startswith("sha256=") else None
                 digest = hashes.get("sha256", fragment_digest)
-                if digest is not None and (
-                    not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None
-                ):
-                    raise GuardedSelectionError("guarded index contains an invalid digest")
-                yanked, withdrawn = entry.get("yanked", False), entry.get("withdrawn", False)
-                if not isinstance(yanked, (bool, str)) or type(withdrawn) is not bool:
-                    raise GuardedSelectionError("guarded index contains invalid admission evidence")
-                if withdrawn:
-                    continue
+                yanked = entry.get("yanked", False)
                 hint, uploaded = entry.get("requires-python"), entry.get("upload-time")
-                if hint not in (None, ""):
-                    if not isinstance(hint, str) or len(hint) > 4096:
-                        raise GuardedSelectionError("guarded index contains an invalid Python hint")
-                    try:
-                        SpecifierSet(hint)
-                    except InvalidSpecifier:
-                        raise GuardedSelectionError("guarded index contains an invalid Python hint") from None
-                if uploaded is not None and (
-                    not isinstance(uploaded, str) or len(uploaded) > 128
-                    or not uploaded.isascii() or any(ord(char) < 32 for char in uploaded)
-                ):
-                    raise GuardedSelectionError("guarded index contains an invalid upload time")
                 folded = filename.casefold()
-                if folded in seen:
-                    raise GuardedSelectionError("guarded index contains duplicate wheel names")
-                seen.add(folded)
-                if tags.isdisjoint(self.compatible_tags):
-                    continue
                 key = hashlib.sha256((name + "\0" + filename).encode("ascii")).hexdigest()
                 path = f"/{self.secret}/files/{key}/{filename}"
                 url = self.base + f"/files/{key}/{filename}"
@@ -607,15 +553,20 @@ def _usage(budget):
     }
 
 
+def _request_tags(request):
+    tags = tuple(sys_tags())
+    if request.get("target_tags") != [str(tag) for tag in tags]:
+        raise GuardedSelectionError("guarded worker target differs from the native interpreter")
+    return frozenset(tags)
+
+
 def _worker(request, control: Path) -> dict:
     feed = _request_feed(request)
     limits = acquisition.AcquisitionLimits(**request["limits"])
     limits.verify()
     wheel_limits = inspection.WheelLimits(**request["wheel_limits"])
     deadline = request["deadline"]
-    compatible_tags = tuple(sys_tags())
-    if request.get("target_tags") != [str(tag) for tag in compatible_tags]:
-        raise GuardedSelectionError("guarded worker target differs from the native interpreter")
+    compatible_tags = _request_tags(request)
     server = _GuardedIndex(
         feed, set(request["origins"]), datetime.fromisoformat(request["floor"]),
         {name: datetime.fromisoformat(value) for name, value in request["cutoffs"].items()},
@@ -687,6 +638,8 @@ def _verify_worker(request) -> dict:
     feed = _request_feed(request)
     limits = acquisition.AcquisitionLimits(**request["limits"])
     limits.verify()
+    wheel_limits = inspection.WheelLimits(**request["wheel_limits"])
+    compatible_tags = _request_tags(request)
     deadline = request["deadline"]
     budget = acquisition._Budget(limits, deadline, request["control_bytes"])
     budget.maximums["metadata_bytes"] = min(
@@ -696,7 +649,10 @@ def _verify_worker(request) -> dict:
     context = acquisition._tls_context(request["tls"])
     for name, expected in sorted(request["projects"].items()):
         inspection._check_deadline(deadline)
-        current = _fetch_project(feed, name, limits, deadline, context, budget)
+        current = _target_project(
+            _fetch_project(feed, name, limits, deadline, context, budget),
+            name, compatible_tags, wheel_limits, deadline,
+        )
         if (None if current is None else current[3]) != expected:
             raise GuardedSelectionError("guarded candidate index changed before publication")
     return {"usage": _usage(budget)}
@@ -929,7 +885,9 @@ def compile_guarded(
         yield response, root / "downloads", snapshot_budget
 
 
-def verify_guarded_projects(feed, projects, *, limits, deadline: float, procutil) -> None:
+def verify_guarded_projects(
+    feed, projects, *, limits, wheel_limits, target_tags, deadline: float, procutil,
+) -> None:
     """Recheck the observed candidate indexes after final wheel acquisition."""
     inspection._check_deadline(deadline)
     limits.verify()
@@ -944,6 +902,7 @@ def verify_guarded_projects(feed, projects, *, limits, deadline: float, procutil
         ))
         request = {
             "version": 1, "operation": "verify", **source, "projects": projects,
+            "wheel_limits": asdict(wheel_limits), "target_tags": target_tags,
             "limits": asdict(limits), "deadline": deadline, "control_bytes": 0,
         }
         response = _run_isolated(request, root, sources, limits, deadline, procutil)

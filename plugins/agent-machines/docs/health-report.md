@@ -470,7 +470,11 @@ refreshes it; never delete slots independently to force convergence.
 
 Results distinguish adopted/configured/enabled, native state/instances,
 last execution/result, candidate readiness, rollback and recovery-required
-facts. Successful registration is not evidence that an hourly collection ran.
+facts. Last/next execution times use native scheduled-task information rather
+than guessing a timezone for COM's unspecified-kind dates. Unavailable timing
+metadata is null and does not block exact disable/removal; native result and
+instance settlement still apply.
+Successful registration is not evidence that an hourly collection ran.
 The explicit native installed-enrollment test uses deleted build inputs,
 two accelerated calendar cycles, replacement, rollback and withdrawal.
 Desktop observation remains optional; actual hourly host results, inbound
