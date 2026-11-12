@@ -36,7 +36,7 @@ def _proxy(name: str):
     """Delegate to ``agent_dispatch.__main__.<name>`` via ``_resolve_cli_module``."""
 
     def _fn(*args, **kwargs):
-        return getattr(_resolve_cli_module(), name)(*args, **kwargs)
+        return getattr(_resolve_cli_module(required=name), name)(*args, **kwargs)
 
     return _fn
 

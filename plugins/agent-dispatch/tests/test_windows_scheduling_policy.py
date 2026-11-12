@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 
 import pytest
 
@@ -44,6 +45,38 @@ def policy(root, mode="absent", **local):
         },
     }), encoding="utf-8")
     return path
+
+
+@pytest.mark.parametrize("source_failure", [False, True])
+def test_combined_source_start_preserves_classic_fallback_but_not_action_failures(tmp_path, source_failure):
+    failure = """
+function Invoke-DispatchSelectedSource {param($Python) $global:LASTEXITCODE=9}
+""" if source_failure else ""
+    result = run(tmp_path, f"""
+$InstallDir={quote(tmp_path)}
+$script:Started=0
+function Test-DispatchStartIntent {{param($Kind,$Name) return $true}}
+function Get-SupervisorMode {{param($EnvFile) return 'serve'}}
+function Get-DispatchSelectedPython {{return {quote(sys.executable)}}}
+function Assert-DispatchActions {{param($Actions)}}
+function Start-DispatchDetachedLogonLauncher {{
+ param($Launcher,$LauncherArguments,[switch]$Ensure,$Python)
+ if(-not $Ensure){{throw 'classic ensure was lost'}}
+ $script:Started++
+}}
+{failure}
+$refused=$false
+try {{
+ Invoke-DispatchSupervisorEnsure -Name fixture -EnvFile fixture.env -Launcher fixture.ps1
+}} catch {{
+ if(-not $_.Exception.Message.Contains('Selected Source application readiness is unconfirmed')){{throw}}
+ $refused=$true
+}}
+if($refused -ne ${str(source_failure).lower()}){{throw 'Source failure was misclassified'}}
+if($script:Started -ne {0 if source_failure else 1}){{throw 'wrong classic fallback count'}}
+exit 0
+""")
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def adapters(root, *, state="Ready", folder="\\", arguments=None, refusal=""):
@@ -284,7 +317,7 @@ function Invoke-FixturePython {
  $global:LASTEXITCODE=0
 }
 function Get-DispatchSelectedPython { 'Invoke-FixturePython' }
-function Test-DispatchSelectedSource { param($Python) return $false }
+function Invoke-DispatchSelectedSource { param($Python) $global:LASTEXITCODE=78 }
 function Start-DispatchDetachedLogonLauncher {
  param($Launcher,$LauncherArguments,[switch]$Ensure,$Python)
  if(-not $Ensure){throw 'readiness must use the existing ensure adapter'}

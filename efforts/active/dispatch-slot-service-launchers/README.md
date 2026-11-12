@@ -338,3 +338,17 @@ claimed.
   independent change and regenerate the affected human-output declaration,
   rather than choosing either side's content hash. Refresh affected qualification,
   required CI and review on the resulting head before merge.
+- Finalize helper initialization per requested attribute: `_client`/`_emit`
+  proxies require initialized definitions, while metadata-only lookups keep
+  their lightweight behavior. A composed run still exposed the original
+  repeated-callback budget, so combine the existing Source capability check and
+  startup in one selected interpreter instead of launching a second process.
+  Preserve capability fallback, actual CLI dispatch, final policy admission and
+  truthful startup-action failures.
+- The affected CLI, helper, Source, diagnostic, native-admission and scheduling
+  suites now pass **427 tests with one skip**, including all ten admission
+  cases at their declared bounds. The policy fixtures were updated at their
+  renamed adapter boundary without changing any policy assertion. Exact-holder
+  qualification separately passes its 19 unit and six native controls, including
+  the real supervisor first line. Refresh source checks and review/CI before
+  merging; no contributor hold or rollout boundary changes.

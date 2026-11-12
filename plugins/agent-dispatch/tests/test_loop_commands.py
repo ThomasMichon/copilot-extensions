@@ -118,6 +118,6 @@ def test_early_entrypoint_without_core_helpers_uses_initialized_dotted_module(mo
     pending = types.ModuleType("__main__")
     pending.__spec__ = types.SimpleNamespace(name="agent_dispatch.__main__")
     monkeypatch.setitem(sys.modules, "__main__", pending)
-    assert _resolve_cli_module() is real_cli
-    assert _resolve_cli_module()._client is real_cli._client
-    assert _resolve_cli_module()._emit is real_cli._emit
+    assert _resolve_cli_module() is pending
+    assert _resolve_cli_module(required="_client")._client is real_cli._client
+    assert _resolve_cli_module(required="_emit")._emit is real_cli._emit

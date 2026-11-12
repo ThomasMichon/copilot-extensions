@@ -146,6 +146,9 @@ This is startup completion evidence, not a fresh health/progress claim.
 Installer preflight reuses the supervisor's canonical parser without loading
 unrelated queue commands. Source startup observes configured and primary-native
 intent together, then keeps its separate admission-time policy check.
+Capability detection and Source startup share one selected interpreter, retaining
+the existing unsupported-probe fallback without treating startup-action failures
+as permission to start a classic lane.
 
 A classic lane observes selected-version/profile supersession at a cycle
 boundary and leaves its loop without stopping its workers. The incoming ensure

@@ -272,6 +272,23 @@ function Test-DispatchSelectedSource {
     return ($LASTEXITCODE -eq 0)
 }
 
+function Invoke-DispatchSelectedSource {
+    param([string]$Python)
+    $startup = @'
+import runpy,sys
+# Keep the capability-probe fallback, not an action-failure fallback.
+try:
+    from agent_dispatch.source_start import require_selected_source
+    require_selected_source()
+except Exception:
+    raise SystemExit(78)
+sys.argv = ['agent_dispatch', '__source-start']
+runpy.run_module('agent_dispatch', run_name='__main__', alter_sys=True)
+'@
+    & $Python -I -B -c $startup
+    $global:LASTEXITCODE = $LASTEXITCODE
+}
+
 function Invoke-DispatchCoordinatorEnsure {
     Assert-DispatchActions @('coordinator-replacement')
     if (-not (Test-DispatchStartIntent -Kind coordinator -Name $TaskName)) { return }
@@ -288,11 +305,9 @@ function Invoke-DispatchSupervisorEnsure {
     }
     $mode = Get-SupervisorMode -EnvFile $EnvFile
     $selected = Get-DispatchSelectedPython
-    if (Test-DispatchSelectedSource -Python $selected) {
-        & $selected -I -B -m agent_dispatch __source-start
-        if ($LASTEXITCODE -ne 0) { throw 'Selected Source application readiness is unconfirmed' }
-        return
-    }
+    Invoke-DispatchSelectedSource -Python $selected
+    if ($LASTEXITCODE -eq 0) { return }
+    if ($LASTEXITCODE -ne 78) { throw 'Selected Source application readiness is unconfirmed' }
     if ($mode -ne 'serve' -and -not (Test-SupervisorLabelsConfigured -EnvFile $EnvFile)) { return }
     Assert-DispatchActions @('supervisor-reconcile')
     # Probe the actual selected interpreter without invoking downlevel CLI syntax.
