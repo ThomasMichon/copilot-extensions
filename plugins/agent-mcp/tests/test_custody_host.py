@@ -37,7 +37,9 @@ async def until(predicate):
 
 
 @asynccontextmanager
-async def shared(tmp_path, monkeypatch, *, early=False):
+async def shared(
+    tmp_path, monkeypatch, *, early=False, legacy_generations=(), legacy_custodian=False,
+):
     root = tmp_path / "installation"
     root.mkdir()
     selector = root / "current-version"
@@ -51,10 +53,41 @@ async def shared(tmp_path, monkeypatch, *, early=False):
     state = SimpleNamespace(
         host=host, root=root, handle=handle, selector=selector, cfg=cfg,
         backends=[], upstreams=[], listeners=[], tasks=[], writers=[], pipelines=[],
-        requests=[], refuse=False, refuse_prepare=False,
+        requests=[], refuse=False, refuse_prepare=False, context_modes=[],
     )
     monkeypatch.setattr(ipc, "_HAS_AF_UNIX", False)
     monkeypatch.setattr(incoming, "launch_generation", physical.get)
+    if legacy_generations or legacy_custodian:
+        describe = ec.descriptor
+        fields = ec.fields_for_peer
+        configure = ec.load_config
+
+        def descriptor():
+            result = describe()
+            if physical.get() in legacy_generations or (
+                physical.get() is None and legacy_custodian
+            ):
+                result.pop("trace_bookkeeping", None)
+            return result
+
+        def legacy_caller_fields(cfg, reply):
+            if physical.get() is None and legacy_custodian:
+                reply = {**reply, "execution_context": dict(reply["execution_context"])}
+                reply["execution_context"].pop("trace_bookkeeping", None)
+            return fields(cfg, reply)
+
+        def configured(bridge, request, loader, *, repository_root):
+            generation = physical.get()
+            if generation is not None:
+                mode = request.get("execution_context", {}).get("trace_bookkeeping", 0)
+                state.context_modes.append((generation, mode))
+                if generation in legacy_generations:
+                    assert mode == 0, "legacy receivers must get legacy digests"
+            return configure(bridge, request, loader, repository_root=repository_root)
+
+        monkeypatch.setattr(ec, "descriptor", descriptor)
+        monkeypatch.setattr(ec, "fields_for_peer", legacy_caller_fields)
+        monkeypatch.setattr(ec, "load_config", configured)
 
     def load(bridge, *, repository_root):
         assert bridge == "fixture"
@@ -276,6 +309,43 @@ async def test_shared_host_adopts_same_slot_backend_replacement(tmp_path, monkey
         assert (await receive(reader))["id"] == 1
         upstream = fixture.upstreams[0]
         assert upstream.starts == 1
+        assert sum(item.get("method") == "initialize" for item in upstream.messages) == 1
+        writer.write_eof()
+        assert await asyncio.wait_for(reader.read(), 2) == b""
+        await ipc.aclose_writer(writer)
+
+
+@pytest.mark.parametrize("legacy_custodian", [False, True], ids=["new-keeper", "legacy-keeper"])
+async def test_trace_context_update_and_rollback_preserve_the_same_session(
+    tmp_path, monkeypatch, legacy_custodian,
+):
+    monkeypatch.setenv("COPILOT_EXTENSIONS_BOOT_TRACE_SHIM_START_MS", "retained-launch")
+    async with shared(
+        tmp_path, monkeypatch, legacy_generations={"outgoing"},
+        legacy_custodian=legacy_custodian,
+    ) as fixture:
+        reader, writer, ack, _ = await fixture.attach()
+        assert ack["attached"] is True
+        entry = next(iter(fixture.host.sessions))
+        await send(writer, {"jsonrpc": "2.0", "id": 0, "method": "initialize"})
+        assert (await receive(reader))["id"] == 0
+        await settled(entry.owner)
+        for generation in ("incoming", "outgoing"):
+            await fixture.publish(generation)
+            fixture.host.inspect_sessions()
+            await asyncio.wait_for(entry.migration, 2)
+            assert entry.connector.generation == generation
+            assert not entry.owner.state.uncertain
+            await send(writer, {"jsonrpc": "2.0", "id": generation, "method": "tools/list"})
+            assert (await receive(reader))["id"] == generation
+            await settled(entry.owner)
+        modes = {
+            generation: {mode for selected, mode in fixture.context_modes if selected == generation}
+            for generation in ("outgoing", "incoming")
+        }
+        assert modes == {"outgoing": {0}, "incoming": {0 if legacy_custodian else 1}}
+        upstream = fixture.upstreams[0]
+        assert len(fixture.upstreams) == 1 and upstream.starts == 1 and upstream.closes == 0
         assert sum(item.get("method") == "initialize" for item in upstream.messages) == 1
         writer.write_eof()
         assert await asyncio.wait_for(reader.read(), 2) == b""
