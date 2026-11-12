@@ -6,6 +6,7 @@ import socket
 import pytest
 
 from agent_mcp import custody_conduit as conduit, execution_context as ec, sockio
+from agent_mcp.checkpoint import CheckpointRefused
 from agent_mcp.custody_contract import CONTRACT, host_descriptor
 from agent_mcp.request_context import CONTEXT_VERSION
 from .test_custody_session import configuration
@@ -190,5 +191,24 @@ def test_lost_or_malformed_attach_outcome_is_terminal(admission, reply):
     with pytest.raises(ConnectionError) as failure:
         conduit.attach(root / "custody.sock", "fixture", root)
     assert not isinstance(failure.value, ec.SharingUnavailable)
+    assert connection.closed
+    assert [item["op"] for item in connection.requests] == ["ping", "attach"]
+
+
+@pytest.mark.parametrize("error_type", [CheckpointRefused, OSError])
+def test_post_attach_identity_read_failure_is_terminal(admission, monkeypatch, error_type):
+    root, _, _, connect = admission
+    connection = connect()
+
+    def changed(request):
+        if request["op"] == "attach":
+            def unavailable(*_args):
+                raise error_type("fixture caller cwd disappeared")
+            monkeypatch.setattr(conduit.Binding, "identity", unavailable)
+    connection.changed = changed
+    with pytest.raises(ConnectionError) as failure:
+        conduit.attach(root / "custody.sock", "fixture", root)
+    assert not isinstance(failure.value, ec.SharingUnavailable)
+    assert isinstance(failure.value.__cause__, error_type)
     assert connection.closed
     assert [item["op"] for item in connection.requests] == ["ping", "attach"]
