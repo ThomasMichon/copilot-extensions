@@ -10,7 +10,7 @@ from types import SimpleNamespace
 import httpx
 import pytest
 
-from agent_dispatch.client import DispatchClient
+from agent_dispatch.client import DispatchClient, DispatchUpgradeRequired
 from agent_dispatch.overrides import set_override
 from agent_dispatch.producers import emitter, emitter_relevance
 from agent_dispatch.queue import Status
@@ -240,7 +240,7 @@ def test_receipt_trim_is_visible_and_batch_cursor_reconsiders_kept_tasks(q, api,
         second = _reconcile(client, spec, _runner("needed"))
         emitter._append_receipts(spec["id"], [{"id": tasks[-1].id}], max_receipts=1)
         trimmed = _reconcile(client, spec, _runner("needed"))
-    assert len(first["accepted"]) == len(second["accepted"]) == 2
+    assert len(first["accepted"]) == 2 and len(second["accepted"]) == 1
     assert second["accepted"][0]["task_id"] == tasks[-1].id
     assert trimmed["receipt_history_trimmed"] is True
 
@@ -496,3 +496,64 @@ def test_unknown_request_backpressure_preserves_custody_without_unbounded_growth
         second = _reconcile(client, spec)
     assert first["pending"] == second["pending"] == len(attempts) == 1
     assert second["capacity_held"] is True
+
+
+def test_duplicate_rediscovery_cannot_starve_an_older_retained_task(q, api, spec):
+    spec["relevance"]["batch_size"] = 1
+    q.register_registration("emitter", spec, reg_id="source-a", machine="host-a")
+    first, repeated = _retain(q, spec), _retain(q, spec)
+    with DispatchClient(
+        "http://testserver", token="data", control_token="control", transport=transport(api, []),
+    ) as client:
+        assert _reconcile(client, spec, _runner("needed"))["accepted"][0]["task_id"] == first.id
+        emitter._append_receipts(spec["id"], [{"id": repeated.id}])
+        assert _reconcile(client, spec, _runner("needed"))["accepted"][0]["task_id"] == repeated.id
+        emitter._append_receipts(spec["id"], [{"id": repeated.id}])
+        revisit = _reconcile(client, spec)
+    assert revisit["accepted"][0]["task_id"] == first.id
+    assert q.get(first.id).status == Status.ABANDONED
+    assert q.get(repeated.id).status == Status.QUEUED
+
+
+@pytest.mark.parametrize("failure", ["timeout", "unsupported"])
+def test_preflight_failure_is_definitely_unsent_and_allows_later_fresh_check(q, api, spec, monkeypatch, failure):
+    task = _retain(q, spec)
+    calls = []
+
+    def fail(**_kwargs):
+        if failure == "unsupported":
+            raise DispatchUpgradeRequired("receiver rolled back before POST")
+        raise httpx.ReadTimeout("health preflight timed out")
+
+    with DispatchClient(
+        "http://testserver", token="data", control_token="control", transport=transport(api, calls),
+    ) as client:
+        with monkeypatch.context() as patch:
+            result = _reconcile(client, spec, _runner(
+                before_return=lambda: patch.setattr(client, "_require_relevance", fail),
+            ))
+        assert result["pending"] == 0 and result["errors"]
+        assert not any(method == "POST" for method, _ in calls)
+        retry = _reconcile(client, spec, _runner("needed"))
+    assert retry["accepted"][0]["task_id"] == task.id
+    assert q.get(task.id).status == Status.QUEUED
+
+
+def test_invalid_post_receipt_is_not_misclassified_as_unsent_upgrade(q, api, spec):
+    task = _retain(q, spec)
+    delegate = transport(api, [])
+
+    def send(request):
+        response = delegate.handle_request(request)
+        if request.method == "POST":
+            return httpx.Response(200, json={"result": None})
+        return response
+
+    with DispatchClient(
+        "http://testserver", token="data", control_token="control", transport=httpx.MockTransport(send),
+    ) as client:
+        first = _reconcile(client, spec)
+        second = _reconcile(client, spec)
+    assert first["pending"] == 1 and second["pending"] == 0
+    assert second["recovered"][0]["decision"] == "abandoned"
+    assert q.get(task.id).status == Status.ABANDONED

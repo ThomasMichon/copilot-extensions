@@ -85,6 +85,11 @@ replacement request. A missing receipt is not proof of no effects. Pending reque
 Pending requests are capped at the receipt owner's 2,000-record budget.
 At capacity, new checks pause while bounded receipt recovery and ordinary
 production continue; unresolved outcomes are not evicted to make room.
+Client failures confined to the pre-POST health/capability check expose
+`RelevanceNotSent` and can clear that unsent pending entry for a later fresh
+check. Unsupported preflight also remains a `DispatchUpgradeRequired`.
+Exceptions after POST begins, including invalid acknowledgement envelopes,
+do not carry the guaranteed-unsent signal.
 
 A current receiver can return an additive `relevance_rejection` alongside
 the unchanged string `detail` on HTTP 409. It identifies
@@ -95,8 +100,10 @@ source check on a later tick. A post-commit callback failure or an unavailable
 receipt read cannot produce this safe-rejection signal. Plain or mismatched
 errors remain uncertain and retained.
 
-Selection rotates over unique retained task ids, with at most `batch_size`
-snapshot attempts and one checker process per tick. Pending receipt recovery
+Selection consumes a persisted finite sweep of unique retained task ids before
+starting the next sweep. Repeated discovery receipts cannot move an open task
+ahead of already retained work; newly discovered tasks join the next sweep.
+There are at most `batch_size` snapshot attempts and one checker process per tick. Pending receipt recovery
 has its own bounded rotating cursor. The creation log retains its existing
 2,000-record cap and unchanged public receipt format; the tick reports
 `receipt_history_trimmed` when its earliest retained sequence exceeds 1.

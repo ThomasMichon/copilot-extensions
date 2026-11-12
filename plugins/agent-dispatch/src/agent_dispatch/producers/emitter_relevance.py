@@ -14,7 +14,7 @@ from typing import Any
 from agent_procutil import no_window_kwargs
 
 from ..client import DispatchClient
-from ..client_errors import DispatchError
+from ..client_errors import DispatchError, RelevanceNotSent
 from ..queue_records import Status
 from ..repository_resources import resolve_execution_resources, validate_resource_arguments
 from ..task_relevance_contract import emitter_spec_revision
@@ -49,7 +49,7 @@ def validate_config(spec: dict) -> None:
 
 def _load(path: Path) -> dict:
     if not path.exists():
-        return {"version": 1, "cursor": 0, "pending": {}, "recovery_cursor": ""}
+        return {"version": 1, "cursor": 0, "pending": {}, "recovery_cursor": "", "sweep": []}
     state = json.loads(path.read_text(encoding="utf-8"))
     if (
         not isinstance(state, dict) or state.get("version") != 1
@@ -64,6 +64,9 @@ def _load(path: Path) -> dict:
             or not report.get("registration_id") or not report.get("request_id")
         ):
             raise emitter.EmitterError("invalid retained emitter relevance request")
+    sweep = state.setdefault("sweep", [])
+    if not isinstance(sweep, list) or any(not isinstance(task_id, str) for task_id in sweep):
+        raise emitter.EmitterError("invalid retained emitter relevance sweep")
     return state
 
 
@@ -146,18 +149,18 @@ def reconcile_receipts(
             if isinstance(row.get("task_id"), str):
                 rows[row["task_id"]] = row
         ordered = sorted(rows.values(), key=lambda row: row["seq"])
-        candidates = [
-            row for row in ordered if row["seq"] > state["cursor"]
-        ] + [row for row in ordered if row["seq"] <= state["cursor"]]
+        if not state["sweep"]:
+            state["sweep"] = [row["task_id"] for row in ordered]
         available = max(0, emitter.DEFAULT_MAX_RECEIPTS - len(state["pending"]))
         result["capacity_held"] = available == 0
         if not available:
             result["errors"].append({"error": "recover retained relevance requests before admitting more"})
         tasks = []
-        for row in candidates[:min(size, available)]:
-            task_id = row["task_id"]
-            state["cursor"] = row["seq"]
-            if task_id in state["pending"]:
+        selected = state["sweep"][:min(size, available)]
+        state["sweep"] = state["sweep"][len(selected):]
+        for task_id in selected:
+            row = rows.get(task_id)
+            if row is None or task_id in state["pending"]:
                 continue
             try:
                 snapshot = client.relevance_snapshot(
@@ -228,6 +231,8 @@ def reconcile_receipts(
                             raise emitter.EmitterError("relevance acceptance identity does not match")
                     except Exception as exc:
                         if (
+                            isinstance(exc, RelevanceNotSent)
+                        ) or (
                             isinstance(exc, DispatchError) and exc.status_code == 409
                             and isinstance(exc.detail, dict)
                             and exc.detail.get("code") == "relevance_not_accepted"
