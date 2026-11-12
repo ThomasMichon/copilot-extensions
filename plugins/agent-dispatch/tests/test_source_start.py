@@ -127,6 +127,7 @@ def test_source_start_callback_never_deploys_or_succeeds_after_failed_coordinato
     calls = []
     monkeypatch.setattr(source_start, "require_selected_source", lambda: Path("app"))
     monkeypatch.setattr(source_start, "supervisor_plan", lambda root: None)
+    monkeypatch.setattr(source_start, "prepare_scheduled_launchers", lambda *_a, **_k: None)
     monkeypatch.setattr(coordinator_cli, "_cmd_cutover", lambda args, **kwargs: (
         calls.append(kwargs) or 1
     ))
@@ -142,6 +143,7 @@ def test_source_start_callback_reports_supervisor_failure_as_failure(monkeypatch
 
     monkeypatch.setattr(source_start, "require_selected_source", lambda: Path("app"))
     monkeypatch.setattr(source_start, "supervisor_plan", lambda root: None)
+    monkeypatch.setattr(source_start, "prepare_scheduled_launchers", lambda *_a, **_k: None)
     monkeypatch.setattr(coordinator_cli, "_cmd_cutover", lambda args, **kwargs: 0)
     monkeypatch.setattr(source_start, "ensure_supervisor", lambda root, **kwargs: (
         (_ for _ in ()).throw(RuntimeError("native supervisor readiness unconfirmed"))
@@ -773,6 +775,7 @@ def test_relative_database_matches_the_coordinator_working_directory(
     incumbent_identity = source_start.config_identity(cfg)
     monkeypatch.chdir(caller)
     monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(runtime))
+    monkeypatch.setattr(source_start, "install_dir", lambda: runtime)
     health = {
         "status": "ok", "version": source_start.__version__,
         "runtime_config_identity": incumbent_identity,

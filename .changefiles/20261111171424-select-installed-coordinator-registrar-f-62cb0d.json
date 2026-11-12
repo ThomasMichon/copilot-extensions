@@ -1,0 +1,9 @@
+{
+  "comment": "Select installed coordinator registrar from its durable service configuration instead of an initiating supervisor profile",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}
