@@ -115,7 +115,8 @@ Git worktree registration. It reads Git's marker, common-directory and
 backpointer files directly, without starting Git or acquiring optional topology.
 It also covers adopted linked checkouts and retained managed checkouts outside
 a newer allocation root. An anchor record instead proves the exact configured
-local Git anchor, including a bare repository.
+local Git anchor, including a bare repository or a Git-file anchor whose
+`gitdir` and optional `commondir` point to the actual repository metadata.
 The record's platform must still match the actual current execution environment;
 an optional topology's platform label cannot replace that OS check.
 
@@ -134,6 +135,9 @@ canonical ID and receiving project into resume rather than resolving the same
 input again against another project's suffixes. Explicit keys, aliases and
 profiles are selected before an observed-hostname fallback; unrelated hostname
 metadata does not turn a retained checkout into a remote destination.
+Caller-declared targets also precede a cross-project historical-name fallback,
+even when the receiving project has no topology of its own. Malformed local
+record shapes are failed optional probes, not a veto on strict remote routing.
 
 No identity migration is necessary. IDs, historical physical and execution
 names, sessions, pairs, claims and owner references remain intact. Qualified
@@ -148,6 +152,10 @@ during a locality read.
 Failed or absent receipt recovery cannot authorize a foreign-owned child:
 without a validated receipt, an owned local record requires an independently
 proven retained local parent.
+Claimant absence is confirmed dead only after execution locality is validated;
+an unvalidated configured name retained after topology failure is not proof.
+Actual retained owner records remain locally observable, but an invalid current
+context leaves an absent owner unconfirmed and preserves the custody hold.
 `doctor` reports `local_registration` for the project's records, distinguishing
 proven local checkouts, absent checkouts and present but unproven paths, without
 rewriting historical identities.

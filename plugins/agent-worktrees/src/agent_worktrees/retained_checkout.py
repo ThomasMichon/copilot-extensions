@@ -47,10 +47,30 @@ def require_git_checkout(checkout: Path, anchor: Path, branch: str) -> None:
         raise ValueError("Git worktree registration points at another location")
 
 
+def _gitdir_marker(checkout: Path) -> Path:
+    marker = checkout / ".git"
+    if marker.is_symlink() or not marker.is_file():
+        raise ValueError("local checkout has no ordinary linked-worktree marker")
+    text = marker.read_text(encoding="utf-8").strip()
+    if not text.startswith("gitdir: ") or "\n" in text:
+        raise ValueError("invalid linked-worktree marker")
+    return (checkout / text.removeprefix("gitdir: ")).resolve()
+
+
 def _git_directory(anchor: Path) -> Path:
     if not anchor.is_absolute():
         raise ValueError("receiving anchor must be absolute")
-    common = anchor / ".git" if (anchor / ".git").is_dir() else anchor
+    marker = anchor / ".git"
+    if marker.is_file():
+        common = _gitdir_marker(anchor)
+        shared = common / "commondir"
+        if shared.is_file():
+            relative = shared.read_text(encoding="utf-8").strip()
+            if not relative:
+                raise ValueError("receiving anchor has an empty common directory")
+            common = common / relative
+    else:
+        common = marker if marker.is_dir() else anchor
     common = common.resolve()
     if not (common / "HEAD").is_file() or not (common / "objects").is_dir():
         raise ValueError("receiving anchor is not a Git repository")
@@ -62,12 +82,7 @@ def _require_linked_checkout(checkout: Path, anchor: Path, branch: str) -> None:
     if not checkout.is_absolute() or checkout.resolve() != checkout.absolute():
         raise ValueError("local checkout must be an absolute nonredirected path")
     marker = checkout / ".git"
-    if marker.is_symlink() or not marker.is_file():
-        raise ValueError("local checkout has no ordinary linked-worktree marker")
-    text = marker.read_text(encoding="utf-8").strip()
-    if not text.startswith("gitdir: ") or "\n" in text:
-        raise ValueError("invalid linked-worktree marker")
-    administrative = (checkout / text.removeprefix("gitdir: ")).resolve()
+    administrative = _gitdir_marker(checkout)
     common = _git_directory(anchor)
     if administrative.parent != common / "worktrees":
         raise ValueError("local checkout belongs to another Git family")
@@ -128,7 +143,7 @@ def is_local(record, config) -> bool:
         else:
             _require_linked_checkout(checkout, Path(repo.anchor), record.branch)
         return True
-    except (AttributeError, OSError, ValueError, RuntimeError, cfg.yaml.YAMLError, git_ops.GitError):
+    except (AttributeError, KeyError, TypeError, OSError, ValueError, RuntimeError, cfg.yaml.YAMLError, git_ops.GitError):
         return False
 
 
@@ -165,6 +180,6 @@ def resolve_owner(ref, config) -> Path | None:
         receiving = config if config.repo_name == ref.project else execution_spaces.project_record_config(record)
         if is_local(record, receiving):
             return path
-    except (AttributeError, OSError, ValueError, RuntimeError, cfg.yaml.YAMLError, git_ops.GitError):
+    except (AttributeError, KeyError, TypeError, OSError, ValueError, RuntimeError, cfg.yaml.YAMLError, git_ops.GitError):
         pass
     return None

@@ -460,7 +460,7 @@ def test_actual_retained_local_parent_needs_no_foreign_receipt(local_worktree, t
     execution_spaces.require_record_mutation(tracking.load_record(fixture.ledger), config)
 
 
-@pytest.mark.parametrize("name_kind", ["key", "alias", "ambiguous-alias"])
+@pytest.mark.parametrize("name_kind", ["key", "alias", "ambiguous-alias", "display", "ambiguous-display"])
 def test_explicit_remote_name_equal_to_observed_hostname_is_not_local(
     local_worktree, monkeypatch, capfd, name_kind,
 ):
@@ -470,11 +470,13 @@ def test_explicit_remote_name_equal_to_observed_hostname_is_not_local(
     _topology(fixture, "missing")
     selector = cfg.socket.gethostname()
     keys = [selector] if name_kind == "key" else ["remote-one"]
-    if name_kind == "ambiguous-alias":
+    if name_kind.startswith("ambiguous"):
         keys.append("remote-two")
     entries = {key: cfg.MachineEntry(
-        key=key, display_name=key, alias=selector if name_kind != "key" else "",
-        hostname=f"{key}-remote", execution_platform=cfg.detect_platform(),
+        key=key, display_name=selector if "display" in name_kind else key,
+        alias=selector if "alias" in name_kind else "",
+        hostname=f"{key}-remote",
+        execution_platform="" if "display" in name_kind else cfg.detect_platform(),
     ) for key in keys}
     monkeypatch.setattr(cfg, "load_machines_yaml", lambda *a, **k: entries)
     monkeypatch.setattr(installer, "read_projects_registry", lambda: {"projects": {"example": {}}})
@@ -485,9 +487,10 @@ def test_explicit_remote_name_equal_to_observed_hostname_is_not_local(
     )
     before = fixture.ledger.read_bytes()
     code = resolve_cli.cmd_resolve(_args(worktree_id=fixture.checkout.name, machine=selector))
-    if name_kind == "ambiguous-alias":
+    if name_kind.startswith("ambiguous"):
         assert code == 1 and not routed
-        assert "ambiguous" in json.loads(capfd.readouterr().out)["error"].lower()
+        message = json.loads(capfd.readouterr().out)["error"].lower()
+        assert "ambiguous" in message or "multiple machines" in message
     else:
         assert code == 0 and routed[0][1] == selector
     assert fixture.ledger.read_bytes() == before
@@ -519,3 +522,150 @@ def test_replacement_checkout_branch_cannot_authorize_forced_cleanup(
     )
     assert not result.cleanable and result.bucket == "execution-space"
     assert changed.read_text(encoding="utf-8") == "preserve replacement work"
+
+
+def test_caller_project_remote_declaration_precedes_receiving_history(local_worktree, monkeypatch):
+    from agent_worktrees import installer, resolve_cli
+
+    fixture = local_worktree
+    _topology(fixture, "missing")
+    receiving = fixture.load()
+    caller = replace(receiving, repo_name="other", machine="other-host", repos={
+        "other": receiving.default_repo,
+    })
+    entry = cfg.MachineEntry(
+        key="old-execution", display_name="Remote", hostname="remote-host",
+        execution_platform=cfg.detect_platform(),
+    )
+    monkeypatch.setattr(cfg, "load_machines_yaml", lambda anchor, *, config=None: (
+        {entry.key: entry} if config is not None and config.repo_name == "other" else {}
+    ))
+    monkeypatch.setattr(cfg, "_ACTIVE_PROJECT", "other")
+    monkeypatch.setattr(cfg, "load_config", lambda *a, **k: caller)
+    monkeypatch.setattr(cfg, "tracking_dir", lambda name=None: cfg.project_dir(
+        name or cfg.active_project(),
+    ) / "worktrees")
+    monkeypatch.setattr(installer, "read_projects_registry", lambda: {
+        "projects": {"example": {}, "other": {}},
+    })
+    monkeypatch.setattr(
+        resolve_cli, "_preflight_launch",
+        lambda *a, **k: pytest.fail("caller-selected remote action reached a local checkout"),
+    )
+    routed = []
+    monkeypatch.setattr(
+        resolve_cli, "_emit_remote_plan_for_env",
+        lambda *args, **kwargs: routed.append(args) or 0,
+    )
+    assert resolve_cli.cmd_resolve(_args(
+        worktree_id=fixture.checkout.name, machine=entry.key,
+    )) == 0
+    assert routed[0][0] is caller and routed[0][1] == entry.key
+    assert cfg.active_project() == "other"
+
+
+@pytest.mark.parametrize("missing", ["branch", "worktree_id"])
+def test_malformed_local_record_does_not_consume_remote_selector(local_worktree, monkeypatch, missing):
+    from agent_worktrees import resolve_cli
+
+    fixture = local_worktree
+    _topology(fixture, "missing")
+    fixture.data.pop(missing)
+    fixture.ledger.write_text(yaml.safe_dump(fixture.data), encoding="utf-8")
+    entry = cfg.MachineEntry(
+        key="remote-target", display_name="Remote", hostname="remote-host",
+        execution_platform=cfg.detect_platform(),
+    )
+    monkeypatch.setattr(cfg, "load_machines_yaml", lambda *a, **k: {entry.key: entry})
+    routed = []
+    monkeypatch.setattr(
+        resolve_cli, "_emit_remote_plan_for_env",
+        lambda *args, **kwargs: routed.append(args) or 0,
+    )
+    before = fixture.ledger.read_bytes()
+    assert resolve_cli.cmd_resolve(_args(
+        worktree_id=fixture.checkout.name, machine=entry.key,
+    )) == 0
+    assert routed[0][3][:2] == ["--worktree-id", fixture.checkout.name]
+    assert fixture.ledger.read_bytes() == before
+
+
+@pytest.mark.parametrize("kind", ["separate", "linked"])
+def test_git_file_anchor_retains_local_authority(local_worktree, monkeypatch, tmp_path, kind):
+    fixture = local_worktree
+    _topology(fixture, "malformed")
+    anchor = tmp_path / kind / "anchor"
+    if kind == "separate":
+        anchor.mkdir(parents=True)
+        git_ops.git("init", "--separate-git-dir", str(anchor.parent / "metadata"), cwd=anchor)
+        git_ops.git(
+            "-c", "user.name=Example", "-c", "user.email=example@example.com",
+            "commit", "--allow-empty", "-m", "fixture", cwd=anchor,
+        )
+    else:
+        git_ops.git(
+            "worktree", "add", "-b", "worktree/linked-anchor", str(anchor), cwd=fixture.anchor,
+        )
+    checkout = anchor.parent / fixture.checkout.name
+    branch = f"worktree/git-file-{kind}"
+    git_ops.git("worktree", "add", "-b", branch, str(checkout), cwd=anchor)
+    fixture.data.update(worktree_path=str(checkout), branch=branch)
+    fixture.ledger.write_text(yaml.safe_dump(fixture.data), encoding="utf-8")
+    config = fixture.load()
+    config = replace(config, repos={"example": replace(
+        config.default_repo, anchor=str(anchor), worktree_root=str(checkout.parent),
+    )})
+    monkeypatch.setattr(cfg, "load_config", lambda *a, **k: config)
+    monkeypatch.setattr(cfg, "load_project_config", lambda *a, **k: config)
+    monkeypatch.setattr(git_ops, "git", lambda *a, **k: pytest.fail("local proof spawned Git"))
+    record = tracking.load_record(fixture.ledger)
+    execution_spaces.require_record_mutation(record, config)
+    assert retained_checkout.is_local(record, config)
+    assert health.audit_local_registration([record])["local"] == 1
+
+
+@pytest.mark.parametrize("qualified", [False, True])
+def test_rejected_configured_machine_cannot_confirm_claimant_death(
+    local_worktree, monkeypatch, qualified,
+):
+    from agent_worktrees import claimant, prune
+
+    fixture = local_worktree
+    other = "wsl" if cfg.detect_platform() != "wsl" else "windows"
+    fixture.topology.write_text(yaml.safe_dump({"machines": {
+        "new-host": {"execution_platform": other},
+    }}), encoding="utf-8")
+    config = fixture.load()
+    assert config.machine == "new-host"
+    ref = "new-host/example/missing-owner" if qualified else "missing-owner"
+    monkeypatch.setattr(
+        claimant, "_remote_claimant_alive",
+        lambda *a, **k: pytest.fail("invalid local execution identity triggered a remote probe"),
+    )
+    assert claimant.local_claimant_alive(ref) is None
+    assert claimant.resolve_claimant_alive(ref) is None
+    child = replace(tracking.load_record(fixture.ledger), owner_ref=ref, resources=[])
+    verdict = prune.assess(
+        child, git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.UNUSED),
+        turn_count=0, claimant_alive=claimant.local_claimant_alive,
+    )
+    assert not verdict.safe and verdict.category == "claimed"
+    assert "unconfirmed" in verdict.reason
+
+
+def test_proven_current_context_can_confirm_a_missing_local_claimant(local_worktree):
+    from agent_worktrees import claimant
+
+    _topology(local_worktree, "missing")
+    assert claimant.local_claimant_alive("new-host/example/missing-owner") is False
+    assert claimant.resolve_claimant_alive("new-host/example/missing-owner") is False
+
+
+def test_retained_local_claimant_survives_invalid_topology(local_worktree):
+    from agent_worktrees import claimant
+
+    fixture = local_worktree
+    _topology(fixture, "malformed")
+    ref = f"old-execution/example/{fixture.checkout.name}"
+    assert claimant.local_claimant_alive(ref) is True
+    assert claimant.resolve_claimant_alive(ref, allow_remote=False) is True

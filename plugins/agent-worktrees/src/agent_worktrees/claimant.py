@@ -49,6 +49,21 @@ def _record_platform_conflicts(record: tracking.WorktreeRecord) -> bool:
         _LOG.warning("Claimant record platform conflicts with the actual execution context")
     return conflict
 
+
+def _claimant_is_local(parsed: tracking.ClaimRef, config) -> bool:
+    from . import retained_checkout
+    from .execution_spaces import require_current_execution_space
+
+    if parsed.is_qualified and retained_checkout.resolve_owner(parsed, config) is not None:
+        return True
+    require_current_execution_space(config)
+    if not parsed.machine or parsed.machine.casefold() == config.machine.casefold():
+        return True
+    if legacy_wsl_record_locality.resolve_legacy_wsl_owner_ref(parsed, config) is not None:
+        return True
+    return machine_identity.is_local_machine(parsed.machine, config)
+
+
 #: Escape hatch: set truthy to disable cross-machine SSH probing entirely, so a
 #: cross-machine owner always degrades to ``None`` (spare) without a network
 #: call. For environments where the SSH mesh is unavailable or undesirable.
@@ -170,16 +185,11 @@ def local_claimant_alive(owner_ref: str) -> bool | None:
         return None
     try:
         config = cfg.load_config()
-        this_machine = config.machine
+        if not config.machine or not _claimant_is_local(parsed, config):
+            return None
     except Exception as exc:
         _LOG.warning("Cannot establish actual claimant execution identity: %s", exc)
         return None
-    if not this_machine:
-        return None
-    # Cross-machine -> unresolvable, unless a record-scoped legacy WSL ref.
-    if parsed.machine and this_machine and parsed.machine != this_machine:
-        if legacy_wsl_record_locality.resolve_legacy_wsl_owner_ref(parsed, config) is None:
-            return None
     project = parsed.project
     if not project:
         # A bare (legacy same-repo) ref -> assume the active project.
@@ -254,27 +264,12 @@ def resolve_claimant_alive(
     parsed = tracking.parse_claim_ref(owner_ref)
     if parsed is None:
         return None
-    if not parsed.machine:
-        same_machine = True
-    else:
-        try:
-            config = cfg.load_config()
-        except Exception as exc:
-            _LOG.warning("Cannot establish actual claimant execution identity: %s", exc)
-            return None
-        else:
-            same_machine = parsed.machine.casefold() == config.machine.casefold()
-            if not same_machine:
-                same_machine = (
-                    legacy_wsl_record_locality.resolve_legacy_wsl_owner_ref(parsed, config) is not None
-                )
-            if not same_machine:
-                from .execution_spaces import ExecutionSpaceError
-                try:
-                    same_machine = machine_identity.is_local_machine(parsed.machine, config)
-                except (ValueError, ExecutionSpaceError) as exc:
-                    _LOG.warning("Cannot establish claimant alias locality: %s", exc)
-                    return None
+    try:
+        config = cfg.load_config()
+        same_machine = _claimant_is_local(parsed, config)
+    except Exception as exc:
+        _LOG.warning("Cannot establish actual claimant execution identity: %s", exc)
+        return None
     if same_machine:
         return local_claimant_alive(owner_ref)
     if not allow_remote or os.environ.get(_NO_REMOTE_ENV):

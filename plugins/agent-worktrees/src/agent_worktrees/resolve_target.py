@@ -9,12 +9,32 @@ from . import config as cfg, machine_identity
 from .execution_spaces import current_execution_context, registry_for_config
 
 
+def _declares_target(entries, name: str) -> bool:
+    return any(
+        name.casefold() in {
+            value.casefold() for value in machine_identity_names(entry, include_metadata=False)
+        } or (
+            not entry.execution_platform and entry.display_name
+            and name.casefold() == entry.display_name.casefold()
+        ) for entry in entries.values()
+    )
+
+
+def _optional_entries(config):
+    from .execution_spaces import ExecutionSpaceError
+
+    try:
+        return registry_for_config(config)
+    except ExecutionSpaceError:
+        return None
+
+
 def retained_target(
     config: cfg.Config, worktree_id: str | None, name: str | None,
     environment: str | None = None,
 ) -> tuple[cfg.Config, str] | None:
     from . import retained_checkout, session_tracking_cli, tracking
-    from .execution_spaces import ExecutionSpaceError, project_record_config
+    from .execution_spaces import project_record_config
 
     if not worktree_id or (
         environment and normalize_environment(environment) != cfg.detect_platform()
@@ -31,22 +51,17 @@ def retained_target(
         receiving = config if record.repo == config.repo_name else project_record_config(record)
         if not retained_checkout.is_local(record, receiving):
             return None
-    except (OSError, ValueError, RuntimeError, cfg.yaml.YAMLError):
+    except (AttributeError, KeyError, TypeError, OSError, ValueError, RuntimeError, cfg.yaml.YAMLError):
         return None
     target = receiving, record.worktree_id
     if not name:
         return target
-    try:
-        entries = registry_for_config(receiving)
-    except ExecutionSpaceError:
-        entries = None
-    if entries is not None and any(
-        name.casefold() in {
-            value.casefold() for value in machine_identity_names(entry, include_metadata=False)
-        } for entry in entries.values()
-    ):
-        resolve_machine_selection(entries, name, environment, allow_physical_context=True)
-        return None
+    caller_entries = _optional_entries(config)
+    entries = caller_entries if receiving is config else _optional_entries(receiving)
+    for selected_entries in (caller_entries, entries):
+        if selected_entries is not None and _declares_target(selected_entries, name):
+            resolve_machine_selection(selected_entries, name, environment, allow_physical_context=True)
+            return None
     observed = cfg.socket.gethostname()
     if name.casefold() in {observed.casefold(), observed.split(".")[0].casefold()}:
         return target
@@ -78,20 +93,17 @@ def target_is_local(
         return True
     if not name:
         return not environment or normalize_environment(environment) == cfg.detect_platform()
+    entries = registry_for_config(config)
+    named_target = _declares_target(entries, name)
     if (
-        not environment and config.machine and name.casefold() == config.machine.casefold()
+        not named_target and not environment and config.machine
+        and name.casefold() == config.machine.casefold()
         and name.casefold() not in {
             cfg.socket.gethostname().casefold(), cfg.socket.gethostname().split(".")[0].casefold(),
         }
         and machine_identity.is_local_machine(name, config)
     ):
         return True
-    entries = registry_for_config(config)
-    named_target = any(
-        name.casefold() in {
-            value.casefold() for value in machine_identity_names(entry, include_metadata=False)
-        } for entry in entries.values()
-    )
     if config.machine and not named_target:
         context = current_execution_context(config)
         if name.casefold() in {context.hostname.casefold(), context.execution_machine.casefold()}:
