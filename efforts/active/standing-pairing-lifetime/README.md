@@ -132,6 +132,21 @@ synthetic stores and native fixture owners.
 
 ### 2026-11-12 - Final source-pinned retention evidence
 
+- The first [physical native lane](https://github.com/ThomasMichon/copilot-extensions/actions/runs/43218439323)
+  failed its five selected jobs. The failures were retained, not waived:
+  a generated POSIX probe needed escaped newlines and a positive fixture head
+  revision; older controls needed native-platform records and the precise earlier
+  missing-record refusal; isolated Manager preparation could not import its
+  sibling helper. The Manager entry-point repair passed its exact isolated
+  `--help` consumer check, and the generated POSIX driver compiles.
+- The mux overlap fixture now exercises the current authenticated read-only
+  observer against one exact-PID/birth, fixture-owned protocol process. The
+  production observation/creation readers and kernel lease remain real; no
+  productive mux, whole-host census claim or safety-guard bypass is involved.
+  All four literal check/create overlap controls passed, preserving release at
+  discoverability and independent-target concurrency. The cold-resume Windows
+  control also passed. Physical native acceptance must be rerun at the corrected
+  checkpoint without widening its budgets or weakening failure/skip gates.
 - A later review required version-appropriate v44-to-v45 database migration,
   malformed terminal-entry retention, native setup fencing, durable reattached
   permission holds and resolver failures that advance the reconciliation page.

@@ -1,0 +1,9 @@
+{
+  "comment": "Resolve the native acceptance helper from its owned source path under isolated Python and verify the preparation entry point.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

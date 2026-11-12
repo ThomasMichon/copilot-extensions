@@ -7,6 +7,7 @@ import argparse
 import io
 import json
 import os
+import runpy
 import shutil
 import subprocess
 import sys
@@ -20,9 +21,11 @@ from contextlib import redirect_stderr
 
 import pytest
 from agent_procutil import no_window_kwargs
-from native_acceptance_helpers import _environment, _prepare_command
 
 from worktree_manager import self_install as si
+
+_helpers = runpy.run_path(str(Path(__file__).with_name("native_acceptance_helpers.py")))
+_environment, _prepare_command = _helpers["_environment"], _helpers["_prepare_command"]
 
 SOURCE = Path(__file__).resolve().parents[2]
 LEGACY_RELEASE = "9c7a61518540787498c77a284f640c36bbe7d8e4"
@@ -40,6 +43,17 @@ result = installer.self_install(payload, root=root, dry_run=False)
 assert result.action == 'installed', result
 print(json.dumps({'controller_version': worktree_manager.__version__, 'slot': result.slot}))
 """
+
+
+def test_isolated_preparation_entrypoint_resolves_owned_helpers(tmp_path):
+    from agent_procutil.owned_process import run_caller_owned
+
+    result = run_caller_owned(
+        [sys.executable, "-I", "-B", str(Path(__file__).resolve()), "--help"],
+        cwd=tmp_path, timeout=15, max_stdout_bytes=4096, max_stderr_bytes=4096,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "--prepare" in result.stdout
 
 
 def _run(argv, env, cwd):

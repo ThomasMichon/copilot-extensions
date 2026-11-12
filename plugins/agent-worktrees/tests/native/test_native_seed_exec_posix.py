@@ -212,10 +212,10 @@ if r["admission_only"]:
             from agent_procutil.owned_process import run_caller_owned
             probe = run_caller_owned(
                 [sys.executable, "-I", "-c",
-                 "import sys;from pathlib import Path;from agent_worktrees import tracking\n"
-                 "try:\n"
-                 " with tracking._RecordLock(Path(sys.argv[1]),timeout=0,require_sidecar=True): pass\n"
-                 "except TimeoutError: sys.exit(7)\n",
+                 "import sys;from pathlib import Path;from agent_worktrees import tracking\\n"
+                 "try:\\n"
+                 " with tracking._RecordLock(Path(sys.argv[1]),timeout=0,require_sidecar=True): pass\\n"
+                 "except TimeoutError: sys.exit(7)\\n",
                  r["record"]],
                 timeout=5, max_stdout_bytes=4096, max_stderr_bytes=4096,
             )
@@ -275,6 +275,7 @@ def test_retained_native_exec_fences_head_writer_and_consumes_execution_hint(
 
     current = tracking.load_record(record)
     current.head_session = "native-original"
+    current.head_revision = 1
     current.sessions = [tracking.SessionEntry("native-original", current.started_at)]
     tracking.save_record(current, record)
     current = tracking.load_record(record)
