@@ -2049,6 +2049,31 @@ result and review, and retain every earlier result at its original source.
 Admitted-baseline upgrade, mandatory frozen enforcement, Main adoption and all
 other parent obligations remain open.
 
+### November 11 - Scope the generated size baseline to the owned extraction
+
+CI 43158756088 at `cb4a8ee` passes eligible units and type contracts, then
+fails the size guard on an unrelated Worktrees module. The whole-tree refresh
+tightened that entry to the local candidate's 6757 lines, while the actual
+merge input includes the newer Dev file at 6758 lines. Git blob comparison
+confirms distinct local versus Dev/merge inputs; this is not a platform
+line-count guess.
+
+Restore the pre-PR baseline entries outside this extraction and retain only
+the Index reader's reduction. Independent JSON comparison verifies exactly
+that one changed entry and no increased ceiling relative to the pre-PR
+baseline. The observed merged Worktrees file remains within its original
+accepted ceiling. No Worktrees implementation is changed, no size exception
+is introduced, and CI is not bypassed. The previous whole-tree local pass
+did not establish merged-input validity; it is not substituted for the
+required current-head result.
+
+The full ten-minute `cb4a8ee` review wait expires without a new verdict.
+That is not a passing review. Its already-owned native run remains frozen
+and supervised; no duplicate is submitted merely to change that result.
+Publish the actual baseline correction and obtain current CI/review. Retain
+exact-source qualification identity rather than relabel an older native
+artifact onto this metadata revision.
+
 ### November 11 - Identify and stop snapshot-guidance payload bytecode
 
 Required CI 43069145815 is green at
