@@ -57,9 +57,12 @@ def inspect(worktree_id: str, destination: str, config) -> dict:
 
         inspect_receiving(record, config)
     elif record.owner_ref and record.creation_nonce:
-        raise ValueError(
-            "read-only proof cannot recover missing receiving allocation metadata; inspect through its owner"
-        )
+        from .receiving_allocation import has_retained_receiving_operation
+
+        if has_retained_receiving_operation(record, ledger.parent):
+            raise ValueError(
+                "read-only proof cannot recover missing receiving allocation metadata; inspect through its owner"
+            )
     owner_directory = relocation.launch_seed_state.state_path(ledger).parent
     for name in ("lifecycle.lock", "launch-admission.lock"):
         if os.path.lexists(owner_directory / name):

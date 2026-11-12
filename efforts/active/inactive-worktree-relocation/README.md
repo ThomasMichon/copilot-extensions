@@ -929,3 +929,21 @@ Earlier inline entries below remain historical source evidence.
 - Retain this Active effort, #10879, its source workspace and ownership for
   subsequent acceptance reconciliation. No installation, runtime/service
   change, allocation-default update or real checkout movement follows.
+
+### 2026-11-12 — Ordinary admission compatibility correction
+- Reproduced two first-flow compatibility defects with three focused
+  before-fix regressions: generic parent ownership plus a nonce was mistaken
+  for a missing receiving receipt, and literal workspace metadata discovery
+  enumerated unrelated session artifacts against the reference budget.
+- This closes the existing ordinary v1 contract and identity-preserving
+  relocation vision; it does not introduce another allocation shape or
+  weaken receiving continuity. Require original journal classification and
+  exact settled generic parent responsibility; known receiving, ambiguous,
+  malformed, busy and unsupported evidence stays held without recovery.
+- Direct known-leaf lookup retains bounded wildcard enumeration, unchanged
+  reference consumers and changing/redirected/unavailable-directory refusals.
+  Checkout-data limits and native owner admission remain unchanged.
+- Source qualification, review, required checks and accepted Main publication
+  remain separate gates. The real-Git component control is not native host
+  inactivity proof; no installation, real target reconciliation or migration
+  follows from it. This effort and #10879 remain Active.

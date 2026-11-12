@@ -332,16 +332,18 @@ def require_record_mutation(record: Any, config: Any, *, recover_receiving: bool
         not getattr(record, "receiving_allocation_present", False)
         and getattr(record, "owner_ref", None) and getattr(record, "creation_nonce", None)
     ):
-        if not recover_receiving:
-            raise ExecutionSpaceError(
-                "read-only proof cannot recover missing receiving allocation metadata; inspect through its owner"
-            )
-        from .receiving_allocation import recover_missing
+        from .receiving_allocation import has_retained_receiving_operation, recover_missing
 
         try:
-            recover_missing(record, record.yaml_path.parent)
+            if recover_receiving:
+                recover_missing(record, record.yaml_path.parent)
+            elif not isinstance(getattr(record, "yaml_path", None), Path) or has_retained_receiving_operation(record, record.yaml_path.parent):
+                raise ExecutionSpaceError(
+                    "read-only proof cannot recover missing receiving allocation metadata; inspect through its owner"
+                )
         except (ValueError, OSError, RuntimeError) as exc:
-            raise ExecutionSpaceError(f"receiving allocation recovery is unproven: {exc}") from exc
+            action = "recovery" if recover_receiving else "inspection"
+            raise ExecutionSpaceError(f"receiving allocation {action} is unproven: {exc}") from exc
     has_receiving_allocation = getattr(record, "receiving_allocation_present", False)
     if has_receiving_allocation:
         from .receiving_allocation import require_record

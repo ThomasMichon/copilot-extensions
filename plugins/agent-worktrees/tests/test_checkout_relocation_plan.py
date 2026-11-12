@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import json
 import argparse
+import sqlite3
+import hashlib
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -60,7 +63,7 @@ def test_unknown_plan_never_enters_action_or_mutation_owners(planning_record, mo
     "changes,reason",
     [
         ({"repo": "foreign"}, "identity/project"),
-        ({"owner_ref": "original/project/creator"}, "cannot recover missing"),
+        ({"owner_ref": "original/project/creator"}, "proven local creator"),
         ({"receiving_allocation": {"schema": "ambiguous"}}, "receiving allocation receipt"),
         ({"status": "active"}, "ordinary sessionless"),
         ({"sessions": [{"session_id": "registered", "state": "active"}]}, "ordinary sessionless"),
@@ -245,3 +248,154 @@ def test_live_cli_rejects_conflicting_effect_or_discovery_options(conflict, monk
         with pytest.raises(SystemExit) as refusal:
             _move_arguments("--check-live", conflict)
         assert refusal.value.code == 2
+
+
+def _ordinary_owned(fixture):
+    fixture.data["owner_ref"] = "fixture/sample/creator"
+    fixture.ledger.write_text(json.dumps(fixture.data), encoding="utf-8")
+    parent = fixture.ledger.with_name("creator.yaml")
+    parent.write_text(json.dumps({
+        "worktree_id": "creator", "repo": "sample", "machine": "fixture",
+        "platform": "windows", "worktree_path": str(parent.parent / "creator"),
+        "branch": "worktree/creator", "status": "active", "sessions": [],
+        "resources": [{
+            "kind": "worktree", "ref": "fixture/sample/" + fixture.identity,
+            "state": "at-rest", "created_at": "2020-01-01T00:00:00",
+        }],
+    }), encoding="utf-8")
+    return parent
+
+
+def test_generic_owned_ordinary_record_is_not_a_missing_receiving_receipt(planning_record):
+    fixture = planning_record
+    parent = _ordinary_owned(fixture)
+    before = (fixture.ledger.read_bytes(), parent.read_bytes())
+    with pytest.raises(ValueError, match="qualified passive native owner evidence"):
+        relocation.plan(fixture.identity, str(fixture.destination), fixture.config)
+    record, proof, _guard = relocation._receiving_admission(
+        fixture.ledger, fixture.config,
+    )
+    assert proof is None and record.owner_ref == "fixture/sample/creator"
+    assert before == (fixture.ledger.read_bytes(), parent.read_bytes())
+
+
+def test_ordinary_owner_reaches_existing_execution_authority_without_recovery(planning_record, monkeypatch):
+    fixture = planning_record
+    _ordinary_owned(fixture)
+    record, _, _ = relocation._receiving_admission(fixture.ledger, fixture.config)
+    monkeypatch.setattr(relocation.execution_spaces, "require_current_execution_space", lambda *_: None)
+
+    def authority(*_args):
+        raise ValueError("remaining native namespace authority")
+
+    monkeypatch.setattr(relocation.execution_spaces, "registry_for_config", authority)
+    with pytest.raises(ValueError, match="remaining native namespace authority"):
+        relocation.execution_spaces.require_record_mutation(record, fixture.config, recover_receiving=False)
+
+
+def test_generic_creator_reference_is_exact_before_ledger_lookup(planning_record):
+    fixture = planning_record
+    fixture.data["owner_ref"] = "fixture/sample/../unrelated"
+    fixture.ledger.write_text(json.dumps(fixture.data), encoding="utf-8")
+    with pytest.raises(ValueError, match="exact qualified worktree reference"):
+        relocation.plan(fixture.identity, str(fixture.destination), fixture.config)
+
+
+@pytest.mark.parametrize("journal", ["receiving", "busy", "malformed", "unsupported"])
+def test_known_or_unreadable_original_receiving_evidence_still_refuses_purely(planning_record, journal):
+    fixture = planning_record
+    _ordinary_owned(fixture)
+    path = fixture.ledger.parent.parent / "workspace-creation.sqlite3"
+    if journal == "malformed":
+        path.write_bytes(b"not an original SQLite journal")
+        reason = "quiescent rollback journal"
+    else:
+        connection = sqlite3.connect(path)
+        connection.execute("CREATE TABLE creations(key_digest TEXT,version INTEGER,facts TEXT,status TEXT,worktree TEXT)")
+        connection.execute("INSERT INTO creations VALUES(?,?,?,?,?)", (
+            "original-key", 999 if journal == "unsupported" else 1,
+            json.dumps({} if journal == "unsupported" else {"receiving_allocation": {"origin": fixture.data["owner_ref"]}}),
+            "terminal", json.dumps({"worktree": {"id": fixture.identity, "creation_nonce": fixture.data["creation_nonce"]}}),
+        ))
+        connection.commit()
+        connection.close()
+        reason = "cannot recover missing"
+        if journal == "unsupported":
+            reason = "unsupported version"
+        if journal == "busy":
+            Path(str(path) + "-wal").write_bytes(b"original owner evidence")
+            reason = "busy, redirected or unsupported"
+    before = hashlib.sha256(path.read_bytes()).hexdigest()
+    with pytest.raises(ValueError, match=reason):
+        relocation.plan(fixture.identity, str(fixture.destination), fixture.config)
+    assert hashlib.sha256(path.read_bytes()).hexdigest() == before
+    if journal == "receiving":
+        connection = sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)
+        assert connection.execute("PRAGMA index_list(creations)").fetchall() == []
+        connection.close()
+
+
+@pytest.mark.parametrize("condition", ["unsettled", "opaque-producer", "oversized", "malformed"])
+def test_unsettled_or_native_producer_is_not_reclassified_as_generic_ordinary(planning_record, condition):
+    fixture = planning_record
+    parent = _ordinary_owned(fixture)
+    if condition == "malformed":
+        parent.write_text("resources: [")
+        with pytest.raises(ValueError, match="creator ledger is malformed"):
+            relocation.plan(fixture.identity, str(fixture.destination), fixture.config)
+        return
+    if condition == "oversized":
+        parent.write_bytes(b" " * (64 * 1024 + 1))
+        with pytest.raises(ValueError, match="oversized"):
+            relocation.plan(fixture.identity, str(fixture.destination), fixture.config)
+        return
+    data = json.loads(parent.read_text())
+    if condition == "unsettled":
+        data["resources"][0]["state"] = "active"
+    else:
+        data["resources"][0]["producer"] = {"namespace": "unknown", "version": 99}
+    parent.write_text(json.dumps(data))
+    with pytest.raises(ValueError, match="responsibility is missing, unsettled"):
+        relocation.plan(fixture.identity, str(fixture.destination), fixture.config)
+
+
+def test_literal_workspace_lookup_does_not_enumerate_unrelated_session_artifacts(tmp_path, monkeypatch):
+    root = tmp_path / "sessions"
+    root.mkdir()
+    expected = []
+    for name in ("first", "second"):
+        directory = root / name
+        directory.mkdir()
+        workspace = directory / "workspace.yaml"
+        workspace.write_text("cwd: example")
+        expected.append(workspace)
+        for index in range(8):
+            (directory / f"unrelated-{index}.json").write_text("not reference metadata")
+    monkeypatch.setattr(relocation.transfer, "MAX_ENTRIES", 4)
+    assert set(relocation._strict_glob(root, "*/workspace.yaml")) == set(expected)
+
+
+def test_literal_lookup_keeps_root_namespace_budget(tmp_path, monkeypatch):
+    for name in ("first", "second", "third"):
+        directory = tmp_path / name
+        directory.mkdir()
+        (directory / "workspace.yaml").write_text("cwd: example")
+    monkeypatch.setattr(relocation.transfer, "MAX_ENTRIES", 2)
+    with pytest.raises(ValueError, match="inventory exceeds its budget"):
+        list(relocation._strict_glob(tmp_path, "*/workspace.yaml"))
+
+
+def test_missing_literal_leaf_does_not_hide_a_disappearing_reference_directory(tmp_path, monkeypatch):
+    directory = tmp_path / "session"
+    directory.mkdir()
+    original = Path.lstat
+
+    def disappear(path, *args, **kwargs):
+        if path == directory / "workspace.yaml":
+            directory.rename(tmp_path / "retained-session")
+            raise FileNotFoundError(path)
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "lstat", disappear)
+    with pytest.raises(FileNotFoundError):
+        list(relocation._strict_glob(tmp_path, "*/workspace.yaml"))

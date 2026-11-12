@@ -5,7 +5,10 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import os
 import sqlite3
+import stat
+import time
 import yaml
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -20,6 +23,92 @@ if TYPE_CHECKING:
     from . import config as cfg, tracking
 
 _writing: ContextVar[frozenset[str]] = ContextVar("receiving_allocation_writes", default=frozenset())
+
+
+def _require_ordinary_parent(record: tracking.WorktreeRecord) -> None:
+    from . import config as cfg, tracking
+    from .checkout_relocation_plan import read_record
+
+    allocation.qualified_ref(record.owner_ref)
+    owner = tracking.parse_claim_ref(record.owner_ref)
+    if owner is None or not owner.is_qualified or owner.machine != record.execution_machine:
+        raise ValueError("ordinary owned record has no proven local creator")
+    path = cfg.tracking_dir(owner.project) / f"{owner.worktree_id}.yaml"
+    try:
+        parent = read_record(path)
+    except yaml.YAMLError as error:
+        raise ValueError("ordinary creator ledger is malformed") from error
+    if (parent.execution_machine, parent.repo, parent.worktree_id) != (
+        owner.machine, owner.project, owner.worktree_id,
+    ):
+        raise ValueError("ordinary creator ledger identity is unproven")
+    ref = tracking.format_claim_ref(record.execution_machine, record.repo, record.worktree_id)
+    claims = [claim for claim in parent.resources if claim.kind == "worktree" and claim.ref == ref]
+    if (
+        len(claims) != 1 or claims[0].state not in {"at-rest", "released"}
+        or claims[0].metadata_opaque or claims[0].has_producer
+        or tracking.claim_handoff_reservation(parent, claims[0])
+    ):
+        raise ValueError("ordinary creator responsibility is missing, unsettled or requires its original producer")
+
+
+def has_retained_receiving_operation(record: tracking.WorktreeRecord, records: Path) -> bool:
+    """Classify a journal-backed receipt hint without recovery or index upgrades."""
+    if not record.owner_ref or not record.creation_nonce:
+        return False
+    path = records.parent / "workspace-creation.sqlite3"
+    try:
+        before = path.lstat()
+    except FileNotFoundError:
+        _require_ordinary_parent(record)
+        return False
+    sidecars = ("-journal", "-wal", "-shm")
+    if (
+        not stat.S_ISREG(before.st_mode) or path.is_symlink()
+        or getattr(before, "st_file_attributes", 0) & 0x400
+        or before.st_size > 16 * 1024 * 1024
+        or any(os.path.lexists(str(path) + suffix) for suffix in sidecars)
+    ):
+        raise ValueError("original receiving classification is busy, redirected or unsupported")
+    with path.open("rb") as stream:
+        header = stream.read(20)
+    if header[:16] != b"SQLite format 3\x00" or header[18:20] != b"\x01\x01":
+        raise ValueError("original receiving classification requires a quiescent rollback journal")
+    try:
+        connection = sqlite3.connect(path.resolve().as_uri() + "?mode=ro&immutable=1", uri=True, timeout=1)
+    except sqlite3.Error as error:
+        raise ValueError("original receiving classification is unavailable or malformed") from error
+    deadline = time.monotonic() + 3
+    connection.set_progress_handler(lambda: int(time.monotonic() > deadline), 1000)
+    try:
+        rows = connection.execute(
+            "SELECT version,json_type(facts,'$.receiving_allocation') FROM creations WHERE ("
+            "json_extract(worktree,'$.id')=? OR json_extract(worktree,'$.worktree.id')=? OR ("
+            "json_extract(facts,'$.receiving_allocation.origin')=? AND ("
+            "json_extract(worktree,'$.creation_nonce')=? OR json_extract(worktree,'$.worktree.creation_nonce')=?))) LIMIT 2",
+            (record.worktree_id, record.worktree_id, record.owner_ref, record.creation_nonce, record.creation_nonce),
+        ).fetchall()
+    except sqlite3.Error as error:
+        raise ValueError("original receiving classification is unavailable or malformed") from error
+    finally:
+        connection.close()
+    after = path.lstat()
+    if (
+        not os.path.samestat(before, after)
+        or (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns)
+        or any(os.path.lexists(str(path) + suffix) for suffix in sidecars)
+    ):
+        raise ValueError("original receiving classification changed during inspection")
+    from . import creation_requests
+
+    if any(row[0] != creation_requests.SCHEMA_VERSION for row in rows):
+        raise ValueError("original receiving classification has an unsupported version")
+    if len(rows) > 1:
+        raise ValueError("original receiving classification is ambiguous")
+    receiving = any(row[1] is not None for row in rows)
+    if not receiving:
+        _require_ordinary_parent(record)
+    return receiving
 
 
 @dataclass(frozen=True)

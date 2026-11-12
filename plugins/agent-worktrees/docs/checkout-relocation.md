@@ -126,8 +126,35 @@ Unrelated live rows are untouched. Copilot session-reference matches are a
 refusal until their reader/writer semantics are qualified.
 Reference inspection has a 10,000-entry budget and a three-second database
 inventory budget; an incomplete inventory refuses.
+Known literal metadata names, such as each session's `workspace.yaml`, are
+looked up directly. The bounded wildcard namespace still includes every
+session directory; unrelated event/cache/lock files do not consume its
+reference-discovery budget. Missing or changing directories, redirected
+components and unavailable metadata remain refusals. This does not increase
+the checkout-data limit or omit any workspace/session-database reference check.
 Permission files must remain ordinary, single-link files at capture and under
 the mutation locks. File links are refused without replacing their linkage.
+
+### Generic creator relationships are not receiving receipts
+
+An ordinary checkout can retain a generic parent `worktree` claim and creation
+nonce without ever participating in the receiving-allocation protocol.
+Neither field alone implies a lost receiving receipt. Read-only classification
+checks the original creation database without recovery, index upgrades or
+sidecars. When present it must be a stable, quiescent rollback-mode snapshot,
+at most 16 MiB, under a three-second query deadline.
+
+An original receiving-operation hint still requires its missing receipt to be
+resolved explicitly through its owner. Unknown, unsupported, malformed, busy
+or changing evidence stays held. Otherwise the exact local parent's bounded,
+stable ledger must retain one matching, nonopaque, nonproducer generic claim,
+at rest or released and without handoff reservation. Missing or unsettled
+responsibility refuses. Parent and child identities and the claim are retained;
+classification neither invents a receiving conclusion nor settles responsibility.
+All ordinary inactivity, follow-up, Git, immutable-creation-receipt and
+publication checks still apply. Pure planning remains unconfirmed for native
+liveness, and explicit apply performs fresh admission rather than reusing a
+classification as clearance.
 
 ## First receiving current-location revision
 
