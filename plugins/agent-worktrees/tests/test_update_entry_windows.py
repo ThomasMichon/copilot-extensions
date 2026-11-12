@@ -60,15 +60,9 @@ def _stub_admission_for_bash(tmp, native_powershell, bash):
     )
 
 
-@pytest.mark.parametrize("front", ["global", "payload", "installed-project", "git-bash"])
-@pytest.mark.parametrize("observer", ["--wait", "--detach", "--no-manager"])
-def test_update_preflight_checks_real_job_before_any_update_work(
-    update_entry_case, native_powershell, front, observer,
-):
-    from agent_procutil import spawn_sync_in_kill_on_close_job
+def _job_preflight_entry(tmp, home, front, observer):
     from agent_worktrees import project_command_templates
 
-    tmp, home, _resolver = update_entry_case
     entry = PLUGIN / "bin" / "agent-worktrees.ps1"
     arguments = ["--project", "sample", "update", observer]
     if front == "payload":
@@ -83,6 +77,25 @@ def test_update_preflight_checks_real_job_before_any_update_work(
             "sample", PLUGIN, windows=True, user_bin=user_bin,
         )["sample.ps1"], encoding="utf-8")
         arguments = ["update", observer]
+    return entry, arguments
+
+
+def _quoted(text):
+    return "'" + str(text).replace("'", "''") + "'"
+
+
+@pytest.mark.parametrize("front", ["global", "payload", "installed-project"])
+@pytest.mark.parametrize("observer", ["--wait", "--detach", "--no-manager"])
+def test_update_preflight_reports_capturable_error_when_wmi_queue_is_blocked(
+    update_entry_case, native_powershell, monkeypatch, front, observer,
+):
+    """A Job that forbids breakaway queues through WMI; a blocked WMI is reported, never silent."""
+    from agent_procutil import spawn_sync_in_kill_on_close_job
+
+    # The durable WMI path is exercised explicitly; contained test mode refuses it.
+    monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
+    tmp, home, _resolver = update_entry_case
+    entry, arguments = _job_preflight_entry(tmp, home, front, observer)
     runtime = home / ".agent-worktrees"
     (runtime / "bin" / "resolve-runtime.ps1").write_text(
         "throw 'update reached installed runtime'\n", encoding="utf-8",
@@ -90,22 +103,91 @@ def test_update_preflight_checks_real_job_before_any_update_work(
     pending = runtime / "pending-request.json"
     pending.write_text('{"state":"PENDING","request":"existing"}', encoding="utf-8")
     before = _updater_profile_files(home)
-    escaped = lambda text: "'" + str(text).replace("'", "''") + "'"
-    download = tmp / "download.ps1"
-    download.write_text(
-        "[IO.File]::WriteAllText($env:BOOT_ARGS, (ConvertTo-Json -InputObject @($args)))\n"
-        "exit 23\n", encoding="utf-8",
-    )
+    captured = tmp / "captured-errors.txt"
     harness = tmp / "job-preflight.ps1"
+    # Simulates a policy (for example the Defender ASR rule) refusing WMI process creation.
     harness.write_text(
-        "function Invoke-WebRequest { param($Uri,$OutFile,[switch]$UseBasicParsing)\n"
-        f"  [IO.File]::Copy({escaped(download)}, $OutFile)\n"
-        "}\n"
-        f"$forward = @({','.join(escaped(value) for value in arguments)})\n"
-        f"& {escaped(entry)} @forward\n"
+        "function Invoke-CimMethod { throw 'Access denied by policy' }\n"
+        f"$forward = @({','.join(_quoted(value) for value in arguments)})\n"
+        f"& {_quoted(entry)} @forward 2> {_quoted(captured)}\n"
         "exit $LASTEXITCODE\n", encoding="utf-8",
     )
-    command = [native_powershell, "-NoProfile", "-File", str(harness)]
+    process, job = spawn_sync_in_kill_on_close_job(
+        [native_powershell, "-NoProfile", "-File", str(harness)],
+        require_job=True, allow_breakaway=False,
+        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        **no_window_kwargs(),
+    )
+    try:
+        stdout, stderr = process.communicate(timeout=60)
+        assert process.returncode == 1, stdout + stderr
+        # PowerShell redirection captured the diagnostic: it is not a bare console write.
+        raw = captured.read_bytes()
+        encoding = "utf-16" if raw.startswith((b"\xff\xfe", b"\xfe\xff")) else "utf-8-sig"
+        errors = " ".join(raw.decode(encoding, errors="replace").split())
+        assert "WinError 5" in errors
+        assert "Queuing the update through WMI failed" in errors
+        assert "Access denied by policy" in errors
+        assert "Block process creations originating from PSExec and WMI commands" in errors
+        assert "No update was started or request submitted" in errors
+        assert not (tmp / "bootstrap.args").exists()
+        assert _updater_profile_files(home) == before
+        assert not list(tmp.glob("agent-update-*"))
+    finally:
+        if job is not None:
+            job.terminate_and_wait(15)
+        process.wait(timeout=15)
+        process.stdout.close()
+        process.stderr.close()
+
+
+_QUEUED_BOOTSTRAP = r"""
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class QueuedUpdateJobProbe {
+    [DllImport("kernel32.dll")] static extern IntPtr GetCurrentProcess();
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern bool IsProcessInJob(IntPtr process, IntPtr job, out bool result);
+    public static bool InJob() { bool r; IsProcessInJob(GetCurrentProcess(), IntPtr.Zero, out r); return r; }
+}
+'@
+$proof = @{ args = @($args); in_job = [QueuedUpdateJobProbe]::InJob() }
+[IO.File]::WriteAllText($env:QUEUED_PROOF, (ConvertTo-Json -Compress -InputObject $proof))
+[Console]::Error.WriteLine('Update request queued-req-7; log: example.log')
+exit 0
+"""
+
+
+@pytest.mark.parametrize("front", ["global", "git-bash"])
+@pytest.mark.parametrize("observer", ["--wait", "--detach"])
+def test_update_preflight_queues_detached_update_outside_strict_caller_job(
+    update_entry_case, native_powershell, monkeypatch, front, observer,
+):
+    """The queued update runs through WMI outside the caller's no-breakaway kill-on-close Job."""
+    from agent_procutil import spawn_sync_in_kill_on_close_job
+
+    git = shutil.which("git.exe") or shutil.which("git")
+    if git is None:
+        pytest.skip("Git is required for the local bootstrap source")
+    monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
+    tmp, home, _resolver = update_entry_case
+    source = tmp / "source"
+    (source / "worktree-manager").mkdir(parents=True)
+    (source / "worktree-manager" / "bootstrap.ps1").write_text(_QUEUED_BOOTSTRAP, encoding="utf-8")
+    for command in (
+        ["init", "--quiet", "--initial-branch", "main", str(source)],
+        ["-C", str(source), "add", "-A"],
+        ["-C", str(source), "-c", "user.name=t", "-c", "user.email=t@example.invalid",
+         "commit", "--quiet", "-m", "fixture"],
+    ):
+        subprocess.run([git, *command], check=True, capture_output=True, **no_window_kwargs())
+    monkeypatch.setenv("WORKTREE_MANAGER_BOOTSTRAP_REPO", str(source))
+    monkeypatch.setenv("WORKTREE_MANAGER_BOOTSTRAP_REF", "main")
+    monkeypatch.setenv("QUEUED_PROOF", str(tmp / "queued.json"))
+    (tmp / "tools" / "git").unlink()
+    entry, arguments = _job_preflight_entry(tmp, home, "global", observer)
+    command = [native_powershell, "-NoProfile", "-File", str(entry), *arguments]
     if front == "git-bash":
         from native_shell_support import ShellUnavailable, admit_native_bash, bash_path
 
@@ -121,17 +203,17 @@ def test_update_preflight_checks_real_job_before_any_update_work(
         **no_window_kwargs(),
     )
     try:
-        stdout, stderr = process.communicate(timeout=30)
-        assert process.returncode == 1, stdout + stderr
-        assert b"WinError 5" in stderr
-        assert b"No update was started or request submitted" in stderr
-        assert b"detached/outside-Job shell mode" in stderr
-        assert b"detach=true" in stderr
-        assert b"Plain async execution or update --detach" in stderr
-        assert b"Do not retry in the same bounded shell" in stderr
-        assert not (tmp / "bootstrap.args").exists()
-        assert _updater_profile_files(home) == before
-        assert not list(tmp.glob("agent-update-*"))
+        stdout, stderr = process.communicate(timeout=180)
+        output = " ".join((stdout + stderr).decode(errors="replace").split())
+        assert process.returncode == 0, output
+        assert "WinError 5" in output
+        assert "queued outside the caller's Job through WMI" in output
+        assert "Update request queued-req-7 submitted" in output
+        assert "--request-status queued-req-7" in output
+        proof = json.loads((tmp / "queued.json").read_text(encoding="utf-8-sig"))
+        assert proof["in_job"] is False
+        assert proof["args"] == ["--bootstrap-update", "update", "--project", "sample", "--detach"]
+        assert len(list(tmp.glob("agent-update-queued-*/submission.log"))) == 1
     finally:
         if job is not None:
             job.terminate_and_wait(15)

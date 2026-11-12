@@ -19,7 +19,10 @@ def spawn_brokered_daemon(
     log_path: str, stderr_log_path: str | None,
     instance_receipt=None,
 ) -> WindowsDaemonProcess:
-    """Read the installed consumer's adoption; never install or fall back to WMI."""
+    """Read the installed consumer's Task adoption; never install one.
+
+    Unrelated to :func:`spawn_daemon`'s WMI durable launch in ``daemon_broker``.
+    """
     import agent_procutil as pu
 
     try:
@@ -114,11 +117,19 @@ def spawn_daemon(
     header. ``env_overrides`` layers over ``env`` (the current environment by
     default). Extra creation flags may add only priority/error-mode policy.
 
-    Windows durable children start suspended, with explicit breakaway, and must
-    escape every tracked launcher-owned cleanup Job before resume. Ambient
-    external Job membership is not a caller-lifetime claim. No broker is
-    activated. ``contained_fallback`` explicitly accepts the caller's shorter
-    lifetime after a settled refusal. POSIX uses a new session; durable Linux
+    Windows durable children (``breakaway=True`` outside contained test mode)
+    are launched through WMI ``Win32_Process.Create`` (#12117): they start
+    outside every caller Job and process tree, so installer or caller
+    termination, a tree-kill or a kill-on-close Job never ends them. Use this
+    only for daemons that must outlive their launcher (installer service
+    start, daemon self-restart, supervisor restart, a CLI ensuring its own
+    backing daemon); bounded and tool-to-tool children use normal creation.
+    A blocked WMI launch raises :class:`DaemonSpawnError`; only
+    ``contained_fallback`` explicitly accepts the caller's shorter lifetime
+    afterwards. ``breakaway=False`` and contained test mode stay native and
+    contained. Finite workers keep native suspended breakaway verified against
+    tracked launcher-owned Jobs and are refused under a strict caller Job.
+    POSIX uses a new session; durable Linux
     launches also leave a systemd caller's cleanup unit through a user scope.
     ``python_bootstrap_root`` selects an explicitly retained agent_procutil
     source root for leased Python admission, rather than the launcher's copy.
@@ -318,8 +329,13 @@ def _spawn_daemon(
             scope_environment = _job_scopes.child_environment(child_env)
             child_env = scope_environment.copy()
             popen_kwargs["env"] = child_env
+        # Finite workers are bounded work, not #12117 durable daemons: they
+        # keep native suspended breakaway and never escape a strict caller Job.
+        finite = instance is not None and instance.lifecycle == "finite-worker"
+        wmi_durable = durable_windows and not finite
         if durable_windows:
             child_env.pop(_job_scopes.ENVIRONMENT_KEY, None)
+        if durable_windows and not wmi_durable:
             kwargs["creationflags"] = flags | pu._CREATE_SUSPENDED
         receipt = reserve()
         if durable_windows:
@@ -332,7 +348,6 @@ def _spawn_daemon(
         process = None
         creation_attempted = False
         creation_refused = False
-        resume_attempted = False
 
         def create():
             nonlocal creation_attempted, creation_refused
@@ -355,71 +370,141 @@ def _spawn_daemon(
                 error.admission_sent = False
                 raise
 
-        try:
-            if durable_windows:
-                # Query handles must close before resume: inherited handles
-                # would defeat the caller's KILL_ON_JOB_CLOSE ownership.
-                with _job_scopes.query_scopes(scope_environment) as verify:
-                    report_logs(f"{stamp} spawn_daemon: creating-suspended\n".encode())
+        resume_attempted = False
+        if not wmi_durable:
+            try:
+                if durable_windows:
+                    # Query handles must close before resume: inherited handles
+                    # would defeat the caller's KILL_ON_JOB_CLOSE ownership.
+                    with _job_scopes.query_scopes(scope_environment) as verify:
+                        report_logs(f"{stamp} spawn_daemon: creating-suspended\n".encode())
+                        process = create()
+                        report_logs(f"{stamp} spawn_daemon: created-suspended\n".encode())
+                        verify(process._handle)
+                        report_logs(f"{stamp} spawn_daemon: caller-jobs-verified\n".encode())
+                    resume_attempted = True
+                    if not pu._resume_suspended_process(process.pid):
+                        raise OSError("failed to resume verified daemon")
+                    report_logs(f"{stamp} spawn_daemon: resumed\n".encode())
+                else:
                     process = create()
-                    report_logs(f"{stamp} spawn_daemon: created-suspended\n".encode())
-                    verify(process._handle)
-                    report_logs(f"{stamp} spawn_daemon: caller-jobs-verified\n".encode())
-                resume_attempted = True
-                if not pu._resume_suspended_process(process.pid):
-                    raise OSError("failed to resume verified daemon")
-                report_logs(f"{stamp} spawn_daemon: resumed\n".encode())
-            else:
-                process = create()
+            except BaseException as error:
+                if process is None and creation_attempted and not creation_refused:
+                    report_logs(
+                        f"{stamp} spawn_daemon: creation-outcome-unknown; "
+                        f"type={type(error).__name__}; reservation retained\n".encode()
+                    )
+                    raise
+                if not durable_windows:
+                    refused()
+                    raise
+                identity = created_process_identity(process) if process is not None else None
+                cleanup_confirmed = process is None
+                if process is not None:
+                    try:
+                        process.kill()
+                        process.wait(timeout=5)
+                        cleanup_confirmed = True
+                    except (OSError, subprocess.SubprocessError):
+                        pass
+                    settled = failed(
+                        identity, exited=cleanup_confirmed, admission_possible=resume_attempted,
+                    )
+                else:
+                    settled = refused()
+                if (
+                    process is None and creation_attempted and settled
+                    and not pu._breakaway_denied(error, kwargs)
+                ):
+                    raise
+                if not isinstance(error, (OSError, ValueError)) and cleanup_confirmed and settled:
+                    raise
+                denied = (
+                    process is None and creation_attempted and pu._breakaway_denied(error, kwargs)
+                )
+                reason = (
+                    "the caller's Job object forbids breakaway; daemon not started"
+                    if denied else "native daemon launch could not escape launcher-owned cleanup Jobs"
+                )
+                report_logs(
+                    f"{stamp} spawn_daemon: {reason}; "
+                    f"cleanup_confirmed={cleanup_confirmed}; reservation_settled={settled}\n".encode()
+                )
+                if not contained_fallback or not cleanup_confirmed or not settled:
+                    failure = pu.DaemonSpawnError(
+                        reason,
+                        cleanup_confirmed=cleanup_confirmed, process_created=process is not None,
+                        admission_sent=resume_attempted, process_identity=identity,
+                    )
+                    failure.instance_receipt = receipt
+                    if not cleanup_confirmed:
+                        failure.process = process
+                    raise failure from error
+                note = "spawn_daemon: explicit contained_fallback accepts caller-owned lifetime"
+                pu.log.warning("%s (%s)", note, command[0])
+                report_logs(f"{stamp} {note}\n".encode())
+                child_env.update(scope_environment)
+                kwargs["creationflags"] = flags & ~pu._CREATE_BREAKAWAY_FROM_JOB
+                receipt = reserve()
+                child_env.update(instance_environment(receipt))
+                try:
+                    process = create()
+                except OSError:
+                    refused()
+                    raise
+            process = commit(process)
+            if durable_windows:
+                report_logs(f"{stamp} spawn_daemon: instance-bound\n".encode())
+            return process
+
+        # Windows durable launch (#12117): always through WMI, never a native
+        # breakaway child that a caller tree-kill or outer Job could still end.
+        report_logs(f"{stamp} spawn_daemon: wmi-durable-launch\n".encode())
+        _creation[0] = True
+        handles = None
+        if stdio_fds is not None:
+            import msvcrt
+
+            handles = tuple(msvcrt.get_osfhandle(fd) for fd in stdio_fds)
+        try:
+            process = _durable_windows_launch(
+                command, cwd=cwd_path, env=dict(child_env), creationflags=flags,
+                log_path=log_file, stderr_log_path=err_file,
+                instance_receipt=receipt, stdio_handles=handles,
+            )
         except BaseException as error:
-            if (
-                process is None and creation_attempted and not creation_refused
-            ):
+            if not isinstance(error, pu.DaemonSpawnError):
                 report_logs(
                     f"{stamp} spawn_daemon: creation-outcome-unknown; "
                     f"type={type(error).__name__}; reservation retained\n".encode()
                 )
                 raise
-            if not durable_windows:
-                refused()
-                raise
-            identity = created_process_identity(process) if process is not None else None
-            cleanup_confirmed = process is None
-            if process is not None:
-                try:
-                    process.kill()
-                    process.wait(timeout=5)
-                    cleanup_confirmed = True
-                except (OSError, subprocess.SubprocessError):
-                    pass
-                settled = failed(identity, exited=cleanup_confirmed, admission_possible=resume_attempted)
-            else:
+            created = getattr(error, "process_created", None)
+            cleanup_confirmed = getattr(error, "cleanup_confirmed", False) is True
+            identity = getattr(error, "process_identity", None)
+            if created is False and cleanup_confirmed:
                 settled = refused()
-            if (
-                process is None and creation_attempted and settled
-                and not pu._breakaway_denied(error, kwargs)
-            ):
-                raise
-            if not isinstance(error, (OSError, ValueError)) and cleanup_confirmed and settled:
-                raise
-            denied = process is None and creation_attempted and pu._breakaway_denied(error, kwargs)
-            reason = (
-                "the caller's Job object forbids breakaway; daemon not started" if denied
-                else "native daemon launch could not escape launcher-owned cleanup Jobs"
-            )
+            elif created is None and not cleanup_confirmed:
+                settled = False
+            else:
+                settled = failed(
+                    identity, exited=cleanup_confirmed,
+                    admission_possible=getattr(error, "admission_sent", True) is not False,
+                )
+            reason = str(error) or "Windows durable WMI launch failed; daemon not started"
             report_logs(
-                f"{stamp} spawn_daemon: {reason}; "
+                f"{stamp} spawn_daemon: durable WMI launch failed; daemon not started; "
                 f"cleanup_confirmed={cleanup_confirmed}; reservation_settled={settled}\n".encode()
             )
             if not contained_fallback or not cleanup_confirmed or not settled:
                 failure = pu.DaemonSpawnError(
-                    reason,
-                    cleanup_confirmed=cleanup_confirmed, process_created=process is not None,
-                    admission_sent=resume_attempted, process_identity=identity,
+                    reason, cleanup_confirmed=cleanup_confirmed,
+                    process_created=created, admission_sent=getattr(error, "admission_sent", True),
+                    process_identity=identity,
                 )
                 failure.instance_receipt = receipt
-                if not cleanup_confirmed:
-                    failure.process = process
+                if getattr(error, "process", None) is not None:
+                    failure.process = error.process
                 raise failure from error
             note = "spawn_daemon: explicit contained_fallback accepts caller-owned lifetime"
             pu.log.warning("%s (%s)", note, command[0])
@@ -433,7 +518,13 @@ def _spawn_daemon(
             except OSError:
                 refused()
                 raise
+            return commit(process)
         process = commit(process)
-        if durable_windows:
-            report_logs(f"{stamp} spawn_daemon: instance-bound\n".encode())
+        report_logs(f"{stamp} spawn_daemon: instance-bound\n".encode())
         return process
+
+
+def _durable_windows_launch(command, **kwargs) -> WindowsDaemonProcess:
+    from . import daemon_broker
+
+    return daemon_broker.spawn_brokered_daemon(command, **kwargs)

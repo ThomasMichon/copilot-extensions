@@ -99,8 +99,22 @@ def native_admission(monkeypatch, declared_mock_daemon):
     return process
 
 
+def _finite_spawn(tmp_path, **kwargs):
+    # Finite workers keep native suspended admission; durable daemons use WMI.
+    from pathlib import Path
+    from agent_procutil.daemon_instances import DaemonInstanceSpec
+
+    return pu.spawn_daemon(
+        ["python.exe", "worker.py"], cwd=tmp_path, log_path=tmp_path / "log",
+        instance=DaemonInstanceSpec(
+            "mock-finite", tmp_path, Path(__file__).resolve(), lifecycle="finite-worker",
+        ),
+        **kwargs,
+    )
+
+
 @pytest.mark.parametrize("replacement", [False, True])
-def test_direct_native_admission_closes_queries_before_resume(
+def test_finite_worker_native_admission_closes_queries_before_resume(
     tmp_path, monkeypatch, native_admission, replacement,
 ):
     events = []
@@ -118,7 +132,7 @@ def test_direct_native_admission_closes_queries_before_resume(
 
     monkeypatch.setattr(scopes, "query_scopes", queries)
     monkeypatch.setattr(pu, "_resume_suspended_process", lambda pid: events.append(("resume", pid)) or True)
-    child = pu.spawn_daemon(["fixture.exe"], cwd=tmp_path, log_path=tmp_path / "log", env=environment)
+    child = _finite_spawn(tmp_path, env=environment)
     assert child is native_admission
     assert events == ["open", ("verify", 456), "close", ("resume", 123)]
     kwargs = subprocess.Popen.call_args.kwargs
@@ -151,7 +165,7 @@ def test_contained_daemon_replacement_environment_retains_outer_scopes(
     resume.assert_not_called()
 
 
-def test_shared_outer_refusal_never_resumes_and_settles_exact_child(
+def test_finite_worker_shared_outer_refusal_never_resumes_and_settles_exact_child(
     tmp_path, monkeypatch, native_admission,
 ):
     @contextmanager
@@ -165,7 +179,7 @@ def test_shared_outer_refusal_never_resumes_and_settles_exact_child(
     resume = Mock()
     monkeypatch.setattr(pu, "_resume_suspended_process", resume)
     with pytest.raises(pu.DaemonSpawnError) as caught:
-        pu.spawn_daemon(["fixture.exe"], cwd=tmp_path, log_path=tmp_path / "log")
+        _finite_spawn(tmp_path)
     assert caught.value.cleanup_confirmed
     assert caught.value.process_created is True
     assert caught.value.admission_sent is False

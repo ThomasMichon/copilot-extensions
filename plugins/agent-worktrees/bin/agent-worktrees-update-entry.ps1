@@ -42,6 +42,135 @@ if (@($_updateArgs | Where-Object {
         '--request-status', '--recovery-status', '--recover-after-restart', '--recover-for-repair') -or
     $_.StartsWith('--request-status=')
 }).Count) { return }
+function Write-AgentUpdateEntryError([string]$Message) {
+    # A PowerShell error record, unlike [Console]::Error, honors 2>/*> redirection and transcripts.
+    Write-Error -Message $Message -ErrorAction Continue
+}
+function New-UpdateScratchDirectory([string]$Prefix = 'agent-update-') {
+    $base = if ($env:AGENT_SCRATCH_ROOT) { $env:AGENT_SCRATCH_ROOT } else { [IO.Path]::GetTempPath() }
+    $prefix = $Prefix + [DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss') + '-'
+    if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
+        $path = & mktemp -d (Join-Path $base ($prefix + 'XXXXXX'))
+        if ($LASTEXITCODE -ne 0) { throw 'Private update scratch creation failed.' }
+        return $path
+    }
+    if (-not ('CopilotExtensions.UpdateScratchDirectory' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+namespace CopilotExtensions {
+    public static class UpdateScratchDirectory {
+        [StructLayout(LayoutKind.Sequential)]
+        private struct SecurityAttributes {
+            public int Length;
+            public IntPtr Descriptor;
+            [MarshalAs(UnmanagedType.Bool)] public bool InheritHandle;
+        }
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, ExactSpelling = true, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool CreateDirectoryW(string path, ref SecurityAttributes attributes);
+        public static void Create(string path, byte[] descriptor) {
+            var pinned = GCHandle.Alloc(descriptor, GCHandleType.Pinned);
+            try {
+                var attributes = new SecurityAttributes {
+                    Length = Marshal.SizeOf(typeof(SecurityAttributes)),
+                    Descriptor = pinned.AddrOfPinnedObject(),
+                    InheritHandle = false
+                };
+                if (!CreateDirectoryW(path, ref attributes))
+                    throw new Win32Exception(Marshal.GetLastWin32Error());
+            } finally { pinned.Free(); }
+        }
+    }
+}
+'@
+    }
+    $user = [Security.Principal.WindowsIdentity]::GetCurrent().User
+    $security = [Security.AccessControl.DirectorySecurity]::new()
+    $security.SetOwner($user)
+    $security.SetAccessRuleProtection($true, $false)
+    $inheritance = [Security.AccessControl.InheritanceFlags]::ContainerInherit -bor
+        [Security.AccessControl.InheritanceFlags]::ObjectInherit
+    foreach ($sid in @($user,
+        [Security.Principal.SecurityIdentifier]::new('S-1-5-18'),
+        [Security.Principal.SecurityIdentifier]::new('S-1-5-32-544'))) {
+        $security.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new(
+            $sid, [Security.AccessControl.FileSystemRights]::FullControl,
+            $inheritance, [Security.AccessControl.PropagationFlags]::None,
+            [Security.AccessControl.AccessControlType]::Allow))
+    }
+    $path = Join-Path $base ($prefix + [guid]::NewGuid().ToString('N'))
+    [CopilotExtensions.UpdateScratchDirectory]::Create($path, $security.GetSecurityDescriptorBinaryForm())
+    return $path
+}
+function Submit-AgentDurableUpdate([string]$Preflight) {
+    # WMI durable launch is reserved for work that must outlive its launcher;
+    # here the queued update itself. Nothing is inherited, so the environment,
+    # directory and log are passed explicitly.
+    $hint = 'WMI process creation may be blocked by policy, for example the Microsoft Defender ' +
+        'ASR rule ''Block process creations originating from PSExec and WMI commands''.'
+    $forward = @($_originalUpdateArgs | Where-Object { $_ -cne '--wait' })
+    $logDirectory = $null
+    if ($forward -cnotcontains '--detach') { $forward += '--detach' }
+    $quote = { param($text) "'" + ([string]$text).Replace("'", "''") + "'" }
+    $script = "`$ErrorActionPreference = 'Continue'`n`$ProgressPreference = 'SilentlyContinue'`n" +
+        "`$env:AGENT_WORKTREES_INTERNAL_DURABLE_UPDATE = '1'`n" +
+        '& ' + (& $quote $_awUpdateCaller) + ' ' +
+        (($forward | ForEach-Object { & $quote $_ }) -join ' ') + "`nexit `$LASTEXITCODE`n"
+    try {
+        $logDirectory = New-UpdateScratchDirectory 'agent-update-queued-'
+        $log = Join-Path $logDirectory 'submission.log'
+        if ($log -match '["%!^&|<>]') { throw 'The update log path is not safe for redirection.' }
+        $shell = (Get-Process -Id $PID).Path
+        $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($script))
+        $command = "`"$env:ComSpec`" /d /s /c `"`"$shell`" -NoProfile -NonInteractive " +
+            "-ExecutionPolicy Bypass -OutputFormat Text -EncodedCommand $encoded > `"$log`" 2>&1`""
+        $environment = @(Get-ChildItem Env: | Where-Object {
+            $_.Name -and -not $_.Name.StartsWith('=') -and $_.Name -cne 'MSYS2_ARG_CONV_EXCL'
+        } | ForEach-Object { "$($_.Name)=$($_.Value)" })
+        $startup = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{
+            ShowWindow = [uint16]0
+            EnvironmentVariables = [string[]]$environment
+        }
+        $created = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{
+            CommandLine = $command
+            CurrentDirectory = (Get-Location).ProviderPath
+            ProcessStartupInformation = $startup
+        }
+    } catch {
+        if ($logDirectory) { Remove-Item -LiteralPath $logDirectory -Recurse -Force -ErrorAction SilentlyContinue }
+        Write-AgentUpdateEntryError ("$Preflight Queuing the update through WMI failed: " +
+            "$($_.Exception.Message) $hint No update was started or request submitted.")
+        return 1
+    }
+    if ($created.ReturnValue -ne 0) {
+        Remove-Item -LiteralPath $logDirectory -Recurse -Force -ErrorAction SilentlyContinue
+        Write-AgentUpdateEntryError ("$Preflight WMI Win32_Process.Create returned " +
+            "$($created.ReturnValue). $hint No update was started or request submitted.")
+        return 1
+    }
+    Write-Host ("$Preflight The update was queued outside the caller's Job through WMI " +
+        "(process $($created.ProcessId)); submission log: $log")
+    $exitCode = $null
+    try {
+        $process = [Diagnostics.Process]::GetProcessById([int]$created.ProcessId)
+        $null = $process.Handle
+        if ($process.WaitForExit(300000)) { $exitCode = $process.ExitCode }
+    } catch {}
+    $text = if (Test-Path -LiteralPath $log -PathType Leaf) { [IO.File]::ReadAllText($log) } else { '' }
+    if ($text) { Write-Host $text.TrimEnd() }
+    if ($text -match 'Update request ([A-Za-z0-9._-]+)') {
+        $request = $Matches[1]
+        Write-Host ("Update request $request submitted. Check it with: " +
+            "agent-worktrees update --request-status $request")
+        return 0
+    }
+    $state = if ($null -eq $exitCode) { 'did not report a result' } else { "exited $exitCode" }
+    Write-AgentUpdateEntryError ("[agent-worktrees] The queued update submission $state " +
+        "without a request id; see $log.")
+    return 1
+}
 if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT -and
     $_updateArgs -cnotcontains '--supervised-debug') {
     try {
@@ -109,16 +238,25 @@ namespace CopilotExtensions {
             throw "Windows refused the required breakaway process (WinError $_breakawayError)."
         }
     } catch {
-        [Console]::Error.WriteLine(
-            "[agent-worktrees] Update launch preflight failed: $($_.Exception.Message) " +
-            'No update was started or request submitted. Re-run in the execution host''s ' +
-            'explicit detached/outside-Job shell mode (for example async with detach=true). ' +
-            'Plain async execution or update --detach does not remove an enclosing Job. ' +
-            'Do not retry in the same bounded shell.'
-        )
-        if ($_awUpdateStandalone) { exit 1 }
+        $_preflightMessage = "[agent-worktrees] Update launch preflight failed: $($_.Exception.Message)"
+        $_queuedRc = 1
+        if ($env:AGENT_WORKTREES_INTERNAL_DURABLE_UPDATE -ceq '1') {
+            Write-AgentUpdateEntryError ($_preflightMessage +
+                ' The durable outside-Job update shell is itself contained; no update was started.')
+        } elseif ($env:COPILOT_EXTENSIONS_TEST_CONTAINED -ceq '1') {
+            # Contained test mode never escapes through WMI, matching spawn_daemon.
+            Write-AgentUpdateEntryError ($_preflightMessage +
+                ' No update was started or request submitted. Re-run in the execution host''s ' +
+                'explicit detached/outside-Job shell mode (for example async with detach=true). ' +
+                'Contained test mode does not use the durable WMI launch.')
+        } else {
+            # The caller's Job forbids breakaway, so the update is queued through
+            # WMI, whose process is outside every caller Job (see #12117).
+            $_queuedRc = Submit-AgentDurableUpdate -Preflight $_preflightMessage
+        }
+        if ($_awUpdateStandalone) { exit $_queuedRc }
         $_awUpdateHandled = $true
-        $global:LASTEXITCODE = 1
+        $global:LASTEXITCODE = $_queuedRc
         return
     }
 }
@@ -286,64 +424,6 @@ if ($_updateRepo -cmatch '^https://github\.com/([A-Za-z0-9._-]+)/([A-Za-z0-9._-]
     if ($_updateRef -cmatch '^[A-Za-z0-9._/][A-Za-z0-9._/-]*$') {
         $_updateUrl = "https://raw.githubusercontent.com/$_updateSlug/$_updateRef/worktree-manager/bootstrap.ps1"
     }
-}
-function New-UpdateScratchDirectory {
-    $base = if ($env:AGENT_SCRATCH_ROOT) { $env:AGENT_SCRATCH_ROOT } else { [IO.Path]::GetTempPath() }
-    $prefix = 'agent-update-' + [DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss') + '-'
-    if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
-        $path = & mktemp -d (Join-Path $base ($prefix + 'XXXXXX'))
-        if ($LASTEXITCODE -ne 0) { throw 'Private update scratch creation failed.' }
-        return $path
-    }
-    if (-not ('CopilotExtensions.UpdateScratchDirectory' -as [type])) {
-        Add-Type -TypeDefinition @'
-using System;
-using System.ComponentModel;
-using System.Runtime.InteropServices;
-namespace CopilotExtensions {
-    public static class UpdateScratchDirectory {
-        [StructLayout(LayoutKind.Sequential)]
-        private struct SecurityAttributes {
-            public int Length;
-            public IntPtr Descriptor;
-            [MarshalAs(UnmanagedType.Bool)] public bool InheritHandle;
-        }
-        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, ExactSpelling = true, SetLastError = true)]
-        [return: MarshalAs(UnmanagedType.Bool)]
-        private static extern bool CreateDirectoryW(string path, ref SecurityAttributes attributes);
-        public static void Create(string path, byte[] descriptor) {
-            var pinned = GCHandle.Alloc(descriptor, GCHandleType.Pinned);
-            try {
-                var attributes = new SecurityAttributes {
-                    Length = Marshal.SizeOf(typeof(SecurityAttributes)),
-                    Descriptor = pinned.AddrOfPinnedObject(),
-                    InheritHandle = false
-                };
-                if (!CreateDirectoryW(path, ref attributes))
-                    throw new Win32Exception(Marshal.GetLastWin32Error());
-            } finally { pinned.Free(); }
-        }
-    }
-}
-'@
-    }
-    $user = [Security.Principal.WindowsIdentity]::GetCurrent().User
-    $security = [Security.AccessControl.DirectorySecurity]::new()
-    $security.SetOwner($user)
-    $security.SetAccessRuleProtection($true, $false)
-    $inheritance = [Security.AccessControl.InheritanceFlags]::ContainerInherit -bor
-        [Security.AccessControl.InheritanceFlags]::ObjectInherit
-    foreach ($sid in @($user,
-        [Security.Principal.SecurityIdentifier]::new('S-1-5-18'),
-        [Security.Principal.SecurityIdentifier]::new('S-1-5-32-544'))) {
-        $security.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new(
-            $sid, [Security.AccessControl.FileSystemRights]::FullControl,
-            $inheritance, [Security.AccessControl.PropagationFlags]::None,
-            [Security.AccessControl.AccessControlType]::Allow))
-    }
-    $path = Join-Path $base ($prefix + [guid]::NewGuid().ToString('N'))
-    [CopilotExtensions.UpdateScratchDirectory]::Create($path, $security.GetSecurityDescriptorBinaryForm())
-    return $path
 }
 $_updateGitRouting = @('GIT_DIR', 'GIT_WORK_TREE', 'GIT_COMMON_DIR', 'GIT_INDEX_FILE',
     'GIT_PREFIX', 'GIT_OBJECT_DIRECTORY', 'GIT_ALTERNATE_OBJECT_DIRECTORIES')

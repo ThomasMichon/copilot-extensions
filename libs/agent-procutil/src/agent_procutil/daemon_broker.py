@@ -22,6 +22,8 @@ _SYNCHRONIZE = 0x00100000
 _PROCESS_ACCESS = _SYNCHRONIZE | 0x0001 | 0x0800 | 0x1000
 _WAIT_TIMEOUT = 0x102
 _CREATE_SUSPENDED = 0x00000004
+_PROCESS_DUP_HANDLE = 0x0040
+_DUPLICATE_SAME_ACCESS = 0x00000002
 _ProcessT = TypeVar("_ProcessT", bound="WindowsDaemonProcess")
 
 _WMI_CREATE = r"""
@@ -38,13 +40,21 @@ try {
         CurrentDirectory = [string]$s.cwd
         ProcessStartupInformation = $startup
     }
-    if ($r.ReturnValue -ne 0) { exit 1 }
+    if ($r.ReturnValue -ne 0) {
+        [Console]::Out.WriteLine('returnvalue=' + [int]$r.ReturnValue)
+        exit 1
+    }
     [Console]::Out.WriteLine([int]$r.ProcessId)
 } catch {
-    [Console]::Error.WriteLine('daemon broker activation failed')
+    [Console]::Out.WriteLine('exception=' + $_.Exception.GetType().Name)
     exit 1
 }
 """
+WMI_POLICY_HINT = (
+    "WMI process creation may be blocked by policy, for example the Microsoft "
+    "Defender ASR rule 'Block process creations originating from PSExec and "
+    "WMI commands'"
+)
 
 
 def _kernel32() -> Any:
@@ -136,8 +146,11 @@ class WindowsDaemonProcess:
     def __del__(self) -> None:
         handle = getattr(self, "_handle", None)
         if handle:
-            _kernel32().CloseHandle(handle)
             self._handle = None
+            try:
+                _kernel32().CloseHandle(handle)
+            except Exception:  # noqa: BLE001 - interpreter shutdown releases it
+                pass
 
 
 def _remaining(deadline: float) -> float:
@@ -243,7 +256,11 @@ def _activate(command: list[str], env: dict[str, str], cwd: str, deadline: float
         check=False, **no_window_kwargs(),
     )
     if result.returncode != 0:
-        raise OSError("daemon broker activation failed")
+        # Only the fixed-format status line is reported: never echo output
+        # that could carry environment or command details.
+        status = str(result.stdout or "").strip().splitlines()[-1:] or ["no-status"]
+        detail = status[0] if status[0].replace("=", "").replace("_", "").isalnum() else "unknown"
+        raise OSError(f"daemon broker activation failed (Win32_Process.Create {detail[:64]})")
     try:
         pid = int(result.stdout.strip())
     except ValueError:
@@ -284,12 +301,52 @@ def _cleanup_process(
     return exited, problems
 
 
+def _duplicate_into(process: WindowsDaemonProcess, handles: list[int]) -> list[int]:
+    """Duplicate caller stdio handles into the WMI bootstrap (no inheritance there)."""
+    from ctypes import wintypes
+
+    kernel = _kernel32()
+    kernel.GetCurrentProcess.argtypes = []
+    kernel.GetCurrentProcess.restype = wintypes.HANDLE
+    kernel.DuplicateHandle.argtypes = [
+        wintypes.HANDLE, wintypes.HANDLE, wintypes.HANDLE,
+        ctypes.POINTER(wintypes.HANDLE), wintypes.DWORD, wintypes.BOOL, wintypes.DWORD,
+    ]
+    kernel.DuplicateHandle.restype = wintypes.BOOL
+    target = kernel.OpenProcess(_PROCESS_DUP_HANDLE, False, process.pid)
+    if not target:
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        duplicated = []
+        for handle in handles:
+            copy = wintypes.HANDLE()
+            if not kernel.DuplicateHandle(
+                kernel.GetCurrentProcess(), handle, target, ctypes.byref(copy),
+                0, False, _DUPLICATE_SAME_ACCESS,
+            ):
+                raise ctypes.WinError(ctypes.get_last_error())
+            duplicated.append(int(copy.value or 0))
+        return duplicated
+    finally:
+        kernel.CloseHandle(target)
+
+
 def spawn_brokered_daemon(
     command: list[str], *, cwd: str, env: dict[str, str], creationflags: int,
     log_path: str, stderr_log_path: str | None,
-    instance_receipt=None,
+    instance_receipt=None, stdio_handles: tuple[int, int, int] | None = None,
 ) -> WindowsDaemonProcess:
-    """Launch through WMI only after the direct Job-breakaway request failed."""
+    """Durably launch a resident daemon through WMI ``Win32_Process.Create``.
+
+    This is the Windows durable-launch primitive (#12117): the WMI provider
+    creates a bootstrap outside every caller Job and process tree, so neither a
+    caller tree-kill nor closing a kill-on-close Job can end the daemon. WMI
+    inherits nothing, so the environment, cwd, logs and optional stdio handles
+    are passed explicitly. The actual child is pinned by handle, PID and
+    creation time and must be outside every Job before it is resumed. Use it
+    only for daemons that must outlive their launcher; bounded and
+    tool-to-tool children keep normal creation and their caller's Jobs.
+    """
     from . import DaemonSpawnError
 
     deadline = time.monotonic() + _TIMEOUT
@@ -299,6 +356,7 @@ def spawn_brokered_daemon(
     child_identity = None
     cookie = secrets.token_hex(32)
     stage = "activation"
+    activation_detail = ""
     problems = []
     try:
         with socket.socket() as listener:
@@ -310,7 +368,11 @@ def spawn_brokered_daemon(
                 _BOOT_PORT: str(listener.getsockname()[1]),
             }
             argv = [_bootstrap_python(), "-I", str(Path(__file__).resolve())]
-            pid = _activate(argv, bootstrap_env, cwd, deadline)
+            try:
+                pid = _activate(argv, bootstrap_env, cwd, deadline)
+            except OSError as error:
+                activation_detail = str(error)
+                raise
             bootstrap = WindowsDaemonProcess(pid, argv)
             stage = "bootstrap-identity"
             listener.settimeout(_remaining(deadline))
@@ -326,11 +388,16 @@ def spawn_brokered_daemon(
                 if not _outside_job(bootstrap):
                     raise OSError("daemon broker bootstrap still belongs to a Job")
                 stage = "child-staging"
+                handles = (
+                    None if stdio_handles is None
+                    else _duplicate_into(bootstrap, list(stdio_handles))
+                )
                 staging_started = True
                 _send(connection, {
                     "argv": command, "cwd": cwd, "env": env,
                     "creationflags": creationflags, "log_path": log_path,
                     "stderr_log_path": stderr_log_path, "deadline": deadline,
+                    "stdio_handles": handles,
                 }, deadline)
                 response = _receive(connection, deadline)
                 child_pid = response.get("pid")
@@ -371,13 +438,25 @@ def spawn_brokered_daemon(
         cleanup_confirmed &= exited
         problems.extend("child-" + problem for problem in cleanup)
     if problems:
-        raise DaemonSpawnError(
-            "spawn_daemon: Windows lifetime broker failed (" + ", ".join(problems) + ")",
+        if activation_detail:
+            message = (
+                "spawn_daemon: Windows durable launch via WMI Win32_Process.Create "
+                f"failed: {activation_detail}; {WMI_POLICY_HINT}; daemon not started"
+            )
+        else:
+            message = (
+                "spawn_daemon: Windows lifetime broker failed (" + ", ".join(problems) + ")"
+            )
+        failure = DaemonSpawnError(
+            message,
             cleanup_confirmed=cleanup_confirmed,
             process_created=True if child is not None else (None if staging_started else False),
             admission_sent=admission_sent,
             process_identity=child_identity,
-        ) from None
+        )
+        if child is not None and not cleanup_confirmed:
+            failure.process = child
+        raise failure from None
     if child is None:
         raise DaemonSpawnError("spawn_daemon: Windows lifetime broker did not return a child")
     return child
@@ -394,22 +473,36 @@ def _bootstrap() -> int:
             _send(conn, {"cookie": cookie, "pid": os.getpid()}, deadline)
             spec = _receive(conn, deadline)
             deadline = min(deadline, float(spec["deadline"]))
+            stdio = spec.get("stdio_handles")
             with open(spec["log_path"], "ab") as output:
                 error_path = spec["stderr_log_path"]
                 error = open(error_path, "ab") if error_path else None
+                streams: dict[str, Any] = {
+                    "stdin": subprocess.DEVNULL, "stdout": output,
+                    "stderr": error if error else subprocess.STDOUT,
+                }
+                descriptors = []
                 try:
+                    if stdio is not None:
+                        import msvcrt
+
+                        for name, handle in zip(("stdin", "stdout", "stderr"), stdio):
+                            descriptor = msvcrt.open_osfhandle(int(handle), 0)
+                            descriptors.append(descriptor)
+                            streams[name] = descriptor
                     child = subprocess.Popen(
                         spec["argv"], cwd=spec["cwd"],
                         env={
                             key: value for key, value in spec["env"].items()
                             if key not in (_BOOT_PORT, _BOOT_COOKIE)
                         },
-                        stdin=subprocess.DEVNULL, stdout=output,
-                        stderr=error if error else subprocess.STDOUT,
                         close_fds=True,
                         creationflags=spec["creationflags"] | _CREATE_SUSPENDED,
+                        **streams,
                     )
                 finally:
+                    for descriptor in descriptors:
+                        os.close(descriptor)
                     if error is not None:
                         error.close()
             _send(conn, {"pid": child.pid}, deadline)

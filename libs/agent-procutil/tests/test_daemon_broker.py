@@ -39,38 +39,42 @@ def no_native_caller_job(monkeypatch):
     monkeypatch.setattr(pu, "spawn_daemon", explicit_fixture)
 
 
-def test_ambient_job_membership_does_not_select_a_broker(monkeypatch, tmp_path):
+def _durable_launch(monkeypatch, *, side_effect=None):
+    process = Mock(pid=1234)
+    launch = Mock(return_value=process, side_effect=side_effect)
+    monkeypatch.setattr(daemon, "_durable_windows_launch", launch)
+    return process, launch
+
+
+def test_durable_windows_launch_always_uses_wmi_even_outside_a_job(monkeypatch, tmp_path):
     monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
     monkeypatch.setattr(pu, "_is_windows", lambda: True)
-    monkeypatch.setattr(broker, "caller_in_job", lambda: True)
-    process = Mock(pid=1234)
-    popen = Mock(return_value=process)
+    popen = Mock(side_effect=AssertionError("native durable creation"))
     monkeypatch.setattr(subprocess, "Popen", popen)
-    monkeypatch.setattr(pu, "_resume_suspended_process", lambda pid: True)
-    launch = Mock(side_effect=AssertionError("automatic broker activation"))
-    monkeypatch.setattr(daemon, "spawn_brokered_daemon", launch)
+    task = Mock(side_effect=AssertionError("automatic Task activation"))
+    monkeypatch.setattr(daemon, "spawn_brokered_daemon", task)
+    process, launch = _durable_launch(monkeypatch)
     assert pu.spawn_daemon(
         ["py"], cwd=tmp_path, log_path=tmp_path / "out.log", console_children=True,
     ) is process
-    assert popen.call_args.kwargs["creationflags"] == (
-        pu._CREATE_NO_WINDOW | pu._CREATE_BREAKAWAY_FROM_JOB | pu._CREATE_SUSPENDED
+    assert launch.call_args.kwargs["creationflags"] == (
+        pu._CREATE_NO_WINDOW | pu._CREATE_BREAKAWAY_FROM_JOB
     )
-    launch.assert_not_called()
+    popen.assert_not_called()
+    task.assert_not_called()
+    log = (tmp_path / "out.log").read_text(encoding="utf-8")
+    assert "wmi-durable-launch" in log and "instance-bound" in log
 
 
-def test_direct_route_preserves_exact_arguments_and_environment_without_task_transport(monkeypatch, tmp_path):
+def test_durable_route_preserves_exact_arguments_and_environment(monkeypatch, tmp_path):
     from agent_procutil import windows_task_broker
 
     monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
     monkeypatch.setattr(pu, "_is_windows", lambda: True)
-    monkeypatch.setattr(broker, "caller_in_job", lambda: True)
-    monkeypatch.setattr(broker, "_activate", Mock(side_effect=AssertionError("legacy WMI")))
-    process = Mock(pid=1234)
-    popen = Mock(return_value=process)
-    monkeypatch.setattr(subprocess, "Popen", popen)
-    monkeypatch.setattr(pu, "_resume_suspended_process", lambda pid: True)
-    launch = Mock(side_effect=AssertionError("automatic Task activation"))
-    monkeypatch.setattr(windows_task_broker, "spawn", launch)
+    monkeypatch.setattr(subprocess, "Popen", Mock(side_effect=AssertionError("native")))
+    task = Mock(side_effect=AssertionError("automatic Task activation"))
+    monkeypatch.setattr(windows_task_broker, "spawn", task)
+    process, launch = _durable_launch(monkeypatch)
     out, err = tmp_path / "out.log", tmp_path / "err.log"
     command = ["py", "argument with spaces", ""]
     assert pu.spawn_daemon(
@@ -79,13 +83,16 @@ def test_direct_route_preserves_exact_arguments_and_environment_without_task_tra
         console_children=True,
     ) is process
     from agent_procutil.daemon_instances import instance_environment
-    assert popen.call_args.args == (command,)
-    assert popen.call_args.kwargs["env"] == {
+    assert launch.call_args.args == (command,)
+    passed = launch.call_args.kwargs
+    assert passed["env"] == {
         "EXACT": "new", **instance_environment(process.instance_receipt),
     }
-    assert popen.call_args.kwargs["cwd"] == str(tmp_path)
-    launch.assert_not_called()
-    broker._activate.assert_not_called()
+    assert passed["cwd"] == str(tmp_path)
+    assert str(passed["log_path"]) == str(out)
+    assert str(passed["stderr_log_path"]) == str(err)
+    assert passed["instance_receipt"] is process.instance_receipt
+    task.assert_not_called()
 
 
 def test_default_broker_missing_support_refuses_without_legacy_activation(tmp_path):
@@ -120,28 +127,6 @@ def test_default_broker_missing_support_refuses_without_legacy_activation(tmp_pa
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "missing-support-refused"
-
-
-def test_tracked_job_query_failure_never_launches(monkeypatch, tmp_path):
-    from agent_procutil import _job_scopes
-    from contextlib import contextmanager
-
-    @contextmanager
-    def refused(environment):
-        raise OSError("query refused")
-        yield  # pragma: no cover
-
-    monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
-    monkeypatch.setattr(pu, "_is_windows", lambda: True)
-    monkeypatch.setattr(_job_scopes, "query_scopes", refused)
-    popen, launch = Mock(), Mock()
-    monkeypatch.setattr(subprocess, "Popen", popen)
-    monkeypatch.setattr(daemon, "spawn_brokered_daemon", launch)
-    with pytest.raises(pu.DaemonSpawnError) as caught:
-        pu.spawn_daemon(["py"], cwd=tmp_path, log_path=tmp_path / "out.log")
-    assert str(caught.value.__cause__) == "query refused"
-    popen.assert_not_called()
-    launch.assert_not_called()
 
 
 def _caller_kernel(monkeypatch, members, *, in_job=True, mode="complete"):
@@ -230,14 +215,16 @@ def test_unknown_caller_membership_refuses_adoption(monkeypatch, mode, members, 
         broker._outside_caller_job(Mock(pid=99001))
 
 
-def test_denied_breakaway_uses_only_explicit_contained_fallback(monkeypatch, tmp_path):
+def test_blocked_wmi_uses_only_explicit_contained_fallback(monkeypatch, tmp_path):
     monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
     monkeypatch.setattr(pu, "_is_windows", lambda: True)
     process = Mock(pid=1234)
-    popen = Mock(side_effect=[_denied(), process])
+    popen = Mock(return_value=process)
     monkeypatch.setattr(subprocess, "Popen", popen)
-    launch = Mock(side_effect=AssertionError("automatic broker"))
-    monkeypatch.setattr(daemon, "spawn_brokered_daemon", launch)
+    _durable_launch(monkeypatch, side_effect=pu.DaemonSpawnError(
+        "Windows durable launch via WMI Win32_Process.Create failed",
+        process_created=False, admission_sent=False,
+    ))
 
     result = pu.spawn_daemon(
         ["py", "arg with spaces"], cwd=tmp_path, log_path=tmp_path / "out.log",
@@ -247,8 +234,7 @@ def test_denied_breakaway_uses_only_explicit_contained_fallback(monkeypatch, tmp
     )
 
     assert result is process
-    assert popen.call_count == 2
-    launch.assert_not_called()
+    assert popen.call_count == 1
     assert popen.call_args.args == (["py", "arg with spaces"],)
     passed = popen.call_args.kwargs
     assert passed["env"]["KEY"] == "new" and passed["env"]["OTHER"] == "value"
@@ -261,6 +247,23 @@ def test_denied_breakaway_uses_only_explicit_contained_fallback(monkeypatch, tmp
         assert "arg with spaces" not in text and "value" not in text
 
 
+def test_blocked_wmi_without_fallback_is_explicit(monkeypatch, tmp_path):
+    monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
+    monkeypatch.setattr(pu, "_is_windows", lambda: True)
+    popen = Mock()
+    monkeypatch.setattr(subprocess, "Popen", popen)
+    _durable_launch(monkeypatch, side_effect=pu.DaemonSpawnError(
+        f"Windows durable launch via WMI failed; {broker.WMI_POLICY_HINT}",
+        process_created=False, admission_sent=False,
+    ))
+    with pytest.raises(pu.DaemonSpawnError, match="PSExec and WMI") as caught:
+        pu.spawn_daemon(["py"], cwd=tmp_path, log_path=tmp_path / "out.log")
+    assert caught.value.process_created is False
+    popen.assert_not_called()
+    from agent_procutil.daemon_instances import inspect_instances
+    assert inspect_instances() == []
+
+
 @pytest.mark.parametrize("contained", [False, True])
 def test_containment_never_uses_the_broker(monkeypatch, tmp_path, contained):
     monkeypatch.setattr(pu, "_is_windows", lambda: True)
@@ -268,57 +271,48 @@ def test_containment_never_uses_the_broker(monkeypatch, tmp_path, contained):
     monkeypatch.setattr(subprocess, "Popen", Mock(side_effect=_denied()))
     launch = Mock()
     monkeypatch.setattr(daemon, "spawn_brokered_daemon", launch)
+    _, durable = _durable_launch(monkeypatch)
     with pytest.raises(OSError):
         pu.spawn_daemon(
             ["py"], cwd=tmp_path, log_path=tmp_path / "out.log",
             breakaway=contained,
         )
     launch.assert_not_called()
+    durable.assert_not_called()
 
 
 def test_broker_errors_are_sanitized_in_both_logs(monkeypatch, tmp_path):
     monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
     monkeypatch.setattr(pu, "_is_windows", lambda: True)
     monkeypatch.setattr(subprocess, "Popen", Mock(side_effect=_denied()))
-    monkeypatch.setattr(
-        daemon, "spawn_brokered_daemon",
-        Mock(side_effect=pu.DaemonSpawnError(
-            "sensitive-fixture-detail", process_created=False, admission_sent=False,
-        )),
-    )
-    with pytest.raises(pu.DaemonSpawnError) as caught:
+    _durable_launch(monkeypatch, side_effect=pu.DaemonSpawnError(
+        "sensitive-fixture-detail", process_created=False, admission_sent=False,
+    ))
+    with pytest.raises(pu.DaemonSpawnError):
         pu.spawn_daemon(
             ["py", "sensitive-fixture-detail"], cwd=tmp_path,
             log_path=tmp_path / "out.log", stderr_log_path=tmp_path / "err.log",
         )
-    assert "sensitive-fixture-detail" not in str(caught.value)
     for name in ("out.log", "err.log"):
         text = (tmp_path / name).read_text(encoding="utf-8")
         assert "daemon not started" in text and "sensitive-fixture-detail" not in text
 
 
 def test_uncertain_cleanup_prohibits_a_contained_retry(monkeypatch, tmp_path):
-    from contextlib import contextmanager
-    from agent_procutil import _job_scopes, _daemon_instance_identity
-
     monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
     monkeypatch.setattr(pu, "_is_windows", lambda: True)
-    process = Mock(pid=123, _handle=456)
-    process.wait.side_effect = subprocess.TimeoutExpired("fixture", 5)
-    popen = Mock(return_value=process)
+    popen = Mock()
     monkeypatch.setattr(subprocess, "Popen", popen)
-    monkeypatch.setattr(_daemon_instance_identity, "created_process_identity", lambda child: (123, "fixture-birth"))
-
-    @contextmanager
-    def refuse(environment):
-        yield Mock(side_effect=OSError("owned Job retained"))
-
-    monkeypatch.setattr(_job_scopes, "query_scopes", refuse)
-    with pytest.raises(pu.DaemonSpawnError):
+    _durable_launch(monkeypatch, side_effect=pu.DaemonSpawnError(
+        "Windows lifetime broker failed (child)", cleanup_confirmed=False,
+        process_created=True, process_identity=(123, "fixture-birth"),
+    ))
+    with pytest.raises(pu.DaemonSpawnError) as caught:
         pu.spawn_daemon(
             ["py"], cwd=tmp_path, log_path=tmp_path / "out.log", contained_fallback=True,
         )
-    assert popen.call_count == 1, "uncertainty must not create a second daemon"
+    assert caught.value.cleanup_confirmed is False
+    popen.assert_not_called()  # uncertainty must not create a second daemon
 
 
 def test_frames_preserve_unicode_environment_and_embedded_newlines():

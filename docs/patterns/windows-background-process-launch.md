@@ -126,11 +126,63 @@ installed service or UAC for a failed normal spawn. Repair and qualify the
 owning direct-creation/Job boundary first. If a restrictive external owner
 prevents the required lifetime, report that limitation explicitly. A different
 activation, availability or privilege model requires its own reviewed decision;
-it is not a silent fallback or an excuse to relax cleanup checks.
+it is not a silent fallback or an excuse to relax cleanup checks. The WMI
+durable launch below is one such reviewed decision, limited to its stated scope.
+
+### Durable WMI launch for processes that must outlive their launcher
+
+Reviewed decision for ThomasMichon/copilot-extensions#12117. Agent shells and
+installers commonly run inside a kill-on-close Job
+(`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`) that forbids breakaway, so
+`CREATE_BREAKAWAY_FROM_JOB` is denied (WinError 5); even a permitted breakaway
+leaves the child in the launcher's process tree, where a forced tree kill or an
+unknown outer Job can still end it. A process created by WMI
+`Win32_Process.Create` is parented by the WMI provider host, belongs to none of
+the caller's Jobs and runs as the same user, so terminating the launcher, its
+tree or every caller Job does not terminate it.
+
+Use the WMI durable launch **only** when a process must outlive its launcher:
+
+1. an installer starting or restarting the services it installed at the end of
+   a setup flow;
+2. a daemon restarting itself, such as a version-cutover self-restart;
+3. a watchdog or supervisor restarting the processes it supervises;
+4. a CLI ensuring or starting its own backing daemon;
+5. the update front door queuing the requested update when the caller's Job
+   forbids breakaway.
+
+Everything else keeps ordinary process creation and Jobs so the process
+hierarchy, timeouts and tree cleanup remain meaningful: a CLI calling another
+CLI, bounded helpers, request/tool/test children and finite workers. WMI is not
+a general fallback for a failed spawn.
+
+On Windows, `spawn_daemon` uses the WMI durable launch for every resident
+durable daemon (`breakaway=True`, outside contained test mode). It does not try
+native breakaway first, because a natively escaped child is still exposed to a
+tree kill and to outer Jobs that admission cannot enumerate; the required
+outcome is that launcher termination never terminates the daemon. Finite
+workers keep native suspended breakaway and refuse under a strict Job.
+`breakaway=False` and contained test mode stay contained.
+
+WMI creation inherits nothing: no environment, standard handles, console or
+handles. The launcher passes the complete environment block, working directory
+and log destinations explicitly. A small no-Job bootstrap creates the daemon
+suspended with its logs attached, pins its identity by PID and creation time,
+returns a handle to the caller's `WindowsDaemonProcess` and then resumes it, so
+instance descriptors and admission receipts keep their existing contract.
+
+WMI process creation can be blocked by policy, notably the Microsoft Defender
+attack surface reduction rule "Block process creations originating from PSExec
+and WMI commands", and is unavailable inside some Windows containers or silos.
+A blocked creation raises an explicit `DaemonSpawnError` naming that cause; only
+an existing `contained_fallback=True` opt-in may then start a contained,
+warning-logged daemon. The durable process still ends on an explicit kill,
+sign-out or reboot; it is not a service registration.
 
 ### Existing finite-broker compatibility path
 
-`spawn_daemon` now uses ordinary suspended native creation. Canonical Job
+Finite workers launched through `spawn_daemon` use ordinary suspended native
+creation. Canonical Job
 producers propagate their complete named-scope chain; admission verifies the
 child against every exact retained Job object, closes temporary query handles
 before resume, and clears escaped metadata. No Job handles are inherited.
@@ -146,7 +198,7 @@ The caller receives the actual daemon's process control. An uncommitted failed
 launch is reaped before retry. Unconfirmed exit retains native custody and
 `cleanup_confirmed=False`; no contained retry is permitted.
 A caller for which the degraded lifetime is still better than no daemon may
-opt in to `contained_fallback=True`: only after a settled native refusal does the daemon
+opt in to `contained_fallback=True`: only after a settled native or WMI refusal does the daemon
 start inside the caller's Job, with a warning and log entry. That daemon does
 not outlive the Job. Explicit `breakaway=False` and contained test mode never
 escape containment.
