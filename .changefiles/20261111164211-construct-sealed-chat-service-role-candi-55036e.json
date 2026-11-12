@@ -2,7 +2,7 @@
   "comment": "Construct sealed Chat service-role candidates without activation",
   "changes": [
     {
-      "plugin": "agent-chat-service",
+      "plugin": "services/chat",
       "type": "patch"
     }
   ]
