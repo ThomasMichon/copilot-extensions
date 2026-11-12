@@ -122,6 +122,7 @@ async def test_actual_native_client_rediscovers_through_replacement_and_rollback
     upstream.write_text(UPSTREAM, encoding="utf-8")
     trigger, receipt = tmp_path / "refresh", tmp_path / "upstream-eof.json"
     observations = tmp_path / "responses.jsonl"
+    caller_context = tmp_path / "caller-context.json"
     config = home / "bridge.json"
     config.write_text(json.dumps({
         "server": {"type": "stdio", "command": [
@@ -130,11 +131,13 @@ async def test_actual_native_client_rediscovers_through_replacement_and_rollback
     }), encoding="utf-8")
     fixed = workspace / "current" / "serve.sock"
     processes, handles, cleanup = [], [], []
-    client = stderr = None
+    client = stderr = session = None
     identities = []
     sequence = 0
     with contextlib.ExitStack() as retained:
-        root, slots = fixture.build_runtimes(tmp_path, retained, observations=observations)
+        root, slots = fixture.build_runtimes(
+            tmp_path, retained, observations=observations, caller_context=caller_context,
+        )
         with daemon_test_lifecycle(
             owner="native-copilot-mcp-handover", registry_root=tmp_path / "instances",
             cleanup_results=cleanup,
@@ -161,11 +164,13 @@ async def test_actual_native_client_rediscovers_through_replacement_and_rollback
                 COPILOT_EXTENSIONS_BOOT_TRACE_SHIM_START_MS="original-native-client",
             )
 
+            backend_environment = environment
+
             async def backend(label: str) -> tuple[asyncio.subprocess.Process, Path, int]:
                 (root / "current-version").write_text(slots[label][0], encoding="utf-8")
                 handle = fixed.parent / f"backend-{len(processes)}.sock"
                 traced = {
-                    **environment, "COPILOT_EXTENSIONS_BOOT_TRACE": "1",
+                    **backend_environment, "COPILOT_EXTENSIONS_BOOT_TRACE": "1",
                     "COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN": "agent-mcp",
                     "COPILOT_EXTENSIONS_BOOT_TRACE_SHIM_START_MS": str(handle),
                 }
@@ -221,7 +226,7 @@ async def test_actual_native_client_rediscovers_through_replacement_and_rollback
                 return result
 
             try:
-                old, old_handle, old_pid = await backend("old")
+                (root / "current-version").write_text(slots["old"][0], encoding="utf-8")
                 python = slots["old"][1] / "bin" / "python"
                 entries = home / "entries.json"
                 entries.write_text(json.dumps({"mcpServers": {"physical-fixture": {
@@ -247,7 +252,21 @@ async def test_actual_native_client_rediscovers_through_replacement_and_rollback
                     "clientInfo": {"name": "physical-owner-fixture", "version": "1"},
                 })
                 assert initialized["protocolVersion"] == 1
-                await rpc(client, stderr, 2, "session/new", {"cwd": str(workspace), "mcpServers": []})
+                session = asyncio.create_task(rpc(
+                    client, stderr, 2, "session/new", {"cwd": str(workspace), "mcpServers": []},
+                ))
+
+                async def prepared_context() -> dict:
+                    if not caller_context.is_file():
+                        return {}
+                    return json.loads(caller_context.read_text(encoding="utf-8"))
+
+                # The native client adds its own semantic environment before MCP exec.
+                # Prepare the private backend from that exact pre-effect caller context.
+                backend_environment = await fixture.eventually(prepared_context)
+                old, old_handle, old_pid = await backend("old")
+                caller_context.with_suffix(".ready").write_text("ready", encoding="utf-8")
+                await session
                 first = await discovery("old", old_pid, refresh=False)
                 upstream_identity = first["pid"], birth_identity(first["pid"])
                 owner = json.loads(observations.with_suffix(".owner.json").read_text(encoding="utf-8"))
@@ -304,6 +323,10 @@ async def test_actual_native_client_rediscovers_through_replacement_and_rollback
                 }))
                 record_testsuite_property("discovery_after_handover", 3)
             finally:
+                if session is not None and not session.done():
+                    session.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await session
                 if client is not None:
                     if client.returncode is None:
                         client.terminate()

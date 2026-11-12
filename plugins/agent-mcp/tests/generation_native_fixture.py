@@ -130,6 +130,7 @@ emit({"jsonrpc":"2.0", "method":"notifications/upstream-eof",
 
 def build_runtimes(
     private: Path, retained: ExitStack, *, observations: Path | None = None,
+    caller_context: Path | None = None,
 ) -> tuple[Path, dict[str, tuple[str, Path]]]:
     """Use the construction owner, not a copied venv or patched launch identity."""
     for library in ("installer-engine", "versioned-runtime"):
@@ -200,6 +201,21 @@ def build_runtimes(
                 "        except (OSError, ValueError) as refusal:\n"
                 f"            Path({str(observations.with_suffix('.refusal'))!r}).write_text(str(refusal))",
             ), encoding="utf-8")
+            if caller_context is not None:
+                body = receiver.read_text(encoding="utf-8")
+                needle = "            args = _qualify(request)"
+                assert body.count(needle) == 1
+                receiver.write_text(body.replace(
+                    needle,
+                    "            import time\n"
+                    f"            Path({str(caller_context)!r}).write_text(json.dumps(dict(os.environ)))\n"
+                    "            deadline = time.monotonic() + 10\n"
+                    f"            while not Path({str(caller_context.with_suffix('.ready'))!r}).exists():\n"
+                    "                if time.monotonic() >= deadline:\n"
+                    "                    raise RuntimeError('fixture backend preparation deadline expired')\n"
+                    "                time.sleep(.02)\n"
+                    + needle,
+                ), encoding="utf-8")
             capabilities = payload / "src" / "agent_mcp" / "owner_capabilities.py"
             body = capabilities.read_text(encoding="utf-8")
             needle = "    print(json.dumps(result, sort_keys=True))"
