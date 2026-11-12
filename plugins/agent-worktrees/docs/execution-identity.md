@@ -109,7 +109,8 @@ conflicting explicit tuples are errors, never fallback execution authority.
 A checkout already registered in this machine's receiving project store is
 local by that store and its actual Git checkout, not by a machine-topology
 lookup. The retained proof checks the selected project, exact tracking path
-and snapshot, absolute nonredirected checkout, repository family and reciprocal
+and snapshot, absolute nonredirected checkout, repository family, recorded
+branch and reciprocal
 Git worktree registration. It reads Git's marker, common-directory and
 backpointer files directly, without starting Git or acquiring optional topology.
 It also covers adopted linked checkouts and retained managed checkouts outside
@@ -128,7 +129,11 @@ validate their selected execution context.
 A historical alias never overrides an explicitly declared remote or ambiguous
 target. The optional local-ID probe searches registered receiving projects without
 rebinding the ambient project, and local suffix ambiguity does not consume a
-selector intended for a remote store.
+selector intended for a remote store. Admitted local selection carries its exact
+canonical ID and receiving project into resume rather than resolving the same
+input again against another project's suffixes. Explicit keys, aliases and
+profiles are selected before an observed-hostname fallback; unrelated hostname
+metadata does not turn a retained checkout into a remote destination.
 
 No identity migration is necessary. IDs, historical physical and execution
 names, sessions, pairs, claims and owner references remain intact. Qualified
@@ -140,6 +145,9 @@ claim nor waives live process, launch, handoff or lifecycle ownership.
 An in-memory receipt recovered by that owner remains provable against the exact
 original indexed journal without rewriting the ledger or upgrading the journal
 during a locality read.
+Failed or absent receipt recovery cannot authorize a foreign-owned child:
+without a validated receipt, an owned local record requires an independently
+proven retained local parent.
 `doctor` reports `local_registration` for the project's records, distinguishing
 proven local checkouts, absent checkouts and present but unproven paths, without
 rewriting historical identities.

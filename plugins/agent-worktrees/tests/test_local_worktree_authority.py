@@ -84,6 +84,10 @@ def _topology(fixture, kind):
         fixture.topology.unlink(missing_ok=True)
     elif kind == "malformed":
         fixture.topology.write_text("machines: [\n", encoding="utf-8")
+    elif kind == "invalid-types":
+        fixture.topology.write_text(yaml.safe_dump({"machines": {
+            "new-host": {"ssh": {"environments": 1}},
+        }}), encoding="utf-8")
     else:
         fixture.topology.write_text(yaml.safe_dump({"machines": {
             "wrong-space": {
@@ -94,7 +98,7 @@ def _topology(fixture, kind):
         }}), encoding="utf-8")
 
 
-@pytest.mark.parametrize("topology", ["missing", "unrelated", "mis-mapped", "malformed"])
+@pytest.mark.parametrize("topology", ["missing", "unrelated", "mis-mapped", "malformed", "invalid-types"])
 @pytest.mark.parametrize("versioned", [False, True])
 def test_local_owner_and_doctor_do_not_require_historical_machine_mapping(
     local_worktree, monkeypatch, topology, versioned,
@@ -124,7 +128,7 @@ def test_local_owner_and_doctor_do_not_require_historical_machine_mapping(
     assert fixture.ledger.read_bytes() == before
 
 
-@pytest.mark.parametrize("topology", ["mis-mapped", "malformed"])
+@pytest.mark.parametrize("topology", ["mis-mapped", "malformed", "invalid-types"])
 @pytest.mark.parametrize("selector", [None, "old-execution", "new-host"])
 def test_real_resolve_resume_and_original_owner_settlement(
     local_worktree, monkeypatch, capfd, topology, selector,
@@ -309,13 +313,33 @@ def test_ambiguous_declared_target_cannot_fall_back_to_a_historical_alias(
         )
 
 
+@pytest.mark.parametrize("exact_suffix_collision", [False, True])
 def test_cross_project_local_probe_uses_receiving_config_without_rebinding_remote(
-    local_worktree, monkeypatch, capfd,
+    local_worktree, monkeypatch, capfd, tmp_path, exact_suffix_collision,
 ):
     from agent_worktrees import installer, local_cache_refresh, resolve_cli, resolve_target
 
     fixture = local_worktree
     _topology(fixture, "malformed")
+    if exact_suffix_collision:
+        original_checkout = fixture.checkout
+        fixture.checkout = tmp_path / "exact" / "worktree"
+        git_ops.git(
+            "worktree", "add", "-b", "worktree/exact", str(fixture.checkout), cwd=fixture.anchor,
+        )
+        fixture.ledger.unlink()
+        fixture.data.update(
+            worktree_id="worktree", branch="worktree/exact", worktree_path=str(fixture.checkout),
+        )
+        fixture.ledger = fixture.ledger.with_name("worktree.yaml")
+        fixture.ledger.write_text(yaml.safe_dump(fixture.data), encoding="utf-8")
+        ambient_records = cfg.project_dir("other") / "worktrees"
+        ambient_records.mkdir(parents=True)
+        (ambient_records / "active-worktree.yaml").write_text(yaml.safe_dump({
+            **fixture.data, "worktree_id": "active-worktree", "repo": "other",
+            "worktree_path": str(original_checkout), "branch": "worktree/example",
+            "machine": "other-host", "execution_machine": "other-execution",
+        }), encoding="utf-8")
     receiving = fixture.load()
     ambient = replace(receiving, repo_name="other", machine="other-host", repos={
         "other": receiving.default_repo,
@@ -345,12 +369,9 @@ def test_cross_project_local_probe_uses_receiving_config_without_rebinding_remot
     assert cfg.active_project() == "example"
 
 
-def test_journal_recovered_receipt_keeps_readonly_local_proof(local_worktree, monkeypatch):
-    from agent_worktrees import creation_requests, receiving_allocation, worktree_trust
+def _receiving_child(fixture):
+    from agent_worktrees import creation_requests, receiving_allocation
 
-    fixture = local_worktree
-    _topology(fixture, "malformed")
-    config = fixture.load()
     admission = receiving_allocation.ReceivingAllocation.from_fields({
         "origin": "remote/parent/origin", "request_id": "original", "token": "a" * 32,
         "target": {"machine": "old-execution", "project": "example", "options": {"no_pair": True}},
@@ -370,6 +391,16 @@ def test_journal_recovered_receipt_keeps_readonly_local_proof(local_worktree, mo
             json.dumps({"creation_nonce": record.creation_nonce, "worktree": child}),
         ))
     connection.close()
+    return record
+
+
+def test_journal_recovered_receipt_keeps_readonly_local_proof(local_worktree, monkeypatch):
+    from agent_worktrees import creation_requests, worktree_trust
+
+    fixture = local_worktree
+    _topology(fixture, "malformed")
+    config = fixture.load()
+    record = _receiving_child(fixture)
     before = fixture.ledger.read_bytes()
     monkeypatch.setattr(
         execution_spaces, "registry_for_config",
@@ -394,3 +425,97 @@ def test_journal_recovered_receipt_keeps_readonly_local_proof(local_worktree, mo
     assert fixture.ledger.read_bytes() == before
     record.receiving_allocation["token"] = "b" * 32
     assert not retained_checkout.is_local(record, config)
+
+
+@pytest.mark.parametrize("journal", ["missing", "conflicting"])
+def test_failed_receipt_recovery_cannot_authorize_foreign_parent(local_worktree, journal):
+    fixture = local_worktree
+    _topology(fixture, "malformed")
+    config = fixture.load()
+    if journal == "conflicting":
+        _receiving_child(fixture)
+    fixture.data.update(owner_ref="remote/parent/origin", creation_nonce="different-incarnation")
+    fixture.ledger.write_text(yaml.safe_dump(fixture.data), encoding="utf-8")
+    before = fixture.ledger.read_bytes()
+    record = tracking.load_record(fixture.ledger)
+    assert retained_checkout.is_local(record, config)
+    with pytest.raises(execution_spaces.ExecutionSpaceError, match="receiving allocation"):
+        execution_spaces.require_record_mutation(record, config)
+    assert not record.receiving_allocation_present
+    assert fixture.ledger.read_bytes() == before
+
+
+def test_actual_retained_local_parent_needs_no_foreign_receipt(local_worktree, tmp_path):
+    fixture = local_worktree
+    _topology(fixture, "malformed")
+    config = fixture.load()
+    parent = tmp_path / "parent"
+    git_ops.git("worktree", "add", "-b", "worktree/parent", str(parent), cwd=fixture.anchor)
+    (fixture.ledger.parent / "parent.yaml").write_text(yaml.safe_dump({
+        **fixture.data, "worktree_id": "parent", "worktree_path": str(parent),
+        "branch": "worktree/parent", "creation_nonce": "parent-incarnation",
+    }), encoding="utf-8")
+    fixture.data["owner_ref"] = "old-execution/example/parent"
+    fixture.ledger.write_text(yaml.safe_dump(fixture.data), encoding="utf-8")
+    execution_spaces.require_record_mutation(tracking.load_record(fixture.ledger), config)
+
+
+@pytest.mark.parametrize("name_kind", ["key", "alias", "ambiguous-alias"])
+def test_explicit_remote_name_equal_to_observed_hostname_is_not_local(
+    local_worktree, monkeypatch, capfd, name_kind,
+):
+    from agent_worktrees import installer, resolve_cli
+
+    fixture = local_worktree
+    _topology(fixture, "missing")
+    selector = cfg.socket.gethostname()
+    keys = [selector] if name_kind == "key" else ["remote-one"]
+    if name_kind == "ambiguous-alias":
+        keys.append("remote-two")
+    entries = {key: cfg.MachineEntry(
+        key=key, display_name=key, alias=selector if name_kind != "key" else "",
+        hostname=f"{key}-remote", execution_platform=cfg.detect_platform(),
+    ) for key in keys}
+    monkeypatch.setattr(cfg, "load_machines_yaml", lambda *a, **k: entries)
+    monkeypatch.setattr(installer, "read_projects_registry", lambda: {"projects": {"example": {}}})
+    routed = []
+    monkeypatch.setattr(
+        resolve_cli, "_emit_remote_plan_for_env",
+        lambda *args, **kwargs: routed.append(args) or 0,
+    )
+    before = fixture.ledger.read_bytes()
+    code = resolve_cli.cmd_resolve(_args(worktree_id=fixture.checkout.name, machine=selector))
+    if name_kind == "ambiguous-alias":
+        assert code == 1 and not routed
+        assert "ambiguous" in json.loads(capfd.readouterr().out)["error"].lower()
+    else:
+        assert code == 0 and routed[0][1] == selector
+    assert fixture.ledger.read_bytes() == before
+
+
+def test_replacement_checkout_branch_cannot_authorize_forced_cleanup(
+    local_worktree, monkeypatch, tmp_path,
+):
+    from agent_worktrees import cleanup_gc_cli
+
+    fixture = local_worktree
+    _topology(fixture, "missing")
+    replacement = tmp_path / "old-root" / fixture.checkout.name
+    git_ops.git("worktree", "add", "-b", "replacement", str(replacement), cwd=fixture.anchor)
+    changed = replacement / "uncommitted.txt"
+    changed.write_text("preserve replacement work", encoding="utf-8")
+    fixture.data["worktree_path"] = str(replacement)
+    fixture.ledger.write_text(yaml.safe_dump(fixture.data), encoding="utf-8")
+    config = fixture.load()
+    config = replace(config, repos={"example": replace(
+        config.default_repo, worktree_root=str(tmp_path / "new-root"),
+    )})
+    monkeypatch.setattr(cfg, "load_project_config", lambda *a, **k: config)
+    record = tracking.load_record(fixture.ledger)
+    assert not retained_checkout.is_local(record, config)
+    result = cleanup_gc_cli._revalidate_cleanup_safety(
+        record.worktree_id, repo=config.default_repo, tracking_path=fixture.ledger.parent, force=True,
+        reap=lambda *args: pytest.fail("replacement checkout reached destructive cleanup"),
+    )
+    assert not result.cleanable and result.bucket == "execution-space"
+    assert changed.read_text(encoding="utf-8") == "preserve replacement work"

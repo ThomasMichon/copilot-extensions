@@ -192,7 +192,7 @@ def registry_for_config(config: Any) -> dict[str, MachineEntry]:
         return cfg.load_machines_yaml(anchor, config=config)
     except FileNotFoundError:
         return {}
-    except (OSError, ValueError, yaml.YAMLError) as exc:
+    except (OSError, ValueError, TypeError, yaml.YAMLError) as exc:
         raise ExecutionSpaceError(f"execution-space registry is invalid: {exc}") from exc
 
 
@@ -344,6 +344,10 @@ def require_record_mutation(record: Any, config: Any, *, recover_receiving: bool
             owner = tracking.parse_claim_ref(record.owner_ref)
             if owner is None or not owner.is_qualified:
                 raise ExecutionSpaceError("owned record has an unqualified owner reference")
+            if not has_receiving_allocation and retained_checkout.resolve_owner(owner, config) is None:
+                raise ExecutionSpaceError(
+                    "owned local record requires its original receiving allocation or proven local parent"
+                )
         return
     entries = registry_for_config(config)
     from .legacy_wsl_record_locality import resolve_legacy_wsl_owner_ref

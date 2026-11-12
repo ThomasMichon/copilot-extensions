@@ -249,7 +249,7 @@ def load_project_authority_config(
             load_entries=lambda: cfg.load_machines_yaml(str(anchor), config=config),
             preserve_native_hostname=True,
         ))
-    except (OSError, ValueError, cfg.yaml.YAMLError):
+    except (OSError, ValueError, TypeError, cfg.yaml.YAMLError):
         return config
 
 

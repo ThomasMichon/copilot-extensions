@@ -57,7 +57,7 @@ def _git_directory(anchor: Path) -> Path:
     return common
 
 
-def _require_linked_checkout(checkout: Path, anchor: Path) -> None:
+def _require_linked_checkout(checkout: Path, anchor: Path, branch: str) -> None:
     """Read Git's own reciprocal membership without starting Git on entry."""
     if not checkout.is_absolute() or checkout.resolve() != checkout.absolute():
         raise ValueError("local checkout must be an absolute nonredirected path")
@@ -77,8 +77,9 @@ def _require_linked_checkout(checkout: Path, anchor: Path) -> None:
     backpointer = (administrative / "gitdir").read_text(encoding="utf-8").strip()
     if not backpointer or (administrative / backpointer).resolve() != marker.resolve():
         raise ValueError("Git worktree registration points at another location")
-    if not (administrative / "HEAD").is_file():
-        raise ValueError("linked-worktree registration has no HEAD")
+    head = (administrative / "HEAD").read_text(encoding="utf-8").strip()
+    if not branch or head != f"ref: refs/heads/{branch}":
+        raise ValueError("linked-worktree branch conflicts with its receiving ledger")
 
 
 def is_local(record, config) -> bool:
@@ -125,7 +126,7 @@ def is_local(record, config) -> bool:
                 return False
             _git_directory(checkout)
         else:
-            _require_linked_checkout(checkout, Path(repo.anchor))
+            _require_linked_checkout(checkout, Path(repo.anchor), record.branch)
         return True
     except (AttributeError, OSError, ValueError, RuntimeError, cfg.yaml.YAMLError, git_ops.GitError):
         return False

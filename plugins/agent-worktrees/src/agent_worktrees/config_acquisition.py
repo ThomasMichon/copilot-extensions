@@ -289,7 +289,7 @@ def execution_config(config, configured_machine, machine_raw, global_raw):
                 config = replace(config, machine=cfg.detect_machine(value=config.machine))
     except Exception as exc:
         failed(current_observations(), source, source, "execution-machine-failed", type(exc).__name__)
-        if isinstance(exc, (OSError, ValueError, cfg.yaml.YAMLError)):
+        if isinstance(exc, (OSError, ValueError, TypeError, cfg.yaml.YAMLError)):
             # Topology selects new/remote execution; it does not own retained local records.
             return config
         raise

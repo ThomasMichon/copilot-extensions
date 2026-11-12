@@ -26,6 +26,7 @@ from .launch_progress import preview_mode, step
 from .resolve_picker_cli import ResolvePickerContext, run_legacy_picker
 from .resolve_machine_cli import remote_selector_args as _remote_selector_args
 from .resolve_target import target_is_local as _target_is_local
+from .resolve_target import retained_target
 
 
 def _core():
@@ -223,6 +224,18 @@ class _ResolveEarlyExit(RuntimeError):
     def __init__(self, exit_code: int):
         super().__init__(str(exit_code))
         self.exit_code = exit_code
+
+
+def _select_target(state: ResolveCommandState, config: cfg.Config) -> tuple[cfg.Config, bool]:
+    environment = getattr(state.args, "environment", None)
+    retained = retained_target(config, state.worktree_id, state.requested_machine, environment)
+    if retained is not None:
+        config, worktree_id = retained
+        cfg.set_active_project(config.repo_name)
+        state.config, state.worktree_id = config, worktree_id
+        state.args.worktree_id = worktree_id
+        return config, True
+    return config, _target_is_local(config, state.requested_machine, environment)
 
 
 def add_parsers(sub) -> None:
@@ -526,13 +539,10 @@ def _cmd_resolve(args: argparse.Namespace) -> int:
             output.err("Run 'agent-worktrees list' to see available worktrees.")
             return 1
 
-        if state.requested_machine:
+        if state.requested_machine or state.worktree_id:
             config = state.load_config()
             try:
-                target_is_local = _target_is_local(
-                    config, state.requested_machine, getattr(args, "environment", None),
-                    worktree_id=state.worktree_id,
-                )
+                config, target_is_local = _select_target(state, config)
                 requested_environment = (
                     cfg.detect_platform() if target_is_local else resolve_machine_selection(
                         registry_for_config(config), state.requested_machine,
@@ -638,36 +648,10 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
     except Exception as exc:
         return output._json_error(str(exc))
 
-    # Self-targeting (--machine <this machine's own name>) must behave like
-    # --machine was never passed -- exactly as the interactive/non-JSON path
-    # already does (its own `state.requested_machine != config.machine` guard
-    # a few lines up, before calling `_try_machine_handoff`). Without this
-    # check, `_emit_remote_plan_for_env` below looks the name up in
-    # machines.yaml with no local-machine awareness at all (unlike
-    # `_load_remote_machines`, which the interactive path's "Other Machines"
-    # menu is built from) and happily emits a real "ssh <this box>" handoff
-    # plan for a caller already running on it -- confirmed live: an
-    # `agent-worktrees copilot`/Worktree Manager flow invoked with this
-    # machine's own alias round-tripped through SSH back to itself instead of
-    # resolving locally.
-    #
-    # BUT a same-machine target can still legitimately name a DIFFERENT
-    # --environment (e.g. --machine some-host --environment WSL, invoked
-    # from the Windows side of the same physical box) -- exactly the case
-    # `_load_remote_machines` itself special-cases ("for the local machine,
-    # only environments that differ from the current platform are
-    # included"). That worktree lives in a separate OS/filesystem with its
-    # own tracking directory, never visible to this process's local
-    # `cfg.tracking_dir()`. Treating same-machine-name as proof of "no
-    # dispatch needed" regardless of --environment made every same-machine
-    # cross-platform resume (e.g. the Windows Worktree Picker launching a
-    # WSL worktree) fail closed with a bogus "Worktree not found" instead of
-    # SSHing into the requested environment -- confirmed live.
+    # Keep the admitted receiving project/ID through resume. A different
+    # execution environment still requires its own remote selection.
     try:
-        same_machine = _target_is_local(
-            config, state.requested_machine, getattr(state.args, "environment", None),
-            worktree_id=state.worktree_id,
-        )
+        config, same_machine = _select_target(state, config)
         requested_environment = (
             cfg.detect_platform() if same_machine else resolve_machine_selection(
                 registry_for_config(config), state.requested_machine,
