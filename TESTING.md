@@ -50,6 +50,9 @@ The caller must separately authorize existing-server observations (which can
 refresh activity), private fixture creation and exact cleanup. The case never
 starts or stops a mux server, limits checkout data to 1 MiB, preserves pure-plan
 refusal and uses real live admission rather than a stopped-owner test double.
+It records the actual Driver registration observations made during admission
+and requires nonempty native coverage for this existing-server qualification;
+an empty inventory is not evidence that the authenticated query path ran.
 Missing enrollment skips; a skip is not qualification. Retain external fixture
 roots and recovery evidence on failure instead of broadening cleanup.
 

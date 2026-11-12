@@ -92,11 +92,27 @@ if mode == "flow":
     def forbidden(*_args, **_kwargs):
         raise AssertionError("source consumer attempted an unqualified native owner probe")
 
+    native_observations = []
     with ExitStack() as fixtures:
         fixtures.enter_context(patch.object(permissions, "_copilot_dir", lambda: home / ".copilot"))
         fixtures.enter_context(patch.object(sessions, "_session_state_dir", lambda: home / ".copilot" / "session-state"))
         if not live_admission:
             fixtures.enter_context(patch.object(sessions, "verify_worktree_active", forbidden))
+        else:
+            from agent_remote_driver import mux_inventory
+
+            observe = mux_inventory.observe_registrations
+
+            def observed(**kwargs):
+                result = observe(**kwargs)
+                native_observations.append({
+                    "registration_count": len(result),
+                    "registrations": sorted(result),
+                    "owner": "agent_remote_driver.mux_inventory.observe_registrations",
+                })
+                return result
+
+            fixtures.enter_context(patch.object(mux_inventory, "observe_registrations", observed))
         anchor = home / "anchor"
         for directory in (anchor, old_root, new_root):
             directory.mkdir()
@@ -222,6 +238,8 @@ if mode == "flow":
         assert creation.read_bytes() == original_db
         assert fixture.origin.yaml_path.read_bytes() == original_creator
         assert retained_checkout.matches(current, current_config)
+        if live_admission:
+            assert native_observations and all(item["registration_count"] > 0 for item in native_observations)
         payload = {
             "ledger": str(ledger), "origin_ledger": str(fixture.origin.yaml_path),
             "destination": str(fixture.destination), "old_root": str(old_root), "new_root": str(new_root),
@@ -230,7 +248,8 @@ if mode == "flow":
             "creation_sha256": hashlib.sha256(original_db).hexdigest(),
             "creator_sha256": hashlib.sha256(original_creator).hexdigest(),
             "provenance": provenance, "real_passive_plan_refused_unknown": True,
-            "actual_live_admission": live_admission,
+            "actual_live_admission": bool(native_observations),
+            "native_observations": native_observations,
         }
         (home / "continuation.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
         print(json.dumps({"phase": "flow", "passed": True, **payload}), flush=True)
