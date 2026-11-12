@@ -54,6 +54,7 @@ from promotion_source_archive import (
     changefile_existed_at as _changefile_existed_at,
     git_environment,
     git_text,
+    git_timeout_options,
     is_ancestor,
     main_version_inputs as _main_version_inputs,
 )
@@ -118,7 +119,10 @@ def add_scratch_worktree(dev_ref: str, *, repo: Path = REPO) -> Path:
     common_dir = (repo / _git(["rev-parse", "--git-common-dir"], cwd=repo)).resolve()
     scratch = common_dir.parent / ".promote-scratch" / f"promote-{int(time.time() * 1000)}"
     scratch.parent.mkdir(parents=True, exist_ok=True)
-    _git(["worktree", "add", "--detach", str(scratch), dev_ref], cwd=repo)
+    try:
+        _git(["worktree", "add", "--detach", str(scratch), dev_ref], cwd=repo)
+    except subprocess.TimeoutExpired as error:
+        raise PromotionError(f"scratch creation timed out; retain and inspect {scratch}") from error
     return scratch
 
 
@@ -227,6 +231,7 @@ def _sync_instruction_projections(
         [sys.executable, str(script), "sync", str(scratch), "--json"],
         capture_output=True, text=True, env=git_environment(),
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        **git_timeout_options(),
     )
     try:
         payload = json.loads(proc.stdout) if proc.stdout.strip() else None
@@ -339,7 +344,9 @@ def consume_pending_changes(
             # generated tree (main must never carry any .changefiles/*).
             acc._consume_changefiles()
 
+        git_timeout_options()
         materialize_log = mm.materialize(scratch, canonical_root=scratch)
+        git_timeout_options()
         unresolved = [line for line in materialize_log if line.startswith("SKIP")]
         if unresolved:
             raise PromotionError(

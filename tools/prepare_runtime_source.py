@@ -152,7 +152,18 @@ def _copy(source, destination, *, deadline: float | None = None) -> None:
 def _extract_archive(
     archive: Path, destination: Path, *, deadline: float | None = None,
     file_pointer_candidates: list[Path] | None = None,
+    include_paths: tuple[str, ...] | None = None,
 ) -> None:
+    if include_paths is not None and (
+        not isinstance(include_paths, tuple) or not include_paths
+        or any(
+            not isinstance(path, str) or not path or "\\" in path or ":" in path
+            or PurePosixPath(path).is_absolute() or ".." in PurePosixPath(path).parts
+            for path in include_paths
+        )
+    ):
+        raise SourcePreparationError("Source archive selection requires portable relative paths")
+    selected = tuple(PurePosixPath(path) for path in include_paths) if include_paths else None
     with tarfile.open(archive, "r:") as source:
         for member in source:
             _remaining(deadline)
@@ -162,6 +173,13 @@ def _extract_archive(
                 or "\\" in member.name or ":" in member.name
             ):
                 raise SourcePreparationError("Source archive contains an unsafe path")
+            if not (member.isdir() or member.isfile()):
+                raise SourcePreparationError("Source archive links and special files are unsupported")
+            if selected is not None and not any(
+                name == path or path in name.parents or member.isdir() and name in path.parents
+                for path in selected
+            ):
+                continue
             target = destination.joinpath(*name.parts)
             if member.isdir():
                 target.mkdir(parents=True, exist_ok=True)

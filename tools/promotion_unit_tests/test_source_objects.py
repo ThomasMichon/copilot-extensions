@@ -13,6 +13,56 @@ import promotion_source_archive as source_io
 from promotion_unit_tests.test_complete_source import case
 
 
+def test_composition_budget_bounds_git_and_restores_the_original_transport(tmp_path, monkeypatch):
+    clock = [100.0]
+    monkeypatch.setattr(source_io.time, "monotonic", lambda: clock[0])
+    calls = []
+
+    def run(argv, **options):
+        calls.append(options)
+        return SimpleNamespace(returncode=0, stdout=b"ok\n", stderr=b"")
+
+    monkeypatch.setattr(source_io.subprocess, "run", run)
+    with source_io.composition_budget(110):
+        source_io.git_text(tmp_path, ["status"])
+        clock[0] = 106
+        source_io._git(tmp_path, ["status"])
+        with source_io.composition_budget(200):
+            source_io.is_ancestor(tmp_path, "a", "b")
+        source_io.changefile_existed_at("a", "example.json", repo=tmp_path)
+        assert [row["timeout"] for row in calls] == [10, 4, 4, 4]
+        clock[0] = 111
+        with pytest.raises(ValueError, match="deadline"):
+            source_io.git_text(tmp_path, ["status"])
+        assert len(calls) == 4
+    assert source_io.git_timeout_options() == {}
+
+
+def test_local_composition_reserves_cleanup_inside_the_original_deadline(tmp_path, monkeypatch):
+    import local_runtime_promotion as local
+
+    clock = [100.0]
+    monkeypatch.setattr(source_io.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(local.promotion, "_rev_parse", lambda ref, **kw: ref.split("^")[0])
+    monkeypatch.setattr(local.promotion, "add_scratch_worktree", lambda *a, **kw: tmp_path / "scratch")
+    cleanup = []
+
+    def consume(*args, **options):
+        assert source_io.git_timeout_options() == {"timeout": 8}
+        clock[0] = 108.5
+        return {}
+
+    monkeypatch.setattr(local.promotion, "consume_pending_changes", consume)
+    monkeypatch.setattr(
+        local.promotion, "remove_scratch_worktree",
+        lambda *a, **kw: cleanup.append(source_io.git_timeout_options()),
+    )
+    with pytest.raises(ValueError, match="deadline"):
+        local.compose(tmp_path, source_commit="a" * 40, main_seed="b" * 40, deadline=110)
+    assert cleanup == [{"timeout": 1.5}]
+    assert source_io.git_timeout_options() == {}
+
+
 @pytest.fixture
 def objects(monkeypatch):
     files, identity = case()

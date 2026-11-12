@@ -49,6 +49,34 @@ The sequence is a target, not executable CLI syntax. In particular, a
 portfolio-wide atomic selector and complete stage-time readiness are not
 established by today's generated per-app installers.
 
+### Prepare a selected application portfolio without installing it
+
+The local source adapter exposes `--prepare-applications` with an explicit
+`--source-checkout`, exact `--source-commit`, `--main-head`, `--branch dev|main`,
+absolute `--uv` executable, new external `--output` directory and one or more
+`--project` selections. Standalone keys use `standalone:<component>`; runtime
+plugins use their declared project name. Optional `--application-extras` is a
+JSON object mapping selected component names to extra lists. Select one
+`--deadline` (absolute monotonic time) or `--timeout` (seconds).
+
+Run `tools/local_install_source.py` from a dependency-prepared source environment.
+It admits the clean merged source, uses the canonical version-preserving
+composition and artifact owners, and keeps one toolchain alive for the profile
+worker. Only after every selected snapshot passes complete readback does it
+return a JSON component-to-snapshot map and write `applications.json`.
+Progress goes to stderr. No runtime is installed, selected or started.
+Windows application preparation selects a standard CPython interpreter from
+the native version and wheel-platform tags. Unsupported interpreter variants
+refuse before application output; no cross-target marker environment is added.
+
+Unchanged complete sibling outputs may be reused after source, composition,
+toolchain, wheel, profile target/extras/policy and application validation.
+Missing or incompatible retained outputs can lead to ordinary preparation;
+a failed selected worker is an error, not permission to replay construction.
+The separate `--reuse-install-source` mode revalidates explicitly selected
+first-party wheel inputs and never silently falls back to a build.
+Neither mode is a new release-approval token or installation-completion claim.
+
 ## Support every application must provide
 
 | Boundary | Required behavior | Existing implementation home |

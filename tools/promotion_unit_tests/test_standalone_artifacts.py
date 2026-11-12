@@ -4,6 +4,9 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
+import hashlib
+from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -12,6 +15,290 @@ import pytest
 import promotion_python_artifacts as artifacts
 from artifact_source_build import validate_static_build
 from standalone_python_artifacts import artifact_label, injected_resources, project_key
+
+
+@pytest.mark.parametrize("variant", [None, "cp313d", "cp313t"])
+def test_native_interpreter_request_preserves_marker_environment_and_refuses_variants(variant):
+    from runtime_application_project import target_python_request
+
+    environment = {
+        "implementation_name": "cpython", "sys_platform": "win32",
+        "platform_machine": "ARM64", "python_full_version": "3.13.0",
+    }
+    original = dict(environment)
+    tags = ["cp313-cp313-win_arm64", "py3-none-any"]
+    if variant:
+        tags.insert(0, f"cp313-{variant}-win_arm64")
+        with pytest.raises(ValueError, match="standard CPython target"):
+            target_python_request(environment, tags)
+    else:
+        assert target_python_request(environment, tags) == "cpython-3.13.0-windows-aarch64-none"
+    assert environment == original
+
+
+@pytest.mark.parametrize("phase", ["complete", "profile-failed", "expired", "earlier-changed"])
+def test_complete_application_portfolio_builds_once_and_publishes_only_after_readback(
+    tmp_path, monkeypatch, phase,
+):
+    import local_install_profile as profiles
+    import local_install_source as local
+
+    deadline = time.monotonic() + 30
+    clock = time.monotonic
+    expired = [False]
+    monkeypatch.setattr(local.time, "monotonic", lambda: deadline + 1 if expired[0] else clock())
+    calls = []
+    records = []
+    identities = {
+        name: {"plugin": name, "source_commit": "a" * 40, "source_tree": "b" * 40}
+        for name in ("worktree-manager", "agent-worktrees")
+    }
+
+    def admit(*args, **options):
+        assert options == {"deadline": deadline}
+        calls.append("admit")
+        return "d" * 40, "b" * 40
+
+    def compose(repository, commit, main, output, **options):
+        assert options["projects"] == ("standalone:worktree-manager", "agent-worktrees")
+        assert options["deadline"] == deadline
+        calls.append("compose")
+        output.mkdir(parents=True)
+        record = {
+            "source_commit": commit, "source_tree": "b" * 40,
+            "composition": {"main_seed": main, "tree": "e" * 40},
+            "projects": {name: {"source": identity} for name, identity in identities.items()},
+        }
+        records.append(record)
+        return record
+
+    @contextmanager
+    def build(output, record, **options):
+        assert options["retain_toolchain"] is True and options["deadline"] == deadline
+        calls.append("build")
+        yield record, "one toolchain"
+
+    def worker(snapshot, record, output, components, extras, toolchain, **options):
+        assert toolchain == "one toolchain"
+        return profiles.prepare_applications(
+            snapshot, output / "profiles", list(components), extras=extras, **options,
+            source_record_sha256=hashlib.sha256(
+                json.dumps(record, sort_keys=True).encode("utf-8"),
+            ).hexdigest(),
+        )
+
+    def profile(snapshot, output, **options):
+        name = options["component"]
+        assert options["deadline"] == deadline and options["prepare_profile"] is True
+        calls.append("profile:" + name)
+        if name == "agent-worktrees" and phase == "profile-failed":
+            raise RuntimeError("profile actor failed")
+        (output / "snapshot").mkdir(parents=True)
+        (output / "snapshot/fixture.txt").write_text(name, encoding="utf-8")
+        expired[0] = phase == "expired"
+        return {
+            "phase": "profile-prepared", "install_ready": True,
+            "snapshot": str(output / "snapshot"), "source": identities[name],
+        }
+
+    @contextmanager
+    def inputs(snapshot, name, **options):
+        calls.append("readback:" + name)
+        selected = SimpleNamespace(
+            identity=SimpleNamespace(
+                document=lambda: identities[name], source_commit="a" * 40, source_tree="b" * 40,
+            ),
+            composition=None if phase == "earlier-changed" and name == "worktree-manager"
+            else {"main_seed": "c" * 40, "tree": "e" * 40},
+            source_descriptor=None, project={"application": "application"}, project_key=name,
+        )
+        yield selected, SimpleNamespace(verify=lambda: calls.append("verify:" + name))
+
+    monkeypatch.setattr(local.preparation, "_admit", admit)
+    monkeypatch.setattr(local, "compose", compose)
+    monkeypatch.setattr(local, "_built_projects", build)
+    monkeypatch.setattr(local, "_prepare_profiles", worker)
+    monkeypatch.setattr(local, "_reused_applications", lambda *args, **options: None)
+    monkeypatch.setattr(profiles, "prepare_registry_lock", profile)
+    monkeypatch.setattr(profiles.source_inputs, "project_inputs", inputs)
+    lock = tmp_path / "uv.lock"
+    lock.write_text("version = 1\n")
+    monkeypatch.setattr(profiles.source_inputs, "_member", lambda *args: lock)
+    monkeypatch.setattr(
+        profiles.source_inputs, "_read",
+        lambda path: records[0] if path.name == profiles.source_inputs.MANIFEST
+        else {"construction": {"retained": True}},
+    )
+    monkeypatch.setattr(profiles.source_inputs, "application_inputs", lambda *args: {"retained": True})
+    output = tmp_path.parent / (tmp_path.name + "-output")
+    options = dict(components=tuple(identities), branch="dev", uv="selected-uv", deadline=deadline)
+    if phase == "complete":
+        result = local.prepare_applications(tmp_path, "a" * 40, "c" * 40, output, **options)
+        completion = json.loads((output / "applications.json").read_text())
+        assert completion["snapshots"] == result
+        assert set(completion["content"]) == set(result)
+        assert calls == [
+            "admit", "compose", "build", "profile:worktree-manager", "profile:agent-worktrees",
+            "readback:worktree-manager", "verify:worktree-manager",
+            "readback:agent-worktrees", "verify:agent-worktrees", "admit",
+        ]
+    else:
+        with pytest.raises((ValueError, RuntimeError), match={
+            "profile-failed": "profile actor failed", "expired": "deadline exceeded",
+            "earlier-changed": "differs from the selected source",
+        }[phase]):
+            local.prepare_applications(tmp_path, "a" * 40, "c" * 40, output, **options)
+        assert not (output / "applications.json").exists()
+
+
+@pytest.mark.parametrize("absolute_deadline", [False, True])
+def test_application_cli_forwards_one_selected_portfolio(tmp_path, monkeypatch, capsys, absolute_deadline):
+    import local_install_source as local
+
+    captured = []
+
+    def prepare(*args, **options):
+        captured.append((args, options))
+        print("fixture build progress")
+        return {"agent-worktrees": "prepared-snapshot"}
+
+    monkeypatch.setattr(local, "prepare_applications", prepare)
+    deadline = time.monotonic() + 60
+    arguments = [
+        "--source-checkout", str(tmp_path), "--source-commit", "a" * 40,
+        "--main-head", "c" * 40, "--output", str(tmp_path / "output"),
+        "--prepare-applications", "--branch", "dev", "--uv", "selected-uv",
+        *(["--deadline", str(deadline)] if absolute_deadline else ["--timeout", "60"]),
+        "--project", "standalone:worktree-manager", "--project", "agent-worktrees",
+        "--application-extras", '{"agent-worktrees":["fixture-extra"]}',
+    ]
+    before = time.monotonic()
+    assert local.main(arguments) == 0
+    args, options = captured[0]
+    assert args == (tmp_path, "a" * 40, "c" * 40, tmp_path / "output")
+    assert options["components"] == ("worktree-manager", "agent-worktrees")
+    assert options["extras"] == {"agent-worktrees": ("fixture-extra",)}
+    assert options["deadline"] == deadline if absolute_deadline else (
+        before + 60 <= options["deadline"] <= time.monotonic() + 60
+    )
+    output = capsys.readouterr()
+    assert json.loads(output.out) == {"agent-worktrees": "prepared-snapshot"}
+    assert output.err == "fixture build progress\n"
+    with pytest.raises(SystemExit) as refused:
+        local.main([*arguments, "--reuse-install-source", str(tmp_path / "old")])
+    assert refused.value.code == 2 and len(captured) == 1
+
+
+@pytest.mark.parametrize("phase", ["reused", "miss", "worker-failed"])
+def test_complete_output_reuse_does_not_replay_worker_failures(tmp_path, monkeypatch, phase):
+    import local_install_source as local
+    import build_toolchain_lock as locks
+
+    record = {
+        "schema": local.SCHEMA, "version": 1, "kind": "source",
+        "source_commit": "a" * 40, "source_tree": "b" * 40,
+        "projects": {"agent-worktrees": {"artifact": {"build_toolchain": {"fixture": True}}}},
+    }
+    previous = tmp_path / "previous"
+    (previous / "inputs/build-tools").mkdir(parents=True)
+    (previous / "inputs" / local.MANIFEST).write_text(json.dumps(record))
+    (previous / "applications.json").write_text(json.dumps({
+        "schema": "copilot-extensions.prepared-applications", "version": 1,
+        "snapshots": {"agent-worktrees": "old"},
+    }))
+    built = tmp_path / "incoming/inputs"
+    built.mkdir(parents=True)
+    calls = []
+
+    def retained(path, **options):
+        assert options["reuse_only"] is True
+        return SimpleNamespace(record={"fixture": True})
+
+    def profiles(*args, **options):
+        calls.append(options["reuse_source"])
+        if phase == "worker-failed":
+            raise RuntimeError("worker died")
+        return None if phase == "miss" else {"agent-worktrees": "retained"}
+
+    monkeypatch.setattr(locks, "resolve_toolchain_lock", retained)
+    monkeypatch.setattr(local, "_prepare_profiles", profiles)
+    args = (built, record, built.parent, ("agent-worktrees",), {})
+    options = dict(uv="unused", deadline=time.monotonic() + 30)
+    if phase == "worker-failed":
+        with pytest.raises(RuntimeError, match="worker died"):
+            local._reused_applications(*args, **options)
+    else:
+        assert local._reused_applications(*args, **options) == (
+            None if phase == "miss" else {"agent-worktrees": "retained"}
+        )
+    assert calls == [previous]
+
+
+def test_missing_retained_toolchain_cannot_start_construction(tmp_path, monkeypatch):
+    import build_toolchain_lock as locks
+
+    target = tmp_path / "absent/retained"
+    monkeypatch.setattr(locks, "_validated_trusted_index_url", lambda env: ("https://packages.example/simple", None))
+    monkeypatch.setattr(locks, "_resolve_interpreter_identity", lambda *a, **kw: "selected-python")
+    monkeypatch.setattr(locks, "_target_dir_for_identity", lambda *a, **kw: target)
+    monkeypatch.setattr(locks, "_seasoned_install", lambda *a, **kw: pytest.fail("reuse constructed a toolchain"))
+    with pytest.raises(locks.ArtifactBuildError, match="no complete retained toolchain"):
+        locks.resolve_toolchain_lock(target, reuse_only=True, deadline=time.monotonic() + 30)
+    assert not target.parent.exists()
+
+
+def test_lazy_toolchain_marker_read_keeps_original_deadline(monkeypatch, tmp_path):
+    import build_toolchain_lock as locks
+
+    deadline = time.monotonic() + 30
+    reads = []
+    monkeypatch.setattr(
+        locks, "_query_marker_environment",
+        lambda path, **options: (reads.append((path, options)) or {"fixture": True}),
+    )
+    selected = tmp_path / "python"
+    lock = locks.ToolchainLock(selected, {}, deadline=deadline)
+    assert lock.marker_environment == {"fixture": True}
+    assert reads == [(selected, {"deadline": deadline})]
+    monkeypatch.setattr(locks.time, "monotonic", lambda: deadline + 1)
+    with pytest.raises(locks.ArtifactBuildError):
+        _ = lock.marker_environment
+    assert len(reads) == 1
+
+
+@pytest.mark.parametrize("outcome", ["success", "miss", "failed", "wrong-snapshot"])
+def test_profile_worker_only_reports_a_miss_for_explicit_reuse(tmp_path, monkeypatch, outcome):
+    import local_install_source as local
+    import build_toolchain_lock as locks
+
+    deadline = time.monotonic() + 30
+    previous = tmp_path / "prior"
+    expected = {"agent-worktrees": str(previous / "profiles/agent-worktrees/snapshot")}
+    commands = []
+    monkeypatch.setattr(locks, "_query_marker_environment", lambda *a, **kw: {})
+
+    def run(argv, **options):
+        commands.append(argv)
+        assert 0 < options["timeout"] <= 30
+        return SimpleNamespace(
+            returncode={"success": 0, "miss": 3, "failed": 1, "wrong-snapshot": 0}[outcome],
+            stdout=json.dumps(expected if outcome != "wrong-snapshot" else {"agent-worktrees": "foreign"}),
+            stderr="worker error",
+        )
+
+    monkeypatch.setattr(local.subprocess, "run", run)
+    args = (tmp_path, {}, tmp_path / "incoming", ("agent-worktrees",), {},
+            SimpleNamespace(venv_python=Path("python"), record={}))
+    options = dict(uv="uv", deadline=deadline, reuse_source=previous)
+    if outcome in {"failed", "wrong-snapshot"}:
+        with pytest.raises(ValueError, match="failed|another selected snapshot"):
+            local._prepare_profiles(*args, **options)
+    else:
+        assert local._prepare_profiles(*args, **options) == (expected if outcome == "success" else None)
+    assert len(commands) == 1 and "--reuse-applications" in commands[0]
+    if outcome == "miss":
+        with pytest.raises(ValueError, match="preparation failed"):
+            local._prepare_profiles(*args, uv="uv", deadline=deadline)
 
 
 @pytest.mark.parametrize("changed", [False, True])

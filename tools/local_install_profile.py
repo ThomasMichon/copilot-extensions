@@ -5,7 +5,8 @@ These are construction inputs, not release approval or runtime activation.
 from __future__ import annotations
 
 import argparse
-from contextlib import nullcontext
+from contextlib import nullcontext, redirect_stdout
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -20,13 +21,16 @@ from packaging.version import Version
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "worktree-manager" / "scripts"
 sys.path.insert(0, str(SCRIPTS))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "libs" / "installer-engine"))
 import install_source as source_inputs
 from installer_wheel_inputs import WheelLimits, _check_deadline, inspect_archive
 from installer_wheel_snapshot import retain_wheel_inputs
 
 from build_toolchain_lock import _query_marker_environment
 from application_sources import application_sources
-from promotion_python_artifacts import project_key, validate_manifest, validate_wheel_sources
+from promotion_python_artifacts import (
+    PromotionArtifactError, project_key, validate_manifest, validate_wheel_sources,
+)
 from runtime_profile import SCHEMA, ProfileError, _reachable, _requirement, validate_profile
 from runtime_profile_wheels import profile_wheel_inputs
 from runtime_source_lock import _wheel_pins, dependencies
@@ -341,13 +345,10 @@ def _write_snapshot(
     return prepared
 
 
-def _profile_feed(
-    selected, transaction, projections, *, uv: str, download_origins: tuple[str, ...],
-    wheels, deadline: float, excluded_local_packages: tuple[str, ...] = (),
-):
+def _profile_policy(selected, environment: dict, download_origins: tuple[str, ...]):
     from governed_feed_trust import _opaque_index_identity, _validated_trusted_index_url
-    from installer_native_feed import capture_native_feed_inputs
-    trusted = _validated_trusted_index_url(transaction.environment)
+
+    trusted = _validated_trusted_index_url(environment)
     if trusted is None:
         raise ProfileError("native profile acquisition needs a configured non-public HTTPS feed")
     policy = {
@@ -357,6 +358,17 @@ def _profile_feed(
         }, sort_keys=True)),
         "selection": {"downloadOrigins": list(download_origins)},
     }
+    return trusted, policy
+
+
+def _profile_feed(
+    selected, transaction, projections, *, uv: str, download_origins: tuple[str, ...],
+    wheels, deadline: float, excluded_local_packages: tuple[str, ...] = (),
+):
+    from governed_feed_trust import _opaque_index_identity
+    from installer_native_feed import capture_native_feed_inputs
+
+    trusted, policy = _profile_policy(selected, transaction.environment, download_origins)
     feed = capture_native_feed_inputs(
         transaction, projections[1], projections[0], None, policy, uv, deadline,
         wheels=wheels, profile_policy="native-source-profile",
@@ -508,23 +520,251 @@ def prepare_registry_lock(
     return record
 
 
+def _application_selection(components: list[str], extras: dict):
+    import prepare_runtime_source as preparation
+
+    if (
+        not isinstance(components, list) or not components or len(components) > 64
+        or any(not isinstance(name, str) or not preparation._PLUGIN.fullmatch(name)
+               for name in components)
+        or len(set(components)) != len(components)
+        or not isinstance(extras, dict) or set(extras) - set(components)
+        or any(
+            not isinstance(values, list) or len(values) > 64
+            or any(not isinstance(value, str) or not preparation._PLUGIN.fullmatch(value)
+                   for value in values)
+            or len(set(values)) != len(values)
+            for values in extras.values()
+        )
+    ):
+        raise ProfileError("application profiles require bounded unique components and extras")
+
+
+def _verify_application(snapshot: Path, component: str, record: dict, selected, inputs):
+    if (
+        selected.identity.document() != record["projects"][selected.project_key]["source"]
+        or selected.identity.source_commit != record["source_commit"]
+        or selected.identity.source_tree != record["source_tree"]
+        or selected.composition != record.get("composition")
+        or selected.source_descriptor != record.get("source_descriptor")
+    ):
+        raise ProfileError("prepared application differs from the selected source")
+    application = source_inputs._member(snapshot, selected.project.get("application"))
+    declaration = source_inputs._read(application / "application.json")
+    if (
+        declaration.get("construction") != source_inputs.application_inputs(selected, inputs)
+        or not source_inputs._member(
+            snapshot, selected.project["application"] + "/uv.lock",
+        ).is_file()
+    ):
+        raise ProfileError("prepared application has no matching locked construction inputs")
+
+
+def prepare_applications(
+    snapshot: Path, output: Path, components: list[str], *,
+    extras: dict, uv: str, deadline: float, source_record_sha256: str,
+) -> dict[str, str]:
+    """Keep complete-profile inspection inside the existing dependency toolchain."""
+    import prepare_runtime_source as preparation
+    from standalone_python_artifacts import COMPONENTS
+
+    preparation._remaining(deadline)
+    _application_selection(components, extras)
+    record = source_inputs._read(snapshot / source_inputs.MANIFEST)
+
+    def verify_record():
+        current = source_inputs._read(snapshot / source_inputs.MANIFEST)
+        if hashlib.sha256(json.dumps(current, sort_keys=True).encode("utf-8")).hexdigest() != source_record_sha256:
+            raise ProfileError("application profile source record differs from the selected source")
+
+    verify_record()
+    projects = {
+        name: "worktree-manager" if name == "worktree-manager"
+        else "standalone:" + name if name in COMPONENTS else name
+        for name in components
+    }
+    snapshots = {}
+    for component in components:
+        preparation._remaining(deadline)
+        profile_output = output / component
+        prepared = prepare_registry_lock(
+            snapshot, profile_output, uv=uv, deadline=deadline, prepare_profile=True,
+            component=component, extras=tuple(extras.get(component, ())),
+        )
+        path = profile_output / "snapshot"
+        if (
+            prepared.get("phase") != "profile-prepared" or prepared.get("install_ready") is not True
+            or prepared.get("snapshot") != str(path)
+        ):
+            raise ProfileError("application profile did not complete its selected snapshot")
+        if prepared.get("source") != record["projects"][projects[component]]["source"]:
+            raise ProfileError("prepared application differs from the selected source")
+        snapshots[component] = str(path)
+    for component, path in snapshots.items():
+        prepared_snapshot = Path(path)
+        with source_inputs.project_inputs(prepared_snapshot, component, deadline=deadline) as (selected, inputs):
+            _verify_application(prepared_snapshot, component, record, selected, inputs)
+            inputs.verify()
+    verify_record()
+    preparation._remaining(deadline)
+    return snapshots
+
+
+def reuse_applications(
+    snapshot: Path, previous: Path, components: list[str], *, extras: dict,
+    deadline: float, source_record_sha256: str, toolchain_record: dict,
+) -> dict[str, str]:
+    from packaging.tags import sys_tags
+    from build_toolchain_lock import ArtifactBuildError
+    from local_install_source import _application_completion, _reuse_projects, _source_projects
+    from runtime_profile import ProfileUnavailable
+    from standalone_python_artifacts import COMPONENTS
+
+    _application_selection(components, extras)
+    record = source_inputs._read(snapshot / source_inputs.MANIFEST)
+
+    def verify_record():
+        current = source_inputs._read(snapshot / source_inputs.MANIFEST)
+        if hashlib.sha256(json.dumps(current, sort_keys=True).encode("utf-8")).hexdigest() != source_record_sha256:
+            raise ProfileError("application profile source record differs from the selected source")
+
+    verify_record()
+    projects = tuple("standalone:" + name if name in COMPONENTS else name for name in components)
+    roster, selected, payloads, identities = _source_projects(snapshot / "source", record, projects)
+    try:
+        completion = source_inputs._read(source_inputs._member(previous, "applications.json"))
+        expected = {name: str(previous / "profiles" / name / "snapshot") for name in components}
+        if completion.get("snapshots") != expected:
+            raise ProfileError("prior completion does not name this selected portfolio")
+        if _application_completion(expected, deadline=deadline) != completion:
+            raise ProfileError("prior complete application outputs changed")
+        manifests = _reuse_projects(
+            source_inputs._member(previous, "inputs"), snapshot, record, selected, identities, roster,
+            source_policy="governed", min_age_days=None, copy_wheels=False, deadline=deadline,
+        )
+        if any(manifest["build_toolchain"] != toolchain_record for manifest in manifests.values()):
+            raise ProfileError("prior wheels differ from the retained toolchain")
+        target = {
+            "environment": _query_marker_environment(Path(sys.executable), deadline=deadline),
+            "tags": [str(tag) for tag in sys_tags()], "device": "cpu",
+        }
+        old_record = source_inputs._read(previous / "inputs" / source_inputs.MANIFEST)
+        for component, path in expected.items():
+            prepared = Path(path)
+            with source_inputs.project_inputs(prepared, component, deadline=deadline) as (observed, inputs):
+                if observed.identity != identities[
+                    "standalone:" + component if component in COMPONENTS else component
+                ] or observed.project["artifact"] != old_record["projects"][observed.project_key]["artifact"]:
+                    raise ProfileError("prior application differs from its selected source/wheels")
+                profile = validate_profile(inputs.receipt()["binding"], deadline=deadline)
+                profile_record = profile.record()
+                selected_extras = source_inputs.engine._selected_extras(
+                    observed.payload, tuple(extras.get(component, ())),
+                )
+                name = source_inputs.engine._package_name(observed.payload)
+                root = name + ("[" + ",".join(selected_extras) + "]" if selected_extras else "")
+                root += "==" + inputs.receipt()["distributions"][name]["version"]
+                _trusted, policy = _profile_policy(observed, dict(os.environ), ())
+                if (
+                    profile_record["target"] != target or profile_record["roots"] != [root]
+                    or profile_record["approval_source"] != policy["policyId"]
+                ):
+                    raise ProfileError("prior application target, extras or source policy changed")
+                checked = profile_wheel_inputs(
+                    profile, inputs.snapshot, max_archive_bytes=512 << 20,
+                    max_unpacked_bytes=1 << 30, max_metadata_bytes=4 << 20,
+                    limits=wheel_limits(), deadline=deadline,
+                )
+                _verify_application(prepared, component, old_record, observed, inputs)
+                checked.verify()
+                inputs.verify()
+        if (
+            _application_completion(expected, deadline=deadline) != completion
+            or source_inputs._read(previous / "applications.json") != completion
+        ):
+            raise ProfileError("prior completion changed during application reuse")
+    except (OSError, ValueError, KeyError, TypeError, PromotionArtifactError, ArtifactBuildError) as error:
+        raise ProfileUnavailable(f"prior complete application outputs are not reusable: {error}") from error
+    finally:
+        verify_record()
+        if any(source_inputs.sources.assembly_hash(payloads[key]) != identity.assembly_hash
+               for key, identity in identities.items()):
+            raise ProfileError("selected source changed during application reuse")
+        _check_deadline(deadline)
+    return expected
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
     parser.add_argument("--install-source", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--uv", required=True)
-    parser.add_argument("--timeout", type=float, default=300)
+    budget = parser.add_mutually_exclusive_group()
+    budget.add_argument("--timeout", type=float, default=300)
+    budget.add_argument("--deadline", type=float)
     parser.add_argument("--prepare-profile", action="store_true")
     parser.add_argument(
         "--download-origin", action="append", default=[],
         help="Optional exact HTTPS artifact-origin restriction; default follows configured-feed delivery",
     )
-    parser.add_argument("--component", default="worktree-manager")
+    selection = parser.add_mutually_exclusive_group()
+    selection.add_argument("--component", default="worktree-manager")
+    selection.add_argument("--application-components", type=json.loads)
+    parser.add_argument("--application-extras", type=json.loads)
+    parser.add_argument("--target-environment", type=json.loads)
+    parser.add_argument("--source-record-sha256")
+    parser.add_argument("--reuse-applications", type=Path)
+    parser.add_argument("--toolchain-record", type=json.loads)
     parser.add_argument("--extra", action="append", default=[])
     args = parser.parse_args(argv)
+    deadline = args.deadline if args.deadline is not None else time.monotonic() + args.timeout
+    _check_deadline(deadline)
+    if args.application_components is not None:
+        if (
+            args.prepare_profile or args.extra or args.download_origin
+            or args.target_environment is None or args.source_record_sha256 is None
+        ):
+            parser.error("application batch requires an explicit target and no single-profile options")
+        if _query_marker_environment(Path(sys.executable), deadline=deadline) != args.target_environment:
+            if args.reuse_applications is not None:
+                print("prior toolchain differs from the selected native target", file=sys.stderr)
+                return 3
+            raise ProfileError("profile tooling interpreter differs from the selected native target")
+        with redirect_stdout(sys.stderr):
+            if args.reuse_applications is not None:
+                from runtime_profile import ProfileUnavailable
+
+                if not isinstance(args.toolchain_record, dict):
+                    parser.error("application reuse requires its retained toolchain record")
+                try:
+                    snapshots = reuse_applications(
+                        args.install_source, args.reuse_applications, args.application_components,
+                        extras={} if args.application_extras is None else args.application_extras,
+                        deadline=deadline, source_record_sha256=args.source_record_sha256,
+                        toolchain_record=args.toolchain_record,
+                    )
+                except ProfileUnavailable as error:
+                    print(str(error), file=sys.stderr)
+                    return 3
+            else:
+                if args.toolchain_record is not None:
+                    parser.error("a retained toolchain record requires application reuse")
+                snapshots = prepare_applications(
+                    args.install_source, args.output.absolute(), args.application_components,
+                    extras={} if args.application_extras is None else args.application_extras,
+                    uv=args.uv, deadline=deadline, source_record_sha256=args.source_record_sha256,
+                )
+        print(json.dumps(snapshots, sort_keys=True))
+        return 0
+    if (
+        args.application_extras is not None or args.target_environment is not None
+        or args.source_record_sha256 is not None or args.reuse_applications is not None
+        or args.toolchain_record is not None
+    ):
+        parser.error("application extras and target require --application-components")
     record = prepare_registry_lock(
         args.install_source, args.output.absolute(), uv=args.uv,
-        deadline=time.monotonic() + args.timeout,
+        deadline=deadline,
         prepare_profile=args.prepare_profile, download_origins=tuple(args.download_origin),
         component=args.component,
         extras=tuple(args.extra),
