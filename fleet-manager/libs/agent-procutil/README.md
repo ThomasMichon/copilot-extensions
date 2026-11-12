@@ -1005,6 +1005,20 @@ An overlapping terminal-backed start in the same process refuses before taking
 another mode snapshot; ownership remains held through restoration and close.
 Readiness and output drainage accept valid descriptors above the `select()` range.
 
+`native_scope` is an opaque in-process token issued only after the original
+guardian and validated native pidfd are retained, before `before_exec` admission.
+Keep that token alongside the exact provider object. `scope_settled(token)`
+returns `True` only after successful owned cleanup, including the guardian's
+settlement receipt, independent confirmation and terminal/resource disposal.
+Missing or foreign tokens and incomplete/failed cleanup return `None` (unknown).
+Reading either callable performs no OS query, wait, termination or confirmation;
+`retirement_started` alone cannot qualify this result. A successful bounded
+cleanup retry may publish settlement only with the original retained receipt.
+The token remains stable after disposal, but is not a numeric handle, a
+serializable recovery descriptor or a post-loss reacquisition mechanism.
+Environment, boot, conversation, current source and authority mapping remain
+the original caller's separate responsibility; this API supplies none of them.
+
 `wait()` returns the native exit status only after whole-session settlement and
 terminal restoration. `terminate()` closes the original lifetime channel and
 awaits that same cleanup. Cancelled waiters do not cancel the retained cleanup;

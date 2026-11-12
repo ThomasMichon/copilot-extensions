@@ -1682,3 +1682,32 @@ The [owner comparison](architecture.md#owner-decision) explains this choice.
   durations to invent. Extend only the bounded content-free transition decoder,
   preserve homogeneous groups and unknown timing/population, then prove the
   genuine producer-to-report path. Broader effort gates remain open.
+
+### 2026-11-12 - Native Bridge transition report decoder merged
+- #12282 merged as `b75ba9b49c6af5a2b83ff63b211fa780a831dfbd` after
+  exact-head Copilot approval with no open findings and green required CI.
+  Pulled forward onto the confirmed squash merge without finalizing this
+  still-active effort.
+- The actual Bridge reducer, retained writer, persisted readback and normal
+  report/chart consumer passed the focused native regression. The admitted
+  actor-free control preserves separate conversation/tool count groups,
+  cancellation semantics, contradictory-input refusal and output privacy.
+  These observations do not establish unique work, latency or availability.
+- Promoted Main `c20ae8c7eeb67ebded4d38af7e1f4ee7ce29b90b` contains the exact
+  reviewed implementation, both regressions, documentation and admitted control.
+  The separately authorized target-only update installed the exact reviewed
+  module. The normal installed CLI reproduced the frozen reference counts and
+  rendered a real mixed local-health/native-transition report with explicit
+  coverage and unknown population, without changing collector policy or task.
+- Readback separately exposed one terminated native execution before the
+  report-manager update, with no new slot or admission uncertainty. The exact
+  retained GUI help-only launch succeeds now, but disabled scheduler history
+  leaves the termination cause unknown. Preserve the missing hour and verify
+  the next actual scheduled execution rather than replaying it or changing the
+  qualified deadline. Broader carrier, preference, platform and
+  receiver-selection gates stay open.
+- The next actual native execution returned zero with settled instances and
+  no recovery uncertainty. Normal readback separates its fresh current-hour
+  listener from preceding-hour service coverage, retaining the missed listener
+  observation as unknown. This verifies recovery of execution, not the cause
+  of the earlier termination or uninterrupted availability.

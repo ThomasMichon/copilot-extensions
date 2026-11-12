@@ -91,6 +91,27 @@ class AsyncForegroundProcess:
         self._terminal_error: BaseException | None = None
         self._requested = self._admitted = self._scope_settled = self._receipt = False
         self._starting = True
+        self._native_scope: object | None = None
+        self._cleanup_completed = False
+
+    @property
+    def native_scope(self) -> object | None:
+        """Opaque same-owner identity, issued only after original native pinning.
+
+        The retained guardian and validated pidfd remain owned here. This token
+        has no serialized, post-loss, environment or boot identity mapping.
+        """
+        return self._native_scope
+
+    def scope_settled(self, native_scope: object) -> bool | None:
+        """Read completed cleanup for the original token without observing the OS.
+
+        None means unknown, including missing/foreign identity and incomplete or
+        failed cleanup. This never requests retirement or confirms a session.
+        """
+        if native_scope is not None and native_scope is self._native_scope:
+            return True if self._cleanup_completed else None
+        return None
 
     @classmethod
     async def start(
@@ -165,6 +186,7 @@ class AsyncForegroundProcess:
         self._descriptors.append(self._native_fd)
         if _pidfd_pid(self._native_fd) != self.pid:
             raise RuntimeError("Foreground native identity changed before admission")
+        self._native_scope = object()
         if before_exec is not None:
             before_exec()
         self._terminal.raw()
@@ -308,6 +330,7 @@ class AsyncForegroundProcess:
             raise self._terminal_error
         if self._admitted and self.returncode is None:
             raise RuntimeError("Foreground native exit status is unconfirmed")
+        self._cleanup_completed = self._receipt and self._scope_settled
         return self.returncode
 
     async def _stop_relay(self):
@@ -331,6 +354,7 @@ class AsyncForegroundProcess:
         if self._terminal is not None:
             _drain(self._master, self._terminal, self._output, deadline=deadline)
         self._dispose()
+        self._cleanup_completed = self._receipt and self._scope_settled
 
     async def wait(self) -> int:
         return await asyncio.shield(self._ensure_completion())

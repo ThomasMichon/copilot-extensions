@@ -200,3 +200,109 @@ def test_retirement_consumes_an_already_queued_stopped_frame(monkeypatch):
         owner._dispose.assert_called_once_with()
 
     asyncio.run(exercise())
+
+
+async def _inline(function, *args, **kwargs):
+    return function(*args, **kwargs)
+
+
+def _original_foreground(monkeypatch, *, pinned_pid=456):
+    owner = api.AsyncForegroundProcess()
+    frames = iter((b"ready", b"native 456", b"running", b"exit 0", b"settled 123"))
+
+    async def frame():
+        return next(frames)
+
+    owner._frame = frame
+    monkeypatch.setattr(api, "_stdio", lambda: ["inherit"] * 3)
+    monkeypatch.setattr(api, "_Terminal", lambda _stdio: SimpleNamespace(
+        fd=None, raw=Mock(), restore=Mock(), close=Mock(),
+    ))
+    monkeypatch.setattr(api, "_lifetime_writers", set())
+    monkeypatch.setattr(api, "_private_pair", lambda pair: pair)
+    monkeypatch.setattr(api, "os", SimpleNamespace(
+        pipe=Mock(side_effect=[(10, 11), (12, 13), (14, 15)]),
+        close=Mock(), getpid=lambda: 99, set_blocking=Mock(), write=Mock(),
+    ))
+    monkeypatch.setattr(api.subprocess, "Popen", Mock(return_value=SimpleNamespace(pid=123)))
+    monkeypatch.setattr(api, "open_pidfd", lambda _pid: 16)
+    monkeypatch.setattr(api, "_pidfd_pid", lambda _fd: pinned_pid)
+    monkeypatch.setattr(api, "confirm_session", Mock())
+    monkeypatch.setattr(api, "_drain", Mock())
+    monkeypatch.setattr(api.asyncio, "to_thread", _inline)
+    return owner
+
+
+@pytest.mark.parametrize("pinned_pid", [456, 457])
+def test_native_scope_is_issued_from_original_pin_before_admission(monkeypatch, pinned_pid):
+    async def exercise():
+        owner = _original_foreground(monkeypatch, pinned_pid=pinned_pid)
+        assert owner.native_scope is None and owner.scope_settled(None) is None
+
+        def admitted():
+            assert owner._guardian.pid == 123 and owner._native_fd == 16
+            assert owner.native_scope is not None
+            assert owner.scope_settled(owner.native_scope) is None
+
+        admission = Mock(side_effect=admitted)
+        if pinned_pid != 456:
+            with pytest.raises(RuntimeError, match="identity changed"):
+                await owner._start(["fixture"], None, None, admission)
+            assert owner.native_scope is None
+            admission.assert_not_called()
+            return
+        await owner._start(["fixture"], None, None, admission)
+        admission.assert_called_once_with()
+        identity = owner.native_scope
+        other = api.AsyncForegroundProcess()
+        other.pid = owner.pid
+        assert other.scope_settled(identity) is None
+
+        class NotTheIdentity:
+            def __eq__(self, _other):
+                raise AssertionError("Native identity must not use value equality")
+
+        assert owner.scope_settled(NotTheIdentity()) is None
+        await owner.wait()
+        assert owner.native_scope is identity and owner.scope_settled(identity) is True
+        assert other.scope_settled(identity) is None
+        owner._frame = Mock(side_effect=AssertionError("inspection must be passive"))
+        owner._request_retirement = owner._frame
+        api.confirm_session.reset_mock(side_effect=True)
+        api.confirm_session.side_effect = AssertionError("inspection must be passive")
+        for _ in range(2):
+            assert owner.native_scope is identity and owner.scope_settled(identity) is True
+        api.confirm_session.assert_not_called()
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("failure", ["confirmation", "drain", "exit-status", "receipt"])
+def test_passive_scope_settlement_keeps_failed_or_incomplete_cleanup_unknown(monkeypatch, failure):
+    async def exercise():
+        owner = _original_foreground(monkeypatch)
+        await owner._start(["fixture"], None, None, None)
+        identity = owner.native_scope
+        if failure in {"confirmation", "drain"}:
+            target = api.confirm_session if failure == "confirmation" else api._drain
+            target.side_effect = OSError("fixture cleanup failed")
+        else:
+            frames = iter(
+                (b"settled 123",) if failure == "exit-status" else (b"exit 0", b"unexpected")
+            )
+
+            async def frame():
+                return next(frames)
+
+            owner._frame = frame
+        with pytest.raises((OwnedCleanupError, RuntimeError)):
+            await owner.wait()
+        owner.retirement_started = True
+        assert owner.native_scope is identity
+        assert owner.scope_settled(identity) is None
+        api.confirm_session.side_effect = None
+        api._drain.side_effect = None
+        owner._retry_cleanup(deadline=api.time.monotonic() + 1)
+        assert owner.scope_settled(identity) is (None if failure == "receipt" else True)
+
+    asyncio.run(exercise())
