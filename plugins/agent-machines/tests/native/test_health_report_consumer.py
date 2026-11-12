@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import importlib.util
 import logging
 import os
 import subprocess
@@ -10,6 +11,7 @@ import sys
 import time
 from contextlib import nullcontext
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 
@@ -23,10 +25,26 @@ from agent_machines import cli_health
 from agent_machines.__main__ import main
 
 
+def native_bridge_records(events, *, stamp):
+    source = Path(__file__).resolve().parents[1] / "test_health_report.py"
+    spec = importlib.util.spec_from_file_location("native_health_report_controls", source)
+    assert spec and spec.loader
+    controls = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(controls)
+    return controls.native_bridge_records(events, stamp=stamp)
+
+
 def test_existing_configured_sink_to_normal_cli_report_and_chart(tmp_path, capsys):
     base = tmp_path / "capture"
     (base / "retained").mkdir(parents=True)
     slot = SinkSlot()
+    transitions = native_bridge_records([
+        ("user_message", {}),
+        ("agent_message", {}),
+        ("tool_call_start", {"tool_call_id": "not-output-tool"}),
+        ("tool_call_update", {"tool_call_id": "not-output-tool", "status": "error"}),
+        ("turn_complete", {}),
+    ], stamp=time.time_ns() // 1_000_000)
 
     def factory(directory):
         return RetainedSpool(
@@ -43,10 +61,12 @@ def test_existing_configured_sink_to_normal_cli_report_and_chart(tmp_path, capsy
             measurement = begin(slot, "example", "preparation")
             assert measurement is not None
             measurement.finish(outcome)
+        for transition in transitions:
+            slot.emit(transition)
         deadline = time.monotonic() + 5
         path = base / "retained" / "example-telemetry.jsonl"
         while time.monotonic() < deadline:
-            if path.exists() and len(path.read_text().splitlines()) == 2:
+            if path.exists() and len(path.read_text().splitlines()) == 2 + len(transitions):
                 break
             time.sleep(.01)
         else:
@@ -63,7 +83,13 @@ def test_existing_configured_sink_to_normal_cli_report_and_chart(tmp_path, capsy
     ], capture_output=True, text=True, timeout=20, **no_window_kwargs())
     assert child.returncode == 0, child.stderr
     report = json.loads(child.stdout)
-    assert report["coverage"]["accepted_records"] == 2
+    assert report["coverage"]["accepted_records"] == 2 + len(transitions)
+    groups = {
+        group["kind"]: group for hour in report["hours"] for group in hour["groups"]
+    }
+    assert groups["bridge-tool"]["outcomes"] == {"running": 1, "error": 1}
+    assert "p95_ns" not in groups["bridge-tool"]
+    assert "not-output" not in child.stdout
     assert report["health"] == {"state": "unavailable", "reason": "local-store-unavailable"}
     assert not (tmp_path / "absent-store").exists()
     assert chart.read_text().startswith("<svg")

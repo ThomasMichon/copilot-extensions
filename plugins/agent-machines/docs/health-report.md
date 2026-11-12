@@ -25,6 +25,13 @@ are not created. Nothing opens a browser or sends network traffic.
   lifecycle records contribute only closed-vocabulary counts. Their explicit
   `ts` is epoch milliseconds, not nanoseconds. Abandoned tasks are not silently
   called transport errors, and lifecycle records do not acquire a duration.
+- Bridge's normalized conversation and tool-call transitions have separate
+  `bridge-conversation` and `bridge-tool` count groups. Outcomes are observed
+  target-state labels, not unique turns/tools or verified work verdicts;
+  producer terminalization can label a tool completed without its result.
+  Cancellation is not a transport error. Unknown event/state combinations
+  remain unsupported, and identifiers, cursors, tool details and content are
+  discarded. These records never acquire latency or availability semantics.
 - Other schemas, malformed/partial records, missing timing, future timestamps
   and expired data have explicit coverage counters. Unknown raw fields,
   identifiers, routing metadata, messages and exception text are not copied.
