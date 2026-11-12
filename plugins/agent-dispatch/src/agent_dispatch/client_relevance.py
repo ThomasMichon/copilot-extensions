@@ -6,7 +6,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
-from .client_errors import DispatchUpgradeRequired
+from .client_errors import DispatchError, DispatchUpgradeRequired
 from .task_relevance_contract import (
     RELEVANCE_EFFECTIVE_SCOPE, RELEVANCE_PATH, RELEVANCE_PROTOCOL, RELEVANCE_SCOPE,
 )
@@ -64,10 +64,18 @@ class RelevanceClientMixin:
     def report_task_relevance(self, task_id: str, *, report: dict) -> dict:
         """Send an original retained request once; unknown outcomes require receipt recovery."""
         self._require_relevance(effective_scope=report.get("effective_revision") is not None)
-        return self._relevance_result(self._http.post(
+        response = self._http.post(
             f"{RELEVANCE_PATH}/tasks/{quote(task_id, safe='')}", json=report,
             headers=self._control_headers(),
-        ))
+        )
+        if response.status_code == 409:
+            try:
+                body = response.json()
+            except ValueError:
+                body = None
+            if isinstance(body, dict) and isinstance(body.get("relevance_rejection"), dict):
+                raise DispatchError(409, body["relevance_rejection"])
+        return self._relevance_result(response)
 
     def relevance_receipt(
         self, task_id: str, request_id: str, *, registration_id: str,

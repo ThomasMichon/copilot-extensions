@@ -2,11 +2,12 @@
 
 The queue has a **receiver-first** relevance operation:
 `reconcile_task_relevance`, with control-authorized HTTP admission for effective
-local command emitters and their registrar-selected evaluators. No automatic emitter, evaluator or
-periodic source calls it yet. Source adapters, periodic selection
+local command emitters and their registrar-selected evaluators. Command emitters
+can opt into [retained-receipt source checks](emitter-relevance.md); existing
+emitters are unchanged without that configuration. Domain source adapters, periodic selection
 and actual session/workspace closeout remain tracked by
 the [active effort](../../../efforts/active/task-relevance-reconciliation/README.md).
-This is not an automatic task scrubber.
+There is no default automatic task scrubber.
 
 ## Existing owners and integration seams
 
@@ -35,7 +36,9 @@ an arbitrary caller assertion. The registered receiver below resolves
 its effective source and evaluator scope in the queue transaction.
 
 `relevance_snapshot` supplies the task generation and latest audit-event
-revision. The caller checks its authoritative backing object and reports
+revision. Registered snapshots also identify the effective emitter spec with
+`emitter_spec_revision`, so a stale running emitter cannot adopt a changed
+definition's fresh observation scope. The caller checks its authoritative backing object and reports
 `needed`, `obsolete` or `unknown`, with a stable request identity, reason and
 observation reference. The reference identifies the source observation; Dispatch
 does not interpret an opaque string as closure evidence. An incomplete listing
@@ -109,7 +112,7 @@ The actual coordinator's `/health.task_relevance` advertises
 `local-direct-command-emitter` and `local-effective-emitter-evaluator`,
 and whether control authority is configured.
 This is additive health metadata; older clients keep their existing behavior.
-No CLI command or automatic source adapter is enabled by this capability.
+Receiver capability alone enables no source adapter or periodic evaluation.
 
 The control-authorized HTTP surface is:
 

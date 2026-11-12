@@ -1,7 +1,8 @@
 """Atomic source-relevance decisions; transport and owner closeout stay separate.
 
 The coordinator also admits effective local sources through registered scope.
-No automatic emitter or periodic caller is enabled. Callers judge the backing object; queue history
+Emitters opt in through the receipt owner; periodic callers remain separate.
+Callers judge the backing object; queue history
 decides resource-free abandonment or original-owner closeout on existing outboxes.
 """
 
@@ -143,6 +144,8 @@ class QueueRelevanceMixin:
                     "registration_revision": registration_revision(conn),
                     **({"effective_revision": resolved.effective_revision}
                        if resolved is not None and resolved.effective_revision is not None else {}),
+                    **({"emitter_spec_revision": resolved.emitter_spec_revision}
+                       if resolved is not None else {}),
                 } if registration is not None else {}),
             }
 

@@ -8,6 +8,7 @@ import os
 from typing import Iterator, Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from .coordinator_auth import _make_control_auth
@@ -88,8 +89,8 @@ def register_relevance_routes(
             raise HTTPException(409, detail=str(exc)) from exc
         return envelope(result)
 
-    @app.post(f"{RELEVANCE_PATH}/tasks/{{task_id}}", dependencies=dependencies)
-    def reconcile(task_id: str, body: RelevanceBody, request: Request) -> dict:
+    @app.post(f"{RELEVANCE_PATH}/tasks/{{task_id}}", dependencies=dependencies, response_model=None)
+    def reconcile(task_id: str, body: RelevanceBody, request: Request) -> dict | JSONResponse:
         gate = request.app.state.drain_gate
         try:
             with gate.track_claim():
@@ -110,6 +111,22 @@ def register_relevance_routes(
                         registration_admission=source.resolve,
                     )
         except (TaskError, OSError, ValueError, TimeoutError) as exc:
+            # The synchronous decision has finished. Only its atomic receipt
+            # can distinguish a rejected write from a post-commit callback error.
+            try:
+                accepted = queue.relevance_receipt(
+                    task_id, body.request_id, registration_id=body.registration_id,
+                )
+            except (TaskError, OSError, ValueError, TimeoutError):
+                accepted = True
+            if accepted is None:
+                return JSONResponse(status_code=409, content={
+                    "detail": str(exc),
+                    "relevance_rejection": {
+                        "code": "relevance_not_accepted", "task_id": task_id,
+                        "request_id": body.request_id, "message": str(exc),
+                    },
+                })
             raise HTTPException(409, detail=str(exc)) from exc
         return envelope(result)
 
