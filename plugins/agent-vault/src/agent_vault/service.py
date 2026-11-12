@@ -560,10 +560,13 @@ class VaultService:
         for key in [k for k in self.cache if k[0] == kpdb and k[1].lstrip("/") in targets]:
             del self.cache[key]
             self._credential_generations.pop(key, None)
+        # Fence rather than drop so a client that read the old value before
+        # this change cannot write it back with an older generation.
+        fence = time.time_ns()
         persistent = get_cache()
         for entry in targets:
-            persistent.invalidate(entry)
-            persistent.invalidate("/" + entry)
+            persistent.fence(entry, fence)
+            persistent.fence("/" + entry, fence)
 
     def _relocate_entry(
         self, kpdb: str, group: str | None, vault_name: str, reason: str,
@@ -571,9 +574,11 @@ class VaultService:
     ) -> dict:
         """Move or copy one entry to a destination group or full entry path.
 
-        Explicit paths may address any group in the database; only an existing
-        destination entry requires ``force`` (it is removed first, which
-        KeePassXC routes to the recycle bin when one is enabled).
+        Explicit paths may address any group in the database. Replacing an
+        existing destination entry requires ``overwrite``; the replacement is
+        staged first and the old entry goes to the recycle bin when enabled.
+        ``force`` is ignored here: older clients sent it to bypass the former
+        group-scope guard, and it must not silently become an overwrite.
         """
         verb = "copy" if copy else "move"
         entry = normalize_entry(request.get("entry", ""), group)
@@ -582,7 +587,7 @@ class VaultService:
             return {"ok": False, "error": "No entry path provided"}
         if not dest.strip():
             return {"ok": False, "error": "No destination group or entry path provided"}
-        force = bool(request.get("force", False))
+        overwrite = request.get("overwrite") is True
         if not self.ensure_unlocked(kpdb, vault_name, reason):
             error_msg = self._last_error(kpdb) or self._last_error("") or "Vault locked"
             return {"ok": False, "error": error_msg, "needs_unlock": True}
@@ -592,20 +597,19 @@ class VaultService:
                 return {"ok": False, "error": f"Source and destination are the same entry: {entry}"}
             if not self.cli.has_entry(kpdb, entry):
                 return {"ok": False, "error": f"Entry not found: {entry}"}
-            if self.cli.has_entry(kpdb, dest_path):
-                if not force:
-                    return {"ok": False, "error": (
-                        f"Destination entry '{dest_path}' already exists. "
-                        "Send force=true to overwrite it.")}
-                ok, msg = self.cli.remove_entry(kpdb, dest_path)
-                self._invalidate_entry_caches(kpdb, dest_path)
-                if not ok:
-                    return {"ok": False, "error": f"Could not replace '{dest_path}': {msg}"}
+            replace = self.cli.has_entry(kpdb, dest_path)
+            if replace and not overwrite:
+                return {"ok": False, "error": (
+                    f"Destination entry '{dest_path}' already exists. "
+                    "Send overwrite=true to replace it.")}
             if copy:
-                ok, msg = self.cli.copy_entry(kpdb, entry, dest_path)
+                ok, msg = self.cli.copy_entry(
+                    kpdb, entry, dest_path, replace=replace,
+                    skip_notes=request.get("skip_notes") is True,
+                )
                 self._invalidate_entry_caches(kpdb, dest_path)
             else:
-                ok, msg = self.cli.move_entry(kpdb, entry, dest_path)
+                ok, msg = self.cli.move_entry(kpdb, entry, dest_path, replace=replace)
                 self._invalidate_entry_caches(kpdb, entry, dest_path)
         if not ok:
             return {"ok": False, "error": msg, "dest": dest_path}
