@@ -132,6 +132,15 @@ synthetic stores and native fixture owners.
 
 ### 2026-11-12 - Final source-pinned retention evidence
 
+- The [seventh native lane](https://github.com/ThomasMichon/copilot-extensions/actions/runs/43258882909)
+  passed bounded Git staging, construction, all nine independent controls and
+  eight installed consumers, including actual live replacement. Two publication
+  fault cases still did not reach their injection: Windows selector replacement
+  uses the native `replace_selector` boundary rather than `os.replace`. The
+  fixture now injects before/after that real cross-platform boundary, retaining
+  exact fault, error, no-cutover and byte-preservation assertions. The existing
+  native selector-fault ownership/recovery control passed on Windows; lint
+  passed. The full corrected physical lane remains required.
 - The [sixth native lane](https://github.com/ThomasMichon/copilot-extensions/actions/runs/43255188400)
   stopped before the replacement assertions: staging the 1,667-file synthetic
   qualified source with one `git add` exceeded its 20-second child deadline.

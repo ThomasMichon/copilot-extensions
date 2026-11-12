@@ -570,7 +570,7 @@ def test_partial_publication_restores_native_selection_without_cutover(
         )
     }
     publication = si._runtime_installer().runtime._runtime_component("versioned_runtime_publication")
-    replace = publication.os.replace
+    replace = publication.replace_selector
     faults = []
 
     def fail_second(source, destination):
@@ -583,9 +583,9 @@ def test_partial_publication_restores_native_selection_without_cutover(
         return replace(source, destination)
 
     with monkeypatch.context() as patch:
-        patch.setattr(publication.os, "replace", fail_second)
+        patch.setattr(publication, "replace_selector", fail_second)
         result, cutovers = _update_from_payload(Path(prepared["qualified"]), root, env)
-    assert faults == [True]
+    assert faults == [True], result
     assert result.action == "error" and "second-selector fault" in result.reason
     assert cutovers == []
     assert all(path.read_bytes() == content for path, content in before.items())
