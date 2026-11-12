@@ -19,7 +19,6 @@ rewriting historical journal evidence or treating a source merge as rollout.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
-| [Standing Pairing and Lifetime](active/standing-pairing-lifetime/README.md) | Draft; manual no-pool responsibility, supported local admission and explicitly granted retained-agent recovery | #12171; existing native custody and finite pools retained; no live enrollment or rollout |
 | [Python Bytecode Cache Lifecycle](active/python-bytecode-cache-lifecycle/README.md) | Active; design accepted, additive private user-cache provider under implementation; consumer migration and retirement/update relief remain | #10968 bytecode follow-on; preserves runtime retention, other hygiene tracks and normal update authority; no real cleanup or rollout |
 | [Latest Waiting Update](active/latest-waiting-update/README.md) | Done; reviewed queue source merged and actual Main release verified; pending archive | #11985 under #7758; existing execution, component provisioning and maintenance owners retained; no rollout |
 | [Launch Observation Regressions](active/launch-observation-regressions/README.md) | Active; legacy mux caller corrections and readiness-only scope proposal | #11722; preserves #11564/#11718 mux owners, admission and operational holds; no rollout |
@@ -183,6 +182,7 @@ rewriting historical journal evidence or treating a source merge as rollout.
 
 | Effort | Outcome | Coordination |
 |--------|---------|--------------|
+| [Standing Pairing and Lifetime](2026/11/12%20standing-pairing-lifetime/README.md) | Done for source scope; implementation #12213 merged after clean review, required CI, canonical 403-case capture and complete Linux/macOS/Windows native qualification | #12171 retains archive and exact source-worktree settlement; existing custody and finite pools preserved; no live enrollment or rollout |
 | [Dispatch Slot Service Launchers](2026/11/12%20dispatch-slot-service-launchers/README.md) | Done for source scope; implementation #12217 reviewed and merged, actual Main release #12265 verified as Dispatch 0.19.18-dev1 | #11875; preserves contributor-owned #11960 reader correction and native hold, #10847 retirement and #10377 upgrade owners; no host repair or rollout |
 | [Topology Dispatcher Integration](2026/11/11%20topology-dispatcher-integration/README.md) | Done for source scope; all six phases merged through #12139 with isolated native recovery and reserve-preserving admission evidence | #12009; Worktrees, Bridge and Dispatch custody retained; no live adoption, materialization or rollout |
 | [Dispatch Standing Charters](2026/11/10%20dispatch-standing-charters/README.md) | Done for source scope; plan #11882 and implementation #11962 merged after approval and required CI, implementation promoted through #12001; adoption prerequisites documented | #11770; existing registrar, lifecycle, materialization and topology owners retained; no enrollment, materialization or rollout |
