@@ -5260,7 +5260,7 @@
         "tools/core_runtime_profile.py": "bd32966b50d92cb58651d7fdb0d07723679ea887730c2468928c9863b8f15390",
         "tools/python_project_inventory.py": "c1392147b95b49a6b5e2ddc247d0592074aaba507faffab3101bb616428ec7ef",
         "tools/promotion_unit_tests/test_core_artifacts.py": "cd38a669c3543ebeca5b7513de78711f8cee6ec7fd4fb7c89f6346c7db3110b2",
-        "tools/promotion_unit_tests/test_guarded_core_contract.py": "888016facc9916119d7278ed7d6205a715261fa00d652947676a11e8ecc9b10c",
+        "tools/promotion_unit_tests/test_guarded_core_contract.py": "35e082a213b8caec7bacfb37ceeea790ef633814debcc724d9e5b4438cbd0530",
         "tools/promotion_unit_tests/test_core_profile_candidate.py": "fea38adc192a4bec13756d80e4d49082e8e61f04eca7a5ddddef8a8b35960817",
         "tools/promotion_unit_tests/test_core_public_feed.py": "106ada4659e7aece6eaaed68f76e41522fc61ba9e323726818c74aff55ca3185",
         "tools/promotion_unit_tests/test_bundle_snapshot.py": "4122e4030eb49d3748acc70ae4360c597f273a224a2d257c8e7fd2825b3c48da",
