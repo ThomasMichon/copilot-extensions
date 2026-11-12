@@ -34,8 +34,18 @@ class _Popen:
 
 
 @pytest.fixture()
-def fake_popen(monkeypatch, declared_mock_daemon):
-    from agent_procutil import daemon, daemon_broker
+def durable_launch(monkeypatch):
+    """The Windows durable (WMI) route, modelled without the real broker."""
+    from agent_procutil import daemon
+
+    launch = Mock(return_value=Mock(pid=5151))
+    monkeypatch.setattr(daemon, "_durable_windows_launch", launch)
+    return launch
+
+
+@pytest.fixture()
+def fake_popen(monkeypatch, declared_mock_daemon, durable_launch):
+    from agent_procutil import daemon_broker
 
     fake = _Popen()
     monkeypatch.setattr(daemon_broker, "caller_in_job", lambda: False)
@@ -44,13 +54,21 @@ def fake_popen(monkeypatch, declared_mock_daemon):
         "agent_procutil.linux_daemon_scope.scope_command",
         lambda command, *_args, **_kwargs: command,
     )
-    monkeypatch.setattr(
-        daemon, "spawn_brokered_daemon", Mock(side_effect=pu.DaemonSpawnError(
-            "fixture", process_created=False, admission_sent=False,
-        )),
-    )
     monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
     return fake
+
+
+def _wmi_refusal() -> pu.DaemonSpawnError:
+    return pu.DaemonSpawnError(
+        "spawn_daemon: Windows durable launch via WMI Win32_Process.Create failed; "
+        "daemon not started",
+        cleanup_confirmed=True, process_created=False, admission_sent=False,
+    )
+
+
+# Native-creation assertions: on Windows a durable daemon routes through WMI,
+# so these opt into the native contained route that still uses Popen.
+_NATIVE = {"breakaway": False} if os.name == "nt" else {}
 
 
 def _access_denied() -> OSError:
@@ -63,7 +81,9 @@ def test_stderr_goes_to_its_own_log(tmp_path, fake_popen):
     out_log = tmp_path / "svc.log"
     err_log = tmp_path / "errs" / "svc-err.log"
 
-    pu.spawn_daemon(["py"], cwd=tmp_path, log_path=out_log, stderr_log_path=err_log)
+    pu.spawn_daemon(
+        ["py"], cwd=tmp_path, log_path=out_log, stderr_log_path=err_log, **_NATIVE,
+    )
 
     (_, kwargs), = fake_popen.calls
     assert kwargs["stdout"].name == str(out_log)
@@ -77,7 +97,7 @@ def test_stderr_goes_to_its_own_log(tmp_path, fake_popen):
 
 
 def test_without_stderr_log_stderr_is_merged(tmp_path, fake_popen):
-    pu.spawn_daemon(["py"], cwd=tmp_path, log_path=tmp_path / "svc.log")
+    pu.spawn_daemon(["py"], cwd=tmp_path, log_path=tmp_path / "svc.log", **_NATIVE)
     (_, kwargs), = fake_popen.calls
     assert kwargs["stderr"] is subprocess.STDOUT
 
@@ -89,7 +109,7 @@ def test_explicit_stdio_fds_remain_caller_owned(tmp_path, fake_popen):
         descriptors = (incoming.fileno(), outgoing.fileno(), outgoing.fileno())
         pu.spawn_daemon(
             ["py"], cwd=tmp_path, log_path=tmp_path / "launch.log",
-            stdio_fds=descriptors,
+            stdio_fds=descriptors, **_NATIVE,
         )
         (_, options), = fake_popen.calls
         assert tuple(options[name] for name in ("stdin", "stdout", "stderr")) == descriptors
@@ -114,7 +134,7 @@ def test_invalid_stdio_fds_refused_before_creation(tmp_path, fake_popen, descrip
 
 def test_stderr_log_equal_to_log_path_merges(tmp_path, fake_popen):
     log = tmp_path / "svc.log"
-    pu.spawn_daemon(["py"], cwd=tmp_path, log_path=log, stderr_log_path=str(log))
+    pu.spawn_daemon(["py"], cwd=tmp_path, log_path=log, stderr_log_path=str(log), **_NATIVE)
     (_, kwargs), = fake_popen.calls
     assert kwargs["stderr"] is subprocess.STDOUT
     assert sum(
@@ -166,21 +186,36 @@ def test_unopenable_stderr_log_closes_the_stdout_log(tmp_path, fake_popen, monke
     assert opened and opened[0].closed
 
 
-def test_breakaway_denial_is_recorded_in_both_logs(tmp_path, fake_popen, monkeypatch):
+def test_durable_windows_route_receives_both_logs(tmp_path, fake_popen, durable_launch, monkeypatch):
     monkeypatch.setattr(pu, "_is_windows", lambda: True)
-    fake_popen.failures.append(_access_denied())
+    out_log, err_log = tmp_path / "svc.log", tmp_path / "svc-err.log"
+
+    pu.spawn_daemon(["py"], cwd=tmp_path, log_path=out_log, stderr_log_path=err_log)
+
+    assert fake_popen.calls == [], "a durable Windows daemon never uses native creation"
+    (_, options), = [(call.args, call.kwargs) for call in durable_launch.call_args_list]
+    assert options["log_path"] == str(out_log)
+    assert options["stderr_log_path"] == str(err_log)
+    for path in (out_log, err_log):
+        assert "wmi-durable-launch" in path.read_text(encoding="utf-8")
+
+
+def test_wmi_refusal_is_recorded_in_both_logs(tmp_path, fake_popen, durable_launch, monkeypatch):
+    monkeypatch.setattr(pu, "_is_windows", lambda: True)
+    durable_launch.side_effect = _wmi_refusal()
     out_log, err_log = tmp_path / "svc.log", tmp_path / "svc-err.log"
 
     with pytest.raises(pu.DaemonSpawnError):
         pu.spawn_daemon(["py"], cwd=tmp_path, log_path=out_log, stderr_log_path=err_log)
 
+    assert fake_popen.calls == [], "a refused WMI launch never falls back implicitly"
     for path in (out_log, err_log):
         assert "daemon not started" in path.read_text(encoding="utf-8")
 
 
-def test_contained_fallback_keeps_the_stderr_log(tmp_path, fake_popen, monkeypatch):
+def test_contained_fallback_keeps_the_stderr_log(tmp_path, fake_popen, durable_launch, monkeypatch):
     monkeypatch.setattr(pu, "_is_windows", lambda: True)
-    fake_popen.failures.append(_access_denied())
+    durable_launch.side_effect = _wmi_refusal()
     err_log = tmp_path / "svc-err.log"
 
     pu.spawn_daemon(
@@ -188,8 +223,10 @@ def test_contained_fallback_keeps_the_stderr_log(tmp_path, fake_popen, monkeypat
         stderr_log_path=err_log, contained_fallback=True,
     )
 
-    _, (_, retry) = fake_popen.calls
+    durable_launch.assert_called_once()
+    (_, retry), = fake_popen.calls
     assert retry["stderr"].name == str(err_log)
+    assert not retry["creationflags"] & pu._CREATE_BREAKAWAY_FROM_JOB
     assert "accepts caller-owned lifetime" in err_log.read_text(encoding="utf-8")
 
 

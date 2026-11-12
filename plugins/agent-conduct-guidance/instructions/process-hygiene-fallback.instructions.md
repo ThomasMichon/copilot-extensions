@@ -4,7 +4,7 @@ applyTo: "**"
 
 # Headless process-spawn fallback
 
-**Fallback policy `[owner: agent-conduct-guidance@0.1.39-dev1]`:** Every ad hoc
+**Fallback policy `[owner: agent-conduct-guidance@0.1.40-dev1]`:** Every ad hoc
 child process an agent starts to serve one turn -- a shell command, a helper
 script, a build/watch/dev-server launch, a self-authored scheduled task or
 service -- must not surface a visible console window or steal focus. On
@@ -34,7 +34,13 @@ Headlessness is not durable lifetime. Prefer ordinary native detached/headless
 creation through the owner's attributed launch/ensure path. Keep bounded helpers
 contained and preserve test suppression. Neither arbitrary Job membership nor
 immediate-Job escape proves lifetime: verify survival after every caller-owned
-cleanup Job closes, not just parent exit or early health. Do not default to COM,
+cleanup Job closes, not just parent exit or early health. Use the Windows WMI
+durable launch (via `spawn_daemon`) only when a process must outlive its
+launcher: an installer starting its services, daemon self-restart, a watchdog
+restart, a CLI ensuring its own daemon, or a queued update under a no-breakaway
+Job. CLI-to-CLI calls and bounded/test children keep normal creation and Jobs;
+WMI is never a generic spawn fallback, and a policy-blocked WMI launch is
+reported, not retried another way. Do not default to COM,
 Scheduled Tasks/S4U, services or UAC; repair the owned boundary and report external
 restrictions without weakening cleanup proof. Flags are not instance custody.
 Test daemons need runner-renewed leases (defaults: 10 minutes; 4-hour unattended maximum);

@@ -1412,8 +1412,26 @@ It composes the helpers above, so its flags never drift from them:
   and layer `extra_env` into the child environment. This bypasses Windows venv
   redirectors so process control names the actual worker while retaining its
   venv imports. Opaque executable commands are not rewritten by `spawn_daemon`.
-- **Escapes tracked caller cleanup.** `breakaway=True` (default) requests native
-  breakaway and starts the Windows child suspended. Canonical Job producers
+- **Escapes caller cleanup.** On Windows, a resident durable daemon
+  (`breakaway=True`, the default, outside contained test mode) starts through
+  the WMI durable launch: `Win32_Process.Create` runs a hidden no-Job bootstrap
+  with the explicit environment block, cwd and log destinations (WMI inherits
+  nothing), which creates the daemon suspended, pins PID and creation time,
+  hands a process handle back and resumes it. The daemon is in none of the
+  caller's Jobs and outside its process tree, so a tree kill or closing any
+  caller kill-on-close Job does not end it; it still ends on explicit kill,
+  sign-out or reboot. This is the reviewed decision for
+  ThomasMichon/copilot-extensions#12117 and is reserved for processes that must
+  outlive their launcher: installers starting their services, daemon
+  self-restart, watchdog/supervisor restarts and a CLI ensuring its own backing
+  daemon. CLI-to-CLI calls, bounded helpers and request/tool/test children keep
+  ordinary creation and Jobs; WMI is never a general spawn fallback. A blocked
+  WMI creation (for example the Defender ASR rule "Block process creations
+  originating from PSExec and WMI commands", or a Windows container/silo)
+  raises `DaemonSpawnError` naming that cause. See
+  `docs/patterns/windows-background-process-launch.md`.
+  Finite workers keep native breakaway and start the Windows child suspended.
+  Canonical Job producers
   assign fresh `Local\ce-owned-job-<uuid>` names and propagate the complete
   semicolon-separated chain in `COPILOT_EXTENSIONS_OWNED_JOB_SCOPES`, including
   strict outer scopes. Explicit child environment replacement cannot drop
@@ -1429,8 +1447,10 @@ It composes the helpers above, so its flags never drift from them:
   Unconfirmed exit retains process custody on `DaemonSpawnError.process` and
   prohibits replay. Only a settled refusal permits an explicitly requested
   `contained_fallback=True`, with a warning and log entry accepting the shorter
-  lifetime. Explicit `breakaway=False` and contained tests stay contained.
-  The returned `Popen` controls the actual daemon. POSIX uses a new session.
+  lifetime. Explicit `breakaway=False` and contained tests stay contained and
+  never use WMI.
+  The returned process control (`WindowsDaemonProcess` for a WMI launch,
+  otherwise `Popen`) controls the actual daemon. POSIX uses a new session.
 - **Explicit cwd.** `cwd` must be an existing absolute directory and must not be
   inside an `installed-plugins` payload, either as given or once symlinks and
   junctions are resolved (`<runtime>/current -> .../installed-plugins/...` is

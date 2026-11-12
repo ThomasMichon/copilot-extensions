@@ -68,6 +68,27 @@ the owning direct-spawn/Job boundary and prove it. If an external restriction
 cannot be satisfied, report that exact unsupported boundary; an alternative
 activation or privilege model requires a separate explicit decision.
 
+One such reviewed decision exists: the Windows **WMI durable launch**
+(`Win32_Process.Create`, used by `agent_procutil.spawn_daemon` for resident
+durable daemons). The created process is parented by the WMI provider host, is
+in none of the caller's Jobs and survives a tree kill or the closing of any
+caller kill-on-close Job. Use it only when a process must outlive its launcher:
+
+1. an installer starting/restarting the services it installed;
+2. a daemon restarting itself (for example a version-cutover restart);
+3. a watchdog/supervisor restarting the processes it supervises;
+4. a CLI ensuring or starting its own backing daemon;
+5. a queued/background update when the caller's Job forbids breakaway.
+
+Everything else -- a CLI calling another CLI, bounded helpers, request/tool/test
+children, timeouts and tree cleanup -- keeps normal creation and Jobs. WMI is not
+a fallback for a failed spawn. It inherits nothing (pass environment, cwd and log
+paths explicitly; pin the result by PID plus creation time), runs as the same
+user, still ends on explicit kill, sign-out or reboot, and can be blocked by the
+Defender ASR rule "Block process creations originating from PSExec and WMI
+commands" -- report that block explicitly instead of trying another mechanism.
+See `docs/patterns/windows-background-process-launch.md` in copilot-extensions.
+
 Keep one-turn helpers and their descendants caller-owned. Only a daemon that
 must outlive the installer/request should opt out, through the repository's
 canonical attributed primitive (`agent_procutil.spawn_daemon` with its

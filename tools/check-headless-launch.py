@@ -90,8 +90,10 @@ PowerShell launch.** In ``plugins/*/scripts/install*.ps1`` and
 ``conhost`` (the windowless host every PowerShell start-now uses) is
 reported: the child stays inside the installer's Job and dies with the SSH
 session or updater that ran it. Start a daemon now through the service's
-user-mode ensure path (``agent_procutil.spawn_daemon``), or WMI
-``Win32_Process.Create`` for a PowerShell-only daemon. A child the caller
+user-mode ensure path (``agent_procutil.spawn_daemon``, which uses the Windows
+WMI durable launch), or WMI ``Win32_Process.Create`` for a PowerShell-only
+daemon. WMI is reserved for processes that must outlive their launcher (see
+``docs/patterns/windows-background-process-launch.md``). A child the caller
 deliberately owns (a foreground supervisor that waits on it, or a warned
 last resort) carries ``# daemon-spawn: allow <why>`` on the statement or the
 comment line directly above it. Scheduled-task and Run-key registrations
@@ -903,7 +905,7 @@ def verify() -> list[str]:
                 problems.append(
                     f"{rel}:{lineno}: hand-rolled detached Popen in {qualname} -- launch a "
                     "resident daemon with agent_procutil.spawn_daemon() (explicit cwd, "
-                    f"log, Job breakaway); mark a non-daemon child '# {_DAEMON_ALLOW} <why>'"
+                    f"log, durable Windows launch); mark a non-daemon child '# {_DAEMON_ALLOW} <why>'"
                 )
     for key, count in sorted(unmatched.items()):
         problems.extend(

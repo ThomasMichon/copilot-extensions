@@ -42,66 +42,40 @@ def test_direct_positive_creation_refusal_removes_only_record(launch, monkeypatc
     assert list(spec.registry_root.glob("*.lock")), "canonical locks are not deleted"
 
 
-def test_positive_native_breakaway_refusal_removes_record_without_activation(launch, monkeypatch):
+def test_positive_wmi_refusal_removes_record_without_native_creation(launch, monkeypatch):
     start, spec = launch
     monkeypatch.setattr(pu, "_is_windows", lambda: True)
-    monkeypatch.setattr(daemon_broker, "caller_in_job", lambda: True)
-    activate = Mock(side_effect=AssertionError("unexpected activation"))
+    activate = Mock(side_effect=AssertionError("unexpected Task activation"))
     monkeypatch.setattr(daemon, "spawn_brokered_daemon", activate)
-    error = PermissionError("breakaway refused")
-    error.winerror = 5
-    monkeypatch.setattr(subprocess, "Popen", Mock(side_effect=error))
+    popen = Mock(side_effect=AssertionError("native durable creation"))
+    monkeypatch.setattr(subprocess, "Popen", popen)
+    monkeypatch.setattr(daemon, "_durable_windows_launch", Mock(side_effect=pu.DaemonSpawnError(
+        "WMI refused", cleanup_confirmed=True, process_created=False, admission_sent=False,
+    )))
     with pytest.raises(pu.DaemonSpawnError):
         start()
     assert inspect_instances(spec.registry_root) == []
     diagnostic = (spec.runtime_root / "log").read_text()
-    assert "instance-reserved" in diagnostic and "creating-suspended" in diagnostic
-    assert "created-suspended" not in diagnostic and "spawn_daemon: resumed" not in diagnostic
+    assert "instance-reserved" in diagnostic and "wmi-durable-launch" in diagnostic
+    assert "instance-bound" not in diagnostic
+    popen.assert_not_called()
     activate.assert_not_called()
 
 
 @pytest.mark.parametrize("mode", ["durable-windows", "contained-windows", "posix"])
 @pytest.mark.parametrize("error", [KeyboardInterrupt(), RuntimeError("creation handoff lost")])
 def test_interrupted_creation_retains_unknown_reservation_without_replay(launch, monkeypatch, mode, error):
-    from agent_procutil import _job_scopes
-
     start, spec = launch
     monkeypatch.setattr(pu, "_is_windows", lambda: mode != "posix")
-
-    @contextmanager
-    def scopes(environment):
-        yield Mock()
-
-    monkeypatch.setattr(_job_scopes, "query_scopes", scopes)
     popen = Mock(side_effect=error)
     monkeypatch.setattr(subprocess, "Popen", popen)
+    if mode == "durable-windows":
+        monkeypatch.setattr(daemon, "_durable_windows_launch", popen)
     with pytest.raises(type(error)) as caught:
         start(breakaway=mode == "durable-windows", contained_fallback=True)
     assert caught.value is error
     assert len(inspect_instances(spec.registry_root)) == 1
     assert popen.call_count == 1
-    assert "creation-outcome-unknown" in (spec.runtime_root / "log").read_text()
-
-
-def test_query_cleanup_cannot_reclassify_interrupted_creation_as_refusal(launch, monkeypatch):
-    from agent_procutil import _job_scopes
-
-    start, spec = launch
-    monkeypatch.setattr(pu, "_is_windows", lambda: True)
-
-    @contextmanager
-    def scopes(environment):
-        try:
-            yield Mock()
-        finally:
-            raise OSError("query handle close failed")
-
-    monkeypatch.setattr(_job_scopes, "query_scopes", scopes)
-    monkeypatch.setattr(subprocess, "Popen", Mock(side_effect=KeyboardInterrupt()))
-    with pytest.raises(OSError, match="query handle close failed"):
-        start(contained_fallback=True)
-    assert len(inspect_instances(spec.registry_root)) == 1
-    assert subprocess.Popen.call_count == 1
     assert "creation-outcome-unknown" in (spec.runtime_root / "log").read_text()
 
 
@@ -161,11 +135,9 @@ def test_native_precreation_diagnostic_failure_cancels_only_its_reservation(
     popen.assert_not_called()
 
 
-@pytest.mark.parametrize("stage", [
-    "creating-suspended", "created-suspended", "caller-jobs-verified", "resumed", "instance-bound",
-])
-def test_native_child_is_returned_even_when_stage_diagnostic_storage_fails(launch, monkeypatch, stage):
-    from agent_procutil import _daemon_instance_identity, _job_scopes
+@pytest.mark.parametrize("stage", ["wmi-durable-launch", "instance-bound"])
+def test_durable_child_is_returned_even_when_stage_diagnostic_storage_fails(launch, monkeypatch, stage):
+    from agent_procutil import _daemon_instance_identity
 
     start, spec = launch
     process = Mock(pid=4321)
@@ -187,16 +159,10 @@ def test_native_child_is_returned_even_when_stage_diagnostic_storage_fails(launc
 
             yield Output()
 
-    @contextmanager
-    def scopes(_environment):
-        yield lambda _handle: None
-
     monkeypatch.setattr(pu, "_is_windows", lambda: True)
-    monkeypatch.setattr(pu, "_resume_suspended_process", lambda _pid: True)
     monkeypatch.setattr(pu, "_open_daemon_log", output)
-    monkeypatch.setattr(_job_scopes, "query_scopes", scopes)
     monkeypatch.setattr(_daemon_instance_identity, "created_process_identity", lambda _process: (4321, "fixture"))
-    monkeypatch.setattr(subprocess, "Popen", lambda *_args, **_kwargs: process)
+    monkeypatch.setattr(daemon, "_durable_windows_launch", lambda *_args, **_kwargs: process)
     assert start() is process
     assert seen == [stage]
     record = inspect_instances(spec.registry_root)[0]
@@ -205,53 +171,35 @@ def test_native_child_is_returned_even_when_stage_diagnostic_storage_fails(launc
     process.kill.assert_not_called()
 
 
-def test_failed_native_diagnostics_preserve_unconfirmed_child_custody(launch, monkeypatch):
-    from agent_procutil import _daemon_instance_identity, _job_scopes
+def _unconfirmed_durable_failure(process, *, admission_sent=True):
+    failure = pu.DaemonSpawnError(
+        "spawn_daemon: Windows lifetime broker failed (bootstrap-exit)",
+        cleanup_confirmed=False, process_created=True, admission_sent=admission_sent,
+        process_identity=(4321, "fixture"),
+    )
+    failure.process = process
+    return failure
 
+
+def test_failed_durable_launch_preserves_unconfirmed_child_custody(launch, monkeypatch):
     start, spec = launch
     process = Mock(pid=4321)
-    process.kill.side_effect = OSError("fixture termination unconfirmed")
-    original = pu._open_daemon_log
-
-    @contextmanager
-    def output(path):
-        with original(path) as stream:
-            class Output:
-                def write(self, data):
-                    if b"instance-reserved" not in data and b"spawn_daemon:" in data:
-                        raise OSError("fixture diagnostic storage unavailable")
-                    return stream.write(data)
-
-                def flush(self):
-                    stream.flush()
-
-            yield Output()
-
-    @contextmanager
-    def scopes(_environment):
-        yield lambda _handle: None
-
     monkeypatch.setattr(pu, "_is_windows", lambda: True)
-    monkeypatch.setattr(pu, "_resume_suspended_process", lambda _pid: False)
-    monkeypatch.setattr(pu, "_open_daemon_log", output)
-    monkeypatch.setattr(_job_scopes, "query_scopes", scopes)
-    monkeypatch.setattr(_daemon_instance_identity, "created_process_identity", lambda _process: (4321, "fixture"))
     monkeypatch.setattr(store, "finish_failed_launch", lambda *_args, **_kwargs: False)
-    monkeypatch.setattr(subprocess, "Popen", lambda *_args, **_kwargs: process)
+    monkeypatch.setattr(daemon, "_durable_windows_launch", Mock(side_effect=_unconfirmed_durable_failure(process)))
     with pytest.raises(pu.DaemonSpawnError) as caught:
         start()
     assert caught.value.process is process
     assert caught.value.cleanup_confirmed is False and caught.value.process_created is True
     assert caught.value.process_identity == (4321, "fixture")
     assert caught.value.instance_receipt.record_path.is_file()
-    assert "failed to resume" in str(caught.value.__cause__)
 
 
 @pytest.mark.parametrize("cleanup_unconfirmed", [False, True])
 def test_persistent_buffered_flush_and_close_failures_preserve_child_outcome(
     launch, monkeypatch, cleanup_unconfirmed,
 ):
-    from agent_procutil import _daemon_instance_identity, _job_scopes
+    from agent_procutil import _daemon_instance_identity
 
     start, spec = launch
     process = Mock(pid=4321)
@@ -271,24 +219,18 @@ def test_persistent_buffered_flush_and_close_failures_preserve_child_outcome(
     raw = Storage()
     stream = io.BufferedWriter(raw)
 
-    @contextmanager
-    def scopes(_environment):
-        yield lambda _handle: None
-
     monkeypatch.setattr(pu, "_is_windows", lambda: True)
-    monkeypatch.setattr(pu, "_resume_suspended_process", lambda _pid: not cleanup_unconfirmed)
     monkeypatch.setattr(pu, "_open_daemon_log", lambda _path: stream)
-    monkeypatch.setattr(_job_scopes, "query_scopes", scopes)
     monkeypatch.setattr(_daemon_instance_identity, "created_process_identity", lambda _process: (4321, "fixture"))
     monkeypatch.setattr(store, "finish_failed_launch", lambda *_args, **_kwargs: False)
-    monkeypatch.setattr(subprocess, "Popen", lambda *_args, **_kwargs: process)
     if cleanup_unconfirmed:
-        process.kill.side_effect = OSError("fixture termination unconfirmed")
+        monkeypatch.setattr(daemon, "_durable_windows_launch", Mock(side_effect=_unconfirmed_durable_failure(process)))
         with pytest.raises(pu.DaemonSpawnError) as caught:
             start()
         assert caught.value.process is process and caught.value.cleanup_confirmed is False
         assert caught.value.instance_receipt.record_path.is_file()
     else:
+        monkeypatch.setattr(daemon, "_durable_windows_launch", lambda *_args, **_kwargs: process)
         assert start() is process
         record = inspect_instances(spec.registry_root)[0]
         assert record["state"] == "bound" and process.instance_receipt.instance_id == record["instance_id"]
@@ -300,42 +242,26 @@ def test_persistent_buffered_flush_and_close_failures_preserve_child_outcome(
 def test_contained_fallback_settles_only_positive_creation_refusal(launch, monkeypatch, error, retained):
     start, spec = launch
     monkeypatch.setattr(pu, "_is_windows", lambda: True)
-    monkeypatch.setattr(daemon_broker, "caller_in_job", lambda: True)
-    monkeypatch.setattr(daemon, "spawn_brokered_daemon", Mock(side_effect=pu.DaemonSpawnError(
-        "no daemon requested", process_created=False, admission_sent=False,
+    monkeypatch.setattr(daemon, "_durable_windows_launch", Mock(side_effect=pu.DaemonSpawnError(
+        "WMI refused", cleanup_confirmed=True, process_created=False, admission_sent=False,
     )))
-    denied = PermissionError("breakaway refused")
-    denied.winerror = 5
-    monkeypatch.setattr(subprocess, "Popen", Mock(side_effect=[denied, error]))
+    monkeypatch.setattr(subprocess, "Popen", Mock(side_effect=[error]))
     with pytest.raises(type(error)):
         start(contained_fallback=True)
     assert len(inspect_instances(spec.registry_root)) == int(retained)
 
 
-@pytest.mark.parametrize("kill_fails", [False, True])
-def test_unconfirmed_native_cleanup_never_cancels_or_replays(launch, monkeypatch, kill_fails):
-    from agent_procutil import _job_scopes, _daemon_instance_identity
-
+def test_unconfirmed_durable_cleanup_never_cancels_or_replays(launch, monkeypatch):
     start, spec = launch
     monkeypatch.setattr(pu, "_is_windows", lambda: True)
-    monkeypatch.setattr(daemon_broker, "caller_in_job", lambda: True)
     child = Mock(pid=4321, _handle=456)
-    if kill_fails:
-        child.kill.side_effect = OSError("kill refused")
-    child.wait.side_effect = subprocess.TimeoutExpired("fixture", 5)
-    monkeypatch.setattr(_daemon_instance_identity, "created_process_identity", lambda _: (4321, "fixture-birth"))
     monkeypatch.setattr(store, "identity_state", lambda *_: "matching")
-
-    @contextmanager
-    def scopes(environment):
-        yield Mock(side_effect=OSError("cleanup Job retained"))
-
-    monkeypatch.setattr(_job_scopes, "query_scopes", scopes)
-    popen = Mock(return_value=child)
+    monkeypatch.setattr(daemon, "_durable_windows_launch", Mock(side_effect=_unconfirmed_durable_failure(child)))
+    popen = Mock()
     monkeypatch.setattr(subprocess, "Popen", popen)
     with pytest.raises(pu.DaemonSpawnError) as failure:
         start(contained_fallback=True)
-    assert popen.call_count == 1
+    popen.assert_not_called()
     assert failure.value.process is child
     assert not failure.value.cleanup_confirmed
     rows = inspect_instances(spec.registry_root)
@@ -344,26 +270,17 @@ def test_unconfirmed_native_cleanup_never_cancels_or_replays(launch, monkeypatch
 
 
 @pytest.mark.parametrize("admitted", [False, True])
-def test_native_child_settles_only_before_resume_attempt(launch, monkeypatch, admitted):
-    from agent_procutil import _job_scopes, _daemon_instance_identity
-
+def test_durable_child_settles_only_before_admission(launch, monkeypatch, admitted):
     start, spec = launch
     monkeypatch.setattr(pu, "_is_windows", lambda: True)
-    monkeypatch.setattr(daemon_broker, "caller_in_job", lambda: True)
     monkeypatch.setattr(store, "identity_state", lambda *_: "dead")
     proof = spec.runtime_root / "retained-proof"
     proof.write_text("keep")
-
-    child = Mock(pid=4321, _handle=456)
-    monkeypatch.setattr(subprocess, "Popen", Mock(return_value=child))
-    monkeypatch.setattr(_daemon_instance_identity, "created_process_identity", lambda _: (4321, "fixture-birth"))
-    monkeypatch.setattr(pu, "_resume_suspended_process", lambda pid: False)
-
-    @contextmanager
-    def scopes(environment):
-        yield Mock() if admitted else Mock(side_effect=OSError("cleanup Job retained"))
-
-    monkeypatch.setattr(_job_scopes, "query_scopes", scopes)
+    monkeypatch.setattr(daemon, "_durable_windows_launch", Mock(side_effect=pu.DaemonSpawnError(
+        "spawn_daemon: Windows lifetime broker failed (child-adoption)",
+        cleanup_confirmed=True, process_created=True, admission_sent=admitted,
+        process_identity=(4321, "fixture-birth"),
+    )))
     with pytest.raises(pu.DaemonSpawnError):
         start()
     rows = inspect_instances(spec.registry_root)
