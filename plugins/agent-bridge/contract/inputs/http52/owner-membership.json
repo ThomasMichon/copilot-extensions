@@ -195,6 +195,7 @@
     "retained_acquisition_writer_inspection": 1,
     "retained_workspace_creation_writer": 1,
     "retained_workspace_creation_writer_inspection": 1,
+    "retained_native_session_recovery": 1,
     "owner_membership": {
       "capability": 1,
       "snapshot": {

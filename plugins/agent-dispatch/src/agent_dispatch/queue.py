@@ -121,6 +121,7 @@ from .queue_spawn_reservations import (  # noqa: F401 -- re-exported for existin
 )
 from .queue_storage import QueueStorageMixin
 from .queue_standing_charters import QueueStandingChartersMixin
+from .queue_standing_recovery import QueueStandingRecoveryMixin
 from .queue_standing_sources import QueueStandingSourcesMixin
 from .queue_task_recovery import TaskRecoveryMixin
 from .queue_task_relationships import QueueTaskRelationshipsMixin
@@ -167,6 +168,7 @@ class _ClosingConnection(sqlite3.Connection):
 
 
 class TaskQueue(
+    QueueStandingRecoveryMixin,
     QueueStandingSourcesMixin,
     QueueStandingChartersMixin,
     QueueSubmissionPreparationMixin,
@@ -241,6 +243,7 @@ class TaskQueue(
         worker_admission: Callable[[], None] | None = None,
         relationship_writer: RelationshipWriter | None = None,
         relationship_authority: str | None = None,
+        standing_relationship_writer: RelationshipWriter | None = None,
     ):
         self.db_path = str(db_path)
         self.lease_seconds = lease_seconds
@@ -251,6 +254,7 @@ class TaskQueue(
         self._worker_admission = worker_admission
         self._relationship_writer = relationship_writer
         self._relationship_authority = relationship_authority
+        self._standing_relationship_writer = standing_relationship_writer
         if relationship_writer is not None and relationship_authority not in {"local", "central"}:
             raise ValueError("relationship writer requires its original local or central queue authority")
         self._wake_notifier: Callable[[], None] | None = None

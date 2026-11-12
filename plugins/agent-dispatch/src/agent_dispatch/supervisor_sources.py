@@ -210,6 +210,7 @@ class SupervisorSources(SupervisorPoolPublication):
             and self._pool_capture_deadline.get() is None
         ):
             self._reconcile_standing_sources(source)
+            self._reconcile_standing_recovery()
         return registrations
 
     def _reconcile_standing_sources(self, source: DeclarationRead) -> None:
@@ -237,6 +238,38 @@ class SupervisorSources(SupervisorPoolPublication):
                 reconcile_standing_sources(source, client, deadline=deadline, before_write=before_write)
         except Exception as exc:
             log.warning("standing source reconciliation withheld: error_type=%s", type(exc).__name__)
+
+    def _reconcile_standing_recovery(self) -> None:
+        method = getattr(self.client, "recover_standing_batch", None)
+        if not callable(method):
+            return
+        deadline = self._reconcile_deadline
+        if deadline is None:
+            deadline = time.monotonic() + self._reconcile_call_budget
+        if time.monotonic() >= deadline:
+            return
+        try:
+            lock = self._pool_lock()
+            client = self.client
+            with lock.guard_current_acquisition(deadline=deadline):
+                if self.client is not client:
+                    return
+                result = method(
+                    cursor=getattr(self, "_standing_recovery_cursor", None),
+                    limit=1, deadline=deadline,
+                )
+                if result is None:
+                    return
+                cursor = result.get("next_cursor")
+                if (
+                    type(result.get("version")) is not int or result["version"] != 1
+                    or not isinstance(result.get("reports"), list)
+                    or cursor is not None and (not isinstance(cursor, str) or not cursor)
+                ):
+                    raise ValueError("standing recovery coordinator result is unconfirmed")
+                self._standing_recovery_cursor = cursor
+        except Exception as exc:
+            log.warning("standing recovery held: error_type=%s", type(exc).__name__)
 
     def _overridden_off(self) -> set[str]:
         """Read the same veto once; preserve legacy behavior on failed reads."""

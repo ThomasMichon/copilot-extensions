@@ -134,6 +134,11 @@ def _matches_receipt(value: object, request: dict, *, phase: str | None = None) 
 
 
 class QueueTaskRelationshipsMixin:
+    def _relationship_selection(self, task: Task) -> tuple[object, str | None]:
+        if task.kind == "standing-charter" and self._standing_relationship_writer is not None:
+            return self._standing_relationship_writer, "local"
+        return self._relationship_writer, self._relationship_authority
+
     def _replay_relationship_claim(
         self,
         task_id: str | None,
@@ -194,7 +199,8 @@ class QueueTaskRelationshipsMixin:
         ts: float,
         reservation_key: str | None = None,
     ) -> int:
-        if self._relationship_writer is None or self._relationship_authority not in {
+        writer, authority = self._relationship_selection(task)
+        if writer is None or authority not in {
             "local",
             "central",
         }:
@@ -230,13 +236,13 @@ class QueueTaskRelationshipsMixin:
             "generation": generation,
             "workspace": asdict(workspace),
             "reservation_key": reservation_key,
-            "authority": self._relationship_authority,
-            "namespace": f"dispatch-{self._relationship_authority}-task",
+            "authority": authority,
+            "namespace": f"dispatch-{authority}-task",
             "identity": identity,
             "recovery": {
                 "schema": "dispatch-task-assignment",
                 "version": 2,
-                "authority": self._relationship_authority,
+                "authority": authority,
                 "task_id": task.id,
                 "queue_identity": conn.execute(
                     "SELECT identity FROM workspace_queue_identity WHERE singleton=1",
@@ -268,11 +274,13 @@ class QueueTaskRelationshipsMixin:
     def _admit_original_relationship_request(self, request: dict) -> dict:
         from .task_obligations import read_snapshot
 
+        task = self.get(request["task_id"])
+        authority = self._relationship_selection(task)[1] if task is not None else None
         snapshot = read_snapshot(
             self, request["task_id"], assignment_event_id=request["event_id"],
         )
         if (
-            self._relationship_authority != request["authority"]
+            authority != request["authority"]
             or snapshot is None
             or snapshot["queue_identity"] != request["recovery"]["queue_identity"]
             or snapshot["assignment"] != {
@@ -314,9 +322,11 @@ class QueueTaskRelationshipsMixin:
         if value is None:
             raise TaskError("no retained task relationship request")
         request = value["request"]
+        task = self.get(task_id)
+        selected_writer, authority = self._relationship_selection(task) if task is not None else (None, None)
         if (
-            self._relationship_writer is None
-            or self._relationship_authority != request["authority"]
+            selected_writer is None
+            or authority != request["authority"]
         ):
             raise TaskError("original relationship writer is unavailable; assignment retained")
         workspace = AssignmentWorkspace(**request["workspace"])
@@ -348,7 +358,7 @@ class QueueTaskRelationshipsMixin:
             ):
                 raise TaskError("original task assignment changed; relationship retained")
         common = {"expected_creation_nonce": workspace.creation_nonce}
-        writer = self._relationship_writer
+        writer = selected_writer
         bind_request = getattr(writer, "bind_request", None)
         if callable(bind_request):
             writer = bind_request(copy.deepcopy(request))
@@ -435,7 +445,7 @@ class QueueTaskRelationshipsMixin:
                 raise TaskError(
                     "task changed during relationship write; original request retained"
                 )
-            result = {**value, "state": state, "receipt": receipt}
+            result = {**json.loads(retained["task_relationship"]), "state": state, "receipt": receipt}
             conn.execute(
                 "UPDATE task_events SET task_relationship=? WHERE id=?",
                 (_encoded(result), request["event_id"]),

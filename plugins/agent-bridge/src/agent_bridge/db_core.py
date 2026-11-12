@@ -14,7 +14,7 @@ from .owner_membership_signal import MembershipSignal, commit as commit_membersh
 
 log = logging.getLogger("agent-bridge")
 
-SCHEMA_VERSION = 44
+SCHEMA_VERSION = 45
 
 # Post-base ``sessions`` columns ensured idempotently on every init, independent
 # of ``schema_version``. Version-gated ``ALTER TABLE ... ADD COLUMN`` migrations
@@ -176,6 +176,8 @@ CREATE TABLE IF NOT EXISTS workspace_embodiments (
     native_session_id TEXT,
     turn_index INTEGER
 );
+CREATE INDEX IF NOT EXISTS idx_workspace_embodiments_session
+ON workspace_embodiments(session_id);
 
 CREATE TABLE IF NOT EXISTS provider_embodiments (
     key_digest TEXT PRIMARY KEY,

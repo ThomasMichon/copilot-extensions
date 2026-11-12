@@ -6,6 +6,7 @@ import asyncio
 from dataclasses import replace
 import json
 import sqlite3
+import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -15,7 +16,7 @@ from pydantic import ValidationError
 from agent_bridge import acquisition_authority, acquisition_worktree_writer as writers
 from agent_bridge import creation_worktree_writer as creation, session_lifecycle_cli, workspace_creation
 from agent_bridge.acquisition_contract import AcquisitionRefused, WorktreeWriterRequirement
-from agent_bridge.client import BridgeClient, BridgeClientError
+from agent_bridge.client import BridgeClient, BridgeClientError, BridgeConnectionError
 from agent_bridge.models import SessionStatus, StartSessionRequest
 from agent_bridge.protocol import HTTP_PROTOCOL_VERSION, HTTP_PROTOCOL_MIN_SUPPORTED
 from test_workspace_creation import creation_rig  # noqa: F401
@@ -146,6 +147,377 @@ async def test_keyed_creation_writer_retains_original_scope_and_strict_resume(wr
     assert fixture.selected.call_count == 1
     assert writers.current() is None
     assert dict(rig.db.execute_read("SELECT * FROM workspace_embodiments")[0]) == saved
+
+
+async def recovery_fixture(writer_creation, monkeypatch):
+    from agent_bridge import creation_writer_inspection as inspection
+    from agent_bridge.models import RetainedRecoveryRequest
+
+    fixture, rig = writer_creation, writer_creation.rig
+    session, _receipt = await workspace_creation.start(
+        rig.manager, rig.target, key="original-key", worktree_writer=fixture.requirement,
+    )
+    session.status, session.client = SessionStatus.STOPPED, None
+    rig.db.update_session_status(session.session_id, SessionStatus.STOPPED.value, time.time())
+    instance = {"installation_root": "original-bridge-owner", "pid": 42, "generation": 1}
+    monkeypatch.setattr(inspection, "_instance", lambda: dict(instance))
+    rig.manager._host_index = SimpleNamespace(locked_inventory=lambda: SimpleNamespace(
+        storage_complete=True, records=[],
+    ))
+    command = fixture.command
+
+    async def recovery_command(args, project, *, owner_prefix=None):
+        if args[0] == "embody":
+            return {
+                "ok": True, "dry_run": True, "native_admission_version": 1,
+                "worktree_id": session.target.worktree_id, "work_dir": session.target.cwd,
+                "resume_session": session.acp_session_id,
+            }
+        result = await command(args, project, owner_prefix=owner_prefix)
+        if args[0] == "resource-relationship":
+            result["retained_native_resume"] = 1
+        return result
+
+    monkeypatch.setattr(acquisition_authority, "worktree_command", recovery_command)
+    row = dict(rig.db.execute_read("SELECT * FROM workspace_embodiments")[0])
+    request = RetainedRecoveryRequest(
+        operation_id="original-recovery", journal_key=row["key_digest"],
+        native_session_id=session.acp_session_id, head_revision=1,
+        bridge_installation=instance["installation_root"],
+    )
+    return session, request, recovery_command
+
+
+@pytest.mark.asyncio
+async def test_retained_recovery_resumes_same_native_once_without_prompt_drain(writer_creation, monkeypatch):
+    from agent_bridge import retained_session_recovery as recovery
+
+    fixture, rig = writer_creation, writer_creation.rig
+    session, request, _command = await recovery_fixture(fixture, monkeypatch)
+    pending = rig.db.enqueue_prompt(session.session_id, "Original queued work", now=100)
+    drain = AsyncMock()
+    monkeypatch.setattr(rig.manager, "_drain_pending_prompts", drain)
+    connect = rig.manager._connect_via_session_host
+    admitted = []
+
+    async def launch(target, **kwargs):
+        guard = json.loads(target.env[recovery.ENVIRONMENT_KEY])
+        assert target.native_resume_id == session.acp_session_id == kwargs["load_session_id"]
+        assert guard["head"] == {"session_id": request.native_session_id, "revision": 1}
+        assert guard["writer"]["creation_nonce"] == fixture.requirement.creation_nonce
+        assert guard["operation_id"] == request.operation_id
+        admitted.append(guard)
+        return await connect(target, **kwargs)
+
+    monkeypatch.setattr(rig.manager, "_connect_via_session_host", launch)
+    resumed, result = await recovery.resume(
+        rig.manager, session.session_id, request, fixture.requirement, lambda: True,
+    )
+    assert resumed is session and result["state"] == "complete"
+    assert result["native_session_id"] == session.acp_session_id == request.native_session_id
+    assert result["bridge_session_id"] == session.session_id
+    assert session.background_recovery_enabled is False
+    assert not rig.db.execute_read("SELECT * FROM acquisition_launch_gates")
+    assert recovery.ENVIRONMENT_KEY not in session.target.env
+    drain.assert_not_called()
+    assert [row["id"] for row in rig.db.list_pending_prompts(session.session_id)] == [pending]
+    assert (await recovery.resume(
+        rig.manager, session.session_id, request, fixture.requirement, lambda: True,
+    ))[1] == result
+    assert len(admitted) == 1
+    assert fixture.selected.call_count == 1
+    assert not rig.db.execute_read("SELECT * FROM acquisition_attempts")
+
+
+@pytest.mark.asyncio
+async def test_ordinary_resume_preserves_completed_recovery_permission_hold(writer_creation, monkeypatch):
+    from agent_bridge import acp_client, retained_session_recovery as recovery, session_manager as core
+    from test_session_host import _assert_reattached_permission_waits
+
+    fixture, rig = writer_creation, writer_creation.rig
+    session, request, _command = await recovery_fixture(fixture, monkeypatch)
+    await recovery.resume(
+        rig.manager, session.session_id, request, fixture.requirement, lambda: True,
+    )
+    session.status, session.client = SessionStatus.STOPPED, None
+    rig.db.update_session_status(session.session_id, SessionStatus.STOPPED.value, time.time())
+    clients = []
+
+    def client_factory(**kwargs):
+        client = acp_client.AcpClient(**kwargs)
+        client.start = AsyncMock()
+        client.load_session = AsyncMock()
+        client.shutdown = AsyncMock()
+        clients.append(client)
+        return client
+
+    monkeypatch.setattr(core, "AcpClient", client_factory)
+    monkeypatch.setattr(rig.manager, "_resume_via_new_remote_host", AsyncMock(return_value=None))
+    resumed = await rig.manager.resume_session(
+        session.session_id, drain=False, worktree_writer=fixture.requirement,
+    )
+    assert resumed is session and len(clients) == 1
+    assert session.client is clients[0] and session.acp_session_id == request.native_session_id
+    clients[0].load_session.assert_awaited_once()
+    await _assert_reattached_permission_waits(clients[0], session.acp_session_id)
+
+
+@pytest.mark.asyncio
+async def test_uncertain_retained_recovery_never_relaunches_or_falls_back(writer_creation, monkeypatch):
+    from agent_bridge import retained_session_recovery as recovery
+
+    fixture, rig = writer_creation, writer_creation.rig
+    session, request, _command = await recovery_fixture(fixture, monkeypatch)
+    async def uncertain_connect(_target, **kwargs):
+        kwargs["recovery_operation"].begin_host()
+        raise TimeoutError("native load outcome unknown")
+
+    connect = AsyncMock(side_effect=uncertain_connect)
+    monkeypatch.setattr(rig.manager, "_connect_via_session_host", connect)
+    with pytest.raises(TimeoutError):
+        await recovery.resume(rig.manager, session.session_id, request, fixture.requirement, lambda: True)
+    result = recovery.inspect(rig.manager, session.session_id, request.operation_id)
+    assert result["state"] == "unknown"
+    gate = dict(rig.db.execute_read("SELECT * FROM acquisition_launch_gates")[0])
+    assert gate["mode"] == "cli" and gate["session_id"] == session.session_id
+    from agent_bridge.acquisition_gates import AcquisitionGateHeld, assert_resume_allowed
+    with pytest.raises(AcquisitionGateHeld):
+        assert_resume_allowed(rig.db, session)
+    assert (await recovery.resume(
+        rig.manager, session.session_id, request, fixture.requirement, lambda: True,
+    ))[1] == result
+    with pytest.raises(AcquisitionRefused, match="inspected without replay"):
+        await rig.manager.resume_session(session.session_id)
+    with pytest.raises(AcquisitionRefused, match="unresolved original"):
+        await recovery.resume(
+            rig.manager, session.session_id, request.model_copy(update={"operation_id": "replacement"}),
+            fixture.requirement, lambda: True,
+        )
+    connect.assert_awaited_once()
+    assert session.acp_session_id == request.native_session_id
+    assert len(rig.manager.list_sessions()) == 1
+
+
+@pytest.mark.asyncio
+async def test_retained_recovery_round_trips_through_actual_http_native_owner(writer_creation, monkeypatch):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from agent_bridge.routes import health, sessions
+    from agent_bridge import retained_session_recovery as recovery
+
+    fixture, rig = writer_creation, writer_creation.rig
+    session, request, _command = await recovery_fixture(fixture, monkeypatch)
+    request = request.model_copy(update={"operation_id": "original/recovery:one"})
+    app = FastAPI()
+    app.include_router(sessions.router)
+    app.include_router(health.router)
+    app.state.session_manager, app.state.ready = rig.manager, True
+    monkeypatch.setattr(health, "observe_worktree_writer", lambda: fixture.requirement.identity.model_dump())
+    monkeypatch.setattr(health, "slot_descriptor", lambda *_a, **_kw: {})
+    monkeypatch.setattr(health, "get_default_manager", lambda: SimpleNamespace(carrier_diagnostics=lambda: {}))
+    connect = rig.manager._connect_via_session_host
+    launches = []
+
+    async def launch(*args, **kwargs):
+        launches.append(kwargs["load_session_id"])
+        return await connect(*args, **kwargs)
+
+    monkeypatch.setattr(rig.manager, "_connect_via_session_host", launch)
+    with TestClient(app) as http:
+        client = BridgeClient("http://fixture", token="fixture", connect_grace=0)
+
+        def send(method, path, body=None, **_kwargs):
+            response = http.request(method, path, json=body)
+            if response.status_code >= 400:
+                raise BridgeClientError(response.status_code, response.json().get("detail"))
+            return response.json()
+
+        client._request = send
+        endpoint = f"/api/v1/sessions/{session.session_id}/resume"
+        invalid = {
+            "worktree_writer": fixture.requirement.model_dump(),
+            "retained_recovery": {**request.model_dump(), "head_revision": True},
+        }
+        assert http.post(endpoint, json=invalid).status_code == 422
+        assert not launches
+        result = client.resume_session(
+            session.session_id, worktree_writer=fixture.requirement.model_dump(),
+            retained_recovery=request.model_dump(),
+        )
+        assert result["retained_recovery"]["state"] == "complete"
+        assert client.inspect_retained_recovery(
+            session.session_id, request.operation_id,
+        ) == result["retained_recovery"]
+        replay = client.resume_session(
+            session.session_id, worktree_writer=fixture.requirement.model_dump(),
+            retained_recovery=request.model_dump(),
+        )
+        assert replay["retained_recovery"] == result["retained_recovery"]
+        assert launches == [request.native_session_id]
+        assert recovery.ENVIRONMENT_KEY not in session.target.env
+
+
+@pytest.mark.asyncio
+async def test_native_stop_race_retains_hold_and_records_no_native_entry(writer_creation, monkeypatch):
+    from agent_bridge import retained_session_recovery as recovery
+    from agent_bridge.cold_outages import ColdRecoveryStoppedError
+
+    fixture, rig = writer_creation, writer_creation.rig
+    session, request, command = await recovery_fixture(fixture, monkeypatch)
+
+    async def stop_during_preflight(args, project, **kwargs):
+        result = await command(args, project, **kwargs)
+        if args[0] == "embody":
+            rig.db.execute_write(
+                "UPDATE sessions SET cold_recovery_stop_token=? WHERE id=?",
+                ("newer-stop", session.session_id),
+            )
+        return result
+
+    monkeypatch.setattr(acquisition_authority, "worktree_command", stop_during_preflight)
+    connect = AsyncMock()
+    monkeypatch.setattr(rig.manager, "_connect_via_session_host", connect)
+    with pytest.raises(ColdRecoveryStoppedError):
+        await recovery.resume(
+            rig.manager, session.session_id, request, fixture.requirement, lambda: True,
+        )
+    connect.assert_not_called()
+    assert recovery.inspect(rig.manager, session.session_id, request.operation_id)["state"] == "not-started"
+    assert rig.db.get_session(session.session_id)["cold_recovery_stop_token"] == "newer-stop"
+    assert not rig.db.execute_read("SELECT * FROM acquisition_launch_gates")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("boundary", [
+    "host", "inventory", "native", "capability", "installation", "not-ready", "gate", "stop",
+])
+async def test_retained_recovery_denies_unconfirmed_native_owners_before_invocation(
+    writer_creation, monkeypatch, boundary,
+):
+    from agent_bridge import retained_session_recovery as recovery
+
+    fixture, rig = writer_creation, writer_creation.rig
+    session, request, command = await recovery_fixture(fixture, monkeypatch)
+    if boundary in {"host", "inventory"}:
+        rig.manager._host_index = SimpleNamespace(locked_inventory=lambda: SimpleNamespace(
+            storage_complete=boundary != "inventory", records=[SimpleNamespace(session_id=session.session_id)]
+            if boundary == "host" else [],
+        ), release_exited_local=lambda _record: False)
+    elif boundary == "native":
+        request = request.model_copy(update={"native_session_id": "another-native"})
+    elif boundary == "installation":
+        request = request.model_copy(update={"bridge_installation": "another-installation"})
+    elif boundary == "capability":
+        async def unsupported(*args, **kwargs):
+            result = await command(*args, **kwargs)
+            result.pop("retained_native_resume", None)
+            return result
+        monkeypatch.setattr(acquisition_authority, "worktree_command", unsupported)
+    elif boundary == "gate":
+        rig.db.execute_write(
+            "INSERT INTO acquisition_launch_gates VALUES (?,?,'cli',?,?,'another-owner')",
+            (session.target.worktree_id, "original-other-operation", session.session_id, session.acp_session_id),
+        )
+    elif boundary == "stop":
+        rig.db.execute_write(
+            "UPDATE sessions SET cold_recovery_stop_token=? WHERE id=?", ("operator-stop", session.session_id),
+        )
+    connect = AsyncMock()
+    monkeypatch.setattr(rig.manager, "_connect_via_session_host", connect)
+    with pytest.raises(AcquisitionRefused):
+        await recovery.resume(
+            rig.manager, session.session_id, request, fixture.requirement, lambda: boundary != "not-ready",
+        )
+    connect.assert_not_called()
+    row = dict(rig.db.execute_read("SELECT * FROM workspace_embodiments")[0])
+    if boundary == "native":
+        assert row["creation_recoveries_json"] is None
+    else:
+        assert recovery.inspect(rig.manager, session.session_id, request.operation_id)["state"] == "not-started"
+    if boundary == "gate":
+        assert rig.db.execute_read("SELECT delivery_id FROM acquisition_launch_gates")[0][0] == (
+            "original-other-operation"
+        )
+    if boundary == "stop":
+        assert rig.db.get_session(session.session_id)["cold_recovery_stop_token"] == "operator-stop"
+
+
+@pytest.mark.parametrize("supported,outcome", [
+    (True, "complete"), (False, None), (True, "unknown"), (True, "not-started"),
+    (True, "daemon-lost"),
+])
+def test_retained_recovery_cli_negotiates_and_never_replays_native_request(
+    monkeypatch, capsys, supported, outcome,
+):
+    import io
+    import sys
+    from agent_bridge import __main__ as core, hosting_admission_cli
+    from agent_bridge import retained_session_recovery as recovery
+
+    body = {
+        "worktree_writer": {
+            "version": 1, "identity": {
+                "installation_root": "/retained-owner", "runtime_generation": "a" * 32,
+            }, "creation_nonce": "retained-nonce",
+        },
+        "retained_recovery": {
+            "version": 1, "operation_id": "original-operation", "journal_key": "a" * 64,
+            "native_session_id": "original-native", "head_revision": 7,
+            "bridge_installation": "/original-bridge",
+        },
+    }
+    args = core.build_parser().parse_args([
+        "--json", "resume", "original-bridge", "--strict", "--retained-recovery-file", "-",
+    ])
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(body)))
+    client = BridgeClient("http://fixture", token="fixture", connect_grace=0)
+    posts = []
+
+    def request(method, path, *values, **kwargs):
+        if path == "/health":
+            return {
+                "protocol_version": HTTP_PROTOCOL_VERSION, "min_protocol_version": 1,
+                "capabilities": {
+                    creation.RESUME_CAPABILITY: 1, **({recovery.CAPABILITY: 1} if supported else {}),
+                },
+            }
+        assert method == "POST" and path == "/api/v1/sessions/original-bridge/resume"
+        assert kwargs["allow_retry"] is False
+        posts.append(values[0])
+        if outcome == "daemon-lost":
+            raise BridgeConnectionError("qualified fixture daemon exited")
+        return {
+            "session_id": "original-bridge", "acp_session_id": "original-native",
+            "durable_session_id": "original-native", "status": "idle",
+            "retained_recovery": {"operation_id": "original-operation", "state": outcome},
+        }
+
+    monkeypatch.setattr(client, "_request", request)
+    original_get_client = core._get_client
+    ensure = MagicMock(side_effect=AssertionError("retained recovery must not start a daemon"))
+    monkeypatch.setattr(core, "_ensure_daemon", ensure)
+    monkeypatch.setattr(BridgeClient, "from_config", lambda: client)
+    get_client = MagicMock(wraps=original_get_client)
+    monkeypatch.setattr(core, "_get_client", get_client)
+    monkeypatch.setattr(core, "_startup_request_timeout", lambda **_: 30)
+    monkeypatch.setattr(hosting_admission_cli, "configure_client", lambda *_: None)
+    if outcome == "daemon-lost":
+        with pytest.raises(BridgeConnectionError, match="fixture daemon exited"):
+            args.func(args)
+        assert posts == [body]
+    elif supported:
+        args.func(args)
+        assert posts == [body]
+        result = json.loads(capsys.readouterr().out)
+        assert result["retained_recovery"]["state"] == outcome
+        assert result["verb"] == ("resumed" if outcome == "complete" else "recovery-inspected")
+    else:
+        with pytest.raises(SystemExit) as refused:
+            args.func(args)
+        assert refused.value.code == 1
+        assert not posts
+    get_client.assert_called_once_with(ensure=False)
+    ensure.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -586,6 +958,31 @@ def test_required_creation_writer_round_trips_through_actual_http_owner(
         assert not rig.db.execute_read("SELECT * FROM acquisition_attempts")
     assert activations == [False]
     assert len(fixture.starts) == 1
+
+
+@pytest.mark.asyncio
+async def test_terminal_creation_writer_remains_inspectable_without_reopening(writer_creation, monkeypatch):
+    from agent_bridge import creation_writer_inspection as inspection
+
+    fixture = writer_creation
+    rig = fixture.rig
+    session, _receipt = await workspace_creation.start(
+        rig.manager, rig.target, key="original-key", worktree_writer=fixture.requirement,
+    )
+    await rig.manager.stop_session(session.session_id, force=True)
+    rig.db.execute_write("UPDATE workspace_embodiments SET state='terminal'")
+    original = dict(rig.db.execute_read("SELECT * FROM workspace_embodiments")[0])
+    monkeypatch.setattr(inspection, "_instance", lambda: {
+        "installation_root": "/bridge", "pid": 42, "generation": 1,
+    })
+    fixture.selected.side_effect = AssertionError("terminal inspection cannot select another writer")
+    observed = await inspection.inspect_writer(rig.manager, session, lambda: True)
+    assert observed["native_session_id"] == session.acp_session_id
+    assert observed["worktree_writer"] == fixture.requirement.model_dump()
+    assert dict(rig.db.execute_read("SELECT * FROM workspace_embodiments")[0]) == original
+    assert session.status == SessionStatus.STOPPED
+    assert len(fixture.starts) == 1
+    assert writers.current() is None
 
 
 @pytest.mark.asyncio

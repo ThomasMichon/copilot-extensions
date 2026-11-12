@@ -1,20 +1,16 @@
 {
-  "evidence_family": "http52-unchanged-source-link-v1",
-  "preserved_from": {
-    "path": "plugins/agent-bridge/contract/fixtures/http/current/http51-source-cold_outages-py-4c492c9d1b8f.json",
-    "sha256": "6fadb293119bc17e537d548ae6810277d558d6b4023b2f2ef17f559ba7dfb413"
-  },
-  "advertisement_evidence": {
+  "evidence_family": "http52-shared-asgi-v1",
+  "shared_operation_evidence": {
     "path": "plugins/agent-bridge/contract/fixtures/http/current/http52-owner-membership.json",
-    "sha256": "9bcceeac4211ee61a1c70287219ab83439e74a7605efdccff527332ef272afe6"
+    "sha256": "e665bef05a2fcc4ef2b7d90859209aa029467643b72c2db21e7454c916ec73e9"
   },
-  "scope": "unchanged source and immutable prior operation; no new runtime observation",
+  "scope": "shared named ASGI portfolio, not an independent capture",
   "captured_from": {
-    "commit": "f46b7d7a045c92a4868f81265a809064b1ff4a99",
+    "commit": "9eab001f71535daae4d9259cb9b06831318b0358",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 52,
     "source_path": "plugins/agent-bridge/src/agent_bridge/cold_outages.py",
-    "source_git_blob": "83ab44cca1230f3cc77fca2106e893d1fdbd37ae",
-    "source_sha256": "9cf42bbe2618caf8cb4113ac5f1778db38532d13e823d7ce228176f20da73f12"
+    "source_git_blob": "1a75840dc23c2287b802d4693ae8e5552600d6d6",
+    "source_sha256": "a8f6d377b49404a3a3f47eff38c0c455b748ebdba05ca4356a8b3923d53afdec"
   }
 }

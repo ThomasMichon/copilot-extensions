@@ -31,4 +31,8 @@ def assert_resume_allowed(db: Any, session: Any) -> None:
         )
     )
     if not allowed:
+        from .retained_session_recovery import permits_gate
+
+        allowed = permits_gate(db, session, gate)
+    if not allowed:
         raise AcquisitionGateHeld("another acquisition holds this worktree launch fence")

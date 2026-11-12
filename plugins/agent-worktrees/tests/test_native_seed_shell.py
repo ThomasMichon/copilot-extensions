@@ -61,6 +61,7 @@ def test_native_runtime_selection_preserves_the_application_environment(tmp_path
 def _run(
     tmp_path, *, child_exit=7, missing=False, uncertain=False, absent_end=False,
     stdin=None, child_stderr="", location=None, failed_sink=None,
+    native_resume=False,
 ):
     observed = tmp_path / "observed.jsonl"
     payload = tmp_path / "prepared.json"
@@ -73,6 +74,7 @@ def _run(
         + (f"sys.{failed_sink}.write('x' * (2 * 1024 * 1024))\n" if failed_sink else "")
         +
         "print(json.dumps(sys.argv[1:],ensure_ascii=False))\n"
+        + ("print(json.dumps('AGENT_WORKTREES_RETAINED_NATIVE_RESUME' in os.environ))\n" if native_resume else "")
         + ("print(json.dumps(sys.stdin.read(),ensure_ascii=False))\n" if stdin is not None else "")
         + ("print(json.dumps(os.getcwd()))\n" if location is not None else "")
         + f"sys.stderr.write({child_stderr!r})\n"
@@ -90,6 +92,30 @@ def _run(
         "attempt_id": "a" * 32, "resolution_id": "b" * 32,
         "operation_id": "c" * 32, "parent_id": None,
     }), encoding="utf-8")
+    probe = tmp_path / "head-writer.py"
+    if native_resume:
+        probe.write_text(
+            "import sys\nfrom pathlib import Path\nfrom agent_worktrees import tracking\n"
+            "try:\n"
+            " with tracking._RecordLock(Path(sys.argv[1]), timeout=0, require_sidecar=True): pass\n"
+            "except TimeoutError: sys.exit(7)\n",
+            encoding="utf-8",
+        )
+    probe_check = (
+        f"    $probe = [Diagnostics.ProcessStartInfo]::new({_literal(Path(sys.executable))})\n"
+        "    $probe.UseShellExecute=$false; $probe.CreateNoWindow=$true\n"
+        "    $probe.RedirectStandardOutput=$true; $probe.RedirectStandardError=$true\n"
+        f"    foreach ($arg in @('-I',{_literal(probe)},{_literal(tmp_path / 'wt-a.yaml')})) "
+        "{ $probe.ArgumentList.Add($arg) }\n"
+        "    $writer=[Diagnostics.Process]::Start($probe)\n"
+        "    $out=$writer.StandardOutput.ReadToEndAsync(); $err=$writer.StandardError.ReadToEndAsync()\n"
+        "    try {\n"
+        "      if (-not $writer.WaitForExit(10000)) { $writer.Kill($true); throw 'head probe timed out' }\n"
+        "      [Threading.Tasks.Task]::WaitAll([Threading.Tasks.Task[]]@($out,$err))\n"
+        "      $expected=if ($phase -eq 'admit') { 7 } else { 0 }\n"
+        "      if ($writer.ExitCode -ne $expected) { throw ('head-writer fence mismatch: '+$err.Result) }\n"
+        "    } finally { $writer.Dispose() }\n"
+    ) if native_resume else ""
     driver = tmp_path / "driver.ps1"
     driver.write_text(
         f". {_literal(SCRIPT)}\n"
@@ -100,6 +126,8 @@ def _run(
         f"  [IO.File]::AppendAllText({_literal(observed)}, "
         "((ConvertTo-Json -InputObject @($Arguments) -Compress) + \"`n\"))\n"
         f"  if ($phase -eq 'prepare') {{ return (Get-Content -Raw {_literal(payload)} | ConvertFrom-Json) }}\n"
+        + ("  if ($phase -eq 'admit' -or $phase -eq 'spawned') {\n" + probe_check + "  }\n" if native_resume else "")
+        +
         "  if ($phase -eq 'spawned') {\n"
         "    $childPid = [int]$Arguments[3]\n"
         "    $birth = [Diagnostics.Process]::GetProcessById($childPid).StartTime.ToUniversalTime().ToFileTimeUtc()\n"
@@ -112,9 +140,12 @@ def _run(
         "}\n"
         + (f"Set-Location -LiteralPath {_literal(location)}\n" if location is not None else "")
         + f"[Environment]::CurrentDirectory = {_literal(origin)}\n"
+        + ("$env:AGENT_WORKTREES_RETAINED_NATIVE_RESUME='fixture-original-owner'\n" if native_resume else "")
         +
         f"$code = Invoke-AwNativeSeedBackend -Root {_literal(tmp_path)} "
-        f"-Record {_literal(tmp_path / 'wt-a.yaml')} -SeedId fixture -Command @('copilot')\n"
+        f"-Record {_literal(tmp_path / 'wt-a.yaml')} "
+        + ("-AdmissionOnly -NativeResumeSession native-original " if native_resume else "-SeedId fixture ")
+        + "-Command @('copilot')\n"
         "exit $code\n",
         encoding="utf-8",
     )
@@ -157,6 +188,15 @@ def test_native_backend_preserves_literal_argv_actual_identity_and_exit(tmp_path
     assert [event[1] for event in events] == ["prepare", "spawned", "returned"]
     assert events[-1][events[-1].index("--exit-code") + 1] == "7"
     assert "--receipt-uncertain" not in events[-1]
+
+
+def test_native_resume_fences_actual_powershell_creation_and_consumes_marker(tmp_path):
+    result, events, argv = _run(tmp_path, native_resume=True)
+    assert result.returncode == 7, result.stderr
+    lines = result.stdout.splitlines()
+    assert json.loads(lines[0]) == argv
+    assert json.loads(lines[1]) is False
+    assert [event[1] for event in events] == ["prepare", "admit", "spawned", "returned"]
 
 
 def test_native_definite_os_spawn_failure_is_the_only_restore_callback(tmp_path):
@@ -298,7 +338,17 @@ def test_headed_original_shell_owns_admission_and_distinct_native_receipt(tmp_pa
         f"    Path({str(tmp_path / 'refusal.txt')!r}).write_text(str(exc),encoding='utf-8')\n"
         "    raise SystemExit(19)\n"
         "finally:\n    client.close()\n"
-        f"child=subprocess.Popen([sys.executable,'-I','-c',{child_code!r}],**no_window_kwargs())\n"
+        + (
+            "import msvcrt\n"
+            f"descriptor=os.open({str(tmp_path / 'record.lock')!r},os.O_RDWR)\n"
+            "try:\n"
+            "    try: msvcrt.locking(descriptor,msvcrt.LK_NBLCK,1)\n"
+            "    except OSError: pass\n"
+            "    else: raise AssertionError('head-writer fence released before native child creation')\n"
+            "finally: os.close(descriptor)\n"
+            if setup else ""
+        )
+        + f"child=subprocess.Popen([sys.executable,'-I','-c',{child_code!r}],**no_window_kwargs())\n"
         + (
             "" if fault == "receipt" else
             "value={'version':2,'mode':'headed','process_receipt':PROCESS_RECEIPT,'state':'native_starting',"
@@ -393,7 +443,7 @@ def test_headed_original_shell_owns_admission_and_distinct_native_receipt(tmp_pa
         assert prepare[prepare.index("--launch-parent-id") + 1] == "c" * 32
     phases = [event[1] for event in events if event[0] == "--phase"]
     assert phases.count("prepare") == 1
-    assert phases.count("admit") == (0 if fault in {"argv", "duplicate"} else 1)
+    assert phases.count("admit") == (0 if fault in {"argv", "duplicate"} else 2 if setup else 1)
     if setup:
         for event in [prepare, *(event for event in events if event[:2] == ["--phase", "admit"])]:
             assert "--admission-only" in event

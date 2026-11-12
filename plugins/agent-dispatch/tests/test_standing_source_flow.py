@@ -75,6 +75,22 @@ def test_committed_source_enrolls_and_retires_but_dirty_or_rewritten_source_cann
         before = queue.get(task_id)
         assert before.standing_charter["lifecycle"] == "active"
         assert queue.standing_source_observation(REPO, NAMESPACE) == first_revision
+        assert before.status == "queued"
+        assert before.owner is None and before.owner_session_id is None
+        assert before.requires == ["standing-charter:explicit-attachment"]
+        with queue._connect() as conn:
+            assert conn.execute(
+                "SELECT COUNT(*) FROM task_pool_assignments WHERE task_id=?", (task_id,),
+            ).fetchone()[0] == 0
+            assert conn.execute(
+                "SELECT COUNT(*) FROM spawn_reservations WHERE task_id=?", (task_id,),
+            ).fetchone()[0] == 0
+        finite = queue.create("Finite emitted child", repo=REPO, standing_parent_id=task_id)
+        claimed = queue.claim_one("fixture-worker", repo=REPO)
+        assert claimed.id == finite.id
+        queue.start(finite.id, "fixture-worker")
+        assert queue.complete(finite.id, "fixture-worker").status == "completed"
+        assert queue.get(task_id) == before
 
         daemon._desired()
         assert writes[-1]["unchanged"] == [task_id]

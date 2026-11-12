@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ..local_launch_owner import LocalLaunchOwner
+    from ..retained_session_recovery import RetainedRecovery
     from .spawner import SpawnedHost
 
 
@@ -27,6 +28,7 @@ class LocalSpawner:
         self, child_argv: list[str], *, cwd: str | None = None,
         env: dict[str, str] | None = None, session_id: str = "",
         acquisition_launch: LocalLaunchOwner | None = None,
+        recovery_operation: RetainedRecovery | None = None,
     ) -> SpawnedHost:
         from .. import __version__
         from . import spawner as core
@@ -40,6 +42,7 @@ class LocalSpawner:
                 unexpected_reap_seconds=self._unexpected_reap_seconds,
                 active_reap_seconds=self._active_reap_seconds,
                 **({"acquisition_launch": acquisition_launch} if acquisition_launch is not None else {}),
+                **({"retained_recovery": recovery_operation} if recovery_operation is not None else {}),
             )
             spawned = core.SpawnedHost(
                 local_port=handle.port, host_pid=handle.host_pid, child_pid=handle.child_pid,
@@ -48,6 +51,8 @@ class LocalSpawner:
             )
             if acquisition_launch is not None:
                 acquisition_launch.retain_host(spawned)
+            if recovery_operation is not None:
+                recovery_operation.retain_host(spawned)
             return spawned
 
         return await asyncio.to_thread(launch)

@@ -101,7 +101,11 @@ def test_native_recipe_refuses_another_consumers_action(adapter, tmp_path, plugi
     ("agent-index", "AGENT_INDEX_ENGINE_HOME"),
 ])
 def test_remaining_native_recipes_preserve_exact_options_and_context(adapter, tmp_path, monkeypatch, plugin, root_key):
-    options = sorted(adapter.RECIPES[plugin] - {"Repair", "Serve"})
+    source_options = set(adapter.RECIPES[plugin]) & {"Repair", "Serve"}
+    for option in source_options:
+        with pytest.raises(ValueError, match="explicit installation source"):
+            adapter.native_arguments(arguments(tmp_path, plugin=plugin, options=[option]))
+    options = sorted(set(adapter.RECIPES[plugin]) - source_options)
     args = arguments(tmp_path, plugin=plugin, options=options)
     monkeypatch.setenv(root_key, str(tmp_path / "consumer"))
     queued = []
@@ -476,23 +480,25 @@ def test_copied_no_install_shell_uses_the_real_default_executor(adapter, tmp_pat
             shutil.copyfile(source, scripts / source.name)
     for name in ("versioned_runtime_native.ps1", "installer-human-output.ps1"):
         shutil.copyfile(SCRIPTS / name, scripts / name)
+    source_scripts = REPO / "plugins" / plugin / "scripts"
+    for name in ("runtime-activation.ps1", "runtime-activation.py"):
+        activation = source_scripts / name
+        if activation.is_file():
+            shutil.copyfile(activation, scripts / activation.name)
     if plugin == "agent-vault":
-        source_scripts = REPO / "plugins" / plugin / "scripts"
-        for name in ("runtime-activation.ps1", "runtime-activation.py"):
-            shutil.copyfile(source_scripts / name, scripts / name)
-        shutil.copytree(source_scripts.parent / "src", minimal / "src")
         shutil.copytree(
-            REPO / "libs" / "configuration-layers" / "src",
-            scripts / "configuration-layers" / "src",
+            source_scripts.parent / "src", minimal / "src",
+            ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
         )
-        configuration = profile / "vault-config.json"
-        configuration.write_text('{"enabled":true}\n', encoding="utf-8")
-        monkeypatch.setenv("AGENT_VAULT_CONFIG", str(configuration))
+        for name in ("configuration-layers", "installation-context"):
+            shutil.copytree(source_scripts / name, scripts / name)
+        config = profile / "fixture-vault.json"
+        config.write_text('{"enabled":true}', encoding="utf-8")
+        monkeypatch.setenv("AGENT_VAULT_CONFIG", str(config))
     if plugin == "agent-dispatch":
-        source = REPO / "plugins" / plugin / "src" / "agent_dispatch" / "windows-scheduling.ps1"
-        destination = minimal / "src" / "agent_dispatch" / source.name
-        destination.parent.mkdir(parents=True)
-        shutil.copyfile(source, destination)
+        scheduling = minimal / "src" / "agent_dispatch" / "windows-scheduling.ps1"
+        scheduling.parent.mkdir(parents=True)
+        shutil.copyfile(source_scripts.parent / "src" / "agent_dispatch" / scheduling.name, scheduling)
     if plugin == "agent-pull-requests":
         source_scripts = REPO / "plugins" / plugin / "scripts"
         shutil.copyfile(source_scripts / "payload-mode.ps1", scripts / "payload-mode.ps1")

@@ -369,6 +369,7 @@
       "t:clean-room/scenarios/plugin-process-hygiene-convergence/fixtures/plugin_process_hygiene_convergence.py::_spawn::Popen": 1
     },
     "caller-contained": {
+      "t:run-manager-runtime-acceptance.py::_runtime_group::Popen": 1,
       "cd:headed/auth_wait.py::AuthWaitReceiver.serve::start_server": 1,
       "v:authenticated_curl.py::execute::create_subprocess_exec": 1,
       "r:plugins/agent-index/scripts/historical_registration_owner.py::NativeTaskOwner.__enter__::Popen": 1,

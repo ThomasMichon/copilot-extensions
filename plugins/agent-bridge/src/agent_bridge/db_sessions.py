@@ -6,10 +6,29 @@ from typing import Any
 import uuid
 
 from .runtime_custody import RuntimeAdmission, admission_document
+from .creation_writer_schema import RETAINED_RECOVERY_HELD
 
 
 class _SessionsMixin:
     """Bridge-owned session lifecycle helpers."""
+
+    def retained_recovery_held(self, session_id: str) -> bool:
+        return bool(self.execute_read(
+            "SELECT 1 FROM sessions WHERE id=? AND "
+            f"({self._retained_recovery_held_predicate()})", (session_id,),
+        ))
+
+    def _retained_recovery_held_predicate(self, conn=None) -> str:
+        conn = self._get_conn() if conn is None else conn
+        if conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='acquisition_launch_gates'"
+        ).fetchone() is None:
+            return RETAINED_RECOVERY_HELD
+        return (
+            "sessions.id IN (SELECT session_id FROM acquisition_launch_gates "
+            "WHERE driver='retained-recovery' AND session_id IS NOT NULL) OR "
+            + RETAINED_RECOVERY_HELD
+        )
 
     def create_session(
         self,
@@ -205,8 +224,10 @@ class _SessionsMixin:
             conn = self._get_conn()
             conn.execute("BEGIN IMMEDIATE")
             try:
+                recovery_held = self._retained_recovery_held_predicate(conn)
                 if conn.execute(
-                    "SELECT 1 FROM sessions WHERE id=? AND runtime_custody_json IS NOT NULL "
+                    "SELECT 1 FROM sessions WHERE id=? AND "
+                    f"(runtime_custody_json IS NOT NULL OR ({recovery_held})) "
                     "UNION ALL SELECT 1 FROM turns WHERE session_id=? "
                     "AND runtime_custody_json IS NOT NULL",
                     (session_id, session_id),
