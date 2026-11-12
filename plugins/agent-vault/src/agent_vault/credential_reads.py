@@ -40,7 +40,7 @@ def read_credential(args) -> CredentialRead:
     cache = get_cache()
     pinned = config.PINNED_CONTEXT_ENV in os.environ
     strict_cache = getattr(args, "strict_cache", False)
-    readonly_cache = pinned or strict_cache
+    readonly_cache = pinned or strict_cache or cache_only
 
     if cache.enabled and (not refresh or strict_cache):
         try:

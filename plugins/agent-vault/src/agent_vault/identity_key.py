@@ -159,7 +159,6 @@ def command(args) -> int:
         cache = get_cache(metadata["env"]["AGENT_VAULT_CACHE_DIR"])
         if not cache.enabled:
             raise IdentityKeyError("cache_unavailable", "Enable a usable protected cache before setup (AGENT_VAULT_CACHE=1).")
-        cache._read_store(readonly=True, strict=True)
         stage = "service"
         if getattr(args, "require_running", False):
             running = cli.send_command(
@@ -172,32 +171,50 @@ def command(args) -> int:
                 )
         elif not cli.ensure_service():
             raise IdentityKeyError("service_unavailable", "Could not start configured vault service; check its installation.")
+        response = cli.send_command({
+            "action": "identity-key-setup",
+            "entry": entry,
+            "kpdb": metadata["env"]["KPDB"],
+            "group": "",
+            "initialize_owner": args.initialize_owner,
+            "confirm_first_owner": args.confirm_first_owner,
+            "allow_prompt": args.prompt,
+        }, timeout=120.0 if args.prompt else 90.0, strict_endpoint=True)
+        if not response or not response.get("ok"):
+            code = response.get("code", "service_unavailable") if response else "service_unavailable"
+            if not isinstance(code, str) or code not in SERVICE_FAILURE_HINTS:
+                code = "service_unavailable"
+            raise IdentityKeyError(code, SERVICE_FAILURE_HINTS[code])
+        value = validate_key(response.get("value", ""))
+        if response.get("status") not in ("created", "reused"):
+            raise IdentityKeyError("invalid_response", "Vault returned an invalid provisioning status; retry with the owning runtime.")
+        stage = "context"
+        if source_context() != metadata:
+            raise IdentityKeyError("context_invalid", "Selected Vault changed; retain the owner entry and retry selection.")
         stage = "cache_update"
+        cache.prepare()
         with cache.replacement_lock():
-            stage = "service"
-            response = cli.send_command({
-                "action": "identity-key-setup",
-                "entry": entry,
-                "kpdb": metadata["env"]["KPDB"],
-                "group": "",
-                "initialize_owner": args.initialize_owner,
-                "confirm_first_owner": args.confirm_first_owner,
+            # Preparation may span a password transaction. Never reconcile its
+            # newer journal with the value obtained before taking this lock.
+            confirmed = cli.send_command({
+                "action": "get", "entry": entry, "field": "password",
+                "kpdb": metadata["env"]["KPDB"], "group": "", "refresh": True,
                 "allow_prompt": args.prompt,
             }, timeout=120.0 if args.prompt else 90.0, strict_endpoint=True)
-            if not response or not response.get("ok"):
-                code = response.get("code", "service_unavailable") if response else "service_unavailable"
-                if not isinstance(code, str) or code not in SERVICE_FAILURE_HINTS:
-                    code = "service_unavailable"
-                raise IdentityKeyError(code, SERVICE_FAILURE_HINTS[code])
-            value = validate_key(response.get("value", ""))
-            if response.get("status") not in ("created", "reused"):
-                raise IdentityKeyError("invalid_response", "Vault returned an invalid provisioning status; retry with the owning runtime.")
-            stage = "cache_update"
-            if not cache.reconcile_authoritative(entry, "password", value, response.get("generation")):
+            if not confirmed or confirmed.get("ok") is not True:
+                raise IdentityKeyError(
+                    "cache_update_failed",
+                    "Owner entry preserved, but its current value could not be confirmed; retry setup.",
+                )
+            value = validate_key(confirmed.get("value", ""))
+            update = cache.recover_missing if cache._recovery else cache.reconcile_authoritative
+            if not update(entry, "password", value, confirmed.get("generation")):
                 raise IdentityKeyError("cache_update_failed", "Owner entry preserved, but protected cache update failed; repair cache and retry.")
             if cache.get(entry, "password", readonly=True) != value:
                 raise IdentityKeyError("cache_update_failed", "Protected cache verification failed; repair cache and retry.")
         payload.update(status=response["status"], cached=True)
+        if cache._recovery:
+            payload["cache_recovery"] = "required"
         succeeded = True
     except IdentityKeyError as exc:
         payload.update(error=exc.code, message=str(exc))
