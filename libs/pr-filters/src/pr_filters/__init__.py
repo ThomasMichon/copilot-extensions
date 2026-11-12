@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from collections.abc import Iterator, Mapping
 import hashlib
 import json
 import math
 import re
-from typing import Any, Mapping
+from typing import Any
 
 PROTOCOL = "agent-pull-requests.filters/v1"
 FIELDS = frozenset({"repo", "from", "assigned", "age", "tags", "publication"})
@@ -121,7 +122,7 @@ def _node(value: object, depth: int, count: list[int], fields: set[str]) -> dict
     return result
 
 
-def _walk(node: Mapping[str, Any]):
+def _walk(node: Mapping[str, Any]) -> Iterator[Mapping[str, Any]]:
     if "all" in node or "any" in node:
         for child in next(iter(node.values())):
             yield from _walk(child)
@@ -152,19 +153,21 @@ class Expression:
         try:
             if len(raw.encode("utf-8") if isinstance(raw, str) else raw) > MAX_BYTES:
                 raise FilterError("filter byte limit")
-            return cls.parse(json.loads(raw, object_pairs_hook=_unique, parse_constant=_constant))
+            text = raw.decode("utf-8") if isinstance(raw, bytes) else raw
+            return cls.parse(json.loads(text, object_pairs_hook=_unique, parse_constant=_constant))
         except (ValueError, TypeError, UnicodeError, RecursionError) as exc:
             raise FilterError("invalid bounded filter JSON") from exc
 
     def document(self) -> dict[str, Any]:
-        return json.loads(self.canonical)
+        value: dict[str, Any] = json.loads(self.canonical)
+        return value
 
     @property
     def revision(self) -> str:
         return hashlib.sha256(self.canonical.encode("utf-8")).hexdigest()
 
     def require(self, capabilities: Mapping[str, Any], repositories: set[str]) -> None:
-        if not isinstance(capabilities, dict) or capabilities.get("protocol") != PROTOCOL or any(
+        if not isinstance(capabilities, Mapping) or capabilities.get("protocol") != PROTOCOL or any(
             not isinstance(capabilities.get(name, []), list)
             or any(not isinstance(item, str) for item in capabilities.get(name, []))
             for name in ("fields", "groups", "age_fields")
@@ -198,14 +201,17 @@ def _combine(results: list[str], operator: str) -> str:
     return decisive if decisive in results else UNKNOWN if UNKNOWN in results else neutral
 
 
-def _identity(selected, actual, groups):
+def _identity(
+    selected: Mapping[str, Any], actual: object,
+    groups: Mapping[str, Mapping[str, Any]],
+) -> str:
     if not isinstance(actual, list) or any(not isinstance(item, str) for item in actual):
         return UNKNOWN
     users = set(selected.get("users", []))
     incomplete = False
     for group in selected.get("groups", []):
         evidence = groups.get(group)
-        if not isinstance(evidence, dict) or not isinstance(evidence.get("members"), list) or any(
+        if not isinstance(evidence, Mapping) or not isinstance(evidence.get("members"), list) or any(
             not isinstance(item, str) for item in evidence["members"]
         ):
             incomplete = True
@@ -215,7 +221,10 @@ def _identity(selected, actual, groups):
     return MATCH if users.intersection(actual) else UNKNOWN if incomplete else NONMATCH
 
 
-def _evaluate(node, facts, now, groups):
+def _evaluate(
+    node: Mapping[str, Any], facts: Mapping[str, Any], now: float,
+    groups: Mapping[str, Mapping[str, Any]],
+) -> str:
     for operator in ("all", "any"):
         if operator in node:
             return _combine([_evaluate(child, facts, now, groups) for child in node[operator]], operator)
@@ -261,7 +270,7 @@ class Definitions:
             or len(value["sets"]) > MAX_VALUES
         ):
             raise FilterError("invalid filter definitions")
-        entries = []
+        entries: list[tuple[str, Expression]] = []
         for name, expression in value["sets"].items():
             if not isinstance(name, str) or not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,63}", name):
                 raise FilterError("invalid filter-set name")
