@@ -117,6 +117,7 @@ class QueueRelevanceMixin:
     def relevance_snapshot(
         self, task_id: str, *, registration: RelevanceRegistration | None = None,
         disabled_ids: frozenset[str] = frozenset(),
+        registration_admission: Callable[[sqlite3.Connection, dict], None] | None = None,
     ) -> dict:
         """One queue snapshot for a source check; this is not source evidence."""
         with self._connect() as conn:
@@ -127,6 +128,7 @@ class QueueRelevanceMixin:
             if registration is not None:
                 resolve_registration(
                     conn, task, registration, disabled_ids=disabled_ids, require_revision=False,
+                    admission=registration_admission,
                 )
             closeout = closeout_request(conn, task_id)
             return {
@@ -147,6 +149,7 @@ class QueueRelevanceMixin:
         reason: str, observation_ref: str, reporter: str, now: float | None = None,
         disabled_ids: frozenset[str] = frozenset(),
         on_transition: Callable[[CompletionOutcome], None] | None = None,
+        registration_admission: Callable[[sqlite3.Connection, dict], None] | None = None,
     ) -> dict:
         """Accept a source judgment and ownership decision in one write.
 
@@ -196,6 +199,7 @@ class QueueRelevanceMixin:
             if isinstance(scope, RelevanceRegistration):
                 scope = RelevanceScope(*resolve_registration(
                     conn, task, scope, disabled_ids=disabled_ids, require_revision=True,
+                    admission=registration_admission,
                 ))
             if task.kind != "finite" or (task.repo, task.source, task.origin_ref) != (
                 scope.repo, scope.source, scope.origin_ref,

@@ -11,10 +11,11 @@ from fastapi.testclient import TestClient
 from agent_dispatch.client import DispatchClient, DispatchError, DispatchUpgradeRequired
 from agent_dispatch.coordinator import create_app
 from agent_dispatch.overrides import logical_override_id, set_override
+from agent_dispatch.pool_source_snapshot import DeclarationRead
 from agent_dispatch.queue import Status
 from agent_dispatch.task_scope import TASK_SCOPE_HEADER, mint_task_scope_token
 from tests.test_pool_catalog_transport import _headers
-from tests.test_task_relevance_registration import emitted, emitter, q as q, report
+from tests.test_task_relevance_registration import SPEC, emitted, emitter, q as q, report
 
 
 @pytest.fixture
@@ -22,6 +23,10 @@ def api(q, tmp_path, monkeypatch) -> TestClient:
     monkeypatch.setattr("agent_dispatch.remote_dispatch.local_machine", lambda: "host-a")
     monkeypatch.setenv("AGENT_DISPATCH_ENV", "default")
     monkeypatch.setenv("AGENT_DISPATCH_OVERRIDES", str(tmp_path / "overrides.json"))
+    monkeypatch.setattr(
+        "agent_dispatch.relevance_source.read_supervisor_declarations",
+        lambda *_args, **_kwargs: DeclarationRead((), True),
+    )
     return TestClient(create_app(
         q, token="data", control_token="control", enable_mcp=False,
         verification_interval=0,
@@ -200,7 +205,7 @@ def test_lost_report_response_recovers_original_receipt_without_another_effect(q
         "http://testserver", token="data", control_token="control",
         transport=httpx.MockTransport(lose_response),
     ) as client:
-        values = body(q, t.id)
+        values = {**body(q, t.id), "request_id": "object/closed-2"}
         with pytest.raises(httpx.ReadTimeout):
             client.report_task_relevance(t.id, report=values)
         q.remove_registration("source-a")
@@ -226,17 +231,70 @@ def test_unreadable_policy_is_not_treated_as_no_overrides(q, api) -> None:
 def test_fresh_abandon_emits_existing_lifecycle_once_not_on_report_replay(q, api, monkeypatch) -> None:
     emitter(q)
     t = emitted(q)
-    events, releases = [], []
+    events, releases, telemetry = [], [], []
     monkeypatch.setattr(api.app.state.bus, "publish", events.append)
     monkeypatch.setattr(
         "agent_dispatch.handoff_claim_release.release_if_handoff",
         lambda task, **options: releases.append((task, options)),
     )
+    monkeypatch.setattr("agent_dispatch.telemetry.emit", telemetry.append)
     request = body(q, t.id)
     for _attempt in range(2):
         response = api.post(f"/task-relevance/tasks/{t.id}", headers=_headers(), json=request)
         assert response.status_code == 200
-    assert len(events) == len(releases) == 1
+    assert len(events) == len(releases) == len(telemetry) == 1
     assert events[0]["type"] == "task.abandoned"
     assert events[0]["task"]["id"] == t.id
     assert events[0]["task"]["status"] == Status.ABANDONED
+    assert events[0]["task"]["has_result"] is False
+    assert "result" not in events[0]["task"]
+    assert telemetry[0]["event"] == events[0]["type"]
+    assert telemetry[0]["to"] == Status.ABANDONED
+
+
+@pytest.mark.parametrize("bound", [False, True])
+@pytest.mark.parametrize("override", [None, "declared:example:review-source", "logical:example:review-source"])
+def test_unmirrored_declaration_supersedes_direct_even_when_its_source_is_disabled(
+    q, api, monkeypatch, bound, override,
+) -> None:
+    from agent_dispatch.config import overrides_path
+    from agent_dispatch.registrar import load_declaration
+
+    emitter(q)
+    t = emitted(q)
+    if bound:
+        q.claim_one("host/worker", task_id=t.id)
+        q.start(t.id, "host/worker", owner_session_id="original-native")
+    values = body(q, t.id)
+    declaration = load_declaration({
+        "name": "review-source", "owner": "example", "kind": "emitter", "spec": SPEC,
+    })
+    monkeypatch.setattr(
+        "agent_dispatch.relevance_source.read_supervisor_declarations",
+        lambda *_args, **_kwargs: DeclarationRead((declaration,), True),
+    )
+    assert q.get_registration("declared:example:review-source") is None
+    if override is not None:
+        set_override(overrides_path(), override, reason="source held")
+    before = q.get(t.id)
+    snapshot = api.get(
+        f"/task-relevance/tasks/{t.id}", headers=_headers(), params={"registration_id": "source-a"},
+    )
+    response = api.post(f"/task-relevance/tasks/{t.id}", headers=_headers(), json=values)
+    assert snapshot.status_code == response.status_code == 409
+    assert "superseded" in response.json()["detail"]
+    assert q.get(t.id) == before
+    assert q.steer_log(t.id) == q.list_wakes(t.id) == []
+
+
+def test_unconfirmed_registrar_does_not_prove_direct_source_eligibility(q, api, monkeypatch) -> None:
+    emitter(q)
+    t = emitted(q)
+    monkeypatch.setattr(
+        "agent_dispatch.relevance_source.read_supervisor_declarations",
+        lambda *_args, **_kwargs: DeclarationRead((), False, "source unavailable"),
+    )
+    response = api.post(f"/task-relevance/tasks/{t.id}", headers=_headers(), json=body(q, t.id))
+    assert response.status_code == 409
+    assert "incomplete" in response.json()["detail"]
+    assert q.get(t.id).status == Status.QUEUED

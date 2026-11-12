@@ -187,6 +187,11 @@ No automatic caller or runtime is activated. The isolated regression packet
 passed 239 controls before the terminal-notification addition; the final
 affected registration/transport/ownership/concurrency/wake packet passed 94.
 Those selections overlap and are not a combined full-plugin result.
+Review corrections additionally cover actual fresh registrar/direct-declaration
+eligibility before mirror publication, full terminal event/telemetry semantics
+and slash-containing receipt identities. The corrected production state passed
+179 selected controls, with three actual-registrar cases passing in a residual
+run after correcting their active-owner fixture. No guard was weakened.
 
 ### 2026-11-12 - Original-owner delivery approved and merged
 

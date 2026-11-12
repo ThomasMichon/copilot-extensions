@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 import json
 import sqlite3
@@ -29,6 +30,7 @@ def registration_revision(conn: sqlite3.Connection) -> int:
 def resolve_registration(
     conn: sqlite3.Connection, task: Task, selector: RelevanceRegistration, *,
     disabled_ids: frozenset[str], require_revision: bool,
+    admission: Callable[[sqlite3.Connection, dict], None] | None = None,
 ) -> tuple[str, str, str]:
     """Store-backed local emitters only; declared/evaluator admission follows later."""
     for value in (selector.registration_id, selector.machine, selector.env):
@@ -54,6 +56,8 @@ def resolve_registration(
     reg["spec"] = spec = json.loads(row["spec"])
     if registration_override_ids(reg) & disabled_ids:
         raise TaskError("relevance registration is disabled by operator override")
+    if admission is not None:
+        admission(conn, reg)
     if spec.get("task_output") != "json" or not spec.get("command"):
         raise TaskError("relevance requires a task-authoring command emitter")
     source, origin = spec.get("source") or "emitter", spec.get("id")

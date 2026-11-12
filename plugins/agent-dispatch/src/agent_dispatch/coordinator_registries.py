@@ -16,6 +16,7 @@ from pydantic import BaseModel, FiniteFloat
 from .coordinator_pool_catalog import register_pool_catalog_routes
 from .coordinator_pool_source import CoordinatorPoolSource
 from .coordinator_relevance import register_relevance_routes
+from .registrar_discovery import RegistrarSources
 from .registrations import RegistrationKind
 from .queue import TaskError, TaskQueue
 
@@ -81,11 +82,12 @@ def register_registry_routes(
     *,
     control_token: str | None = None,
     cohort_source: CoordinatorPoolSource | None = None,
+    relevance_sources: RegistrarSources | None = None,
 ) -> None:
     register_pool_catalog_routes(
         app, queue, control_token=control_token, cohort_source=cohort_source,
     )
-    register_relevance_routes(app, queue, control_token=control_token)
+    register_relevance_routes(app, queue, control_token=control_token, sources=relevance_sources)
 
     # -- schedule registry ---------------------------------------------------
 

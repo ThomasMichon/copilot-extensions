@@ -11,9 +11,12 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from .coordinator_auth import _make_control_auth
+from .coordinator_task_views import _event_task_dict
 from .queue import TaskError, TaskQueue
 from .queue_common import CompletionOutcome
 from .queue_relevance_registration import RelevanceRegistration
+from .registrar_discovery import RegistrarSources
+from .relevance_source import RelevanceSource
 from .task_relevance_contract import RELEVANCE_PATH, RELEVANCE_PROTOCOL, relevance_contract
 
 
@@ -45,7 +48,9 @@ def local_policy() -> Iterator[tuple[str, str, frozenset[str]]]:
 
 def register_relevance_routes(
     app: FastAPI, queue: TaskQueue, *, control_token: str | None,
+    sources: RegistrarSources | None = None,
 ) -> None:
+    source = RelevanceSource(sources)
     auth = _make_control_auth(
         control_token or None, lambda *_args: None, operation="task_relevance",
         code_prefix="relevance_control",
@@ -56,11 +61,14 @@ def register_relevance_routes(
         return {"protocol": RELEVANCE_PROTOCOL, "version": 1, "result": result}
 
     def transition(outcome: CompletionOutcome) -> None:
+        from . import telemetry
         from .handoff_claim_release import release_if_handoff
 
         task = asdict(outcome.task)
         release_if_handoff(task, cancel_pending=True)
-        app.state.bus.publish({"type": outcome.event_type, "task": task})
+        event_task = _event_task_dict(task)
+        app.state.bus.publish({"type": outcome.event_type, "task": event_task})
+        telemetry.emit(telemetry.task_lifecycle_event(outcome.event_type, event_task))
 
     @app.get(f"{RELEVANCE_PATH}/contract", dependencies=dependencies)
     def contract() -> dict:
@@ -73,6 +81,7 @@ def register_relevance_routes(
                 result = queue.relevance_snapshot(
                     task_id, registration=RelevanceRegistration(registration_id, machine, env),
                     disabled_ids=disabled,
+                    registration_admission=source.require_effective_direct,
                 )
         except (TaskError, OSError, ValueError, TimeoutError) as exc:
             raise HTTPException(409, detail=str(exc)) from exc
@@ -96,13 +105,14 @@ def register_relevance_routes(
                         reason=body.reason, observation_ref=body.observation_ref,
                         reporter=f"registration:{body.registration_id}", disabled_ids=disabled,
                         on_transition=transition,
+                        registration_admission=source.require_effective_direct,
                     )
         except (TaskError, OSError, ValueError, TimeoutError) as exc:
             raise HTTPException(409, detail=str(exc)) from exc
         return envelope(result)
 
     @app.get(
-        f"{RELEVANCE_PATH}/tasks/{{task_id}}/receipts/{{request_id}}",
+        f"{RELEVANCE_PATH}/tasks/{{task_id}}/receipts/{{request_id:path}}",
         dependencies=dependencies,
     )
     def receipt(task_id: str, request_id: str, registration_id: str) -> dict:

@@ -130,12 +130,17 @@ The receiver resolves its own local machine/environment and holds the existing
 operator-override lock through the queue decision. Inside the same SQLite write
 as claim and registration mutation, it checks the observed registration revision,
 active local registration, command-emitter task output and the emitter-authored
-source/origin fields. It honors concrete and logical local overrides. Another
+source/origin fields. Fresh admission also consults the configured registrar
+reader and existing direct/declaration merge owner. A declaration-superseded
+direct row is refused even before its declaration is mirrored into SQLite;
+missing or incomplete discovery is not eligibility evidence. This does not
+enable relevance reports from declared registrations.
+It honors concrete and logical local overrides. Another
 registration with the same emitter provenance is ambiguous and refused.
 An unchanged registration upsert does not invalidate observations; changed,
 removed/recreated or paused registrations do. A draining receiver refuses new
-decisions. A fresh abandonment uses existing terminal lifecycle notification;
-an identical report replay emits no second terminal transition.
+decisions. A fresh abandonment uses the existing result-free terminal event
+shape and lifecycle telemetry; an identical report replay emits neither twice.
 
 This is structural source attribution within existing trusted control authority,
 not proof that an opaque legacy task was created by a particular process.
@@ -151,6 +156,8 @@ abandonment. Each effect is sent once. A lost response is recovered from the
 original receipt rather than minting a new request. Identical accepted requests
 and their receipt reads remain recoverable after registration removal or a new
 hold; they do not authorize another effect.
+Request identities containing slashes remain recoverable through the receipt
+route's path capture; URL quoting alone is not assumed to preserve a segment.
 
 Rollout remains provider-first: release this receiver before migrating source
 callers, then qualify broader scopes and actual owner closeout. A rollback to a
