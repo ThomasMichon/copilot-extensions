@@ -131,4 +131,5 @@ def prepare(root: Path, target: Path, identity: str, *, read_record) -> Path:
             stream.write(encoded)
     bytecode = location / "bytecode"
     _directory(bytecode, permissions, private=True)
+    permissions.check_bytecode(bytecode)
     return bytecode

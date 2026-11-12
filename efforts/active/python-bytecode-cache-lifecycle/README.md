@@ -174,6 +174,20 @@ gates, not claims that the current code already provides them.
   equality. No deployed files, real caches or service lifetimes changed.
 - The library remains pending static-type admission under #9807; this
   foundation does not claim type-portfolio graduation or certification.
+- Expanded permission controls cover inherited Windows grants, private POSIX
+  traversal, unresolved homes, sticky-parent first touch and Darwin's native
+  ACL iterator ABI. The corrected focused packet passes on Windows
+  (54 passed / 4 platform skips) and Linux (51 passed / 7 platform skips).
+  Native macOS remains unavailable. Windows descendant ACL admission now uses
+  an explicitly bounded metadata-only check, because bypass-traverse access
+  defeats parent-only protection. Native Windows directory/file grants and
+  entry/time exhaustion regressions pass (56 passed / 5 platform skips).
+  Large Windows caches conservatively select no-write execution; the design
+  and library contract state this reuse limitation rather than hiding a walk.
+- Full Linux unit-packet execution exposed an older-Python test injection
+  mismatch: that interpreter's TemporaryDirectory stores its removal callable
+  separately from `shutil.rmtree`. The focused fault control now targets the
+  actual TemporaryDirectory removal seam; its verification remains pending.
 
 ### 2026-11-11 - Design accepted; implementation starting
 

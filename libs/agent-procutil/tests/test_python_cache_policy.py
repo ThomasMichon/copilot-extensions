@@ -85,6 +85,7 @@ def test_unsealed_invocation_does_not_allocate_any_namespace(tmp_path, local_cac
     assert not local_cache.exists() and not root.exists()
 
 
+@pytest.mark.skipif(os.name == "nt", reason="Windows requires bounded descendant DACL admission")
 def test_warm_selection_never_inventories_cache_contents(tmp_path, local_cache, monkeypatch):
     root = tmp_path / "installation"
     target = _installed(root)
@@ -232,17 +233,23 @@ def test_real_interpreter_reuses_external_bytecode_and_unsealed_writes_nothing(
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows native DACL protection")
-@pytest.mark.parametrize("inherit_only", [False, True])
-def test_native_windows_shared_writable_cache_is_not_selected(tmp_path, local_cache, inherit_only):
+@pytest.mark.parametrize("kind", ["base", "inherit-only", "file", "directory"])
+def test_native_windows_shared_writable_cache_is_not_selected(tmp_path, local_cache, kind):
     import ctypes
     from ctypes import wintypes
 
     root = tmp_path / "installation"
     target = _installed(root)
-    if inherit_only:
+    if kind != "base":
         selected = cache.policy_arguments(root, runtime=target)
         assert selected[0] == "-X"
         changed = Path(selected[1].split("=", 1)[1])
+        if kind in {"file", "directory"}:
+            changed /= "existing"
+            if kind == "file":
+                changed.write_bytes(b"untouched bytecode fixture")
+            else:
+                permissions.mkdir(changed)
     else:
         permissions.mkdir(local_cache)
         changed = local_cache
@@ -258,16 +265,37 @@ def test_native_windows_shared_writable_cache_is_not_selected(tmp_path, local_ca
     advapi.SetFileSecurityW.restype = wintypes.BOOL
     descriptor = ctypes.c_void_p()
     assert advapi.ConvertStringSecurityDescriptorToSecurityDescriptorW(
-        f"O:{user}D:P(A;;FA;;;{user})(A;{'OICIIO' if inherit_only else ''};FA;;;AU)",
+        f"O:{user}D:P(A;;FA;;;{user})(A;{'OICIIO' if kind == 'inherit-only' else ''};FA;;;AU)",
         1, ctypes.byref(descriptor), None,
     )
     try:
         assert advapi.SetFileSecurityW(str(changed), 0x80000004, descriptor)
         assert cache.policy_arguments(root, runtime=target) == ["-B"]
-        if not inherit_only:
+        if kind == "base":
             assert not (local_cache / "copilot-extensions").exists()
+        if kind == "file":
+            assert changed.read_bytes() == b"untouched bytecode fixture"
     finally:
         kernel.LocalFree(descriptor)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows bounded descendant admission")
+def test_windows_descendant_admission_budgets_fall_back_without_mutation(
+    tmp_path, local_cache, monkeypatch,
+):
+    root = tmp_path / "installation"
+    target = _installed(root)
+    selected = cache.policy_arguments(root, runtime=target)
+    assert selected[0] == "-X"
+    bytecode = Path(selected[1].split("=", 1)[1])
+    compiled = bytecode / "fixture.pyc"
+    compiled.write_bytes(b"untouched")
+    assert cache.policy_arguments(root, runtime=target) == selected
+    real_check = permissions.check_bytecode
+    for limits in ({"max_entries": 0}, {"seconds": 0}):
+        monkeypatch.setattr(permissions, "check_bytecode", lambda path: real_check(path, **limits))
+        assert cache.policy_arguments(root, runtime=target) == ["-B"]
+        assert compiled.read_bytes() == b"untouched"
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="macOS native named-user ACL protection")

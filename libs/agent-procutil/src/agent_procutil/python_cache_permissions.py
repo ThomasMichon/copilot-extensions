@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 import stat
 import sys
+import time
 from functools import lru_cache
 from pathlib import Path
 
@@ -148,3 +149,37 @@ def check_ancestors(path: Path) -> None:
     """Include parent replacement authority, not just the leaf's permissions."""
     for parent in path.parents:
         check(parent, ancestor=True)
+
+
+def check_bytecode(path: Path, *, max_entries: int = 256, seconds: float = 0.05) -> None:
+    """Bound Windows descendant admission; private POSIX traversal suffices."""
+    if os.name != "nt":
+        return
+    deadline = time.monotonic() + seconds
+    pending = [path]
+    visited = 0
+    while pending:
+        directory = pending.pop()
+        with os.scandir(directory) as entries:
+            while True:
+                if time.monotonic() >= deadline:
+                    raise PermissionError("bytecode cache protection exceeds its time budget")
+                entry = next(entries, None)
+                if entry is None:
+                    break
+                visited += 1
+                if visited > max_entries:
+                    raise PermissionError("bytecode cache protection exceeds its entry budget")
+                info = entry.stat(follow_symlinks=False)
+                if (
+                    not (stat.S_ISDIR(info.st_mode) or stat.S_ISREG(info.st_mode))
+                    or getattr(info, "st_file_attributes", 0) & 0x400
+                    or stat.S_ISLNK(info.st_mode)
+                ):
+                    raise PermissionError("bytecode cache descendant is not ordinary")
+                child = Path(entry.path)
+                _windows_check(child, ancestor=False, private=True)
+                if stat.S_ISDIR(info.st_mode):
+                    pending.append(child)
+    if time.monotonic() >= deadline:
+        raise PermissionError("bytecode cache protection exceeds its time budget")

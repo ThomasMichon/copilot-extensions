@@ -5248,7 +5248,7 @@
         "tools/promotion_unit_tests/test_frozen_candidate.py": "7d0d46ff5ec6f1df4bc20540a5218f9de914f2a259db0c17155c016afb5a488a",
         "tools/promotion_unit_tests/test_git_config_transaction.py": "d47c4b32c9ccbffdda2cc3813ae66871970a068be44fddcbde5449230db4da2b",
         "tools/promotion_unit_tests/test_host_profile.py": "e6bd9d07ef2b1699737e27a86e1883038097ec905170067bea3da6e445645331",
-        "tools/promotion_unit_tests/test_installer_retention.py": "1d80cb3a4f97f71d70f392e30e02d4aaf5d7b82749e5ebcb2e504f32708a58e6",
+        "tools/promotion_unit_tests/test_installer_retention.py": "4b19928179fdb1d1dee58fe6953e832552bcef0f4250b939b8fd4993bda4f227",
         "tools/promotion_unit_tests/test_komodo_repair_authorization.py": "b23393a8b2f9343f7c1004bc98b7f0fbc1030139655376f88a169951d2c209f7",
         "tools/promotion_unit_tests/test_lazy_dispatch.py": "7a206f98c1f7686b83ad5c8fe11a3f801d93e3939c1b8d75294fe4deef5040dd",
         "tools/promotion_unit_tests/test_legacy_version_evidence.py": "741716970463c8ae8bf53cbd7d046faa02450593eb13f88d46984ba821d3668d",

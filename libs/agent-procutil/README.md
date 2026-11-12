@@ -190,7 +190,14 @@ Windows validates ownership/DACLs and POSIX validates ownership/modes.
 Owned POSIX cache directories require private traversal, so a permissively
 created `.pyc` cannot become writable input for another user through a
 world-traversable cache tree. Windows checks inheritable access rules as well
-as rules applying to the directory itself. macOS additionally reads extended
+as rules applying to the directory itself. Because Windows bypass-traverse
+access can reach independently granted children below a private directory,
+the provider additionally checks existing bytecode descendants' ownership and
+DACLs. This metadata-only admission stops at 256 entries or 50 ms between
+filesystem/security calls; exhaustion selects `-B` without changing the cache.
+Large Windows caches therefore currently lose reuse rather than bypass
+protection. POSIX private traversal needs no descendant walk.
+macOS additionally reads extended
 ACLs: deny-only ACLs are safe; extended allow entries are conservatively
 unsupported and select the no-write fallback rather than inferring safety
 from mode bits. An unresolved user home likewise selects the fallback.
