@@ -256,13 +256,29 @@ refusal=subprocess.run([
 assert refusal.returncode==0,refusal.stdout+refusal.stderr
 validation=root.parent/"validate-service.py"
 validation.write_text('''
-import json,socket,sqlite3,sys,threading
+import json,os,socket,sqlite3,sys,threading
+def refuse(*args,**kwargs):
+    raise AssertionError("sealed service validation entered hosting")
+def refuse_effect(event,args):
+    if event in ("socket.__new__","sqlite3.connect","subprocess.Popen",
+                 "os.mkdir","os.rename","os.remove","os.rmdir","os.chmod","os.truncate"):
+        refuse()
+    if event=="open" and args[2] & (os.O_WRONLY|os.O_RDWR|os.O_CREAT|os.O_TRUNC|os.O_APPEND):
+        refuse()
+sys.addaudithook(refuse_effect)
+threading.Thread.start=refuse
+for operation in (socket.socket,lambda:sqlite3.connect(":memory:"),
+                  lambda:threading.Thread(target=lambda:None).start()):
+    try:
+        operation()
+    except AssertionError:
+        pass
+    else:
+        raise AssertionError("hosting-effect guard was not active before imports")
 from agent_chat_service import construction,hosting
 from agent_chat_service.client import ClientError
 from agent_procutil import daemon,daemon_instances
 import endpoint_rendezvous,single_instance_lease
-def refuse(*args,**kwargs):
-    raise AssertionError("sealed service validation entered hosting")
 for module,names in (
     (hosting,("HostedChat","ChatStore","initialize_storage","probe_health")),
     (daemon_instances,("admit_daemon_instance",)),
