@@ -1551,3 +1551,9 @@ The [owner comparison](architecture.md#owner-decision) explains this choice.
   proved its final write and normal result precede successful disable, followed
   by exact task/lease cleanup. Fresh COM readback preserves the intended Enabled
   change while detecting all other definition drift during bounded waiting.
+- Ordinary file-resource convergence now reserves health enrollment consent/
+  recovery state in selected, legacy and canonical cell installations, closing
+  the generic JSON adoption path while preserving unrelated file behavior.
+  This is a built-in convergence restriction, not a sandbox for arbitrary
+  filesystem-authorized code. The enrollment/resource packet passed 210 cases;
+  actor-free classification and existing composition/runner controls passed 42.

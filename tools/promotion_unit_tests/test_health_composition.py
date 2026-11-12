@@ -77,6 +77,13 @@ def owners(monkeypatch):
     modules["runtime_launcher"] = load(
         machines.__name__ + ".runtime_launcher", "libs/installer-engine/runtime_launcher.py",
     )
+    resources = package(machines.__name__ + ".resources")
+    resources.ResourceHandler = object
+    resources.ResourceFinding = resources.ResourceResult = SimpleNamespace
+    resources._select_field = forbidden
+    modules["resource_health_job"] = load(
+        machines.__name__ + ".resource_health_job", sources + "resource_health_job.py",
+    )
     modules["task_desktop"] = load(
         machines.__name__ + ".task_desktop",
         "plugins/agent-machines/tests/native/health_task_desktop.py",
@@ -227,6 +234,25 @@ def test_removed_enrollment_convergence_is_noop_after_reference_settlement(owner
         read_runtime_references=lambda *_args: {},
     )
     assert owner.converge(remove=True)["changed"] is False
+
+
+def test_file_resource_classification_keeps_enrollment_consent_local(owners, monkeypatch):
+    module = owners[0]["resource_health_job"]
+
+    class VirtualPath(type(Path())):
+        def resolve(self, *args, **fields):
+            return self
+
+    home = VirtualPath(ROOT / "fixture-home")
+    selected = VirtualPath(ROOT / "selected-install")
+    monkeypatch.setattr(module, "Path", VirtualPath)
+    monkeypatch.setattr(module, "os", SimpleNamespace(environ={"AGENT_RT_ROOT": str(selected)}))
+    for root in (
+        home / ".agent-machines", selected,
+        home / ".copilot-extensions" / "marketplaces" / "example" / "plugins" / "agent-machines",
+    ):
+        assert module.is_enrollment_state(root / "health-job.json", home)
+    assert not module.is_enrollment_state(home / "ordinary.json", home)
 
 
 @pytest.mark.parametrize("outcome,expected", [("unsupported", 2), ("failed", 2), ("timeout", 124), ("cleanup", 125)])

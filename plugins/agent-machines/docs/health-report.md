@@ -450,8 +450,11 @@ status, disable and removal without invoking the unsupported collector.
 For normal declared machine-state convergence, a requirement package may add
 `resources: [{type: health-job, state: present, platforms: [windows]}]`.
 That resource only converges an existing local opt-in; it cannot supply
-collection settings or grant adoption. `state: absent` withdraws it. Runtime
-replacement retains the old registration's dependencies until this same owner
+collection settings or grant adoption. `state: absent` withdraws it. Local
+consent/recovery state is also reserved against ordinary `file` resources, so a
+generic package JSON write cannot create this local opt-in. This protects the
+built-in convergence path, not arbitrary scripts with full filesystem authority.
+Runtime replacement retains the old registration's dependencies until this same owner
 refreshes it; never delete slots independently to force convergence.
 
 Results distinguish adopted/configured/enabled, native state/instances,

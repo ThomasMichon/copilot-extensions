@@ -592,6 +592,40 @@ def test_resource_converges_only_existing_local_consent(case, monkeypatch):
     assert result.ok and not result.changed and not native.calls and not refs.owners
 
 
+@pytest.mark.parametrize("location", ["legacy", "selected", "cell"])
+@pytest.mark.parametrize("strategy", ["enforce", "ensure-present", "managed-block"])
+def test_generic_file_resources_cannot_adopt_local_collection(tmp_path, monkeypatch, location, strategy):
+    from agent_machines.resources import HANDLERS, ResolvedResource
+
+    home = tmp_path / "home"
+    selected = tmp_path / "selected-install"
+    monkeypatch.setenv("AGENT_RT_ROOT", str(selected))
+    roots = {
+        "legacy": home / ".agent-machines",
+        "selected": selected,
+        "cell": home / ".copilot-extensions" / "marketplaces" / "example" / "plugins" / "agent-machines",
+    }
+    target = roots[location] / enrollment.STATE
+    declaration = {
+        "path": str(target), "format": "json", "strategy": strategy,
+        "content": {"schema": enrollment.SCHEMA, "desired": {"enabled": True}},
+    }
+    result = HANDLERS["file"].apply(
+        ResolvedResource("file", "attempted-consent", (str(target),), declaration),
+        SimpleNamespace(home=home, repo_paths={}), False,
+    )
+    assert result.status == "blocked" and not target.exists()
+    ordinary = tmp_path / "ordinary.json"
+    result = HANDLERS["file"].apply(
+        ResolvedResource("file", "ordinary", (str(ordinary),), {
+            "path": str(ordinary), "format": "json", "strategy": "enforce",
+            "content": {"ordinary": True},
+        }),
+        SimpleNamespace(home=home, repo_paths={}), False,
+    )
+    assert result.ok and json.loads(ordinary.read_text()) == {"ordinary": True}
+
+
 def test_native_omitted_enabled_default_can_be_disabled(case):
     owner, desired, _, _, _, installed = case
     root = ET.fromstring(installed().definition(desired, owner.owner, enabled=True))

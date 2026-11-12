@@ -1,6 +1,7 @@
 {
     "profile": "copilot-extensions.promotion-units/v1",
     "nodes": [
+        "tools/promotion_unit_tests/test_health_composition.py::test_file_resource_classification_keeps_enrollment_consent_local",
         "tools/promotion_unit_tests/test_health_composition.py::test_withdrawal_recovery_cannot_select_or_enable_an_incumbent",
         "tools/promotion_unit_tests/test_health_composition.py::test_removed_enrollment_convergence_is_noop_after_reference_settlement",
         "tools/promotion_unit_tests/test_health_composition.py::test_installed_enrollment_preview_binds_installation_and_refuses_foreign_state_without_effects",
@@ -4808,7 +4809,7 @@
         "tools/promotion_unit_tests/test_local_finalize.py::test_cleanup_requires_positive_local_branch_observation[remote]"
     ],
     "sources": {
-        "tools/promotion_unit_tests/test_health_composition.py": "766f0abaeba63375ad63aeb7a12f524d598a9666c28da2762a3626f3d2cddbbb",
+        "tools/promotion_unit_tests/test_health_composition.py": "c36dfd1bd83c513d8023f3674c7f1e353a7cd293bcd5779e6e3c381e800f2509",
         "plugins/agent-machines/tests/native/health_task_desktop.py": "742086a0c8ded805f6e9e2b519009b2d31872e936752f6e08051ba973a1c2d84",
         "plugins/agent-machines/src/agent_machines/cli_health.py": "282c294281319df55d12b287fd36f1f08b45241dbd32b13541c0fa5390e80cd7",
         "plugins/agent-machines/src/agent_machines/health_jobs.py": "ec135a55725a1f29fa4688fa380e24bd6b703a46ae977c8ad416881a4ca6e75d",
@@ -5499,9 +5500,11 @@
         "plugins/agent-machines/src/agent_machines/health_enrollment.py": "c2d10203b89995c82caca8665572dbcd6e889cff8dc987d9f034f9c2b5036847",
         "plugins/agent-machines/src/agent_machines/health_job.py": "69f6b2ffd86adc4c8d262b6a42c59c9036e7d8eef88e6433f2b8fdc29cdbf1ca",
         "plugins/agent-machines/src/agent_machines/health_task_native.py": "62c20ca8136f9858335171118200b88ae25906745834b3bcfa804ae381638269",
-        "libs/installer-engine/runtime_launcher.py": "0cd1ac9fd75cff85f605345ec958fabc70f59796343b798aceec253ecc0b7cde"
+        "libs/installer-engine/runtime_launcher.py": "0cd1ac9fd75cff85f605345ec958fabc70f59796343b798aceec253ecc0b7cde",
+        "plugins/agent-machines/src/agent_machines/resource_health_job.py": "eea23d4a44d0cba2e772b12df4ad61a3bf87dde46372d17077804b768412e6d9"
     },
     "coverage_targets": [
+        "plugins/agent-machines/src/agent_machines/resource_health_job.py",
         "plugins/agent-machines/src/agent_machines/health_enrollment.py",
         "plugins/agent-machines/src/agent_machines/health_job.py",
         "plugins/agent-machines/src/agent_machines/health_task_native.py",

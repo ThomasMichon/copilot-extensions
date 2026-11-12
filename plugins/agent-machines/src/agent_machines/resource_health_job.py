@@ -11,6 +11,25 @@ from .resources import (
 )
 
 
+def is_enrollment_state(target: Path, home: Path) -> bool:
+    """Reserve native local-consent state from ordinary file resources."""
+    roots = [home / ".agent-machines"]
+    if os.environ.get("AGENT_RT_ROOT"):
+        roots.append(Path(os.environ["AGENT_RT_ROOT"]))
+    candidates = [target.absolute(), target.resolve()]
+    for path in candidates:
+        if any(path == (root / "health-job.json").resolve() for root in roots):
+            return True
+        root = path.parent
+        if (
+            path.name == "health-job.json" and root.name == "agent-machines"
+            and root.parent.name == "plugins"
+            and root.parent.parent.parent.name == "marketplaces"
+        ):
+            return True
+    return False
+
+
 class HealthJobResourceHandler(ResourceHandler):
     TYPE = "health-job"
 
