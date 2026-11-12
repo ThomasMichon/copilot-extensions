@@ -77,7 +77,8 @@ def test_hidden_parent_does_not_suppress_cleanup_failure(
     primary = RuntimeError("primary failure")
     attempts = []
     exists = os.path.exists
-    remove = policy._configuration.shutil.rmtree
+    directory_type = policy._configuration.tempfile.TemporaryDirectory
+    remove = directory_type._rmtree
     expected = RuntimeError if primary_failure else policy.RetainedInputCleanupError
     with pytest.raises(expected) as caught:
         with policy._temporary_inputs(tmp_path) as directory:
@@ -86,14 +87,14 @@ def test_hidden_parent_does_not_suppress_cleanup_failure(
             def hidden(path):
                 return False if os.fspath(path) == native else exists(path)
 
-            def refused(path, *args, **kwargs):
+            def refused(_cls, path, *args, **kwargs):
                 if os.fspath(path) == native:
                     attempts.append(native)
                     raise denied
                 return remove(path, *args, **kwargs)
 
             monkeypatch.setattr(os.path, "exists", hidden)
-            monkeypatch.setattr(policy._configuration.shutil, "rmtree", refused)
+            monkeypatch.setattr(directory_type, "_rmtree", classmethod(refused))
             if primary_failure:
                 raise primary
     assert attempts == [native]
