@@ -149,6 +149,7 @@ async def test_actual_native_client_rediscovers_through_replacement_and_rollback
             }
             environment.update(
                 **lifetime, HOME=str(home), USERPROFILE=str(home),
+                COPILOT_EXTENSIONS_TEST_CONTAINED=os.environ["COPILOT_EXTENSIONS_TEST_CONTAINED"],
                 PWD=str(workspace), COPILOT_DISABLE_LOGIN_SHELL_ENV="1",
                 COPILOT_HOME=str(home / ".copilot"), COPILOT_OFFLINE="true",
                 COPILOT_PROVIDER_TYPE="openai", COPILOT_PROVIDER_BASE_URL="http://127.0.0.1:1",
@@ -314,6 +315,7 @@ async def test_actual_native_client_rediscovers_through_replacement_and_rollback
                             observations, observations.with_suffix(".owner.json"),
                             observations.with_suffix(".refusal"), observations.with_suffix(".capabilities"),
                             *(tmp_path / "logs").glob("**/*.log"),
+                            *workspace.glob("**/*.log"),
                         ]:
                             if path.is_file():
                                 print(path.name + ":", path.read_text(
