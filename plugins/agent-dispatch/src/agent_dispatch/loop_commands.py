@@ -35,7 +35,7 @@ if TYPE_CHECKING:
     from .registrar import ProfileDeclaration
 
 
-def _resolve_cli_module():
+def _resolve_cli_module(*, required: str | None = None):
     """Return the actually-running ``agent_dispatch.__main__`` module.
 
     ``python -m agent_dispatch`` loads ``__main__.py`` as
@@ -46,13 +46,17 @@ def _resolve_cli_module():
     ``runpy`` still sets the running module's ``__spec__.name`` to its real
     dotted name, so that recognizes the live copy; fall back to a normal
     dotted import (tests, or any other importer) only when neither is
-    already loaded.
+    already loaded. Early internal commands can require a specific helper before
+    selecting the still-initializing live module.
     """
     import sys as _sys
 
     live = _sys.modules.get("__main__")
     live_spec = getattr(live, "__spec__", None)
-    if live_spec is not None and live_spec.name == "agent_dispatch.__main__":
+    if (
+        live_spec is not None and live_spec.name == "agent_dispatch.__main__"
+        and (required is None or hasattr(live, required))
+    ):
         return live
     dotted = _sys.modules.get("agent_dispatch.__main__")
     if dotted is not None:

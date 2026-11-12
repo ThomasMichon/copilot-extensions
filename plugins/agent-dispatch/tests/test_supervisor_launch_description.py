@@ -30,6 +30,9 @@ def test_generated_description_preserves_policy_and_slot_selection(tmp_path, mod
     slot.mkdir(parents=True)
     python = slot / "python.exe"
     python.touch()  # Description must never try to execute this sentinel.
+    resources = slot.parent / "Lib" / "site-packages" / "agent_dispatch" / "service_launchers"
+    shutil.copytree(INSTALLER.parents[1] / "src" / "agent_dispatch" / "service_launchers",
+                    resources)
     (runtime / "current-version").write_text("fixture")
     log = runtime / "supervise-service.log"
     log.write_bytes(b"x" * (1024 * 1024 + 1))

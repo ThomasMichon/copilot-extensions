@@ -1,10 +1,8 @@
 """Interactive service mode guards for the Windows installer (install.ps1).
 
-On an interactive-required host (dev6/cloud1/box1: an RDP/console logon is
-required before SSH works, and Task Scheduler registration is admin-gated), the
-non-elevated HKCU logon auto-start is the FIRST-CLASS coordinator service -- no
-elevated S4U boot task. These read install.ps1 as text and assert that shape so
-the mode can't silently regress to requiring elevation.
+An explicitly scheduled interactive coordinator uses its interactive task,
+not the S4U boot task or an unsolicited alternative registration. Other
+installation policies keep their independent runtime readiness owner.
 """
 
 from __future__ import annotations
@@ -60,9 +58,7 @@ def test_service_mode_resolver_exists():
     assert "'service-mode'" in text, "mode must persist via a service-mode marker"
 
 
-def test_interactive_mode_uses_logon_autostart_not_a_task():
-    """In interactive mode the coordinator install must take the non-elevated
-    logon auto-start path (Primary) and return BEFORE the S4U task registration."""
+def test_interactive_mode_uses_only_its_explicit_task_registration():
     text = _text()
     body = _function_body(text, "Install-CoordinatorTask")
 
@@ -71,12 +67,10 @@ def test_interactive_mode_uses_logon_autostart_not_a_task():
     assert branch < reg, "interactive-mode branch must precede task registration"
 
     interactive_block = body[branch:reg]
-    assert "-Primary" in interactive_block, (
-        "interactive mode must install the logon auto-start as the primary service"
-    )
-    assert "return" in interactive_block, (
-        "interactive mode must return before attempting an elevated Scheduled Task"
-    )
+    assert "Install-InteractiveScheduledTask -Name $TaskName" in interactive_block
+    assert "Start-CoordinatorNonElevatedFallback" not in interactive_block
+    assert "return" in interactive_block
+    assert "Explicit coordinator scheduling failed; no alternate startup registration was installed" in interactive_block
 
 
 def test_autostart_function_supports_primary_flag():
