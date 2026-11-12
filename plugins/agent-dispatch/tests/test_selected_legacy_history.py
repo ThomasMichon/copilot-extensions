@@ -167,6 +167,43 @@ def test_selected_client_rejects_a_provider_that_drops_the_selection():
             client.fence_legacy_history(before=2000.0, reservation_keys=["selected"])
 
 
+@pytest.mark.parametrize("malformed", ["missing_selection", "invalid_sample"])
+def test_malformed_apply_response_preserves_the_unknown_committed_outcome(queue, monkeypatch, malformed):
+    monkeypatch.setattr("agent_dispatch.acquisition_receipts.verify_recovery_bridge", lambda: None)
+    _, selected = _legacy(queue, "selected")
+    _, retained = _legacy(queue, "retained")
+    api = TestClient(create_app(queue, token="worker-test", control_token="control-test"))
+    apply_posts = []
+
+    def forward(request: httpx.Request) -> httpx.Response:
+        response = api.request(
+            request.method, request.url.path, content=request.content, headers=request.headers,
+        )
+        body = response.json()
+        if request.method == "POST" and json.loads(request.content).get("apply"):
+            apply_posts.append(request.url.path)
+            assert response.status_code == 200 and body["fenced"] == 1
+            if malformed == "missing_selection":
+                body.pop("selection")
+            else:
+                body["sample"] = None
+        return httpx.Response(response.status_code, json=body)
+
+    with DispatchClient(
+        "http://example.test", token="worker-test", control_token="control-test",
+        transport=httpx.MockTransport(forward),
+    ) as client:
+        preview = client.fence_legacy_history(before=2000.0, reservation_keys=[selected.key])
+        with pytest.raises(DispatchError, match="outcome is unknown") as failure:
+            client.fence_legacy_history(
+                before=2000.0, reservation_keys=[selected.key],
+                expected_preview=preview["selection"]["revision"], apply=True, **ATTESTED,
+            )
+    assert failure.value.status_code == 502
+    assert apply_posts == ["/spawn-reservations/history/fence"]
+    assert not _accountable(queue, selected.key) and _accountable(queue, retained.key)
+
+
 def test_cli_carries_the_selected_keys_and_preview_to_its_original_client(monkeypatch, capsys):
     from contextlib import nullcontext
     from types import SimpleNamespace

@@ -230,14 +230,21 @@ class SpawnReservationClientMixin:
         ))
         if reservation_keys is not None:
             selection = result.get("selection") if isinstance(result, dict) else None
+            sample = result.get("sample") if isinstance(result, dict) else None
             if (
                 not isinstance(selection, dict)
                 or selection.get("reservation_keys") != sorted(reservation_keys)
                 or not isinstance(selection.get("revision"), str)
                 or len(selection["revision"]) != 64
                 or (apply and selection["revision"] != expected_preview)
-                or any(key not in reservation_keys for key in result.get("sample", []))
+                or not isinstance(sample, list)
+                or any(not isinstance(key, str) or key not in reservation_keys for key in sample)
             ):
+                if apply:
+                    raise DispatchError(
+                        502, "selected legacy history apply outcome is unknown: invalid scope response; "
+                        "inspect the original reservations and audit before retrying",
+                    )
                 raise DispatchError(426, "coordinator did not preserve selected-legacy-history/v1")
         return result
 

@@ -119,7 +119,9 @@ an older or rolled-back provider cannot silently widen the operation. Expand
 the provider first, then use selected callers. Unselected syntax and its
 attestation requirements remain unchanged. A lost apply response does not
 authorize replay with a fresh preview: inspect the original records and audit
-before deciding what remains. Selection and a matching preview never establish
+before deciding what remains. Invalid apply-response scope is likewise an
+explicit unknown mutation outcome, not the pre-POST upgrade-required result;
+it never authorizes an automatic retry. Selection and a matching preview never establish
 holder, startup or transport absence on the operator's behalf.
 
 The affected residents are the coordinator (`serve`), supervisor daemon
