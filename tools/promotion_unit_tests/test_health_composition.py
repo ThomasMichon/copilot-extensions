@@ -102,6 +102,41 @@ def owners(monkeypatch):
     return modules, parser
 
 
+def test_native_bridge_transition_codec_keeps_counts_separate_from_latency_and_identity(owners):
+    module = owners[0]["health_report"]
+    base = {
+        "kind": "state_transition", "ts": STAMP, "session_id": "not-output",
+        "worktree_id": "not-output", "event_id": 41,
+    }
+    tool = {
+        **base, "name": "tool_call", "event": "tool_call_update",
+        "from": "running", "to": "error", "tool_status": "error",
+        "tool_call_id": "not-output", "output": "not-output",
+    }
+    rows = [
+        {**base, "name": "conversation", "event": "turn_complete",
+         "from": "responding", "to": "cancelled"},
+        {**base, "name": "conversation", "event": "turn_complete",
+         "from": "cancelled", "to": "idle"},
+        tool,
+        {**tool, "tool_status": "completed"},
+    ]
+    raw = b"".join(json.dumps(row).encode("utf-8") + b"\n" for row in rows)
+    builder = module.HourlyReport(NOW)
+    builder.scan(io.BytesIO(raw), len(raw))
+    result = builder.result(1)
+    assert result["coverage"]["accepted_records"] == 3
+    assert result["coverage"]["unsupported_records"] == 1
+    groups = {group["kind"]: group for group in result["hours"][-1]["groups"]}
+    assert groups["bridge-conversation"]["outcomes"] == {"cancelled": 1, "idle": 1}
+    assert groups["bridge-tool"]["outcomes"] == {"error": 1}
+    assert all("p95_ns" not in group for group in groups.values())
+    assert "not-output" not in json.dumps(result)
+    chart = owners[0]["health_chart"].render(result)
+    ElementTree.fromstring(chart)
+    assert "not-output" not in chart and "No p99 or uptime claim" in chart
+
+
 def test_installed_enrollment_preview_binds_installation_and_refuses_foreign_state_without_effects(owners):
     modules, _ = owners
     enrollment = modules["health_enrollment"]

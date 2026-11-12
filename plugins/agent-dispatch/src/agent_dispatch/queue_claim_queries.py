@@ -78,13 +78,15 @@ class QueueClaimQueriesMixin:
             if task_id is not None:
                 rows = conn.execute(
                     f"SELECT {_TASK_BULK_SELECT}, producer_request_hash FROM tasks "
-                    "WHERE id = ? AND status = ? AND not_before <= ? AND hold_reason IS NULL",
+                    "WHERE id = ? AND status = ? AND not_before <= ? AND hold_reason IS NULL"
+                    " AND NOT EXISTS (SELECT 1 FROM task_relevance_closeouts r WHERE r.task_id=tasks.id)",
                     (task_id, Status.QUEUED, ts),
                 ).fetchall()
             else:
                 rows = conn.execute(
                     f"SELECT {_TASK_BULK_SELECT}, producer_request_hash FROM tasks "
                     "WHERE status = ? AND not_before <= ? AND hold_reason IS NULL"
+                    " AND NOT EXISTS (SELECT 1 FROM task_relevance_closeouts r WHERE r.task_id=tasks.id)"
                     " ORDER BY created_at ASC",
                     (Status.QUEUED, ts),
                 ).fetchall()

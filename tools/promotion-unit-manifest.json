@@ -1,6 +1,7 @@
 {
     "profile": "copilot-extensions.promotion-units/v1",
     "nodes": [
+        "tools/promotion_unit_tests/test_health_composition.py::test_native_bridge_transition_codec_keeps_counts_separate_from_latency_and_identity",
         "tools/promotion_unit_tests/test_health_composition.py::test_new_confirmation_does_not_promote_previous_configuration_recovery",
         "tools/promotion_unit_tests/test_health_composition.py::test_file_resource_classification_keeps_enrollment_consent_local",
         "tools/promotion_unit_tests/test_health_composition.py::test_withdrawal_recovery_cannot_select_or_enable_an_incumbent",
@@ -4838,12 +4839,12 @@
         "tools/promotion_unit_tests/test_local_finalize.py::test_cleanup_requires_positive_local_branch_observation[remote]"
     ],
     "sources": {
-        "tools/promotion_unit_tests/test_health_composition.py": "885aa089c991f0efb13f43e9d79346b8d70a113304ee7b027cf86f5e8660a82a",
+        "tools/promotion_unit_tests/test_health_composition.py": "793f8fe874791b454df005d807ec23e443abfdd91df808d0c6365db7b47da35e",
         "plugins/agent-machines/tests/native/health_task_desktop.py": "742086a0c8ded805f6e9e2b519009b2d31872e936752f6e08051ba973a1c2d84",
         "plugins/agent-machines/src/agent_machines/cli_health.py": "392423275fcaaa963e2fbfdd32344cd5e1efa898d4fbc1b2f41c7d544d59e6b3",
         "plugins/agent-machines/src/agent_machines/health_jobs.py": "eba051e3cce7717543b7e805ea308833618ac1d1535a300c31bd386e97323af9",
         "plugins/agent-machines/src/agent_machines/health_chart.py": "4ff6dcdf1189ff903f55ceb0445e4853974b6b3981d9f9ee455552a8f5a4b2bf",
-        "plugins/agent-machines/src/agent_machines/health_report.py": "8e1684c9466b2d0d2a3065787ab2ffcc0232c14b0b01ae25f11605e70260f2da",
+        "plugins/agent-machines/src/agent_machines/health_report.py": "d2c877d5a92e538c00ac35bd4d0c8483e3d6067e49fb1aa37a215d8b61ced8d1",
         "plugins/agent-machines/src/agent_machines/health_slots.py": "9317a16c7d6d70cce4afb93b5e9fb692d2a0dc25d8b5c19797ad5d0e00bb1149",
         "plugins/agent-machines/src/agent_machines/health_run.py": "68a1cd656e2ceb65b48a0d6a7dcada95d088a973a2f7ee60739ead4e9c4fb1df",
         "libs/process-telemetry/src/process_telemetry/hourly.py": "d67b389059d202755a5020b2591a89d4882a3eb6cc774c39bf83b8072b967a47",
