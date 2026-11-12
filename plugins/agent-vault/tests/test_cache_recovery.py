@@ -176,6 +176,34 @@ def test_interrupted_publication_reuses_existing_current_bytes(isolated, monkeyp
     assert resumed.get("Example/current") == "newer"
 
 
+def test_interrupted_activation_reuses_record_snapshot_and_current_journal(isolated, monkeypatch):
+    corrupt(isolated)
+    original_write = cache_recovery._write
+
+    def interrupted(directory, target, value, windows):
+        if target.name == "active.json":
+            raise OSError("fixture activation interruption")
+        return original_write(directory, target, value, windows)
+
+    monkeypatch.setattr(cache_recovery, "_write", interrupted)
+    with pytest.raises(OSError):
+        PersistentCache(isolated).prepare()
+    compartment = isolated / cache_recovery.DIRECTORY / cache_recovery.source_key(isolated)
+    record = (compartment / "recovery.json").read_bytes()
+    current = PersistentCache(compartment / "current")
+    assert current.begin_replace("Example/current", "password", "candidate", 2)
+    current_bytes = current._cache_file.read_bytes()
+    snapshot_count = len(list(compartment.iterdir()))
+    monkeypatch.setattr(cache_recovery, "_write", original_write)
+    resumed = PersistentCache(isolated)
+    assert resumed.prepare()["state"] == "recovering"
+    assert (compartment / "recovery.json").read_bytes() == record
+    assert resumed._cache_file.read_bytes() == current_bytes
+    assert resumed.pending_replace("Example/current", "password")["operation"] == 2
+    assert len(list(compartment.iterdir())) == snapshot_count + 1  # Coordination marker only.
+    assert resumed.get("Example/current", readonly=True) is None
+
+
 def test_context_change_during_recovery_preserves_current_cache(isolated, monkeypatch):
     corrupt(isolated)
     cache = PersistentCache(isolated)
@@ -404,6 +432,7 @@ def test_adoption_during_old_store_transaction_cannot_overwrite_current_journal(
 @pytest.mark.parametrize(("name", "value"), [
     ("AGENT_VAULT_ENDPOINT", "tcp://127.0.0.1:41234"),
     ("AGENT_VAULT_HOST", "192.0.2.10"),
+    ("AGENT_VAULT_WINDOWS_RUN_DIR", "other-run"),
     ("KPDB", "other.kdbx"),
 ])
 def test_changed_authority_never_falls_back_to_readable_originals(
@@ -418,7 +447,7 @@ def test_changed_authority_never_falls_back_to_readable_originals(
     assert active.recover_missing("Example/shared", "password", "current authority", 2)
     for filename, raw in preserved.items():
         (isolated / filename).write_bytes(raw)
-    if name == "KPDB":
+    if name in {"KPDB", "AGENT_VAULT_WINDOWS_RUN_DIR"}:
         value = str(isolated.parent / value)
     current_bytes = active._cache_file.read_bytes()
     monkeypatch.setenv(name, value)

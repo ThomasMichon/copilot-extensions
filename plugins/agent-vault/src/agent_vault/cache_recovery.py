@@ -63,11 +63,13 @@ def source_key(base: Path) -> str:
     identity = identity_cache_digest(
         context.kpdb, str(config.home_dir()), config.installation_id() or "",
     )
+    windows_run = os.environ.get("AGENT_VAULT_WINDOWS_RUN_DIR")
     value = json.dumps([
         identity, os.path.normcase(str(base.absolute())), context.group or "",
         context.vault_name or "", context.port,
         os.environ.get(config.ENDPOINT_ENV, ""),
         os.environ.get("AGENT_VAULT_HOST", "127.0.0.1"),
+        os.path.normcase(os.path.abspath(os.path.expanduser(windows_run))) if windows_run else "",
     ], separators=(",", ":")).encode()
     return hashlib.sha256(value).hexdigest()
 
@@ -371,7 +373,7 @@ def _replacement_guard(base: Path):
             yield True
 
 
-def _coordinate_selected(base: Path, record: dict) -> dict:
+def _coordinate_selected(base: Path, record: dict, *, publication_locked: bool = False) -> dict:
     result = {"state": "recovering", "original": record["original"]}
     windows = _windows()
     _, compartment, _ = _paths(base, record["source"])
@@ -379,7 +381,10 @@ def _coordinate_selected(base: Path, record: dict) -> dict:
     if _path_exists(marker):
         require_coordinated(base, record)
         return result
-    with _publication_lock(compartment, windows):
+    with (
+        contextlib.nullcontext()
+        if publication_locked else _publication_lock(compartment, windows)
+    ):
         with _replacement_guard(base) as acquired:
             if acquired:
                 report = (
@@ -427,6 +432,17 @@ def prepare_cache(base: Path) -> dict:
     _private_directory(parent, windows)
     _private_directory(compartment, windows)
     with _publication_lock(compartment, windows):
+        if _path_exists(marker):
+            try:
+                record = _validate_record(_json(_read(marker, windows)), source)
+            except (ValueError, UnicodeError) as exc:
+                raise CacheProtectionError("invalid protected cache recovery selection") from exc
+            current = compartment / "current"
+            _current_directory(current, windows)
+            PersistentCache(current)._read_store(readonly=True, strict=True)
+            require_source(base, record)
+            _write(parent, parent / "active.json", b'{"version":1}', windows)
+            return _coordinate_selected(base, record, publication_locked=True)
         try:
             _, record = selected_cache(base)
         except CacheSelectionRequired as exc:

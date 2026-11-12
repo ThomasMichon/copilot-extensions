@@ -297,18 +297,17 @@ def send_command(
     if result is not None:
         return result
 
-    # A discovered Windows named pipe (rung 2) is dialed ahead of TCP; any pipe
-    # failure falls through to the legacy TCP path below.
+    # Strict selection never falls back to another daemon after a failed dial.
     if discovered_pipe is not None and IS_WINDOWS:
         result = pipe_send(discovered_pipe, request, timeout)
-        if result is not None:
+        if result is not None or strict_endpoint:
             return _tag(result, "discovered-pipe")
 
     # A discovered Unix socket (native, possibly non-default path) is dialed
     # ahead of the legacy fixed socket.
     if discovered_unix is not None and not IS_WINDOWS:
         result = _send_socket(request, timeout, path=discovered_unix)
-        if result is not None:
+        if result is not None or strict_endpoint:
             return _tag(result, "discovered-unix")
 
     if discovered_unix is None and not IS_WINDOWS and context.sources.get("port") == "default":
@@ -317,7 +316,7 @@ def send_command(
             return _tag(result, "unix-socket")
 
     result = _send_tcp(request, host, port, timeout)
-    if result is not None:
+    if result is not None or strict_endpoint and discovered is not None:
         is_disc_tcp = discovered is not None and discovered.transport == "tcp"
         return _tag(result, "discovered-tcp" if is_disc_tcp else "tcp")
 
