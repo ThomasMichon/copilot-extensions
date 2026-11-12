@@ -1,0 +1,9 @@
+{
+  "comment": "Retain the canonical source installer asset in native compatibility fixtures",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    }
+  ]
+}

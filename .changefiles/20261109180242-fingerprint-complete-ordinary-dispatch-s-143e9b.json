@@ -1,0 +1,9 @@
+{
+  "comment": "Fingerprint complete ordinary Dispatch source inputs before immutable admission",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

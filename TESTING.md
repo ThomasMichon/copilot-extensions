@@ -2228,6 +2228,16 @@ Codespaces and the native Logger batch controls execute actual UV; Logger's
 offline first-use package-effects/backend fixture remains synthetic.
 MCP/Dispatch controls retain source-closure, reinstall, extras, cutoff, retry
 and exact-exit checks through their fixture UV capture.
+The same Linux/Windows steps select the complete
+`agent-dispatch --test-file tests/test_installer_input_fingerprint.py` packet
+separately, without a node filter. Its twelve T2 filesystem/process cases use
+real shells and synthetic packages to check source/dependency sensitivity,
+unchanged reuse and immutable refusal. Windows' six POSIX-shell skips are not
+execution evidence; Linux must qualify that route separately. These cases are
+not actor-free promotion units, installed-service proof or Python 3.10/bootstrap
+selection qualification. The scope regression in
+`tools/test_standalone_qualification.py` protects both routes and exclusion from
+the positive actor-free inventory. Routing is not a recorded passing run.
 The thirty-minute jobs and twenty-minute Logger packet allowance include existing
 preparation and cleanup costs, not a production installer deadline or speed
 claim. Pair this selector with `source_cache=true` for the ordinary constructor's
