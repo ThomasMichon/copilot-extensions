@@ -265,8 +265,9 @@ def _spawn_daemon(
         process.instance_receipt = receipt
         return process
     # A contained-test child environment keeps the launch contained even when
-    # the launcher itself is not in contained test mode.
-    if child_env.get("COPILOT_EXTENSIONS_TEST_CONTAINED") == "1":
+    # the launcher itself is not in contained test mode. Windows environment
+    # names are case-insensitive, so match the marker case-insensitively there.
+    if _child_env_contained(child_env):
         breakaway = False
     kwargs = pu._daemon_popen_kwargs(
         console_children=console_children,
@@ -526,6 +527,13 @@ def _spawn_daemon(
         process = commit(process)
         report_logs(f"{stamp} spawn_daemon: instance-bound\n".encode())
         return process
+
+
+def _child_env_contained(child_env: dict[str, str]) -> bool:
+    name = "COPILOT_EXTENSIONS_TEST_CONTAINED"
+    if os.name == "nt":
+        return any(key.upper() == name and value == "1" for key, value in child_env.items())
+    return child_env.get(name) == "1"
 
 
 def _durable_windows_launch(command, **kwargs) -> WindowsDaemonProcess:

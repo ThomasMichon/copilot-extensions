@@ -18,6 +18,8 @@ _BOOT_PORT = "_CE_DAEMON_BROKER_PORT"
 _BOOT_COOKIE = "_CE_DAEMON_BROKER_COOKIE"
 _TIMEOUT = 30.0
 _MAX_FRAME = 16 * 1024 * 1024
+_HELLO_TIMEOUT = 2.0
+_BACKLOG = 16
 _SYNCHRONIZE = 0x00100000
 _PROCESS_ACCESS = _SYNCHRONIZE | 0x0001 | 0x0800 | 0x1000
 _WAIT_TIMEOUT = 0x102
@@ -187,6 +189,37 @@ def _receive(connection: socket.socket, deadline: float) -> dict:
     if not isinstance(result, dict):
         raise ValueError("invalid daemon broker response")
     return result
+
+
+def _accept_bootstrap(
+    listener: socket.socket, cookie: str, pid: int, deadline: float,
+) -> socket.socket:
+    """Return the bootstrap's authenticated connection.
+
+    Any local process can connect to the loopback listener, so a client that
+    sends a bad frame or the wrong cookie is dropped and accepting continues;
+    each unauthenticated read is bounded so one stalled client cannot consume
+    the whole startup deadline. A correct cookie with the wrong PID is a real
+    identity failure, not a stray client.
+    """
+    while True:
+        listener.settimeout(_remaining(deadline))
+        connection = listener.accept()[0]
+        try:
+            hello = _receive(connection, min(deadline, time.monotonic() + _HELLO_TIMEOUT))
+            received_cookie = hello.get("cookie")
+            authenticated = isinstance(received_cookie, str) and secrets.compare_digest(
+                received_cookie.encode("utf-8"), cookie.encode(),
+            )
+        except (OSError, ValueError, UnicodeError):
+            authenticated = False
+        if not authenticated:
+            connection.close()
+            continue
+        if hello.get("pid") != pid:
+            connection.close()
+            raise OSError("daemon broker identity mismatch")
+        return connection
 
 
 def _outside_caller_job(process: WindowsDaemonProcess) -> bool:
@@ -365,7 +398,7 @@ def spawn_brokered_daemon(
     try:
         with socket.socket() as listener:
             listener.bind(("127.0.0.1", 0))
-            listener.listen(1)
+            listener.listen(_BACKLOG)
             bootstrap_env = {
                 **os.environ,
                 _BOOT_COOKIE: cookie,
@@ -379,16 +412,7 @@ def spawn_brokered_daemon(
                 raise
             bootstrap = WindowsDaemonProcess(pid, argv)
             stage = "bootstrap-identity"
-            listener.settimeout(_remaining(deadline))
-            with listener.accept()[0] as connection:
-                hello = _receive(connection, deadline)
-                received_cookie = hello.get("cookie")
-                if (
-                    not isinstance(received_cookie, str)
-                    or not secrets.compare_digest(received_cookie.encode("utf-8"), cookie.encode())
-                    or hello.get("pid") != pid
-                ):
-                    raise OSError("daemon broker identity mismatch")
+            with _accept_bootstrap(listener, cookie, pid, deadline) as connection:
                 # WMI may place the bootstrap in its provider host's quota Job
                 # (never a caller Job). Only the resident child, created with
                 # breakaway, must be outside every Job; that is checked below.

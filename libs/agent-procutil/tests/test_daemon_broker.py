@@ -282,15 +282,20 @@ def test_containment_never_uses_the_broker(monkeypatch, tmp_path, contained):
     durable.assert_not_called()
 
 
+@pytest.mark.parametrize("name", [
+    "COPILOT_EXTENSIONS_TEST_CONTAINED", "copilot_extensions_test_contained",
+])
 @pytest.mark.parametrize("route", ["env", "env_overrides"])
-def test_contained_child_environment_never_uses_wmi(monkeypatch, tmp_path, route):
+def test_contained_child_environment_never_uses_wmi(monkeypatch, tmp_path, route, name):
+    if name != name.upper() and os.name != "nt":
+        pytest.skip("environment names are case-insensitive only on Windows")
     monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
     monkeypatch.setattr(pu, "_is_windows", lambda: True)
     monkeypatch.setattr(pu, "contained_test_mode", lambda: False)
     popen = Mock(return_value=Mock(pid=4321))
     monkeypatch.setattr(subprocess, "Popen", popen)
     _, durable = _durable_launch(monkeypatch)
-    marker = {"COPILOT_EXTENSIONS_TEST_CONTAINED": "1"}
+    marker = {name: "1"}
     extra = (
         {"env": {**os.environ, **marker}} if route == "env" else {"env_overrides": marker}
     )
@@ -299,6 +304,9 @@ def test_contained_child_environment_never_uses_wmi(monkeypatch, tmp_path, route
     popen.assert_called_once()
     flags = popen.call_args.kwargs.get("creationflags", 0)
     assert not flags & pu._CREATE_BREAKAWAY_FROM_JOB
+
+
+def test_broker_errors_are_sanitized_in_both_logs(monkeypatch, tmp_path):
     monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
     monkeypatch.setattr(pu, "_is_windows", lambda: True)
     monkeypatch.setattr(subprocess, "Popen", Mock(side_effect=_denied()))
@@ -503,12 +511,52 @@ def test_identity_mismatch_never_sends_environment(
     monkeypatch, broker_channel, tmp_path, hello,
 ):
     processes, _ = broker_channel
+    # Unauthenticated clients are dropped until the deadline; keep it short.
+    monkeypatch.setattr(broker, "_TIMEOUT", 0.2)
     monkeypatch.setattr(broker, "_receive", Mock(return_value=hello))
     with pytest.raises(pu.DaemonSpawnError, match="lifetime broker failed"):
         _launch(tmp_path)
     broker._send.assert_not_called()
     assert set(processes) == {100}
     processes[100].close.assert_called_once()
+
+
+def test_competing_local_clients_cannot_block_bootstrap_admission(monkeypatch):
+    monkeypatch.setattr(broker, "_HELLO_TIMEOUT", 0.3)
+    cookie, pid = "fixture-cookie", 4242
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(broker._BACKLOG)
+        address = listener.getsockname()
+        stalled = socket.create_connection(address)
+        garbage = socket.create_connection(address)
+        garbage.sendall(b"\xff\xff\xff\xff")
+        impostor = socket.create_connection(address)
+        broker._send(impostor, {"cookie": "wrong", "pid": pid}, time.monotonic() + 5)
+        genuine = socket.create_connection(address)
+        broker._send(genuine, {"cookie": cookie, "pid": pid}, time.monotonic() + 5)
+        started = time.monotonic()
+        try:
+            with broker._accept_bootstrap(
+                listener, cookie, pid, time.monotonic() + 10,
+            ) as accepted:
+                broker._send(accepted, {"ok": True}, time.monotonic() + 5)
+                assert broker._receive(genuine, time.monotonic() + 5) == {"ok": True}
+        finally:
+            for client in (stalled, garbage, impostor, genuine):
+                client.close()
+    assert time.monotonic() - started < 5, "a stalled client consumed the startup deadline"
+
+
+def test_authenticated_client_with_wrong_pid_is_an_identity_failure():
+    cookie = "fixture-cookie"
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(broker._BACKLOG)
+        with socket.create_connection(listener.getsockname()) as client:
+            broker._send(client, {"cookie": cookie, "pid": 1}, time.monotonic() + 5)
+            with pytest.raises(OSError, match="identity mismatch"):
+                broker._accept_bootstrap(listener, cookie, 2, time.monotonic() + 5)
 
 
 def test_bootstrap_uses_base_python_even_without_a_gui_sibling(monkeypatch, tmp_path):
