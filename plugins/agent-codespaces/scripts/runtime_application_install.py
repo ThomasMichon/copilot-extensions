@@ -109,7 +109,10 @@ def _application(slot: Path) -> dict:
     raw = _read(slot / "application.json", limit=4 << 20)
     if raw is None:
         raise RuntimeError("the copied application has no install declaration")
-    record = json.loads(raw)
+    return _validate_application(json.loads(raw))
+
+
+def _validate_application(record: dict) -> dict:
     fields = {
         "name", "module", "commands", "root_environment", "default_directory",
         "setup", "start", "construction",

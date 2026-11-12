@@ -2871,6 +2871,8 @@ def application_adapter(tmp_path, monkeypatch):
     application.mkdir(parents=True)
     declaration = {
         "name": "demo-app", "construction": {"fixture": True},
+        "module": "demo_app", "commands": ["demo-app"],
+        "root_environment": "DEMO_APP_HOME", "default_directory": "demo-app",
         "setup": ["--setup"], "start": ["--start"],
     }
     (application / "application.json").write_text(json.dumps(declaration))
@@ -2908,7 +2910,7 @@ def application_adapter(tmp_path, monkeypatch):
         reused = slot.exists()
         if not slot.exists():
             slot.mkdir(parents=True)
-            (slot / "application.json").write_text(json.dumps(declaration))
+            (slot / "application.json").write_bytes((application / "application.json").read_bytes())
         options["validate_candidate"](slot)
         yield SimpleNamespace(
             slot=slot, payload_hash=selection["payload_hash"],
@@ -2986,6 +2988,23 @@ def test_application_adapter_prepares_worktrees_before_engine_completion(
     else:
         assert options["health_module"] == "demo_app"
         assert "health_callable" not in options and "construction_callable" not in options
+
+
+def test_application_adapter_requires_explicit_repair_for_changed_callbacks(application_adapter):
+    fixture = application_adapter
+    before = (fixture.old / "application.json").read_bytes()
+    declaration = json.loads((fixture.application / "application.json").read_text())
+    declaration["setup"].append("--changed")
+    (fixture.application / "application.json").write_text(json.dumps(declaration))
+    with pytest.raises(fixture.source.engine.ContentRepairRequired, match="distinct repair generation"):
+        fixture.install()
+    assert fixture.versions == [fixture.old.name]
+    assert not fixture.children
+    assert (fixture.old / "application.json").read_bytes() == before
+    assert (fixture.old / "preserved").read_bytes() == b"incumbent bytes"
+    repaired = Path(fixture.install(repair=True)["slot"])
+    assert repaired != fixture.old and fixture.children == [repaired.name]
+    assert json.loads((repaired / "application.json").read_text()) == declaration
 
 
 @pytest.mark.parametrize("damage", ["health", "content", "missing", "malformed", "different"])

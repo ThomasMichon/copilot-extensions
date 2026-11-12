@@ -31,6 +31,10 @@ APPLICATION_INSTALL_CONTRACT = {
 }
 
 
+class _ApplicationDeclarationConflict(engine.ContentRepairRequired):
+    """Different valid contracts require explicit repair, not corruption recovery."""
+
+
 @dataclass(frozen=True)
 class ProjectSource:
     payload: Path
@@ -469,7 +473,15 @@ def install_application(
                     "application declaration is not reusable; select a distinct repair generation"
                 ) from error
             if installed != declaration:
-                raise engine.ContentRepairRequired(
+                from runtime_application_install import _validate_application
+
+                try:
+                    _validate_application(installed)
+                except ValueError as error:
+                    raise engine.ContentRepairRequired(
+                        "application declaration is not reusable; select a distinct repair generation"
+                    ) from error
+                raise _ApplicationDeclarationConflict(
                     "application declaration differs from its completed slot; "
                     "select a distinct repair generation"
                 )
@@ -498,8 +510,11 @@ def install_application(
                         application=application, process_retention=True, reuse_generations=False,
                         expected_source_identity=selection["identity"], validate_candidate=validate,
                     ))
-                except (engine.ContentRepairRequired, engine.HealthRepairRequired):
-                    if repair or attempt or not existing:
+                except (engine.ContentRepairRequired, engine.HealthRepairRequired) as error:
+                    if (
+                        isinstance(error, _ApplicationDeclarationConflict)
+                        or repair or attempt or not existing
+                    ):
                         raise
                     inputs.verify()
                     if _read(application / "application.json") != declaration:
