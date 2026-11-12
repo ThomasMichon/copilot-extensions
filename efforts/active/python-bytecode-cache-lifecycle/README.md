@@ -187,7 +187,10 @@ gates, not claims that the current code already provides them.
 - Full Linux unit-packet execution exposed an older-Python test injection
   mismatch: that interpreter's TemporaryDirectory stores its removal callable
   separately from `shutil.rmtree`. The focused fault control now targets the
-  actual TemporaryDirectory removal seam; its verification remains pending.
+  actual TemporaryDirectory removal seam. The complete admitted Linux unit
+  packet now passes (4,792 tests), including that regression. Rebased native
+  Linux provider/interpreter controls pass (51 passed / 10 platform skips);
+  successful disposable fixtures were removed through their scratch owner.
 
 ### 2026-11-11 - Design accepted; implementation starting
 
