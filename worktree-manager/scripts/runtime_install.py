@@ -118,6 +118,7 @@ def candidate(
     payload: Path, root: Path, *, assemble, uv: Path | None = None,
     python: Path | None = None,
     wheel_inputs: engine.WheelInstallInputs | engine.WheelReuseInputs | None = None,
+    native_wheel_inputs: engine.WheelInstallInputs | None = None,
     local_packages: tuple[str, ...] | None = None, validate_candidate=None,
     application: Path | None = None,
 ):
@@ -146,6 +147,14 @@ def candidate(
         ):
             raise ValueError("Manager construction requires its attributed project name and version")
         identity = runtime_source.read_source_identity(payload, version, plugin="worktree-manager")
+        if native_wheel_inputs is not None:
+            if identity is not None or wheel_inputs is not None:
+                raise ValueError("Manager native wheels cannot replace a Source association")
+            from install_source import wheel_selection
+
+            selected = wheel_selection(payload, "worktree-manager", native_wheel_inputs)
+            wheel_inputs = native_wheel_inputs
+            local_packages = tuple(selected["local_packages"])
         if wheel_inputs is None and identity is not None:
             current = runtime.current_version(root)
             reused = _source_profile_reuse(
@@ -154,7 +163,7 @@ def candidate(
             if reused is not None:
                 wheel_inputs, local_packages = reused
         if wheel_inputs is not None:
-            if identity is None:
+            if identity is None and native_wheel_inputs is None:
                 raise ValueError("Manager source wheels require an attributed source identity")
             if not isinstance(wheel_inputs, (engine.WheelInstallInputs, engine.WheelReuseInputs)):
                 raise ValueError("Manager source wheels require inspected retained inputs")
@@ -184,7 +193,7 @@ def candidate(
             health_module="worktree_manager.runtime_candidate",
             health_callable="verify_runtime_candidate",
             construction_callable="worktree_manager.runtime_candidate:prepare_runtime_candidate",
-            process_retention=True, reuse_generations=identity is None,
+            process_retention=True, reuse_generations=identity is None and wheel_inputs is None,
             expected_source_identity=runtime_source.manifest_fields(identity),
         )
         if identity is not None:
@@ -197,7 +206,8 @@ def candidate(
             arguments["application"] = application
         current = runtime.current_version(root)
         if (
-            not reuse_only and identity is not None and current and current.startswith(generation + ".repair.")
+            not reuse_only and (identity is not None or native_wheel_inputs is not None) and current
+            and re.fullmatch(re.escape(generation) + r"(?:[.+]repair\.[0-9a-f]{32})?", current)
             and runtime.is_complete(root, current)
         ):
             generation = current
@@ -543,6 +553,10 @@ def _foreground_install(args, driver) -> Path | int:
         source_path = str(args.install_source)
         arguments.extend(["--install-source", source_path])
         identity.extend(["install-source", source_path])
+    if getattr(args, "wheel_profile", None) is not None:
+        for name in ("wheel_profile", "wheel_directory", "wheel_profile_sha256", "wheel_python", "wheel_uv"):
+            arguments.extend(["--" + name.replace("_", "-"), str(getattr(args, name))])
+        identity.extend(["wheel-profile", args.wheel_profile_sha256])
     if args.skip_instance_reconcile:
         arguments.append("--skip-instance-reconcile")
         identity.append("skip-instance-reconcile")
@@ -646,6 +660,14 @@ def _uninstall(args) -> int:
 
 
 def _install(args) -> Path | int:
+    if getattr(args, "wheel_profile", None) is not None:
+        from install_source import wheel_inputs, wheel_selection
+
+        with wheel_inputs(
+            args.wheel_profile, args.wheel_directory, expected_profile_sha256=args.wheel_profile_sha256,
+        ) as wheels:
+            wheel_selection(args.payload, "worktree-manager", wheels)
+            return _install_payload(args, native_wheel_inputs=wheels)
     if getattr(args, "install_source", None) is None:
         return _install_payload(args)
     from install_source import _member, manager_inputs
@@ -664,7 +686,9 @@ def _install(args) -> Path | int:
         return _install_payload(args, **options)
 
 
-def _install_payload(args, *, wheel_inputs=None, local_packages=None, application=None) -> Path | int:
+def _install_payload(
+    args, *, wheel_inputs=None, native_wheel_inputs=None, local_packages=None, application=None,
+) -> Path | int:
     _validate_update_request(args)
     reconcile = not args.skip_instance_reconcile
     if args.repair_update:
@@ -686,7 +710,10 @@ def _install_payload(args, *, wheel_inputs=None, local_packages=None, applicatio
     from worktree_manager.self_install import self_install
 
     install_payload = args.payload
-    if args.recover_adopted is None and getattr(args, "install_source", None) is None:
+    if (
+        args.recover_adopted is None and getattr(args, "install_source", None) is None
+        and native_wheel_inputs is None
+    ):
         from source_acquisition import manager_payload
 
         try:
@@ -741,7 +768,12 @@ def _install_payload(args, *, wheel_inputs=None, local_packages=None, applicatio
         )
         if application is not None:
             source_options["_application"] = application
-        if args.repair_update or wheel_inputs is not None:
+        if native_wheel_inputs is not None:
+            source_options.update(
+                _native_wheel_inputs=native_wheel_inputs,
+                _base_python=args.wheel_python, _uv=args.wheel_uv,
+            )
+        if args.repair_update or wheel_inputs is not None or native_wheel_inputs is not None:
             result = self_install(
                 install_payload, root=args.root, dry_run=False,
                 _before_publish=before_publish,
@@ -818,9 +850,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--source-digest", help=argparse.SUPPRESS)
     parser.add_argument("--skip-instance-reconcile", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--install-source", type=Path)
+    for name in ("wheel-profile", "wheel-directory", "wheel-python", "wheel-uv"):
+        parser.add_argument("--" + name, type=Path)
+    parser.add_argument("--wheel-profile-sha256", help=argparse.SUPPRESS)
     parser.add_argument("--describe-source-inputs", action="store_true")
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args(argv)
+    from runtime_install_inputs import admit_native_wheels
+
+    admit_native_wheels(args, parser)
     if args.describe_source_inputs:
         if any((
             args.root, args.install_source, args.command, args.uninstall, args.apply,

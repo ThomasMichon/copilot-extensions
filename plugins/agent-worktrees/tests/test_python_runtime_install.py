@@ -44,6 +44,40 @@ def test_driver_governance_uses_current_scripts(driver):
     assert governance.SCRIPTS == scripts
 
 
+def test_native_release_entry_retains_inputs_without_a_source_association(driver, tmp_path, monkeypatch):
+    import install_source
+
+    held = []
+    wheels = object()
+
+    @contextmanager
+    def retain(profile, directory, **_options):
+        assert profile == tmp_path / "profile.json" and directory == tmp_path / "wheels"
+        held.append(wheels)
+        try:
+            yield wheels
+        finally:
+            held.pop()
+
+    def install(root, plugin, **options):
+        assert held == [wheels]
+        assert options["native_wheel_inputs"] is wheels
+        assert "wheel_inputs" not in options
+        return {"installed": True}
+
+    monkeypatch.setattr(install_source, "wheel_inputs", retain)
+    monkeypatch.setattr(driver, "install", install)
+    result = tmp_path / "result.json"
+    assert driver.main([
+        "--root", str(tmp_path / "runtime"), "--plugin", str(tmp_path / "payload"),
+        "--payload", str(tmp_path / "payload"), "--uv", str(tmp_path / "uv"),
+        "--base-python", sys.executable, "--result", str(result),
+        "--wheel-profile", str(tmp_path / "profile.json"),
+        "--wheel-directory", str(tmp_path / "wheels"),
+    ]) == 0
+    assert not held and json.loads(result.read_text()) == {"installed": True}
+
+
 def test_application_preparation_uses_wheel_assets_without_rewriting_wheel(
     tmp_path, monkeypatch,
 ):
@@ -289,6 +323,54 @@ def _slot(driver, root, version):
     python.write_bytes(b"interpreter")
     driver.runtime.mark_complete(root, version, payload_hash="previous")
     return slot
+
+
+@pytest.mark.parametrize("separator", [".", "+"])
+@pytest.mark.parametrize("same_profile", [False, True])
+def test_native_wheel_update_keeps_selected_repair_for_full_candidate_admission(
+    driver, tmp_path, monkeypatch, separator, same_profile,
+):
+    from types import SimpleNamespace
+
+    root, plugin = tmp_path / "runtime", tmp_path / "payload"
+    plugin.mkdir()
+    (plugin / "pyproject.toml").write_text('[project]\nname="agent-worktrees"\nversion="1.0"\n')
+    version = "1.0.profile." + "a" * 16
+    previous = ("1.0.profile." + ("a" if same_profile else "b") * 16) + separator + "repair." + "c" * 32
+    slot = _slot(driver, root, previous)
+    (root / "current-version").write_text(previous)
+    manifest = {"runtime_version": previous, "venv": str(slot)}
+
+    @contextmanager
+    def held(**_options):
+        yield
+
+    monkeypatch.setattr(driver, "Governance", lambda requested, payload: SimpleNamespace(
+        root=requested, payload=payload, held=held,
+        helper=SimpleNamespace(read_deployment_manifest=lambda _path: manifest),
+    ))
+    monkeypatch.setattr(driver, "_source_provenance", lambda *_args: {})
+    wheels = object()
+    options = {"wheel_inputs": wheels, "local_packages": ("agent-worktrees",), "extras": ()}
+    monkeypatch.setattr(driver.install_driver, "native_construction_options", lambda *_args: (version, options))
+
+    class CandidateAdmissionReached(Exception):
+        pass
+
+    def candidate(requested, generation, **arguments):
+        assert requested == root
+        assert generation == (previous if same_profile else version)
+        assert arguments["wheel_inputs"] is wheels
+        assert arguments["reuse_generations"] is False
+        assert arguments["health_callable"] == "verify_runtime_candidate"
+        raise CandidateAdmissionReached
+
+    monkeypatch.setattr(driver.engine, "numbered_candidate", candidate)
+    with pytest.raises(CandidateAdmissionReached):
+        driver.install(
+            root, plugin, payload=plugin, uv=tmp_path / "uv", base_python=Path(sys.executable),
+            native_wheel_inputs=wheels,
+        )
 
 
 @pytest.mark.parametrize("tampered", [False, True])

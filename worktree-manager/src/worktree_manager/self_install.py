@@ -879,7 +879,7 @@ def self_install(
     _transactional_activation: bool = False, _reconcile_instances: bool = True,
     _wheel_inputs=None, _local_packages: tuple[str, ...] | None = None, _validate_candidate=None,
     _raise_candidate_errors: bool = False, _base_python: Path | None = None, _uv: Path | None = None,
-    _application: Path | None = None,
+    _application: Path | None = None, _native_wheel_inputs=None,
 ) -> SelfInstallResult:
     """Construct and health-gate with the canonical engine before selection."""
     from .runtime_identity import running_application_slot
@@ -927,7 +927,7 @@ def self_install(
         candidate_options = {key: value for key, value in (
             ("python", _base_python), ("uv", _uv), ("wheel_inputs", _wheel_inputs),
             ("local_packages", _local_packages), ("validate_candidate", _validate_candidate),
-            ("application", _application),
+            ("application", _application), ("native_wheel_inputs", _native_wheel_inputs),
         ) if value is not None}
         with ExitStack() as custody:
             if os.name == "nt" and os.environ.get("COPILOT_EXTENSIONS_TEST_CONTAINED") != "1":
@@ -965,7 +965,7 @@ def self_install(
             slot = ready.slot
             return _complete_candidate(
                 ready, pd, r, previous=previous,
-                was_current=was_current or (_wheel_inputs is not None and previous == slot.name),
+                was_current=was_current or ((_wheel_inputs is not None or _native_wheel_inputs is not None) and previous == slot.name),
                 before_publish=_before_publish, after_activate=_after_activate,
                 transactional_activation=_transactional_activation,
             )

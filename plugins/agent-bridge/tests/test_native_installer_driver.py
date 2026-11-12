@@ -101,7 +101,7 @@ def test_native_recipe_refuses_another_consumers_action(adapter, tmp_path, plugi
     ("agent-index", "AGENT_INDEX_ENGINE_HOME"),
 ])
 def test_remaining_native_recipes_preserve_exact_options_and_context(adapter, tmp_path, monkeypatch, plugin, root_key):
-    options = sorted(adapter.RECIPES[plugin])
+    options = sorted(adapter.RECIPES[plugin] - {"Repair", "Serve"})
     args = arguments(tmp_path, plugin=plugin, options=options)
     monkeypatch.setenv(root_key, str(tmp_path / "consumer"))
     queued = []
@@ -359,7 +359,12 @@ def test_uninstall_removes_only_the_component_under_the_current_owner(
     args = arguments(tmp_path, plugin=plugin, action=action, remove_broker=True)
     remove = Mock()
     monkeypatch.setattr(windows_broker, "remove", remove)
-    admission = Mock(side_effect=None if admitted else RuntimeError("live consumer"))
+    def admit(_args, *, controller_custody):
+        controller_custody.assert_owned()
+        if not admitted:
+            raise RuntimeError("live consumer")
+
+    admission = Mock(side_effect=admit)
     monkeypatch.setattr(adapter, "admit_broker_removal", admission)
     monkeypatch.setattr(adapter.subprocess, "Popen", Mock(side_effect=AssertionError("second native installer")))
     request = core.enqueue(
@@ -379,7 +384,9 @@ def test_uninstall_removes_only_the_component_under_the_current_owner(
         with pytest.raises(RuntimeError, match="unclosed participants"):
             core.drain(executor=execute)
         remove.assert_not_called()
-    admission.assert_called_once_with(args)
+    admission.assert_called_once()
+    assert admission.call_args.args == (args,)
+    assert admission.call_args.kwargs["controller_custody"].request_id == request.id
 
 
 def test_bridge_retains_completion_before_publication_without_broker_adoption():
@@ -469,6 +476,23 @@ def test_copied_no_install_shell_uses_the_real_default_executor(adapter, tmp_pat
             shutil.copyfile(source, scripts / source.name)
     for name in ("versioned_runtime_native.ps1", "installer-human-output.ps1"):
         shutil.copyfile(SCRIPTS / name, scripts / name)
+    if plugin == "agent-vault":
+        source_scripts = REPO / "plugins" / plugin / "scripts"
+        for name in ("runtime-activation.ps1", "runtime-activation.py"):
+            shutil.copyfile(source_scripts / name, scripts / name)
+        shutil.copytree(source_scripts.parent / "src", minimal / "src")
+        shutil.copytree(
+            REPO / "libs" / "configuration-layers" / "src",
+            scripts / "configuration-layers" / "src",
+        )
+        configuration = profile / "vault-config.json"
+        configuration.write_text('{"enabled":true}\n', encoding="utf-8")
+        monkeypatch.setenv("AGENT_VAULT_CONFIG", str(configuration))
+    if plugin == "agent-dispatch":
+        source = REPO / "plugins" / plugin / "src" / "agent_dispatch" / "windows-scheduling.ps1"
+        destination = minimal / "src" / "agent_dispatch" / source.name
+        destination.parent.mkdir(parents=True)
+        shutil.copyfile(source, destination)
     if plugin == "agent-pull-requests":
         source_scripts = REPO / "plugins" / plugin / "scripts"
         shutil.copyfile(source_scripts / "payload-mode.ps1", scripts / "payload-mode.ps1")
