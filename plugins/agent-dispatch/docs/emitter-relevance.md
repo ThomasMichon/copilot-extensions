@@ -63,6 +63,12 @@ nonzero exit, malformed output or missing/foreign/duplicate observation sends
 no reports for that batch. The regular production command still runs; the
 tick exposes reconciliation errors and unhealthy status rather than silently
 claiming success.
+Unexpected sidecar read/write or lock failures are isolated from the normal
+production command too. The tick reports reconciliation errors and
+`pending: null` when that count is unavailable, rather than treating unreadable
+custody as empty. It does not repair, replace or discard an invalid sidecar.
+Later ticks keep attempting ordinary production while that retained state
+requires recovery.
 
 ## Admission, retention and recovery
 

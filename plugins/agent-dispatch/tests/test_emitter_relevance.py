@@ -558,3 +558,62 @@ def test_invalid_post_receipt_is_not_misclassified_as_unsent_upgrade(q, api, spe
     assert first["pending"] == 1 and second["pending"] == 0
     assert second["recovered"][0]["decision"] == "abandoned"
     assert q.get(task.id).status == Status.ABANDONED
+
+
+@pytest.mark.parametrize("contents", ["not json", '{"version": 99}'])
+def test_invalid_sidecar_preserves_custody_and_does_not_block_normal_production(q, api, spec, contents):
+    task = _retain(q, spec)
+    path = emitter.receipts_path(spec["id"]).with_name("relevance.json")
+    path.write_text(contents)
+    commands = []
+    calls = []
+
+    def produce(command, **_kwargs):
+        commands.append(command)
+        assert command == spec["command"]
+        return SimpleNamespace(returncode=0, stdout="[]")
+
+    with DispatchClient(
+        "http://testserver", token="data", control_token="control", transport=transport(api, calls),
+    ) as client:
+        for _tick in range(2):
+            result = emitter.run_tick(
+                client, spec, holder="host-a", registration_id="source-a", runner=produce,
+            )
+            assert result["returncode"] == 0
+            assert result["relevance"]["errors"] and result["relevance"]["pending"] is None
+            assert "relevance" in result["error"]
+            assert path.read_text() == contents
+    assert len(commands) == 2 and q.get(task.id).status == Status.QUEUED
+    assert not any(path == "/task-relevance/reports" for _method, path in calls)
+
+
+def test_pre_send_sidecar_write_failure_keeps_normal_production_available(q, api, spec, monkeypatch):
+    task = _retain(q, spec)
+    original = emitter_relevance._save
+    commands = []
+    calls = []
+
+    def fail_before_send(path, state):
+        if state["pending"]:
+            raise OSError("sidecar write unavailable")
+        original(path, state)
+
+    monkeypatch.setattr(emitter_relevance, "_save", fail_before_send)
+
+    def produce(command, **kwargs):
+        commands.append(command)
+        if command == spec["command"]:
+            return SimpleNamespace(returncode=0, stdout="[]")
+        return _runner()(command, **kwargs)
+
+    with DispatchClient(
+        "http://testserver", token="data", control_token="control", transport=transport(api, calls),
+    ) as client:
+        result = emitter.run_tick(
+            client, spec, holder="host-a", registration_id="source-a", runner=produce,
+        )
+    assert result["returncode"] == 0 and result["relevance"]["errors"]
+    assert commands[-1] == spec["command"]
+    assert q.get(task.id).status == Status.QUEUED
+    assert not any(path == "/task-relevance/reports" for _method, path in calls)

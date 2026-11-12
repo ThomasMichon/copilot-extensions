@@ -536,9 +536,16 @@ def run_tick(
         if spec.get("relevance") is not None:
             from .emitter_relevance import reconcile_receipts
 
-            relevance = {"relevance": reconcile_receipts(
-                client, spec, registration_id=registration_id, runner=runner,
-            )}
+            try:
+                report = reconcile_receipts(
+                    client, spec, registration_id=registration_id, runner=runner,
+                )
+            except Exception as exc:
+                report = {
+                    "accepted": [], "recovered": [], "pending": None,
+                    "errors": [{"error": f"relevance reconciliation unavailable: {exc}"}],
+                }
+            relevance = {"relevance": report}
         if spec.get("ci_repair") is not None:
             from .ci_repair import AdmissionRefused, run_tick as run_ci_tick
 
