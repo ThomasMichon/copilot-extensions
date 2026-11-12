@@ -104,6 +104,24 @@ namespace CopilotExtensions {
     [CopilotExtensions.UpdateScratchDirectory]::Create($path, $security.GetSecurityDescriptorBinaryForm())
     return $path
 }
+function Wait-AgentQueuedSubmission($ProcessId, [DateTime]$SubmittedAt, [string]$ExitFile) {
+    # Returns the submission's exit code, or $null when it reported none.
+    try {
+        $process = [Diagnostics.Process]::GetProcessById([int]$ProcessId)
+        $null = $process.Handle
+        if ($process.StartTime -lt $SubmittedAt) { throw 'The submission PID was reused.' }
+        if ($process.WaitForExit(300000)) { return $process.ExitCode }
+        return $null
+    } catch {
+        # Not openable, or its PID was reused: the submission already exited,
+        # so the exit code it recorded before exiting is authoritative.
+    }
+    if (Test-Path -LiteralPath $ExitFile -PathType Leaf) {
+        $recorded = 0
+        if ([int]::TryParse(([IO.File]::ReadAllText($ExitFile)).Trim(), [ref]$recorded)) { return $recorded }
+    }
+    return $null
+}
 function Submit-AgentDurableUpdate([string]$Preflight) {
     # WMI durable launch is reserved for work that must outlive its launcher;
     # here the queued update itself. Nothing is inherited, so the environment,
@@ -114,19 +132,24 @@ function Submit-AgentDurableUpdate([string]$Preflight) {
     $logDirectory = $null
     if ($forward -cnotcontains '--detach') { $forward += '--detach' }
     $asJson = $forward -ccontains '--json'
-    # The caller and arguments travel as base64 JSON data, never as PowerShell
-    # source, so no quote character (ASCII or typographic) can end a literal.
-    $payload = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(
-        (ConvertTo-Json -Compress -InputObject @{ caller = [string]$_awUpdateCaller; args = [string[]]$forward })))
-    $script = "`$ErrorActionPreference = 'Continue'`n`$ProgressPreference = 'SilentlyContinue'`n" +
-        "`$env:AGENT_WORKTREES_INTERNAL_DURABLE_UPDATE = '1'`n" +
-        "`$spec = ConvertFrom-Json ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('$payload')))`n" +
-        "`$forward = [string[]]@(`$spec.args)`n& ([string]`$spec.caller) @forward`nexit `$LASTEXITCODE`n"
     try {
         $logDirectory = New-UpdateScratchDirectory 'agent-update-queued-'
         $out = Join-Path $logDirectory 'submission.out'
         $log = Join-Path $logDirectory 'submission.log'
+        # The submission records its own exit code, so a submission that exits
+        # before its process can be opened is still reported accurately.
+        $exitFile = Join-Path $logDirectory 'submission.exit'
         if ($logDirectory -match '["%!^&|<>]') { throw 'The update log path is not safe for redirection.' }
+        # The caller, arguments and exit path travel as base64 JSON data, never as
+        # PowerShell source, so no quote character (ASCII or typographic) can end a literal.
+        $payload = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes((ConvertTo-Json -Compress -InputObject @{
+            caller = [string]$_awUpdateCaller; args = [string[]]$forward; exit = [string]$exitFile })))
+        $script = "`$ErrorActionPreference = 'Continue'`n`$ProgressPreference = 'SilentlyContinue'`n" +
+            "`$env:AGENT_WORKTREES_INTERNAL_DURABLE_UPDATE = '1'`n" +
+            "`$spec = ConvertFrom-Json ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('$payload')))`n" +
+            "`$forward = [string[]]@(`$spec.args)`n& ([string]`$spec.caller) @forward`n" +
+            "`$code = if (`$null -eq `$LASTEXITCODE) { 0 } else { `$LASTEXITCODE }`n" +
+            "[IO.File]::WriteAllText([string]`$spec.exit, [string]`$code)`nexit `$code`n"
         $shell = (Get-Process -Id $PID).Path
         $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($script))
         $command = "`"$env:ComSpec`" /d /s /c `"`"$shell`" -NoProfile -NonInteractive " +
@@ -138,6 +161,7 @@ function Submit-AgentDurableUpdate([string]$Preflight) {
             ShowWindow = [uint16]0
             EnvironmentVariables = [string[]]$environment
         }
+        $submittedAt = [DateTime]::Now.AddSeconds(-2)
         $created = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{
             CommandLine = $command
             CurrentDirectory = (Get-Location).ProviderPath
@@ -159,12 +183,7 @@ function Submit-AgentDurableUpdate([string]$Preflight) {
         "(process $($created.ProcessId)); submission output: $out; submission log: $log"
     # With --json, stdout carries only the submission's own JSON document.
     if (-not $asJson) { Write-Host $notice }
-    $exitCode = $null
-    try {
-        $process = [Diagnostics.Process]::GetProcessById([int]$created.ProcessId)
-        $null = $process.Handle
-        if ($process.WaitForExit(300000)) { $exitCode = $process.ExitCode }
-    } catch {}
+    $exitCode = Wait-AgentQueuedSubmission $created.ProcessId $submittedAt $exitFile
     $read = { param($path) if (Test-Path -LiteralPath $path -PathType Leaf) { [IO.File]::ReadAllText($path) } else { '' } }
     $stdout = & $read $out
     $stderr = & $read $log

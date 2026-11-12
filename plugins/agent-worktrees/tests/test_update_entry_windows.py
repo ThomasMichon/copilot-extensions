@@ -1566,3 +1566,49 @@ if __name__ == "__main__":
                 Path(directory) / selected_front, str(options.powershell), selected_front,
             )
             print(f"PASS {selected_front}: actual admission, offline bootstrap, probe and Job cleanup")
+
+
+_WAIT_SUBMISSION = r"""
+$ast = [Management.Automation.Language.Parser]::ParseFile($env:ENTRY_SCRIPT, [ref]$null, [ref]$null)
+$definition = $ast.Find({ param($node)
+    $node -is [Management.Automation.Language.FunctionDefinitionAst] -and
+    $node.Name -eq 'Wait-AgentQueuedSubmission' }, $true)
+. ([scriptblock]::Create($definition.Extent.Text))
+$result = Wait-AgentQueuedSubmission ([int]$env:SUBMISSION_PID) ([DateTime]::Parse($env:SUBMITTED_AT)) $env:EXIT_FILE
+if ($null -eq $result) { 'none' } else { "code=$result" }
+"""
+
+
+@pytest.mark.parametrize("case", ["exited", "reused", "unreported"])
+def test_queued_submission_that_exits_before_it_is_opened_reports_its_recorded_code(
+    tmp_path, native_powershell, case,
+):
+    """A fast-exiting submission is judged by its recorded exit code, never a reused PID."""
+    exit_file = tmp_path / "submission.exit"
+    if case != "unreported":
+        exit_file.write_text("0", encoding="utf-8")
+    if case == "exited":
+        finished = subprocess.run(
+            [native_powershell, "-NoProfile", "-Command", "$PID"],
+            capture_output=True, text=True, check=True, **no_window_kwargs(),
+        )
+        submission_pid = int(finished.stdout.strip())
+    else:
+        # A long-lived process started before the submission stands in for a reused PID.
+        submission_pid = os.getpid()
+    env = dict(
+        os.environ,
+        ENTRY_SCRIPT=str(PLUGIN / "bin" / "agent-worktrees-update-entry.ps1"),
+        SUBMISSION_PID=str(submission_pid),
+        SUBMITTED_AT=time.strftime("%Y-%m-%dT%H:%M:%S"),
+        EXIT_FILE=str(exit_file),
+    )
+    started = time.monotonic()
+    result = subprocess.run(
+        [native_powershell, "-NoProfile", "-NonInteractive", "-Command", _WAIT_SUBMISSION],
+        capture_output=True, text=True, env=env, timeout=60, **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    expected = "none" if case == "unreported" else "code=0"
+    assert result.stdout.strip().splitlines()[-1] == expected, result.stdout + result.stderr
+    assert time.monotonic() - started < 30, "a reused PID must never be waited on"

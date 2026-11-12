@@ -202,8 +202,16 @@ def test_wmi_launch_transfers_a_pipe_with_output_eof_and_caller_descriptors(tmp_
     )
     env = {k: v for k, v in os.environ.items() if k != "COPILOT_EXTENSIONS_TEST_CONTAINED"}
     read_fd, write_fd = os.pipe()
-    stream = os.fdopen(read_fd, "rb")
     process = None
+    chunks: list[bytes] = []
+
+    def drain():
+        # Raw reads hold no buffered-reader lock, so a failing test never
+        # blocks on the reader during cleanup.
+        while chunk := os.read(read_fd, 4096):
+            chunks.append(chunk)
+
+    reader = threading.Thread(target=drain, daemon=True)
     try:
         with os.fdopen(write_fd, "wb") as output, open(os.devnull, "rb") as null:
             handles = tuple(
@@ -219,16 +227,21 @@ def test_wmi_launch_transfers_a_pipe_with_output_eof_and_caller_descriptors(tmp_
             os.fstat(output.fileno())
             os.fstat(null.fileno())
             output.write(b"")
-        received: list[bytes] = []
-        reader = threading.Thread(target=lambda: received.append(stream.read()), daemon=True)
         reader.start()
         reader.join(30)
         assert not reader.is_alive(), "the pipe never reached EOF after the daemon exited"
-        assert received[0].replace(b"\r\n", b"\n") == b"out-line\nerr-line\n"
+        assert b"".join(chunks).replace(b"\r\n", b"\n") == b"out-line\nerr-line\n"
         assert process.wait(timeout=10) == 0
     finally:
-        stream.close()
+        # Stop the owned daemon first: its exit closes the write end the reader waits on.
         if process is not None:
             if process.poll() is None:
                 process.terminate()
+                process.wait(timeout=10)
             process.close()
+        if reader.is_alive():
+            reader.join(10)
+        # Close the read end only once nothing can still be blocked reading it;
+        # otherwise the daemon reader thread is left to end with the test process.
+        if not reader.is_alive():
+            os.close(read_fd)
