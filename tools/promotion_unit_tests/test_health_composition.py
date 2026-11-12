@@ -10,7 +10,7 @@ import json
 import sys
 from contextlib import contextmanager, nullcontext
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from types import ModuleType, SimpleNamespace
 from xml.etree import ElementTree
 
@@ -58,6 +58,32 @@ def owners(monkeypatch):
             "health_report", "health_chart", "health_jobs", "cli_health",
         )
     }
+    peer = package(machines.__name__ + "._peer_launch")
+    peer.retained_runtime_identity = peer.retained_runtime_prefix = forbidden
+    proc = package("agent_procutil")
+    owned = package(proc.__name__ + ".owned_process")
+    owned.OwnedCleanupError = type("OwnedCleanupError", (RuntimeError,), {})
+    owned.run_caller_owned = forbidden
+    budget = package(proc.__name__ + ".owned_budget")
+
+    class Budget(SimpleNamespace):
+        @classmethod
+        def from_timeout(cls, timeout, *, cleanup_reserve):
+            return cls(timeout=timeout, cleanup_reserve=cleanup_reserve)
+
+    budget.OwnedExecutionBudget = Budget
+    for name in ("health_task_native", "health_enrollment", "health_job"):
+        modules[name] = load(machines.__name__ + "." + name, sources + name + ".py")
+    modules["runtime_launcher"] = load(
+        machines.__name__ + ".runtime_launcher", "libs/installer-engine/runtime_launcher.py",
+    )
+    resources = package(machines.__name__ + ".resources")
+    resources.ResourceHandler = object
+    resources.ResourceFinding = resources.ResourceResult = SimpleNamespace
+    resources._select_field = forbidden
+    modules["resource_health_job"] = load(
+        machines.__name__ + ".resource_health_job", sources + "resource_health_job.py",
+    )
     modules["task_desktop"] = load(
         machines.__name__ + ".task_desktop",
         "plugins/agent-machines/tests/native/health_task_desktop.py",
@@ -74,6 +100,301 @@ def owners(monkeypatch):
     parser = argparse.ArgumentParser(allow_abbrev=False)
     modules["cli_health"].add_parser(parser.add_subparsers(required=True))
     return modules, parser
+
+
+def test_installed_enrollment_preview_binds_installation_and_refuses_foreign_state_without_effects(owners):
+    modules, _ = owners
+    enrollment = modules["health_enrollment"]
+    desired = {
+        "store": str(ROOT / "fixture-store"), "policy_token": "a" * 64,
+        "user_id": "S-1-5-21-1-2-3-1000", "enabled": True,
+    }
+    native = {"configured": False, "enabled": False, "instances": [], "digest": "absent"}
+    owner = object.__new__(enrollment.Enrollment)
+    owner.root = ROOT
+    owner.owner = "urn:copilot-extensions:health-job:" + "a" * 64
+    owner.backend = SimpleNamespace(call=lambda operation: copy.deepcopy(native))
+    owner.read = enrollment.empty
+    owner._policy = lambda *_args: None
+    owner.selector = lambda *_args: None
+    owner.converge = lambda **_fields: pytest.fail("preview reached convergence")
+    preview = owner.configure(desired)
+    assert preview["status"] == "preview" and not preview["configured"]
+    owner.owner = "urn:copilot-extensions:health-job:" + "b" * 64
+    with pytest.raises(ValueError, match="preview-changed"):
+        owner.configure(desired, apply=True, expected=preview["preview_token"])
+    with pytest.raises(ValueError, match="confirmation-requires-apply"):
+        owner.configure(desired, expected=preview["preview_token"])
+    with pytest.raises(ValueError, match="invalid-local-job-enrollment"):
+        owner.configure({**desired, "executable": "not-collection-authority"})
+    with pytest.raises(ValueError, match="foreign-or-drifted"):
+        owner._owned({**native, "configured": True}, None)
+
+
+def test_installed_job_native_defaults_preserve_matching_but_not_changed_execution(owners):
+    modules, _ = owners
+    enrollment, jobs = modules["health_enrollment"], modules["health_jobs"]
+    xml = jobs.installed_definition(
+        slot=r"C:\fixture\versions\1.0", python=r"C:\fixture\versions\1.0\Scripts\python.exe",
+        gui_python=r"C:\Python\pythonw.exe", identity="a" * 32 + ":" + "b" * 64,
+        store=r"C:\fixture\store", policy_token="c" * 64,
+        user_id="S-1-5-21-1-2-3-1000", windows_root=r"C:\Windows",
+        owner="urn:copilot-extensions:health-job:" + "d" * 64, enabled=True,
+    )
+    root = ElementTree.fromstring(xml.replace("2000-01-01T00:00:15Z", "2000-01-01T00:00:15+00:00"))
+    ns = {"t": jobs.NS}
+    settings = root.find("t:Settings", ns)
+    settings.remove(settings.find("t:Enabled", ns))
+    normalized = ElementTree.tostring(root, encoding="unicode")
+    assert enrollment.signature(normalized) == enrollment.signature(xml)
+    assert enrollment.signature(enrollment.disabled(normalized))["Settings/Enabled"] == "false"
+    disabled_xml = jobs.installed_definition(
+        slot=r"C:\fixture\versions\1.0", python=r"C:\fixture\versions\1.0\Scripts\python.exe",
+        gui_python=r"C:\Python\pythonw.exe", identity="a" * 32 + ":" + "b" * 64,
+        store=r"C:\fixture\store", policy_token="c" * 64,
+        user_id="S-1-5-21-1-2-3-1000", windows_root=r"C:\Windows",
+        owner="urn:copilot-extensions:health-job:" + "d" * 64, enabled=False,
+    )
+    assert enrollment.signature(disabled_xml) == enrollment.signature(enrollment.disabled(xml))
+    root.find("t:Actions/t:Exec/t:Command", ns).text = r"C:\Python\python.exe"
+    changed = ElementTree.tostring(root, encoding="unicode")
+    assert enrollment.signature(changed) != enrollment.signature(xml)
+    owner = object.__new__(enrollment.Enrollment)
+    owner.root = ROOT
+    owner.owner = "urn:copilot-extensions:health-job:" + "d" * 64
+    owner.selector = lambda *_args: SimpleNamespace(
+        identity="selected-build", definition=lambda *_args, **_fields: xml,
+    )
+    owner._policy = owner.qualifier = lambda *_args: pytest.fail("unqualified cached action")
+    pending = {"candidate": {"definition": xml}, "before": None}
+    assert owner._pending_owner({"configured": True, "xml": enrollment.disabled(xml)}, pending) == pending["candidate"]
+    with pytest.raises(ValueError, match="recovery-conflict"):
+        owner._pending_owner({"configured": True, "xml": changed}, pending)
+    with pytest.raises(ValueError, match="recovery-closure-changed"):
+        owner._qualify_record({
+            "version": "1.0", "identity": "selected-build", "definition": changed,
+            "desired": {"enabled": True},
+        }, {})
+
+
+def test_new_confirmation_does_not_promote_previous_configuration_recovery(owners):
+    module = owners[0]["health_enrollment"]
+    owner = object.__new__(module.Enrollment)
+    owner.root = ROOT
+    owner.owner = "urn:copilot-extensions:health-job:" + "a" * 64
+    old = {
+        "store": str(ROOT / "old-store"), "policy_token": "a" * 64,
+        "user_id": "S-1-5-21-1-2-3-1000", "enabled": False,
+    }
+    state = {**module.empty(), "desired": old}
+    owner.read = lambda: state
+    owner.backend = SimpleNamespace(call=lambda operation: {
+        "configured": False, "enabled": False, "instances": [], "digest": "absent",
+    })
+    owner._owned = owner._policy = lambda *_args: None
+    owner.selector = lambda *_args: None
+    owner.converge = lambda **_fields: {
+        "status": "disabled", "recovery_required": False, "changed": True,
+    }
+    wanted = {**old, "store": str(ROOT / "new-store")}
+    preview = owner.configure(wanted)
+    result = owner.configure(wanted, apply=True, expected=preview["preview_token"])
+    assert result["status"] == "configuration-not-applied"
+    assert result["configuration_applied"] is False and result["changed"] is True
+
+
+def test_installed_lifecycle_cli_uses_retained_manager_without_collector_readiness(owners, monkeypatch):
+    modules, parser = owners
+    enrollment = modules["health_enrollment"]
+    selections = []
+    monkeypatch.setattr(enrollment, "select", lambda **fields: selections.append(fields) or "manager")
+    monkeypatch.setattr(enrollment, "Enrollment", lambda selected: SimpleNamespace(
+        disable=lambda: {"status": "disabled"},
+    ))
+    args = parser.parse_args(["health", "job", "disable"])
+    output = io.StringIO()
+    monkeypatch.setattr(sys, "stdout", output)
+    assert args.func(args) == 0
+    assert selections == [{"executing": True, "for_collection": False}]
+    assert json.loads(output.getvalue())["status"] == "disabled"
+
+
+def test_withdrawal_recovery_cannot_select_or_enable_an_incumbent(owners):
+    module = owners[0]["health_enrollment"]
+    owner = object.__new__(module.Enrollment)
+    owner.root = ROOT
+    owner.path = ROOT / "unused-state"
+    owner.leases = SimpleNamespace(begin_runtime_reference_transaction=lambda *_args: {
+        "token": "a" * 64, "owners": {},
+    })
+    writes, switches = [], []
+    module.slots._write = lambda *args: writes.append(args)
+    owner._qualify_record = lambda *_args: pytest.fail("withdrawal qualified an incumbent")
+    owner._switch = lambda native, candidate: switches.append(candidate) or native
+    owner._settle = lambda *_args, **fields: fields
+    state = {"pending": {
+        "before": {"retained": "incumbent"}, "candidate": {"retained": "replacement"},
+        "references": [], "token": "a" * 64, "intent": "replace",
+        "native_unsettled": False,
+    }}
+    result = owner._recover(state, {"configured": False}, rollback=True, remove=True)
+    assert result["status"] == "removed" and switches == [None] and len(writes) == 1
+    assert writes[0][1]["pending"]["intent"] == "remove"
+    for fields, intent in (({"remove": True}, "remove"), ({"disable": True}, "disable")):
+        writes.clear()
+        switches.clear()
+        with pytest.raises(ValueError, match="cleanup-unconfirmed"):
+            owner._recover({
+                "pending": {**state["pending"], "native_unsettled": True},
+            }, {"configured": False}, **fields)
+        assert not switches and writes[0][1]["pending"]["intent"] == intent
+        assert writes[0][1]["pending"]["native_unsettled"] is True
+
+
+def test_removed_enrollment_convergence_is_noop_after_reference_settlement(owners):
+    module = owners[0]["health_enrollment"]
+    owner = object.__new__(module.Enrollment)
+    owner.root = ROOT
+    owner.read = module.empty
+    native = {"configured": False, "enabled": False, "instances": []}
+    owner.backend = SimpleNamespace(call=lambda operation: native)
+    owner._owned = owner._recover_reference_fence = lambda *_args: None
+    owner.leases = SimpleNamespace(
+        reference_transaction_custody=lambda *_args, **_fields: nullcontext(),
+        read_runtime_references=lambda *_args: {},
+    )
+    assert owner.converge(remove=True)["changed"] is False
+
+
+def test_file_resource_classification_keeps_enrollment_consent_local(owners, monkeypatch):
+    module = owners[0]["resource_health_job"]
+
+    class VirtualPath(type(Path())):
+        def resolve(self, *args, **fields):
+            return self.with_name(module.ENROLLMENT_STATE) if self.name == "alias.json" else self
+
+    home = VirtualPath(ROOT / "fixture-home")
+    selected = VirtualPath(ROOT / "selected-install")
+    monkeypatch.setattr(module, "Path", VirtualPath)
+    monkeypatch.setattr(module, "os", SimpleNamespace(name="nt", environ={"AGENT_RT_ROOT": str(selected)}))
+    for root in (
+        home / ".agent-machines", selected,
+        home / ".copilot-extensions" / "marketplaces" / "example" / "plugins" / "agent-machines",
+    ):
+        assert module.is_enrollment_state(root / module.ENROLLMENT_STATE)
+    assert module.is_enrollment_state(home / "another-custom-install" / module.ENROLLMENT_STATE)
+    assert not module.is_enrollment_state(home / "ordinary.json")
+    assert not module.is_enrollment_state(home / "health-job.json")
+    assert module.is_enrollment_state(home / "alias.json")
+    for suffix in (".", " ", "::$DATA"):
+        assert module.is_enrollment_state(home / (module.ENROLLMENT_STATE + suffix))
+
+
+@pytest.mark.parametrize("outcome,expected", [("unsupported", 2), ("failed", 2), ("timeout", 124), ("cleanup", 125)])
+def test_installed_job_support_and_result_propagation_use_substituted_native_owners(owners, monkeypatch, outcome, expected):
+    modules, _ = owners
+    job = modules["health_job"]
+    peer = sys.modules[job.__package__ + "._peer_launch"]
+    native = sys.modules["agent_procutil.owned_process"]
+
+    class VirtualPath(type(Path())):
+        def exists(self):
+            return False
+
+    monkeypatch.setattr(job, "Path", VirtualPath)
+    monkeypatch.setattr(job, "sys", SimpleNamespace(
+        platform="win32", prefix=str(ROOT / "versions" / "1.0" / ".venv"),
+        executable=str(ROOT / "versions" / "1.0" / ".venv" / "Scripts" / "python.exe"),
+    ))
+    monkeypatch.setattr(job, "os", SimpleNamespace(environ={}))
+    monkeypatch.setattr(job, "time", SimpleNamespace(monotonic=lambda: 100))
+    monkeypatch.setattr(modules["health_slots"], "_read", lambda *_args, **_fields: ({
+        "schema": "agent-machines.health.collection", "version": 1,
+        "operations": ["preview", "apply"] + ([] if outcome == "unsupported" else ["installed-job"]),
+    }, "source"))
+    peer.retained_runtime_identity = lambda *_args: "selected-build"
+    peer.retained_runtime_prefix = lambda *_args, **_fields: ["selected-runtime", "-m", "agent_machines"]
+    peer.legacy_peer_environment = lambda environment: dict(environment)
+    calls = []
+
+    def run(argv, **fields):
+        calls.append(argv)
+        assert fields["budget"].deadline == 155
+        assert argv[-3:] == ["--apply", "--expect-policy", "a" * 64]
+        if outcome == "timeout":
+            raise job.subprocess.TimeoutExpired(argv, 1)
+        if outcome == "cleanup":
+            raise native.OwnedCleanupError("unsettled")
+        return SimpleNamespace(returncode=2)
+
+    monkeypatch.setattr(native, "run_caller_owned", run)
+    assert job.main(["--store", str(ROOT / "fixture-store"), "--expect-policy", "a" * 64]) == expected
+    assert len(calls) == (0 if outcome == "unsupported" else 1)
+
+
+def test_native_job_adapter_frames_exact_request_and_refuses_oversize_or_invalid_reply(owners, monkeypatch):
+    import base64
+    import re
+
+    module = owners[0]["health_task_native"]
+    monkeypatch.setattr(module, "sys", SimpleNamespace(platform="win32"))
+    monkeypatch.setattr(module, "os", SimpleNamespace(environ={"SystemRoot": str(ROOT / "Windows")}))
+    calls = []
+    snapshot = {"configured": False, "enabled": False, "instances": [], "digest": "absent"}
+
+    def run(argv, **_fields):
+        script = base64.b64decode(argv[-1]).decode("utf-16-le")
+        encoded = re.search(r"FromBase64String\('([A-Za-z0-9+/=]+)'\)", script).group(1)
+        calls.append(json.loads(base64.b64decode(encoded)))
+        return SimpleNamespace(returncode=0, stdout=json.dumps(snapshot))
+
+    monkeypatch.setattr(module, "run_caller_owned", run)
+    task = module.NativeTask("ce-health-" + "a" * 32, "urn:copilot-extensions:health-job:" + "b" * 64)
+    assert task.call("read") == snapshot
+    assert calls == [{
+        "name": task.name, "owner": task.owner, "operation": "read", "expected": "", "definition": "",
+    }]
+    with pytest.raises(ValueError, match="oversize"):
+        task.call("create", expected="absent", definition="x" * 20000)
+    assert len(calls) == 1
+    monkeypatch.setattr(module, "run_caller_owned", lambda *_args, **_fields: SimpleNamespace(
+        returncode=0, stdout="[]",
+    ))
+    with pytest.raises(RuntimeError, match="response-invalid"):
+        task.call("read")
+
+
+def test_gui_bootstrap_binds_only_its_matching_base_and_retained_environment(owners, monkeypatch):
+    module = owners[0]["runtime_launcher"]
+
+    class VirtualPath(PureWindowsPath):
+        def samefile(self, other):
+            return self == other
+
+    home = VirtualPath(r"C:\Python")
+    slot = VirtualPath(r"C:\fixture\versions\1.0")
+    environment = slot / ".venv"
+    python = environment / "Scripts" / "python.exe"
+    context = SimpleNamespace(
+        platform="win32", executable=str(home / "pythonw.exe"),
+        base_prefix=str(home), prefix=str(home), exec_prefix=str(home),
+    )
+    monkeypatch.setattr(module, "Path", VirtualPath)
+    monkeypatch.setattr(module, "sys", context)
+    monkeypatch.setattr(module, "_identity_bytes", lambda *_args: (
+        b"home = C:\\Python\ninclude-system-site-packages = false\n"
+    ))
+    runtime = SimpleNamespace(slot_python=lambda *_args: python)
+    module._gui_environment(runtime, slot.parent.parent, slot)
+    assert context.executable == str(python)
+    assert context.prefix == context.exec_prefix == str(environment)
+    context.executable = str(home / "python.exe")
+    with pytest.raises(RuntimeError, match="does not match"):
+        module._gui_environment(runtime, slot.parent.parent, slot)
+    context.executable = str(home / "pythonw.exe")
+    context.base_prefix = r"C:\DifferentPython"
+    with pytest.raises(RuntimeError, match="does not match"):
+        module._gui_environment(runtime, slot.parent.parent, slot)
 
 
 def test_optional_desktop_admission_accepts_active_console_and_rdp_without_changing_capture(owners):

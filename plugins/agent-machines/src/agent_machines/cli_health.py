@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import stat
+import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -62,6 +63,57 @@ def add_parser(subparsers) -> None:
     job.add_argument("--store-dir", type=Path, required=True, help="explicit preprovisioned v2 store")
     job.add_argument("--user-id", default="", help="interactive Windows account SID for the proposed task")
     job.set_defaults(func=run_prepare_job)
+    enrollment = commands.add_parser(
+        "job", help="explicit local Windows health-job lifecycle; never a service", allow_abbrev=False,
+    )
+    operations = enrollment.add_subparsers(dest="job_operation", required=True)
+    configure = operations.add_parser("configure", allow_abbrev=False)
+    configure.add_argument("--store-dir", type=Path, required=True)
+    configure.add_argument("--user-id", required=True)
+    configure.add_argument("--enabled", action="store_true", help="explicitly adopt recurring local writes")
+    configure.add_argument("--apply", action="store_true")
+    configure.add_argument("--expect", default="", help="exact local enrollment preview token")
+    configure.set_defaults(func=run_job)
+    for operation in ("status", "converge", "disable", "remove"):
+        operations.add_parser(operation, allow_abbrev=False).set_defaults(func=run_job)
+
+
+def run_job(args) -> int:
+    from . import health_enrollment as enrollment
+    from .health_run import policy_preview
+    from .health_slots import HealthError
+
+    owner = None
+    settlement_attempted = False
+    try:
+        owner = enrollment.Enrollment(enrollment.select(executing=True, for_collection=False))
+        if args.job_operation == "configure":
+            result = owner.configure({
+                "store": str(args.store_dir), "policy_token": policy_preview(args.store_dir)[2],
+                "user_id": args.user_id, "enabled": args.enabled,
+            }, apply=args.apply, expected=args.expect)
+        elif args.job_operation == "status":
+            result = owner.status()
+        elif args.job_operation == "disable":
+            result = owner.disable()
+        else:
+            result = owner.converge(remove=args.job_operation == "remove")
+        settlement_attempted = True
+        if enrollment.settle_native_cleanup(owner):
+            result["native_cleanup_unconfirmed"] = False
+        print(json.dumps(result, separators=(",", ":"), allow_nan=False), flush=True)
+        return 2 if result["status"] in {"unknown", "rolled-back", "configuration-not-applied"} else 0
+    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
+        if not settlement_attempted:
+            try:
+                enrollment.settle_native_cleanup(owner, error)
+            except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
+                pass
+        print(json.dumps({
+            "ok": False, "error": str(error) if isinstance(error, HealthError) else "job-lifecycle-unavailable",
+            "carrier_publication": "not-requested",
+        }), file=sys.stderr)
+        return 2
 
 
 def run_prepare_job(args) -> int:
