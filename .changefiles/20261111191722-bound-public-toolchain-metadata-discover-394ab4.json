@@ -1,0 +1,9 @@
+{
+  "comment": "Bound public toolchain metadata discovery across connection and response using the caller deadline.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
