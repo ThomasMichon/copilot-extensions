@@ -14,6 +14,7 @@ from .queue import TaskQueue
 from .coordinator_task_recovery import RECOVERY_CONTRACT
 from .coordinator_pool_catalog import pool_catalog_contract
 from .coordinator_standing import standing_capability
+from .task_relevance_contract import relevance_contract
 from .queue_pool_placement import pool_placement_contract
 from .queue_spawn_conclusion import CLAIM_HELD_REARM_CAPABILITY
 
@@ -129,6 +130,7 @@ def register_status_routes(
             CLAIM_HELD_REARM_CAPABILITY: 1,
             "pool_cohort": {"version": 1, "revision": queue.pool_configured_cohort().revision},
             "task_recovery": RECOVERY_CONTRACT,
+            "task_relevance": relevance_contract(control_token),
             "delegated_run_waiters": {
                 "protocol": "delegated_run_waiters/v1",
                 "coordinator_id": queue.run_waiter_coordinator_id(),

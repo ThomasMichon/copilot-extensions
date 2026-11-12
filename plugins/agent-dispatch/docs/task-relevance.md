@@ -1,8 +1,9 @@
 # Task relevance receiver
 
-The queue has an **internal, receiver-first** relevance operation:
-`reconcile_task_relevance`. It is not exposed through HTTP or CLI and no emitter,
-evaluator or periodic source calls it yet. Source adapters, registered-source
+The queue has a **receiver-first** relevance operation:
+`reconcile_task_relevance`, with control-authorized HTTP admission for local
+direct command-emitter registrations. No automatic emitter, evaluator or
+periodic source calls it yet. Source adapters, broader registered-source
 admission and actual session/workspace closeout remain tracked by
 the [active effort](../../../efforts/active/task-relevance-reconciliation/README.md).
 This is not an automatic task scrubber.
@@ -28,9 +29,10 @@ transport, cleanup service or claim ledger.
 A trusted coordinator caller resolves a `RelevanceScope` containing the
 repository lane, source and origin reference. All three must match the finite
 task. This structural scope is not authentication or proof that a registered
-emitter owns a legacy recipe task. The future external receiver must derive
+emitter owns a legacy recipe task. An external receiver must derive
 caller scope from the existing registration and attribution owners, not accept
-an arbitrary caller assertion.
+an arbitrary caller assertion. The local direct-emitter receiver below resolves
+its scope in the queue transaction; declared/evaluator scope is not yet admitted.
 
 `relevance_snapshot` supplies the task generation and latest audit-event
 revision. The caller checks its authoritative backing object and reports
@@ -100,9 +102,68 @@ Session conclusion, workspace disposition, recovery of cleared historical
 owners and externally registered relevance callers remain pending. This slice
 does not release reservations or delete files.
 
-No new wire contract or support capability is advertised. Existing clients and
-ordinary tasks retain their behavior. A prior receiver must not receive new
-relevance requests, and an older runtime must not resume a database containing
-accepted closeout intents without preserving their admission fence. Mixed-version
-wire negotiation and the supported rollback path remain prerequisites before
-external callers are enabled.
+## Registered receiver and compatibility
+
+The actual coordinator's `/health.task_relevance` advertises
+`task_relevance/v1`, supported version `1`, registration scope
+`local-direct-command-emitter` and whether control authority is configured.
+This is additive health metadata; older clients keep their existing behavior.
+No CLI command or automatic source adapter is enabled by this capability.
+
+The control-authorized HTTP surface is:
+
+| Route | Meaning |
+|---|---|
+| `GET /task-relevance/contract` | Current serving receiver's support |
+| `GET /task-relevance/tasks/{task_id}?registration_id=...` | Source-scoped task and registration revision snapshot |
+| `POST /task-relevance/tasks/{task_id}` | Strict version-1 relevance report |
+| `GET /task-relevance/tasks/{task_id}/receipts/{request_id}?registration_id=...` | Original acceptance and current delivery state |
+
+The POST body contains `version`, `registration_id`, `registration_revision`,
+`request_id`, `expected_generation`, `expected_revision`, `verdict`, `reason`
+and `observation_ref`. Unknown fields, boolean revisions and other versions are
+rejected. Callers cannot choose the reporter, source, origin, machine or
+environment. Ordinary data and task-scoped authority do not authorize this
+surface.
+
+The receiver resolves its own local machine/environment and holds the existing
+operator-override lock through the queue decision. Inside the same SQLite write
+as claim and registration mutation, it checks the observed registration revision,
+active local registration, command-emitter task output and the emitter-authored
+source/origin fields. Fresh admission also consults the configured registrar
+reader and existing direct/declaration merge owner. A declaration-superseded
+direct row is refused even before its declaration is mirrored into SQLite;
+missing or incomplete discovery is not eligibility evidence. This does not
+enable relevance reports from declared registrations.
+It honors concrete and logical local overrides. Another
+registration with the same emitter provenance is ambiguous and refused.
+That check includes conflicting declarations in the fresh merged set before
+their registration rows are mirrored, not only already-published rows.
+An unchanged registration upsert does not invalidate observations; changed,
+removed/recreated or paused registrations do. A draining receiver refuses new
+decisions. A fresh abandonment uses the existing result-free terminal event
+shape and lifecycle telemetry; an identical report replay emits neither twice.
+
+This is structural source attribution within existing trusted control authority,
+not proof that an opaque legacy task was created by a particular process.
+Declared, remote and evaluator registrations are explicitly unsupported until
+their effective registrar/override and attribution owners are integrated. They
+must not be relabelled as local direct registrations to pass admission.
+Legacy/manual tasks without matching emitter provenance remain outside scope.
+
+Opt-in client methods check support on their bound running peer before sending
+the new form. Missing, invalid or unsupported metadata raises
+`DispatchUpgradeRequired` before the report; there is no fallback to ordinary
+abandonment. Each effect is sent once. A lost response is recovered from the
+original receipt rather than minting a new request. Identical accepted requests
+and their receipt reads remain recoverable after registration removal or a new
+hold; they do not authorize another effect.
+Request identities containing slashes remain recoverable through the receipt
+route's path capture; URL quoting alone is not assumed to preserve a segment.
+
+Rollout remains provider-first: release this receiver before migrating source
+callers, then qualify broader scopes and actual owner closeout. A rollback to a
+prior wire receiver refuses the new operation while retaining old operations.
+An older database consumer must not resume accepted closeout goals without
+preserving their admission fence; rolling back the database or discarding
+closeout history is not a supported recovery. No old surface is retired here.

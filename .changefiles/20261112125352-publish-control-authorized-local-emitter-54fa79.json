@@ -1,0 +1,9 @@
+{
+  "comment": "Publish control-authorized local emitter relevance admission with registration and task revision fences, original receipt recovery and running-peer compatibility.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}
