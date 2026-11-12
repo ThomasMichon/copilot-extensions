@@ -18,6 +18,11 @@ retains those separate integration and adoption gates.
 `server.build_app` passes its actual `RegistrarSources` to `CoordinatorPoolSource`.
 Only the selected coordinator projects the whole configured cohort. It uses
 the existing liveness-GC iteration, not another loop, timer, service or executor.
+Installed coordinator bootstrap, deployment and source reconciliation select
+the installation's `registrar/` unless its `service.env` explicitly sets
+`AGENT_DISPATCH_REGISTRAR_DIR`. A named supervisor's inherited registrar override
+does not select the shared coordinator's cohort. Direct foreground `serve`
+continues to honor its explicit process configuration.
 An enabled positive GC interval, configured control authority and the actual
 active-route callback are required. Construction and reads still write nothing;
 the first eligible GC iteration performs maintenance.

@@ -84,7 +84,9 @@ def test_ordinary_dispatch_deploy_refuses_conditional_recovery(
 ):
     from agent_dispatch.config import Config
 
-    monkeypatch.setattr("agent_dispatch.install_paths.apply_service_env_overlay", lambda *_: None)
+    monkeypatch.setattr(
+        "agent_dispatch.install_paths.apply_service_env_overlay", lambda env, *_a, **_k: env,
+    )
     monkeypatch.setattr(coordinator_cli._config, "routing_dir", lambda: tmp_path)
     monkeypatch.setattr(coordinator_cli._config, "load_config", lambda: Config(db_path="fixture.db"))
     monkeypatch.setattr(coordinator_cli, "_client_token_value", lambda: None)

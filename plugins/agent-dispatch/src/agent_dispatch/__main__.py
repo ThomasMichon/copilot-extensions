@@ -398,7 +398,7 @@ def _spawn_coordinator_process() -> None:
     from .install_paths import install_dir as runtime_install_dir
 
     install_dir = runtime_install_dir()
-    from .install_paths import apply_service_env_overlay
+    from .install_paths import coordinator_service_environment
     from .procutil import resolve_own_runtime_python, spawn_dispatch_daemon
 
     # Always the canonically-resolved current-version slot (never sys.executable
@@ -410,9 +410,8 @@ def _spawn_coordinator_process() -> None:
 
     # Honor service.env (token, host/port pins) if present -- parity with the
     # installed launcher, which loads it before running `serve`.
-    env = dict(os.environ)
+    env = coordinator_service_environment(dict(os.environ), install_dir)
     env.setdefault("PYTHONUTF8", "1")
-    apply_service_env_overlay(env, install_dir)
 
     # Runs from the runtime root, never the CWD we inherited (a session-start
     # hook's CWD is often the plugin payload dir, which on Windows would lock it
