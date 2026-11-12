@@ -201,7 +201,7 @@ def collect(args: argparse.Namespace, report: Report) -> None:
                 report.gap("guidance-unavailable", f"{label}/{GUIDANCE}")
                 continue
             report.read(instructions / provider / GUIDANCE, f"{label}/{GUIDANCE}")
-    if args.maintenance_file:
+    if args.maintenance_file is not None:
         maintenance = checked_path(args.maintenance_file)
         if maintenance.name != "maintenance.json":
             raise Refusal("invalid-maintenance-name")

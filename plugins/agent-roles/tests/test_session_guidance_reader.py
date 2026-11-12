@@ -240,6 +240,7 @@ def test_total_read_and_output_budgets_are_enforced(selected: Selected, source: 
     ["--guidance", "../escape"],
     ["--guidance", "x" * 10000],
     ["--session-id", "../escape"],
+    ["--maintenance-file", ""],
     ["--timeout", "nan"],
     ["--timeout", "6"],
     ["--unknown", "private argument"],
