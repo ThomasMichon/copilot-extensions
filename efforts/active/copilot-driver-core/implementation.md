@@ -92,6 +92,12 @@ embody/copilot and Bridge create/resume, including their ordinary local and
 remote paths, consume the same core. Native AHP/SDK/application peers remain
 provider-honest; the refactor does not silently change mode defaults.
 
+Recordless normalized setup now enters the retained core after setup hooks
+through #12186, without a fabricated worktree record. Explicit runtime-root
+resolution, policy-checked directory pinning and private execution storage are
+covered by source/synthetic consumer controls. This does not complete the
+caller/mode matrix or native, installed and all-platform receiving acceptance.
+
 ## Lifetime and activity evidence
 
 Interactive execution stays alive until Copilot is closed by the user or an
@@ -259,24 +265,49 @@ store tests cover reopen after retirement or resume intent, duplicate and
 conflicting requests, changed boot/source/owner/lease, missing settlement,
 unknown external effects and lost resume acknowledgements.
 
-The actor-free reducer and `RecoveryStore` protocol landed in #12144. They
-are not a production store or admission provider. The next original-owner
-adapter belongs outside the core, initially in Worktrees' existing guarded
-tracking-write and per-worktree launch state. Resolve canonical owner paths
+The actor-free reducer and `RecoveryStore` protocol landed in #12144; the
+complete codec and passive projection landed in #12150. Worktrees' actor-free
+original-owner store landed in #12157 through its existing guarded tracking
+writer and per-worktree launch state. It is not current native admission or
+productive recovery activation. Other original owners supply their own
+adapters outside the standalone core. Resolve canonical owner paths
 through that owner, never from untrusted descriptor strings. Compare every
 descriptor field, reserve absence at revision zero, retain immutable prior
 steps and operation-ID uniqueness, and acknowledge only durable atomic commit.
 An ambiguous writer response requires a read of the same original operation;
 it must not select direct-write fallback after possible admission.
 
-The receiver contributor's disjoint next leaf is a complete, bounded versioned
-record codec and passive store-read projection. Serialize the ordered steps,
-not the abbreviated status view; reject duplicate fields, unsupported versions,
-invalid types and oversized data without repair or truncation. Preserve
-unknown effects after restored observation. Keep generic store internals and
-native admission with their existing owner, and platform settlement with its
-qualified provider. A reducer/CAS return, including an identical-step replay
-that returns a later record, never dispatches a native effect.
+The receiver contributor's bounded record codec and passive store-read
+projection are source-complete in #12150. Preserve ordered steps, unknown
+effects and strict version/type/size refusal without repair or truncation.
+A reducer/CAS return, including an identical-step replay that returns a later
+record, never dispatches a native effect.
+
+**Next original-owner admission and provider boundaries.** Bind the exact
+descriptor and original operation to the retained native caller/scope and the
+currently approved source selection at the action boundary. Compare the
+actual owner, source and descriptor revisions, conversation/incarnation,
+environment/boot/scope and monotonic authority revision. An opaque lease ID,
+stored evidence reference or source-file presence is not that binding.
+Matching owned input is the positive source-control case; missing, stale,
+revoked, expired or changed target/route evidence stays unknown or held
+before effects. A lost acknowledgement reconciles the same durable operation.
+
+When a configured source uses a Gateway, its existing owner retains
+authentication, enrollment and the actual consumer/controller relationship.
+SDK availability or a source-lease helper alone does not qualify the routed
+grant. Keep credential responses on that owner's admitted confidential API,
+not ordinary publication/subscription metadata. This is an adapter-specific
+acceptance dependency, not a mandatory Gateway for unrelated sources or a
+new issuer, broker, store or per-session feeder.
+
+Qualified platform APIs currently settle through the same retained live
+owner. Durable descriptor-to-owner reacquisition or authoritative old-boot
+scope absence after coordinator loss remains a missing provider contract.
+Do not fill it with root exit, EOF, a local deadline, an internal provider
+confirmation call or a journal-generated certificate. Keep original-owner
+admission/store and receiver/platform custody separate; declare and review
+the binding and provider seams before any native-facing consumer leaf.
 
 Only subsequent reviewed provider integration and independently admitted
 process/native controls can qualify exact scope settlement and same-session

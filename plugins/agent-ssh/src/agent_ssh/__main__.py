@@ -8,6 +8,8 @@ Subcommands:
   mesh-status    Render the calling repo's SSH machine mesh from machines.yaml.
   refresh-mesh   Re-discover live tunnel ids, re-emit the profile, and verify
                  reachability to every machines.yaml dtssh alias.
+  setup          Plan/apply the local machine's SSH driver setup (ssh.driver).
+  status         Report the local machine's SSH driver status (read-only).
   verify         Probe machine-name SSH reachability using the active profile.
   version        Show package version.
 """
@@ -24,6 +26,26 @@ from . import explore as explore_mod
 from . import mesh as mesh_mod
 from . import mesh_refresh as mesh_refresh_mod
 from .probe import probe_alias
+
+
+def _cmd_driver(args: argparse.Namespace) -> int:
+    from . import driver
+
+    result = driver.run(
+        driver.Request(
+            verb=args.command,
+            apply=getattr(args, "apply", False),
+            interactive=getattr(args, "interactive", False),
+            machine=args.machine,
+            machines=args.machines,
+            module=args.module,
+        )
+    )
+    if args.json:
+        print(json.dumps(result, indent=2))
+    else:
+        print(driver.render_human(result, args.command))
+    return driver.exit_code(result)
 
 
 def _cmd_emit_profile(args: argparse.Namespace) -> int:
@@ -454,6 +476,24 @@ def build_parser() -> argparse.ArgumentParser:
 
     add_copilot_subparser(sub)
     add_forward_keeper_subparser(sub)
+
+    for verb, summary in (
+        ("setup", "Plan or apply the local machine's SSH driver setup (machines.yaml ssh.driver)."),
+        ("status", "Report the local machine's SSH driver status without changing anything."),
+    ):
+        driver_parser = sub.add_parser(verb, help=summary)
+        if verb == "setup":
+            driver_parser.add_argument("--apply", action="store_true", help="Apply instead of plan.")
+            driver_parser.add_argument(
+                "--interactive",
+                action="store_true",
+                help="Operator present: run requested auth commands on this console, then re-run setup once.",
+            )
+        driver_parser.add_argument("--machine", default=None, help="machines.yaml key (default: match local hostname).")
+        driver_parser.add_argument("--machines", type=Path, default=None, help="Path to machines.yaml.")
+        driver_parser.add_argument("--module", type=Path, default=None, help="Path to the driver's module.yaml.")
+        driver_parser.add_argument("--json", action="store_true", help="Emit the agent-ssh.driver-result JSON.")
+        driver_parser.set_defaults(func=_cmd_driver)
 
     sub.add_parser("version", help="Show version")
     return parser

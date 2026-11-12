@@ -38,6 +38,29 @@ bus/cgroup lifetime and authoritative cleanup. Their separate
 
 ## Select the evidence first
 
+The opt-in native receiving relocation case
+`tests/native/test_checkout_relocation_staging.py::test_live_cross_volume_receiving_uses_existing_native_owners`
+uses the canonical Worktrees runner with `--allow-explicit-tiers`. Explicit
+`RELOCATION_LIVE_ENROLLMENT` names a private JSON input containing newly owned
+`primary` and `second` directories on different volumes, the existing
+`native_data_dir`, and an approved `native_ports` integer list. Optional
+`evidence` names the caller's retained proof file. These are fixture inputs,
+not service/runtime-root overrides; ordinary runner isolation remains enabled.
+The caller must separately authorize existing-server observations (which can
+refresh activity), private fixture creation and exact cleanup. The case never
+starts or stops a mux server, limits checkout data to 1 MiB, preserves pure-plan
+refusal and uses real live admission rather than a stopped-owner test double.
+It records the actual Driver registration observations made during admission
+and requires nonempty native coverage for this existing-server qualification;
+an empty inventory is not evidence that the authenticated query path ran.
+Missing enrollment skips; a skip is not qualification. Retain external fixture
+roots and recovery evidence on failure instead of broadening cleanup. The
+enrolled anchor, creation database and relocation journal live in a fresh
+persistent directory under `second`, outside runner temporary storage. That
+state is removed only after every synthetic linked checkout and fixture root
+has been cleaned successfully; a failing case retains the original recovery
+state with its external copies.
+
 This page is a reference catalog, not a sequential checklist. Read the lane
 needed for the changed behavior; optional packets below do not all become
 prerequisites for one contribution.

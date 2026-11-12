@@ -71,7 +71,7 @@ def test_expired_git_probe_is_a_structured_refusal_without_move_custody(checkout
     )
     args = SimpleNamespace(
         capabilities=False, worktree_id=checkout.record.worktree_id,
-        destination=str(checkout.destination), apply=True, abort=False,
+        destination=str(checkout.destination), apply=True, abort=False, check_live=False,
     )
     assert cli.cmd_move(args) == 1
     result = json.loads(capsys.readouterr().out)

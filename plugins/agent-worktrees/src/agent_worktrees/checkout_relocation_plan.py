@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import os
 import stat
+import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 import yaml
@@ -71,3 +73,31 @@ def inspect(worktree_id: str, destination: str, config) -> dict:
         "relocation planning requires qualified passive native owner evidence; "
         "mux, Copilot and process/CWD coverage remain unconfirmed; strict action probes were not run"
     )
+
+
+def check_live(worktree_id: str, destination: str, config) -> dict:
+    """Explicit action-time admission; never a cached permission to apply."""
+    from . import checkout_relocation as relocation
+
+    relocation._require_native_support()
+    if Path(worktree_id).name != worktree_id or "/" in worktree_id or "\\" in worktree_id:
+        raise ValueError("move requires one exact managed worktree ID")
+    ledger = cfg.tracking_dir(config.repo_name) / f"{worktree_id}.yaml"
+    _record, _proof, receiving_guard = relocation._receiving_admission(ledger, config)
+    with relocation.FinalizeLock(
+        Path(config.default_repo.worktree_root) / ".finalize.lock", timeout=3,
+        on_stale=lambda message: print(message, file=sys.stderr),
+    ), receiving_guard, relocation.worktree_lifecycle.guard(ledger, relocation=True), (
+        relocation.launch_admission.guard(ledger)
+    ), relocation.state.owner(ledger):
+        report = relocation._action_plan(worktree_id, destination, config)
+        if report["phase"] != "planned":
+            raise ValueError("live admission requires an unstarted move; inspect the original operation")
+        return {
+            **report,
+            "live_admission": {
+                "schema": "agent-worktrees.checkout-live-admission", "version": 1,
+                "observed_at": datetime.now(timezone.utc).isoformat(),
+                "activity_refresh": True, "apply_rechecks": True,
+            },
+        }
