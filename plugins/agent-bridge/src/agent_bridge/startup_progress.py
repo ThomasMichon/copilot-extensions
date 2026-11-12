@@ -23,6 +23,42 @@ log = logging.getLogger("agent-bridge")
 _T = TypeVar("_T")
 
 
+class _AcpLaunchTiming:
+    """Collect low-noise ACP launch sub-step timings for one session launch."""
+
+    def __init__(self, *, session_id: str, mode: str, boundary: str) -> None:
+        self.session_id = session_id
+        self.mode = mode
+        self.boundary = boundary
+        self._started = time.monotonic()
+        self._steps: list[tuple[str, float]] = []
+
+    def add(self, label: str, elapsed_s: float) -> None:
+        self._steps.append((label, max(0.0, float(elapsed_s))))
+
+    def total_s(self) -> float:
+        return max(0.0, time.monotonic() - self._started)
+
+    def step_map_ms(self) -> dict[str, int]:
+        return {
+            label: int(round(elapsed_s * 1000.0))
+            for label, elapsed_s in self._steps
+        }
+
+    def summary(self) -> str:
+        parts = [
+            f"session={self.session_id}",
+            f"mode={self.mode}",
+            f"boundary={self.boundary}",
+        ]
+        parts.extend(
+            f"{label}={int(round(elapsed_s * 1000.0))}ms"
+            for label, elapsed_s in self._steps
+        )
+        parts.append(f"total={int(round(self.total_s() * 1000.0))}ms")
+        return " ".join(parts)
+
+
 class StartupProgress:
     def __init__(self, emit: Callable[[str, dict[str, Any]], Any]) -> None:
         self.emit = emit

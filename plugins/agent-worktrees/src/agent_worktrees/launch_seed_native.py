@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import argparse
-from contextlib import contextmanager, nullcontext
+from contextlib import ExitStack, contextmanager, nullcontext
 from dataclasses import asdict
 import json
 import os
@@ -198,6 +198,15 @@ def admit(
     native_resume_session: str | None = None, planned_status: str | None = None,
 ) -> None:
     """Recheck the original launch immediately before its retained coordinator creates native."""
+    if native_resume_session is not None:
+        # The Windows native parent owns the head-writer fence through Start().
+        # This finite checker must not acquire its parent's record/launch locks.
+        _admission_check(
+            record_path, correlation, operation_id, admission_only=admission_only,
+            preserve_seed_id=preserve_seed_id, native_resume_session=native_resume_session,
+            planned_status=planned_status,
+        )()
+        return
     with admission(
         record_path, correlation, operation_id, admission_only=admission_only,
         preserve_seed_id=preserve_seed_id, native_resume_session=native_resume_session,
@@ -255,51 +264,74 @@ def admission(
     *, admission_only: bool = False, preserve_seed_id: str | None = None,
     native_resume_session: str | None = None, require_cold_stop: bool = True,
     planned_status: str | None = None,
+    head_fence: ExitStack | None = None,
 ):
     """Keep the original creation fence until the exec or retained owner releases it."""
-    from . import launch_admission, launch_seed_exec, launch_seed_state, tracking
+    from . import launch_admission, tracking
+
+    with (
+        launch_admission.guard(record_path),
+        ExitStack() as held,
+    ):
+        record_scope = head_fence if head_fence is not None else held
+        if head_fence is not None:
+            held.callback(head_fence.close)
+        if native_resume_session is not None:
+            record_scope.enter_context(tracking._RecordLock(record_path, require_sidecar=True))
+        check = _admission_check(
+            record_path, correlation, operation_id, admission_only=admission_only,
+            preserve_seed_id=preserve_seed_id, native_resume_session=native_resume_session,
+            require_cold_stop=require_cold_stop, planned_status=planned_status,
+        )
+        check()
+        yield check
+
+
+def _admission_check(
+    record_path: Path, correlation: launch_execution.Correlation, operation_id: str,
+    *, admission_only: bool = False, preserve_seed_id: str | None = None,
+    native_resume_session: str | None = None, require_cold_stop: bool = True,
+    planned_status: str | None = None,
+):
+    from . import launch_seed_exec, launch_seed_state, tracking
 
     if not require_cold_stop and (not admission_only or native_resume_session is not None):
         raise ValueError("Only ordinary admission-only execution may omit the cold-stop check")
-    with launch_admission.guard(record_path):
-        def check() -> None:
-            _owner, saved = _load(record_path, correlation, operation_id)
-            if any(event["phase"] == "process-spawned" for event in saved["events"]):
-                raise ValueError("Original headed launch was already observed")
-            receipt = _receipt(record_path, saved)
-            planned = planned_status
-            if planned is None:
-                # Separate native callbacks (POSIX setup, Windows --phase admit)
-                # use the status their own prepare phase retained.
-                planned = _read_planned_status(record_path, correlation.attempt_id, operation_id)
-            if admission_only:
-                if receipt is not None or not launch_seed_exec._valid_request(
-                    record_path, invoke=False, seed_id=None, admission_only=True,
-                    preserve_seed_id=preserve_seed_id, native_resume_session=native_resume_session,
-                ):
-                    raise ValueError("Admission-only creation cannot claim a prompt")
-                prepared = launch_seed_exec._prepare(
-                    record_path, ["admission-check"], invoke=False, seed_id=None, admission_only=True,
-                    preserve_seed_id=preserve_seed_id, native_resume_session=native_resume_session,
-                )
-                if isinstance(prepared, int):
-                    raise ValueError("Original admission-only launch intent changed before creation")
-            current = tracking.load_record(record_path)
-            if _status_refused(current.status, planned):
-                raise ValueError(
-                    f"Original headed launch intent changed before creation: "
-                    f"worktree status is {current.status!r}"
-                    + (f" (launch started as {planned!r})" if planned else "")
-                )
-            if (
-                current.pending_seed
-                or not admission_only and receipt is None and launch_seed_state.peek(record_path) is not None
+    def check() -> None:
+        _owner, saved = _load(record_path, correlation, operation_id)
+        if any(event["phase"] == "process-spawned" for event in saved["events"]):
+            raise ValueError("Original headed launch was already observed")
+        receipt = _receipt(record_path, saved)
+        planned = planned_status
+        if planned is None:
+            planned = _read_planned_status(record_path, correlation.attempt_id, operation_id)
+        if admission_only:
+            if receipt is not None or not launch_seed_exec._valid_request(
+                record_path, invoke=False, seed_id=None, admission_only=True,
+                preserve_seed_id=preserve_seed_id, native_resume_session=native_resume_session,
             ):
-                raise ValueError("Original headed launch intent changed before creation")
-            if require_cold_stop and (error := launch_seed_exec._final_cold_error(current)):
-                raise ValueError(error)
-        check()
-        yield check
+                raise ValueError("Admission-only creation cannot claim a prompt")
+            prepared = launch_seed_exec._prepare(
+                record_path, ["admission-check"], invoke=False, seed_id=None, admission_only=True,
+                preserve_seed_id=preserve_seed_id, native_resume_session=native_resume_session,
+            )
+            if isinstance(prepared, int):
+                raise ValueError("Original admission-only launch intent changed before creation")
+        current = tracking.load_record(record_path)
+        if _status_refused(current.status, planned):
+            raise ValueError(
+                f"Original headed launch intent changed before creation: "
+                f"worktree status is {current.status!r}"
+                + (f" (launch started as {planned!r})" if planned else "")
+            )
+        if (
+            current.pending_seed
+            or not admission_only and receipt is None and launch_seed_state.peek(record_path) is not None
+        ):
+            raise ValueError("Original headed launch intent changed before creation")
+        if require_cold_stop and (error := launch_seed_exec._final_cold_error(current)):
+            raise ValueError(error)
+    return check
 
 
 def _require_process(pid: int | None, process_start_time: str | None) -> None:

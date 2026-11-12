@@ -1,0 +1,9 @@
+{
+  "comment": "Fence retained native recovery to the original workspace incarnation and head revision",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

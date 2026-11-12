@@ -115,10 +115,11 @@ raise SystemExit(code)
 '''
 
 
-def _run(record, tmp_path, native_bash, command, *, fault=None, admission_only=False):
+def _run(record, tmp_path, native_bash, command, *, fault=None, admission_only=False, retained=None):
     seed = seeds.stage(record, kind="new", text="literal prompt ' \" \u03a9\n") if not admission_only else None
     prepared = native.prepare(
         record, command, seed_id=seed.seed_id if seed else None, admission_only=admission_only,
+        native_resume_session=retained["head"]["session_id"] if retained else None,
     )
     correlation = audit.Correlation(
         prepared["attempt_id"], prepared["resolution_id"], prepared["parent_id"],
@@ -135,6 +136,7 @@ def _run(record, tmp_path, native_bash, command, *, fault=None, admission_only=F
         "completion": str(completion), "assets": str(assets),
         "fault": fault,
         "admission_only": admission_only,
+        "retained": retained,
     }), encoding="utf-8")
     driver = tmp_path / "exec-driver.py"
     driver.write_text('''
@@ -192,10 +194,33 @@ elif r["fault"] == "restore-interrupt":
     signal.signal = interrupt_restore
 if r["admission_only"]:
     from agent_worktrees import launch_admission, launch_seed_state
+    if r["retained"]:
+        from agent_worktrees import launch_seed_exec, resource_relationship, session_liveness, tracking
+        session_liveness.session_liveness = lambda *_: "dead"
+        launch_seed_exec.sessions.has_mux_session = lambda *_: False
+        resource_relationship.writer_identity = lambda: r["retained"]["writer"]["identity"]
+        if r["fault"] == "new-head":
+            current = tracking.load_record(Path(r["record"]))
+            current.head_session = "new-head"
+            current.sessions.append(tracking.SessionEntry("new-head", current.started_at))
+            tracking.save_record(current, Path(r["record"]))
     if r["fault"] == "new-intent":
         launch_seed_state.stage(Path(r["record"]), kind="new", text="newer intent")
     original_exec = launch_seed_posix.os.execvpe
     def admitted_exec(*args):
+        if r["retained"]:
+            from agent_procutil.owned_process import run_caller_owned
+            probe = run_caller_owned(
+                [sys.executable, "-I", "-c",
+                 "import sys;from pathlib import Path;from agent_worktrees import tracking\\n"
+                 "try:\\n"
+                 " with tracking._RecordLock(Path(sys.argv[1]),timeout=0,require_sidecar=True): pass\\n"
+                 "except TimeoutError: sys.exit(7)\\n",
+                 r["record"]],
+                timeout=5, max_stdout_bytes=4096, max_stderr_bytes=4096,
+            )
+            assert probe.returncode == 7, probe.stderr
+            assert "AGENT_WORKTREES_RETAINED_NATIVE_RESUME" not in args[2]
         try:
             with launch_admission.guard(Path(r["record"])):
                 raise AssertionError("Creation fence was released before exec")
@@ -208,6 +233,7 @@ try:
         Path(r["record"]), Correlation(r["attempt"], r["resolution"], r["parent"]),
         r["operation"], r["command"], Path(r["completion"]),
         admission_only=r["admission_only"],
+        native_resume_session=r["retained"]["head"]["session_id"] if r["retained"] else None,
     )
 except (KeyboardInterrupt, UnicodeError, ValueError):
     deadline = time.monotonic() + 12
@@ -232,11 +258,54 @@ raise SystemExit(code)
         env={
             **environment, "AW_EXEC_COMPLETION": str(completion),
             "AW_EXEC_ADMISSION": "1" if admission_only else "", "AW_EXEC_RECORD": str(record),
+            **({"AGENT_WORKTREES_RETAINED_NATIVE_RESUME": json.dumps(retained)} if retained else {}),
         },
         input_text="retained stdin\n", timeout=20,
         max_stdout_bytes=4096, max_stderr_bytes=4096,
     )
     return seed, prepared, correlation, assets, result
+
+
+@pytest.mark.parametrize("changed", [False, True])
+def test_retained_native_exec_fences_head_writer_and_consumes_execution_hint(
+    record, tmp_path, native_bash, monkeypatch, changed,
+):
+    from agent_worktrees import resource_relationship, session_liveness
+    from agent_worktrees.retained_native_resume import ENVIRONMENT_KEY
+
+    current = tracking.load_record(record)
+    current.head_session = "native-original"
+    current.head_revision = 1
+    current.sessions = [tracking.SessionEntry("native-original", current.started_at)]
+    tracking.save_record(current, record)
+    current = tracking.load_record(record)
+    intent = {
+        "version": 1, "operation_id": "original-recovery",
+        "writer": {
+            "version": 1, "identity": {
+                "installation_root": "retained-owner", "runtime_generation": "a" * 32,
+            },
+            "creation_nonce": current.creation_nonce, "worktree_id": current.worktree_id,
+            "worktree_path": current.worktree_path, "project": current.repo,
+        },
+        "head": {"session_id": "native-original", "revision": current.head_revision},
+    }
+    monkeypatch.setattr(legacy.sessions, "has_mux_session", lambda *_: False)
+    monkeypatch.setattr(session_liveness, "session_liveness", lambda *_: "dead")
+    monkeypatch.setattr(resource_relationship, "writer_identity", lambda: intent["writer"]["identity"])
+    monkeypatch.setenv(ENVIRONMENT_KEY, json.dumps(intent))
+    command = [
+        sys.executable, "-c", BACKEND.replace(
+            'root = Path(sys.argv[1])',
+            'root = next(Path(sys.argv[1]).glob("*/*/.native-seed-exec.complete")).parent',
+        ), str(record.parent / "launch-attempts"), "7",
+    ]
+    _seed, _prepared, _correlation, assets, result = _run(
+        record, tmp_path, native_bash, command, admission_only=True, retained=intent,
+        fault="new-head" if changed else None,
+    )
+    assert result.returncode == (3 if changed else 7), result.stderr
+    assert (assets / "backend.json").exists() is not changed
 
 
 @pytest.mark.parametrize("changed", [False, True])

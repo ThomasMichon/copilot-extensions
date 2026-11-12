@@ -380,9 +380,10 @@ def test_unreadable_dev_claim_refuses_cleanup_and_mutation(tmp_path, monkeypatch
     path = vr.dev_claim_path(tmp_path)
     before = path.read_bytes()
     load = vr._load_unique_json
+    native_path = Path(vr._leases._native_path(path)) if os.name == "nt" else path
 
     def denied(source):
-        if source == path:
+        if source in (path, native_path):
             raise PermissionError("claim inaccessible")
         return load(source)
 

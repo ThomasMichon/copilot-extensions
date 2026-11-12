@@ -2787,10 +2787,49 @@ async def test_start_session_host_mode_end_to_end(tmp_path, monkeypatch, hosted_
         db.close()
 
 
+def _retain_manual_recovery_permission(db, session):
+    from agent_bridge.creation_worktree_writer import JOURNAL_KEY
+    from agent_bridge.models import RetainedRecoveryRequest
+
+    key = "a" * 64
+    session.target.venue = {**(session.target.venue or {}), JOURNAL_KEY: key}
+    db.update_session_target(session.session_id, session.target.to_json(), session.target.cwd)
+    request = RetainedRecoveryRequest(
+        operation_id="original", journal_key=key, native_session_id=session.acp_session_id,
+        head_revision=1, bridge_installation="fixture-installation",
+    )
+    db.execute_write(
+        "INSERT INTO workspace_embodiments "
+        "(key_digest,facts_digest,state,session_id,creation_recoveries_json) "
+        "VALUES (?,'facts','allocated',?,?)",
+        (key, session.session_id, json.dumps({"original": {"request": request.model_dump(), "state": "complete"}})),
+    )
+
+
+async def _assert_reattached_permission_waits(client, native):
+    from acp.schema import PermissionOption, ToolCallUpdate
+
+    assert client.auto_approve is False
+    pending = asyncio.create_task(client._handle_permission_request(
+        [PermissionOption(option_id="allow", name="Allow", kind="allow_once")],
+        ToolCallUpdate(tool_call_id="fixture-tool", title="Fixture tool"),
+        session_id=native,
+    ))
+    try:
+        await asyncio.sleep(0)
+        assert not pending.done()
+        assert client._pending_permission_future is not None
+    finally:
+        pending.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await pending
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("late_identity", [False, True])
+@pytest.mark.parametrize("retained_permission_hold", [False, True])
 async def test_reattach_session_hosts_on_restart(
-    tmp_path, monkeypatch, hosted_workspace, late_identity,
+    tmp_path, monkeypatch, hosted_workspace, late_identity, retained_permission_hold,
 ):
     import os
     import sys
@@ -2819,6 +2858,8 @@ async def test_reattach_session_hosts_on_restart(
         mgr1 = SessionManager(db1, session_host_state_dir=statedir)
         target = SpawnTarget(type="local", cwd=str(tmp_path))
         session = await asyncio.wait_for(mgr1.start_session(target), timeout=30)
+        if retained_permission_hold:
+            _retain_manual_recovery_permission(db1, session)
         sid = session.session_id
         rec = mgr1._host_index.all()[0]
         host_pid, child_pid = rec.host_pid, rec.child_pid
@@ -2858,6 +2899,8 @@ async def test_reattach_session_hosts_on_restart(
         assert s2.client is not None
         assert s2.acp_session_id == "host-mode-sess"      # session adopted, not re-created
         assert s2.client.pid == child_pid                 # same surviving child
+        if retained_permission_hold:
+            await _assert_reattached_permission_waits(s2.client, s2.acp_session_id)
         await s2.client.shutdown()
         db2.close()
     finally:
@@ -2973,7 +3016,10 @@ async def test_recovery_settles_attached_client_after_child_exit(
 
 
 @pytest.mark.asyncio
-async def test_recover_disconnected_hosts_reattaches_in_session(tmp_path, monkeypatch, hosted_workspace):
+@pytest.mark.parametrize("retained_permission_hold", [False, True])
+async def test_recover_disconnected_hosts_reattaches_in_session(
+    tmp_path, monkeypatch, hosted_workspace, retained_permission_hold,
+):
     """In-session liveness-driven reattach: a RUNNING host-backed session whose
     transport dropped (host + child alive) is redialed and resumed by cursor by
     ``recover_disconnected_hosts`` -- no restart, same child, same ACP session.
@@ -3005,6 +3051,8 @@ async def test_recover_disconnected_hosts_reattaches_in_session(tmp_path, monkey
     try:
         target = SpawnTarget(type="local", cwd=str(tmp_path))
         session = await asyncio.wait_for(mgr.start_session(target), timeout=30)
+        if retained_permission_hold:
+            _retain_manual_recovery_permission(db, session)
         sid = session.session_id
         rec = mgr._host_index.all()[0]
         host_pid, child_pid = rec.host_pid, rec.child_pid
@@ -3023,6 +3071,8 @@ async def test_recover_disconnected_hosts_reattaches_in_session(tmp_path, monkey
         assert s.client.pid == child_pid                      # same surviving child
         assert s.status == SessionStatus.RUNNING              # turn status preserved
         assert osutil_pid_alive(host_pid)                     # host never respawned
+        if retained_permission_hold:
+            await _assert_reattached_permission_waits(s.client, s.acp_session_id)
 
         # Idempotent: a healthy session needs no further reattach.
         assert await asyncio.wait_for(mgr.recover_disconnected_hosts(), timeout=30) == 0

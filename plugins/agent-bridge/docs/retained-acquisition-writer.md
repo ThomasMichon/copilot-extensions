@@ -156,6 +156,80 @@ and an unproven response is not replayed. The existing
 `agent-bridge.resume` version-1 executing-CLI descriptor advertises
 `keyed-worktree-writer`; daemon support remains a separate per-attempt check.
 
+### Once-only retained native recovery
+
+The optional `retained_native_session_recovery: 1` capability extends that
+existing exact-session resume body with `retained_recovery`. It contains
+version `1`, an opaque `operation_id`, the original 64-hex `journal_key`,
+`native_session_id`, positive integer `head_revision` and the original
+`bridge_installation`. The original `worktree_writer` remains required.
+`resume <exact-id> --strict --retained-recovery-file <path>` accepts that full
+body; `-` reads one bounded stdin document. The executing resume/status CLI
+contracts separately advertise `retained-native-recovery`.
+
+The receiver requalifies its original keyed writer and installation, requires
+a stopped local session and owner-confirmed native loss, then writes the
+operation before one exact native load. Worktrees must advertise
+`retained_native_resume: 1` and enforces the original workspace incarnation
+and native head revision inside its process-creation fence. An older owner
+does not silently receive an ordinary unfenced resume.
+
+The same journal retains completed and uncertain operation IDs. A same-ID
+request reads that outcome, never relaunches. Pending/unknown recovery blocks
+other resumes; transport mutation retries are disabled. The read-only
+`GET /api/v1/sessions/{exact-id}/retained-recovery/{operation-id}` route, or
+`status <exact-id> --recovery-operation <id> --json`, reconciles the original
+operation without a new launch. A lost reply after committed acceptance
+returns the retained completion. Unknown native execution remains held;
+live status by itself cannot invent acceptance of that operation.
+Preparation is retained before native qualification. A refused preparation
+or an automatic admission that never entered native launch records
+`not-started`; a preparing request or uncertain native entry remains unknown.
+Read-only reconciliation can settle that exact no-effect outcome without
+reusing its ID. A non-complete same-ID CLI replay reports
+`verb: recovery-inspected`, not a successful resume.
+The existing native launch gate commits atomically with the operation journal.
+Its native-bound gate form also blocks legacy ordinary ACP resumes and fresh
+starts after provider rollback; only this task's exact recovery owner may pass
+it. Unknown outcomes retain the gate, and confirmed acceptance settles only
+that operation's gate in the same commit.
+
+Recovery preserves the original session, workspace, charter, native
+conversation and queued prompts. It neither drains prompts nor sends a new
+turn, runs the ordinary resume retry ladder, recreates a conversation or
+enables background recovery. Native durable stop tokens remain in force
+through automatic recovery admission;
+this operation is not manual consent to clear them. Ordinary explicit resume
+retains its separate behavior. Only ordinary keyed local sessions are supported;
+admitted-runtime custody and separate cold-update recovery retain their
+existing owners. Local Host registration records native host/child birth
+identities. Recovery can settle that exact stale record only after both
+original processes are confirmed exited under the Host-index lock. Missing
+identity, live/unknown processes, a changed record or a remote boundary holds.
+There is no process termination or forced claim release.
+
+Automatic recovery does not inherit approval authority from a missing upstream
+permission callback. The replacement client holds permission requests in the
+existing manual-resolution path until an owner explicitly resolves them or
+the request is canceled. The durable original recovery journal restores this
+hold before ACP initialization after transport loss or daemon restart;
+reattachment never grants auto-approval. The retained-recovery CLI does not
+start a missing daemon.
+Preparing, invoking, unknown or malformed recovery records protect their
+original session handles from startup collection, periodic garbage collection
+and transactional deletion, so the original outcome remains inspectable.
+Explicit teardown shares recovery's original executor fence and cannot remove
+an unresolved handle, even with `force`. Persisted SQLite guards also reject
+legacy deletion of a handle retained by a recovery journal or launch gate.
+The retention binding follows the keyed journal through succession; it does not
+assume the journal's initial session is still the exact current handle.
+Malformed terminal entries remain held too: a terminal state string alone is
+not a validated recovery request. Schema 45 installs the recovery column and
+additional deletion guards through writable migration of existing databases,
+validating their earlier writer contract before migration without rewriting its
+guards. Original-handle lookup is indexed and launch-gate membership is collected
+once per query, rather than rescanned for every retained session.
+
 `retained_workspace_creation_writer_inspection: 1` adds the optional
 `BridgeClient.get_session(exact_id, worktree_writer=True)` form on the existing
 `GET /api/v1/sessions/{exact_id}?worktree_writer=true`. The negotiated query
@@ -167,6 +241,12 @@ digest, exact session/native/workspace, original requirement, serializer
 contract and Bridge instance. It exposes no command or environment. An
 unqualified exact owner returns 409; an older reader ignoring the query is
 unconfirmed, not successful evidence. Ordinary session reads remain unchanged.
+
+A retained terminal creation journal remains inspectable for its exact managed
+native session and still-existing workspace. Inspection does not reopen the
+journal, resume a session or select a replacement writer. Changed identities,
+journal movement, finalizing/terminal workspaces and unavailable original
+writers retain their refusals; terminal history alone cannot prove liveness.
 
 The existing full-session CLI exposes the same optional observation through
 `status <exact-session-id> --full --worktree-writer`. Its

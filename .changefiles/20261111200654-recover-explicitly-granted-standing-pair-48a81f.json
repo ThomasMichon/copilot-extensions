@@ -1,0 +1,13 @@
+{
+  "comment": "Recover explicitly granted standing pairings through once-only original native session continuation",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

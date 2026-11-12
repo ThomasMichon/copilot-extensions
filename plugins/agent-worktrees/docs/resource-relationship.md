@@ -223,6 +223,23 @@ required operation without dropping its scope or retrying through a resident.
 This capability does not qualify unrelated participating writers or authorize
 installer inhibition.
 
+### Retained native process creation
+
+The same executing-owner capability response advertises
+`retained_native_resume: 1`. A qualified local Bridge recovery supplies the
+version-1 `AGENT_WORKTREES_RETAINED_NATIVE_RESUME` environment envelope:
+`operation_id`, the original qualified `writer` scope above, and
+`head: {session_id, revision}`. This is a restriction on the existing exact
+native-resume path, not launch authority or a new allocator.
+
+Inside the existing process-creation admission fence, Worktrees checks the
+executing writer, project, workspace path/ID, creation nonce, native session
+and head revision. Ordinary native cold-stop, pending handoff/seed, hosting
+and liveness checks still apply. Missing metadata from an older owner does
+not establish this capability. An invalid or changed envelope refuses before
+process creation instead of dropping the restriction; ordinary invocations
+without the envelope retain their previous behavior.
+
 ## Replay and obligation
 
 Reserve persists pending responsibility before returning. Exact request-ID

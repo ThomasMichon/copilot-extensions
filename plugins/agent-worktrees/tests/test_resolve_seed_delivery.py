@@ -557,12 +557,13 @@ def test_cold_resume_plan_obeys_native_evidence_at_powershell_boundary(
     from agent_worktrees import output
 
     monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
-    config = _create_config(tmp_path)
+    platform = cfg.detect_platform()
+    config = _create_config(tmp_path, platform=platform)
     work_dir = tmp_path / "wt-a"
     work_dir.mkdir()
     tracking.create_new_record(
         "wt-a", "worktree/wt-a", str(work_dir), "demo-repo", "test",
-        "windows", tmp_path,
+        platform, tmp_path,
     )
     _stub_launch_plumbing(monkeypatch, config)
     consumer = tmp_path / "capture.ps1"

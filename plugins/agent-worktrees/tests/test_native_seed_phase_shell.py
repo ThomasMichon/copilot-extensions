@@ -154,7 +154,8 @@ def test_recordless_bash_selected_runtime_cannot_fall_back(tmp_path, resolver):
 
 
 @pytest.mark.parametrize("ambient", [False, True], ids=["absent", "conflicting"])
-def test_recordless_bash_resolver_binds_selected_root_and_restores_ambient(tmp_path, ambient):
+@pytest.mark.parametrize("arguments", [[], ["", "two words", 'quote "inside"']])
+def test_recordless_bash_resolver_binds_selected_root_and_restores_ambient(tmp_path, ambient, arguments):
     home, selected = tmp_path / "home", tmp_path / "selected"
     legacy, output = home / ".agent-worktrees", tmp_path / "observed"
     for root in (selected, legacy):
@@ -192,6 +193,7 @@ def test_recordless_bash_resolver_binds_selected_root_and_restores_ambient(tmp_p
     result = run_caller_owned([
         _bash(), "--noprofile", "--norc", _shell_path(SCRIPT.parent / "default-setup.sh"),
         "--machine", "fixture", "--copilot-path", _shell_path(native),
+        *arguments,
     ], cwd=tmp_path, env=environment, timeout=30, max_stdout_bytes=8192, max_stderr_bytes=8192)
     assert result.returncode == 7, result.stdout + result.stderr
     observed = output.read_bytes().decode("utf-8").split("\0")[:-1]
@@ -200,6 +202,7 @@ def test_recordless_bash_resolver_binds_selected_root_and_restores_ambient(tmp_p
         _shell_path(legacy) if ambient else "unset",
     ]
     assert observed[2:6] == ["-I", "-m", "agent_worktrees.normalized_backend", "--"]
+    assert observed[6:] == [_shell_path(native), *arguments]
 
 
 @pytest.mark.parametrize("application", [False, True], ids=["legacy", "application"])

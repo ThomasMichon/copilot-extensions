@@ -23,6 +23,38 @@ def _register(idx: HostIndex, session_id: str = "s1") -> None:
     idx.register(HostRecord(session_id=session_id, port=9000, host_pid=111, child_pid=222))
 
 
+@pytest.mark.parametrize("boundary", ["exited", "host-live", "child-unknown", "changed", "legacy", "remote"])
+def test_retained_recovery_settles_only_exact_exited_local_host(tmp_path, monkeypatch, boundary):
+    from dataclasses import replace
+    from zdd import process_exit
+
+    idx = _idx(tmp_path)
+    record = HostRecord(
+        session_id="original", port=9000, host_pid=111, child_pid=222,
+        extra={"host_process_start": "host-birth", "child_process_start": "child-birth"},
+    )
+    if boundary == "legacy":
+        record.extra = {}
+    if boundary == "remote":
+        record.boundary = "ssh"
+    idx.register(record)
+    if boundary == "changed":
+        idx.register(replace(record, nonce="changed"))
+    observed = []
+
+    def exited(pid, birth):
+        observed.append((pid, birth))
+        return not (boundary == "host-live" and pid == 111 or boundary == "child-unknown" and pid == 222)
+
+    monkeypatch.setattr(process_exit, "observe_original_exit", exited)
+    assert idx.release_exited_local(record) is (boundary == "exited")
+    assert (idx.get("original") is None) is (boundary == "exited")
+    if boundary == "exited":
+        assert observed == [(111, "host-birth"), (222, "child-birth")]
+    elif boundary in {"changed", "legacy", "remote"}:
+        assert observed == []
+
+
 def test_claim_on_never_claimed_record_succeeds(tmp_path: Path):
     idx = _idx(tmp_path)
     _register(idx)

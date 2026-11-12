@@ -31,6 +31,8 @@ is never retried against a newer state on the caller's behalf.
 | `accept` | Accept one already-existing native head; `--expected-owner-session-id` names a predecessor for succession. The same head may re-accept after a declaration change to cover the new revision without a new owner |
 | `cancel` | Cancel an unaccepted reservation (including one retired before acceptance) and settle its original relationship; never inspects, accepts or launches a head |
 | `release` | Detach an owner with exact native conclusion evidence |
+| `recovery-grant` | Delegate bounded recovery of an already accepted pairing; never staff or launch |
+| `recovery-revoke` | Revoke future recovery while retaining unresolved effects and custody |
 | `retire` | Close admission; retain any occupant, hold and unresolved obligation |
 | `settle-retirement` | Record retirement once no occupant, hold or obligation remains |
 | `reenroll` | Explicitly reopen the same retired charter in a new declaration generation |
@@ -64,7 +66,59 @@ agent-dispatch standing release <task-id> --expected-revision <n> \
 agent-dispatch standing retire <task-id> --expected-revision <n>
 agent-dispatch standing settle-retirement <task-id> --expected-revision <n>
 agent-dispatch standing reenroll <task-id> --expected-revision <n>
+agent-dispatch standing recovery-grant <task-id> --expected-revision <n> \
+  --expected-generation <g> --owner-session-id <session> <workspace flags> \
+  --grant-id <logical-grant-id> --authority-ref <approval-reference> \
+  --expires-at <unix-time> --max-attempts <positive-limit>
+agent-dispatch standing recovery-revoke <task-id> --expected-revision <n> \
+  --grant-id <logical-grant-id>
 ```
+
+## Retained-pairing recovery delegation
+
+Declaration and acceptance do not grant unattended boot/failure recovery.
+`recovery-grant` records an explicit control-authorized grant for the exact
+accepted workspace, native session, assignment generation, original retained
+relationship, declaration and materialization. It requires an absolute finite
+expiry and a positive attempt limit; `authority_ref` identifies the approving
+record, not independently verified authority. The caller still owns approval
+qualification before issuing the control command.
+
+Changed ownership, charter/materialization, retirement, a task hold, expiry,
+exhausted attempts or an unresolved operation withholds effective recovery
+authority. A same-ID retry returns the original retained outcome; it cannot
+renew the grant, change its limits or reactivate a revoked grant. Replacing a
+grant requires a new logical ID and current revision, and cannot discard a
+pending operation. Grant IDs remain reserved in immutable task history.
+Revocation works even when the native attachment writer is unavailable and
+preserves the pairing and any pending effects.
+
+Grant/revocation commands themselves never launch. With supported native
+owners, the existing supervisor processes one retained pairing per cycle;
+the same confirmed-loss path covers a host boot. It rechecks trusted source,
+host policy, materialization, original assignment and native head before
+asking Worktrees to prove the exact conversation is dead. A stopped Bridge
+status alone is not that proof. Unknown liveness never becomes an empty
+standing seat or finite pool demand.
+Native durable stops are separately observed before preparation and remain
+enforced by Bridge's automatic admission; a grant does not clear them.
+
+Dispatch writes an original operation ID and consumes one bounded attempt
+before invoking Bridge. Preparation is not effect admission: revocation,
+expiry, a hold or pairing drift before the once-only claim prevents the
+invocation. Claim is the linearization point for an in-flight recovery;
+revocation prevents later claims but does not cancel an already admitted
+invocation. A failed or lost reply retains that ID and native owner. Later
+cycles inspect the original Bridge operation without issuing another resume,
+even after revocation or declaration withdrawal.
+
+Recovery restores the same local keyed ACP conversation and workspace, not a
+new agent or successor. It leaves queued prompts untouched and does not send
+a continuation message, replay an interrupted turn, recreate a native session
+or clear task relationships. The native process is available for its existing
+work owners. Unsupported historical journals, admitted-runtime custody,
+unsettled cold-update recovery, missing process identity and changed owners
+remain explicit holds rather than alternate launch paths.
 
 ## Registrar discovery
 
@@ -161,6 +215,9 @@ an older peer CLI refuses the unknown flag. The HTTP filter is
 | `POST /tasks/{id}/standing/accept` | reserve fields plus `expected_generation`, `owner_session_id`, `expected_head_revision`, optional `expected_owner_session_id` |
 | `POST /tasks/{id}/standing/cancel` | reserve fields plus `expected_generation` |
 | `POST /tasks/{id}/standing/release` | reserve fields plus `expected_generation`, `owner_session_id`, `expected_conclusion_revision` |
+| `POST /tasks/{id}/standing/recovery-grant` | reserve fields plus `expected_generation`, `owner_session_id`, `grant_id`, `authority_ref`, finite `expires_at` and positive integer `max_attempts` |
+| `POST /tasks/{id}/standing/recovery-revoke` | `expected_revision`, `grant_id` |
+| `POST /standing/recovery/reconcile` | optional nullable `cursor`, integer `limit` (1-10, default 1); control-authorized bounded native recovery page |
 | `POST /tasks/{id}/standing/{retire,settle-retirement,reenroll}` | `expected_revision` |
 
 Bodies reject unknown fields, booleans as revisions and revisions below 1.
@@ -188,6 +245,23 @@ refuse with 409 when `attachment` is not true. Source-set operations additionall
 require `source_set: 1`; they do not fall back to per-lane writes that could
 lose complete-set or retirement semantics. Ordinary finite requests omit
 `standing_parent_id` and keep their previous wire shape.
+
+Ordinary local `serve` construction includes the
+[native standing admission assembly](configuration.md#native-local-standing-admission).
+This does not configure a finite-task relationship writer or assign a default
+pool. An explicit alternate admission factory retains its selected authority
+instead. Capability availability is not workspace readiness: unsupported native
+participants or missing original journals refuse and preserve custody.
+
+The additive `recovery_grants: 1` capability advertises grant/revocation
+storage, not automatic recovery. Clients require that exact integer before
+either request. Grant additionally requires attachment support; revocation
+does not, so degraded admission cannot prevent withdrawing authority.
+`retained_pairing_recovery: 1` separately advertises the supported local native
+consumer; explicit alternate factories report `0`. The supervisor negotiates
+it before posting a bounded page, retaining its cursor on an unknown response.
+Older providers without this capability receive no recovery request. Source
+enrollment without a grant still has no recovery effect.
 
 ## Mixed versions and rollback
 

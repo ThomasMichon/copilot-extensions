@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr
 
 from .assignment_workspace import AssignmentWorkspace
@@ -15,6 +15,7 @@ from .queue import TaskQueue
 from .queue_common import Task
 from .queue_records import TaskError
 from .queue_standing_charters import StandingCharterDeclaration
+from .queue_standing_recovery import StandingRecoveryGrant
 
 STANDING_CAPABILITY_VERSION = 1
 _Text = Field(min_length=1, max_length=1024)
@@ -81,13 +82,37 @@ class StandingReleaseBody(StandingReserveBody):
     expected_conclusion_revision: StrictInt = _Revision
 
 
+class StandingRecoveryGrantBody(StandingReserveBody):
+    expected_generation: StrictInt = _Revision
+    owner_session_id: StrictStr = _Text
+    grant_id: StrictStr = _Text
+    authority_ref: StrictStr = _Text
+    expires_at: float = Field(strict=True, gt=0, allow_inf_nan=False)
+    max_attempts: StrictInt = Field(ge=1, le=2**31 - 1)
+
+
+class StandingRecoveryRevokeBody(StandingRevisionBody):
+    grant_id: StrictStr = _Text
+
+
+class StandingRecoveryBatchBody(_Body):
+    cursor: StrictStr | None = Field(default=None, min_length=1, max_length=1024)
+    limit: StrictInt = Field(default=1, ge=1, le=10)
+
+
 def standing_capability(queue: TaskQueue) -> dict:
     """Advertise standing operations; attachment needs the writer's own standing support."""
+    from .assignment_local_standing import LocalStandingRelationshipWriter
+
     return {
         "version": STANDING_CAPABILITY_VERSION,
         "finite_child_link": 1,
         "source_set": 1,
         "attachment": queue.standing_attachment_supported(),
+        "recovery_grants": 1,
+        "retained_pairing_recovery": int(isinstance(
+            queue._standing_relationship_writer, LocalStandingRelationshipWriter,
+        )),
     }
 
 
@@ -201,6 +226,53 @@ def register_standing_routes(
             owner_session_id=body.owner_session_id,
             expected_conclusion_revision=body.expected_conclusion_revision,
         ), task_id)
+
+    @app.post("/tasks/{task_id}/standing/recovery-grant", dependencies=control)
+    def recovery_grant(task_id: str, body: StandingRecoveryGrantBody) -> dict:
+        workspace = _workspace(body.workspace)
+        try:
+            grant = StandingRecoveryGrant(
+                body.grant_id, body.authority_ref, body.expires_at, body.max_attempts,
+            )
+        except TaskError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return mutate("recovery_granted", lambda: queue.grant_standing_recovery(
+            task_id, workspace, grant, expected_revision=body.expected_revision,
+            expected_generation=body.expected_generation, owner_session_id=body.owner_session_id,
+        ), task_id)
+
+    @app.post("/tasks/{task_id}/standing/recovery-revoke", dependencies=control)
+    def recovery_revoke(task_id: str, body: StandingRecoveryRevokeBody) -> dict:
+        return mutate("recovery_revoked", lambda: queue.revoke_standing_recovery(
+            task_id, grant_id=body.grant_id, expected_revision=body.expected_revision,
+        ), task_id)
+
+    @app.post("/standing/recovery/reconcile", dependencies=control)
+    def recovery_reconcile(body: StandingRecoveryBatchBody, request: Request) -> dict:
+        from .standing_recovery_driver import recover
+
+        gate = request.app.state.drain_gate
+        with gate.track_claim():
+            if gate.draining:
+                raise HTTPException(409, "standing recovery is inhibited while draining")
+            if standing_capability(queue)["retained_pairing_recovery"] != 1:
+                raise HTTPException(409, "coordinator lacks supported native retained pairing recovery")
+            with queue._connect() as conn:
+                rows = conn.execute(
+                    "SELECT id FROM tasks WHERE kind='standing-charter' AND id>? AND "
+                    "json_extract(standing_charter,'$.recovery') IS NOT NULL "
+                    "ORDER BY id LIMIT ?", (body.cursor or "", body.limit),
+                ).fetchall()
+            reports = []
+            for row in rows:
+                try:
+                    reports.append(recover(queue, row["id"]))
+                except TaskError as exc:
+                    reports.append({"task_id": row["id"], "state": "held", "reason": str(exc)})
+        return {
+            "version": 1, "reports": reports,
+            "next_cursor": rows[-1]["id"] if len(rows) == body.limit else None,
+        }
 
     lifecycle = {
         "retire": ("retiring", queue.retire_standing_charter),

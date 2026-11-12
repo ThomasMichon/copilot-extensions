@@ -1,7 +1,7 @@
 """Cold Manager acceptance under independently contained native group boundaries.
 
-Prepare real installed candidates before pytest's unchanged 30-second item
-checks, then execute those checks through the canonical plugin runner.
+Prepare real installed candidates alongside independent input controls, then
+execute their consumers with unchanged 30-second items and the portfolio guard.
 The application-adapter contract instead times application preparation and
 every consumer as separate 30-second items inside one 300-second group.
 """
@@ -40,6 +40,55 @@ APPLICATION_ADAPTER_VARIANTS = ("plugin", "standalone")
 APPLICATION_ADAPTER_PHASES = (
     "inputs", "prepare", "selection", "install", "repeat", "refusal", "fail-start", "retry", "command",
 )
+RUNTIME_INPUT_CONTROLS = (
+    "test_isolated_preparation_entrypoint_resolves_owned_helpers",
+    "test_qualified_source_staging_is_bounded_and_stops_on_failure",
+    "test_preparation_completed_units_reach_native_inactivity_owner",
+)
+
+
+def _runtime_group(python: Path, sandbox: Path) -> int:
+    """Overlap disjoint fixture roots and input controls inside the caller's single Job."""
+    native = REPO / "worktree-manager" / "tests" / "native" / "test_manager_runtime_install.py"
+    assertions = [
+        str(python), "-m", "pytest", "-q", "-p", "pytest_portfolio_guard",
+        "--timeout=30", "-o", "timeout_func_only=false", "-o", "addopts=",
+    ]
+    selection = " or ".join(RUNTIME_INPUT_CONTROLS)
+    streams = {"stdin": subprocess.DEVNULL, "stdout": sys.stdout, "stderr": sys.stderr}
+    print("Manager runtime: starting independent input controls and cold construction", flush=True)
+    prepare = [str(python), "-I", "-B", str(native), "--prepare", str(sandbox)]
+    children = []
+    try:
+        for command in (
+            [*assertions, f"--basetemp={sandbox / 'input-controls'}", str(native), "-k", selection],
+            [*prepare, "--prepare-step", "constructed"],
+            [*prepare, "--prepare-step", "legacy"],
+        ):
+            children.append(subprocess.Popen(command, cwd=REPO, **streams, **no_window_kwargs()))
+        for child in children[1:]:
+            result = child.wait()
+            if result:
+                return result
+        prepared = subprocess.run(
+            [*prepare, "--prepare-step", "finish"],
+            cwd=REPO, check=False, **streams, **no_window_kwargs(),
+        )
+        if prepared.returncode:
+            return prepared.returncode
+        result = children[0].wait()
+        if result:
+            return result
+        print("Manager runtime: construction and input controls passed; running consumers", flush=True)
+        return subprocess.run(
+            [*assertions, f"--basetemp={sandbox / 'assertions'}", str(native), "-k", f"not ({selection})"],
+            cwd=REPO, check=False, **streams, **no_window_kwargs(),
+        ).returncode
+    finally:
+        for child in reversed(children):
+            if child.poll() is None:
+                child.terminate()
+            child.wait(timeout=5)
 
 
 def _installed_tty_complete(report: Path, expected: dict) -> bool:
@@ -425,6 +474,8 @@ def main() -> int:
     )
     parser.add_argument("--venv-root", type=Path, default=REPO / ".test-venvs" / sys.platform)
     parser.add_argument("--prepare-only", action="store_true", help="engine-routing preparation diagnostic only")
+    parser.add_argument("--runtime-group", type=Path, help=argparse.SUPPRESS)
+    parser.add_argument("--runtime-python", type=Path, help=argparse.SUPPRESS)
     parser.add_argument("--validate-result", type=Path)
     parser.add_argument("--output", type=Path)
     for name in ("candidate-commit", "candidate-tree", "source-commit", "main-before"):
@@ -432,6 +483,10 @@ def main() -> int:
     parser.add_argument("--run-id", type=int)
     parser.add_argument("--run-attempt", type=int)
     args = parser.parse_args()
+    if args.runtime_group is not None:
+        if args.runtime_python is None:
+            parser.error("--runtime-group requires --runtime-python")
+        return _runtime_group(args.runtime_python, args.runtime_group)
     if args.contract == "installed-tty":
         identity = {key: getattr(args, key) for key in (
             "candidate_commit", "candidate_tree", "source_commit", "main_before", "run_id", "run_attempt",
@@ -492,10 +547,15 @@ def main() -> int:
         sandbox = Path(raw)
         record_owner(sandbox, REPO, retention="disposable after verified process cleanup")
         env = isolated_environment(os.environ, sandbox)
+        env["PYTHONPATH"] = str(REPO / "tools")
+        env.pop("PYTEST_ADDOPTS", None)
         env["MANAGER_RUNTIME_ACCEPTANCE_DATA"] = str(sandbox / "fixtures.json")
         prepare_command = [str(python), "-I", "-B", str(native), "--prepare", str(sandbox)]
-        assertions = [sys.executable, str(REPO / "tools" / "run-plugin-tests.py"), "worktree-manager",
-                      "--test-file", "tests/native/" + filename]
+        assertions = [
+            str(python), "-m", "pytest", "-q", "-p", "pytest_portfolio_guard",
+            "--timeout=30", "-o", "timeout_func_only=false", "-o", "addopts=",
+            f"--basetemp={sandbox / 'assertions'}", str(native),
+        ]
         groups = (
             [("source constructions and assertions", [
                 *[[*prepare_command, "--prepare-step", step]
@@ -516,6 +576,11 @@ def main() -> int:
                  [str(python), "-I", "-B", str(native), "--exercise", str(sandbox)], assertions,
              ])]
             if args.contract == "uninstall" else
+            [("construction and assertions", [[
+                str(python), str(Path(__file__).resolve()),
+                "--runtime-group", str(sandbox), "--runtime-python", str(python),
+            ]])]
+            if args.contract == "runtime" else
             [("construction and assertions", [prepare_command, assertions])]
         )
         group_seconds = 1800 if args.contract == "source" else 300

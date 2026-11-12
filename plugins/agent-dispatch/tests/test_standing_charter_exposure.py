@@ -108,6 +108,8 @@ def test_client_flow_preserves_native_store_fences(tmp_path):
     with app(queue) as api, connected(api, requests) as client:
         assert client.health()["standing_charters"] == {
             "version": 1, "finite_child_link": 1, "source_set": 1, "attachment": True,
+            "recovery_grants": 1,
+            "retained_pairing_recovery": 0,
         }
         standing = client.reconcile_standing_charter("Dispatcher", DECLARATION, repo=REPO)
         again = client.reconcile_standing_charter("Dispatcher", DECLARATION, repo=REPO)

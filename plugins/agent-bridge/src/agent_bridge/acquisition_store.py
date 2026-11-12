@@ -32,6 +32,13 @@ class AcquisitionStore:
             "session_id TEXT, native_session_id TEXT, driver TEXT NOT NULL)"
         )
         db.execute_write(
+            "CREATE TRIGGER IF NOT EXISTS acquisition_recovery_session_retained "
+            "BEFORE DELETE ON sessions WHEN EXISTS ("
+            "SELECT 1 FROM acquisition_launch_gates AS gate "
+            "WHERE gate.session_id=OLD.id AND gate.driver='retained-recovery') "
+            "BEGIN SELECT RAISE(ABORT,'bridge_retained_recovery_held'); END"
+        )
+        db.execute_write(
             "CREATE TRIGGER IF NOT EXISTS acquisition_owned_start_guard BEFORE INSERT ON sessions "
             "WHEN EXISTS (SELECT 1 FROM acquisition_launch_gates g "
             "WHERE g.worktree_id=json_extract(NEW.target_json, '$.worktree_id') "

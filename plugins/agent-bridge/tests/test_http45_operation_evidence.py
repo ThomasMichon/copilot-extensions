@@ -91,10 +91,19 @@ def test_capture_rejects_tampered_proposed_keyed_before_write(
             "workspace_creation_cli.py",
         )
     }
+    retained_provenance = set()
     for path in retained:
         value = json.loads((ROOT / path).read_text())
         sources.add(value["captured_from"]["source_path"])
+        retained_provenance.add((
+            value["captured_from"]["commit"], value["captured_from"]["source_path"],
+        ))
     http["source_paths"] = [row for row in http["source_paths"] if row["path"] in sources]
+    if representation != "retained":
+        http["provenance"] = [
+            row for row in http["provenance"]
+            if (row["commit"], row["source_path"]) in retained_provenance
+        ]
     for path in (*retained, contract + "/inputs/http45/native-keyed-admission.json",
                  contract + "/inputs/http45/workspace-creation-cli.json"):
         destination = snapshot / path
@@ -107,7 +116,10 @@ def test_capture_rejects_tampered_proposed_keyed_before_write(
         assert metadata.index["schema_version"] == 1
     with monkeypatch.context() as bounds:
         if representation == "chunked":
-            bounds.setattr(capture.registry_codec, "MAX_ARTIFACT_BYTES", 350000)
+            bounds.setattr(
+                capture.registry_codec, "MAX_ARTIFACT_BYTES",
+                len(capture.registry_codec.encode(registry)) - 1,
+            )
         planned = capture.registry_codec.plan(snapshot, metadata, registry)
     assert (len(planned) > 1) is (representation == "chunked")
     for path, data in {**metadata.inputs, **planned}.items():
