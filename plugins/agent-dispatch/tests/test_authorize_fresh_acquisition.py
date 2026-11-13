@@ -65,6 +65,19 @@ def test_authorization_advances_generation_and_preserves_attempt(recovery):
         queue.authorize_fresh_acquisition(task.id, **args)
 
 
+def test_authorization_accepts_already_retired_conversation(recovery):
+    queue, task, reservation, args = recovery
+    with queue._connect() as conn:
+        conn.execute(
+            "UPDATE spawn_reservations SET conversation_retired=1 WHERE key=?",
+            (reservation.key,),
+        )
+        conn.commit()
+    result = queue.authorize_fresh_acquisition(task.id, **args)
+    assert result["generation"] == task.generation + 1
+    assert queue.get_reservation(reservation.key).conversation_retired is True
+
+
 @pytest.mark.parametrize("recovery", ["targeted"], indirect=True)
 @pytest.mark.parametrize("changed_target", ["affinity", "target", "missing-affinity"])
 def test_targeted_authorization_refuses_changed_target_without_mutation(recovery, changed_target):
