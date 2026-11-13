@@ -46,6 +46,14 @@ These are coordination dependencies, not new assignments or ownership transfers.
 
 ## Coordination
 
+The [installation convergence map](../source-managed-runtime-installs/installation-convergence.md)
+uses this effort's affected-installation cases to qualify the same incoming
+path as a fresh install, not a separate legacy reconstruction algorithm.
+Complete staging precedes live compatibility checks, state transfer and
+activation. Preserve this effort's existing recovery/adopter/native owners,
+holds and all open acceptance; no old footprint is declared recovered by
+documentation or a completed package environment.
+
 - **Topology:** serial bounded source units, with normal independent PRs where
   their edit and acceptance scopes do not overlap.
 - **Host:** Workstream driver owns this effort, its PRs and completion gate.
@@ -55,6 +63,15 @@ These are coordination dependencies, not new assignments or ownership transfers.
   implementation. Reuse an existing issue rather than duplicate it. Preserve
   contributor expressions and active claims; coordinate an overlap before
   changing its implementation.
+- **Resident-companion intake:** the finite [#5820 lifecycle family](acceptance.md#l5820---whole-installer-and-resident-companion-lifecycle)
+  is planned here without changing its original implementation owners,
+  claims, holds or activation gates. Preserve delivered staging/source credit
+  and the complete version-slot/whole-lifecycle contract. #5827's CWD
+  prevention is not acceptance of the resident Windows companion chain.
+  #2395's temporary per-unit restart-inhibition/expiry remains separately
+  open unless implemented OR explicitly transferred to its rightful
+  supervision owner. This documentary intake neither accepts native proof
+  nor authorizes updater execution, live companion operations or custody transfer.
 - **Boundary:** this is a defect and upgrade-acceptance workstream, not a second
   installer, reset engine, artifact resolver, daemon, scheduler, provenance
   authority or repository-wide merge queue.
@@ -135,6 +152,47 @@ authorize production updates, recovery mutations or new access.
   Keep preparation/read failures distinct from absence, installation and caller
   adoption; U17's delivered source/release remains complete.
 
+### Whole installer and resident-companion lifecycle - #5820
+
+The complete finite family is retained in
+[L5820](acceptance.md#l5820---whole-installer-and-resident-companion-lifecycle).
+It closes an existing authoritative-runtime-replacement vision delta, not
+a new recovery/provenance veto on explicit incoming replacement.
+
+- [ ] S1: keep only fast payload copying in an attributable version-slot
+  OR equivalent pending candidate. Build, health, cutover and task waits
+  stay outside the replaceable payload throughout their lifetime; preserve
+  immutable completed slots.
+- [ ] S2: staging failure hard-fails OR uses an enforced bounded protected
+  attempt; never silently execute unprotected in place. The original
+  alternative does not require both implementations.
+- [ ] S3: independently bound background reconciliation and its descendants,
+  tree custody, uncertainty and owned cleanup. A staged child's UV timeout
+  alone is not the independent installer/reconciler lifecycle bound.
+- [ ] S4: cover the exact registered resident `dtssh` start/stop/health
+  command AND waiting PowerShell/host-helper descendants throughout
+  supervision, health, restart and update.
+- [ ] S5: retain selected source/provenance, argv/config/service identity,
+  containment, child exit, readiness/reporting, exact-generation ownership
+  and owned cleanup, without using old-state uncertainty to veto incoming
+  completion under the governing replacement contract.
+- [ ] S6: prove an ordinary native Windows plugin update while that companion
+  is actively supervised, without manual killing, a retry race or stopping
+  unrelated/shared trees; prove automatic post-update supervision/readiness.
+- [ ] S7: preserve inherited #2395's separate temporary per-unit
+  restart-inhibition/expiry acceptance unless implemented OR explicitly
+  transferred to the rightful supervision owner; no owner or resource release
+  follows from documenting this family.
+- [ ] V5820-L: distinguish payload exclusion, immutable-slot preservation,
+  staging-failure alternatives and independent installer/reconcile descendant
+  lifetime controls; retain all identity, exit, uncertainty and owned-cleanup
+  evidence without substituting a child UV timeout.
+- [ ] V5820-N: exercise the exact registered native Windows resident companion
+  AND its waiting descendants through ordinary update while actively supervised,
+  proving automatic post-update readiness and no manual/unrelated-tree stop.
+  Keep this witness distinct from rename/CWD fixtures and from #2395's
+  separately open inhibition/expiry acceptance.
+
 ### Phase 3 - Release and completion
 
 - [ ] Drive each source PR through review, required CI, merge and containing
@@ -178,6 +236,14 @@ authorize production updates, recovery mutations or new access.
 - [ ] For changed peer boundaries, qualify current/prior callers and providers,
   supported rollback, missing metadata and unsupported requirements. Do not
   blindly replay an effectful operation with older syntax.
+- [ ] G5820: validate the complete [S1-S7 resident-companion family](acceptance.md#l5820---whole-installer-and-resident-companion-lifecycle):
+  payload exclusion throughout lifetime, immutable completed slots, hard-fail
+  OR bounded protected staging failure, independent installer/reconcile
+  descendant bounds and custody, exact registered native Windows `dtssh`
+  AND waiting helpers under active supervision during ordinary update,
+  identity/exit/readiness, automatic post-update supervision and owned cleanup.
+  Preserve #2395's separate inhibition/expiry implementation OR rightful-owner
+  transfer; rename/CWD or staged-child timeout evidence alone is insufficient.
 - [ ] Use focused unit checks, real subprocess/native fixtures and practical
   clean-room lanes. Keep broad native matrices opt-in, not added to required
   unit-only CI. State exact reasons for unavailable lanes.
@@ -193,6 +259,18 @@ is proposed. Select each concrete unit only after current owner and source
 reconciliation; the matrix is not a blanket reservation of those components.
 
 ## Journal
+
+### 2026-11-13 - Resident-companion lifecycle intake proposed
+
+The direct #5820 Plan, local AND actual global Validation and strict
+[L5820 acceptance family](acceptance.md#l5820---whole-installer-and-resident-companion-lifecycle)
+retain S1-S7 under the existing workstream. All ten new rows remain unchecked.
+Delivered fail-closed MCP/Budget staging and narrower constructor/reconcile/
+lifetime source credit remain; #5827's CWD credit is not the exact resident
+Windows-chain witness. Original owners, holds, activation and the separate
+#2395 acceptance survive. Normal reviewed merge and whole-current receiving
+readback precede any separate source-tracking judgment; no product execution,
+technical completion, deployment, source retirement or custody transfer is claimed.
 
 ### 2026-11-03 - Workstream established
 

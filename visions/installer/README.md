@@ -9,7 +9,7 @@
   all three of its roles.
 - **Scope:** branch (application intent; configuration detail lives in its child)
 - **Status:** Active
-- **Last revised:** 2026-11-12
+- **Last revised:** 2026-11-13
 - **Reality docs:** [`docs/install-contract.md`](../../docs/install-contract.md) ·
   [`docs/architecture.md`](../../docs/architecture.md)
 
@@ -415,6 +415,25 @@ makes automatic-update policy visible and adjustable, with a clear distinction
 between allowing an automatic request and enrolling a recurring controller.
 
 ### ordinary-update-completion
+
+Fresh installation and update use the same incoming installation path.
+Both enter the trusted upstream bootstrap, honor explicit source overrides,
+establish Manager through its complete application flow, and use its onboarding
+capabilities to derive the selected repository's required applications,
+dependencies and downstream installables. Repository adoption does not
+silently override the independently selected Manager or service source.
+
+Every required member of that installation is fully prepared before the
+activation phase begins. Staging constructs complete self-contained application
+footprints without initializing live runtime data, activating live services,
+publishing current selections or attempting handoff. App-owned private
+candidate readiness may use the existing passive contract, with live work
+admission closed and no live publication or shared-data migration. This is
+not service activation. Activation then checks state
+compatibility and lets incoming versions observe incumbents and attempt
+supported state transfer, start and cut over. Existing versions do not select
+a separate legacy construction flow. Outgoing retirement remains independent
+under [authoritative-runtime-replacement](#authoritative-runtime-replacement).
 
 A directly requested update owns its recovery and completion: it performs a
 fresh installation, or joins an equivalent already-running fresh installation

@@ -41,6 +41,7 @@ class Vault:
         self._shutdown = False
         self.is_expired = False
         self.cli = types.SimpleNamespace(status=lambda _: "fixture")
+        self._cache_warm = service.CacheWarmQueue(self)
     def initialize(self):
         admitted("initialize")
     def _check_password_ttl(self):
@@ -214,8 +215,10 @@ def test_expiry_progress_and_cancellation_ignore_saturated_request_executor(
         release = threading.Event()
         loop.set_default_executor(ThreadPoolExecutor(max_workers=1))
         vault = SimpleNamespace(
-            _shutdown=False, is_expired=False, _check_password_ttl=checked.set,
+            _shutdown=False, _runtime_can_work=True, is_expired=False,
+            _check_password_ttl=checked.set,
         )
+        vault._cache_warm = service.CacheWarmQueue(vault)
 
         class Generation:
             def __init__(self, *_args: object) -> None:

@@ -3,6 +3,22 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-13 - Onboarding, conclusion and key-consumer intake](journal/2026/11.13-onboarding-conclusion-and-key-intake.md)
+
+- [2026-11-13 - Distinct decision, consumer and transfer intake](journal/2026/11.13-distinct-decisions-and-transfer-intake.md)
+
+- [2026-11-13 - Named scheduled-configuration intake](journal/2026/11.13-named-scheduled-configuration-intake.md)
+
+- [2026-11-13 - Recurrence and source-accounting intake](journal/2026/11.13-recurrence-and-source-accounting-intake.md)
+
+- [2026-11-13 - Resident-companion lifecycle intake](journal/2026/11.13-resident-companion-lifecycle-intake.md)
+
+- [2026-11-13 - Finite recovery and account-execution intake](journal/2026/11.13-finite-recovery-and-account-intake.md)
+
+- [2026-11-13 - Canonical keepers and finite receiving gaps](journal/2026/11.13-canonical-keepers-and-finite-intake.md)
+
+- [2026-11-13 - Inherited allocator and parked review intake](journal/2026/11.13-inherited-allocator-and-parked-review-intake.md)
+
 - [2026-11-13 - Reviewed receiving readiness recovered](journal/2026/11.13-reviewed-receiving-readiness.md)
 
 - [2026-11-13 - Finite source completions and existing receivers](journal/2026/11.13-finite-source-and-existing-receivers.md)

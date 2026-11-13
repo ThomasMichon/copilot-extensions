@@ -35,6 +35,14 @@ while retaining installation, ownership, policy and health contracts.
 
 ## Coordination
 
+The [installation convergence map](../source-managed-runtime-installs/installation-convergence.md)
+aligns this effort's accounting with one fresh-install/update path: acquisition,
+Manager establishment, dependency discovery, complete staging and activation
+must remain distinguishable in actual results. Report failed-stage suppression
+and incoming readiness separately from outgoing retirement; do not time only an
+inner venv operation as the whole update. Existing framing, cohort, source and
+operational owners and acceptance remain here.
+
 - **Topology:** one reviewed proposal followed by independently reviewable,
   dependency-ordered implementation PRs. Only the coordinator publishes or
   mutates Git state in the integration worktree.

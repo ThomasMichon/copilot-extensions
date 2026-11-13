@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
 from typing import Protocol
 
 import yaml
@@ -12,6 +14,9 @@ from .worktree_machine_identity import WorktreeMachineIdentity, WorktreeMachineI
 class IdentityRecord(Protocol):
     machine: str
     platform: str
+    _loaded_machine: str | None
+    _loaded_machine_identity: tuple[object, ...] | None
+    _loaded_record_subject: tuple[object, ...] | None
 
 
 class RecordMachineIdentityView(IdentityRecord):
@@ -69,8 +74,30 @@ def serialized_fields(record: IdentityRecord) -> str:
     return yaml.safe_dump(record_fields(record), sort_keys=False)
 
 
+def subject_fence(record: IdentityRecord, path: Path | None) -> tuple[object, ...]:
+    """Identify the receiving ledger and allocation independently of its labels."""
+    ledger = None if path is None else os.path.normcase(os.path.abspath(str(path)))
+    return (ledger, *(getattr(record, name, None) or "" for name in (
+        "repo", "worktree_id", "worktree_path", "branch", "started_at",
+    )))
+
+
+def remember_loaded_identity(record: IdentityRecord, path: Path) -> None:
+    """Retain transient save evidence without adding persisted identity fields."""
+    record._loaded_machine = record.machine
+    record._loaded_machine_identity = identity_fence(record)
+    record._loaded_record_subject = subject_fence(record, path)
+
+
 def require_unchanged_identity(record: IdentityRecord, current: IdentityRecord | None) -> None:
     """Allow existing explicit legacy-label repair, never implicit tuple migration."""
+    if current is not None:
+        path = getattr(current, "_loaded_from", None)
+        expected_subject = getattr(record, "_loaded_record_subject", None)
+        if expected_subject is None:
+            expected_subject = subject_fence(record, path)
+        if subject_fence(current, path) != expected_subject:
+            raise WorktreeMachineIdentityError("record subject changed; reload the receiving record")
     expected = getattr(record, "_loaded_machine_identity", None)
     if expected is None:
         expected = identity_fence(record)

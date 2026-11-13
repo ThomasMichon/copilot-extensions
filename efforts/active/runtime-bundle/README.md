@@ -29,6 +29,13 @@ contract on one explicitly recorded native target before widening the matrix.
 
 ## Coordination
 
+The [installation convergence map](../source-managed-runtime-installs/installation-convergence.md)
+consumes this effort's admitted core composition as an input to the same fresh
+install/update path. A composition bundle is not each app's complete staged
+project, and an isolated CLI proof is not whole-inventory activation. Keep
+optional profiles, artifact/admission owners and every remaining acceptance
+item here; this is alignment, not completion or a new publisher.
+
 - **Topology:** bounded per-slice PRs, leaving the default branch green.
 - **Host (owns PRs):** Core bundle submitter.
 - **Delegates:** none for this initial slice.

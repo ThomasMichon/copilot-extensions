@@ -39,6 +39,18 @@ Compaction remains emergency recovery rather than the planned continuity path.
 - No private deployment record is required to understand or execute this plan.
 
 
+The coordinator retains integration/completion judgment and the
+compatibility worker retains its bounded evidence role. The native-first
+#6028 contract and inherited #5683 automatic custom-transfer contract remain
+separate; existing scheduling, background-work and process-host owners retain
+their scope, claims, artifacts and approvals. The
+[guidance claim](https://github.com/ThomasMichon/copilot-extensions/issues/6028#issuecomment-6674381607)
+remains bounded guidance work, not runtime or custody transfer. #3367's
+error-repair OR supported-native-owner-dependency contract remains independent
+and is not a whole-#6028 prerequisite. Reviewed receiving/readback and any
+source-specific conditions precede a separate disposition; no generic owner
+ACK or every-host gate is added.
+
 <!-- backlog-reconciliation:7556:last-seven:Coordination -->
 
 ### Continuing source-specific #3367
@@ -132,6 +144,63 @@ Unrelated repository lifecycle work is intentionally outside this scope.
   Unknown capability retains diagnostics/explicit recovery, not silent suppression.
 - [x] Preserve emergency compaction. Do not invoke low-level context clearing
   opportunistically from a timer or non-terminal hook.
+
+### Direct custom-force transfer acceptance inherited through #6028
+
+The original native-selection, checkpoint-fidelity and isolated acceptance
+contract remains directly tracked in Phases 1-4 and the existing global
+Validation Plan. Preserve every incumbent checked delivery and historical
+result. The following added work separately retains #5683's complete
+automatic custom-transfer contract through #6028.
+
+- [ ] **P6028-3:** For automatic custom force transfer, implement an
+  extension-invokable ownership-scoped lifecycle contract with existing
+  scheduling/background-work owners OR another verified transfer mechanism
+  preventing predecessor writers and recurring schedules racing a
+  successor. Manual skill instructions alone do not supply a lifecycle
+  action the automatic path can invoke.
+- [ ] **P6028-4:** Capture the emergency baton boundedly before context loss,
+  reporting actual owned agents/shells/schedules and unresolved custody.
+  Do not assume empty inventory or block capture indefinitely. A stored
+  baton, "Not captured" disclosure or bounded sync wait does not authorize
+  concurrent predecessor/successor work.
+- [ ] **P6028-5:** Preserve capture/quiesce-before-sync ordering at the
+  actual transfer boundary and safe successor recovery. Preserve unrelated
+  work and existing process-hosting ownership; do not move process hosting
+  into context-handoff. Existing force-tier existence and continuity
+  content remain separately credited features.
+- [ ] **P6028-6:** Preserve native compatibility, guidance-follow-up,
+  scheduling, background-agent/shell and process-host custodians and their
+  claims, artifacts, live work and approvals. Distinguish artifact read
+  projection from storage limits; honor host checkpoint cadence and
+  terminal ordering without unconditional verification/contraction loops,
+  a new store or invented legacy-tool support.
+
+#### Local Validation for #6028's retained whole contract
+
+- [ ] **V6028-1:** Preserve the original isolated CLI/ACP/custom-filter and
+  adverse/fallback matrix before deployment: complete checkpoint contents,
+  parent gate, revision/source/owner isolation, stale/disabled/conflicting/
+  unavailable signals, partial rollover and explicit custom handoff.
+  Preserve post-rollover durable refresh and historical FAILs without
+  reopening delivered native-selection/guidance credit.
+- [ ] **V6028-2:** Exercise automatic custom force transfer with an active
+  writer AND recurring schedule, capture failure/time pressure and
+  successor recovery. Prove no duplicate scheduled execution or concurrent
+  predecessor/successor writes while retaining bounded emergency capture
+  and visible unresolved ownership.
+- [ ] **V6028-3:** Preserve manual-only/off/auto modes, explicit operator
+  handoff and unrelated work; qualify whichever lifecycle OR verified
+  alternative-transfer design is chosen. Native same-owner success alone
+  does not pass custom fallback. No universal quiescence wait, empty-work
+  assumption or new process-hosting service is required.
+- [ ] **V6028-4:** Before any separate administrative child-retirement
+  judgment, read back the complete current OPEN parent, original #5683
+  and every refinement under their actual source/custody conditions.
+  Newly retained technical rows remain unchecked; every incumbent checked
+  delivery and historical result stays unchanged. Keep source, native,
+  release and deployed tiers distinct; this receipt triggers no transfer,
+  rollover, sync, writer, schedule, process or cleanup effect.
 
 ### Phase 4 - Acceptance and deployment
 
@@ -267,6 +336,15 @@ owner reassignment, source disposition or claim/resource release.
   native SAME-owner checkpoint selection distinct from custom consume/owner transfer; no
   unrelated all-host acceptance is required.
 
+- [ ] **G6028:** Resolve the original native Plan/global acceptance matrix
+  AND every P6028/local V6028 inherited custom-force clause. Preserve the
+  lifecycle OR verified-alternative choice, active writer AND recurring
+  schedule, bounded emergency capture, real inventory, quiesce-before-sync,
+  successor recovery, modes and existing custodians. Native same-owner
+  continuity and custom owner/process transfer remain separate acceptance
+  paths. Preserve existing checked source/release credit, historical FAILs
+  and applicable caller/native/deployment conditions.
+
 ## Proposal
 
 [design.md](design.md) separates selection, semantic guidance, operational
@@ -366,6 +444,15 @@ resident-daemon lifecycle and platform support are unchanged. This is
 below-altitude evidence/tooling documentation, with no new rollout claim.
 
 ## Journal
+
+### 2026-11-13 - Complete #6028 native and custom-transfer retention proposed
+
+Added nine unchecked direct/local/global rows retaining the original native
+acceptance alongside the separate complete inherited custom-force outcome
+and bounded guidance refinement. All twelve incumbent checked rows, first
+unresolved native-fidelity/selection gates, historical FAILs, source/release
+credit and #3367 alternatives remain unchanged. No native run, automatic
+transfer, owner reassignment, source retirement or deployment is asserted.
 
 ### 2026-10-12 - Evidence publication review
 

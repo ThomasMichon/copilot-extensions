@@ -529,6 +529,23 @@ caller wiring, grant acquisition, credential write, observer, native effect,
 automatic recovery or rollout. Effectful integration and qualification remain
 separately reviewed and admitted through their existing owners.
 
+The first source outcome landed in #12336 as
+`launch_execution_permit.WorktreeExecutionPermit`, documented in the
+[original-owner decision journal](../../../plugins/agent-worktrees/docs/architecture.md#original-owner-execution-decision-journal).
+It records independently retained action-specific decisions through the
+existing guarded writer, with separate append-only permit ordering and passive
+inspection. It does not authenticate private approvals, verify current source
+lifetime or expose a native effect. Its matching candidate keeps
+`effects_wired: false`, `native_recovery: unqualified`,
+`intent_contract: unavailable` and `replay: never`.
+
+No permit-aware recovery descriptor or intent contract is implemented by that
+leaf. The existing v1 fields retain their meanings and prior records remain
+unqualified. The next source boundary is the explicit contract evolution above,
+coordinated with the current Core and receiver owners before consumer changes.
+Complete historical identity publication, actual execution admission and
+provider reacquisition remain independently open.
+
 ## Evidence before each functional promotion
 
 Retain focused tests that fail without the extraction or adapter behavior.

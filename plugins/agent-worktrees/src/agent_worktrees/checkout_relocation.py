@@ -289,6 +289,9 @@ def _references(path: Path, queries: list[tuple]) -> bool:
         raise ValueError("read-only WAL inventory requires existing owner-managed sidecars")
     connection = sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True, timeout=3)
     deadline = time.monotonic() + 3
+    from .checkout_reference_paths import ReferenceSnapshot
+
+    references = ReferenceSnapshot(deadline)
     connection.set_progress_handler(lambda: int(time.monotonic() > deadline), 1000)
     inspected = 0
     def bounded_reference(value, root):
@@ -300,10 +303,13 @@ def _references(path: Path, queries: list[tuple]) -> bool:
             return 0
         if not isinstance(value, str):
             raise ValueError("operational reference path has an unsupported schema")
-        return int(reference_under(value, root))
+        return int(references.under(value, root))
     connection.create_function("checkout_reference_under", 2, bounded_reference)
     try:
-        return any(connection.execute(query, parameters).fetchone() for query, parameters in queries)
+        matched = any(connection.execute(query, parameters).fetchone() for query, parameters in queries)
+        if not matched:
+            references.verify()
+        return matched
     except sqlite3.DatabaseError as exc:
         raise ValueError("operational reference schema is unsupported or inventory is incomplete") from exc
     finally:

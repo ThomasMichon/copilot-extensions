@@ -35,6 +35,15 @@ remains the default, and selection requires no coordinator or sibling plugin.
 - **Delegates:** None initially.
 - **Handoff:** The effort and #1564 are the public recovery points.
 
+### Continuing #4871 usage/deprecation decision custody
+
+The Maintainer retains the finite decision below and existing #1564 recovery
+points. Preserve user-owned arming, default-off safety, profile/backend and
+assignment custodians. Direct planned receiving is not an accepted removal
+decision, configuration/UI/ledger mutation or rollout authorization. Complete
+normal review and current receiving readback precede separate source judgment;
+the existing deployment gate remains independently unresolved.
+
 ## Context
 
 Agent-worktrees already supports named `copilot_profiles` from global,
@@ -118,6 +127,30 @@ profile; handoff successors are new session generations and draw again.
   source/runtime identity. Deployment acceptance remains unverified; merged
   source and the closed implementation issue are not installed-state evidence.
 
+### Independent #4871 need and capability decision
+
+- [ ] **P4871-need:** Confirm the real current need for named profiles and
+  balanced assignment, crediting persisted settings for ordinary non-ACP
+  model/effort/context defaults. Ordinary defaults are not evidence that
+  distinct named-backend or assignment capabilities have become redundant.
+- [ ] **P4871-capabilities:** Explicitly reconcile named backend environment,
+  provider and argument selection, manual Picker cycling AND balanced
+  rotation. Preserve default-off/user-owned arming, durable assignment and
+  the original retry/resume/handoff replay semantics.
+- [ ] **P4871-conditional-path:** IF no real need remains, warn on use THEN
+  remove in a major version; otherwise preserve the needed capabilities.
+  Record the decision and retained alternatives rather than treating this
+  conditional proposal as unconditional retirement or permission to arm,
+  remove or rewrite configuration, UI or assignment state.
+- [ ] **V4871-need:** Retain the current-need evidence and ordinary-default
+  delivery credit separately from any proposed capability equivalence.
+- [ ] **V4871-capabilities:** Map every named-backend, manual-cycle, balanced
+  rotation, authority and durable lifecycle clause to the recorded decision;
+  preserve both manual selection and assignment rather than conflating them.
+- [ ] **V4871-conditional-path:** Verify the actual IF/otherwise decision
+  preserves warning-before-major-removal ordering when its condition holds.
+  Planning creates no removal, arming, settings, runtime or deployment effect.
+
 ## Validation Plan
 
 - [x] A six-profile bag emits every profile exactly once per generation before
@@ -148,6 +181,12 @@ profile; handoff successors are new session generations and draw again.
 - [x] Existing Picker profile cycling and `--profile` launch tests remain green.
 - [x] Records written before profile assignment existed continue to load
   byte-compatibly with no implied assignment.
+
+- [ ] **G4871:** Resolve ALL P4871/V4871 need, capability and conditional-path
+  clauses with the existing Maintainer coordination and Journal intact.
+  Preserve checked assignment/source credit and the independently unchecked
+  installed-deployment gate; that gate is not a prerequisite for documentary
+  intake, and intake is not proof it passed or an accepted removal decision.
 
 ## Proposal
 
@@ -183,6 +222,12 @@ The open usage/deprecation discussion #4871 is separate. Persisted
 model/effort/context defaults do not replace named backend selection or balanced
 assignment. That proposal is not an accepted removal decision, and this effort
 does not change either capability or its default-off safety.
+
+The direct #4871 Plan/local/global Validation and coordination above propose
+retaining that separate substantive decision in this existing effort. They
+do not themselves establish accepted whole transfer or authorize source
+retirement; normal review, complete current receiving readback and a separate
+source judgment remain required.
 
 ## Journal
 
@@ -360,3 +405,13 @@ does not change either capability or its default-off safety.
 - Retain #4871 as the existing usage/deprecation decision rather than treating
   ordinary launch-default reinforcement as permission to remove or re-arm
   named-profile assignment. No runtime, configuration or version change.
+
+### 2026-11-13 - Proposed finite #4871 decision receiving
+
+Added unchecked need, capability and conditional-path Plan/local/global
+Validation with unchanged Maintainer custody. Credit ordinary-default and
+assignment delivery while preserving named backend selection, manual cycling,
+balanced rotation and the literal IF-no-need/warn-then-major-removal choice.
+This is planned receiving, not a deprecation decision, source retirement,
+policy arming or completed deployment. Existing checked rows and the first
+unchecked deployment gate remain intact.

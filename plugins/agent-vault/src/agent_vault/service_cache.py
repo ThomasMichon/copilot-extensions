@@ -26,6 +26,10 @@ class ServiceCacheUnavailable(RuntimeError):
     pass
 
 
+class ReadAdmissionExpired(ServiceCacheUnavailable):
+    """An internal caller's native-read admission budget expired."""
+
+
 def get_cache() -> PersistentCache:
     try:
         return _raw_get_cache()
@@ -98,8 +102,12 @@ def read(
                     service.cache[key] = record["value"]
                     service._credential_generations[key] = record["generation"]
                     return record["value"]
+            service._check_password_ttl()
             if not service.ensure_unlocked(kpdb):
                 return None
+            deadline = getattr(service._request_ctx, "cache_warm_deadline", None)
+            if deadline is not None and time.monotonic() >= deadline:
+                raise ReadAdmissionExpired(UNAVAILABLE)
             value = service.cli.get_entry(kpdb, entry, field)
             if value is not None:
                 generation = max(time.time_ns(), service._credential_generations.get(key, 0) + 1)

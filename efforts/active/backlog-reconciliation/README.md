@@ -342,6 +342,18 @@ the non-public approval conversation.
 
 ## Plan
 
+The [inherited-allocator and parked-review intake](journal/2026/11.13-inherited-allocator-and-parked-review-intake.md)
+records reviewed delivery of eighteen direct unchecked rows across two existing
+ROOTs in #12467 and three separate `NOT_PLANNED` tracking retirements for
+#4217, #5183 and #5211. It retains the allocator's report AND log ownership,
+the semantic-revalidation OR addressed-feedback alternative, BOTH default
+round outputs and concrete soft-threshold tactics. The review ROOT stays
+Blocked; execution/resumption and every incumbent owner/hold remain unchanged.
+Complete current receiving/history coverage and fresh source/custody readback
+support each separate judgment; no implementation or resumption is claimed.
+The complete queue is 862 open, 133 above fixed 729, with no intervening arrival,
+external departure or classification change.
+
 The [reviewed-receiving readiness unit](journal/2026/11.13-reviewed-receiving-readiness.md)
 screens 46 older mapped originals and verifies actual complete D4214
 receiving in the existing Active Dispatch effort. #4214's separate
@@ -3152,6 +3164,69 @@ sources, transferring owners or turning partial/planning gains into completion.
   receiving objective or a retained gap; investigate actual implementation
   evidence when claiming completion, rather than making that the prerequisite
   for discovering thematic alignment.
+  The [onboarding/conclusion/key-consumer intake](journal/2026/11.13-onboarding-conclusion-and-key-intake.md)
+  proposes eighteen unchecked rows in existing Fleet, Draft tidier and
+  attribution plans, preserving strict annexes, pilot/credential/custody
+  gates and two canonical keepers. No new operational action or source
+  disposition follows from this five-source proposal.
+  The [distinct decision/consumer/transfer intake](journal/2026/11.13-distinct-decisions-and-transfer-intake.md)
+  proposes #5956's separately owned architecture decision, #5960's complete
+  Phase 2 consumer promises and #6028's inherited custom-force family in
+  existing ROOTs. Twenty-three unchecked rows preserve literal alternatives,
+  original native credit and all custodians; three canonical keepers remain.
+  No source disposition is claimed; 857 whole open is still 128 above target.
+  Subsequent complete current receiving readback after #12496 supports
+  #5960/#6028's separate redundant-tracking retirements, while #5956 remains
+  the distinct architecture canonical. All 23 technical rows remain
+  unchecked; the [post-merge judgment](journal/2026/11.13-distinct-decisions-and-transfer-intake.md#separate-post-merge-receiving-and-tracking-judgments)
+  retains #5683's independent child gate and records 856 whole open,
+  still 127 above target.
+  The [named scheduled-configuration intake](journal/2026/11.13-named-scheduled-configuration-intake.md)
+  proposes #5941's complete finite execution-time NAME lookup, authorized
+  refusal and explicit-file compatibility family in existing Logger planning.
+  Four unchecked Plan/local/global rows and five source-specific canonical
+  keepers remain; documentary delivery is not a runtime fix or source
+  disposition. The current census is 861 whole open, 132 above target.
+  Complete current ROOT/strict-annex readback after #12491 now supports
+  #5941's [separate redundant-tracking retirement](journal/2026/11.13-named-scheduled-configuration-intake.md#separate-post-merge-receiving-and-tracking-judgment),
+  not technical completion. Its four technical rows remain unchecked;
+  the later full census records 858 whole open, 129 above target.
+  The [recurrence/source-accounting intake](journal/2026/11.13-recurrence-and-source-accounting-intake.md)
+  proposes two complete finite families in promotion Phase 3 and progressive
+  Phase 6, preserving undecided policy and normal reviewed domain acceptance.
+  Four canonical keepers, all thirteen unchecked Plan/local/global rows and
+  separate receiving/source/resource judgments remain; no new disposition
+  or closure credit is claimed.
+  Subsequent complete current receiving readback after #12489 supports
+  #5890/#5896's separate redundant-tracking retirements, not technical
+  completion. All thirteen rows remain unchecked; the
+  [post-merge judgment](journal/2026/11.13-recurrence-and-source-accounting-intake.md#separate-post-merge-receiving-and-tracking-judgments)
+  records 859 whole open, still 130 above target.
+  Complete current ROOT/strict-annex receiving readback after #12478 supports
+  #5675's separate redundant-tracking retirement, not technical completion.
+  All original D/R/W witness rows and custodians remain; #5791's complete
+  accepted Phase 2 intake does not withdraw its explicit WHOLE independently
+  OPEN keeper condition. The [dated judgment](journal/2026/11.13-resident-companion-lifecycle-intake.md#separate-recoveryaccount-receiving-judgments)
+  records 860 whole open issues, still 131 above target, and no product effects.
+  The [resident-companion intake](journal/2026/11.13-resident-companion-lifecycle-intake.md)
+  proposes #5820's complete S1-S7 version-candidate, independent lifecycle,
+  exact resident-chain and native ordinary-update family directly under
+  installer recovery, preserving the original failure alternative and
+  #2395's separate inhibition/expiry acceptance. Three canonical keepers
+  and two actual primary-author gaps remain distinct; documentary delivery
+  neither supplies technical proof nor releases source/resource custody.
+  Complete post-merge ROOT/strict-annex receiving readback now supports
+  #5820's [separate redundant-tracking retirement](journal/2026/11.13-resident-companion-lifecycle-intake.md#separate-resident-companion-receiving-judgment),
+  not technical completion. All ten S/local/global rows remain unchecked;
+  #2385's acceptance and #2395's independently open control plane remain.
+  One new arrival offsets this retirement: 860 whole open, 131 above target.
+  The [finite recovery/account intake](journal/2026/11.13-finite-recovery-and-account-intake.md)
+  proposes #5675's original guarded recovery/witness family directly under
+  Dispatch Phase 3 and #5791's complete original plus #330/#2755 family
+  under account-aware Phase 2. The actual deduplication/ownership intake
+  preserves exactly one canonical phase, Draft status, implementation gate,
+  delivered source credit and all incumbent custody. Three canonical/whole
+  retentions remain; reviewed delivery is not technical acceptance or closure.
   The [further sixteen-contract register](receiving-recovered-sixteen.md)
   preserves all-nine/four-consumer selection, literal alternatives, finite
   original cohorts and same-canonical retirement. Ten proposed direct families,
@@ -3194,6 +3269,13 @@ sources, transferring owners or turning partial/planning gains into completion.
   #5665 handoff remains separate from documentary publication.
 - [ ] Verify and publish supported dispositions, preserving source versus
   release versus rollout distinctions and all active ownership.
+  The [canonical-keeper and finite-intake checkpoint](journal/2026/11.13-canonical-keepers-and-finite-intake.md)
+  records three accepted complete planned families and separately verified
+  tracking retirements after #12474, plus seven retained canonical/whole-transfer
+  conditions and two whole-source provenance holds. All 25 direct Plan/local/
+  global rows remain unchecked; no technical completion or custody transfer
+  follows. The 861-open census records three own original-cohort departures
+  and one excluded metadata-only arrival, remaining 132 above fixed 729.
   The [ordered reliability map](reliability-ordered-tracking.md) preserves
   #4231's accepted five-area TRACK map and actual named diagnostic receiving
   under unchanged custodians. The [complete-ROOT checkpoint](journal/2026/11.12-complete-root-receiving-and-required-source-scope.md)
@@ -3450,6 +3532,17 @@ sources, transferring owners or turning partial/planning gains into completion.
   normal publication flow.
 
 ## Validation Plan
+
+The [eighteen-row intake](journal/2026/11.13-inherited-allocator-and-parked-review-intake.md#evidence-and-preservation)
+adds only direct Plan/local/global Validation, Coordination and dated-Journal
+text in the two existing receiving ROOTs. Independent byte proof preserves
+every incumbent row/check state: portfolio 270 to 275 unchecked with 13 checked
+unchanged; parked review 50 to 63 unchecked with three checked unchanged.
+Actual reviewed delivery in #12467, whole-current receiving/history coverage
+and exact source-specific acknowledgment/state readbacks verify the three
+separate redundant-tracking retirements. All ten T4217, six R5183 and seven
+R5211 technical/validation rows remain unchecked; the review ROOT stays Blocked.
+No execution, implementation, resumption or source/resource release is claimed.
 
 The [existing-receiving audit](journal/2026/11.13-reviewed-receiving-readiness.md)
 verifies eight whole documentary files and full primary histories, actual

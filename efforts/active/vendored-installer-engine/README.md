@@ -68,6 +68,14 @@ as independent per-plugin PRs; see Coordination._
 
 ## Coordination
 
+The [installation convergence map](../source-managed-runtime-installs/installation-convergence.md)
+composes this effort's shared construction/adopter mechanics into complete
+application staging before activation. It does not create another engine or
+extend a legacy per-plugin build-and-start loop as the fresh/update target.
+Preserve existing phase owners, Worktrees/Budget exceptions, paused adopters
+and required native/installed acceptance; those are not transferred or passed
+by this cross-link.
+
 The proposed finite #5955 intake retains the SAME legacy bootstrap/installer
 and adopter custodians for Containers, SSH and Machines. Direct tracking of
 their first-use acquisition order does not start an adopter, resume the paused
@@ -111,6 +119,14 @@ budget-guidance's non-rollout exception.
   `tools/sync-installer-engine.py --check` (built in Phase 1) is green in CI.
   Use the standard context-handoff flow to hand off between phases; the
   Journal below is the resumption point.
+
+Retain #5956's separate architecture-decision scope; this planned receipt
+neither selects full-flow versus mechanics policy nor assigns that decision
+to the installer phase implementer. Preserve the one-phase-at-a-time
+installer rule, current Index/next-adopter pause, Worktrees' exception,
+Budget's audit-only scope and actual source/resource custodians. Normal
+reviewed receiving and complete current readback precede a separate source
+judgment; no implementation, next adopter or rollout starts here.
 
 <!-- backlog-reconciliation:7556:qualified-fifteen:2729:Coordination -->
 
@@ -532,6 +548,42 @@ _Correlated via a facility-driven sweep of open `bug`-labeled issues against act
       decision. This amendment neither removes Worktrees' engine exception nor
       pulls all service-specific lifecycle logic into the shared build engine.
 
+### Direct separate architecture acceptance from #5956
+
+This retains #5956's distinct architecture-decision objective, not engine
+implementation ownership or a selected policy. All incumbent status, phases,
+checks, pauses, exceptions, source credit and custodians remain unchanged.
+
+- [ ] **P5956-1:** Obtain the reviewed explanation/selection of intended
+  full-entrypoint applicability and extension boundaries against the
+  full-flow intent and documented mechanics/exception boundary. Keep this
+  the distinct #5956 decision objective; do not appoint the engine
+  implementer as architecture decision owner.
+- [ ] **P5956-2:** Preserve standalone bootstrap, optional control-plane
+  ownership and irreducible service-specific behavior. Do not silently
+  weaken the invariant or force a wholesale core rewrite. Preserve this
+  ROOT's authoritative incoming-replacement contract: incoming readiness
+  and all applicable current selections are completion, not outgoing
+  settlement; old recovery, provenance, monitor or stale-fence state
+  must not become incoming-installation vetoes.
+- [ ] **P5956-3:** Credit shared lifecycle adoption and reviewed audit capture
+  separately from the architecture decision. Preserve existing engine,
+  adopter, service, conditional-cutover and source-managed custodians,
+  build-versus-serving truth and retry from completed immutable slots.
+
+#### Local Validation for #5956
+
+- [ ] **V5956-1:** Review the actual applicability/extension decision against
+  both scope statements; an adopter merge or audit capture alone does not
+  adjudicate the discrepancy.
+- [ ] **V5956-2:** Verify the reviewed explanation preserves bootstrap,
+  control-plane and irreducible-service constraints and authoritative
+  incoming replacement without silently selecting the disputed policy.
+- [ ] **V5956-3:** Distinguish architecture acceptance, source adoption and
+  serving qualification. Keep remaining operational work with its existing
+  custodians; neither all #6389 work nor every native adopter is a
+  prerequisite to this finite reviewed decision.
+
 <!-- backlog-reconciliation:7556:transfer:2871:to:efforts/active/vendored-installer-engine/README.md -->
 
 Add this exact audit-only seventh row of #2871 directly to the existing ROOT audit Plan
@@ -786,6 +838,12 @@ state, pause, participant, exception and Journal entry remains binding._
   loader-awareness limit. Intake is not source repair, native/current-cause
   proof, retirement permission, parent completion or resource release.
 
+- [ ] **G5956:** Resolve every P5956/local V5956 clause at the reviewed
+  architecture-decision tier. Preserve the separate decision objective,
+  authoritative incoming replacement and incumbent exceptions/owners.
+  Mechanical adoption alone is insufficient; completing all serving/native
+  adopter work is not required merely to adjudicate this decision.
+
 ## Proposal
 
 **Phase 0 audit findings (2026-09-22):**
@@ -829,6 +887,15 @@ immutable-versioned-runtime slot contract. No scheduled task, no sibling
 installs, no service-specific config needed for this class of plugin.
 
 ## Journal
+
+### 2026-11-13 - Separate #5956 architecture receiving proposed
+
+Added seven unchecked direct Plan/local/global Validation rows retaining
+the whole original/refined applicability decision as a distinct objective.
+All incumbent bytes, checked credit, first unresolved gates, pauses and
+owners remain. No architecture policy, vision rewrite, implementation
+assignment, native result, receiving acceptance or source disposition is
+asserted.
 
 ### 2026-11-04 - Finite first-use interpreter-order intake proposed
 

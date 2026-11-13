@@ -139,6 +139,26 @@ Validation/Coordination/Journal delivery and permitted whole-current
 readback precede any separate source judgment; intake is not technical
 PASS, implementation, acceptance or resource release.
 
+The complete #4217 family now proposed includes its directly inherited finite
+default-allocator lane from #8511, not only the older four-outcome enrollment
+request. Continue through the SAME primary maintainer, existing Phase 2/4
+scenario and owning clean-room wave and Phase 7 migration-intake/domain review.
+The existing rig/scenario/CI-portfolio/allocator, source, runner, native,
+periodic-failure, release and resource custodians retain their responsibilities.
+No container, credential, results directory, retained log, native execution or
+cleanup custody moves. #5921's missing-report/reducer family and #5922 remain
+independent; the existing statement keeping #8511 separate from that family is
+preserved, not silently deleted or treated as an enrollment dependency.
+
+Before any separate #4217 redundant-tracking judgment, normal review must
+deliver this whole addition to the actual ROOT Plan, local Validation,
+level-two global Validation, Coordination and dated Journal; read back the
+complete current receiving/source contracts and actual custody under the
+existing gate. Keep #4217 and #1303 OPEN now. A proposal, map, old intake merge,
+unfinished code or generic new ACK is not that acceptance or a new barrier.
+This tracking proposal authorizes no test, workflow, runtime, native, cleanup,
+resource allocation or implementation action.
+
 <!-- backlog-reconciliation:7556:qualified-sixteen:4128:Coordination -->
 
 The proposed #4128 family retains its finite filesystem-registry owner and
@@ -1326,6 +1346,34 @@ implementation operation is authorized.)_
   failure/reporting/cleanup controls through existing authorized lanes.
   Preserve truthful unsupported/unavailable and original tiers; no broad
   required integration, new runner or every-platform/adopter program.
+- [ ] **T4217-P4:** Retain #4217's complete inherited #8511 finite default
+  host-results allocator contract as an independently progressable lane beside
+  T4217-P1/P2 enrollment. Atomically allocate an exclusive default results
+  directory for each simultaneous run, including same-second starts and
+  distinct container-name suffixes. BOTH `cr-report.json` AND copied `cr-logs/`
+  must remain attributable to their correct independent run; unique container
+  names alone do not provide independent artifact ownership. Preserve the
+  existing distinct explicit `CR_RESULTS_DIR` workaround outside the checkout
+  and its intended override semantics. Container-local retained logs remain
+  evidence only under their actual owners until authorized teardown.
+- [ ] **T4217-P5:** Check the corresponding PowerShell allocation path without
+  assuming either safety or an observed Windows incident. Preserve the actual
+  Linux collision separately from static PowerShell susceptibility, and add
+  the focused collision/concurrency regression without expanding required
+  native integration or waiting for the whole enrollment program.
+- [ ] **T4217-LV2:** Exercise simultaneous default allocations in the same
+  timestamp interval with different container suffixes. Verify distinct
+  exclusive destinations, correct independent report AND copied-log contents,
+  collision/refusal behavior, explicit-directory override and truthful printed
+  paths. A successful container execution, unique container name or shared
+  host report does not prove correct artifact attribution.
+- [ ] **T4217-LV3:** Record Linux observation, corresponding PowerShell source
+  findings, focused regression results and any independently authorized native
+  qualification as distinct evidence grades. Preserve original unit-only
+  required PR/promotion policy, existing periodic/explicit tiers, prerequisites,
+  budgets and owning cleanup. Missing capacity, skip, incomplete cleanup or
+  unexecuted native coverage remains unavailable/non-PASS.
+
 - [ ] **T4233-P1:** Retain only the exact original supported web-client
   dependency SET and public-suite deprecation outcome across supported
   platforms. Identify original warning/class, supported combination and
@@ -1914,6 +1962,16 @@ every-host or release prerequisite is added to a finite family.
   bounded periodic/disposable lanes, not rig/manual-run proxies. Preserve
   unit-only required CI, failure/cleanup/resource owners and unavailable
   states; documentary delivery is not CI coverage or parent completion.
+- [ ] **T4217-G2:** Resolve every T4217-P4/P5/LV2/LV3 inherited allocator
+  condition alongside the unchanged T4217-P1/P2/P3/LV/G all-four-outcome
+  enrollment family. Keep the lanes independently progressable: allocator
+  correction need not await enrollment completion, and enrollment cannot infer
+  reliable host artifacts merely because independent containers ran. Preserve
+  explicit-directory semantics, BOTH report/log ownership, Linux versus
+  PowerShell evidence grades, all existing source/resource/native owners and
+  original finite tiers. This is neither technical completion nor a new
+  every-platform/adopter or broad blocking native/release program.
+
 - [ ] **T4233-G:** Resolve EVERY T4233 Plan/local Validation condition:
   exact original warning/dependency-set attribution and supported-suite/
   platform outcome OR attributable requirement-preserving disposition.
@@ -1959,6 +2017,19 @@ with another unbounded full-suite run. Portfolio reductions follow only after
 the inventory and evidence gates are available.
 
 ## Journal
+
+### 2026-11-13 - Proposed completion of inherited #4217 allocator intake
+
+The current #4217 original, two eligible refinements, two non-null original
+versions and title history retain four-outcome deterministic CI enrollment AND
+the independent finite #8511 host-artifact allocator lane. Existing T4217
+enrollment credit and acceptance stay unchanged. The additive allocator rows
+retain same-second exclusivity, distinct container suffixes, BOTH report/log
+ownership, explicit-directory semantics, Linux versus PowerShell evidence and
+focused regression/cleanup controls. All new technical rows remain unchecked.
+Normal review, actual complete delivery/readback and a separate source-specific
+judgment remain pending; #4217 and #1303 are not closed by this proposal.
+No product or execution/resource effect occurred.
 
 ### 2026-11-12 - Proposed inherited registration-family receiving
 

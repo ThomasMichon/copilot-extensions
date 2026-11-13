@@ -126,6 +126,18 @@ Unrelated live rows are untouched. Copilot session-reference matches are a
 refusal until their reader/writer semantics are qualified.
 Reference inspection has a 10,000-entry budget and a three-second database
 inventory budget; an incomplete inventory refuses.
+Within one database read, canonical candidate roots and reference-parent
+directories are prepared once instead of resolving the same ancestors for
+every file row. Regular and missing leaves reuse that parent resolution;
+directories, symlinks and reparse leaves still use full native resolution.
+Before accepting a negative query result, the reader revalidates every reused
+directory's identity/type and canonical destination under the same deadline.
+Changed or unavailable namespaces refuse. This transient read snapshot is
+not a persistent cache or reusable admission token; ordinary file-content or
+directory-entry activity is not a global quietness prerequisite.
+Every row still consumes the original inventory budget, including null rows,
+and no SQL field, alias, unsupported path or true retained reference is omitted.
+Large or slow inventories can still refuse within the unchanged limits.
 Known literal metadata names, such as each session's `workspace.yaml`, are
 looked up directly. The bounded wildcard namespace still includes every
 session directory; unrelated event/cache/lock files do not consume its

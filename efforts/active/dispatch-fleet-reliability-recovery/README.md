@@ -87,6 +87,28 @@ rearm/replay permission or owner release; no new watchdog or generic ACK.
   follows from plan approval.
 
 
+### Continuing #5675 pinned-emitter recovery custody
+
+The finite Phase 3 family below retains the original diagnostic/regression/
+documented-recovery claimant and pinned-producer custodian. Credit #5679's
+delivered diagnostics and fenced recovery; only the original end-to-end
+witness remains unqualified. An existing authoritative source-fixture OR
+owner receipt may satisfy it at its actual evidence tier, without a new
+production exercise. Keep #5301's child-lifecycle repair separate. Reviewed
+documentary delivery is not migration authority, technical completion,
+claim release or permission to replace a valid producer.
+
+### Continuing #4774 emitter-receipt recovery custody
+
+The finite receipt family below keeps existing emitter, generic receipt and
+domain custodians; it does not appoint the recipe-taxonomy owner or introduce
+domain-specific polling. Credit #4790 and the archived Done emitter-receipts
+baseline without reopening them or folding the canonical token into itself.
+Normal reviewed direct Plan/local AND global Validation/Coordination/Journal
+delivery and complete current receiving readback precede separate source
+judgment. Existing owner-fenced recovery and strict annex duties remain
+independent; no replay, reassignment, cleanup or resource release is authorized.
+
 <!-- backlog-reconciliation:7556:qualified-fifteen:2877:Coordination -->
 
 ### Continuing #2877 custody
@@ -240,6 +262,72 @@ startup path first; it does not claim every suite entry point already conforms.
   [typed registry-to-reservation Plan rows](retained-registry-deferrals.md#plan),
   preserving finite transient versus definitive-absence classification,
   distinct task/reservation accounting and original caller uncertainty.
+
+#### Direct retained #4774 generic receipt recovery
+
+- [ ] **P4774-A:** Preserve the delivered generic dedup-key to actual task
+  ID/status primitive and its later-tick retrieval. Retain stable declared
+  emitter identity, bounded/rotated logs and cursor retrieval through CLI
+  AND environment paths, including ordinary tick and side-load parity.
+  Credit #4790 rather than claiming the completed baseline is missing.
+- [ ] **P4774-B:** Establish an admitted usable result channel BEFORE authoring
+  effects AND retain a generic recoverable accepted/uncertain result if
+  receipt publication subsequently fails. Channel availability is not proof
+  that the authored effect failed or permission to replay it.
+- [ ] **P4774-C:** Retain created AND dedup-existing task identities and
+  partial success through the failure/recovery path. Preserve cursor/bounds,
+  concurrency, CLI/environment and side-load behavior; an empty success
+  envelope must not erase known results or license blind resubmission.
+- [ ] **V4774-A:** Qualify actual later-tick dedup-key/task-ID/status linkage,
+  stable emitter identity, bounded/rotated logs and both cursor surfaces,
+  with normal tick/side-load controls.
+- [ ] **V4774-B:** Cover pre-effect result-channel refusal and post-effect
+  publication failure, retaining recoverable accepted/uncertain outcomes
+  without domain polling or duplicate business effects.
+- [ ] **V4774-C:** Exercise created and dedup-existing results, partial
+  publication failure, empty-envelope and concurrent/cursor-boundary cases
+  while preserving all original CLI/environment/side-load controls.
+
+#### Direct retained #5675 pinned-emitter recovery
+
+**Agent-recommended tracking amendment.** Preserve this finite original
+contract within Phase 3, not as another supervisor or automatic failover.
+
+- [ ] **P5675-D:** Retain structured local identity, declaration eligibility,
+  expected cadence, health freshness, election status, pinned holder and
+  last renewal, distinguishing stale, fresh and unknown states. Credit the
+  delivered #5679 doctor/status diagnostics; a running supervisor,
+  `ok=true`/`held=false` or an expired readiness receipt alone does not prove
+  that a command executed, that a holder died or that takeover is allowed.
+- [ ] **P5675-R:** Preserve report-first explicit recovery bound to BOTH the
+  observed holder AND observed renewal, refusing a changed or valid producer.
+  Independently confirm the migration and absence of an old in-flight command.
+  Retain pin-not-failover: observability TTL, ineligibility or denied
+  acquisition alone never transfers the pin; a fresh valid remote producer
+  is not a fault. Keep migration guidance consistent with those safeguards
+  and credit the existing atomic renewal fence rather than rebuilding it.
+- [ ] **P5675-W:** Retain the original recovery -> executed target tick ->
+  LATER ordinary supervisor renewal witness. Lease release alone, a
+  `production_verified=false` result, a synthetic tick-success field or a
+  generic targeted-pass count is not that sequence. Seek an existing
+  authoritative source-fixture OR owner receipt before proposing any new
+  exercise; preserve its actual evidence tier and original finite scope.
+
+#### Local Validation - #5675
+
+- [ ] **V5675-D:** Qualify the actual structured identity/eligibility/cadence/
+  health/election/holder/renewal report with fresh, stale and unknown
+  controls. Preserve the delivered source credit without interpreting
+  denied acquisition or fresh remote production as death or failure.
+- [ ] **V5675-R:** Preserve observed-holder AND renewal change refusal,
+  valid-producer refusal, custom-scope and safe old-coordinator controls,
+  plus the independent no-old-command condition and corrected TTL guidance.
+  These controls establish fenced release, not restored production.
+- [ ] **V5675-W:** Resolve the ordered recovery, executed tick and later
+  ordinary renewal at the original accepted tier. An existing qualifying
+  source-fixture OR owner receipt is sufficient; do not mandate a new
+  native/all-host benchmark. Preserve the original recovery claimant,
+  pinned-producer custody, #5301 separation and all incumbent Phase 3 gates.
 
 ### Phase 3a - Startup progress and timeout adoption
 
@@ -632,6 +720,14 @@ _(Agent-recommended direct Phase3/Phase7 consumer case; all rows unchecked.)_
 
 ## Validation Plan
 
+- [ ] **G5675:** Resolve EVERY P5675-D/R/W and V5675-D/R/W clause together
+  with continuing #5675 custody: delivered diagnostic/recovery credit,
+  report-first holder AND renewal fencing, no-old-command safeguard and
+  actual recovery -> tick -> later ordinary renewal proof. Preserve the
+  original source-fixture OR owner-receipt alternative and all parent/
+  strict-annex duties; no automatic takeover, migration, replay, owner
+  appointment, cleanup or resource release follows from this tracking intake.
+
 - [ ] Resolve every original/refined #2798/#3179/#8780/#8781 clause through the
   direct [owner-fenced Validation Plan](owner-fenced-recovery-intake.md#validation-plan).
   Preserve R2816, R2877, P5493 and every incumbent global validation/owner gate;
@@ -735,6 +831,16 @@ _(Agent-recommended direct Phase3/Phase7 consumer case; all rows unchecked.)_
   is not incident diagnosis, reproduction, technical/whole-fleet completion
   or resource release; no every-host/unrelated whole-parent gate is added.
 
+### Global validation for #4774
+
+- [ ] **G4774:** Resolve EVERY P4774-A through C and V4774-A through C:
+  completed generic receipt credit, usable channel before effects AND
+  recoverable results after publication failure, created/dedup-existing IDs,
+  later reads and all retained cursor/bounds/concurrency/entry controls.
+  Keep actual emitter/receipt/domain and recovery custodians. No new
+  every-host programme, recipe-taxonomy appointment, polling loop, ownership
+  reset or replay authority is introduced; incumbent parent/annex gates remain.
+
 ## Proposal
 
 The initial proposal changes no runtime or deployment configuration. Category is
@@ -748,6 +854,27 @@ named-resource resolution so an older peer cannot silently accept but ignore a
 requested contract.
 
 ## Journal
+
+### 2026-11-13 - Proposed finite #5675 recovery-proof intake
+
+Added direct D/R/W Plan, paired local Validation, actual global Validation
+and continuing custody for the original pinned-emitter recovery contract.
+Credit #5679's delivered diagnostics and fenced release; retain the distinct
+executed-tick/later-ordinary-renewal witness and existing source-fixture OR
+owner-receipt alternative. All incumbent bytes, status, check states and
+first unresolved gates remain. Normal reviewed merge and complete current
+receiving readback precede a separate source judgment; no migration,
+producer replacement, implementation or resource release occurred.
+
+### 2026-11-13 - Proposed finite #4774 receipt-recovery intake
+
+Added unchecked A-C Plan/local Validation, actual global Validation and
+continuing receipt custody for before-effect channel availability and
+after-effect recoverability. The completed generic primitive and archived
+Done baseline retain their credit. This is a proposed distinct planned
+receiver, not accepted whole-family transfer, implementation or source
+retirement. Complete current ROOT/strict-annex readback and separate source
+judgment remain; no operation replay, executor appointment or resource release.
 
 ### 2026-11-05 - Proposed owner-fenced recovery and CLI tracking intake
 

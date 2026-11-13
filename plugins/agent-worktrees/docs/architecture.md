@@ -379,6 +379,19 @@ verb), so the round-trip preserves every overlay. A forward-compat guard test
 by a writer that touches only one field leaves all other overlays intact; if you
 add a field, extend that test.
 
+Full-record saves also compare the loaded receiving ledger, repository,
+worktree ID, checkout path, branch and start time with the current record before
+replacement. A stale snapshot cannot overwrite a different subject merely
+because its machine labels still match. This evidence is transient, refreshes
+after a successful save, and permits deliberate edits to a freshly loaded
+subject. The existing creation-nonce, receiving-allocation, relocation and
+machine-identity fences remain independent; this check does not authorize an
+allocation transfer or change the persisted identity format.
+Ledger spellings use the same lexical absolute-path key as the write lock;
+the original loaded path remains available for lookup. Start timestamps are
+quoted on write so YAML inference cannot change UTC spelling or precision
+between a cached snapshot and an uncached read.
+
 [Committed-save notifications](committed-save-notifications.md) describes the
 bounded optional capture and after-all-record/pair-holds delivery boundary.
 It does not make canonical persistence and observation history atomic.
@@ -728,6 +741,59 @@ Neither a result nor a reconstructed inspector is an admission certificate.
 No ordinary caller, observer, CLI or RPC is wired to it. Actual current-source
 verification, final-boundary serialization, durable provider reacquisition and
 native recovery qualification remain unimplemented.
+
+### Original-owner execution decision journal
+
+`launch_execution_permit.WorktreeExecutionPermit` records already-authorized,
+action-specific decisions from the original lifecycle owner. It does not issue
+permission or authenticate private approval evidence. The owner retains actual
+approvals and limits privately and supplies their bounded decision references
+independently of incoming recovery requests, credentials and launch receipts.
+No ordinary caller or native operation is wired to this source-only adapter.
+
+An immutable `ExecutionBinding` retains the original launch correlation and
+operation, worktree `OwnerIntent`, source/account/recipient/route/controller
+selection and historical conversation/environment/boot/scope/incarnation
+references. These references are bookkeeping inputs, not a complete historical
+publisher or live native identity. The guarded writer rechecks current owner
+intent, receiving execution-space authority and the original launch journal
+under the existing worktree-record lock. It performs no network or callbacks
+while holding that lock.
+
+The separate `worktree-launch-execution-decisions` version-1 document,
+`launch-execution-decisions.json`, uses the recovery store's same bounded,
+indirect-path-refusing, atomic durable publication primitive. Each permit begins
+with its owned start decision. Every authorization change, including revocation,
+appends a distinct owner decision reference and advances the revision once.
+Start approval does not authorize retirement or restoration. One original launch
+operation has one permit identity; reopening cannot replace that identity,
+rewrite history or reset ordering. Limits are 64 permits, 64 decisions each and
+2 MiB overall; full or invalid stores refuse without eviction or repair.
+
+The additive `launch_execution_decision_append` tracking-write verb is version 1.
+The actual running resident advertises support through its existing verb/version
+discovery. An unaware resident never receives new syntax: the documented
+pre-send path uses the same canonical owner implementation in the caller.
+No package-version equality or new service is required. After a possibly
+admitted write, lost acknowledgements remain ambiguous; reread the same permit
+and exact decision instead of issuing a replacement. A matching committed
+decision returns without another dispatch. Newer/invalid document contracts
+refuse without rewriting. Existing recovery v1 records and their
+`lease_revision`/`authority_revision` meanings remain unchanged.
+
+Passive `inspect` compares the exact current permit revision with an
+independently supplied owned decision, action, expiry and current approved
+source selection. A restoration candidate requires its own newer decision,
+not the initial start permission or a larger counter alone. Revocation,
+expiration, source changes, stale revisions and missing evidence never become
+candidates. A candidate only means supplied owner inputs match; it does not
+verify their private approvals, source lifetime, native binding or actual
+execution permission. Every result retains `effects_wired: false`,
+`native_recovery: unqualified`, `intent_contract: unavailable` and `replay: never`.
+An explicit permit-aware recovery descriptor/intent contract, final action
+admission, actual source verification and native scope reacquisition/settlement
+remain separate, unimplemented gates. The journal cannot clear unknown work
+or legacy holds in the independent recovery store.
 
 ### Launch-owned pane assets and current boundary handlers
 

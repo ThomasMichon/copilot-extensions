@@ -388,3 +388,23 @@ two measured forwarding roles, with live process-tree evidence.)_
   Coordinate readiness with the installed-acceptance owner before any new
   update. A source merge does not release those operational gates or complete
   this effort.
+
+### 2026-11-07 - Ordered credential-read prerequisite merged
+
+- #11075 merged to `dev` as `04de3c62cf9a50476239d2e8f5d8d2d315ab6a3f`.
+  The additive `batch-get` operation reuses the ordinary credential-read path
+  and advertises `batch-get-v1` through the selected runtime's invocation
+  contract. Legacy `get` remains supported.
+- The accepted source head received Copilot approval, resolved its review
+  thread and passed required CI `42316292840`. Exact-head Linux and Windows
+  qualification `42315656780` passed; both actual native batch cases ran
+  without skips and completed their normal fixture cleanup.
+- Source controls preserve ordered results, protected cache/key bytes and
+  pending journals across expected failures, including legacy aliases.
+  One credential CLI handles the batch; existing peer qualification and
+  transport helpers retain their ordinary behavior.
+- Re-read the parent Plan and Validation Plan after merge. No Phase 4 or
+  Validation item closes from this prerequisite. Promotion, actual selected
+  receiver support, configured-consumer qualification and whole-update
+  acceptance remain separate gates; no live deployment or session transition
+  was part of this source acceptance.
