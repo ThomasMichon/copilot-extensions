@@ -1,0 +1,9 @@
+{
+  "comment": "Retain verified original producer and exact pool assignment cohort on protected task audit requests",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}
