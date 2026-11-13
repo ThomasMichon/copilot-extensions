@@ -523,6 +523,7 @@ def test_retirement_settles_admitted_queued_dispatch_but_rejects_late_arrivals(
     monkeypatch.setattr(vault, "_check_password_ttl", lambda: ttl_checks.append("checked"))
 
     def has(kpdb: str, entry: str, group: str | None = None) -> bool:
+        assert ttl_checks, "admitted credential work skipped expiry reconciliation"
         dispatched.append((kpdb, entry, group, vault._request_ctx.allow_prompt,
                            vault._request_ctx.reason))
         return True
@@ -568,7 +569,6 @@ def test_retirement_settles_admitted_queued_dispatch_but_rejects_late_arrivals(
         assert await pending == {"ok": True, "exists": True}
         assert dispatched == [("fixture.kdbx", "fixture", "fixture-group", False,
                                "action=has peer=fixture-peer")]
-        assert ttl_checks == ["checked"]
         await asyncio.sleep(0)
         assert not connections.work and not connections.workers
         await controller.tick()
