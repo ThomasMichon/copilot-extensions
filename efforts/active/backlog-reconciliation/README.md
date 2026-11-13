@@ -342,6 +342,12 @@ the non-public approval conversation.
 
 ## Plan
 
+The [Index data and inherited-fixture checkpoint](journal/2026/11.12-index-data-receiving-and-inherited-fixture-scope.md)
+records eighteen exact source outcomes, the separate verified #5302 tracking
+retirement, the accepted complete #5245/#6675 receiving extension and its
+separately verified #5245 tracking retirement.
+All implementation, custody and parent completion gates remain unchanged.
+
 The [next twenty-primary checkpoint](journal/2026/11.12-oldest-contracts-and-finite-delivery.md)
 records three source completions, one accepted tracking fold and sixteen
 retained oldest contracts. It corrects the campaign's overreading of #3367's
@@ -3232,6 +3238,13 @@ sources, transferring owners or turning partial/planning gains into completion.
   normal publication flow.
 
 ## Validation Plan
+
+The [eighteen-primary Index/fixture study](journal/2026/11.12-index-data-receiving-and-inherited-fixture-scope.md)
+distinguishes thirteen whole admitted unions from five provenance-only gaps.
+The four-group Index retirement has actual reviewed receiving and live
+acknowledgment/state readback; inherited registration coverage remains an
+unchecked technical obligation in the accepted receiving ROOT. Its separately
+audited tracking retirement is neither native execution nor a coverage pass.
 
 The [twenty-primary follow-through](journal/2026/11.12-oldest-contracts-and-finite-delivery.md)
 distinguishes actual source fulfillment from #3367's planned, unchecked

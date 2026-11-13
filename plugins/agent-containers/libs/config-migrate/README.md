@@ -51,9 +51,12 @@ config converges to one shape.
 - **Fail-closed on newer** -- a file newer than the registry's `current_version`
   raises `NewerThanCurrentError` rather than lossily downgrading.
 - **Formatting-preserving baseline stamp** -- when a migration only *adds the
-  marker* (no shape change), the marker is inserted textually so comments and
-  hand-formatting survive; a real `vN->vN+1` transform reserializes (the rewrite
-  it already implies).
+  marker* (no shape change), textual insertion keeps comments and hand-formatting
+  when the result still parses as the intended mapping. Other root forms
+  (including JSON/flow mappings and explicit document starts) use serialization
+  instead; a real `vN->vN+1` transform also reserializes.
+- **Mapping roots only** -- sequence and scalar documents are rejected without
+  rewriting them; an empty document is treated as an empty mapping.
 
 ## Usage
 
