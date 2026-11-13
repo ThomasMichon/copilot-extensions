@@ -17,6 +17,28 @@ import test_runtime_serving as serving_controls
 import test_live_inbox_runtime as inbox_controls
 import test_native_send_admission as native_controls
 import test_gc as gc_controls
+from test_dispatch_cli_origin import (
+    test_connected_cli_creation_persists_before_delivery_and_replays
+    as test_connected_cli_creation_persists_before_delivery_and_replays,
+    test_unconfirmed_first_save_keeps_pending_effect_without_prompt_or_relaunch
+    as test_unconfirmed_first_save_keeps_pending_effect_without_prompt_or_relaunch,
+    test_original_snapshot_survives_restart_heartbeat_alias_and_mutable_targeting
+    as test_original_snapshot_survives_restart_heartbeat_alias_and_mutable_targeting,
+    test_resume_into_existing_conversation_preserves_its_stamp_or_absence
+    as test_resume_into_existing_conversation_preserves_its_stamp_or_absence,
+    test_resume_gate_never_stamps_provisional_or_legacy_identity
+    as test_resume_gate_never_stamps_provisional_or_legacy_identity,
+    test_incoherent_origin_refuses_registration_without_claiming_reservation
+    as test_incoherent_origin_refuses_registration_without_claiming_reservation,
+    test_foreign_driver_cannot_claim_origin_and_failed_fold_rolls_back_first_save
+    as test_foreign_driver_cannot_claim_origin_and_failed_fold_rolls_back_first_save,
+    test_legacy_and_opaque_storage_remain_unattributed
+    as test_legacy_and_opaque_storage_remain_unattributed,
+    test_schema45_upgrade_preserves_legacy_absence_and_requires_writable_preparation
+    as test_schema45_upgrade_preserves_legacy_absence_and_requires_writable_preparation,
+    test_current_schema_without_origin_storage_is_not_silently_repaired
+    as test_current_schema_without_origin_storage_is_not_silently_repaired,
+)
 from test_dispatch_session_origin import (
     boundary as boundary,
     singleton_boundary as singleton_boundary,
