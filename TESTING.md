@@ -1966,6 +1966,197 @@ observes the finished files rather than restamping their inventory identities.
 `tools/test_runtime_application_binstubs.py` covers these boundaries and checks
 the actual UV stage entry; its native POSIX controls are separate from Windows
 execution and the required unit-only CI packet.
+Worktrees' optional `tests/test_runtime_input_verifier.py` packet uses real
+native children and invocation-local inherited pipes for successful checks,
+revocation, cancellation, owner disconnection, identity mismatch and expired
+scope. Coupled installer controls refuse unsupported source before construction
+and prevent read-only helper preparation from acquiring publication custody.
+The framing regression advances the controller clock after the first real pipe
+byte: an idle poll must not discard the unfinished request. It uses actual
+children and a short invocation deadline, not a long sleep or source bootstrap.
+The separate explicit
+`tests/test_python_runtime_install.py -k real_candidate_publication_rechecks_live_inputs`
+packet constructs and publishes a complete private candidate through the real
+installer, then rejects a reused candidate when its actual publication process
+asks the live owner. Incumbent selector and manifest bytes remain unchanged.
+It streams lifecycle phases so an enclosing timeout retains meaningful output.
+These local controls do not exercise monitor transition, mid-copy rollback,
+the complete discovery/bootstrap caller or installed rollout.
+
+The non-construction `test_python_runtime_install.py` selection also exercises
+the real installation-policy reader: profile facts alone refuse, live matching
+standalone policy can proceed, revocation refuses, and managed policy retains
+its independent publication gate. Admission-caller controls retain the original
+origin and seed through settlement, refuse a missing private parent before
+toolkit imports, and derive the producer from the actual acquired source.
+These caller controls are unit boundary proofs, not a completed semantic
+installation or ordinary-path enablement.
+Artifact association controls exercise both byte owners and source-fallback
+disabled policy, while preserving managed and live-verification refusals.
+The explicit `real_semantic_admission` selection attempts the complete real
+native source caller with a fixture Git promotion and substituted unavailable
+release transport. Its final-runtime independence assertion is not qualified
+until the entire publication and post-tooling health check pass.
+It requires `CE_RUN_NATIVE_FULL_ADMISSION=1` and an explicitly configured
+governed feed. This single disposable integration witness has a separate
+900-second envelope; it does not raise normal packet bounds or the native
+constructor's 100-second operation limits. It uses captured native feed policy
+without a redirect override or installed-policy changes.
+The optional source-build matrix isolates library-overlap controls in their
+own 240-second packet on Linux and Windows, instead of adding them to the
+larger `profiles` suite. Its real controlled-feed/backend witness builds five
+libraries with at most four active builds, then the application on the calling
+thread, and verifies the exact closed source profile. Separate event controls
+cover ordered results, caller-thread validation, refusal and cancellation with
+complete settlement, including interruption immediately after a validation
+request is dequeued. These real-thread controls remain outside the
+thread-prohibited, unit-only promotion packet; none relax its effect rules.
+They qualify scheduling and source closure, not full installation publication,
+runtime independence or ordinary-path enablement.
+Phase timings and controller subprocess counts remain visible. Within that
+unchanged envelope, actual marker queries, whole-source checks and individual
+wheel builds have 30-second ceilings. Source-lock capture and borrowed planning
+also have separate 300-second qualification packets below. Source custody stays
+open through final runtime health; its lifetime is not an acquisition-only
+stage budget. The diagnostic reports source-lock capture, whole-source
+verification and per-wheel build times rather than extending the aggregate
+guard after a timeout.
+Only that fixture permits up to 4,096 catalogue entries per project; byte,
+request, redirect and operation-time bounds remain independent. Metadata-only
+checks can distinguish ordinary catalogue history from malformed rows without
+performing an installation or downloading candidate wheels.
+The separate `real_native_admission_source_lock` selection shares its real
+promoted-source layout but stops at verified native union-lock capture, under
+the normal 300-second bound. Use it to isolate source/lock compatibility without
+rebuilding the seed or attempting runtime publication.
+`real_native_admission_planning` separately exercises the actual source-bound
+planner through an inherited-pipe borrowed origin, under the same 300-second
+bound. Its expected Dev commit comes from fixture creation, not the production
+history reader being tested.
+
+Run fixture-heavy seed, source-configuration, revocation and live-refusal
+checks in separate bounded packets with per-item timeouts and duration reports.
+The seed checks give each item 100 seconds. Do not fix a packet timeout by
+repeatedly enlarging the whole-suite budget: isolate the slow item and check
+for blocked I/O, deadlocks, sleeps, repeated work and excessive subprocess
+launches before changing its budget. The native source-lock controls include
+a real long-path interpreter probe and real multi-wheel UV output: native
+build-union selection ranks supported tags, still rejects tied candidates,
+and does not relax the ordinary exact-wheel reader.
+Promotion-identity controls also read real acquired Git objects beyond the
+legacy Windows path limit, using the reader's invocation-local long-path setting.
+Artifact-builder and promotion controls exercise explicit candidate-root
+resolution and hashing while unrelated builder roots remain unchanged. The
+bundle validator must also pass the existing static release-loader rules;
+candidate validation cannot mutate a dynamically loaded module's namespace.
+Seed interpreter probes have their own 30-second bound and use the existing
+owned-child runner. Readiness executes both the original and installed
+interpreters in independent owned scopes under a shared 30-second deadline,
+without reusing target facts. A real long-path test covers native Windows
+launches; short stalled-probe tests prove that venv-launcher descendants,
+including the second interpreter's children, settle before refusal returns.
+Tooling fingerprints use at most four protected fresh reads and settle every
+reader before returning or raising. Event-gated success/failure controls also
+change an input between calls to reject cached byte identities. Keep nested
+Windows test workspaces short enough for native Git's working-directory
+handling; long payload-file and interpreter-path controls remain separate.
+Focused controls also cover both actual
+interpreter executions, isolated environments and partial-probe refusal.
+The opt-in acceptance workflow runs the seed module as disjoint packets on
+both Linux and Windows, with independent containment, cleanup and duration
+reports. Its existing six-minute job ceiling is unchanged:
+
+| Packet | Wall limit |
+|---|---:|
+| Interpreter probes | 60 seconds |
+| Cold health and reuse | 180 seconds |
+| Selection, health or consumption revocation (one packet each) | 180 seconds each |
+| Acquisition or consumption feed changes (one packet each) | 180 seconds each |
+| Owner arguments and frozen cutoffs | 300 seconds |
+| Early policy refusals | 180 seconds |
+| Standalone first touch and explicit native witness | 120 seconds |
+
+Collection controls require every actual seed case to appear exactly once.
+The retained dependency-compile lane likewise runs native compilation, compile
+policy, source locking, source authentication and source feeds as five separate
+300-second packets, preserving its previous selection. A timeout identifies
+that packet rather than discarding an entire combined suite. Neither matrix
+increases a native operation or individual test deadline.
+
+Run the existing `real_native_admission_planning` and
+`real_native_admission_source_lock` selections separately, not as one combined
+native invocation. Their stage evidence does not replace the independently
+opted-in full publication witness or its continuous-custody assertions.
+Owned build-requirement checks evaluate markers inside the actual toolchain
+interpreter in the same child as requirement validation, without launching a
+separate marker-query child for each wheel. Real-child controls cover applicable
+and inapplicable requirements, an incorrect parent marker cache and file-backed
+payloads exceeding the Windows command-line limit. The source-build/reuse
+control also rejects recursive whole-source verification; source integrity,
+live configuration and revocation checks remain in the composed verifier.
+The compact source is checked before the build loop, every newly built wheel
+is revalidated before cache publication, and the complete closure is checked
+before exposure and again after consumption. Adjacent redundant pre-wheel
+whole-graph scans do not replace those publication-boundary checks.
+Source-lock revalidation separates live selection checks from retained-byte
+validation: the candidate hashes its retained graph once, while standalone
+configuration consumption still validates both. Scans receive deadline progress
+checks; a mutation in the retained tree must refuse at the candidate boundary
+as well as at context exit.
+Canonical resource builds use backend hard-link support only between generated
+build output and the active disposable wheel staging tree, with ordinary copy
+fallback when linking is unavailable. Ordinary installs, namespace exclusions,
+dry runs and outputs outside the resolved wheel staging root retain standard
+copying; older backends without the bundled wheel command retain their original
+commands. Resource collection validates shared ancestors once per collection
+and rechecks their identities after reading, without caching file bytes across
+builds. `test_standalone_python_artifacts.py` covers those scope/refusal controls,
+real link/copy fallback, and Manager/Worktrees wheel, sdist and installed-asset
+round trips.
+
+The copied-admission packet in `tools/test_runtime_admission_toolkit.py` now
+includes real acquired-source discovery and stdlib origin/bootstrap controls.
+It maps a synthetic Main promotion's Git objects through the actual channel
+reader, distinguishes channel 404 from permission refusal, and rejects publisher
+imports. Fresh `-I -S` children acquire the actual configured origin without
+Packaging or source-fallback approval. The restricted native seed then supplies
+the tooling interpreter for semantic validation; a current seed revocation
+after health must refuse. The admitted child borrows the same origin through
+the native private pipe, refuses live seed revocation, and cannot use its
+borrow after context exit; any attempted source reacquisition fails the test.
+The copied bundle control validates actual first-party bytes against independent
+source, checks the raw manifest digest, rejects publisher imports and changed
+source, and preserves the canonical builder's global roots. The real acquired
+origin/planner control follows Git promotion history and actual bundle/subject
+authentication through artifact selection, genuine profile/channel absence,
+permission refusal and a forged manifest binding. These do not replace the
+still-open native install entrypoint and publication-composition checks.
+`test_installer_packaging_seed.py` and `test_runtime_source_build.py` mutate
+private selected certificate files after acquisition and during consumption.
+The original held native settings must be rechecked before construction and
+through active custody, without dependency re-resolution.
+`test_runtime_feed_configuration.py` separately checks artifact-feed lifetime:
+the original UV configuration, actual owner policy and retained native settings
+remain current, and verification after context exit refuses. Re-probing only
+the immutable retained copy is not evidence that the original configuration
+is unchanged.
+The acquired-origin control also composes a first-party-only profile and a
+mixed profile against a controlled TLS feed that serves only the third-party
+dependency. It checks full closure, source changes, current feed configuration,
+revocation, closed custody and retained-byte cleanup. The copied-toolkit control
+imports that composition from its own payload without publisher imports.
+The source-compile packet permits repeated optional or conditional mappings
+only when their distributions are independently active through unconditional
+edges from the actual operand roots; inactive and context-only ambiguities
+remain refusal cases. Seed witnesses accept a well-formed auxiliary MD5 value
+only alongside the required SHA-256 identity. The opt-in
+`CE_RUN_NATIVE_SEED_FEED=1` / `test_native_configured_feed_packaging_witness`
+selection checks the actual configured feed's native lock format, not a whole
+seed constructor or consumer publication.
+Companion `test_promotion_source_identity.py` controls
+preserve the caller index and publisher content-tree equivalence.
+These are isolated source/tooling-boundary proofs, not native publication,
+ordinary-path enablement, production-feed qualification or rollout.
 
 The focused `bootstrap-update-native-acceptance.yml` workflow runs on demand
 and for relevant PR paths on Linux and Windows. Its native/PATH local packet is
@@ -7341,6 +7532,13 @@ cannot be selected as test nodes or Python coverage targets; an unregistered
 template or changed input still rejects admission.
 An exact node whitelist deselects other cases before execution and restores manifest
 order. Missing or duplicate admitted nodes reject collection before execution.
+The guard's thread-free nested-open/refusal control belongs to this packet.
+Its actual same-name/different-directory thread interleaving is instead
+`tools/test_promotion_unit_effects_native.py`, selected with the pure effect
+controls by `unit-effect-guard-native.yml` on Linux and Windows. That separate
+120-second contained lane requires the real interleaving case without skips
+and verifies sandbox settlement. It does not relax ordinary thread-start
+refusal or re-run the unrelated installer-native matrix.
 Nine execution-acquisition controls in `test_related_acquisition.py` exercise
 the original selection and absence paths, retained config with failed
 acquisition observations for optional source/presence failures,
@@ -7382,6 +7580,12 @@ Its actor-free PowerShell SDK controls compare Windows physical-path spellings
 through a synthetic resolver boundary, including DOS/UNC aliases and unrelated
 roots. Native path reads and concurrent first publication remain separate
 integration controls.
+The portable lease ACL and first-touch call-boundary controls remain in
+`tools/promotion_unit_tests/test_windows_lease_acl.py`. Actual POSIX kernel
+lease acquisition, fresh mode admission and existing-mode preservation live in
+`libs/versioned-runtime/tests/test_runtime_lease_privacy.py`; the Linux
+source-build `overlap` job runs all three native cases. They are not admitted
+into the actor-free packet and are not represented by skipped unit outcomes.
 `test_materialized_local_sources.py` supplies bounded synthetic closure controls
 for missing/editable/escaping local sources, literal conditional paths, standalone
 manifests, and root/nested requirement declarations. Real Git promotion and
@@ -7431,6 +7635,16 @@ copies, never a selected unit or Python coverage target.
 the admission, reuse, materialization, resource and native verification rules.
 Compiler, Git transport and setuptools superclass actors are substituted only
 at their boundaries. These tests do not qualify real compiler/native execution.
+Static build admission inventories each current source directory before probing
+possible trusted-tool shadows. Focused controls retain module, package, native
+extension, dangling-link and native case-alias refusals, fail closed on an
+unreadable directory, and detect a newly added shadow on the next validation.
+The minimal clean fixture has a bounded probe count rather than one filesystem
+lookup per stdlib name and suffix.
+The effect observer resolves a low-level open once per operation, forwards one
+captured `PathLike` spelling and clears its operation context on refusal or OS
+error. Directory-descriptor targets are resolved again on every later open;
+no cross-operation path or authority cache is introduced.
 
 `tools/test_release_controller_contract.py` uses the recorded development
 proposal for source-contract tests, even inside generated Main with an

@@ -1,7 +1,10 @@
 """Installation profile policy composed with the stdlib native feed owner."""
 from __future__ import annotations
 
+from collections.abc import Callable
 from contextlib import contextmanager
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
 import hashlib
 import json
 import os
@@ -22,8 +25,17 @@ sys.path.insert(0, str(_ROOT / "libs" / "installation-context"))
 import installer_dependency_policy as dependencies
 from installer_native_feed import NativeFeedError, NativeFeedInputs, capture_native_feed_inputs  # noqa: F401
 from installer_native_feed import _basic  # noqa: F401 -- compatibility for existing byte-construction controls
+from installer_native_feed import recheck_native_feed_inputs
 from installer_wheel_inputs import _check_deadline
 from installation_context import resolve_runtime_profile_policy
+
+
+@dataclass(frozen=True)
+class RetainedNativeFeedInputs(NativeFeedInputs):
+    _verification: Callable[[], None] = field(repr=False, compare=False)
+
+    def verify(self) -> None:
+        self._verification()
 
 
 def _capture(
@@ -58,7 +70,9 @@ def retain_native_feed_inputs(
 ):
     """Read actual owner policy and native settings without resolving/installing."""
     _check_deadline(deadline)
-    current = resolve_runtime_profile_policy(**installation)["runtimeProfiles"]
+    current = resolve_runtime_profile_policy(
+        **installation, backend=plan.policy()["selection"]["backend"],
+    )["runtimeProfiles"]
     if current.get("status") != "ready" or current != plan.policy():
         raise ProfileError("native acquisition policy differs from its installation owner")
     if plan.release_selection is None:
@@ -90,16 +104,66 @@ def retain_native_feed_inputs(
         requirements.write_text("".join(
             wheel["name"] + "==" + wheel["version"] + "\n" for wheel in profile.record()["wheels"]
         ), encoding="utf-8")
+        arguments = [
+            str(requirements), "--python", str(python), "--only-binary", ":all:",
+            "--no-python-downloads", "--python-version",
+            profile.record()["target"]["environment"]["python_full_version"],
+        ]
+        instant = datetime.now(timezone.utc)
         projection = []
         with dependencies.retain_uv_compile(
-            uv, [str(requirements), "--python", str(python), "--only-binary", ":all:",
-                 "--no-python-downloads", "--python-version", profile.record()["target"]["environment"]["python_full_version"]],
+            uv, arguments, now=instant,
             env=environment, cwd=cwd, trusted_source_roots=(root, cwd),
             deadline=deadline, native_target=True, _projection=projection,
         ) as transaction:
             if len(projection) != 2:
                 raise ProfileError("native feed capture did not produce paired native configurations")
-            yield _capture(transaction, projection[1], projection[0], profile, current, transaction.argv[0], deadline)
+            captured = _capture(
+                transaction, projection[1], projection[0], profile, current,
+                transaction.argv[0], deadline,
+            )
+            active = True
+
+            def verify():
+                if not active:
+                    raise ProfileError("native artifact feed custody is closed")
+                _check_deadline(deadline)
+                observed = resolve_runtime_profile_policy(
+                    **installation, backend=current["selection"]["backend"],
+                )["runtimeProfiles"]
+                if observed != current:
+                    raise ProfileError("native acquisition policy changed during consumption")
+                live_projection = []
+                dependencies.prepare_uv_compile(
+                    uv, arguments, now=instant, env=environment, cwd=cwd,
+                    trusted_source_roots=(root, cwd), deadline=deadline,
+                    native_target=True, _projection=live_projection,
+                )
+                if (
+                    len(live_projection) != 1
+                    or dependencies._resolver_configuration(live_projection[0], now=instant)
+                    != dependencies._resolver_configuration(projection[0], now=instant)
+                ):
+                    raise ProfileError("native artifact feed configuration changed during consumption")
+                try:
+                    checked = recheck_native_feed_inputs(
+                        transaction, projection[1], projection[0], profile, current,
+                        transaction.argv[0], deadline, wheels=profile.record()["wheels"],
+                        profile_policy=profile.record()["acquisition_policy"],
+                        opaque_identity=_opaque_index_identity,
+                    )
+                except NativeFeedError as error:
+                    raise ProfileError(str(error)) from error
+                if checked.policy_id != captured.policy_id:
+                    raise ProfileError("native artifact feed inputs changed during consumption")
+
+            retained = RetainedNativeFeedInputs(**vars(captured), _verification=verify)
+            try:
+                retained.verify()
+                yield retained
+                retained.verify()
+            finally:
+                active = False
 
 
 def _source_policy(plan: InstallationProfilePlan, installation: dict) -> dict:
@@ -125,10 +189,14 @@ def validate_source_resolution_inputs(
     current = _source_policy(plan, installation)
     if len(projections) != 2:
         raise ProfileError("source resolution preflight needs paired native configurations")
-    return _capture(
-        transaction, projections[1], projections[0], None, current,
-        transaction.argv[0], deadline, source_resolution=True,
-    ).policy_id
+    try:
+        return recheck_native_feed_inputs(
+            transaction, projections[1], projections[0], None, current,
+            transaction.argv[0], deadline, wheels=None, profile_policy="source-resolution",
+            opaque_identity=_opaque_index_identity,
+        ).policy_id
+    except NativeFeedError as error:
+        raise ProfileError(str(error)) from error
 
 
 @contextmanager

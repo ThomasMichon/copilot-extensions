@@ -43,6 +43,7 @@ from installer_source_build import (
     SourceWheelInputs, _selected_extras as _selected_extras,
     _source_deadline, _source_phase, retained_input_graph, retained_source_wheels,
     revalidate_input_content, check_dev_owner,
+    _wheel_construction_hash as _wheel_construction_hash,
 )
 
 from installer_engine_health import (
@@ -104,15 +105,6 @@ def _construction_hash(
     return hashlib.sha256(json.dumps({
         "schema": "installer-engine.dependency-profile", "version": 1,
         **profile,
-    }, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
-
-
-def _wheel_construction_hash(source_hash: str, wheels: WheelInstallInputs | WheelReuseInputs | None) -> str:
-    if wheels is None:
-        return source_hash
-    return hashlib.sha256(json.dumps({
-        "schema": "installer-engine.closed-wheel-inputs", "version": 1,
-        "source_hash": source_hash, "wheel_inputs": wheels.receipt(),
     }, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
 
 
@@ -286,14 +278,21 @@ def freeze_inputs(
 
             before = runtime.fingerprint_source(files, on_file=retain_source, **progress)
             # Finish the full baseline before copying, preserving the mutation barrier.
-            for source in files:
+            def retained_sources():
+                for source in files:
+                    if deadline is not None:
+                        _check_deadline(deadline)
+                    offset, length = offsets[source]
+                    buffer.seek(offset)
+                    data = buffer.read(length)
+                    if len(data) != length:
+                        raise OSError("Frozen source buffer read was incomplete")
+                    yield source, data
+
+            def write_source(item):
+                source, data = item
                 if deadline is not None:
                     _check_deadline(deadline)
-                offset, length = offsets[source]
-                buffer.seek(offset)
-                data = buffer.read(length)
-                if len(data) != length:
-                    raise OSError("Frozen source buffer read was incomplete")
                 target = destination / source.relative_to(common)
                 Path(_native_retained_path(target.parent)).mkdir(parents=True, exist_ok=True)
                 Path(_native_retained_path(target)).write_bytes(data)
@@ -301,8 +300,13 @@ def freeze_inputs(
                     _native_retained_path(source), _native_retained_path(target),
                     follow_symlinks=False,
                 )
-                if on_progress is not None:
-                    on_progress()
+                if deadline is not None:
+                    _check_deadline(deadline)
+
+            _bounded_content_map(
+                write_source, retained_sources(),
+                **({"on_result": lambda _result: on_progress()} if on_progress is not None else {}),
+            )
         frozen_roots = tuple(destination / root.relative_to(common) for root in roots)
         frozen_plugin = destination / plugin.relative_to(common)
         frozen_applications = tuple(

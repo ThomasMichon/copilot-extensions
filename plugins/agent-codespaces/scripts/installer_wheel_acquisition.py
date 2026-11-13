@@ -195,8 +195,10 @@ def _entries(content: bytes, media: str, name: str, limit: int) -> list[dict]:
             entries = parser.links
         else:
             raise WheelError("unsupported wheel index content type")
-        if len(entries) > limit or any(not isinstance(item, dict) for item in entries):
-            raise WheelError("wheel index exceeds its candidate budget or has invalid entries")
+        if len(entries) > limit:
+            raise WheelError(f"wheel index candidate budget exceeded for {name}: {len(entries)} > {limit}")
+        if any(not isinstance(item, dict) for item in entries):
+            raise WheelError(f"wheel index has invalid entries for {name}")
         return entries
     except (UnicodeError, json.JSONDecodeError, RecursionError):
         raise WheelError("wheel index is malformed") from None

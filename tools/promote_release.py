@@ -576,31 +576,9 @@ def _tree_excluding_state(tree_sha: str, *, repo: Path) -> str:
     tree is a fair, content-only comparison that never treats a mere
     bookkeeping update (pipeline state) or a freshly re-collected coverage
     baseline with no real code change behind it as a real promotion."""
-    with tempfile.TemporaryDirectory() as tmp:
-        index_file = Path(tmp) / "index"
-        env = git_environment(GIT_INDEX_FILE=str(index_file))
-        subprocess.run(
-            ["git", "read-tree", tree_sha], cwd=str(repo), env=env,
-            check=True, capture_output=True,
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
-        )
-        subprocess.run(
-            ["git", "rm", "--cached", "-f", "-q", "--ignore-unmatch", PIPELINE_STATE_PATH],
-            cwd=str(repo), env=env, check=True, capture_output=True,
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
-        )
-        subprocess.run(
-            ["git", "rm", "--cached", "-f", "-q", "-r", "--ignore-unmatch",
-             COVERAGE_BASELINES_DIR],
-            cwd=str(repo), env=env, check=True, capture_output=True,
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
-        )
-        result = subprocess.run(
-            ["git", "write-tree"], cwd=str(repo), env=env,
-            capture_output=True, text=True, check=True,
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
-        )
-        return result.stdout.strip()
+    from promotion_source_history import content_tree
+
+    return content_tree(tree_sha, repo=repo)
 
 
 def promote(

@@ -1,0 +1,13 @@
+{
+  "comment": "Package canonical setup and selector resources for isolated artifact validation; verify copied Worktrees/core toolkit and embedded Manager provider preparation.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

@@ -460,6 +460,64 @@ def test_freeze_buffers_complete_baseline_without_reopening_copy_sources(
     assert spools[0]._rolled is rollover
 
 
+@pytest.mark.parametrize("write_failure", [False, True])
+def test_freeze_overlaps_bounded_writes_and_settles_before_cleanup(
+    engine, tmp_path, monkeypatch, write_failure,
+):
+    plugin = _package(tmp_path / "plugin", "example")
+    for index in range(6):
+        (plugin / f"content-{index}.txt").write_text(str(index), encoding="utf-8")
+    files = engine._source_files((plugin,))
+    destination = tmp_path / "frozen"
+    write_bytes = Path.write_bytes
+    next_started = threading.Event()
+    lock = threading.Lock()
+    active = maximum = 0
+    writes = []
+    caller = threading.get_ident()
+    progress_threads = []
+    failure = PermissionError("snapshot writer failed")
+
+    def write(path, data):
+        nonlocal active, maximum
+        ordinary = Path(engine.runtime._normalize_windows_extended_path(str(path)))
+        source = plugin / ordinary.relative_to(destination)
+        with lock:
+            active += 1
+            maximum = max(maximum, active)
+        try:
+            if source == files[4]:
+                next_started.set()
+            if source == files[3]:
+                assert next_started.wait(timeout=5)
+                if write_failure:
+                    raise failure
+            return write_bytes(path, data)
+        finally:
+            with lock:
+                active -= 1
+                writes.append(source)
+
+    monkeypatch.setattr(Path, "write_bytes", write)
+    if write_failure:
+        with pytest.raises(PermissionError) as caught:
+            engine.freeze_inputs(
+                plugin, destination,
+                on_progress=lambda: progress_threads.append(threading.get_ident()),
+            )
+        assert caught.value is failure
+        assert not destination.exists()
+    else:
+        engine.freeze_inputs(
+            plugin, destination,
+            on_progress=lambda: progress_threads.append(threading.get_ident()),
+        )
+        assert sorted(writes) == list(files)
+    assert 2 <= maximum <= 4 and active == 0
+    assert set(progress_threads) == {caller}
+    assert not any(t.name.startswith("retained-content") for t in threading.enumerate())
+
+
 @pytest.mark.parametrize("fault", ["write-error", "short-write", "short-read"])
 def test_freeze_buffer_failure_closes_storage_and_removes_snapshot(engine, tmp_path, monkeypatch, fault):
     plugin = _package(tmp_path / "plugin", "example")

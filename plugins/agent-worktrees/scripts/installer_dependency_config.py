@@ -26,6 +26,7 @@ exec(compile(_arguments_path.read_bytes(), str(_arguments_path), "exec"), _argum
 argument_pairs = _arguments.argument_pairs
 balanced = _arguments.balanced
 uv_command = _arguments.uv_command
+captured_environment = _arguments.captured_environment
 
 _WINDOWS = os.name == "nt"
 
@@ -48,8 +49,6 @@ exec(compile(_content_path.read_bytes(), str(_content_path), "exec"), _content._
 bounded_content_map = _content.bounded_content_map
 retained_source_hashes = _content.retained_source_hashes
 verify_retained_sources = retained_source_hashes
-
-
 
 
 def remaining_timeout(deadline, *, error_type, cap=None):
@@ -81,8 +80,6 @@ def copy_retained_file(source, destination, *, native_path, deadline, error_type
     if on_progress is not None:
         on_progress()
     return result
-
-
 
 
 def prepare_uv_install(
@@ -637,12 +634,21 @@ def cutoff_arguments(settings, *, now, operation, min_age, balanced, remote_refe
 
 
 def source_compile_packages(projects, *, toml, identity, error_type):
-    names = []
-    omissions = set()
-    for path in projects:
-        data = toml(path / "pyproject.toml")
+    manifests = {path: toml(path / "pyproject.toml") for path in projects}
+    names = [identity(data["project"]["name"]) for data in manifests.values()]
+    if not names or len(set(names)) != len(names):
+        raise error_type("source lock export needs an unambiguous owned project graph")
+    pending = list(getattr(projects, "roots", ()))
+    if not pending or not set(pending) <= manifests.keys():
+        raise error_type("source lock export lacks its actual project roots")
+    active = set()
+    while pending:
+        path = pending.pop()
+        if path in active:
+            continue
+        active.add(path)
+        data = manifests[path]
         project = data["project"]
-        names.append(identity(project["name"]))
         required = {
             identity(match[1])
             for requirement in project.get("dependencies", [])
@@ -651,12 +657,20 @@ def source_compile_packages(projects, *, toml, identity, error_type):
         }
         for name, mapping in data.get("tool", {}).get("uv", {}).get("sources", {}).items():
             if isinstance(mapping, dict) and "path" in mapping:
-                name = identity(name)
-                if name not in required:
-                    raise error_type("source lock export cannot omit a conditional or unselected local dependency")
-                omissions.add(name)
-    if not names or len(set(names)) != len(names):
-        raise error_type("source lock export needs an unambiguous owned project graph")
+                if identity(name) in required:
+                    child = (path / mapping["path"]).resolve()
+                    if child not in manifests:
+                        raise error_type("source lock export lacks an owned local dependency")
+                    pending.append(child)
+    selected = {identity(manifests[path]["project"]["name"]) for path in active}
+    omissions = {
+        identity(name)
+        for data in manifests.values()
+        for name, mapping in data.get("tool", {}).get("uv", {}).get("sources", {}).items()
+        if isinstance(mapping, dict) and "path" in mapping
+    }
+    if not omissions <= selected:
+        raise error_type("source lock export cannot omit a conditional or unselected local dependency")
     return tuple(sorted(omissions))
 
 

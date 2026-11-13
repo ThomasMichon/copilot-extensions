@@ -404,6 +404,29 @@ def test_resolve_vendored_libs_direct(fake_repo: Path):
     assert libs == [("widget", lib_dir.resolve())]
 
 
+def test_candidate_root_is_explicit_without_rebinding_builder(
+    fake_repo: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    plugin_dir = fake_repo / "plugins" / "demo"
+    lib_dir = _seed_valid_lib(fake_repo, "widget")
+    _write_pyproject(plugin_dir, sources={"demo-widget": "../../libs/widget"})
+    expected_hash = bpa.compute_payload_hash([plugin_dir, lib_dir])
+    unrelated = fake_repo / "unrelated"
+    for module in (bpa, uer):
+        monkeypatch.setattr(module, "REPO", unrelated)
+        monkeypatch.setattr(module, "LIBS_DIR", unrelated / "libs")
+        monkeypatch.setattr(module, "PLUGINS_DIR", unrelated / "plugins")
+
+    assert bpa.resolve_vendored_libs(plugin_dir, root=fake_repo) == [
+        ("widget", lib_dir.resolve()),
+    ]
+    assert bpa.compute_payload_hash([plugin_dir, lib_dir], root=fake_repo) == expected_hash
+    for module in (bpa, uer):
+        assert module.REPO == unrelated
+        assert module.LIBS_DIR == unrelated / "libs"
+        assert module.PLUGINS_DIR == unrelated / "plugins"
+
+
 def test_retained_flat_sources_survive_materialization_and_artifact_discovery(
     fake_repo: Path,
 ) -> None:
@@ -4627,8 +4650,10 @@ def test_owned_build_requires_payload_can_exceed_windows_argument_limit(tmp_path
     assert len(json.dumps(packages).encode("utf-16-le")) // 2 > 32767
     toolchain = bpa.ToolchainLock(Path(sys.executable), packages)
     payload_paths = []
+    calls = []
 
     def run(argv):
+        calls.append(argv)
         assert len(subprocess.list2cmdline(argv).encode("utf-16-le")) // 2 + 1 < 32767
         if "--payload-file" in argv:
             path = Path(argv[-1])
@@ -4640,8 +4665,33 @@ def test_owned_build_requires_payload_can_exceed_windows_argument_limit(tmp_path
         )
 
     btl._assert_toolchain_satisfies_build_requires(source, toolchain, run=run)
+    assert len(calls) == 1
     assert len(payload_paths) == 1
     assert not payload_paths[0].exists()
+
+
+@pytest.mark.parametrize("applies", [False, True])
+def test_owned_build_requires_checks_actual_target_with_one_child(tmp_path, applies):
+    source = tmp_path / "source"
+    marker = 'python_version >= "3.0"' if applies else 'python_version < "3.0"'
+    _write_build_system_requires(source, ["unlocked-build-dependency; " + marker])
+    toolchain = bpa.ToolchainLock(Path(sys.executable), {})
+    toolchain._marker_environment = {"python_version": "0.0"}
+    calls = []
+
+    def run(argv):
+        calls.append(argv)
+        return _REAL_SUBPROCESS_RUN(
+            argv, capture_output=True, text=True, check=True, timeout=30,
+            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+        )
+
+    if applies:
+        with pytest.raises(bpa.ArtifactBuildError, match="does not pin"):
+            btl._assert_toolchain_satisfies_build_requires(source, toolchain, run=run)
+    else:
+        btl._assert_toolchain_satisfies_build_requires(source, toolchain, run=run)
+    assert len(calls) == 1
 
 
 def _dispatch_toolchain_subprocess(

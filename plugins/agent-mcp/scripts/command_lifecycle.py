@@ -22,6 +22,24 @@ else:
 
 TICKET_ENV = "COPILOT_EXTENSIONS_COMMAND_LIFECYCLE"
 _CURRENT: contextvars.ContextVar[LifecycleLease | None] = contextvars.ContextVar("command_lifecycle", default=None)
+_PROFILE_AUTHORITIES: contextvars.ContextVar[tuple[Any, ...]] = contextvars.ContextVar(
+    "profile_publication_authorities", default=(),
+)
+
+
+@contextmanager
+def profile_publication_authority(
+    *, runtime_root: Path, plugin_id: str, authorize: Any,
+) -> Iterator[None]:
+    """Retain a profile consumer's live authorizer in this process only."""
+    if not runtime_root.is_absolute() or not plugin_id or not callable(authorize):
+        raise ValueError("Profile publication requires an absolute root, plugin and live authorizer.")
+    authority = (runtime_root.resolve(), plugin_id, authorize)
+    token = _PROFILE_AUTHORITIES.set((*_PROFILE_AUTHORITIES.get(), authority))
+    try:
+        yield
+    finally:
+        _PROFILE_AUTHORITIES.reset(token)
 
 
 class DeploymentPurpose(TypedDict):
@@ -57,7 +75,7 @@ def _publication(
     resolver = getattr(primitive, "resolve_runtime_deployment", None)
     root = Path(arguments["legacy_root"])
     if resolver is None:
-        if not os.path.lexists(root / "runtime-deployment.json"):
+        if not _PROFILE_AUTHORITIES.get() and not os.path.lexists(root / "runtime-deployment.json"):
             return
         raise binding.CommandOwnershipConflict(
             "Runtime deployment policy requires a capable installation helper."
@@ -72,6 +90,22 @@ def _publication(
     actual_root = result["runtimeRoot"] or result["legacy"]["root"]
     if Path(actual_root).resolve() != root.resolve():
         raise binding.CommandOwnershipConflict("Runtime deployment policy names another root.")
+    authorities = _PROFILE_AUTHORITIES.get()
+    if authorities:
+        if (
+            deployment["state"] != "valid" or deployment["managed"] is not False
+            or deployment["reason"] != "runtime-profile-consumer-required"
+            or any(
+                owner_root != root.resolve() or plugin_id != arguments["plugin_id"]
+                for owner_root, plugin_id, _authorize in authorities
+            )
+        ):
+            raise binding.CommandOwnershipConflict(
+                "Profile publication authority does not match this runtime deployment."
+            )
+        for _root, _plugin_id, authorize in authorities:
+            authorize()
+        return
     if deployment["allowPluginPublication"] is True or (
         purpose["origin"] == "management"
         and deployment["state"] == "valid"

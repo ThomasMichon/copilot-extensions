@@ -5,6 +5,7 @@ import io
 
 import pytest
 
+import artifact_bundle_validation as validation
 import promotion_python_artifacts as promotion
 import runtime_profile_wheels as profiles
 import runtime_wheel_inspection as inspection
@@ -13,7 +14,8 @@ from wheel_input_fixture import wheel_bytes
 
 def test_runtime_and_promotion_use_one_canonical_semantic_inspector(monkeypatch):
     assert profiles.inspect_wheel is inspection.inspect_wheel
-    assert promotion.inspect_wheel_facts is inspection.inspect_wheel_facts
+    assert validation.inspect_wheel_facts is inspection.inspect_wheel_facts
+    assert promotion.inspect_wheel is validation.inspect_wheel
     actual = inspection.inspect_archive
     observed = []
 
@@ -43,7 +45,7 @@ def test_promotion_still_binds_inspected_members_to_actual_source(tmp_path, monk
         seen.append((bundle.read("demo_pkg/__init__.py"), hashes, options))
         raise promotion.PromotionArtifactError("source member changed")
 
-    monkeypatch.setattr(promotion, "validate_wheel_sources", validate)
+    monkeypatch.setattr(validation, "validate_wheel_sources", validate)
     with pytest.raises(promotion.PromotionArtifactError, match="source member changed"):
         promotion.inspect_wheel(
             io.BytesIO(data), {"filename": "demo_pkg-1.0-py3-none-any.whl"},

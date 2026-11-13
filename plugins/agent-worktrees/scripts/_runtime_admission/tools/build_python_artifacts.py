@@ -1,18 +1,7 @@
 #!/usr/bin/env python3
-"""Build promotion-time, content-addressed Python artifacts for one plugin:
-its own wheel plus a wheel for every vendored `libs/<lib>` dependency it
-needs, discovered recursively in BOTH shapes a consumer's `pyproject.toml`
-can carry: the dev-branch live, escaping `uv`-editable canonical-reference
-form (`uv_editable_ref.find_uv_editable_refs`) and an ordinary, non-escaping
-in-tree vendored copy (`find_in_tree_lib_sources`) -- the form every
-reference becomes once `materialize_main.py` has run, which is the real
-state this tool actually builds against during promotion. This is Phase 2
-of the `governed-python-artifact-promotion` effort
-(`efforts/active/governed-python-artifact-promotion/README.md`) -- the first
-implementation slice: wheel + manifest generation. Publication (a GitHub
-Release), attestation (Sigstore/OIDC), and promotion-pipeline wiring are
-separate, later slices; this script only builds artifacts and writes a
-manifest describing them, and does not publish or sign anything.
+"""Build content-addressed plugin wheels, their vendored closure and manifest.
+Recursively discover live editable references and materialized in-tree copies.
+Publication, signing and pipeline orchestration remain separate owners.
 
 **Artifact identity.** Per the effort's resolved Open Design Questions, an
 artifact set's identity folds together:
@@ -241,7 +230,7 @@ def _validate_in_tree_lib_dir(label: str, unresolved: Path) -> Path:
 
 
 def _validate_editable_canonical_ref(
-    *, consumer_dir: Path, name: str, raw_path: str, lib: str
+    *, consumer_dir: Path, name: str, raw_path: str, lib: str, root: Path | None = None,
 ) -> Path:
     """Full acceptance check for one escaping canonical reference, including
     explicitly retained flat modules -- the same rules
@@ -259,8 +248,10 @@ def _validate_editable_canonical_ref(
         raise ArtifactBuildError(
             f"{consumer_dir}: {name} -> {raw_path}: unsafe lib name {lib!r}"
         )
-    canonical_unresolved = LIBS_DIR / lib
-    bad_ancestor = uer._find_symlinked_ancestor(canonical_unresolved, REPO)
+    canonical_unresolved = (LIBS_DIR if root is None else root / "libs") / lib
+    bad_ancestor = uer._find_symlinked_ancestor(
+        canonical_unresolved, REPO if root is None else root,
+    )
     if bad_ancestor is not None:
         raise ArtifactBuildError(
             f"{consumer_dir}: {name} -> {raw_path}: {bad_ancestor} is a "
@@ -351,7 +342,9 @@ def _add_vendored_lib(
     pending.append(canonical)
 
 
-def resolve_vendored_libs(consumer_dir: Path) -> list[tuple[str, Path]]:
+def resolve_vendored_libs(
+    consumer_dir: Path, *, root: Path | None = None,
+) -> list[tuple[str, Path]]:
     """Discover the materializer's complete recursive vendored-lib closure.
 
     Accept escaping editable canonical references, explicitly retained flat
@@ -376,7 +369,9 @@ def resolve_vendored_libs(consumer_dir: Path) -> list[tuple[str, Path]]:
         seen_dirs.add(current_r)
         if is_top_level:
             consumer_label = current_r.name
-            problems = uer.uv_editable_problems(consumer_label, current, repo=REPO)
+            problems = uer.uv_editable_problems(
+                consumer_label, current, repo=REPO if root is None else root,
+            )
             if problems:
                 raise ArtifactBuildError(
                     f"{current}: rejected by uv_editable_problems: "
@@ -397,7 +392,9 @@ def resolve_vendored_libs(consumer_dir: Path) -> list[tuple[str, Path]]:
                     continue
                 if not (
                     uer.is_safe_lib_name(lib)
-                    and uer.is_retained_flat_ref(current, name, LIBS_DIR / lib)
+                    and uer.is_retained_flat_ref(
+                        current, name, (LIBS_DIR if root is None else root / "libs") / lib,
+                    )
                 ):
                     raise ArtifactBuildError(
                         f"{current}: {name} -> {raw_path} is not editable = "
@@ -410,7 +407,7 @@ def resolve_vendored_libs(consumer_dir: Path) -> list[tuple[str, Path]]:
             # lib can carry its own escaping, editable reference, and
             # without this it would be queued and built unvalidated.
             canonical = _validate_editable_canonical_ref(
-                consumer_dir=current, name=name, raw_path=raw_path, lib=lib
+                consumer_dir=current, name=name, raw_path=raw_path, lib=lib, root=root,
             )
             _add_vendored_lib(
                 out, pending, lib=lib, canonical=canonical, label=str(current)
@@ -480,7 +477,9 @@ def directory_content_hash(d: Path) -> str:
     return _hash_fields(*flattened)
 
 
-def compute_payload_hash(dirs: list[Path], *, workers: int = 1) -> str:
+def compute_payload_hash(
+    dirs: list[Path], *, workers: int = 1, root: Path | None = None,
+) -> str:
     """A single hash over every directory in ``dirs`` (plugin + vendored
     libs), each identified by its repo-relative path and its own working-
     tree content hash (`directory_content_hash`). Sorted so key order never
@@ -489,7 +488,7 @@ def compute_payload_hash(dirs: list[Path], *, workers: int = 1) -> str:
     be called BEFORE building any wheel from ``dirs`` -- see
     `directory_content_hash`'s own docstring."""
     return payload_hash_directories(
-        dirs, root=REPO, directory_hash=directory_content_hash,
+        dirs, root=REPO if root is None else root, directory_hash=directory_content_hash,
         hash_fields=_hash_fields, workers=workers,
     )
 
@@ -793,14 +792,13 @@ def build_plugin_artifacts(
     interpreter) -- still a real, pinned, ``--no-build-isolation`` build,
     just not shared with any other call."""
     if not uer.is_safe_lib_name(plugin):
-        # `plugin` becomes a path component twice over (`PLUGINS_DIR /
-        # plugin` and the manifest filename `{plugin}-{version}-manifest
-        # .json`) -- an absolute value or a `../` traversal must be
-        # rejected before either, the same way a vendored-lib name already
-        # is (`is_safe_lib_name` applies identically: a single path
-        # component, never empty, `.`/`..`, or containing a separator).
         raise ArtifactBuildError(f"{plugin!r} is not a safe plugin name")
-    plugin_dir = PLUGINS_DIR / plugin
+    from application_sources import artifact_project
+
+    try:
+        plugin_dir, identity = artifact_project(REPO, plugin)
+    except (OSError, ValueError) as exc:
+        raise ArtifactBuildError("invalid repository Python project declaration") from exc
     if not (plugin_dir / "pyproject.toml").is_file():
         raise ArtifactBuildError(f"{plugin_dir}: no pyproject.toml -- not a plugin")
     plugin_nested_symlink = uer._find_symlink(plugin_dir, skip_test_runs=False)
@@ -821,7 +819,7 @@ def build_plugin_artifacts(
             raise ArtifactBuildError(f"invalid Containers runtime build inputs: {exc}") from exc
 
     return build_source_artifacts(
-        identity={"plugin": plugin}, source_dir=plugin_dir, dependencies=vendored_libs,
+        identity=identity, source_dir=plugin_dir, dependencies=vendored_libs,
         out_dir=out_dir, python=python, toolchain=toolchain,
         **({"uv": uv, "deadline": deadline} if uv != "uv" or deadline is not None else {}),
     )

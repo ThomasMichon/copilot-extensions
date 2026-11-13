@@ -667,6 +667,10 @@ def materialize(
 
     ``canonical_root`` is a parameter (not hardcoded to ``REPO``) so a test
     can point it at an isolated tree instead of the real checkout."""
+    from application_sources import declared_projects
+
+    declared = declared_projects(canonical_root)
+    declared_consumers = [dest / directory.relative_to(canonical_root) for directory in declared.values()]
     standalone = {dest / extra for extra in _EXTRA_CONSUMER_DIRS}
     for consumer in sorted(standalone):
         if consumer.is_dir() and not (consumer / "pyproject.toml").is_file():
@@ -676,7 +680,11 @@ def materialize(
     human_sources = mie.validate_human_output_sources(canonical_root)
     log = [
         f"SKIP {pointer_path}: retired directory-pointer kind still present -- refusing"
-        for pointer_path in find_retired_directory_pointers(dest)
+        for pointer_path in (
+            *find_retired_directory_pointers(dest),
+            *(pointer for consumer in declared_consumers
+              for pointer in find_retired_directory_pointers_in_plugin(consumer)),
+        )
     ]
     log.extend(materialize_file_pointers(
         dest, canonical_root=canonical_root, candidates=file_pointer_candidates,
@@ -687,11 +695,25 @@ def materialize(
     ))
     log.extend(mpiv.materialize(dest, canonical_root=canonical_root))
     log.extend(materialize_launch_wrapper_assets(dest, canonical_root=canonical_root))
+    for source_consumer in declared.values():
+        consumer = dest / source_consumer.relative_to(canonical_root)
+        arguments = {
+            "source_consumer_dir": source_consumer, "dest_consumer_dir": consumer,
+            "canonical_root": canonical_root, "dest_root": dest,
+        }
+        log.extend(materialize_uv_editable_ref_into(**arguments))
+        log.extend(materialize_installer_engine_ref_into(**arguments))
+        log.extend(materialize_launch_wrapper_assets_into(**arguments))
+        log.extend(materialize_payload_invocation_into(
+            source_consumer_dir=source_consumer, dest_consumer_dir=consumer,
+            canonical_root=canonical_root,
+        ))
     log.extend(mie.materialize_human_output_declarations(
         dest, canonical_root=canonical_root, human_sources=human_sources,
     ))
     consumers = sorted((dest / "plugins").glob("*"))
     consumers.extend(sorted(standalone))
+    consumers.extend(declared_consumers)
     for consumer in consumers:
         manifest = consumer / "pyproject.toml"
         if (

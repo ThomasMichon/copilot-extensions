@@ -6,6 +6,7 @@ import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import io
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -91,7 +92,7 @@ def test_expired_outer_source_transaction_preserves_active_timeout_and_diagnosti
 
 @pytest.mark.parametrize("wheel_witness", [False, True])
 def test_native_source_lock_binds_real_owner_plan_selected_source_and_empty_closure(
-    adopter, source, target, tmp_path, wheel_witness,
+    adopter, source, target, tmp_path, wheel_witness, monkeypatch,
 ):
     # This source has no third-party requirements; an empty third-party lock is real.
     with candidate(adopter, source, target, tmp_path, wheel_witness=wheel_witness) as selected:
@@ -112,12 +113,79 @@ def test_native_source_lock_binds_real_owner_plan_selected_source_and_empty_clos
             assert selected.native_lock is None
         assert selected.payload != source[0]
         assert (selected.payload / "pyproject.toml").is_file()
+        scans = []
+        actual_fingerprint = locks.runtime.fingerprint_source
+
+        def fingerprint(paths, **kwargs):
+            scans.append(tuple(paths))
+            assert callable(kwargs["on_progress"])
+            return actual_fingerprint(scans[-1], **kwargs)
+
+        with monkeypatch.context() as patch:
+            patch.setattr(locks.runtime, "fingerprint_source", fingerprint)
+            selected.verify(deadline=time.monotonic() + 10)
+        assert len(scans) == 1
         record["source"]["source_commit"] = "c" * 40
         target["device"] = "changed-after-selection"
         assert selected.record()["source"]["source_commit"] == "a" * 40
         assert selected.record()["target"]["device"] == "cpu"
         retained = selected.payload
     assert not retained.exists()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows native interpreter path limit")
+@pytest.mark.timeout(60)
+def test_source_configuration_launches_a_real_long_path_interpreter(
+    adopter, source, target, tmp_path,
+):
+    import venv
+    from build_toolchain_lock import _query_marker_environment
+
+    root = tmp_path
+    while len(str(root / "Scripts" / "python.exe")) <= 280:
+        root /= "interpreter-" + "x" * 30
+    venv.EnvBuilder(with_pip=False).create(locks.dependencies._native_retained_path(root))
+    python = root / "Scripts" / "python.exe"
+    assert _query_marker_environment(python, deadline=time.monotonic() + 10) == target["environment"]
+    with candidate(adopter, source, target, tmp_path, python=python) as selected:
+        assert selected.record()["target"] == target
+        assert selected.record()["source"] == source[1].document()
+
+
+@pytest.mark.parametrize("changed", ["origin", "retained", "custody"])
+def test_source_owner_delegation_keeps_fresh_origin_retention_and_custody_checks(
+    adopter, source, target, tmp_path, monkeypatch, changed,
+):
+    from versioned_runtime_source import SourceIdentityError
+
+    actual_source = locks._source
+    active = True
+
+    def verify(payload, identity):
+        assert payload == source[0] and identity == source[1]
+        if not active:
+            raise ProfileError("fixture source owner custody closed")
+        actual_source(payload, identity)
+
+    message = {
+        "origin": "bytes do not match the source identity",
+        "retained": "retained source differs",
+        "custody": "source owner custody closed",
+    }[changed]
+    with pytest.raises(SourceIdentityError if changed == "origin" else ProfileError, match=message):
+        with candidate(adopter, source, target, tmp_path, source_verifier=verify) as selected:
+            monkeypatch.setattr(
+                locks, "_source",
+                lambda *args: pytest.fail("delegated origin was independently rehashed"),
+            )
+            selected.verify(deadline=time.monotonic() + 10)
+            if changed == "custody":
+                active = False
+            else:
+                root = source[0] if changed == "origin" else selected.payload
+                manifest = root / "pyproject.toml"
+                manifest.write_text(manifest.read_text() + "\n# changed after selection\n")
+            selected.verify(deadline=time.monotonic() + 10)
 
 
 @pytest.mark.parametrize("as_extra", [False, True])
@@ -272,6 +340,8 @@ def test_retained_source_mutation_during_consumption_refuses(adopter, source, ta
         with candidate(adopter, source, target, tmp_path) as selected:
             retained = selected.payload
             (retained / "fixture_backend.py").write_text("changed", encoding="utf-8")
+            with pytest.raises(ProfileError, match="retained source differs"):
+                selected.verify(deadline=time.monotonic() + 10)
     assert not retained.exists()
 
 

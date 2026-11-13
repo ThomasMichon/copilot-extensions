@@ -13,6 +13,7 @@ from artifact_attestation import (
     _check, _gh, verify_attestation_subject,
 )
 from promotion_unit_contract import MAX_PACKET_FILE_BYTES
+from promotion_source_history import is_ancestor, read_promoted_source
 
 _BUNDLE = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*-[0-9][A-Za-z0-9.+-]*-[0-9a-f]{64}\.zip")
 # Three unit-packet members, archive overhead, and the enclosing evidence member.
@@ -226,3 +227,82 @@ def read_admitted_source_index(
     if expected != assets.keys():
         raise PromotionArtifactError(f"{tag}: unexpected files in the frozen source artifact set")
     return index, assets
+
+
+def discover_promoted_source(
+    directory: Path, *, repository: str, repo: Path, main_commit: str,
+    deadline: float, runner=None, verify_subject=None,
+) -> tuple[dict, dict[str, dict]] | None:
+    """Discover the actual channel selected by the retained source provider."""
+    selected = read_promoted_source(repo, main_commit, deadline=deadline)
+    return read_admitted_source_index(
+        directory, repository=repository, dev_head=selected.dev_head,
+        main_before=selected.main_before, content_tree=selected.content_tree,
+        is_ancestor=lambda ancestor, descendant: is_ancestor(
+            repo, ancestor, descendant, deadline=deadline,
+        ),
+        runner=runner, verify_subject=verify_subject,
+    )
+
+
+def read_selected_source_artifact(
+    directory: Path, *, index: dict, assets: dict[str, dict], repository: str,
+    component: str, version: str, candidate_root: Path, runner=None, verify_subject=None,
+) -> tuple[dict, str] | None:
+    """Validate the actual selected bundle before it can bind a runtime profile.
+
+    The source owner first authenticates this index through discovery. A missing
+    component is typed absence; conflicting identities or failed byte/source
+    validation are errors, never permission to substitute source fallback.
+    """
+    from artifact_bundle_validation import (
+        _BUNDLE_LIMIT, _artifact_label, validate_artifact_entry, validate_bundle_binding,
+    )
+    from runtime_profile_release import release_profiles, validate_release_bindings
+    from standalone_python_artifacts import project_key
+
+    profiles = release_profiles(index)
+    selected, names, projects = [], set(), set()
+    for entry in index["artifacts"]:
+        name = validate_artifact_entry(entry)
+        project = project_key(entry)
+        if name in names or project in projects:
+            raise PromotionArtifactError("duplicate or mismatched artifact filename")
+        names.add(name)
+        projects.add(project)
+        if _artifact_label(entry) == component:
+            if entry["version"] != version:
+                raise PromotionArtifactError("selected artifact version differs from acquired source")
+            selected.append(entry)
+    if not selected:
+        return None
+    if len(selected) != 1:
+        raise PromotionArtifactError("selected component has ambiguous first-party artifacts")
+    entry = selected[0]
+    name = entry["filename"]
+    asset = assets.get(name)
+    if not isinstance(asset, dict) or asset.get("digest") != "sha256:" + entry["sha256"]:
+        raise PromotionArtifactError("selected artifact differs from its admitted asset")
+    download(
+        directory, repository=repository, tag=f"python-artifacts-{index['dev_head']}",
+        name=name, asset=asset, limit=_BUNDLE_LIMIT, runner=runner,
+    )
+    path = directory / name
+    control = index["admission"]
+    (verify_subject or verify_attestation_subject)(
+        path, repository=repository, signer_digest=control["signer_digest"],
+        source_digest=control["source_digest"], source_ref=control["source_ref"],
+    )
+    manifest, digest = validate_bundle_binding(path, entry, candidate_root=candidate_root)
+    matching = [
+        profile.record() for profile in profiles
+        if profile.record()["artifact"]["artifact_id"] == entry["artifact_id"]
+    ]
+    if matching:
+        validate_release_bindings(
+            {**index, "runtime_profiles": {
+                **index["runtime_profiles"], "profiles": matching,
+            }},
+            {entry["artifact_id"]: (manifest, digest)},
+        )
+    return manifest, digest

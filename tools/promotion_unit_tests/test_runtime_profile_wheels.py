@@ -418,10 +418,11 @@ def test_complete_profile_checks_deadline_during_archive_hashing(monkeypatch):
         _verify(profile, wheels, deadline=1)
 
 def test_complete_profile_does_not_inherit_the_first_party_archive_cap(monkeypatch):
+    import artifact_bundle_validation as validation
     import promotion_python_artifacts as promotion
 
     profile, wheels = _inputs()
-    monkeypatch.setattr(promotion, "_BUNDLE_LIMIT", 1)
+    monkeypatch.setattr(validation, "_BUNDLE_LIMIT", 1)
     _verify(profile, wheels)
     wheel = profile.record()["wheels"][0]
     with pytest.raises(promotion.PromotionArtifactError, match="archive limit"):

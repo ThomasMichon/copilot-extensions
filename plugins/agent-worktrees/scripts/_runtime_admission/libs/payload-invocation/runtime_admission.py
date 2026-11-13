@@ -11,6 +11,8 @@ import sys
 ENTRY_MODULES = (
     "runtime_profile_policy", "runtime_source_build", "runtime_source_reuse",
     "runtime_marketplace_source", "artifact_release_discovery", "runtime_profile_delivery",
+    "runtime_admission_bootstrap",
+    "artifact_bundle_validation", "runtime_artifact_inputs",
 )
 REPOSITORY_ADAPTERS = {
     "runtime_source_manager", "worktree_manager.self_install",
@@ -25,6 +27,14 @@ _RESOURCES = (
     "libs/agent-procutil/setup.py",
     "libs/versioned-runtime/standalone_build.py",
     "plugins/agent-containers/setup.py",
+    "plugins/agent-worktrees/setup.py",
+    "worktree-manager/setup.py",
+    "fleet-manager/setup.py",
+    "services/chat/setup.py",
+    "services/index/setup.py",
+    "services/index/_build_runtime_resource.py",
+    "services/pr/setup.py",
+    "services/pr/_build_runtime_resource.py",
 )
 
 

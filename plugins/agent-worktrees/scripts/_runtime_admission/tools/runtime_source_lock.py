@@ -63,7 +63,11 @@ class SourceLockCandidate:
         record = self.record()
         if "sha256:" + hashlib.sha256(self.requirements).hexdigest() != record["requirements_sha256"]:
             raise ProfileError("source candidate requirements changed")
-        observed = runtime.fingerprint_source(_source_files(_package_roots(self.payload)))
+        progress = lambda: _check_deadline(deadline)
+        observed = runtime.fingerprint_source(
+            _source_files(_package_roots(self.payload), on_progress=progress),
+            on_progress=progress,
+        )
         if "sha256:" + observed != record["retained_source_sha256"]:
             raise ProfileError("retained source differs from the selected source lock")
         _check_deadline(deadline)
@@ -79,12 +83,17 @@ class SourceConfiguration:
     projections: tuple[str, ...] = field(repr=False, compare=False)
     output: Path = field(repr=False, compare=False)
     _verification: Callable[[], None] = field(repr=False, compare=False)
+    _selection_verification: Callable[[], None] | None = field(default=None, repr=False, compare=False)
 
     def record(self) -> dict:
         return json.loads(self.canonical)
 
     def verify(self) -> None:
         self._verification()
+
+    def verify_selection(self) -> None:
+        """Recheck the live selection when the caller checks retained bytes."""
+        (self._selection_verification or self._verification)()
 
 
 def _pins(content: bytes, environment: dict, deadline: float) -> list[dict]:
@@ -278,11 +287,14 @@ def retain_source_configuration(
     env: dict[str, str] | None = None, wheel_witness: bool = False,
     include_build_tools: bool = False,
     installation: dict | None = None,
+    source_verifier: Callable[[Path, SourceIdentity], None] | None = None,
 ):
     """Capture source/compiler settings without executing dependency resolution.
 
     The existing authority supplies the source selection and target facts.
     No installation, source discovery, alternate release or artifact is used.
+    A source verifier owns full fresh authentication of the exact payload and
+    identity; omitted, the independent source check remains the default.
     """
     _check_deadline(deadline)
     if type(include_build_tools) is not bool or (include_build_tools and not wheel_witness):
@@ -291,6 +303,8 @@ def retain_source_configuration(
         raise ProfileError("source build resolution requires its actual installation owner")
     if not isinstance(expected_source, SourceIdentity):
         raise ProfileError("source candidate needs an independent source selection")
+    if source_verifier is not None and not callable(source_verifier):
+        raise ProfileError("source candidate needs a callable source verifier")
     policy = plan.policy()
     if (
         plan.release_selection is not None or plan.source_trigger not in (
@@ -314,6 +328,7 @@ def retain_source_configuration(
     environment = dependencies._captured_environment(env)
     observed = subprocess.run(
         [str(python), "-I", "-S", "-c", _MARKER_ENV_QUERY_SCRIPT],
+        executable=dependencies._native_retained_path(python),
         capture_output=True, text=True, env=sanitize_subprocess_env(environment),
         timeout=max(0, deadline - time.monotonic()),
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
@@ -323,6 +338,13 @@ def retain_source_configuration(
         raise ProfileError("source candidate target differs from the selected interpreter")
     payload = payload.resolve(strict=True)
     project = _source(payload, expected_source)
+
+    def recheck_source():
+        if source_verifier is None:
+            _source(payload, expected_source)
+        else:
+            source_verifier(payload, expected_source)
+
     extras = tuple(sorted(canonicalize_name(extra) for extra in extras))
     provided = {canonicalize_name(extra) for extra in project.get("optional-dependencies", {})}
     if not set(extras) <= provided:
@@ -350,7 +372,7 @@ def retain_source_configuration(
             cwd=payload, env=environment, trusted_source_roots=(payload,),
             deadline=deadline, native_target=True, _projection=projection,
         ) as transaction:
-            _source(payload, expected_source)
+            recheck_source()
             _retained_source(transaction, payload, deadline)
             retained_roots = tuple(transaction.sources.values())
             retained_hash = runtime.fingerprint_source(_source_files(retained_roots))
@@ -376,11 +398,9 @@ def retain_source_configuration(
                 record["build_roots"] = build_roots
             canonical = json.dumps(record, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
 
-            def verify():
+            def verify_selection():
                 _check_deadline(deadline)
-                _source(payload, expected_source)
-                if runtime.fingerprint_source(_source_files(retained_roots)) != retained_hash:
-                    raise ProfileError("retained source changed during candidate consumption")
+                recheck_source()
                 if installation is not None:
                     observed = validate_source_resolution_inputs(
                         plan, installation=installation, transaction=transaction,
@@ -390,10 +410,18 @@ def retain_source_configuration(
                         raise ProfileError("source configuration changed during consumption")
                 _check_deadline(deadline)
 
+            def verify():
+                verify_selection()
+                progress = lambda: _check_deadline(deadline)
+                if runtime.fingerprint_source(
+                    _source_files(retained_roots, on_progress=progress), on_progress=progress,
+                ) != retained_hash:
+                    raise ProfileError("retained source changed during candidate consumption")
+
             verify()
             yield SourceConfiguration(
                 canonical, transaction.sources[payload], transaction, tuple(projection),
-                output, verify,
+                output, verify, verify_selection,
             )
             verify()
 
@@ -427,7 +455,9 @@ def _retain_source_lock(
         configuration.verify()
         record = configuration.record()
         native_lock = content if wheel_witness else None
-        files = _wheel_pins(content, record["target"], deadline) if wheel_witness else None
+        files = _wheel_pins(
+            content, record["target"], deadline, prefer_target_tags="build_roots" in record,
+        ) if wheel_witness else None
         if files is not None:
             content = "".join(
                 f'{item["name"]}=={item["version"]} --hash={item["sha256"]}\n' for item in files
@@ -446,6 +476,7 @@ def _retain_source_lock(
             canonical, content, configuration.payload, native_lock,
             transaction if wheel_witness else None,
             configuration.projections if wheel_witness else (),
+            configuration.verify_selection,
         )
         _check_deadline(deadline)
 

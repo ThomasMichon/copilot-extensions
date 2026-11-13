@@ -333,6 +333,10 @@ def _query_marker_environment(python_exe: Path, *, deadline: float | None = None
     venv."""
     result = subprocess.run(
         [str(python_exe), "-I", "-S", "-c", _MARKER_ENV_QUERY_SCRIPT],
+        executable=(
+            getattr(os.path, "_getfinalpathname")(str(python_exe))
+            if os.name == "nt" and python_exe.is_file() else None
+        ),
         capture_output=True, text=True, env=sanitize_subprocess_env(),
         **({"timeout": max(0, deadline - time.monotonic())} if deadline is not None else {}),
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
@@ -458,12 +462,7 @@ def _query_toolchain_versions(
 
 
 def _toml_escape(value: str) -> str:
-    """Escapes ``value`` for embedding in a TOML basic string (``"..."``)
-    -- backslash and double-quote are the only characters a basic string
-    must escape for this module's own use (index URLs/names never
-    legitimately contain control characters or newlines). No stdlib TOML
-    WRITER exists (only `tomllib`, a reader), so this is a tiny, scoped
-    helper rather than a dependency."""
+    """Escape backslashes and quotes in index URLs/names, which contain no controls."""
     return value.replace("\\", "\\\\").replace('"', '\\"')
 
 
@@ -816,6 +815,7 @@ def resolve_toolchain_lock(
 _BUILD_REQUIRES_CHECK_SCRIPT = (
     "import json, sys\n"
     "from pathlib import Path\n"
+    "from packaging.markers import default_environment\n"
     "from packaging.requirements import InvalidRequirement, Requirement\n"
     "from packaging.utils import canonicalize_name\n"
     "from packaging.version import InvalidVersion, Version\n"
@@ -831,6 +831,8 @@ _BUILD_REQUIRES_CHECK_SCRIPT = (
     "    for name, version in payload['locked_packages'].items()\n"
     "}\n"
     "marker_environment = payload['marker_environment']\n"
+    "if marker_environment is None:\n"
+    "    marker_environment = default_environment()\n"
     "for raw in payload['requires']:\n"
     "    try:\n"
     "        req = Requirement(raw)\n"
@@ -925,11 +927,7 @@ def _assert_toolchain_satisfies_build_requires(
     requires = _read_build_system_requires(source_dir)
     if run is None and deadline is not None and toolchain._marker_environment is None:
         toolchain._marker_environment = _query_marker_environment(toolchain.venv_python, deadline=deadline)
-    marker_environment = (
-        toolchain.marker_environment if run is None else json.loads(run([
-            str(toolchain.venv_python), "-I", "-S", "-c", _MARKER_ENV_QUERY_SCRIPT,
-        ]).stdout)
-    )
+    marker_environment = toolchain.marker_environment if run is None else None
     payload = json.dumps(
         {
             "requires": requires,
@@ -948,6 +946,10 @@ def _assert_toolchain_satisfies_build_requires(
     else:
         result = subprocess.run(
             [str(toolchain.venv_python), "-I", "-c", _BUILD_REQUIRES_CHECK_SCRIPT],
+            executable=(
+                getattr(os.path, "_getfinalpathname")(str(toolchain.venv_python))
+                if os.name == "nt" and toolchain.venv_python.is_file() else None
+            ),
             input=payload, capture_output=True, text=True,
             env=sanitize_subprocess_env(),
             **({"timeout": max(0, deadline - time.monotonic())} if deadline is not None else {}),

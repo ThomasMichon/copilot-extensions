@@ -1,14 +1,14 @@
 """Bounded content verification without weakening retained-source admission."""
-from contextlib import contextmanager
 import hashlib
-from pathlib import Path
 import sys
 import threading
+from contextlib import contextmanager
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-
-from test_python_installer_engine import engine as engine, _package
+from test_python_installer_engine import _package
+from test_python_installer_engine import engine as engine
 
 
 @pytest.fixture
@@ -61,10 +61,33 @@ def test_content_map_bounds_pending_work_and_preserves_order(policy, monkeypatch
         progress.append(result)
 
     monkeypatch.setattr(policy._configuration._content, "ThreadPoolExecutor", ObservedPool)
-    assert policy._bounded_content_map(read, iter(range(12)), on_result=completed) == list(range(0, 24, 2))
+    assert policy._bounded_content_map(
+        read, iter(range(12)), on_result=completed,
+    ) == list(range(0, 24, 2))
     assert progress == list(range(0, 24, 2))
     assert maximum == maximum_pending == 4
     assert active == pending == 0
+
+
+def test_content_map_refills_before_waiting_for_the_previous_window(policy):
+    next_started = threading.Event()
+    reads = []
+    lock = threading.Lock()
+
+    def read(value):
+        if value == 4:
+            next_started.set()
+        if value == 3:
+            assert next_started.wait(timeout=5)
+        with lock:
+            reads.append(value)
+        return value
+
+    progress = []
+    assert policy._bounded_content_map(read, range(9), on_result=progress.append) == list(range(9))
+    assert progress == list(range(9))
+    assert sorted(reads) == list(range(9))
+    assert not any(t.name.startswith("retained-content") for t in threading.enumerate())
 
 
 @pytest.mark.parametrize("failure_kind", ["reader", "enumerator", "cancel"])
@@ -142,8 +165,8 @@ def test_content_map_settles_readers_before_propagating_progress_failure(policy)
 def test_content_map_defers_shutdown_cancellation_until_readers_settle(
     policy, monkeypatch, reader_failure,
 ):
-    from concurrent.futures import ThreadPoolExecutor
     import time
+    from concurrent.futures import ThreadPoolExecutor
 
     entered = threading.Event()
     released = threading.Event()
@@ -223,7 +246,9 @@ def test_retained_case_distinct_files_are_both_verified(policy, tmp_path, monkey
 
     monkeypatch.setattr(policy, "_select_uv_executable", lambda value: value)
     monkeypatch.setattr(policy, "prepare_uv_install", prepare)
-    monkeypatch.setattr(policy, "_resolver_configuration", lambda *_args, **_kwargs: "fixture resolver")
+    monkeypatch.setattr(
+        policy, "_resolver_configuration", lambda *_args, **_kwargs: "fixture resolver",
+    )
     monkeypatch.setattr(Path, "read_bytes", observe)
     with policy.retain_uv_install(
         "fixture-uv", ["--no-config", str(source)], env={}, cwd=tmp_path,
@@ -283,7 +308,9 @@ def test_retained_content_reads_overlap_and_settle_before_cleanup(
 
     monkeypatch.setattr(policy, "_select_uv_executable", lambda value: value)
     monkeypatch.setattr(policy, "prepare_uv_install", prepare)
-    monkeypatch.setattr(policy, "_resolver_configuration", lambda *_args, **_kwargs: "fixture resolver")
+    monkeypatch.setattr(
+        policy, "_resolver_configuration", lambda *_args, **_kwargs: "fixture resolver",
+    )
     monkeypatch.setattr(policy, "_private_retained_root", root)
     monkeypatch.setattr(policy._configuration, "remaining_timeout", timeout)
     monkeypatch.setattr(Path, "read_bytes", observe)
@@ -325,6 +352,7 @@ def test_engine_rechecks_every_admitted_source_with_bounded_reads(
     if changed:
         for path in files:
             path.write_bytes(b"changed")
+    admitted = engine._construction_hash(tuple(files), ())
     read_bytes = Path.read_bytes
     barrier = threading.Barrier(4)
     reads = []
@@ -340,18 +368,20 @@ def test_engine_rechecks_every_admitted_source_with_bounded_reads(
 
     monkeypatch.setattr(engine, "_source_files", lambda _packages, **_kwargs: files)
     monkeypatch.setattr(engine, "_package_roots", lambda _plugin: (source,))
-    monkeypatch.setattr(engine, "_construction_hash", lambda *_args, **_kwargs: "admitted")
     monkeypatch.setattr(engine, "_select_uv_executable", lambda _uv: sys.executable)
     monkeypatch.setattr(engine, "retain_uv_install", retained)
-    monkeypatch.setattr(engine.runtime, "fingerprint_source", lambda _files, **_kwargs: "retained")
     monkeypatch.setattr(Path, "read_bytes", observe)
-    inputs = engine.FrozenInputs(source, (source,), "admitted")
+    inputs = engine.FrozenInputs(source, (source,), admitted)
     if changed:
         with pytest.raises(RuntimeError) as caught:
-            with engine._retained_inputs(inputs, Path(sys.executable), Path(sys.executable), refresh=False):
+            with engine._retained_inputs(
+                inputs, Path(sys.executable), Path(sys.executable), refresh=False,
+            ):
                 pytest.fail("changed admitted content cannot reach construction")
         assert str(caught.value).endswith(", ".join(str(path) for path in files[:10]))
     else:
-        with engine._retained_inputs(inputs, Path(sys.executable), Path(sys.executable), refresh=False):
+        with engine._retained_inputs(
+            inputs, Path(sys.executable), Path(sys.executable), refresh=False,
+        ):
             pass
-    assert sorted(reads) == sorted(files)
+    assert sorted(reads) == sorted(files if changed else files * 2)

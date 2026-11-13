@@ -106,7 +106,8 @@ be selected as a successful reuse.
 ## Source fingerprinting
 
 `fingerprint_source()` retains its complete input, symlink and framed-digest
-contract while overlapping content reads in batches of at most four. Frames
+contract while overlapping content reads in a sliding window of at most four.
+Path labels are computed once per call, without caching file content. Frames
 are hashed in label order regardless of read completion order; failures remain
 fail-closed and all in-flight readers settle before return or error. Each call
 reads current bytes again: there is no persistent content-hash cache or
@@ -225,7 +226,9 @@ being hashed. Callback errors propagate; callers own cleanup and must wait for
 the complete fingerprint before treating collected bytes as admitted evidence.
 The installer engine buffers that first pass with a 32 MiB in-memory ceiling
 and disk spill for larger graphs, then copies only after the full baseline is
-complete. It independently rechecks the source file set, source content and
+complete. Copying keeps at most four file buffers/writes pending, reports progress
+on the caller thread and settles every writer before cleanup or validation.
+It independently rechecks the source file set, source content and
 frozen content afterward; the buffer closes before frozen-tree validation.
 Read-only Windows scans may prefetch four regular files at a time, while
 framing and per-file digest collection remain ordered. Calls with `on_file`

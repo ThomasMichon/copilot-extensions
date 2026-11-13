@@ -7,11 +7,14 @@ constructor while both contexts remain open through installed health.
 """
 from __future__ import annotations
 
+from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 import hashlib
 import json
 from pathlib import Path
+from queue import Queue
+from threading import Lock
 import shutil
 import stat
 import time
@@ -161,6 +164,87 @@ def _extras(wheels: dict[str, dict], roots: list[str], environment: dict, deadli
     return wanted
 
 
+def _build_libraries(projects, build):
+    """Overlap at most four builds; validate and settle on the calling owner."""
+    projects = tuple(projects)
+    if len(projects) <= 1:
+        return [build(project, lambda operation: operation()) for project in projects]
+    messages = Queue()
+    results = [None] * len(projects)
+    remaining = iter(enumerate(projects))
+    pending = {}
+    failure = None
+    replies = set()
+    reply_lock = Lock()
+
+    def validate_on_owner(operation):
+        reply = Future()
+        with reply_lock:
+            if failure is not None:
+                raise failure
+            replies.add(reply)
+        try:
+            messages.put((operation, reply))
+            return reply.result()
+        finally:
+            with reply_lock:
+                replies.discard(reply)
+
+    with ThreadPoolExecutor(max_workers=min(4, len(projects))) as executor:
+        def start_next():
+            nonlocal failure
+            try:
+                index, project = next(remaining)
+            except StopIteration:
+                return
+            try:
+                future = executor.submit(build, project, validate_on_owner)
+            except BaseException as error:
+                if failure is None:
+                    failure = error
+                return
+            pending[future] = index
+            future.add_done_callback(lambda settled: messages.put((None, settled)))
+
+        try:
+            for _ in range(min(4, len(projects))):
+                if failure is None:
+                    start_next()
+            while pending:
+                operation, future = messages.get()
+                if operation is not None:
+                    if failure is not None:
+                        future.set_exception(failure)
+                        continue
+                    try:
+                        value = operation()
+                    except BaseException as error:
+                        failure = error
+                        future.set_exception(error)
+                    else:
+                        future.set_result(value)
+                else:
+                    index = pending.pop(future)
+                    try:
+                        results[index] = future.result()
+                    except BaseException as error:
+                        if failure is None:
+                            failure = error
+                    if failure is None:
+                        start_next()
+            if failure is not None:
+                raise failure
+        except BaseException as error:
+            with reply_lock:
+                if failure is None:
+                    failure = error
+                for reply in replies:
+                    if not reply.done():
+                        reply.set_exception(failure)
+            raise failure
+    return results
+
+
 @contextmanager
 def retain_source_profile(
     candidate: SourceLockCandidate, *, third_party: dict[str, Path],
@@ -288,10 +372,10 @@ def retain_source_profile(
                 if before != runtime.fingerprint_source(files) or modes != frozen_modes:
                     raise ProfileError("compact source changed before wheel cache publication")
 
-        local_projects = {}
-        for project_path in selected_projects:
-            candidate.verify(deadline=deadline)
-            verify_compact_source()
+        candidate.verify(deadline=deadline)
+        verify_compact_source()
+
+        def build_project(project_path, validate_on_owner):
             declaration = _toml(project_path / "pyproject.toml")["project"]
 
             def build(destination):
@@ -330,9 +414,22 @@ def retain_source_profile(
                 }, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("ascii")
                 wheel = cached_source_wheel(
                     Path(record["policy"]["owner"]["runtimeRoot"]), binding, output,
-                    build=build, validate=validate,
+                    build=build, validate=lambda wheel: validate_on_owner(lambda: validate(wheel)),
                     max_archive_bytes=limits.max_archive_bytes, deadline=deadline,
                 )
+            return declaration, wheel
+
+        if cache_binding is not None:
+            libraries = tuple(path for path in selected_projects if path != frozen.plugin)
+            completed = _build_libraries(libraries, build_project)
+            if frozen.plugin in selected_projects:
+                completed.append(build_project(frozen.plugin, lambda operation: operation()))
+        else:
+            completed = (
+                build_project(path, lambda operation: operation()) for path in selected_projects
+            )
+        local_projects = {}
+        for declaration, wheel in completed:
             name, version, _, _ = _wheel_filename(wheel.name, limits.max_tags, deadline)
             if (
                 name != canonicalize_name(declaration["name"])

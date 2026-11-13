@@ -1254,12 +1254,13 @@ def test_constructor_groups_and_mutations_move_to_existing_lanes_without_droppin
         job = workflow["jobs"][key]
         assert job["timeout-minutes"] == 6
         matrix = job["strategy"]["matrix"]
-        assert matrix["suite"] == ["profiles", "refusals", "manager", "normal", "toolkit"]
+        assert matrix["suite"] == ["profiles", "refusals", "manager", "normal", "toolkit", "overlap"]
         normal = next(item for item in matrix["include"] if item["suite"] == "normal")
         assert normal["normal_expression"] == f"not ({refusal_expression} or {groups})"
         profiles = next(item for item in matrix["include"] if item["suite"] == "profiles")
         refusals = next(item for item in matrix["include"] if item["suite"] == "refusals")
         assert profiles["constructor_expression"] == groups
+        assert "native_library_builds_overlap" in profiles["expression"]
         assert refusals["constructor_expression"] == refusal_expression
         admission = next(step for step in job["steps"] if step.get("name", "").startswith("Real authenticated source,"))
         assert admission["if"] == "${{ matrix.suite == 'profiles' || matrix.suite == 'refusals' }}"
@@ -1274,6 +1275,24 @@ def test_constructor_groups_and_mutations_move_to_existing_lanes_without_droppin
             "python", "-m", "pytest", "-q", "tools/test_runtime_admission_toolkit.py",
             "libs/payload-invocation/tests/test_runtime_admission.py",
         ]
+        overlap = next(step for step in job["steps"] if step.get("name") == "Bounded library overlap and serial application construction")
+        assert overlap["if"] == "${{ matrix.suite == 'overlap' }}"
+        assert overlap["shell"] == "python"
+        assert 'Limits(wall_seconds=240)' in overlap["run"]
+        assert (
+            '"native_library_builds_overlap or library_builds_overlap or library_dispatch_cancellation"'
+            in overlap["run"]
+        )
+        assert 'if owner.retained or temporary.exists():' in overlap["run"]
+        privacy = next(
+            step for step in job["steps"]
+            if step.get("name") == "Native POSIX lease privacy and existing-mode preservation"
+        )
+        assert privacy["if"] == "${{ matrix.suite == 'overlap' && runner.os == 'Linux' }}"
+        assert shlex.split(privacy["run"]) == [
+            "python", "-m", "pytest", "-q",
+            "libs/versioned-runtime/tests/test_runtime_lease_privacy.py",
+        ]
         execution = next(step for step in job["steps"] if step.get("name", "").startswith("Ordinary constructors,"))
         assert set(shlex.split(execution["run"])[4:6]) == expected_files
         assert '${{ matrix.normal_expression || \'\' }}' in execution["run"]
@@ -1284,8 +1303,18 @@ def test_constructor_groups_and_mutations_move_to_existing_lanes_without_droppin
             "-k", "${{ matrix.constructor_expression }}",
         ]
         backend = next(step for step in job["steps"] if step.get("name", "").startswith("Acquire the pinned real backend"))
-        assert backend["if"] == "${{ matrix.suite != 'manager' && matrix.suite != 'toolkit' }}"
+        assert backend["if"] == "${{ matrix.suite != 'manager' && matrix.suite != 'toolkit' && matrix.suite != 'overlap' }}"
         assert job["steps"].index(backend) < job["steps"].index(refusal)
+    unit_manifest = json.loads((HERE / "promotion-unit-manifest.json").read_text())
+    assert not any(
+        "::test_posix_fresh_lease_root_passes_strict_private_admission[" in node
+        or node.endswith("::test_posix_existing_root_is_not_repaired_for_private_admission")
+        for node in unit_manifest["nodes"]
+    )
+    assert (
+        "tools/promotion_unit_tests/test_windows_lease_acl.py"
+        "::test_posix_lease_requests_private_root_before_descendants"
+    ) in unit_manifest["nodes"]
     for key in ("source-cache-linux", "source-cache-windows"):
         matrix = workflow["jobs"][key]["strategy"]["matrix"]
         assert matrix == {"suite": ["normal"]}
@@ -2362,18 +2391,26 @@ def test_compile_acceptance_is_bounded_native_and_independently_selected() -> No
         assert job["if"] == "${{ inputs.dependency_compile }}"
         assert job["runs-on"] == runner
         assert job["timeout-minutes"] == 6 and not job.get("continue-on-error")
-        assert not job.get("strategy")
-        commands = [step["run"] for step in job["steps"] if "run" in step]
-        assert commands == [
-            "python tools/seasoned_uv.py --uv uv --registry-only -- --system pytest pyyaml",
-            'python -m pytest -q tools/test_installer_dependency_compile.py '
-            'tools/test_installer_dependency_policy.py '
-            'tools/test_runtime_source_lock.py '
-            'tools/test_runtime_source_authentication.py '
-            'tools/test_runtime_source_feed.py '
-            '-k "compile or real_uv_registry_transitive_and_isolated_build_age or runtime_source_lock '
-            'or runtime_source_authentication or runtime_source_feed"',
+        assert job["strategy"]["fail-fast"] is False
+        assert job["strategy"]["matrix"]["include"] == [
+            {"suite": "native-compile", "test": "tools/test_installer_dependency_compile.py"},
+            {"suite": "compile-policy", "test": "tools/test_installer_dependency_policy.py"},
+            {"suite": "source-lock", "test": "tools/test_runtime_source_lock.py"},
+            {"suite": "source-authentication", "test": "tools/test_runtime_source_authentication.py"},
+            {"suite": "source-feed", "test": "tools/test_runtime_source_feed.py"},
         ]
+        tooling = next(step for step in job["steps"] if step.get("name") == "Validator tooling only")
+        assert tooling["run"] == (
+            'python tools/seasoned_uv.py --uv uv --registry-only -- --system pytest '
+            '"pytest-timeout>=2.3,<3" pyyaml'
+        )
+        packet = next(step for step in job["steps"] if step.get("shell") == "python")
+        assert packet["env"] == {"PACKET_TEST": "${{ matrix.test }}"}
+        assert 'os.environ["PACKET_TEST"]' in packet["run"]
+        assert '"compile or real_uv_registry_transitive_and_isolated_build_age or runtime_source_lock or runtime_source_authentication or runtime_source_feed"' in packet["run"]
+        assert 'Limits(wall_seconds=300)' in packet["run"]
+        assert 'if owner.retained or temporary.exists():' in packet["run"]
+        assert 'raise SystemExit(code)' in packet["run"]
 
 
 def test_installer_latency_contracts_are_native_bounded_and_opt_in() -> None:

@@ -56,7 +56,7 @@ def _runtime_profile_settings(value: Any) -> dict[str, Any]:
     if not isinstance(value, Mapping) or not set(value) <= {
         "allowSourceFallback", "backend", "downloadOrigins",
     }:
-        _fail("runtimeProfiles supports only allowSourceFallback, backend and downloadOrigins.")
+        _fail("runtimeProfiles has unsupported settings.")
     result = dict(value)
     if "allowSourceFallback" in result and not isinstance(result["allowSourceFallback"], bool):
         _fail("runtimeProfiles.allowSourceFallback must be a JSON boolean.")

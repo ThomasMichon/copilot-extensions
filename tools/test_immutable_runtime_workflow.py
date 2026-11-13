@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from pathlib import Path
 import os
 import platform
@@ -13,6 +14,7 @@ import sys
 
 import pytest
 import yaml
+from _pytest.mark import Expression, KeywordMatcher
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -134,6 +136,111 @@ def test_manual_selection_preserves_every_existing_route_and_default():
                 expected | routes["immutable_runtime"]
             )
     assert set(WORKFLOW["jobs"]) == diagnostics | set().union(*routes.values())
+
+
+def _collected_packet_items(monkeypatch, files, expression=None):
+    items = []
+
+    class Inventory:
+        def pytest_collection_finish(self, session):
+            items.extend(session.items)
+
+    arguments = [
+        "-q", "--collect-only", "--import-mode=importlib", f"--rootdir={ROOT}",
+        "-p", "no:cacheprovider", *files,
+    ]
+    if expression:
+        arguments.extend(("-k", expression))
+    with monkeypatch.context() as context:
+        context.chdir(ROOT)
+        assert pytest.main(arguments, plugins=[Inventory()]) == 0
+    return items
+
+
+def test_seed_packets_cover_actual_cases_once_without_wider_deadlines(monkeypatch):
+    linux = WORKFLOW["jobs"]["packaging-seed-linux"]
+    windows = WORKFLOW["jobs"]["packaging-seed-windows"]
+    assert linux["strategy"] == windows["strategy"]
+    assert linux["strategy"]["fail-fast"] is False
+    assert linux["timeout-minutes"] == windows["timeout-minutes"] == 6
+    packets = linux["strategy"]["matrix"]["include"]
+    assert len({packet["suite"] for packet in packets}) == len(packets)
+    items = _collected_packet_items(monkeypatch, ["tools/test_installer_packaging_seed.py"])
+    selected = []
+    for packet in packets:
+        assert 0 < packet["seconds"] <= 300
+        expression = Expression.compile(packet["expression"])
+        cases = [
+            item.nodeid for item in items
+            if expression.evaluate(KeywordMatcher.from_item(item))
+        ]
+        assert cases, packet["suite"]
+        selected.extend(cases)
+    assert Counter(selected) == Counter(item.nodeid for item in items)
+    tooling = next(step for step in linux["steps"] if step.get("name") == "Validator tooling only")
+    assert "pytest-timeout>=2.3,<3" in tooling["run"]
+
+
+def test_compile_packets_preserve_the_previous_actual_selection(monkeypatch):
+    linux = WORKFLOW["jobs"]["dependency-compile-linux"]
+    windows = WORKFLOW["jobs"]["dependency-compile-windows"]
+    assert linux["strategy"] == windows["strategy"]
+    assert linux["strategy"]["fail-fast"] is False
+    assert linux["timeout-minutes"] == windows["timeout-minutes"] == 6
+    previous_files = [
+        "tools/test_installer_dependency_compile.py", "tools/test_installer_dependency_policy.py",
+        "tools/test_runtime_source_lock.py", "tools/test_runtime_source_authentication.py",
+        "tools/test_runtime_source_feed.py",
+    ]
+    packets = linux["strategy"]["matrix"]["include"]
+    assert Counter(packet["test"] for packet in packets) == Counter(previous_files)
+    expression = Expression.compile(
+        "compile or real_uv_registry_transitive_and_isolated_build_age or "
+        "runtime_source_lock or runtime_source_authentication or runtime_source_feed",
+    )
+    items = _collected_packet_items(monkeypatch, previous_files)
+    expected = [item.nodeid for item in items if expression.evaluate(KeywordMatcher.from_item(item))]
+    selected = [
+        item.nodeid for packet in packets for item in items
+        if item.nodeid.split("::", 1)[0] == packet["test"]
+        and expression.evaluate(KeywordMatcher.from_item(item))
+    ]
+    assert expected and Counter(selected) == Counter(expected)
+
+
+@pytest.mark.parametrize("job_name", ["dependency-compile-linux", "packaging-seed-linux"])
+def test_actual_native_packet_step_uses_containment_and_reports_cleanup(monkeypatch, job_name):
+    import plugin_test_containment as containment
+
+    job = WORKFLOW["jobs"][job_name]
+    packet = job["strategy"]["matrix"]["include"][0]
+    step = next(step for step in job["steps"] if step.get("shell") == "python")
+    calls = []
+
+    def run(command, **options):
+        assert options["cwd"] == ROOT
+        assert options["env"]["HOME"] != os.environ.get("HOME")
+        assert command[command.index("--basetemp") + 1] == str(options["sandbox"] / "pytest")
+        assert "--durations=10" in command
+        if job_name == "packaging-seed-linux":
+            assert options["limits"].wall_seconds == packet["seconds"]
+            assert command[command.index("-k") + 1] == packet["expression"]
+            assert "--timeout=100" in command
+        else:
+            assert options["limits"].wall_seconds == 300
+            assert packet["test"] in command
+        calls.append(options["sandbox"])
+        return 0
+
+    monkeypatch.setattr(containment, "run_contained", run)
+    monkeypatch.chdir(ROOT)
+    monkeypatch.setattr(sys, "path", sys.path.copy())
+    for key, value in packet.items():
+        monkeypatch.setenv("PACKET_" + key.upper(), str(value))
+    with pytest.raises(SystemExit) as result:
+        exec(compile(step["run"], "<native-packet-step>", "exec"), {})
+    assert result.value.code == 0
+    assert len(calls) == 1 and not calls[0].exists()
 
 
 @pytest.mark.parametrize("requested", ["", "A" * 40, "0123456789abcdef" * 2 + "01234567"])

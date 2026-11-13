@@ -13,7 +13,7 @@ import shutil
 import sys
 import time
 from collections.abc import Callable
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
@@ -41,7 +41,10 @@ from runtime_profile import (
     validate_profile,
 )
 from runtime_profile_wheels import profile_wheel_inputs
-from runtime_source_authentication import retain_authenticated_source
+from runtime_source_authentication import (
+    AuthenticatedSource,
+    retain_installation_source as retain_authenticated_source,
+)
 from runtime_source_lock import (
     _build_roots,
     _source,
@@ -150,6 +153,7 @@ def retain_source_runtime_inputs(
     acquisition_limits: AcquisitionLimits, wheel_limits: WheelLimits,
     max_lock_bytes: int, max_snapshot_bytes: int, deadline: float,
     revoked_inputs: Callable[[], frozenset[str]] | None = None,
+    authenticated_source: AuthenticatedSource | None = None,
 ):
     """Retain authenticated source, admitted tools and built runtime wheels.
 
@@ -163,13 +167,25 @@ def retain_source_runtime_inputs(
         raise ProfileError("source runtime needs an explicit wheel snapshot budget")
     selected_uv = dependencies._select_uv_executable(uv)
     uv = str(Path(shutil.which(selected_uv) or selected_uv).resolve(strict=True))
-    with retain_authenticated_source(
-        plan, installation=installation, deadline=deadline,
-    ) as authenticated, retain_source_wheel_lock(
+    if authenticated_source is not None and not isinstance(authenticated_source, AuthenticatedSource):
+        raise ProfileError("source build needs its retained authentication owner")
+    selected_source = (
+        nullcontext(authenticated_source.for_plan(plan, installation=installation))
+        if authenticated_source is not None else
+        retain_authenticated_source(plan, installation=installation, deadline=deadline)
+    )
+
+    def verify_source(payload, identity):
+        if payload != authenticated.payload or identity != authenticated.identity:
+            raise ProfileError("source configuration verifier names another origin")
+        authenticated.verify()
+
+    with selected_source as authenticated, retain_source_wheel_lock(
         plan, payload=authenticated.payload, expected_source=authenticated.identity,
         target=target, component=component, uv=uv, python=python, extras=extras, env=env,
         max_lock_bytes=max_lock_bytes, deadline=deadline, include_build_tools=True,
         installation=installation,
+        source_verifier=verify_source,
     ) as locked, retain_source_feed_inputs(
         plan, locked, installation=installation, deadline=deadline,
     ) as feed:
@@ -208,12 +224,17 @@ def retain_source_runtime_inputs(
                 build_profile, build_snapshot, evidence=evidence, limits=wheel_limits, deadline=deadline,
             )
 
-            def verify_build():
-                authenticated.verify()
+            def verify_selected():
+                (locked._verification or authenticated.verify)()
                 if revoked_inputs is not None:
                     from runtime_source_reuse import verify_not_revoked
 
                     verify_not_revoked(build_inputs.receipt(), revoked_inputs)
+
+            selected = replace(locked, _verification=verify_selected)
+
+            def verify_build():
+                selected.verify(deadline=deadline)
 
             verify_build()
             build_root = Path(record["policy"]["owner"]["runtimeRoot"]) / ".source-build-tools"
@@ -236,11 +257,10 @@ def retain_source_runtime_inputs(
                 toolchain = ToolchainLock(tool_python, {
                     item["name"]: item["version"] for item in build_profile.record()["wheels"]
                 })
-                selected = replace(locked, canonical=json.dumps({
+                selected = replace(selected, canonical=json.dumps({
                     **record, "source_authentication": evidence["source"],
                     "acquisition": evidence["acquisition"],
                 }, sort_keys=True, separators=(",", ":"), allow_nan=False).encode(),
-                    _verification=verify_build,
                 )
                 authenticated.verify()
                 with retain_source_profile(

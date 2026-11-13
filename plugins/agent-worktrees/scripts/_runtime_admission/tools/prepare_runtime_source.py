@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from functools import partial
@@ -11,11 +12,11 @@ import math
 import os
 from pathlib import Path, PurePosixPath
 import re
+import secrets
 import shutil
 import subprocess
 import sys
 import tarfile
-import tempfile
 import time
 from typing import BinaryIO
 
@@ -30,7 +31,10 @@ _RUNTIME_LIBRARY = (
     else _TOOL_DIRECTORY.parent / "libs" / "versioned-runtime"
 )
 sys.path.insert(0, str(_RUNTIME_LIBRARY))
-from versioned_runtime import _AV_RETRY_ATTEMPTS, _AV_RETRY_BACKOFF, _is_transient_lock, construction_lease
+from versioned_runtime import (
+    _AV_RETRY_ATTEMPTS, _AV_RETRY_BACKOFF, _is_transient_lock,
+    _normalize_windows_extended_path, construction_lease,
+)
 from versioned_runtime_source import (
     SOURCE_FILE,
     SourceIdentity,
@@ -111,12 +115,49 @@ def _git(
     return result.stdout.strip() if result.stdout is not None else ""
 
 
+def _private_output_directory(path: Path) -> None:
+    from source_preparation_process import procutil_module
+
+    permissions = procutil_module("python_cache_permissions")
+    owner = procutil_module("_daemon_instance_owner")
+    missing = []
+    current = path
+    while not current.exists():
+        missing.append(current)
+        current = current.parent
+    permissions.check(current, ancestor=True)
+    permissions.check_ancestors(current)
+    for directory in reversed(missing):
+        owner.mkdir_private(directory)
+
+
 def _archive(source: Path, commit: str, archive: Path, *, deadline: float | None = None) -> None:
-    with archive.open("xb") as output:
+    from source_preparation_process import procutil_module
+
+    archive = archive.absolute()
+    permissions = procutil_module("python_cache_permissions")
+    permissions.check(archive.parent)
+    permissions.check_ancestors(archive.parent)
+    file_owner = procutil_module("_daemon_instance_owner")
+    descriptor = file_owner.open_private(archive, os.O_WRONLY | os.O_CREAT | os.O_EXCL)
+    git_path = _normalize_windows_extended_path(str(archive)) if os.name == "nt" else str(archive)
+    with os.fdopen(descriptor, "wb"):
         _git(
             source, "-c", "tar.umask=0022", "-c", "core.eol=lf",
-            "archive", "--format=tar", commit, deadline=deadline, output=output,
+            "archive", "--format=tar", "--output=" + git_path, commit, deadline=deadline,
         )
+
+
+@contextmanager
+def _private_work_directory(parent: Path, prefix: str):
+    from source_preparation_process import procutil_module
+
+    work = parent / (prefix + secrets.token_hex(16))
+    procutil_module("_daemon_instance_owner").mkdir_private(work)
+    try:
+        yield work
+    finally:
+        shutil.rmtree(work)
 
 
 def _admit(source: Path, commit: str, branch: str, *, deadline: float | None = None) -> tuple[str, str]:
@@ -300,12 +341,11 @@ def prepare(
     if os.name == "nt":
         # Prefix the existing volume root before creating a long missing path.
         output = Path(os.path._getfinalpathname(output.anchor)).joinpath(*output.parts[1:])
-    output.mkdir(parents=True, exist_ok=True)
+    _private_output_directory(output)
     if os.name == "nt":
         output = Path(os.path._getfinalpathname(output))
     prefix = f".prepare-{plugin}-{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}-"
-    with tempfile.TemporaryDirectory(prefix=prefix, dir=output) as temporary:
-        work = Path(temporary)
+    with _private_work_directory(output, prefix) as work:
         archive = work / "source.tar"
         _archive(source, commit, archive, deadline=deadline)
         snapshot = work / "source"

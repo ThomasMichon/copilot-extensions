@@ -289,6 +289,36 @@ def test_source_compile_retains_graph_and_derives_only_local_omissions(tmp_path,
     assert not root.exists()
 
 
+@pytest.mark.parametrize("conditional", [False, True])
+def test_source_compile_accepts_repeated_mapping_only_when_independently_active(
+    tmp_path, monkeypatch, conditional,
+):
+    child = source_project(tmp_path / "child", name="fixture-child")
+    sibling = source_project(
+        tmp_path / "sibling", name="fixture-sibling",
+        dependencies=json.dumps("fixture-child; sys_platform == 'win32'") if conditional else "",
+        sources='fixture-child={path="../child"}',
+    )
+    project = source_project(
+        tmp_path / "root", dependencies='"fixture-child", "fixture-sibling"',
+        sources='fixture-child={path="../child"}\nfixture-sibling={path="../sibling"}',
+    )
+    names = ["fixture-child", "fixture-sibling"]
+    monkeypatch.setattr(
+        policy.subprocess, "run",
+        lambda command, **options: subprocess.CompletedProcess(command, 0, source_compile_settings(names), ""),
+    )
+    with policy.retain_uv_source_compile(
+        "fixture-uv", [str(project / "pyproject.toml")], env={}, cwd=tmp_path,
+        trusted_source_roots=(tmp_path,), now=NOW,
+    ) as transaction:
+        assert transaction.sources.keys() == {project, sibling, child}
+        assert [
+            value for option, value in policy._argument_pairs(list(transaction.argv[3:]))
+            if option == "--no-emit-package"
+        ] == names
+
+
 @pytest.mark.parametrize("omissions", [[], ["fixture-source", "registry-only"], ["wrong-source"]])
 def test_source_compile_refuses_ambient_omission_drift(tmp_path, monkeypatch, omissions):
     source_project(tmp_path / "child", name="fixture-child")

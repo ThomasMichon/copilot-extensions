@@ -41,47 +41,50 @@ def fingerprint_entries(
     def frame(data):
         return len(data).to_bytes(8, "big") + data
 
-    ordered = sorted(entries, key=label)
+    labels = {entry: label(entry) for entry in entries}
+    ordered = sorted(entries, key=labels.__getitem__)
     parallel = on_file is None and len(ordered) > 1
     digest = hashlib.sha256()
     with ThreadPoolExecutor(max_workers=4) if parallel else nullcontext() as readers:
-        for start in range(0, len(ordered), 4):
-            batch = ordered[start:start + 4]
-            pending = {
-                entry: readers.submit(entry.read_bytes)
-                for entry in batch if entries[entry] != "symlink"
-            } if readers is not None else {}
-            for entry in batch:
-                kind = entries[entry]
-                if kind == "symlink":
+        def submit(entry):
+            return readers.submit(entry.read_bytes) if entries[entry] != "symlink" else None
+
+        pending = {entry: submit(entry) for entry in ordered[:4]} if readers is not None else {}
+        for index, entry in enumerate(ordered):
+            kind = entries[entry]
+            future = pending.pop(entry, None)
+            if kind == "symlink":
+                try:
+                    target = normalize_link(os.readlink(entry))
+                except OSError as exc:
+                    raise OSError(f"fingerprint_source: could not read symlink {entry}: {exc}") from exc
+                if os.path.isabs(target):
                     try:
-                        target = normalize_link(os.readlink(entry))
-                    except OSError as exc:
-                        raise OSError(f"fingerprint_source: could not read symlink {entry}: {exc}") from exc
-                    if os.path.isabs(target):
-                        try:
-                            resolved = path_type(target).resolve()
-                        except OSError:
-                            resolved = None
-                        if resolved is not None and any(
-                            resolved == root or resolved.is_relative_to(root) for root in roots
-                        ):
-                            target = root_label(resolved)
-                    data = path_type(target).as_posix().encode("utf-8")
-                else:
-                    try:
-                        data = pending[entry].result() if entry in pending else entry.read_bytes()
-                    except OSError as exc:
-                        raise OSError(f"fingerprint_source: could not read {entry}: {exc}") from exc
-                    if file_hashes is not None:
-                        file_hashes[entry] = hashlib.sha256(data).hexdigest()
-                    if on_file is not None:
-                        on_file(entry, data)
-                digest.update(frame(label(entry).encode("utf-8")))
-                digest.update(frame(kind.encode("utf-8")))
-                digest.update(frame(data))
-                if on_progress is not None:
-                    on_progress()
+                        resolved = path_type(target).resolve()
+                    except OSError:
+                        resolved = None
+                    if resolved is not None and any(
+                        resolved == root or resolved.is_relative_to(root) for root in roots
+                    ):
+                        target = root_label(resolved)
+                data = path_type(target).as_posix().encode("utf-8")
+            else:
+                try:
+                    data = future.result() if future is not None else entry.read_bytes()
+                except OSError as exc:
+                    raise OSError(f"fingerprint_source: could not read {entry}: {exc}") from exc
+                if file_hashes is not None:
+                    file_hashes[entry] = hashlib.sha256(data).hexdigest()
+                if on_file is not None:
+                    on_file(entry, data)
+            digest.update(frame(labels[entry].encode("utf-8")))
+            digest.update(frame(kind.encode("utf-8")))
+            digest.update(frame(data))
+            if on_progress is not None:
+                on_progress()
+            if readers is not None and index + 4 < len(ordered):
+                next_entry = ordered[index + 4]
+                pending[next_entry] = submit(next_entry)
     return digest.hexdigest()
 
 
@@ -698,12 +701,9 @@ def fingerprint_source(
 ) -> str:
     """Return a stable sha256 fingerprint over a frozen set of source paths.
 
-    Covers the FULL attributable runtime install input, not just one
-    manifest file -- an adopter must pass every path whose content changing
-    should be treated as "this version's payload changed" (e.g. a plugin's
-    whole ``src/`` tree plus its ``pyproject.toml``, not ``pyproject.toml``
-    alone -- a prior audit on this effort found exactly that narrower scope
-    on one adopter, #5472). Hashes each regular file's path (relative to
+    Callers supply every attributable runtime input, including the complete
+    source tree and project manifest, not just metadata (see #5472).
+    Hashes each regular file's path (relative to
     whichever declared root most specifically contains it, labeled by that
     root's own path relative to the common ancestor of every declared root
     -- never the root's bare basename, which is not unique across declared

@@ -588,6 +588,31 @@ def test_changed_owner_policy_cannot_be_replaced_by_a_stale_plan(adopter, select
     assert state["requests"] == []
 
 
+@pytest.mark.parametrize("change", ["settings", "policy", "closed"])
+def test_artifact_feed_live_checks_keep_current_native_and_owner_inputs(
+    adopter, selected, feeds, tmp_path, change,
+):
+    state = feeds()
+    env = environment(adopter, state, tmp_path)
+    if change == "closed":
+        with capture(selected, adopter, env) as inputs:
+            inputs.verify()
+        with pytest.raises(ProfileError, match="custody is closed"):
+            inputs.verify()
+    else:
+        with pytest.raises(ProfileError, match="changed"):
+            with capture(selected, adopter, env) as inputs:
+                if change == "policy":
+                    owned_policy(adopter[0], adopter[1], downloadOrigins=["https://files.example"])
+                else:
+                    path = Path(env["UV_CONFIG_FILE"])
+                    path.write_text(
+                        path.read_text().replace('authenticate="never"', 'authenticate="auto"'),
+                    )
+                inputs.verify()
+    assert state["requests"] == []
+
+
 @pytest.mark.parametrize("changes,message", [
     ({"index_strategy": "unsafe-best-match"}, "index strategy"),
     ({"keyring_provider": "subprocess"}, "credential provider"),
@@ -629,7 +654,9 @@ def test_owner_selected_download_origins_survive_native_capture(
     adopter, release, feeds, tmp_path, monkeypatch,
 ):
     state = feeds()
-    owned_policy(adopter[0], adopter[1], downloadOrigins=["https://files.example"])
+    owned_policy(
+        adopter[0], adopter[1], downloadOrigins=["https://files.example"],
+    )
     release[2]["target"] = {"environment": default_environment(), "tags": ["py3-none-any"], "device": "cpu"}
     _write_index(release[0], release[1])
     _verification(monkeypatch, release)
