@@ -3164,6 +3164,12 @@ sources, transferring owners or turning partial/planning gains into completion.
   receiving objective or a retained gap; investigate actual implementation
   evidence when claiming completion, rather than making that the prerequisite
   for discovering thematic alignment.
+  The [named scheduled-configuration intake](journal/2026/11.13-named-scheduled-configuration-intake.md)
+  proposes #5941's complete finite execution-time NAME lookup, authorized
+  refusal and explicit-file compatibility family in existing Logger planning.
+  Four unchecked Plan/local/global rows and five source-specific canonical
+  keepers remain; documentary delivery is not a runtime fix or source
+  disposition. The current census is 861 whole open, 132 above target.
   The [recurrence/source-accounting intake](journal/2026/11.13-recurrence-and-source-accounting-intake.md)
   proposes two complete finite families in promotion Phase 3 and progressive
   Phase 6, preserving undecided policy and normal reviewed domain acceptance.

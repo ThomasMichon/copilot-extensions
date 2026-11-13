@@ -44,6 +44,16 @@ which repository wins.
   source, collection, rendering and operational custody. A closed historical
   umbrella never serves as a live claim or evidence of completed acceptance.
 
+The #5941 named-scheduling lane retains the existing primary contributor and
+Logger configuration/accounting, installer and scheduled-activation owners.
+Preserve existing admission, trust, aggregate-policy and source/resource
+holds; do not absorb #2350 activation architecture or #2701 installation-context
+work. Use the existing eligible bounded-source/Journal claiming process.
+Normal reviewed direct Plan/local AND actual global Validation/Coordination/
+Journal delivery and whole-current receiving/custody readback precede any
+separate source judgment. This intake appoints no implementer and authorizes
+no repository move, scheduler execution, settings change or rollout.
+
 ## Context
 
 The revised [agent-logger vision](../../../visions/plugins/agent-logger/README.md)
@@ -136,6 +146,33 @@ particular control-repository name, machine inventory, or private topology.
 - [ ] Add setup or migration guidance that never writes committed repository policy during install or update.
 - [ ] Bump all required agent-logger versions with each implementation pull request.
 - [ ] Deploy the merged runtime through the unified update flow and validate a passive machine before enabling real collection policy.
+
+### Direct named scheduled-configuration acceptance from #5941
+
+This finite supplement addresses the existing Phase 5 scheduling boundary.
+It does not reorder phases, bypass aggregate authorization, or make named
+configuration resolution depend on completing aggregate enforcement.
+
+- [ ] N5941-1: For named-repository scheduling, persist the selected
+  configuration repository NAME and resolve its current authorized
+  configuration at EACH execution, rather than persisting the pathname
+  resolved during launcher/unit generation. Visibly reject missing,
+  ambiguous or untrusted resolution; location propagation is not a trust
+  bypass.
+- [ ] N5941-2: Preserve deliberately selected standalone file configuration,
+  existing Windows AND POSIX stable scheduled activation, registry-location
+  propagation and installation-cell provenance. Named mode does not ban
+  legitimate explicit paths or transfer aggregate configuration authority.
+
+#### Local Validation
+
+- [ ] NV5941: Through the actual named scheduled configuration resolution
+  boundary, qualify synthetic named-repository relocation and missing,
+  ambiguous and untrusted outcomes, alongside unchanged explicitly selected
+  standalone-file controls. Preserve Windows/POSIX activation and
+  installation-cell provenance at the original finite source/synthetic tier.
+  A stale-path trust refusal is not successful name-following. No production
+  repository move or new native scheduler portfolio is required by this lane.
 
 ### Direct aggregate authorization and adoption acceptance from #1817
 
@@ -235,6 +272,13 @@ https://github.com/ThomasMichon/copilot-extensions/pull/5671 .
 ## Validation Plan
 
 - [ ] Complete every directly retained #1817 Plan/Validation clause above at its original evidence tier and bounds; preserve current owners, holds and unfinished acceptance. Tracker consolidation is not implementation.
+- [ ] G5941: Resolve EVERY N5941/local Validation/continuing Coordination
+  clause: execution-time authorized lookup of the selected repository NAME,
+  missing/ambiguous/untrusted refusal, deliberate explicit-file compatibility
+  and Windows AND POSIX activation/installation provenance. Keep this finite
+  scheduling contract independent of aggregate enforcement completion.
+  Documentary receiving, historical source credit and synthetic controls are
+  not a runtime fix, installation or deployment.
 
 - [ ] Two disjoint repository declarations resolve identically regardless of discovery order.
 - [ ] A declaration in an unadmitted checkout is inert and reported as unadmitted.
@@ -267,6 +311,16 @@ https://github.com/ThomasMichon/copilot-extensions/pull/5671 .
 Reviewed and merged in #1828. Implementation is authorized against this plan.
 
 ## Journal
+
+### 2026-11-13 - Proposed named scheduled-configuration retention
+
+Retained #5941's complete original and comment6332331912 in direct unchecked
+Plan/local/global Validation and Coordination. Named execution-time lookup,
+authorized refusal and the explicit-file counterexample remain distinct.
+Existing Windows/POSIX activation, installation-cell provenance and aggregate
+configuration ownership are preserved. #5943 remains tracker/audit credit,
+not runtime delivery. Review and actual whole-current receiving acceptance
+remain pending; no source disposition or resource effect occurred.
 
 ### 2026-10-22 - Complete retained acceptance from #1817
 
