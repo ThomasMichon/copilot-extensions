@@ -514,6 +514,12 @@ def _create_worktree_core(
     """
     core = _core()
     from .execution_spaces import require_current_execution_space, require_record_mutation
+    from .dispatch_cohort import DispatchCohort
+
+    cohort = (
+        DispatchCohort.from_attempt(dispatch_attempt)
+        if dispatch_attempt is not None and "cohort" in dispatch_attempt else None
+    )
 
     if (build_launch_plan and kind != "system") or pending_seed:
         from .launch_preflight import require_repository_hosting
@@ -853,6 +859,7 @@ def _create_worktree_core(
                         driver=str(dispatch_attempt["driver"]),
                         supervisor=str(dispatch_attempt["supervisor"]),
                         creator_machine=machine_identity.execution_machine if machine_identity is not None else config.machine,
+                        cohort=cohort,
                     )
                     if dispatch_attempt is not None
                     else None

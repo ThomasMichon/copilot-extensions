@@ -45,6 +45,19 @@ def overlay(
     environment: dict[str, str],
 ) -> dict:
     """Carry selected entries to MCP start without querying a mutable provider."""
+    return _overlay(configuration, names, {"pid": pid, "birth": birth})
+
+
+def windows_overlay(configuration: dict, names: list[str], *, binding: str) -> dict:
+    """Prepare a snapshot-bound overlay; no Windows client is enrolled here."""
+    from .owner_snapshot import section_name
+
+    section_name(binding)
+    snapshot = Path(__file__).with_name("owner_snapshot.py").read_text(encoding="utf-8")
+    return _overlay(configuration, names, {"binding": binding}, snapshot=snapshot)
+
+
+def _overlay(configuration: dict, names: list[str], owner: dict, *, snapshot: str = "") -> dict:
     servers = configuration.get("mcpServers")
     if (
         not isinstance(servers, dict) or not names
@@ -69,11 +82,11 @@ def overlay(
             remaining = entry["args"] if len(query) == 2 else entry["args"][len(query) - 2:]
             request = {
                 "original": original, "arguments": remaining, "query": query,
-                "pid": pid, "birth": birth,
+                **owner,
             }
             replacement["command"] = str(Path(sys._base_executable).absolute())
             replacement["args"] = [
-                "-I", "-S", "-c", Path(__file__).with_name("owner_bootstrap.py").read_text(
+                "-I", "-S", "-c", snapshot + "\n" + Path(__file__).with_name("owner_bootstrap.py").read_text(
                     encoding="utf-8",
                 ), json.dumps(request, ensure_ascii=True),
             ]

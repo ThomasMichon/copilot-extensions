@@ -10,7 +10,7 @@ from agent_worktrees import terminal_pair_progress as progress, tracking
 from agent_worktrees.worktree_machine_identity import WorktreeMachineIdentity
 
 
-def _pair(tmp_path: Path, *, versioned: bool):
+def _pair(tmp_path: Path, *, versioned: bool, attempt: dict | None = None):
     identity = WorktreeMachineIdentity("desk", "wsl", "guest-space") if versioned else None
     machine = identity.machine if identity else "desk-wsl"
     execution_owner = identity.execution_machine if identity else machine
@@ -18,6 +18,7 @@ def _pair(tmp_path: Path, *, versioned: bool):
         tracking.create_new_record(
             name, f"worktree/{name}", str(tmp_path / name), project, machine,
             "wsl", tmp_path / project / "worktrees", machine_identity=identity,
+            dispatch_attempt=tracking.DispatchAttempt(**attempt) if name == "primary" and attempt else None,
         )
         for name, project in (("primary", "harness"), ("sibling", "knowledge"))
     ]
@@ -36,11 +37,20 @@ def _pair(tmp_path: Path, *, versioned: bool):
 
 
 @pytest.mark.parametrize("versioned", [False, True])
-def test_retained_pair_receipts_resume_and_allow_completed_discharge(tmp_path, monkeypatch, versioned):
+@pytest.mark.parametrize("dispatch_created", [False, True])
+def test_retained_pair_receipts_resume_and_allow_completed_discharge(
+    tmp_path, monkeypatch, versioned, dispatch_created,
+):
     monkeypatch.setattr(tracking.cfg, "project_dir", lambda project=None: tmp_path / str(project))
-    primary, sibling = _pair(tmp_path, versioned=versioned)
+    original_attempt = {
+        "task_id": "original-task", "reservation_key": "original-reservation",
+        "attempt": 1, "driver": "cli", "supervisor": "original-supervisor",
+        "creator_machine": "desk-wsl", "ownership": "created",
+    } if dispatch_created else None
+    primary, sibling = _pair(tmp_path, versioned=versioned, attempt=original_attempt)
     progress.publish(primary, sibling, sibling.yaml_path, primary_path=primary.yaml_path)
     receipt = json.loads(progress.receipt_path(sibling.yaml_path).read_text())
+    assert receipt["primary"]["dispatch_attempt"] == original_attempt
     if versioned:
         assert receipt["primary"] | primary.machine_fields == receipt["primary"]
     else:
@@ -51,7 +61,7 @@ def test_retained_pair_receipts_resume_and_allow_completed_discharge(tmp_path, m
                 "pair_id": "pair", "pair_role": "harness",
                 "pair_ref": "desk-wsl/knowledge/sibling", "pair_kind": "worktree",
             },
-            "dispatch_attempt": None,
+            "dispatch_attempt": original_attempt,
         }
         assert receipt["primary"] == old_identity
         receipt["primary"] = old_identity
