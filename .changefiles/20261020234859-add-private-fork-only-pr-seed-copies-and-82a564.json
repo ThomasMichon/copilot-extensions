@@ -1,9 +1,0 @@
-{
-  "comment": "Add private fork-only PR seed copies and mutation-isolation contracts without converting consumers.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Add independent real rebased PR setup fixtures preserving recorded old publication heads and copied private refs",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

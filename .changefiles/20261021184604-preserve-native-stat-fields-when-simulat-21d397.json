@@ -1,9 +1,0 @@
-{
-  "comment": "Preserve native stat fields when simulating nonregular instruction inputs in tests.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

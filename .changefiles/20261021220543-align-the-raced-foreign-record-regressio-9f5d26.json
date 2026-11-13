@@ -1,9 +1,0 @@
-{
-  "comment": "Align the raced foreign-record regression dispatch floor with current session write generation three.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

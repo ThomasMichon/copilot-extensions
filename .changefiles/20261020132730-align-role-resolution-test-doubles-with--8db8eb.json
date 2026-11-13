@@ -1,9 +1,0 @@
-{
-  "comment": "Align role-resolution test doubles with head-bound provider review exceptions.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Read explicit Worktrees tuple metadata through the shared codec when filtering and presenting focus.",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

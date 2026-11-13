@@ -1,9 +1,0 @@
-{
-  "comment": "Check actual non-tmpfs prerequisites in native launch-storage refusal tests without weakening disk, symlink, or permission witnesses.",
-  "changes": [
-    {
-      "plugin": "agent-containers",
-      "type": "patch"
-    }
-  ]
-}

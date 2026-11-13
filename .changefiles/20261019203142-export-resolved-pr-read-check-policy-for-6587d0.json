@@ -1,9 +1,0 @@
-{
-  "comment": "Export resolved PR read/check policy for fresh worker contexts and validate canonical push destinations",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

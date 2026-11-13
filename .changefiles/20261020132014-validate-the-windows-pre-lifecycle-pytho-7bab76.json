@@ -1,9 +1,0 @@
-{
-  "comment": "Validate the Windows pre-lifecycle Python floor before admission; preserve explicit selections and skip incompatible discovery candidates.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

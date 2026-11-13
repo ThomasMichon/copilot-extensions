@@ -1,9 +1,0 @@
-{
-  "comment": "Add internal legacy-default tuple creation with registered identity and paired execution-owner references",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

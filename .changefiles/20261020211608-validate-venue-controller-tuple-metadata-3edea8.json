@@ -1,9 +1,0 @@
-{
-  "comment": "Validate venue controller tuple metadata through the shared execution-owner codec and retain standalone snapshot packaging.",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

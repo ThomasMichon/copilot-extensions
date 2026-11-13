@@ -1,9 +1,0 @@
-{
-  "comment": "Preserve an explicit signed Windows Python base across Dispatch updates without changing global interpreter defaults",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}
