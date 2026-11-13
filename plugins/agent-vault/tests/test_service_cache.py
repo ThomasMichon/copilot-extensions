@@ -828,3 +828,23 @@ def test_absolute_move_destination_invalidates_memory_when_persistent_caching_is
     assert response["ok"]
     assert (kpdb, "Allowed/New/entry", "password") not in vault.cache
     assert _get(vault, entry="Allowed/New/entry")["value"] == "moved-value"
+
+
+@pytest.mark.parametrize("invalid_field", ["password", "Password"])
+def test_alias_journal_guard_preserves_strict_corruption_failure(
+    cached_service, invalid_field: str,
+) -> None:
+    _vault, persistent, _kpdb, _clock = cached_service
+    assert persistent.put("Allowed/entry", "password", "old-canonical", 1)
+    assert persistent.put("Allowed/entry", "Password", "old-alias", 1)
+    assert persistent.begin_replace("Allowed/entry", "password", "candidate", 2)
+    store = persistent._read_store()
+    store["entries"]["Allowed/entry"][invalid_field] = {"rotation": {}}
+    assert persistent._write_store(store)
+    before = persistent._cache_file.read_bytes()
+
+    with pytest.raises(CacheProtectionError, match="record is invalid"):
+        persistent.get("Allowed/entry", readonly=True)
+
+    assert persistent._cache_file.read_bytes() == before
+    assert persistent.get("Allowed/entry") is None

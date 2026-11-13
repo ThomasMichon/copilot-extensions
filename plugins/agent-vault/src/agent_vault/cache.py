@@ -478,19 +478,22 @@ class PersistentCache:
             entries[entry] = fields
         return entries, fields
 
-    @staticmethod
-    def _pending_alias(store: dict, entry: str, field: str) -> bool:
+    @classmethod
+    def _pending_alias(cls, store: dict, entry: str, field: str, *, strict: bool) -> bool:
         identity = normalize_entry(entry, "")
+        pending = False
         for path, fields in store["entries"].items():
-            if normalize_entry(path, "") != identity or not isinstance(fields, dict):
+            if normalize_entry(path, "") != identity:
                 continue
-            for attribute, record in fields.items():
-                if (
-                    canonical_field(attribute) == canonical_field(field)
-                    and isinstance(record, dict) and "rotation" in record
-                ):
-                    return True
-        return False
+            if not isinstance(fields, dict):
+                cls._field_record(store, path, field, strict=strict)
+                continue
+            for attribute in fields:
+                if canonical_field(attribute) == canonical_field(field):
+                    record = cls._field_record(store, path, attribute, strict=strict)
+                    if isinstance(record, dict) and "rotation" in record:
+                        pending = True
+        return pending
 
     def get(
         self,
@@ -526,7 +529,7 @@ class PersistentCache:
             self._read_store(readonly=True, strict=True)
             if readonly else self._read_store()
         )
-        if self._pending_alias(store, entry, field):
+        if self._pending_alias(store, entry, field, strict=readonly):
             return None
         if not readonly and _path_exists(self._key_file):
             from . import kek
@@ -542,7 +545,7 @@ class PersistentCache:
                                 self._write_key(blob.strip())
         rec = self._field_record(store, entry, field, strict=readonly)
         if rec is None and legacy_entry and legacy_entry != entry:
-            if self._pending_alias(store, legacy_entry, field):
+            if self._pending_alias(store, legacy_entry, field, strict=readonly):
                 return None
             rec = self._field_record(store, legacy_entry, field, strict=readonly)
             if rec is not None and not readonly:
