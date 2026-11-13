@@ -10,7 +10,7 @@ import sys
 
 from . import config
 from .cache_dpapi import CacheDecryptionUnavailable
-from .credential_fields import canonical_field
+from .credential_fields import attribute_name, canonical_field
 
 CACHE_DECRYPTION_WARNING = (
     "cache_decryption_unavailable; protected cache retained; service-only read"
@@ -58,6 +58,7 @@ def read_credential(args) -> CredentialRead:
                 field,
                 max_age_seconds=max_cache_age,
                 legacy_entry=None if pinned else entry,
+                legacy_field=attribute_name(field),
                 **({"readonly": True} if readonly_cache else {}),
             )
         except CacheDecryptionUnavailable:

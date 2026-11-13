@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import contextlib
+from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+import threading
 from types import SimpleNamespace
 
 import pytest
@@ -463,8 +467,9 @@ def test_custom_field_case_remains_distinct_while_standard_aliases_are_canonical
 @pytest.mark.parametrize("invalid", [
     b'{"version":99,"epochs":{}}', b'{"version":99,"version":1,"epochs":{}}',
 ])
+@pytest.mark.parametrize("entry", ["entry", "uncached"])
 def test_malformed_revocation_metadata_is_not_replaced_or_treated_as_permission(
-    cached_service, monkeypatch: pytest.MonkeyPatch, invalid: bytes,
+    cached_service, monkeypatch: pytest.MonkeyPatch, invalid: bytes, entry: str,
 ) -> None:
     from agent_vault.service_cache_epochs import FILENAME
 
@@ -475,5 +480,286 @@ def test_malformed_revocation_metadata_is_not_replaced_or_treated_as_permission(
     monkeypatch.setattr(
         vault, "ensure_unlocked", lambda *_a, **_kw: pytest.fail("invalid metadata bypassed policy"),
     )
-    assert _get(vault) == {"ok": False, "error": service_cache.UNAVAILABLE}
+    assert _get(vault, entry=entry) == {"ok": False, "error": service_cache.UNAVAILABLE}
     assert path.read_bytes() == invalid
+
+
+def test_alias_population_cache_only_and_verification_use_the_same_field(
+    cached_service, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture,
+) -> None:
+    vault, persistent, _kpdb, _clock = cached_service
+    monkeypatch.setattr(cache, "get_cache", lambda: persistent)
+    monkeypatch.setattr(persistent, "prepare", lambda: {"state": "compatible"})
+    monkeypatch.setattr(cli, "ensure_service", lambda: True)
+    monkeypatch.setattr(
+        cli, "send_command",
+        lambda request, **_kw: vault.handle_request({**request, "group": "Allowed"}),
+    )
+    arguments = SimpleNamespace(
+        entry=["entry:Password"], manifest=None, machine=None, prompt=False, verify=False,
+    )
+    assert cli.cmd_cache_populate(arguments) == 0
+    assert persistent.get("Allowed/entry", "password") == "fixture-value"
+    monkeypatch.setattr(cli, "ensure_service", lambda: pytest.fail("cache-only contacted service"))
+    assert credential_reads.read_credential(
+        SimpleNamespace(entry="entry", field="Password", cache_only=True),
+    ).value == "fixture-value"
+    assert cli.cmd_cache_verify(arguments) == 0
+    assert "fixture-value" not in capsys.readouterr().out
+
+
+def test_legacy_alias_remains_readable_without_migration_but_cannot_bypass_a_pending_canonical_field(
+    cached_service, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _vault, persistent, _kpdb, _clock = cached_service
+    assert persistent.put("Allowed/entry", "Password", "legacy-alias-value", 1)
+    before = persistent._cache_file.read_bytes()
+    monkeypatch.setattr(cache, "get_cache", lambda: persistent)
+    monkeypatch.setattr(cli, "ensure_service", lambda: pytest.fail("cache-only contacted service"))
+    arguments = SimpleNamespace(entry="entry", field="Password", cache_only=True)
+    assert credential_reads.read_credential(arguments).value == "legacy-alias-value"
+    assert persistent._cache_file.read_bytes() == before
+    assert persistent.begin_replace("Allowed/entry", "password", "candidate", 2)
+    assert credential_reads.read_credential(arguments).code == 1
+
+
+def test_revocation_compaction_and_explicit_clear_retain_fences_without_exhausting_capacity(
+    cached_service, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_vault import service_cache_epochs
+
+    vault, persistent, kpdb, _clock = cached_service
+    assert _get(vault)["ok"]
+    monkeypatch.setattr(service_cache_epochs, "MAX_BYTES", 800)
+    for index in range(20):
+        assert _store(persistent, kpdb).invalidate(f"other-{index}", "password")
+    epochs = service_cache_epochs.read(persistent._base_dir)
+    assert "all" in epochs
+    assert (persistent._base_dir / service_cache_epochs.FILENAME).stat().st_size <= 800
+    assert _store(persistent, kpdb).record("entry") is None
+    assert persistent.clear()
+    assert set(service_cache_epochs.read(persistent._base_dir)) == {"all"}
+    assert _store(persistent, kpdb).put("entry", "password", "fresh-value", 50)
+    assert _store(persistent, kpdb).record("entry")["value"] == "fresh-value"
+
+
+def test_refresh_and_password_commit_generations_advance_beyond_persisted_values_after_clock_rollback(
+    cached_service, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    vault, persistent, kpdb, clock = cached_service
+    monkeypatch.setattr(service.time, "time_ns", lambda: 500)
+    first = _get(vault)
+    assert persistent.put("Allowed/entry", "password", "old-client-value", 2000)
+    clock[0] = 900
+    monkeypatch.setattr(vault.cli, "get_entry", lambda *_args: "refreshed-value")
+    refreshed = _get(vault, refresh=True)
+    assert refreshed["value"] == "refreshed-value"
+    assert refreshed["generation"] > max(first["generation"], 2000)
+    monkeypatch.setattr(vault.cli, "edit_password", lambda *_args: (True, "updated"))
+    changed = vault.handle_request({
+        "action": "set-password", "entry": "entry", "group": "Allowed", "password": "changed-value",
+    })
+    assert changed["ok"] and changed["generation"] > refreshed["generation"]
+    assert persistent._read_store()["entries"]["Allowed/entry"]["password"]["generation"] == changed["generation"]
+    clock[0] = 1010
+    final = _get(vault)
+    assert final["value"] == "changed-value" and final["generation"] == changed["generation"]
+    assert not vault.cli.has_password(kpdb)
+
+
+@pytest.mark.parametrize("action", ["set-password", "remove"])
+def test_backend_equivalent_leading_slash_records_are_revoked_together(
+    cached_service, monkeypatch: pytest.MonkeyPatch, action: str,
+) -> None:
+    vault, persistent, kpdb, clock = cached_service
+    assert _get(vault, entry="/Allowed/entry")["ok"]
+    stored = persistent._read_store()
+    retained = dict(next(iter(stored[COLLECTION].values())))
+    retained["entry"] = "/Allowed/entry"
+    stored[COLLECTION]["retained-alternate-spelling"] = retained
+    assert persistent._write_store(stored)
+    monkeypatch.setattr(vault.cli, "edit_password", lambda *_args: (True, "updated"))
+    monkeypatch.setattr(vault.cli, "remove_entry", lambda *_args: (True, "removed"))
+    response = vault.handle_request({
+        "action": action, "entry": "Allowed/entry", "group": "Allowed", "password": "changed-value",
+    })
+    assert response["ok"]
+    assert "retained-alternate-spelling" not in persistent._read_store()[COLLECTION]
+    clock[0] += 10
+    monkeypatch.setattr(vault, "ensure_unlocked", lambda *_a, **_kw: False)
+    result = _get(vault, entry="/Allowed/entry")
+    if action == "set-password":
+        assert result["value"] == "changed-value"
+    else:
+        assert not result["ok"]
+    assert not vault.cli.has_password(kpdb)
+
+
+def test_absolute_bare_entry_is_not_reprefixed_by_service_cache_layers(
+    cached_service, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    vault, _persistent, _kpdb, clock = cached_service
+    monkeypatch.setattr(vault.cli, "get_entry", lambda _db, entry, _field: "value-" + entry)
+    assert _get(vault, entry="/token")["value"] == "value-token"
+    assert _get(vault, entry="token")["value"] == "value-Allowed/token"
+    clock[0] += 10
+    assert _get(vault, entry="/token")["value"] == "value-token"
+    assert _get(vault, entry="token")["value"] == "value-Allowed/token"
+
+
+@pytest.mark.parametrize("compartments", [False, True])
+@pytest.mark.parametrize("action", ["set-password", "remove"])
+def test_shared_database_revocation_crosses_installation_bindings_and_selected_compartments(
+    cached_service, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, compartments: bool, action: str,
+) -> None:
+    first, first_cache, kpdb, clock = cached_service
+    second_cache = first_cache
+    if compartments:
+        second_cache = cache.PersistentCache(first_cache._root_dir)
+        second_cache._select_base(first_cache._root_dir / "selected-second-compartment")
+        second_cache._base_dir.mkdir()
+        second_cache._key_file.write_bytes(b"fixture-key")
+        second_cache._fernet = first_cache._fernet
+        monkeypatch.setattr(second_cache, "_refresh_selection", lambda: None)
+        monkeypatch.setattr(second_cache, "_get_fernet", lambda **_kw: second_cache._fernet)
+    second = service.VaultService()
+    second.cli.set_password(kpdb, "fixture-master")
+    second._password_set_at[kpdb] = clock[0]
+    monkeypatch.setattr(second.cli, "get_entry", lambda *_args: "fixture-value")
+    monkeypatch.setattr(first.cli, "edit_password", lambda *_args: (True, "updated"))
+    monkeypatch.setattr(first.cli, "remove_entry", lambda *_args: (True, "removed"))
+
+    @contextlib.contextmanager
+    def cell(name: str, selected: cache.PersistentCache) -> Iterator[None]:
+        with monkeypatch.context() as context:
+            context.setattr(config, "home_dir", lambda: tmp_path / name)
+            context.setattr(config, "installation_id", lambda: name)
+            context.setattr(service, "get_cache", lambda: selected)
+            yield
+
+    with cell("first", first_cache):
+        assert _get(first)["ok"]
+    with cell("second", second_cache):
+        assert _get(second)["ok"]
+    with cell("first", first_cache):
+        assert first.handle_request({
+            "action": action, "entry": "entry", "group": "Allowed", "password": "changed-value",
+        })["ok"]
+    clock[0] += 10
+    monkeypatch.setattr(second, "ensure_unlocked", lambda *_a, **_kw: False)
+    with cell("second", second_cache):
+        assert not _get(second)["ok"]
+
+
+@pytest.mark.parametrize("action", ["get", "lock", "add", "set-username", "remove", "move", "set-password"])
+def test_cache_construction_failure_has_an_authoritative_service_response(
+    cached_service, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, action: str,
+) -> None:
+    vault, _persistent, kpdb, _clock = cached_service
+    assert _get(vault)["ok"]
+
+    def unavailable() -> cache.PersistentCache:
+        raise CacheProtectionError("private recovery selection diagnostic")
+
+    for operation in ("add_entry", "edit_username", "remove_entry", "move_entry", "edit_password"):
+        monkeypatch.setattr(vault.cli, operation, lambda *_a, **_kw: pytest.fail("backend mutation ran"))
+    with monkeypatch.context() as context:
+        context.setattr(service, "get_cache", service_cache.get_cache)
+        context.setattr(service_cache, "_raw_get_cache", unavailable)
+        response = vault.handle_request({
+            "action": action, "kpdb": kpdb, "entry": "entry", "group": "Allowed",
+            "username": "new", "password": "new", "dest": "Allowed/New",
+        })
+    assert response == {"ok": False, "error": service_cache.UNAVAILABLE}
+    assert "private recovery selection diagnostic" not in caplog.text
+    if action == "lock":
+        assert not vault.cli.has_password(kpdb)
+        assert _get(vault) == response
+
+
+def test_shared_backend_custody_orders_a_refresh_after_another_service_mutation(
+    cached_service, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first, _persistent, kpdb, clock = cached_service
+    second = service.VaultService()
+    second.cli.set_password(kpdb, "fixture-master")
+    second._password_set_at[kpdb] = clock[0]
+    value = ["old-value"]
+    entered, release, read = threading.Event(), threading.Event(), threading.Event()
+
+    def mutate(*_args: object) -> tuple[bool, str]:
+        entered.set()
+        assert release.wait(4)
+        value[0] = "changed-value"
+        return True, "updated"
+
+    def refresh(*_args: object) -> str:
+        read.set()
+        return value[0]
+
+    monkeypatch.setattr(first.cli, "edit_password", mutate)
+    monkeypatch.setattr(second.cli, "get_entry", refresh)
+    with ThreadPoolExecutor(max_workers=2) as workers:
+        mutation = workers.submit(first.handle_request, {
+            "action": "set-password", "entry": "entry", "group": "Allowed", "password": "changed-value",
+        })
+        try:
+            assert entered.wait(2)
+            refreshing = workers.submit(_get, second, refresh=True)
+            assert not read.wait(0.1)
+        finally:
+            release.set()
+        assert mutation.result(timeout=4)["ok"]
+        assert refreshing.result(timeout=4)["value"] == "changed-value"
+
+
+def test_mutation_deadline_still_prevents_backend_work_after_cache_journalling(
+    cached_service, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    vault, persistent, _kpdb, _clock = cached_service
+    monotonic = [0.0]
+    original = vault._prepare_password_cache
+    monkeypatch.setattr(service.time, "monotonic", lambda: monotonic[0])
+
+    def prepare(*args: object) -> tuple:
+        result = original(*args)
+        monotonic[0] = 31.0
+        return result
+
+    monkeypatch.setattr(vault, "_prepare_password_cache", prepare)
+    monkeypatch.setattr(vault.cli, "edit_password", lambda *_a: pytest.fail("late backend write"))
+    response = vault.handle_request({
+        "action": "set-password", "entry": "entry", "group": "Allowed", "password": "changed-value",
+    })
+    assert response["ok"] is False and "expired before the backend write" in response["error"]
+    assert persistent.pending_replace("Allowed/entry", "password") is None
+
+
+def test_alternate_spelling_pending_journal_is_preserved_instead_of_starting_another_mutation(
+    cached_service, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    vault, persistent, _kpdb, _clock = cached_service
+    assert persistent.begin_replace("/Allowed/entry", "password", "unknown-candidate", 5)
+    monkeypatch.setattr(vault.cli, "edit_password", lambda *_a: pytest.fail("unknown mutation bypassed"))
+    response = vault.handle_request({
+        "action": "set-password", "entry": "Allowed/entry", "group": "Allowed", "password": "other",
+    })
+    assert response == {"ok": False, "error": service_cache.UNAVAILABLE}
+    assert persistent.pending_replace("/Allowed/entry", "password")["operation"] == 5
+
+
+def test_add_at_an_existing_path_cannot_leave_the_prior_service_value_cached(
+    cached_service, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    vault, _persistent, _kpdb, _clock = cached_service
+    value = ["prior-value"]
+    monkeypatch.setattr(vault.cli, "get_entry", lambda *_a: value[0])
+    assert _get(vault)["value"] == "prior-value"
+
+    def add(*_args: object, **_kwargs: object) -> tuple[bool, str]:
+        value[0] = "added-value"
+        return True, "added"
+
+    monkeypatch.setattr(vault.cli, "add_entry", add)
+    assert vault.handle_request({"action": "add", "entry": "entry", "group": "Allowed"})["ok"]
+    assert _get(vault)["value"] == "added-value"

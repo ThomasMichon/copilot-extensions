@@ -1332,12 +1332,13 @@ def cmd_cache_populate(args):
     is fetched so the daemon caches it (and missing entries surface early).
     """
     from .extensions import get_registry
+    from .credential_fields import canonical_field
 
     pairs: list[tuple[str, str]] = []
     seen: set[tuple[str, str]] = set()
 
     def _add(entry: str, field: str) -> None:
-        pair = (entry, field or "password")
+        pair = (entry, canonical_field(field or "password"))
         if pair[0] and pair not in seen:
             seen.add(pair)
             pairs.append(pair)
@@ -1464,12 +1465,13 @@ def cmd_cache_verify(args):
     launch-time gate can confirm an unattended box is primed while still locked.
     """
     from .cache import get_cache
+    from .credential_fields import attribute_name, canonical_field
 
     pairs: list[tuple[str, str]] = []
     seen: set[tuple[str, str]] = set()
 
     def _add(entry: str, field: str) -> None:
-        pair = (entry, field or "password")
+        pair = (entry, canonical_field(field or "password"))
         if pair[0] and pair not in seen:
             seen.add(pair)
             pairs.append(pair)
@@ -1498,7 +1500,11 @@ def cmd_cache_verify(args):
     present = 0
     missing: list[str] = []
     for entry, field in pairs:
-        if cache.get(entry, field, readonly=True) is not None:
+        cache_entry = config.normalize_entry(entry, config.resolve_context().group)
+        if cache.get(
+            cache_entry, field, readonly=True, legacy_field=attribute_name(field),
+            legacy_entry=None if config.PINNED_CONTEXT_ENV in os.environ else entry,
+        ) is not None:
             present += 1
         else:
             missing.append(f"{entry} [{field}]")

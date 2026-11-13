@@ -600,8 +600,14 @@ cannot poison those slots. Unattributed legacy values are not adopted.
 
 A matching service record can satisfy the existing `get` request after the
 master password expires. Value/generation snapshots are read together.
+Backend-equivalent leading-slash paths use one entry identity without
+re-prefixing an explicitly absolute root entry. Unknown journals under an older
+spelling are preserved, not bypassed by starting another mutation.
 Standard field aliases such as `Password` and `password` share one cache and
-journal identity; custom field names remain case-sensitive. Ordinary client
+journal identity, including population and verification; custom field names
+remain case-sensitive. Existing alias-keyed direct records remain readable
+without migration only when no canonical record or pending journal owns the
+field. Ordinary client
 writeback and entry migration do not rewrite service records or renew their age.
 
 Authoritative refresh never returns a cached value or deletes the caller's
@@ -612,13 +618,32 @@ the relevant service records. Pending password journals remain intact, but
 observing a pending replacement revokes earlier service values so rolling it
 back cannot resurrect a revoked value.
 
-The existing store lock also protects a small non-secret revocation-epoch file.
+A root-metadata lock and the selected store lock protect a small non-secret
+revocation-epoch file at the original cache root.
 It contains only hashed subjects and random fences, never credentials. Recording
 revocation before attempting credential decoding prevents a replacement service
 from reviving old records after a temporarily unavailable crypto backend returns.
 An opted-in but unavailable protected cache is not cache opt-out: dependent
 mutations fail before backend writes, and locking still clears the master while
 reporting failed protected-cache revocation. Malformed metadata fails closed.
+Read bindings remain installation-specific, but revocation follows the physical
+database across installations sharing a cache root, including separately selected
+recovery compartments. Short root-metadata locking coordinates those fences;
+cache-miss backend reads and cache-affecting mutations share per-database custody
+without recursing into caller-held replacement locks. Health probes remain
+independent, and mutation deadlines still apply after cache journalling.
+Cache-construction/selection failures return `service_cache_unavailable` rather
+than dropping the service response.
+Encompassing revocations compact narrower fences only after rotating the wider
+fence. Capacity pressure rotates a global fence rather than permanently disabling
+mutations, and explicit `cache-clear` starts a fresh global fence before removing
+credential data. Uncached reads validate this metadata too.
+
+Fresh service generations advance beyond persisted generations under the
+protected-store lock, not just wall-clock time, so backward clock adjustments
+cannot make an older value outrank an authoritative refresh. Owned password
+journal completion, service publication and its generation are committed in the
+same protected write.
 
 The encrypted format, DPAPI/key protection, existing request syntax and direct
 `--cache-only` behavior remain unchanged; `cache-status` reports service records

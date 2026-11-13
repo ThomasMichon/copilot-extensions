@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+from collections.abc import Iterator
 import hashlib
 import json
 import os
@@ -10,11 +11,34 @@ from pathlib import Path
 import re
 import tempfile
 import uuid
+from typing import TYPE_CHECKING
 
 from .cache_dpapi import CacheProtectionError
 from .ssh_key_files import _ordinary
 
+if TYPE_CHECKING:
+    from .cache import PersistentCache
+
 FILENAME = "service-cache-revocations.json"
+MAX_BYTES = 1024 * 1024
+
+
+@contextlib.contextmanager
+def guard(persistent: PersistentCache) -> Iterator[None]:
+    """Share revocations across selected compartments without caller-lock recursion."""
+    with persistent._selection_guard():
+        persistent._refresh_selection()
+        with persistent._file_lock(persistent._root_dir / "service-cache-state.lock"):
+            with persistent._store_lock():
+                yield
+
+
+@contextlib.contextmanager
+def backend_guard(persistent: PersistentCache, database: str) -> Iterator[None]:
+    """Serialize backend work for one shared database, independently of client locks."""
+    key = hashlib.sha256(database.encode()).hexdigest()[:24]
+    with persistent._file_lock(persistent._root_dir / f"service-cache-work-{key}.lock"):
+        yield
 
 
 def _unique(pairs: list[tuple[str, object]]) -> dict[str, object]:
@@ -39,7 +63,7 @@ def read(base: Path) -> dict[str, str]:
         _ordinary(path, directory=False)
     except FileNotFoundError:
         return {}
-    if path.stat().st_size > 1024 * 1024:
+    if path.stat().st_size > MAX_BYTES:
         raise CacheProtectionError("Protected service-cache revocation metadata is too large")
     try:
         document = json.loads(path.read_bytes(), object_pairs_hook=_unique)
@@ -67,13 +91,22 @@ def snapshot(epochs: dict[str, str], database: str, entry: str, field: str) -> l
 
 def revoke(
     base: Path, database: str | None, entry: str | None = None, field: str | None = None,
+    *, reset: bool = False,
 ) -> None:
     """Caller holds the existing protected-store lock, including codec failures."""
-    epochs = read(base)
+    if reset and database is not None:
+        raise ValueError("A service-cache reset requires a global fence")
+    epochs = {} if reset else read(base)
+    if database is None:
+        epochs = {}
+    elif entry is None:
+        prefixes = tuple(kind + database for kind in ("database:", "entry:", "field:"))
+        epochs = {key: value for key, value in epochs.items() if not key.startswith(prefixes)}
     epochs["all" if database is None else _key(database, entry, field)] = uuid.uuid4().hex
     payload = json.dumps({"version": 1, "epochs": epochs}, separators=(",", ":")).encode()
-    if len(payload) > 1024 * 1024:
-        raise CacheProtectionError("Protected service-cache revocation metadata is too large")
+    if len(payload) > MAX_BYTES:
+        epochs = {"all": uuid.uuid4().hex}
+        payload = json.dumps({"version": 1, "epochs": epochs}, separators=(",", ":")).encode()
     fd, temporary = tempfile.mkstemp(dir=base, prefix=".service-cache-", suffix=".tmp")
     try:
         with os.fdopen(fd, "wb") as stream:

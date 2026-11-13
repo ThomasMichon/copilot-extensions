@@ -483,6 +483,7 @@ class PersistentCache:
         max_age_seconds: int | None = None,
         *,
         legacy_entry: str | None = None,
+        legacy_field: str | None = None,
         readonly: bool = False,
     ) -> str | None:
         """Read a cached value; readonly mode refuses migration and corrupt data."""
@@ -498,11 +499,12 @@ class PersistentCache:
             ):
                 require_coordinated(self._root_dir, self._recovery)
                 return self._get_value(
-                    entry, field, max_age_seconds, legacy_entry=legacy_entry, readonly=readonly,
+                    entry, field, max_age_seconds, legacy_entry=legacy_entry,
+                    legacy_field=legacy_field, readonly=readonly,
                 )
 
     def _get_value(
-        self, entry, field, max_age_seconds, *, legacy_entry, readonly,
+        self, entry, field, max_age_seconds, *, legacy_entry, legacy_field, readonly,
     ) -> str | None:
         store = (
             self._read_store(readonly=True, strict=True)
@@ -528,6 +530,14 @@ class PersistentCache:
                 migrated = self._field_record(self._read_store(), entry, field)
                 if migrated is not None:
                     rec = migrated
+        canonical_exists = any(
+            isinstance(fields, dict) and field in fields
+            for fields in (store["entries"].get(entry), store["entries"].get(legacy_entry))
+        )
+        if rec is None and not canonical_exists and legacy_field and legacy_field != field:
+            rec = self._field_record(store, entry, legacy_field, strict=readonly)
+            if rec is None and legacy_entry and legacy_entry != entry:
+                rec = self._field_record(store, legacy_entry, legacy_field, strict=readonly)
         if not isinstance(rec, dict) or "rotation" in rec:
             return None
         if max_age_seconds is not None:
@@ -852,10 +862,16 @@ class PersistentCache:
         """Wipe the entire cache file. Safe when the file is absent."""
         try:
             self._refresh_selection()
-            if self._cache_file.exists():
-                self._cache_file.unlink()
+            if not self._base_dir.exists():
+                return True
+            from . import service_cache_epochs
+
+            with service_cache_epochs.guard(self):
+                service_cache_epochs.revoke(self._root_dir, None, reset=True)
+                if self._cache_file.exists():
+                    self._cache_file.unlink()
             return True
-        except OSError:
+        except (OSError, RuntimeError, ValueError):
             return False
 
     def status(self) -> dict:
