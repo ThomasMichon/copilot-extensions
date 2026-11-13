@@ -85,7 +85,7 @@ def _live_codespaces() -> list | None:
     try:
         from .lifecycle import list_codespaces
 
-        return list(list_codespaces())
+        return list(list_codespaces(concurrent=True))
     except Exception:
         log.debug("could not list CodeSpaces; keeping every account binding", exc_info=True)
         return None
@@ -115,8 +115,12 @@ def codespace_scope_accounts(*, live_only: bool = False) -> tuple[tuple[str, ...
         from .config import load_merged_config
 
         cfg = load_merged_config(include_cwd=False)
-        for repo in cfg.repos.keys():
-            account = gh_account.account_for_repo(repo)
+        repos = list(cfg.repos.keys())
+        # One routing snapshot serves every configured repo; a per-repo lookup
+        # spawns agent-worktrees once per repo and dominates readiness time.
+        inventory = gh_account.account_inventory() if repos else None
+        for repo in repos:
+            account = inventory.account_for(repo) if repo else None
             if account:
                 accounts.append(account)
             else:

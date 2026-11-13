@@ -1,0 +1,9 @@
+{
+  "comment": "Keep installer readiness cheap: resolve configured repo accounts from one routing snapshot and list live CodeSpaces concurrently",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    }
+  ]
+}
