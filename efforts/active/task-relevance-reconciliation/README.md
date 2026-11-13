@@ -112,7 +112,7 @@ merged plan does not establish running adoption.
       Unknown or unavailable owner state remains visible for recovery.
       Accepted original-owner wake and steering now survive same-generation
       unassignment and requeue in source controls. Generation-advancing recovery,
-      uncaptured owners and actual lifecycle closeout remain open.
+      uncaptured owners and recovered-owner lifecycle closeout remain open.
 
 ### Phase 3 - Source and periodic evaluation integration
 
@@ -176,7 +176,7 @@ merged plan does not establish running adoption.
       that original claim without releasing the native or reservation.
       Internal acknowledgement now reuses independent finalized-workspace
       observation and the existing terminal transition; actual own-worker
-      caller adoption, native conclusion and running qualification remain open.
+      installed caller adoption and broader native/running qualification remain open.
       The provider-first HTTP expansion exposes captured-owner preparation,
       validated state and terminal acknowledgement under existing authentication,
       drain and terminal hooks; source merged in #12435. Its task-scoped exception
@@ -189,8 +189,14 @@ merged plan does not establish running adoption.
       New closeout wakes now direct the original worker through read-only
       executing-CLI support discovery and that conditional caller, without a
       generic task-read/steer prerequisite or rewriting accepted wakes.
-      Native conclusion and running qualification remain open; source prompt
-      adoption does not close the aggregate item.
+      The scoped local ordinary assembly and request-bound known-busy retry
+      merged in #12453. A fresh synthetic original-owner composition now
+      qualifies busy refusal/retry, guarded finalization, abandonment and
+      independent native/workspace conclusion through that assembly.
+      Production cohorts, other owner states and recovered-owner qualification
+      remain open; source/native credit does not close the aggregate item.
+      Whole-container timing is not isolated admission-latency or concurrent
+      running acceptance, and no production activation is implied.
 - [ ] Publish receiver support before enabling new callers; document baseline,
       upgrade and rollback behavior against the executing runtime.
 
@@ -207,6 +213,8 @@ merged plan does not establish running adoption.
       reset-cleared mutable fields; source controls merged in #12281.
 - [ ] Busy, idle, suspended and temporarily unreachable owners receive
       durable closeout in the original conversation without duplicate work.
+      The bounded fresh busy/idle synthetic composition is qualified in #12453;
+      suspended/unreachable owners and production acceptance remain open.
 - [ ] Restart, duplicate reports and lost responses preserve a single accepted
       request, steer and closeout outcome; pending effects remain inspectable.
 - [ ] A stale report, reopened source, changed task episode, foreign emitter

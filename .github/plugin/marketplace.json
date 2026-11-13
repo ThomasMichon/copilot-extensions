@@ -6,13 +6,13 @@
   },
   "metadata": {
     "description": "Copilot CLI plugins for worktree isolation, service lifecycle, inter-agent communication, GitHub Codespaces management, local container fleets, MCP bridging, session logging, context-window handoff, effort planning, budget posture, coordinator-first delegation, publication safety, WSL environment setup, and CLI customization",
-    "version": "1.26.56-dev1"
+    "version": "1.26.57-dev1"
   },
   "plugins": [
     {
       "name": "agent-worktrees",
       "description": "Worktree isolation system for concurrent Copilot CLI sessions - lifecycle management, finalization, cleanup, service discovery, and deployment patterns for monorepos",
-      "version": "1.26.56-dev1",
+      "version": "1.26.57-dev1",
       "source": "plugins/agent-worktrees"
     },
     {
@@ -25,13 +25,13 @@
     {
       "name": "agent-bridge",
       "description": "Live cross-boundary inter-agent communication service - conversation transport, session management, SSE event streaming, agent subprocess spawning, and ACP-over-WebSocket support for external clients",
-      "version": "0.9.435-dev2",
+      "version": "0.9.436-dev1",
       "source": "plugins/agent-bridge"
     },
     {
       "name": "agent-remote-driver",
       "description": "User-global SDK extension giving baseline drivability (attach to the live event stream, send/steer, abort) to any copilot CLI session present at launch time - independent of agent-bridge, agent-worktrees, or any other coordination plugin being installed in that venue",
-      "version": "0.1.42-dev1",
+      "version": "0.1.43-dev1",
       "source": "plugins/agent-remote-driver",
       "defaultEnabled": false
     },
@@ -50,7 +50,7 @@
     {
       "name": "agent-mcp",
       "description": "Swiss-army MCP bridge - wrap an upstream MCP server (HTTP or stdio) as a local stdio MCP, inject host credentials, and apply a decorator stack (filter, rename, defer, code-mode, storage, transform, gate, input_gate). Dual-era: speaks modern MCP 2.x (2026-07-28) and the legacy handshake, in both directions.",
-      "version": "0.2.269-dev1",
+      "version": "0.2.270-dev1",
       "source": "plugins/agent-mcp"
     },
     {

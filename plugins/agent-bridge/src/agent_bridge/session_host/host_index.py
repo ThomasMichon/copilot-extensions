@@ -283,6 +283,19 @@ class HostIndex:
             existed = self._records.pop(session_id, None) is not None
         return existed
 
+    @contextmanager
+    def retiring_current(self, expected: HostRecord) -> Iterator[bool]:
+        """Fence synchronous settlement and removal against other generations.
+
+        The admitted body must not await or re-enter this index's mutation API.
+        """
+        with self._locked_reload():
+            if self._records.get(expected.session_id) != expected:
+                yield False
+                return
+            yield True
+            del self._records[expected.session_id]
+
     def release_exited_local(self, expected: HostRecord) -> bool:
         """Settle only this exact local Host record after both original processes exited."""
         from zdd.process_exit import observe_original_exit
