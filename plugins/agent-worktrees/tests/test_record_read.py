@@ -57,6 +57,27 @@ def invoke(*args):
     return rc, json.loads(captured.getvalue())
 
 
+@pytest.mark.parametrize("session_state", ["active", "yielded", "concluded"])
+@pytest.mark.parametrize("checkout_managed", [None, True, False])
+def test_exact_record_exposes_indexed_id_even_without_an_active_head(
+    record_fixture, session_state, checkout_managed,
+):
+    data, path = record_fixture
+    data["sessions"] = [{"session_id": "original-native", "state": session_state}]
+    if checkout_managed is not None:
+        data["checkout_managed"] = checkout_managed
+    path.write_text(yaml.safe_dump(data), encoding="utf-8")
+    before = path.read_bytes()
+    rc, response = invoke(data["worktree_id"])
+    assert rc == 0
+    record = response["worktree"]
+    assert record["session_ids"] == ["original-native"]
+    assert record["session_count"] == 1
+    assert record["last_session_id"] == ("original-native" if session_state == "active" else None)
+    assert record["checkout_managed"] is checkout_managed
+    assert path.read_bytes() == before
+
+
 def test_exact_record_never_falls_back_to_matching_foreign_head(record_fixture, monkeypatch):
     data, path = record_fixture
     foreign_dir = path.parents[2] / ".other-project" / "worktrees"
@@ -305,6 +326,7 @@ def test_record_read_exact_unpublished_record_and_unchanged_list(record_fixture,
         "creation_nonce": data["creation_nonce"],
         "status": "active",
         "session_count": 0,
+        "session_ids": [],
         "last_session_id": None,
         "execution_leg": None,
         "execution_leg_opaque": False,

@@ -248,6 +248,7 @@ class TaskQueue(
         relationship_writer: RelationshipWriter | None = None,
         relationship_authority: str | None = None,
         standing_relationship_writer: RelationshipWriter | None = None,
+        ordinary_relationship_writer: RelationshipWriter | None = None,
     ):
         self.db_path = str(db_path)
         self.lease_seconds = lease_seconds
@@ -259,6 +260,7 @@ class TaskQueue(
         self._relationship_writer = relationship_writer
         self._relationship_authority = relationship_authority
         self._standing_relationship_writer = standing_relationship_writer
+        self._ordinary_relationship_writer = ordinary_relationship_writer
         if relationship_writer is not None and relationship_authority not in {"local", "central"}:
             raise ValueError("relationship writer requires its original local or central queue authority")
         self._wake_notifier: Callable[[], None] | None = None

@@ -112,6 +112,19 @@ Supported original-native receipt reconciliation can settle acceptance without
 another send; a missing receipt is not proof of absence. A delivered wake may
 still be awaiting the agent's work.
 
+A selected Bridge CLI's typed `refused_busy` result (exit 75, matching target,
+`reason: busy`, `retryable: true`) establishes pre-admission refusal, not an
+ambiguous send. Its original invocation key and native identity must match the
+wake before settlement as `not_sent`. A later normally claimed attempt repeats
+all current owner, generation, runtime, lane and delivery-token admission.
+The prior send identity and refusal are appended to the task's existing audit
+transaction before installing the new attempt identity; no separate retry store
+is used. The wake/idempotency key and ordinary backoff/attempt cap remain the
+same. Reusing the same delivery token, an untyped historical `not_sent`,
+malformed or mismatched output, a lost response and pending/unknown outcomes
+cannot authorize another send. Existing unknown records are never rewritten
+from busy-looking error text.
+
 At first acceptance the existing closeout row also freezes `resource_binding`
 in the same queue transaction. A captured binding identifies the queue, original
 relationship audit event/request, managed workspace and, for a placed task,
