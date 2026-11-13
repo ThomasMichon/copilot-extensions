@@ -3,6 +3,12 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-12 - Account source credit and retained execution custody](journal/2026/11.12-account-source-credit-and-retained-custody.md)
+
+- [2026-11-12 - Index data receiving and inherited fixture scope](journal/2026/11.12-index-data-receiving-and-inherited-fixture-scope.md)
+
+- [2026-11-12 - Complete ROOT receiving and required source scope](journal/2026/11.12-complete-root-receiving-and-required-source-scope.md)
+
 - [2026-11-12 - Ordered reliability and diagnostic receiving](journal/2026/11.12-ordered-reliability-and-diagnostic-receiving.md)
 
 - [2026-11-12 - Menu completion and source-ownership receiving](journal/2026/11.12-menu-completion-and-source-ownership-receiving.md)

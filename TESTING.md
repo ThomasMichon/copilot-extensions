@@ -7647,7 +7647,7 @@ or modified. This bounded mapping does not complete the historical unit census.
 `tools/promotion_unit_tests/test_config_migrate.py` re-exports the original
 config-migration functions and unchanged parameterization from
 `libs/config-migrate/tests/test_config_migrate.py`. Replacing only the file
-prefix maps all 29 original cases to their release identities. Its synthetic
+prefix maps all 38 original cases to their release identities. Its synthetic
 temporary-file cases retain the actual atomic rewrite, backup, interruption
 and idempotency assertions. The original tests and all four canonical
 production modules are hash-bound, without executing their path-only conftest

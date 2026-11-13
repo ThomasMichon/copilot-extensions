@@ -10,6 +10,9 @@
 - **Coverage:** [Portfolio tracker and merged lockdown records](coverage.md)
 - **Current slice:** Continue Payload Invocation's complete original test/program corpus, source/frozen strict qualification, native/minimum-runtime gates and reviewed admission under #10371. The bounded declared-consumer roster and native fixture corrections merged in #11820 after the reviewed independent-runtime direction in #11796; neither activates a pending project. Promotion-owned copy implementation and complete acceptance merged in #11265; preparation and copied-source correspondence are not admission. Installer Engine (#10931) and Efforts (#10955) retain their separate owners and unmet gates. The original Windows membership report (#11468) is resolved by verified passing original cases. Preserve existing deadlines, source custody, resource limits and individual holds. Agent Roles is strictly admitted by #11485; Payload Invocation preparation merged in #11165. Versioned Runtime (#10331), full-composed-consumer qualification (#10362) and the all-Python campaign remain open. No Main release or installed rollout is inferred from a Dev merge.
 - **Checker-only follow-up:** #10638 is delivered by merged #10866; #10938 delivers emitted-program visibility/binding completeness. Both are prerequisites, not Harness, Versioned Runtime or Payload Invocation admission. Preserve full-composed-consumer qualification under #10362 independently while progressing the other assigned slices.
+- **Latest fixture prerequisite:** The post-acquisition policy-recheck wrapper correction merged in #12133 after the original regression, Ruff, both declared Python 3.11 strict analysis targets, exact-head approval and required source CI passed. Return to the remaining original Invocation test/program corpus; no pending-project admission, coverage advance or existing native/minimum-runtime gate is closed by this fixture-only fix.
+- **Latest scoped unit qualification:** All 32 original private-file management cases now have ordinary three-phase passes, with original function/helper definitions and module markers preserved. Focused multi-case cohorts avoid repeating startup for every case. This closes that fixture family only; the original full corpus, executed/emitted programs, native/minimum-runtime and strict-admission gates remain open.
+- **Next independent admission:** The operator authorized strict enforcement of the complete 27-file `lib-payload-invocation-tests` project on its declared Python 3.11 Linux/win32 targets through a reviewed PR. Production and emitted-program ownership remains separate; the full original corpus, native/minimum-runtime, source/frozen/candidate and final #10371 gates stay open. This approval is not merged admission or permission to exclude test files.
 - **Sub-issues:** #9831 (P1 checker foundation, complete); #9853 (P2 required source CI, complete); #9862 (P3 exact-candidate qualification, complete); #9916 (P4a canonical Installation Context source view, complete); #9924 (L1 Config Migrate strict admission, complete); #9930 (L1 Dropin Registry strict admission, complete); #9933 (L1 Endpoint Rendezvous strict admission, complete); #9941 (L1 initial leaf-library test/helper completion, complete); #9951 (L1 Lazy CLI Dispatch strict admission, complete); #9964 (L1 Bootstrap Killswitch strict admission, complete); #9967 (L1 Peer Launch strict admission, complete); #9971 (P2a Installation Context native typing preparation, complete); #9975 (P2b validation-decorator signature preservation, complete); #9980 (P2c production result and flow contracts, complete); #9983 (P2d native platform API contracts, complete); #9986 (P2e cleanup and worker contracts, complete); #9993 (P2f shared receipt-fixture typing, complete); #9996 (P2g slot-release test contracts); #10400 (shared real-import-root/additional-version checker prerequisite, merged #10553); #10331, #10362 and #10371 (independent consumer admissions, open). Create/reuse later scoped issues as selected. #9177 remains separately owned.
 
 ## Guiding Intent
@@ -98,7 +101,26 @@ Confirmed operator responses:
   file-weighted accounting remain part of the original all-Python objective.
 - The operator explicitly confirmed tracking both merged strict-project
   coverage and physical Python-file coverage.
+- Bounded diagnostics may proceed without another approval prompt, preserving
+  existing resource, privacy, custody and cleanup limits. This does not
+  authorize rollout, protected shared IPC, production mutation, deadline
+  increases or qualification replay. Diagnostic outcomes never substitute for
+  qualification or strict admission.
+- Validation should make incremental, change-focused progress rather than
+  repeatedly paying setup costs for individual cases. For the remaining
+  twenty-two management controls, separate explicit authority permits at most
+  three 600-second batches, each with a 510-second work boundary and
+  ninety-second cleanup reserve. Cohorts contain at most four cases, with
+  coordinator/group/plugin limits of 120 seconds and individual test/native/
+  helper limits still thirty seconds. Existing failed clocks, retained
+  resources, rollout holds and unrelated qualification gates are unchanged.
 - The confirmed terminal policy is every first-party file checked strictly, with typed dynamic boundaries and narrow reviewed third-party exceptions. It is not a literal ban on all `Any` expressions.
+- The complete Invocation test-source project may be admitted independently
+  through normal review and required CI, with fresh checks of both declared
+  targets, actual negative controls and directly relevant behavior evidence.
+  Production, emitted-program, original full-corpus, native/minimum-runtime
+  and release obligations remain tracked under #10371 and are not waived by
+  the static test-source policy change.
 - No blanket ignores, unchecked first-party substitutes or permanent pending/basic cohorts count as completion.
 - Plugin self-provisioning is being retired, with service implementations
   ultimately distributed outside Copilot plugin payloads. Qualification must
@@ -212,6 +234,7 @@ rewrite.
 - [x] Strictly admit all nine Harness Knowledge binding/overlay helper and test files, preserving Python 3.10 copied-helper compatibility (#10185 / merged #10201).
 - [x] Strictly admit all five retained effort-helper source/test files on their existing Python 3.11 minimum, preserving native measurement and refusal controls (#10215 / merged #10360).
 - [x] Strictly admit all three Agent Roles Python contract-test files on both existing 3.10 analysis targets, preserving every assertion and the non-authoritative JSON fixture boundary (#11473 / merged #11485).
+- [ ] Strictly admit all 27 Invocation test-source files on both declared Python 3.11 analysis targets, independently of the still-pending production/catalog project and its program/native/minimum-runtime gates (#10371).
 - [ ] Strictly admit the Copilot Extensions Harness plugin's complete Python helper/test scope, preserving its actual helper minimums and payload ownership (#10362).
 - [ ] Strictly admit the Efforts plugin's complete source/test and executed-program scope, retaining actual producer, namespace and selected-provider boundaries (#10955).
 - [ ] Admit repository tools and CI helpers with unambiguous module identities and strict local/CI behavior.
@@ -261,6 +284,7 @@ rewrite.
 - [x] SSH service preserves all 254 original function contracts, 299 assertion expressions and four embedded literals across both strict targets, actual Python 3.10 Linux/Windows qualification and fresh exact-input source CI (#10348).
 - [x] Retained effort helpers preserve all 39 original function contracts and 31 assertion expressions across both strict targets, actual Python 3.11 Linux/Windows controls, composed-source qualification and fresh exact-input source CI (#10360).
 - [x] Agent Roles preserves all 46 functions, 191 assertions and parameterizations; both strict targets, all 61 original tests and normal-checker regression rejection pass, followed by exact-head approval and required source CI (#11485). This does not qualify live role/provider behavior.
+- [ ] Invocation test-source enforcement selects its complete owned scope without activating the production/catalog project; both Python 3.11 analysis targets and actual normal-front-door regression rejection pass, followed by exact-head review and required source CI. All original program/native/minimum-runtime/candidate obligations remain open under #10371.
 - [x] Payload Invocation preparation preserves its canonical and authorized copied-source contracts, rejects real catalog/type/data drift and passes complete ordinary Linux unit execution (#11165). The verified synthetic merge contains every current-head admitted test/source binding; this is not canonical-library, consumer, native or global strict admission.
 - [x] Shared checker controls preserve default qualification and ordinary import-root/source-frozen custody semantics, including native separator rejection (#10400 / #10553).
 - [x] Persistent dual-version checker controls reject a type error confined to the 3.11 TOML branch on both analysis platforms through local/source/frozen-candidate entry points (#10400 / #10553); four exact-head cases complete 28 actual MyPy analyses. Preserving Versioned Runtime's actual 3.10 behavior and native/copy qualification remains separately open under #10331.

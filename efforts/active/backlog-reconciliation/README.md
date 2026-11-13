@@ -342,6 +342,17 @@ the non-public approval conversation.
 
 ## Plan
 
+The [current account and custody study](journal/2026/11.12-account-source-credit-and-retained-custody.md)
+retains eighteen source-specific outcomes and eighty requirement groups,
+including two independently verified current-source corrections and one
+provenance-only original. No source retirement or new receiving is inferred.
+
+The [Index data and inherited-fixture checkpoint](journal/2026/11.12-index-data-receiving-and-inherited-fixture-scope.md)
+records eighteen exact source outcomes, the separate verified #5302 tracking
+retirement, the accepted complete #5245/#6675 receiving extension and its
+separately verified #5245 tracking retirement.
+All implementation, custody and parent completion gates remain unchanged.
+
 The [next twenty-primary checkpoint](journal/2026/11.12-oldest-contracts-and-finite-delivery.md)
 records three source completions, one accepted tracking fold and sixteen
 retained oldest contracts. It corrects the campaign's overreading of #3367's
@@ -2977,9 +2988,11 @@ sources, transferring owners or turning partial/planning gains into completion.
 - [ ] Verify and publish supported dispositions, preserving source versus
   release versus rollout distinctions and all active ownership.
   The [ordered reliability map](reliability-ordered-tracking.md) preserves
-  #4231's five-area TRACK objective and proposes complete named receiving
-  for its separate actual Host-child diagnostic lane. Normal review, actual
-  direct receiving/readback and source judgment remain; #4231 stays OPEN.
+  #4231's accepted five-area TRACK map and actual named diagnostic receiving
+  under unchanged custodians. The [complete-ROOT checkpoint](journal/2026/11.12-complete-root-receiving-and-required-source-scope.md)
+  records its separate tracking retirement, #5115/#4128's whole planned
+  receiving, fifteen qualified source unions, three provenance holds and
+  new inflow. Its 905-open census remains 176 above the fixed whole target.
   The [menu/source-ownership checkpoint](journal/2026/11.12-menu-completion-and-source-ownership-receiving.md)
   records #4437's finite source completion and #4220's complete accepted
   receiving, sixteen other whole retentions and unchanged actual custodians.
@@ -3230,6 +3243,19 @@ sources, transferring owners or turning partial/planning gains into completion.
   normal publication flow.
 
 ## Validation Plan
+
+The [account-source credit checkpoint](journal/2026/11.12-account-source-credit-and-retained-custody.md)
+separates #5763/#5791's actual finite helper repairs from their whole
+operation/inherited compatibility gates. Both nonterminal public comments
+have fresh qualification and exact live readback; partial ROOT acquisition
+is not whole receiving acceptance or a passing technical result.
+
+The [eighteen-primary Index/fixture study](journal/2026/11.12-index-data-receiving-and-inherited-fixture-scope.md)
+distinguishes thirteen whole admitted unions from five provenance-only gaps.
+The four-group Index retirement has actual reviewed receiving and live
+acknowledgment/state readback; inherited registration coverage remains an
+unchecked technical obligation in the accepted receiving ROOT. Its separately
+audited tracking retirement is neither native execution nor a coverage pass.
 
 The [twenty-primary follow-through](journal/2026/11.12-oldest-contracts-and-finite-delivery.md)
 distinguishes actual source fulfillment from #3367's planned, unchecked
