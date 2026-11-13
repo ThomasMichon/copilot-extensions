@@ -146,7 +146,8 @@ strings without surrounding whitespace or control characters.
 `last_known_good`, when present, is a list of nonempty reference strings;
 the reader preserves it without qualifying or advancing it. Unrelated YAML
 configuration is accepted and left untouched. Duplicate keys, malformed YAML,
-non-mapping documents, nonordinary paths and files over 64 KiB refuse.
+merge keys, non-mapping documents (including explicit null), nonordinary paths
+and files over 64 KiB refuse. Empty or comment-only input is an absent declaration.
 
 Native preview currently accepts `main`, `refs/heads/main`, full lowercase
 commit IDs and `refs/tags/<tag>`. Existing native source validation, credential-free
@@ -155,6 +156,11 @@ symbolic expressions refuse explicitly; they are not guessed to be tags,
 mapped to Dev or retried as Main. A repository override alone explicitly
 selects its Main. With neither selection field, or with an unavailable
 repository, preview reports the Main-foundation fallback.
+Repository declarations cannot select UNC/network filesystem paths or `file:`
+URLs; ordinary absolute local repository paths remain supported. These passive
+declarations do not authorize network-filesystem authentication. An object-source
+checkout supplies objects only: selected tags are fetched from the declared
+repository, not from potentially different or missing local tags.
 
 When a declaration exists, the physical `-I -S` toolkit prepares the Manager
 manifest's existing PyYAML requirements into the request workspace through

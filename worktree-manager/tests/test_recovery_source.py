@@ -474,6 +474,41 @@ def test_repository_tag_preview_keeps_one_resolved_identity(tmp_path, monkeypatc
     assert report["selection"]["source_tree"] == git(root, "rev-parse", older + "^{tree}")
 
 
+@pytest.mark.parametrize("object_tag", ["different", "missing"])
+def test_repository_tag_comes_from_declared_authority_not_object_checkout(
+    tmp_path, monkeypatch, upstream, object_tag,
+):
+    from worktree_manager import runtime_source_repository
+
+    root, older, current = upstream
+    git(root, "tag", "selected", older)
+    objects = tmp_path / "objects"
+    git(tmp_path, "clone", "--quiet", str(root), str(objects))
+    if object_tag == "different":
+        git(objects, "tag", "-f", "selected", current)
+    else:
+        git(objects, "tag", "-d", "selected")
+    adopter = tmp_path / "adopter"
+    policy = adopter / ".copilot-extensions" / "config.yaml"
+    policy.parent.mkdir(parents=True)
+    policy.write_text(
+        f"current_version: refs/tags/selected\nrepository: {json.dumps(str(root))}\n", encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        recovery, "repository_declaration",
+        lambda addressed, workspace: runtime_source_repository.read(
+            addressed, default_repository=recovery.UPSTREAM,
+        ),
+    )
+    value = repository_request(adopter)
+    value["selection"]["checkout"] = str(objects)
+    report = {}
+    assert recovery.recover(value, tmp_path / "work", report) == 0
+    assert report["selection"]["source_commit"] == older
+    assert report["selection"]["source_tree"] == git(root, "rev-parse", older + "^{tree}")
+    assert report["repository_policy"]["repository"] == str(root)
+
+
 def test_main_does_not_override_existing_exact_policy(tmp_path):
     from worktree_manager.runtime_source_config import RuntimeSource, set_source
 

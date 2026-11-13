@@ -38,7 +38,8 @@ def _yaml(text: str, parser_root: Path | None) -> dict:
 
     class UniqueLoader(yaml.SafeLoader):
         def construct_mapping(self, node, deep=False):
-            self.flatten_mapping(node)
+            if any(key.tag == "tag:yaml.org,2002:merge" for key, _value in node.value):
+                raise ValueError("Repository suite YAML merge keys are unsupported")
             result = {}
             for key_node, value_node in node.value:
                 key = self.construct_object(key_node, deep=deep)
@@ -48,11 +49,18 @@ def _yaml(text: str, parser_root: Path | None) -> dict:
             return result
 
     try:
-        value = yaml.load(text, Loader=UniqueLoader)
+        loader = UniqueLoader(text)
+        try:
+            node = loader.get_single_node()
+            if node is None:
+                return {}
+            if not isinstance(node, yaml.MappingNode):
+                raise ValueError("Repository suite configuration must be a mapping")
+            value = loader.construct_document(node)
+        finally:
+            loader.dispose()
     except (yaml.YAMLError, TypeError, RecursionError) as error:
         raise ValueError(f"Invalid repository suite YAML: {error}") from error
-    if value is None:
-        return {}
     if not isinstance(value, dict):
         raise ValueError("Repository suite configuration must be a mapping")
     return value
@@ -112,7 +120,10 @@ def read(
     if "current_version" not in data and "repository" not in data:
         return result
     if "repository" in data:
-        result["repository"] = _string(data["repository"], "repository")
+        repository = _string(data["repository"], "repository")
+        if repository.replace("\\", "/").startswith("//") or repository.lower().startswith("file:"):
+            raise ValueError("Repository suite declarations do not admit network filesystem or file: sources")
+        result["repository"] = repository
     if "current_version" in data:
         reference = _string(data["current_version"], "current_version")
         result.update(requested_reference=reference, reference=reference)

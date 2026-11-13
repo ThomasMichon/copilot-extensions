@@ -153,3 +153,36 @@ def test_unreadable_repository_is_not_an_unavailable_repository(tmp_path, monkey
     monkeypatch.setattr(Path, "stat", denied)
     with pytest.raises(PermissionError):
         policy.read(root, default_repository=UPSTREAM)
+
+
+@pytest.mark.parametrize("repository", [
+    r"\\server\share\suite", "//server/share/suite", r"/\server\share\suite",
+    r"\\?\UNC\server\share\suite", "file://server/share/suite",
+    "file:////server/share/suite", "file:///C:/suite",
+])
+def test_repository_declaration_cannot_select_network_filesystem_sources(tmp_path, repository):
+    declaration(tmp_path, "repository: " + json.dumps(repository) + "\n")
+    with pytest.raises(ValueError, match="network filesystem|file:"):
+        policy.read(tmp_path, default_repository=UPSTREAM)
+
+
+@pytest.mark.parametrize("text", ["null\n", "~\n", "!!null ''\n", "---\n"])
+def test_explicit_null_documents_are_not_absent_policy(tmp_path, text):
+    declaration(tmp_path, text)
+    with pytest.raises(ValueError, match="mapping"):
+        policy.read(tmp_path, default_repository=UPSTREAM)
+
+
+def test_yaml_merge_keys_refuse_before_alias_expansion(tmp_path):
+    declaration(
+        tmp_path, "base: &base {key: value}\n"
+        "merged: {<<: *base}\ncurrent_version: main\n",
+    )
+    with pytest.raises(ValueError, match="merge"):
+        policy.read(tmp_path, default_repository=UPSTREAM)
+
+
+@pytest.mark.parametrize("text", ["", "# no selected source\n"])
+def test_no_yaml_document_still_reports_absent_selection(tmp_path, text):
+    declaration(tmp_path, text)
+    assert policy.read(tmp_path, default_repository=UPSTREAM)["fallback_reason"] == "selection-absent"
