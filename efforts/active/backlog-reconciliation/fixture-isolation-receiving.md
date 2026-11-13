@@ -67,10 +67,13 @@ install anything, release a claim or authorize runtime operations.
   neither borrowing ambient configuration nor registering or changing the
   developer's host is part of the fixture.
 - [ ] Preserve every originally selected binding/lifecycle assertion and the
-  actual publisher, concurrency and subprocess boundaries. Production must
-  still reject unregistered WSL, foreign or conflicting registration and
-  the original native/container negatives. Preserve read-only behavior,
-  admission and deadlines; no WSL skip or weaker production fence.
+  actual publisher, concurrency and subprocess boundaries. Preserve supported
+  named-direct WSL acceptance with an observed or explicit distribution;
+  absence of registration alone is not a refusal. Retain refusal when both
+  distribution identity and valid registration are absent, plus the original
+  foreign/conflicting-registration and native/container negative controls.
+  Preserve read-only behavior, admission and deadlines; no WSL skip or
+  weaker production fence.
 - [ ] Credit the attributed #7119/#7234 synthetic-guest/private-registration
   and native-home fixture repairs without asserting the original failures
   are unchanged. Keep #7009's authoritative guest-resolution context
