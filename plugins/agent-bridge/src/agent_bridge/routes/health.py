@@ -38,6 +38,7 @@ from ..live_questions import CAPABILITY as LIVE_QUESTION_ANSWERS_CAPABILITY
 from ..live_delivery_state import CAPABILITY as LIVE_DELIVERY_OBSERVATION_CAPABILITY
 from ..mux_questions import CAPABILITY as MUX_QUESTION_ANSWERS_CAPABILITY
 from ..status_schema import CAPABILITY as HOST_STATUS_CAPABILITY
+from ..dispatch_origin import CAPABILITY as DISPATCH_ORIGIN_CAPABILITY
 
 router = APIRouter()
 
@@ -89,6 +90,7 @@ async def health(request: Request) -> dict:
             LIVE_DELIVERY_OBSERVATION_CAPABILITY: 1,
             MUX_QUESTION_ANSWERS_CAPABILITY: 1,
             HOST_STATUS_CAPABILITY: 1,
+            DISPATCH_ORIGIN_CAPABILITY: 1,
         },
         "drain_contract": {"minimum": DRAIN_CONTRACT_VERSION, "maximum": DRAIN_CONTRACT_VERSION},
         "ssh_carriers": get_default_manager().carrier_diagnostics(),

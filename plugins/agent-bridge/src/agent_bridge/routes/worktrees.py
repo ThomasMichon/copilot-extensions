@@ -842,7 +842,7 @@ async def handoff_worktree(
         raise HTTPException(status_code=409, detail=str(exc))
     except RuntimeError as exc:
         raise HTTPException(status_code=502, detail=str(exc))
-    return _session_info(successor)
+    return _session_info(successor, mgr)
 
 
 @router.post(
@@ -912,7 +912,7 @@ async def handoff_worktree_request(
         raise HTTPException(status_code=409, detail=str(exc))
     except RuntimeError as exc:
         raise HTTPException(status_code=502, detail=str(exc))
-    return _session_info(successor)
+    return _session_info(successor, mgr)
 
 
 # -- Session reading (worktree-scoped) ----------------------------------------

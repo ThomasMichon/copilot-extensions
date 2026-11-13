@@ -8,6 +8,7 @@ from pydantic import Field, model_validator
 
 from .preference_models import PreferenceRequestFields
 from .acquisition_contract import WorktreeWriterRequirement
+from .dispatch_origin import DispatchSessionOrigin
 
 
 class StartSessionRequest(PreferenceRequestFields):
@@ -22,9 +23,16 @@ class StartSessionRequest(PreferenceRequestFields):
     creation_prompt: str | None = None
     provider_instance: bool = False  # explicit keyed provider-native creation, never a worktree
     worktree_writer: WorktreeWriterRequirement | None = None
+    dispatch_origin: DispatchSessionOrigin | None = None
 
     @model_validator(mode="after")
     def require_provider_creation_key(self) -> StartSessionRequest:
+        if self.dispatch_origin is not None and (
+            not self.creation_key or not self.worktree_id or self.provider_instance
+            or self.target_dir is not None or self.remote_session_id is not None
+            or self.parity_fault is not None or not self.agent
+        ):
+            raise ValueError("dispatch origin requires keyed creation into a prepared local worktree")
         if self.provider_instance and self.creation_key is None:
             raise ValueError("provider_instance requires creation_key")
         if self.worktree_writer is not None and (

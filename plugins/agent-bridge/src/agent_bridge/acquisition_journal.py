@@ -181,6 +181,7 @@ class AcquisitionJournal(_AcquisitionCustodyMixin):
                 "worktree_unknown", "workspace_identity_conflict", "worktree_terminal",
                 "cli_capability_missing", "cli_options_unsupported",
                 "target_unavailable", "venue_unsupported",
+                "dispatch_origin_unsupported",
                 "plugin_preparation_failed",
             }
         ):
