@@ -5857,6 +5857,16 @@ runner/workflow budgets are unchanged; this is not a production database change.
 
 ## Optional PR service lifecycle
 
+For filtered populations only, the independent `pr_filtered=true` manual
+selector runs one Linux job with a 10-minute cap. It selects the filtered
+subscription/native plugin controls and then the standalone runner with
+`PYTEST_ADDOPTS="-k filtered"`: the filtered CLI tests and both actual
+foreground-host scenarios. The existing full `pr_service` lane is unchanged.
+Use a pinned published source and keep unrelated selectors off. These
+synthetic fixtures qualify local peer credentials, sponsorship, restart,
+outage and subscription lifetime; they do not enroll a live provider or
+deploy a service. This is an opt-in integration lane, not required unit CI.
+
 The existing `pr_service=true` manual Linux/Windows lane also runs
 `services/pr/tests/test_image_inputs.py` through the standalone runner. It
 checks the repository-only offline-context consumer with real retained

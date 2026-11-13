@@ -3,10 +3,10 @@
 import copy
 import uuid
 
-from pr_filters import Definitions, Expression, MATCH, NONMATCH, PROTOCOL as FILTER_PROTOCOL
+from pr_filters import Definitions, Expression, FilterError, MATCH, NONMATCH, PROTOCOL as FILTER_PROTOCOL
 from pr_filters.acquisition import plan
 
-from .filtered_state import facts as validate_facts, release_inactive, revision, trim
+from .filtered_state import facts as validate_facts, release_inactive, trim
 from .repository_contract import MAX_PULLS, RepositoryBackpressure
 from .repository_projection import _new_repository
 
@@ -39,6 +39,15 @@ class FilteredProjection:
         if identity.provider == "azure-devops":
             plan(expression, support.get("acquisition", {}))
 
+    def require_rows(self, key, rows):
+        self.require(key, self.union(rows))
+        if self.identities[key].provider == "azure-devops":
+            constraints = self.capabilities[key]["acquisition"]
+            queries = {query for row in rows for query in plan(self.expression(row), constraints)
+                       if query is not None}
+            if len(queries) > constraints["max_query_branches"]:
+                raise FilterError("population query branch limit after independent withdrawal")
+
     @staticmethod
     def expression(row):
         return Expression.parse(row["request"]["filter"])
@@ -49,7 +58,7 @@ class FilteredProjection:
         row["members"] = [
             p["number"] for p in repository["pulls"] if selected.evaluate(p["facts"], now=now) == MATCH
         ]
-        row["revisions"] = {str(p["number"]): revision(p["facts"]) for p in repository["pulls"]
+        row["projected"] = {str(p["number"]): copy.deepcopy(p) for p in repository["pulls"]
                             if p["number"] in row["members"]}
         row["coverage"] = {
             "outcome": "unknown", "observed_at": None, "last_complete_at": None, "pages": 0, "error": "",
@@ -66,7 +75,7 @@ class FilteredProjection:
                 if not rows:
                     continue
                 expression = self.union(rows)
-                self.require(key, expression)
+                self.require_rows(key, rows)
                 result[key] = {
                     "filter": expression, "registrations": {
                         row["registration_id"]: (self.expression(row).revision, row["generation"]) for row in rows
@@ -123,11 +132,15 @@ class FilteredProjection:
             old = {p["number"]: p["facts"] for p in repository["pulls"]}
             known = {**old, **prepared}
             first_new = state["next_sequence"]
+            progressed = False
             for row in rows:
+                before = copy.deepcopy(row)
+                event_count, sequence = len(state["events"]), state["next_sequence"]
                 selected = self.expression(row)
                 previous = set(row["members"])
                 members, unknown = set(previous), False
-                for number, facts in known.items():
+                retained = {int(number): pull["facts"] for number, pull in row["projected"].items()}
+                for number, facts in {**retained, **known, **prepared}.items():
                     # Incomplete discovery never proves absence. Cached facts
                     # may still prove clock-driven departure without a new head.
                     result = selected.evaluate(facts, now=observed_at)
@@ -144,12 +157,15 @@ class FilteredProjection:
                         self.event(state, row, number, "entry", facts)
                     elif number not in members and number in previous:
                         self.event(state, row, number, "departure", facts)
-                    elif number in members and row["revisions"].get(str(number)) != revision(facts):
+                    elif number in members and row["projected"][str(number)]["facts"] != facts:
                         self.event(state, row, number, "change", facts)
                     if number in members:
-                        row["revisions"][str(number)] = revision(facts)
+                        row["projected"][str(number)] = {
+                            "number": number, "facts": copy.deepcopy(facts),
+                            "observed_at": observed_at if number in prepared else row["projected"][str(number)]["observed_at"],
+                        }
                     else:
-                        row["revisions"].pop(str(number), None)
+                        row["projected"].pop(str(number), None)
                 coverage = {
                     "outcome": "partial" if unknown and scan["outcome"] == "complete" else scan["outcome"],
                     "error": "facts_unknown" if unknown and scan["outcome"] == "complete" else scan["error"],
@@ -163,11 +179,19 @@ class FilteredProjection:
                 ):
                     self.event(state, row, None, "coverage", coverage)
                 row.update(members=sorted(members), coverage=coverage)
-            retained = set(prepared).union(*(set(row["members"]) for row in state["registrations"]
-                                            if row["target"] == key))
-            known = {number: facts for number, facts in known.items() if number in retained}
-            if len(known) > MAX_PULLS * 2:
-                raise RepositoryBackpressure("filtered retained membership exceeds capacity")
+                try:
+                    trim(state, new_sequence=first_new, now=now)
+                except RepositoryBackpressure:
+                    row.clear()
+                    row.update(before)
+                    del state["events"][event_count:]
+                    state["next_sequence"] = sequence
+                    if not progressed:
+                        raise
+                    break
+                progressed = True
+            keep = list(prepared) + [number for number in known if number not in prepared]
+            known = {number: known[number] for number in keep[:MAX_PULLS * 2]}
             repository["pulls"] = [{
                 "number": number, "facts": facts,
                 "observed_at": observed_at if number in prepared else next(

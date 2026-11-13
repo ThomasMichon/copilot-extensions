@@ -72,10 +72,13 @@ def test_manual_selection_preserves_every_existing_route_and_default():
         },
         "dispatch_delegation": {"dispatch-delegation-linux", "dispatch-delegation-windows"},
         "pr_service": {"pr-service-linux", "pr-service-windows"},
+        "pr_filtered": {"pr-filtered-linux"},
         "ssh_service": {"ssh-service-linux", "ssh-service-windows"},
         "pr_artifacts": {
             "pr-artifacts-linux", "pr-artifacts-windows", "gateway-role-tunnels",
             "gateway-host-application-linux", "gateway-host-application-windows",
+            "gateway-continuity-application-linux", "gateway-continuity-application-windows",
+            "gateway-normal-setup-linux", "gateway-normal-setup-windows",
         },
         "dependency_compile": {
             "dependency-compile-linux", "dependency-compile-windows",

@@ -299,3 +299,69 @@ def test_native_identity_and_aggregate_limits_refuse_before_mutating_demand(sele
     with pytest.raises(FilterError, match="query branch limit"):
         execute(selected, "first", "renew", {**registration(first), "expires_at": 200})
     assert store.path.read_bytes() == before
+
+
+@pytest.mark.parametrize("cancel", [False, True])
+def test_broad_demand_cannot_mask_an_unexecutable_union_after_withdrawal(selected, cancel):
+    from pr_filters.acquisition import PROTOCOL as ACQUISITION_PROTOCOL
+
+    now, store, _identity, _projection, _registry = selected
+    identity = RepositoryIdentity("test", "azure-devops", "https://dev.azure.com/example", "reader", "owner/repo")
+    projection = FilteredProjection(store, (identity,), capabilities={identity.key: {
+        **CAPABILITIES, "acquisition": {
+            "protocol": ACQUISITION_PROTOCOL, "user_ids": "uuid-lowercase",
+            "query_fields": {"from": "creatorId", "assigned": "reviewerId"}, "max_query_branches": 64,
+        },
+    }})
+    selected = now, store, identity, projection, FilteredSubscriptions(projection)
+    broad = subscribe(selected, "broad", {"repo": ["owner/repo"]}, ttl=1)
+    users = [f"{number:08x}-1111-1111-1111-111111111111" for number in range(128)]
+    subscribe(selected, "first", {"from": {"users": users[:64]}})
+    before = store.path.read_bytes()
+    with pytest.raises(FilterError, match="independent withdrawal"):
+        subscribe(selected, "second", {"from": {"users": users[64:]}})
+    assert store.path.read_bytes() == before
+    if cancel:
+        execute(selected, "broad", "cancel", registration(broad))
+    else:
+        now[0] = 102
+    demand = projection.demands(expires_at=10000)[identity.key]
+    assert len(demand["registrations"]) == 1
+    observe(selected, {7: facts(**{"from": [users[0]]})}, demand=demand)
+
+
+def test_initial_large_fanout_commits_resumable_progress_before_event_backpressure(selected):
+    registrations = [subscribe(selected, f"consumer-{n}", {"repo": ["owner/repo"]}) for n in range(21)]
+    population = {n: facts() for n in range(1, 201)}
+    observe(selected, population)
+    assert len(execute(selected, "consumer-0", "query", registration(registrations[0]))["baseline"]["pulls"]) == 16
+    assert not execute(selected, "consumer-20", "query", registration(registrations[20]))["baseline"]["pulls"]
+    after = None
+    while True:
+        page = execute(selected, "consumer-0", "events", {
+            **registration(registrations[0]), **({"after": after} if after is not None else {}),
+        })
+        assert page["events"]
+        if not page["more"]:
+            break
+        after = page["events"][-1]["sequence"]
+    execute(selected, "consumer-0", "acknowledge", {
+        **registration(registrations[0]), "event_id": page["events"][-1]["event_id"],
+    })
+    observe(selected, population)
+    assert execute(selected, "consumer-20", "query", registration(registrations[20]))["baseline"]["pulls"]
+
+
+def test_warm_cache_query_does_not_borrow_unprojected_nonmatching_facts(selected):
+    subscribe(selected, "first", {"repo": ["owner/repo"]})
+    observe(selected, {7: facts()})
+    captured = selected[3].demands(expires_at=10000)[selected[2].key]
+    joined = subscribe(selected, "joined", {"tags": {"any": ["ready"]}})
+    observe(selected, {7: facts(tags=[])}, demand=captured)
+    page = execute(selected, "joined", "query", registration(joined))["baseline"]
+    assert page["pulls"] == joined["baseline"]["pulls"]
+    assert page["pulls"][0]["facts"]["tags"] == ["ready"]
+    assert not events(selected, "joined", joined)
+    observe(selected, {7: facts(tags=[])})
+    assert not execute(selected, "joined", "query", registration(joined))["baseline"]["pulls"]
+    assert any(e["kind"] == "departure" for e in events(selected, "joined", joined))
