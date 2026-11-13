@@ -645,21 +645,36 @@ def test_main_snapshot_uses_portable_archive_eol_and_keeps_explicit_crlf(reposit
     assert (output / "source" / "binary.bin").read_bytes() == bytes(range(256))
 
 
-@pytest.mark.parametrize("relative", [False, True])
+@pytest.mark.parametrize("spelling", [
+    "absolute", "relative",
+    pytest.param("extended", marks=pytest.mark.skipif(os.name != "nt", reason="Windows namespace")),
+])
 def test_native_archive_writes_owned_file_without_captured_binary(
-    repository: tuple[Path, str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch, relative: bool,
+    repository: tuple[Path, str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch, spelling: str,
 ) -> None:
+    from native_test_paths import native_test_path
+
     repo, commit = repository
-    output = tmp_path / "archive"
-    preparation._private_output_directory(output)
-    monkeypatch.chdir(output)
-    archive = Path("native.tar") if relative else output / "native.tar"
+    monkeypatch.chdir(tmp_path)
+    directory = tmp_path / "owned"
+    if spelling == "extended":
+        while len(str(directory / "native.tar")) < 280:
+            directory /= "native-archive-output"
+        directory = native_test_path(directory)
+    preparation._private_output_directory(directory)
+    archive = (
+        Path("owned/native.tar") if spelling == "relative"
+        else directory / "native.tar"
+    )
     original = preparation_process.run
     observed = []
     deadline = time.monotonic() + 30
 
     def run(argv: list[str], **options: Any) -> Any:
-        assert "--output=" + str(archive.absolute()) in argv
+        output = next(argument.removeprefix("--output=") for argument in argv
+                      if argument.startswith("--output="))
+        assert Path(output).is_absolute()
+        assert Path(output).samefile(archive)
         assert "stdout" not in options and options["capture_output"] is True
         assert options["deadline"] == deadline
         result = original(argv, **options)
