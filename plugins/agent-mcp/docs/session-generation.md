@@ -534,6 +534,10 @@ creation handle, writes once, and creates or waits for no process. Dispose its
 handles after publication; the child's explicitly inherited read-only handle
 retains the section. A headed coordinator's identity is not evidence of its
 eventual native client's identity.
+The existing native seed adapter's optional direct-client assertion is described
+in [its architecture](../../agent-worktrees/docs/architecture.md). It refuses a
+headed or substituted target before the publication callback, without changing
+ordinary launch selection.
 
 The focused `tests/test_owner_section.py` packet covers suspended native
 creation-handle capture, protected DACL, read-only inheritance, delayed reading
@@ -604,6 +608,14 @@ creation-bound handoff, not installed custody, Windows physical-generation
 handover, productive caller enrollment or update latency. The existing optional
 source workflow pins the public client asset and runs this packet only on its
 Windows runner; required unit-only CI is unchanged.
+The packet additionally composes the section publisher with the existing native
+seed creation/wait owner. That owner remains alive while the actual native
+client starts MCP after publisher handles close; the receipt must name the
+client, not its waiting parent. Original ACP streams, provider/context and
+settlement match the ordinary baseline. Finite preparation/admission responses
+are controlled source fixtures, not installed-runtime acceptance. The independent
+publisher-exit control remains separate. Neither case enrolls a default or headed
+production caller.
 
 The separate `tests/native/test_generation_handover_copilot.py` packet now
 composes that Windows caller with the selected physical receiver and shared

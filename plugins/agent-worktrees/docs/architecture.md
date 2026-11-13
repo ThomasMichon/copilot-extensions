@@ -1271,6 +1271,15 @@ to terminate the child as an unexecuted creation. A zero suspend count retains
 the existing wait, actual exit and uncertain terminal receipt without retrying
 resume. Unconfirmed termination raises a distinct cleanup error, never the
 definite OS-spawn-failure class that permits seed restoration.
+An internal caller publishing the originating client can additionally request
+`RequireDirectClient`. This requires `BeforeResume` and, before creation or
+publication, refuses headed preparations, relative or substituted executable
+paths, non-`.exe` commands and missing native-image headers. The prepared target
+must be the caller's explicitly selected executable, not a coordinator discovered
+later. This is a direct-launch check, not an attestation of an arbitrary native
+executable's behavior. An independently updated caller must check the actual
+loaded function's parameter metadata before requesting it; older copied adapters
+do not acquire this optional support from a package-version comparison.
 The original byte transfers, admission,
 head-writer fence, wait and terminal callback remain with the shell.
 The canonical build selector and its trusted admission counterpart include the
@@ -1281,8 +1290,12 @@ advertisement, an anonymous owner bootstrap or automatic caller enrollment.
 The focused `tests/test_native_seed_process.py` and `tests/test_native_seed_shell.py`
 controls exercise actual birth, pre-execution refusal, literal arguments,
 environment/cwd/stdin/output/exit preservation, exclusive section inheritance,
-final-handle cleanup and the existing admission/wait path. An actual native
-Copilot consumer and installed adoption remain separate qualification gates.
+final-handle cleanup and the existing admission/wait path. The MCP source packet also runs actual offline native Copilot through this
+existing creation/wait owner with direct-client publication, delayed MCP startup,
+original byte streams, physical receiver/context parity and natural settlement.
+Only finite admission is substituted in that packet; it does not qualify an
+installed adapter or production caller selection. Headed creation still belongs
+to its separate actual-client owner, not the shell's coordinator handle.
 The headed path discovers preparation/receipt support against one captured,
 completed immutable runtime slot for preparation, admission and spawn; each
 finite call independently refuses a changed current selection before effects.

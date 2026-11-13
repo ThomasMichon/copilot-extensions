@@ -64,6 +64,7 @@ def _run(
     stdin=None, child_stderr="", location=None, failed_sink=None,
     native_resume=False,
     suspended=False, publish=True, resume_early=False, cleanup_failure=False,
+    direct_client=False, preparation="direct",
 ):
     observed = tmp_path / "observed.jsonl"
     payload = tmp_path / "prepared.json"
@@ -94,6 +95,7 @@ def _run(
         "version": 1, "argv": command, "environment": None,
         "attempt_id": "a" * 32, "resolution_id": "b" * 32,
         "operation_id": "c" * 32, "parent_id": None,
+        **({"headed": {"version": 1}} if preparation == "headed" else {}),
     }), encoding="utf-8")
     probe = tmp_path / "head-writer.py"
     if native_resume:
@@ -124,7 +126,11 @@ def _run(
         f"-Record {_literal(tmp_path / 'wt-a.yaml')} "
         + ("-AdmissionOnly -NativeResumeSession native-original " if native_resume else "-SeedId fixture ")
         + ("-BeforeResume $capture " if suspended else "")
-        + "-Command @('copilot')\n"
+        + ("-RequireDirectClient " if direct_client else "")
+        + (
+            f"-Command @({_literal(Path(command[0]) if preparation != 'forwarded' else tmp_path / 'forwarder.exe')})\n"
+            if direct_client else "-Command @('copilot')\n"
+        )
     )
     if cleanup_failure:
         invocation = (
@@ -275,6 +281,22 @@ def test_native_suspended_publication_refusal_never_admits_or_executes(tmp_path)
     assert not result.stdout
     assert [event[1] for event in events] == ["prepare", "captured", "spawn-failed"]
     assert "no backend executed" in result.stderr
+
+
+@pytest.mark.parametrize("preparation", ["direct", "headed", "forwarded"])
+def test_direct_client_handoff_never_publishes_a_coordinator_or_forwarder(tmp_path, preparation):
+    result, events, argv = _run(
+        tmp_path, suspended=True, direct_client=True, preparation=preparation,
+    )
+    if preparation == "direct":
+        assert result.returncode == 7, result.stdout + result.stderr
+        assert json.loads(result.stdout) == argv
+        assert [event[1] for event in events] == ["prepare", "captured", "spawned", "returned"]
+    else:
+        assert result.returncode == 3, result.stdout + result.stderr
+        assert not result.stdout
+        assert [event[1] for event in events] == ["prepare"]
+        assert "Direct native client preparation is unconfirmed" in result.stderr
 
 
 def test_native_zero_suspend_count_preserves_wait_exit_and_uncertain_receipt(tmp_path):

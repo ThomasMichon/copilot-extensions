@@ -16,6 +16,8 @@ on:
       - "plugins/agent-mcp/pyproject.toml"
       - "plugins/agent-worktrees/scripts/native-seed-process.ps1"
       - "plugins/agent-worktrees/scripts/native-seed-process.cs"
+      - "plugins/agent-worktrees/scripts/native-seed-boundary.ps1"
+      - "plugins/agent-worktrees/tests/test_native_seed_shell.py"
       - "plugins/agent-mcp/src/agent_mcp/owner_handoff.py"
       - "plugins/agent-mcp/src/agent_mcp/owner_capabilities.py"
       - "plugins/agent-mcp/src/agent_mcp/execution_context.py"
@@ -180,6 +182,12 @@ jobs:
           --test-file tests/test_owner_entry.py
           --test-file tests/test_owner_capabilities.py
           --junit-dir "${{ runner.temp }}/mcp-owner-publication-${{ github.run_id }}"
+      - name: Refuse coordinator attribution before native publication
+        run: >-
+          python tools/run-plugin-tests.py agent-worktrees
+          --test-file tests/test_native_seed_shell.py -k direct_client_handoff
+          --test-timeout 45 --timeout 90 --plugin-timeout 120
+          --junit-dir "${{ runner.temp }}/mcp-owner-publication-${{ github.run_id }}"
       - name: Retain native publication source controls
         if: always()
         uses: actions/upload-artifact@v4
@@ -220,7 +228,7 @@ jobs:
                   shutil.copyfileobj(source, output)
           with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as output:
               output.write("COPILOT_NATIVE_TEST_EXECUTABLE=" + str(target) + "\n")
-      - name: Exercise actual Windows client after publisher exit
+      - name: Exercise actual Windows client after publisher exit and through its existing wait owner
         run: >-
           python tools/run-plugin-tests.py agent-mcp
           --test-file tests/native/test_owner_bootstrap_copilot_windows.py
