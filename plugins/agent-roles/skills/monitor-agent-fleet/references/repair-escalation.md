@@ -50,7 +50,7 @@ operation.
 | R1 Diagnose directly | Reach the target's host through its declared SSH profile or transport. Read service and session status, logs, receipts, process lists and the owners' doctors in read-only mode. Load the owning troubleshooting skills (for example `agent-bridge-troubleshooting`, `repairing-worktrees`, `agent-ssh`) | Reads only. A command that self-heals, resumes or restarts is not a diagnostic |
 | R2 Doctor records | Correct one diagnosed identity or state finding through the owner's supported repair verb: re-bind a session to its workspace, settle a stale claim, reconcile a registry entry or a projection | Reversible, owner-mediated writes scoped to the target, followed by the owner's readback |
 | R3 Recover transport or session | Restart the one bridge or session-hosting service, or resume the target's own session through its supported lifecycle. Resume it; never reseed it | Only for the named target. Restarting a host-shared service requires the grant to name that service, because it affects every agent on the host |
-| R4 Disruptive | Terminate a wedged process, update or reinstall a runtime, replace a session, or change credentials | Only when the grant names this effect. Otherwise prepare one operator decision packet with evidence and a recommended default |
+| R4 Disruptive | Terminate the target's wedged process, replace its session, or change its credentials. Runtime updates and reinstalls are maintenance, never a repair rung | Only when the grant names this effect. Otherwise prepare one operator decision packet with evidence and a recommended default |
 
 A rung ceiling in the charter is a maximum, not a target. Most blockers end at
 R1 or R2. Never skip to a higher rung because a lower one is slow. Never

@@ -82,8 +82,9 @@ Repair scope (only if explicitly granted; else "none"; see
   Direct access: <declared SSH profiles/transports usable for diagnosis>
   Delegation: <parallel sub-agent delegates allowed; concurrency bound; one
     per target or shared service>
-  Excluded effects: <e.g. credential changes, reinstall, session replacement,
-    lock or baton removal, owner-store hand edits>
+  Excluded effects: <e.g. credential changes, session replacement, lock or
+    baton removal, owner-store hand edits; runtime updates and reinstalls
+    always route to the fleet maintainer>
   Validity: <expiry, revision or revocation condition>
 
 Agent charter maintenance (see references/agent-charters.md)
