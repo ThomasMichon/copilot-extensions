@@ -1,0 +1,82 @@
+name: Unit audit guard native regression
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [dev]
+    paths:
+      - .github/workflows/unit-effect-guard-native.yml
+      - tools/promotion_unit_effects.py
+      - tools/promotion_unit_tests/test_effects.py
+      - tools/test_promotion_unit_effects_native.py
+
+permissions:
+  contents: read
+
+env:
+  QUALIFICATION_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+
+jobs:
+  guard-custody-linux:
+    name: Audit guard thread custody (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps: &unit-guard-steps
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Validator tooling only
+        run: >-
+          python tools/seasoned_uv.py --uv uv --registry-only --
+          --system "pytest==9.1.1" "coverage>=7.7" pyyaml packaging
+      - name: Qualify real interleaving without weakening actor-free units
+        shell: python
+        run: |
+          import os, subprocess, sys
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          repo = Path.cwd()
+          actual = subprocess.check_output(
+              ["git", "rev-parse", "HEAD"], text=True, timeout=30,
+              creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+          ).strip()
+          assert actual == os.environ["QUALIFICATION_SHA"]
+          sys.path.insert(0, str(repo / "tools"))
+          from plugin_test_containment import Limits, TestSandbox, isolated_environment, run_contained
+          owner = TestSandbox(prefix="unit-guard-native-")
+          with owner as name:
+              directory = Path(name)
+              environment = isolated_environment(os.environ, directory)
+              environment["PYTHONPATH"] = str(repo / "tools")
+              environment["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] = "1"
+              report = directory / "results.xml"
+              code = run_contained(
+                  [sys.executable, "-m", "pytest", "-q",
+                   "tools/promotion_unit_tests/test_effects.py",
+                   "tools/test_promotion_unit_effects_native.py",
+                   "--basetemp", str(directory / "pytest"), "--junitxml", str(report)],
+                  cwd=repo, env=environment, sandbox=directory / "run",
+                  limits=Limits(wall_seconds=120),
+              )
+              if code == 0:
+                  cases = list(ET.parse(report).iter("testcase"))
+                  assert any(case.get("name") ==
+                             "test_interleaved_relative_opens_keep_thread_and_nested_path_custody"
+                             for case in cases)
+                  assert all(case.find(tag) is None for case in cases
+                             for tag in ("error", "failure", "skipped"))
+          if owner.retained or directory.exists():
+              raise RuntimeError("Unit audit guard native cleanup did not settle")
+          print(f"UNIT_GUARD_NATIVE_SOURCE={actual} CLEANUP=TRUE EXIT={code}", flush=True)
+          raise SystemExit(code)
+
+  guard-custody-windows:
+    name: Audit guard thread custody (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 6
+    steps: *unit-guard-steps

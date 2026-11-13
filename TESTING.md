@@ -7532,6 +7532,13 @@ cannot be selected as test nodes or Python coverage targets; an unregistered
 template or changed input still rejects admission.
 An exact node whitelist deselects other cases before execution and restores manifest
 order. Missing or duplicate admitted nodes reject collection before execution.
+The guard's thread-free nested-open/refusal control belongs to this packet.
+Its actual same-name/different-directory thread interleaving is instead
+`tools/test_promotion_unit_effects_native.py`, selected with the pure effect
+controls by `unit-effect-guard-native.yml` on Linux and Windows. That separate
+120-second contained lane requires the real interleaving case without skips
+and verifies sandbox settlement. It does not relax ordinary thread-start
+refusal or re-run the unrelated installer-native matrix.
 Nine execution-acquisition controls in `test_related_acquisition.py` exercise
 the original selection and absence paths, retained config with failed
 acquisition observations for optional source/presence failures,
