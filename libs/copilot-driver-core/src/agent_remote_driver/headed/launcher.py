@@ -170,18 +170,35 @@ class _PaneChild:
         return result
 
     async def _finish_handoff(self) -> None:
-        if self._cleanup_task is None:
-            self._cleanup_task = asyncio.create_task(asyncio.to_thread(self._settle_handoff))
-        try:
-            await asyncio.shield(self._cleanup_task)
-        except asyncio.CancelledError as error:
-            if self._cleanup_task.done() and not self._cleanup_task.cancelled():
-                self._cleanup_task.result()
-                raise
-            from agent_procutil.owned_process import OwnedCleanupError
+        from agent_procutil.owned_process import OwnedCleanupError
 
+        try:
+            if self._cleanup_task is None:
+                worker = asyncio.to_thread(self._settle_handoff)
+                try:
+                    self._cleanup_task = asyncio.create_task(worker)
+                except BaseException:
+                    worker.close()
+                    raise
+            await asyncio.shield(self._cleanup_task)
+        except OwnedCleanupError:
+            raise
+        except BaseException as error:
+            if (
+                isinstance(error, asyncio.CancelledError) and self._cleanup_task is not None
+                and self._cleanup_task.done() and not self._cleanup_task.cancelled()
+            ):
+                try:
+                    self._cleanup_task.result()
+                except OwnedCleanupError:
+                    raise
+                except BaseException as failure:
+                    error = failure
+                else:
+                    raise
             failure = OwnedCleanupError(self.proc, self.job)
             failure.cleanup_task = self._cleanup_task
+            failure.cleanup_error = error
             raise failure from error
 
     async def terminate(self) -> None:

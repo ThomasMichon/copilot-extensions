@@ -210,3 +210,26 @@ async def test_interrupted_settlement_retains_the_original_cleanup_task():
             await owner._cleanup_task
     assert owner.job is None
     job.terminate_and_wait.assert_called_once_with(5)
+
+
+@pytest.mark.asyncio
+async def test_executor_refusal_retains_native_custody_without_replaying_dispatch(monkeypatch):
+    from agent_procutil.owned_process import OwnedCleanupError
+
+    owner = launcher._PaneChild()
+    child, job = Mock(pid=123), Mock()
+    child.poll.return_value = 23
+    owner.proc, owner.job = child, job
+    owner.started.set()
+    dispatch = Mock(side_effect=RuntimeError("fixture executor refused dispatch"))
+    monkeypatch.setattr(asyncio.get_running_loop(), "run_in_executor", dispatch)
+    for operation in (owner.wait, owner.terminate):
+        with pytest.raises(OwnedCleanupError) as caught:
+            await operation()
+        assert caught.value.process is child and caught.value.job is job
+        assert caught.value.cleanup_task is owner._cleanup_task
+        assert isinstance(caught.value.cleanup_error, RuntimeError)
+    assert owner.job is job
+    assert dispatch.call_count == 1
+    job.terminate_and_wait.assert_not_called()
+    child.kill.assert_not_called()
