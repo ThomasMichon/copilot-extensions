@@ -24,7 +24,7 @@ Do not maintain a second independently evolving registrar schema.
 | `URL`, `SHARED_URL` | URL; native local discovery / absent shared |
 | `SHARED_TOKEN`, `SHARED_CONTROL_TOKEN` | Secret string; absent; independent shared authority |
 | `TASK_AUTHORITY` | `central` / `local`; unset retains native routing; no cross-queue fallback for explicit authority |
-| `RELATIONSHIP_ADMISSION`, `RELATIONSHIP_AUTHORITY` | Trusted `module:factory` and explicit `local` / `central` queue authority; both absent by default |
+| `RELATIONSHIP_ADMISSION`, `RELATIONSHIP_AUTHORITY` | Trusted `module:factory` and explicit `local` / `central` queue authority, or native `local-ordinary` with `local`; both absent by default |
 | `PRODUCER_CAPABILITY`, `PRODUCER_CAPABILITY_COMMAND` | Capability/fetch selector; invocation-owned, never portable authority |
 | `NO_AUTOSTART` | Any nonempty value disables lazy start |
 | `RUN_DIR`, `ROUTING_DIR`, `ENDPOINT`, `OVERRIDES` | Owner runtime/discovery paths/selectors; native defaults; not preference tiers |
@@ -60,6 +60,41 @@ host-local `OVERRIDES` policy and native head/conclusion checks remain mandatory
 The original native journal identity is retained on the assignment event, not
 in a second registry. Source withdrawal closes new admission, but cancellation
 and exact-conclusion release still settle through those original owners.
+
+### Native local ordinary admission
+
+Selecting `RELATIONSHIP_ADMISSION=local-ordinary` and
+`RELATIONSHIP_AUTHORITY=local` assembles admission inside the existing queue
+owner, on demand. Startup neither probes siblings nor enables pool allocation.
+This scope governs new `ordinary-bridge` reservations only; ordinary manual
+claims, CLI-driver pools and the native standing assembly keep their existing
+behavior. Health's version-1 `task_relationships` object reports the additive
+`scope: "local-ordinary"`; `enabled` describes available integration, not the
+readiness of any participant. Alternate global factories report `scope: "all"`.
+
+Before each relationship operation the assembly rechecks the exact original
+queue request and reservation, actual execution/creation machine, created
+workspace ownership, creation key and retained writer requirement. The exact
+Worktrees record must match the original allocation stamp and incarnation,
+with indexed native history, no opaque/alternate execution binding and no
+additional native participant. Carried/targeted workspaces, uncaptured natives
+and historical requests without the original evidence refuse; current labels
+or an idle process list cannot retrofit them.
+
+The existing selected Worktrees adapter qualifies its retained executing CLI
+and the authenticated resident without fallback. Independent callbacks qualify
+Bridge's current keyed-creation support before a native exists, or its original
+native's retained writer journal afterward. A compatible CLI, resident and
+original Bridge writer may use different build generations; each must establish
+its own preservation support. The original requirement is never rewritten from
+Bridge's newer default selection. No callback reserves, resumes, abandons,
+finalizes or releases a native.
+
+Both selectors remain absent by default. A prior coordinator does not understand
+the new local selector and refuses startup rather than silently enabling weaker
+admission; remove the selection only after reconciling its original governed
+requests through capable owners. Source/transport controls do not establish an
+installed cohort, native qualification or deployment authority.
 
 ### Explicit alternate relationship admission
 
