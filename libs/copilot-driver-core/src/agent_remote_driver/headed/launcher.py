@@ -166,13 +166,28 @@ class _PaneChild:
         while (result := self.returncode) is None:
             await asyncio.sleep(0.05)
         if self.job is not None or self._cleanup_task is not None:
-            if self._cleanup_task is None:
-                self._cleanup_task = asyncio.create_task(asyncio.to_thread(self._settle_handoff))
-            await asyncio.shield(self._cleanup_task)
+            await self._finish_handoff()
         return result
 
+    async def _finish_handoff(self) -> None:
+        if self._cleanup_task is None:
+            self._cleanup_task = asyncio.create_task(asyncio.to_thread(self._settle_handoff))
+        try:
+            await asyncio.shield(self._cleanup_task)
+        except asyncio.CancelledError as error:
+            if self._cleanup_task.done() and not self._cleanup_task.cancelled():
+                self._cleanup_task.result()
+                raise
+            from agent_procutil.owned_process import OwnedCleanupError
+
+            failure = OwnedCleanupError(self.proc, self.job)
+            failure.cleanup_task = self._cleanup_task
+            raise failure from error
+
     async def terminate(self) -> None:
-        if self.proc is not None and self.returncode is None:
+        if self.job is not None or self._cleanup_task is not None:
+            await self._finish_handoff()
+        elif self.proc is not None and self.returncode is None:
             # The retained Popen owns this exact child; never re-resolve a PID or mux name.
             self.proc.kill()
         await self.wait()

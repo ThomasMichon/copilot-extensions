@@ -4,6 +4,7 @@ import asyncio
 import json
 import os
 import subprocess
+import threading
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -31,6 +32,19 @@ def test_forwarders_and_coordinators_cannot_be_published(tmp_path, monkeypatch, 
     with pytest.raises(ValueError, match="direct Windows Copilot"):
         WindowsNativeHandoff(Mock()).launch([str(image)])
     spawn.assert_not_called()
+
+
+@pytest.mark.parametrize("override", [{"shell": True}, {"executable": "another-owner.exe"}])
+def test_popen_overrides_cannot_change_the_actual_published_image(tmp_path, monkeypatch, override):
+    _windows(monkeypatch)
+    image = tmp_path / "copilot.exe"
+    image.write_bytes(b"MZfixture")
+    spawn, callback = Mock(), Mock()
+    monkeypatch.setattr(native_handoff, "spawn_sync_in_kill_on_close_job", spawn)
+    with pytest.raises(ValueError, match="cannot override"):
+        WindowsNativeHandoff(callback).launch([str(image)], **override)
+    spawn.assert_not_called()
+    callback.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -100,8 +114,9 @@ def test_handoff_does_not_accept_ambiguous_handle_custody(handles):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("cleanup_fails", [False, True])
-async def test_cancellation_after_root_exit_still_settles_or_retains_handoff_job(
-    tmp_path, monkeypatch, cleanup_fails,
+@pytest.mark.parametrize("root_exits", [False, True], ids=["live-root", "exited-root"])
+async def test_cancellation_still_settles_or_retains_handoff_job(
+    tmp_path, monkeypatch, cleanup_fails, root_exits,
 ):
     from agent_procutil.owned_process import OwnedCleanupError
 
@@ -110,9 +125,15 @@ async def test_cancellation_after_root_exit_still_settles_or_retains_handoff_job
     image.write_bytes(b"MZfixture")
     child = Mock(pid=os.getpid(), returncode=None)
     child.poll.side_effect = lambda: child.returncode
+    child.kill.side_effect = OSError("fixture root kill is unavailable")
     job = Mock()
-    if cleanup_fails:
-        job.terminate_and_wait.side_effect = OSError("fixture descendants unsettled")
+
+    def retire(_timeout):
+        if cleanup_fails:
+            raise OSError("fixture descendants unsettled")
+        child.returncode = 23
+
+    job.terminate_and_wait.side_effect = retire
     created = asyncio.Event()
 
     class Backend:
@@ -127,7 +148,8 @@ async def test_cancellation_after_root_exit_still_settles_or_retains_handoff_job
 
         async def close(self):
             # The root exits after waiter cancellation, before final native cleanup.
-            child.returncode = 23
+            if root_exits:
+                child.returncode = 23
 
     def create(*_args, **_kwargs):
         created.set()
@@ -148,7 +170,43 @@ async def test_cancellation_after_root_exit_still_settles_or_retains_handoff_job
         await task
     job.terminate_and_wait.assert_called_once_with(5)
     job.close.assert_not_called()
+    child.kill.assert_not_called()
     if cleanup_fails:
         assert caught.value.process is child and caught.value.job is job
     else:
         child.wait.assert_called_once_with(timeout=5)
+
+
+@pytest.mark.asyncio
+async def test_interrupted_settlement_retains_the_original_cleanup_task():
+    from agent_procutil.owned_process import OwnedCleanupError
+
+    owner = launcher._PaneChild()
+    child, job = Mock(pid=123), Mock()
+    child.poll.return_value = 23
+    owner.proc, owner.job = child, job
+    owner.started.set()
+    entered, release = threading.Event(), threading.Event()
+
+    def retire(_timeout):
+        entered.set()
+        assert release.wait(5), "fixture cleanup was not released"
+
+    job.terminate_and_wait.side_effect = retire
+    wait = asyncio.create_task(owner.wait())
+    try:
+        assert await asyncio.wait_for(asyncio.to_thread(entered.wait, 2), 3)
+        wait.cancel()
+        with pytest.raises(OwnedCleanupError) as caught:
+            await wait
+        failure = caught.value
+        assert failure.process is child and failure.job is job
+        assert failure.cleanup_task is owner._cleanup_task
+        assert not failure.cleanup_task.done()
+    finally:
+        release.set()
+        await asyncio.gather(wait, return_exceptions=True)
+        if owner._cleanup_task is not None:
+            await owner._cleanup_task
+    assert owner.job is None
+    job.terminate_and_wait.assert_called_once_with(5)

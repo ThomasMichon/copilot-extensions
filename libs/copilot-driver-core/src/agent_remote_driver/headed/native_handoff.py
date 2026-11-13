@@ -36,6 +36,8 @@ class WindowsNativeHandoff:
 
     def launch(self, argv: list[str], **kwargs):
         """Create only the selected native client, without a coordinator substitute."""
+        if kwargs.get("shell", False) is not False or kwargs.get("executable") is not None:
+            raise ValueError("Native handoff cannot override its direct executable")
         if (
             os.name != "nt" or not argv or not Path(argv[0]).is_absolute()
             or Path(argv[0]).name.casefold() != "copilot.exe"
