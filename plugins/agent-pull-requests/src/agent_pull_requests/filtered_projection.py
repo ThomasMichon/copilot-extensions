@@ -129,8 +129,22 @@ class FilteredProjection:
             if not rows:
                 return {"status": "withdrawn", "observed": 0}
             repository = self.repository(state, key)
+            cached = {p["number"]: p for p in repository["pulls"]}
             old = {p["number"]: p["facts"] for p in repository["pulls"]}
-            known = {**old, **prepared}
+            known = dict(prepared) if scan["outcome"] == "complete" else {**old, **prepared}
+            keep = list(prepared) + [number for number in known if number not in prepared]
+            known = {number: known[number] for number in keep[:MAX_PULLS * 2]}
+            repository["pulls"] = [{
+                "number": number, "facts": facts,
+                "observed_at": observed_at if number in prepared else cached[number]["observed_at"],
+            } for number, facts in sorted(known.items())]
+            repository["inventory"] = {
+                "outcome": scan["outcome"], "observed_at": observed_at, "error": scan["error"],
+                "pages": scan["pages"], "last_complete_at": (
+                    observed_at if scan["outcome"] == "complete"
+                    else repository["inventory"]["last_complete_at"]
+                ),
+            }
             first_new = state["next_sequence"]
             progressed = False
             for row in rows:
@@ -190,21 +204,6 @@ class FilteredProjection:
                         raise
                     break
                 progressed = True
-            keep = list(prepared) + [number for number in known if number not in prepared]
-            known = {number: known[number] for number in keep[:MAX_PULLS * 2]}
-            repository["pulls"] = [{
-                "number": number, "facts": facts,
-                "observed_at": observed_at if number in prepared else next(
-                    p["observed_at"] for p in repository["pulls"] if p["number"] == number
-                ),
-            } for number, facts in sorted(known.items())]
-            repository["inventory"] = {
-                "outcome": scan["outcome"], "observed_at": observed_at, "error": scan["error"],
-                "pages": scan["pages"], "last_complete_at": (
-                    observed_at if scan["outcome"] == "complete"
-                    else repository["inventory"]["last_complete_at"]
-                ),
-            }
             trim(state, new_sequence=first_new, now=now)
             return {"status": "projected", "observed": len(prepared)}
         return self.store._review_transaction(apply, persist=True, **authority)

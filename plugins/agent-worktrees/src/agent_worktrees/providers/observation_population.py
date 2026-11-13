@@ -52,6 +52,7 @@ def contract() -> dict:
         "max_capture_bytes": MAX_BYTES + 8, "max_json_bytes": MAX_BYTES,
         "max_identities_per_pull": MAX_IDENTITIES, "max_tags_per_pull": MAX_IDENTITIES,
         "max_query_branches": MAX_REQUESTS,
+        "query_rotation": "offset/v1",
     }
 
 
@@ -187,8 +188,13 @@ def _labels(value):
 def population(
     provider, repo: str, *, api_base: str, expression: Expression, credential_source,
     max_pages=4, max_pulls=200, deadline=None,
+    query_offset=0,
 ) -> dict:
     queries = validate(provider, repo, api_base, expression, max_pages, max_pulls)
+    if type(query_offset) is not int or not 0 <= query_offset < MAX_REQUESTS:
+        raise ValueError("population query offset outside bounded rotation")
+    start = query_offset % len(queries)
+    queries = queries[start:] + queries[:start]
     deadline = time.monotonic() + 60 if deadline is None else min(deadline, time.monotonic() + 60)
     endpoint = api_base.rstrip("/")
     project, repository = repo.split("/")

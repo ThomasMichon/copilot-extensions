@@ -29,6 +29,10 @@ upgrade the native provider before selecting the filtered service profile.
 Admission also checks each registration's bounded cover independently of broad
 repository-wide demand. Removing that broad demand cannot strand another owner's
 otherwise admitted subscriptions.
+The executing descriptor must also advertise `query_rotation: offset/v1`.
+Successive bounded cycles rotate the native query cover, so one author's pages
+cannot indefinitely prevent later authors from being observed. Incomplete
+cycles still report partial coverage rather than proving absence.
 
 The initial native population driver is Azure DevOps. Its user IDs are native
 canonical lowercase IdentityRef UUIDs; assignment means reviewer users, not
@@ -140,6 +144,9 @@ Original settled request receipts remain at least one day beyond expiry.
 Inactive registrations release current-membership cache pins independently of
 their immutable baseline and unsettled delivered event payloads. Reactivating
 expired demand starts membership reconciliation under its new generation.
+Expected startup-sponsor admission conflicts do not stop dynamic observation.
+The selected service reports their count as `sponsor_conflicts` and remains
+degraded until its sponsor demand can be admitted again.
 
 Renew takes `--registration-id --expires-at <absolute-epoch-second>`. It advances
 the finite expiry monotonically, at most one day into the future. Repeating an

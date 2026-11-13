@@ -30,6 +30,7 @@ if "--contract" in args:
  "fields":["repo","from","assigned","age","tags","publication"],"groups":[],"age_fields":["created"]}},
  "credential":"observe/per-request","effects":"read-only","max_pages":20,"max_pulls":1000,
  "max_requests":64,"max_seconds":60,"max_capture_bytes":1048584,"max_json_bytes":1048576}
+ value["query_rotation"]="offset/v1"
  value["providers"]["azure-devops"]["acquisition"]={
  "protocol":"agent-pull-requests.filter-acquisition/v1","user_ids":"uuid-lowercase",
  "query_fields":{"from":"creatorId","assigned":"reviewerId"},"max_query_branches":64}

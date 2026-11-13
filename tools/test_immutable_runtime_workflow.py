@@ -50,10 +50,27 @@ def _enabled(expression, inputs):
     return True
 
 
+def test_filtered_workflow_is_one_source_pinned_disposable_linux_job():
+    workflow = yaml.safe_load(
+        (ROOT / ".github/workflows/pr-filtered-acceptance.yml").read_text("utf-8")
+    )
+    assert set(workflow.get("on", workflow.get(True))) == {"workflow_dispatch"}
+    assert set(workflow["jobs"]) == {"pr-filtered-linux"}
+    job = workflow["jobs"]["pr-filtered-linux"]
+    assert job["runs-on"] == "ubuntu-latest" and job["timeout-minutes"] == 10
+    checkout = job["steps"][0]
+    assert checkout["with"] == {"ref": "${{ github.sha }}", "persist-credentials": False}
+    installed = job["steps"][-1]
+    assert installed["env"] == {"PYTEST_ADDOPTS": "-k filtered"}
+    assert "run-standalone-tests.py services/pr" in installed["run"]
+    assert "--timeout 180" in installed["run"]
+
+
 def test_manual_selection_preserves_every_existing_route_and_default():
     trigger = WORKFLOW.get("on", WORKFLOW.get(True))
     assert set(trigger) == {"workflow_dispatch"}
     inputs = trigger["workflow_dispatch"]["inputs"]
+    assert len(inputs) <= 25
     assert inputs["immutable_runtime"]["type"] == "boolean"
     assert inputs["immutable_runtime"]["default"] is False
     assert inputs["immutable_runtime_ref"]["type"] == "string"
@@ -72,7 +89,6 @@ def test_manual_selection_preserves_every_existing_route_and_default():
         },
         "dispatch_delegation": {"dispatch-delegation-linux", "dispatch-delegation-windows"},
         "pr_service": {"pr-service-linux", "pr-service-windows"},
-        "pr_filtered": {"pr-filtered-linux"},
         "ssh_service": {"ssh-service-linux", "ssh-service-windows"},
         "pr_artifacts": {
             "pr-artifacts-linux", "pr-artifacts-windows", "gateway-role-tunnels",
