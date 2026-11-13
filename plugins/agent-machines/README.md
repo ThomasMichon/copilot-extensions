@@ -398,7 +398,10 @@ protocols, either the existing `payload-invocation.json` or a script-only
 The latter never creates a command or Python module and cannot coexist with
 the former. Older consumers refuse script-only owners before effects; do not
 remove them from the required census. Inherited core-cell control variables
-are cleared. Linked/reparse
+are cleared. Actions run from the owner's payload root with
+`COPILOT_PROJECT_DIR` set to the selected `--project-root`, so
+repository-scoped owners resolve their configuration without a project working
+directory. Linked/reparse
 targets, ambiguous owners and migration/deactivation/maintenance states refuse
 repair rather than guessing an installer. A legacy runtime root must have one
 qualified plugin owner, even when the competing plugins share a marketplace.
