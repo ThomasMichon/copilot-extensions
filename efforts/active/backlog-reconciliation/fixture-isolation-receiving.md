@@ -7,21 +7,22 @@ Method: [Weighted Semantic Consolidation](semantic-density-consolidation.md).
 
 ## Receiving decision
 
-Use the existing [#7075](https://github.com/ThomasMichon/copilot-extensions/issues/7075)
-as a two-lane planned receiver for
+The existing [#7075](https://github.com/ThomasMichon/copilot-extensions/issues/7075)
+is the accepted two-lane planned receiver for
 [#7076](https://github.com/ThomasMichon/copilot-extensions/issues/7076).
-This is an agent-recommended tracking consolidation, not a common-root-cause
+This is a reviewed tracking consolidation, not a common-root-cause
 finding or a completed fix. Both reports concern faithful isolated fixtures
 and valid measurements from the same hosted run, but their languages,
 inventories, defects and technical custodians differ.
 
-The current issue contracts do not yet contain this combined intake.
-Reviewing this plan precedes the additive issue amendment. Preserve the
-receiver's entire incumbent body, discussion, unchecked acceptance and claim;
-append the complete contract below rather than replacing them with this link.
-Then verify the current whole receiving content and source-specific custody
-before separately deciding whether #7076's redundant tracking may retire.
-Neither source closes from this proposal alone.
+After [plan review and merge in #12359](https://github.com/ThomasMichon/copilot-extensions/pull/12359),
+the complete contract below was appended directly to the existing #7075 body.
+Whole current provider readback verified its exact content and preserved
+incumbent body, title, labels, assignments, discussion, unchecked acceptance
+and claim. A separate [source-specific explanation](https://github.com/ThomasMichon/copilot-extensions/issues/7076#issuecomment-6843185742)
+and provider readback verified #7076's `NOT_PLANNED` tracking retirement.
+The receiver remains open with both unfinished technical lanes; no technical
+completion, claim release or resource transfer follows.
 
 The broader managed-runner receiver #6917 explicitly excludes the WSL-selector
 portfolio. Do not silently interpret that existing contract as this intake.
@@ -135,12 +136,12 @@ install anything, release a claim or authorize runtime operations.
 - [ ] Keep the broader #5245 containment and #2660 identity-cost outcomes
   distinct. A shared hosted run is neither whole inherited acceptance nor
   a prerequisite that all those other outcomes finish.
-- [ ] Before any #7076 tracking retirement, append this complete direct
+- [x] Before any #7076 tracking retirement, append this complete direct
   contract to the existing #7075 issue without losing incumbent content;
   verify current eligibility, discussion/history, exact receiving content
   and any actual source-specific custody condition. Do not infer this
   readback from a link, issue title, publication receipt or this plan alone.
-- [ ] Only after that separate judgment, retire redundant #7076 tracking
+- [x] Only after that separate judgment, retire redundant #7076 tracking
   with the provider's `NOT_PLANNED` reason and a clear explanation that its
   work remains planned in the open receiver. Do not use `COMPLETED`, claim
   a technical fix or release resources. Preserve useful labels and history.
@@ -167,7 +168,7 @@ above does not depend on assuming those unqualified ROOTs were read.
 
 ## Next bounded action
 
-After review, materialize and verify the additive #7075 receiving contract,
-then adjudicate #7076 separately. Preserve all technical rows unchecked.
-Continue the parent campaign afterward; a two-source receiving plan or one
-retired tracking token does not meet its whole-queue or roadmap gates.
+The reviewed issue materialization, complete readback and separate tracking
+retirement are verified. Preserve all technical rows unchecked and continue
+coherent receiving research under the parent campaign. This two-source
+receiving result does not meet its whole-queue or roadmap gates.

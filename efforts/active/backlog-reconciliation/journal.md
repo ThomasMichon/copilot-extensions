@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-12 - Fixture tracking and retained token boundaries](journal/2026/11.12-fixture-tracking-and-retained-token-boundaries.md)
+
 - [2026-11-12 - Faithful fixture receiving and cohort boundaries](journal/2026/11.12-faithful-fixture-receiving-and-cohort-boundaries.md)
 
 - [2026-11-12 - Admission failure and citation boundary](journal/2026/11.12-admission-failure-and-citation-boundary.md)

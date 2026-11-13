@@ -138,7 +138,10 @@ def _provider(root):
     return root / "Scripts" / "python.exe"
 
 
-def _publisher(root, workspace, executable, configuration, environment, adopted):
+def _publisher(
+    root, workspace, executable, configuration, environment, adopted,
+    *, server="owner-fixture", tools=(),
+):
     source = Path(owner_exec.__file__)
     scripts = source.resolve().parents[3] / "agent-worktrees" / "scripts"
     plan = root / "launch.json"
@@ -154,7 +157,7 @@ def _publisher(root, workspace, executable, configuration, environment, adopted)
         "$publisher=[AgentMcp.NativeOwnerSection]::new();$child=$null\n"
         "try {\n"
         + (
-            " $entry=$plan.configuration.mcpServers['owner-fixture']\n"
+            f" $entry=$plan.configuration.mcpServers[{_literal(server)}]\n"
             " $request=ConvertFrom-Json -InputObject $entry.args[-1] -AsHashtable\n"
             " $request.binding=$publisher.Binding\n"
             " $entry.args[-1]=ConvertTo-Json -InputObject $request -Depth 20 -Compress\n"
@@ -170,7 +173,8 @@ def _publisher(root, workspace, executable, configuration, environment, adopted)
         + _literal(root / "logs")
         + ",'--additional-mcp-config')){$info.ArgumentList.Add($arg)}\n"
         " $info.ArgumentList.Add((ConvertTo-Json -InputObject $plan.configuration -Depth 20 -Compress))\n"
-        " $child=New-AwNativeSeedSuspendedProcess $info -InheritedHandles @($publisher.InheritedHandle)\n"
+        + "".join(f" $info.ArgumentList.Add({_literal('--allow-tool=' + tool)})\n" for tool in tools)
+        + " $child=New-AwNativeSeedSuspendedProcess $info -InheritedHandles @($publisher.InheritedHandle)\n"
         " if(-not $publisher.Publish($child.CreationHandle,$child.Process.Id,$child.Birth))"
         "{throw 'publication unconfirmed'}\n"
         " $receipt=@{pid=$child.Process.Id;birth=$child.Birth;binding=$publisher.Binding}\n"
