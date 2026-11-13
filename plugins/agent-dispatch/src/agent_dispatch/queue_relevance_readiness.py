@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 import json
 import sqlite3
 from typing import TYPE_CHECKING
@@ -124,8 +125,13 @@ def _state(queue: TaskQueue, conn: sqlite3.Connection, task_id: str, arguments: 
     }
 
 
-def prepare(queue: TaskQueue, task_id: str, **arguments: str | int) -> dict:
+def prepare(
+    queue: TaskQueue, task_id: str, *,
+    authority_guard: Callable[[], None] | None = None, **arguments: str | int,
+) -> dict:
     """Internal provider only: obtain readiness, commit it, then settle the exact claim."""
+    if authority_guard is not None:
+        authority_guard()
     with queue._connect() as conn:
         conn.execute("BEGIN")
         original = _state(queue, conn, task_id, arguments)
@@ -154,6 +160,8 @@ def prepare(queue: TaskQueue, task_id: str, **arguments: str | int) -> dict:
         }
         with queue._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
+            if authority_guard is not None:
+                authority_guard()
             if _encoded(_state(queue, conn, task_id, arguments)) != _encoded(original):
                 raise TaskError("relevance closeout changed during readiness observation")
             prior = conn.execute(
@@ -172,7 +180,7 @@ def prepare(queue: TaskQueue, task_id: str, **arguments: str | int) -> dict:
 
     return {"receipt": receipt, "relationship": _settle(queue, task_id, {
         "task_relationship_event_id": original["binding"]["assignment_event_id"],
-    })}
+    }, authority_guard=authority_guard)}
 
 
 def release_evidence(queue: TaskQueue, conn: sqlite3.Connection, raw: str) -> dict | None:

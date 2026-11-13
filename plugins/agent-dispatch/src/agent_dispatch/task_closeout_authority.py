@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+
 from fastapi import HTTPException, Request
 
 from .lease import FencingGuard
@@ -20,6 +22,19 @@ CLOSEOUT_ROUTES = frozenset(
 )
 
 
+def require_closeout_fencing(request: Request, fencing_guard: FencingGuard | None) -> None:
+    """Recheck the verified credential after independent owner I/O."""
+    scope = getattr(request.state, "task_scope", None)
+    if scope is None:
+        return
+    if time.time() >= scope.exp:
+        raise HTTPException(401, detail="expired task-scoped token")
+    if fencing_guard is not None and not fencing_guard.is_valid(scope.epoch):
+        raise HTTPException(
+            403, detail="task-scoped token's coordinator epoch has been superseded"
+        )
+
+
 def resolve_closeout_authority(
     request: Request,
     queue: TaskQueue,
@@ -28,14 +43,11 @@ def resolve_closeout_authority(
     arguments: dict | None = None,
 ) -> dict:
     """Recheck captured ownership or exact terminal replay, never generic task authority."""
+    require_closeout_fencing(request, fencing_guard)
     scope = getattr(request.state, "task_scope", None)
     if scope is not None:
         if scope.task_id != task_id:
             raise HTTPException(403, detail="task-scoped token is not valid for this task")
-        if fencing_guard is not None and not fencing_guard.is_valid(scope.epoch):
-            raise HTTPException(
-                403, detail="task-scoped token's coordinator epoch has been superseded"
-            )
     try:
         with queue._connect() as conn:
             conn.execute("BEGIN")

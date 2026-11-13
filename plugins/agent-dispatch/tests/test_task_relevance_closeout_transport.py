@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -95,6 +96,7 @@ def test_finish_and_lost_reply_replay_emit_terminal_hooks_once(
     first = client.post(path(finalized, "/finish"), json=arguments, headers=auth)
     assert first.status_code == 200, first.text
     assert first.json()["result"]["status"] == Status.ABANDONED
+    assert set(first.json()["result"]) == {"id", "status", "generation"}
 
     def unexpected(*_: object) -> dict:
         raise AssertionError("terminal retries must not reobserve the workspace")
@@ -149,6 +151,104 @@ def test_captured_owner_can_close_out_unassigned_or_submitted_work(
     assert client.get(f"/tasks/{task.id}", headers=auth).status_code == 403
     response = client.post(path(value, "/finish"), json=body(value), headers=auth)
     assert response.status_code == 200, response.text
+    assert set(response.json()["result"]) == {"id", "status", "generation"}
+
+
+@pytest.mark.parametrize("boundary", ["readiness", "claim", "finalization"])
+@pytest.mark.parametrize("invalidation", ["epoch", "expiry"])
+def test_authority_is_rechecked_after_independent_owner_io(
+    ready: readiness.Ready,
+    monkeypatch: pytest.MonkeyPatch,
+    boundary: str,
+    invalidation: str,
+) -> None:
+    from agent_dispatch import (
+        pool_decline_observation, submission_readiness_observation, task_closeout_authority,
+    )
+
+    class Guard:
+        floor = 0
+
+        def is_valid(self, epoch: int) -> bool:
+            return epoch >= self.floor
+
+    guard = Guard()
+    queue, owner, workspace, task, _ = ready
+    client, auth, arguments = api(ready), headers(ready), body(ready)
+    client.app.state.task_fencing_guard = guard
+    if boundary == "finalization":
+        assert client.post(path(ready, "/prepare"), json=arguments, headers=auth).status_code == 200
+    before_closes = sum(operation == "close" for operation, _ in owner.calls)
+
+    def invalidate() -> None:
+        if invalidation == "epoch":
+            guard.floor = 1
+        else:
+            expired = time.time() + 1800
+            monkeypatch.setattr(
+                task_closeout_authority, "time", SimpleNamespace(time=lambda: expired),
+            )
+
+    if boundary == "readiness":
+        observe = submission_readiness_observation.observe
+
+        def observe_readiness(*args: object) -> dict:
+            result = observe(*args)
+            invalidate()
+            return result
+
+        monkeypatch.setattr(submission_readiness_observation, "observe", observe_readiness)
+    elif boundary == "claim":
+        def before_reply(operation: str, _: dict) -> None:
+            if operation == "inspect":
+                invalidate()
+
+        owner.before_reply = before_reply
+    else:
+        def observe_finalized(*_: object) -> dict:
+            invalidate()
+            return {"status": "finalized", "creation_nonce": workspace.creation_nonce}
+
+        monkeypatch.setattr(pool_decline_observation, "observe", observe_finalized)
+
+    response = client.post(
+        path(ready, "/finish" if boundary == "finalization" else "/prepare"),
+        json=arguments,
+        headers=auth,
+    )
+    assert response.status_code == (403 if invalidation == "epoch" else 401), response.text
+    assert queue.get(task.id).status == Status.STARTED
+    assert not queue.latest_reservation(task.id).release_requested
+    assert sum(operation == "close" for operation, _ in owner.calls) == before_closes
+    closeout = queue.relevance_snapshot(task.id)["closeout"]
+    assert closeout.get("acknowledgement") is None
+    if boundary == "readiness":
+        assert closeout.get("readiness") is None
+
+
+def test_scoped_finish_and_replay_never_return_generic_task_content(
+    finalized: readiness.Ready,
+) -> None:
+    queue, _, _, task, _ = finalized
+    with queue._connect() as conn:
+        conn.execute(
+            "UPDATE tasks SET payload_inline=?, result=?, card_draft=? WHERE id=?",
+            ('{"private":"payload"}', '{"private":"result"}', '{"private":"card"}', task.id),
+        )
+    client, arguments = api(finalized), body(finalized)
+    scheme = "Be" + "arer"
+    trusted = client.post(
+        path(finalized, "/finish"),
+        json=arguments,
+        headers={"Authorization": scheme + " data"},
+    )
+    assert trusted.status_code == 200, trusted.text
+    assert all(key in trusted.json()["result"] for key in ("payload_inline", "result", "card_draft"))
+    scoped = client.post(path(finalized, "/finish"), json=arguments, headers=headers(finalized))
+    assert scoped.status_code == 200, scoped.text
+    assert scoped.json()["result"] == {
+        "id": task.id, "status": Status.ABANDONED, "generation": arguments["expected_generation"],
+    }
 
 
 @pytest.mark.parametrize(

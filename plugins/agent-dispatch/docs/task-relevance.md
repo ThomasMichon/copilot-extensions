@@ -192,8 +192,8 @@ The existing task lifecycle owns abandonment. A queue-local transaction guard
 revalidates the captured task, closeout, relationship, placement and reservation
 after observation and stores `acknowledgement` on the existing closeout row in
 that same terminal transaction. A hold, changed incarnation or failed task
-write cannot leave an acknowledgement committed separately. IPC never runs
-under the SQLite write lock.
+write cannot leave an acknowledgement committed separately. Worktrees
+observation IPC never runs under the SQLite write lock.
 
 Exact retries after restart or a lost response return the committed terminal
 outcome without reobserving, repeating the transition audit or reemitting its
@@ -232,13 +232,19 @@ The existing coordinator authentication boundary protects three operations:
 Both POST bodies strictly require `version: 1`, `request_id`, `worker_id`,
 `native_id` and `expected_generation`. They accept no caller-supplied proof.
 Responses use `{protocol, version: 1, result}`; prepare returns the queue's
-readiness/relationship result and finish returns its task view. Both writes
+readiness/relationship result. Finish returns only `id`, `status` and `generation`
+for a task-scoped caller, including exact terminal retries; trusted shared
+bearers retain the ordinary task view. Both writes
 participate in the existing drain gate; the shared terminal hook releases a
 handoff claim and emits the event only for a new transition, not an exact replay.
 The existing active-route middleware still applies.
 
 A task-scoped token must match the accepted closeout's original task, worker,
 native and generation and remain unexpired under the current coordinator fence.
+The same credential fence and expiry are checked again after independent owner
+observations, before retaining readiness, before relationship writes and in the
+terminal transaction. A credential invalidated during observation cannot settle
+the claim or acknowledge finalization.
 The provider also validates current resource custody, or the exact committed
 acknowledgement for a terminal retry. An accepted owner may therefore inspect
 and finish its same-generation unassigned or submitted closeout without gaining

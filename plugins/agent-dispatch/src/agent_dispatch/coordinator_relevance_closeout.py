@@ -8,7 +8,11 @@ from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from .queue import TaskError, TaskQueue
-from .task_closeout_authority import CLOSEOUT_PATH, resolve_closeout_authority
+from .task_closeout_authority import (
+    CLOSEOUT_PATH,
+    require_closeout_fencing,
+    resolve_closeout_authority,
+)
 from .task_relevance_contract import CLOSEOUT_PROTOCOL
 
 
@@ -49,15 +53,25 @@ def register_closeout_routes(
     def mutate(task_id: str, body: CloseoutBody, request: Request, *, finish: bool) -> dict:
         arguments = body.model_dump(exclude={"version"})
         gate = app.state.drain_gate
+
+        def authority_guard() -> None:
+            require_closeout_fencing(request, app.state.task_fencing_guard)
+
         try:
             with gate.track_claim():
                 if gate.draining:
                     raise TaskError("relevance closeout is inhibited while draining")
                 authorize(request, task_id, arguments)
                 if finish:
-                    result = guard(lambda: queue.finish_relevance_closeout(task_id, **arguments))
+                    result = guard(lambda: queue.finish_relevance_closeout(
+                        task_id, authority_guard=authority_guard, **arguments,
+                    ))
+                    if getattr(request.state, "task_scope", None) is not None:
+                        result = {key: result[key] for key in ("id", "status", "generation")}
                 else:
-                    result = queue.prepare_relevance_closeout(task_id, **arguments)
+                    result = queue.prepare_relevance_closeout(
+                        task_id, authority_guard=authority_guard, **arguments,
+                    )
         except TaskError as exc:
             raise HTTPException(409, detail=str(exc)) from exc
         return envelope(result)

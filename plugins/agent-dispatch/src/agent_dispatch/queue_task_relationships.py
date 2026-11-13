@@ -7,6 +7,7 @@ import copy
 import json
 import secrets
 import sqlite3
+from collections.abc import Callable
 from dataclasses import asdict
 
 from .assignment_workspace import AssignmentWorkspace, same_assignment_worker
@@ -319,7 +320,10 @@ class QueueTaskRelationshipsMixin:
                 raise TaskError("original prepared workspace and reservation are unconfirmed")
         return snapshot
 
-    def reconcile_task_relationship(self, task_id: str, *, event_id: int | None = None) -> dict:
+    def reconcile_task_relationship(
+        self, task_id: str, *, event_id: int | None = None,
+        authority_guard: Callable[[], None] | None = None,
+    ) -> dict:
         """Replay the same ground-owner request; never hold SQLite during I/O."""
         value = self.task_relationship(task_id, event_id=event_id)
         if value is None:
@@ -370,6 +374,8 @@ class QueueTaskRelationshipsMixin:
 
         def write(operation: str, payload: dict, *, phase: str | None = None) -> dict:
             self._admit_original_relationship_request(request)
+            if authority_guard is not None:
+                authority_guard()
             try:
                 result = writer(workspace, operation, {**payload, **common})
             except Exception as exc:
@@ -382,6 +388,8 @@ class QueueTaskRelationshipsMixin:
 
         if retiring:
             self._admit_original_relationship_request(request)
+            if authority_guard is not None:
+                authority_guard()
             receipt = writer(
                 workspace,
                 "inspect",
@@ -431,6 +439,8 @@ class QueueTaskRelationshipsMixin:
             state = "bound"
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
+            if authority_guard is not None:
+                authority_guard()
             retained = conn.execute(
                 "SELECT task_relationship FROM task_events WHERE id=? AND task_id=?",
                 (request["event_id"], task_id),
