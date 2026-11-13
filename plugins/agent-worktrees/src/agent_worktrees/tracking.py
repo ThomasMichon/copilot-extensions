@@ -1538,8 +1538,7 @@ def load_record(path: Path, *, copy_result: bool = True) -> WorktreeRecord:
     record = record_cache.cached_load(path, _load_record_uncached, copy_result=copy_result)
     if copy_result:
         record = loaded(record)
-        record._loaded_machine = record.machine  # Read-time CAS evidence, never serialized.
-        record._loaded_machine_identity = record_machine_identity.identity_fence(record)
+        record_machine_identity.remember_loaded_identity(record, path)
     return record
 
 
@@ -1550,7 +1549,7 @@ def parse_record_data(data: dict, *, path: Path) -> WorktreeRecord:
     if title == "null" or title is None:
         title = None
 
-    started_at_raw = data.get("started_at", "")
+    started_at_raw = data.get("started_at") or ""
     if hasattr(started_at_raw, "isoformat"):
         started_at_raw = started_at_raw.isoformat()
 
@@ -2122,8 +2121,8 @@ def parse_record_data(data: dict, *, path: Path) -> WorktreeRecord:
         codename_source=(str(data["codename_source"])
                          if data.get("codename_source") else None),
     )
-    record._loaded_from, record._loaded_machine = path, record.machine
-    record._loaded_machine_identity = record_machine_identity.identity_fence(record)
+    record._loaded_from = path
+    record_machine_identity.remember_loaded_identity(record, path)
     return record
 
 
@@ -2549,14 +2548,14 @@ def _save_record_contents_unlocked(
     title_val = "null" if record.title is None else yaml.safe_dump(
         str(record.title), default_style='"', allow_unicode=False, width=float("inf"),
     ).strip()
-
+    started_val = yaml.safe_dump(str(record.started_at), default_style='"').strip()
     content = (
         f"worktree_id: {_yaml_scalar(record.worktree_id)}\n"
         f"branch: {_yaml_scalar(record.branch)}\n"
         f"worktree_path: {record.worktree_path}\n"
         f"repo: {record.repo}\n"
         + record_machine_identity.serialized_fields(record)
-        + f"started_at: {record.started_at}\n"
+        + f"started_at: {started_val}\n"
         f"last_resumed_at: {record.last_resumed_at}\n"
         f"resume_count: {record.resume_count}\n"
         f"title: {title_val}\n"
