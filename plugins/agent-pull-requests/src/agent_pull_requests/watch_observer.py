@@ -97,6 +97,7 @@ class ReplayObserver:
         else:
             self.repositories = RepositoryProjection(store, identities) if identities else None
         self._repository_cursor = 0
+        self._query_cursors = {}
         self._cycle = threading.Lock()
 
     def cycle(
@@ -272,9 +273,11 @@ class ReplayObserver:
                 if current is None or current["registrations"] != demand["registrations"]:
                     raise Withdrawn()
             try:
+                offset = self._query_cursors.get(key, 0)
+                self._query_cursors[key] = (offset + 1) % 64
                 scan = population(
                     binding, demand["filter"], root=self.store.root,
-                    checkpoint=interested, start_checkpoint=starting,
+                    checkpoint=interested, start_checkpoint=starting, query_offset=offset,
                 )
             except Withdrawn:
                 continue

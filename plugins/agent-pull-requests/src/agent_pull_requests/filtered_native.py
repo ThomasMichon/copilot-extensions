@@ -29,6 +29,7 @@ def qualify(binding, *, checkpoint):
         support = value["providers"][identity.provider]
         if result.returncode or value["protocol"] != PROTOCOL or value["filter_protocol"] != FILTER_PROTOCOL or (
             value["credential"] != "observe/per-request" or value["effects"] != "read-only"
+            or value.get("query_rotation") != "offset/v1"
         ) or any(type(value[name]) is not int or not lower <= value[name] <= upper for name, lower, upper in (
             ("max_pages", 4, 20), ("max_pulls", 200, 1000), ("max_requests", 1, 64),
             ("max_seconds", 60, 60), ("max_capture_bytes", 1, 1_048_584),
@@ -44,7 +45,7 @@ def qualify(binding, *, checkpoint):
     return support
 
 
-def population(binding, expression, *, root, checkpoint, start_checkpoint=None):
+def population(binding, expression, *, root, checkpoint, start_checkpoint=None, query_offset=0):
     """Keep immutable input until the actual native reader and cleanup settle."""
     start_checkpoint = checkpoint if start_checkpoint is None else start_checkpoint
     support = qualify(binding, checkpoint=start_checkpoint)
@@ -62,6 +63,7 @@ def population(binding, expression, *, root, checkpoint, start_checkpoint=None):
             "--config", binding.inventory_config,
             "--credential-command", json.dumps(binding.credential_command),
             "--filter-file", filename,
+            "--query-offset", str(query_offset),
             "--max-pages", "4", "--max-pulls", "200", "--seconds", "60", "--json",
         ], timeout=60, checkpoint=checkpoint, qualified=True)
     except OwnedCleanupError:

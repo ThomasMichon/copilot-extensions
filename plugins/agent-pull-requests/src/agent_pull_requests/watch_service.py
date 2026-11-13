@@ -138,24 +138,33 @@ class WatchService:
 
     def _observe_cycle(self):
         authority = {"expires_at": self._authority(), "checkpoint": self._check}
+        conflicts = 0
         if self.store.repository_filtered:
+            from pr_filters import FilterError
             from .filtered_subscriptions import FilteredSubscriptions
+            from .repository_subscriptions import RepositoryRequestConflict
             subscriptions = FilteredSubscriptions(self.observer.repositories)
             for sponsor in self.filter_sponsors:
                 scope = self.gateway.bindings[(sponsor["principal"], sponsor["target"])]
-                result = subscriptions.execute(scope.account, scope.consumer, "subscribe", {
-                    "request_id": sponsor["request_id"], "ttl": sponsor["ttl"],
-                    "definition": sponsor["definition"],
-                }, **authority)
-                row = result["subscription"]
-                if row["cancelled"]:
-                    continue
-                now = int(self.store.clock())
-                if row["expires_at"] < now + sponsor["ttl"] // 2:
-                    subscriptions.execute(scope.account, scope.consumer, "renew", {
-                        "registration_id": row["registration_id"], "expires_at": now + sponsor["ttl"],
+                try:
+                    result = subscriptions.execute(scope.account, scope.consumer, "subscribe", {
+                        "request_id": sponsor["request_id"], "ttl": sponsor["ttl"],
+                        "definition": sponsor["definition"],
                     }, **authority)
-        return self.observer.cycle(**authority)
+                    row = result["subscription"]
+                    if row["cancelled"]:
+                        continue
+                    now = int(self.store.clock())
+                    if row["expires_at"] <= now + sponsor["ttl"] // 2:
+                        subscriptions.execute(scope.account, scope.consumer, "renew", {
+                            "registration_id": row["registration_id"], "expires_at": now + sponsor["ttl"],
+                        }, **authority)
+                except (FilterError, RepositoryRequestConflict, RepositoryBackpressure):
+                    conflicts += 1
+        result = self.observer.cycle(**authority)
+        if self.store.repository_filtered:
+            result["sponsor_conflicts"] = conflicts
+        return result
 
     def _withdraw(self) -> None:
         self._stopping.set()
@@ -254,10 +263,13 @@ class WatchService:
             and all(not task.done() for task in self._tasks)
             and cycle is not None and cycle["status"] == "observed"
             and cycle["unavailable"] == 0 and cycle["unbound"] == 0
+            and not cycle.get("sponsor_conflicts", 0)
         )
         return {
             "ready": ready, "writer_held": self._lease.held,
             "draining": self._stopping.is_set(), "closed": self._closed,
+            **({"sponsor_conflicts": cycle.get("sponsor_conflicts", 0) if cycle else 0}
+               if self.store.repository_filtered else {}),
         }
 
     async def close(self, *, timeout: float) -> None:

@@ -22,6 +22,7 @@ def dispatch(argv: list[str]) -> int:
     parser.add_argument("--filter-file")
     parser.add_argument("--max-pages", type=int, default=4)
     parser.add_argument("--max-pulls", type=int, default=200)
+    parser.add_argument("--query-offset", type=int, default=0)
     parser.add_argument("--seconds", type=int, default=60)
     parser.add_argument("--json", action="store_true")
     try:
@@ -36,7 +37,7 @@ def dispatch(argv: list[str]) -> int:
             return 0
         if not all((args.repo, args.config, args.credential_command, args.filter_file, args.json)):
             raise ValueError("population requires explicit bounded inputs and JSON")
-        if not 1 <= args.seconds <= 60:
+        if not 1 <= args.seconds <= 60 or not 0 <= args.query_offset < 64:
             raise ValueError("population requires 1..60 seconds")
         deadline = time.monotonic() + args.seconds
         path = Path(args.filter_file)
@@ -56,6 +57,7 @@ def dispatch(argv: list[str]) -> int:
             selected.provider, args.repo, api_base=selected.api_base, expression=expression,
             credential_source=source, max_pages=args.max_pages, max_pulls=args.max_pulls,
             deadline=deadline,
+            query_offset=args.query_offset,
         )
         print(json.dumps(result, allow_nan=False))
         return 0

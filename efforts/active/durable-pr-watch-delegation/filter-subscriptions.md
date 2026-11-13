@@ -197,10 +197,25 @@ that exact source and selection. Windows exposed a transport test that did not
 reconcile the existing pre-transaction busy response; Linux's full standalone
 suite exhausted its 180-second runner limit. Neither job is claimed passing.
 The busy contract is now handled with bounded original-ID retry only for its
-explicit pre-entry response. A separate opt-in `pr_filtered` Linux lane selects
+explicit pre-entry response. A separate opt-in filtered Linux workflow selects
 the changed foreground consumers without dropping or relaxing the full lane.
 Any further workflow invocation needs its own authority; the original single
 run approval is consumed.
+
+The separately approved `pr_filtered=true` attempt at
+`4a2f6aa21bfb46698efe040ce5f98310a0842e2c` was rejected before a run was
+created: the shared dispatch workflow already has GitHub's maximum 25 inputs.
+The focused lane therefore lives in `pr-filtered-acceptance.yml`, with one
+Linux job and no inputs; existing shared-workflow selectors remain unchanged.
+Workflow contract controls check the input limit and focused job scope.
+
+The next review's byte-accounting, disproved-cache, query-fairness and
+sponsor-conflict findings are addressed in the same service slice. Shared-cache
+bytes are included before each bounded registration projection; complete scans
+remove disproved seed facts. The native descriptor expands with bounded
+`query_rotation: offset/v1`, preserving default native callers while the new
+service selects support before passing offsets. Sponsor renewal conflicts are
+reported without stopping already admitted dynamic demand.
 
 ### 2026-11-11 - Native population merged; service qualification in progress
 

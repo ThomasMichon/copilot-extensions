@@ -365,3 +365,33 @@ def test_warm_cache_query_does_not_borrow_unprojected_nonmatching_facts(selected
     observe(selected, {7: facts(tags=[])})
     assert not execute(selected, "joined", "query", registration(joined))["baseline"]["pulls"]
     assert any(e["kind"] == "departure" for e in events(selected, "joined", joined))
+
+
+def test_complete_absence_cannot_seed_disproved_membership_during_an_outage(selected):
+    subscribe(selected, "first", {"repo": ["owner/repo"]})
+    observe(selected, {7: facts()})
+    observe(selected)
+    joined = subscribe(selected, "joined", {"repo": ["owner/repo"]})
+    assert not joined["baseline"]["pulls"]
+    observe(selected, outcome="unavailable", error="provider_unavailable")
+    assert not execute(selected, "joined", "query", registration(joined))["baseline"]["pulls"]
+
+
+def test_byte_backpressure_accounts_for_shared_cache_before_partial_projection(selected, monkeypatch):
+    from agent_pull_requests import filtered_state
+
+    registrations = [subscribe(selected, f"consumer-{n}", {"repo": ["owner/repo"]}) for n in range(2)]
+    monkeypatch.setattr(filtered_state, "METADATA_RESERVE_BYTES", 0)
+    monkeypatch.setattr(filtered_state, "MAX_CACHE_BYTES", 27000)
+    population = {7: facts(tags=[str(n) + "x" * 250 for n in range(20)])}
+    observe(selected, population)
+    assert execute(selected, "consumer-0", "query", registration(registrations[0]))["baseline"]["pulls"]
+    assert not execute(selected, "consumer-1", "query", registration(registrations[1]))["baseline"]["pulls"]
+    for consumer, registration_value in enumerate(registrations):
+        observe(selected, population)
+        pending = events(selected, f"consumer-{consumer}", registration_value)
+        assert pending
+        execute(selected, f"consumer-{consumer}", "acknowledge", {
+            **registration(registration_value), "event_id": pending[-1]["event_id"],
+        })
+    assert execute(selected, "consumer-1", "query", registration(registrations[1]))["baseline"]["pulls"]

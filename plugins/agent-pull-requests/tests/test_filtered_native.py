@@ -40,6 +40,7 @@ if "--contract" in args:
  "fields":["repo","from","age","publication","assigned","tags"],"groups":[],"age_fields":["created"]}},
  "credential":"observe/per-request","effects":"read-only","max_pages":20,"max_pulls":1000,
  "max_requests":64,"max_seconds":60,"max_capture_bytes":1048584,"max_json_bytes":1048576}
+ value["query_rotation"]="offset/v1"
  value["providers"]["azure-devops"]["acquisition"]={
  "protocol":"agent-pull-requests.filter-acquisition/v1","user_ids":"uuid-lowercase",
  "query_fields":{"from":"creatorId","assigned":"reviewerId"},"max_query_branches":64}
@@ -114,6 +115,9 @@ def test_observer_has_no_provider_reads_for_inert_definitions_and_coalesces_live
     assert observer.cycle(expires_at=10000)["observed"] == 1
     calls = [json.loads(line) for line in log.read_text().splitlines()]
     assert sum("--filter-file" in command for command in calls) == 1
+    observer.cycle(expires_at=10000)
+    acquisitions = [json.loads(line) for line in log.read_text().splitlines() if "--filter-file" in line]
+    assert [command[command.index("--query-offset") + 1] for command in acquisitions] == ["0", "1"]
 
 
 @pytest.mark.parametrize("withdraw_all", [False, True])
@@ -135,7 +139,7 @@ def test_inflight_read_keeps_results_for_remaining_captured_demand(native, tmp_p
         }, expires_at=10000)
         registrations[consumer] = result["subscription"]["registration_id"]
     reads = []
-    def acquire(_binding, _expression, *, root, checkpoint, start_checkpoint):
+    def acquire(_binding, _expression, *, root, checkpoint, start_checkpoint, query_offset):
         start_checkpoint()
         reads.append("once")
         for consumer in ("first", "second") if withdraw_all else ("first",):
@@ -155,3 +159,52 @@ def test_inflight_read_keeps_results_for_remaining_captured_demand(native, tmp_p
             "registration_id": registrations[consumer],
         }, expires_at=10000)
         assert bool(result["events"]) is (consumer == "second" and not withdraw_all)
+
+
+def test_expired_sponsor_conflict_does_not_stop_admitted_dynamic_observation(native, tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from pr_filters import Definitions
+    from agent_pull_requests import filtered_native
+    from agent_pull_requests.watch_service import WatchService
+
+    binding, _log, _control = native
+    now = [100]
+    store = ReplayStore(tmp_path / "state", "test", clock=lambda: now[0],
+                        repository_cache=True, repository_continuing=True, repository_filtered=True)
+    store.provision()
+    observer = ReplayObserver(store, bindings=(binding,))
+    observer.repositories.capabilities[binding.account] = SUPPORT
+    users = [f"{n:08x}-1111-1111-1111-111111111111" for n in range(128)]
+    observer.repositories.definitions = Definitions.parse({
+        "protocol": PROTOCOL, "sets": {"sponsor": {
+            "protocol": PROTOCOL, "where": {"from": {"users": users[:64]}},
+        }},
+    })
+    registry = FilteredSubscriptions(observer.repositories)
+    registry.execute(binding.account, "sponsor", "subscribe", {
+        "request_id": "startup", "ttl": 1, "definition": "sponsor",
+    }, expires_at=10000)
+    now[0] = 102
+    dynamic = registry.execute(binding.account, "dynamic", "subscribe", {
+        "request_id": "dynamic", "ttl": 60,
+        "filter": {"protocol": PROTOCOL, "where": {"from": {"users": users[64:]}}},
+    }, expires_at=10000)
+    reads = []
+    def acquire(_binding, expression, **kwargs):
+        reads.append(expression)
+        return {"outcome": "complete", "error": "", "pages": 1, "pulls": []}
+    monkeypatch.setattr(filtered_native, "population", acquire)
+    service = SimpleNamespace(
+        store=store, observer=observer, _authority=lambda: 10000, _check=lambda: None,
+        filter_sponsors=({"principal": "sponsor", "target": "project", "request_id": "startup",
+                          "ttl": 1, "definition": "sponsor"},),
+        gateway=SimpleNamespace(bindings={("sponsor", "project"): SimpleNamespace(
+            account=binding.account, consumer="sponsor",
+        )}),
+    )
+    result = WatchService._observe_cycle(service)
+    assert result["status"] == "observed" and result["sponsor_conflicts"] == 1
+    assert len(reads) == 1
+    assert registry.execute(binding.account, "dynamic", "inspect", {
+        "registration_id": dynamic["subscription"]["registration_id"],
+    }, expires_at=10000)["status"] == "active"
