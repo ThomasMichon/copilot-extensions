@@ -138,7 +138,8 @@ closed rather than falling back to ordinary coordinator discovery. Global
 options require their full spelling, so task-worker flags do not intercept
 existing subcommand flags such as `claim --task` or `doctor --task`.
 
-Only `show`, `payload`, `start`, `progress`, `heartbeat`, `complete`, and
+Only `show`, `payload`, `start`, `progress`, `heartbeat`, `complete`,
+[`relevance-closeout`](docs/relevance-closeout-worker.md), and
 `abandon --permit` are accepted, for the projected task only. `show` returns
 the authorized task snapshot without separate progress-history, attachment,
 or worktree-tracking reads. `heartbeat` retains its explicit worker positional;
@@ -146,7 +147,9 @@ other owner verbs use the projected worker when omitted. Task abandonment
 reports the worker's own failure directly, not a fleet/session cleanup request.
 Fleet/history/cleanup options are refused. The coordinator independently
 checks the signed task, owner, session, generation, expiry and fencing epoch
-on every request; terminal transitions invalidate the grant.
+on every request; terminal transitions invalidate ordinary task authority.
+The captured-original-owner closeout routes retain their documented exact
+acknowledgement-replay exception, not generic terminal-task access.
 Task-only `start` uses the already-bound native session and never returns a
 new credential; grant renewal remains a trusted-supervisor operation.
 The coordinator's fencing floor is retained in the task queue database.

@@ -722,6 +722,25 @@ They require explicit `COPILOT_NATIVE_TEST_EXECUTABLE`,
 bounded runner; skips supply no native qualification. Required unit-only CI
 is unchanged.
 
+The `retained-headed` case in
+`tests/native/test_generation_handover_copilot.py` joins that same copied
+producer to the real optional physical receiver and custody protocol. It uses
+the original headed session through the existing authenticated Session Host
+transport; it does not create another conversation with `session/new`. The
+fixture prepares its physical backend from the actual native MCP environment
+before releasing the existing pre-effect barrier, including when native MCP
+startup precedes the Host's running state. The original client, coordinator,
+extension, conduit, keeper and upstream must retain their native identities
+through physical replacement, rollback and same-code replacement. The shared
+packet requires seven completed tool calls, three accepted/in-flight handovers,
+fresh server-ping replies and a single accepted operation with lost output that
+is fenced without replay. Headed final-message evidence comes from that
+original session's native event journal, independently of streaming ACP text;
+the loopback model must also consume each real MCP result. Exact Host/mux and
+daemon-lifetime settlement remain required. This is opt-in source qualification,
+not installed acceptance, automatic caller adoption or qualification of
+non-streaming final-text delivery through the headed ACP adapter.
+
 ### Hosted originating-owner qualification
 
 The explicit `mcp-caller-lifetime` hosted Windows qualification packet uses the

@@ -55,6 +55,11 @@ A **task** is a graduated handoff: a title + `prompt` + optional Markdown
 (`target_machine` / `target_worktree` / `target_repo`, `labels`), optional
 spawn exclusivity (`exclusive_key`), and moves through a nine-state lifecycle.
 
+For an accepted source-obsolescence instruction, the original worker can use
+`<agent-dispatch catalog argv[0]> relevance-closeout TASK` to settle its claim,
+finalize its own workspace and request independent acknowledgement; see
+[original-worker closeout](../../docs/relevance-closeout-worker.md).
+
 ## When to reach for it
 
 - You want to **hand work to another agent** (same machine or another) without

@@ -72,6 +72,7 @@ on:
       - "plugins/agent-mcp/tests/native/test_owner_bootstrap_copilot_windows.py"
       - "plugins/agent-mcp/tests/native/test_generation_handover_copilot.py"
       - "plugins/agent-mcp/tests/native/generation_copilot_provider.py"
+      - "plugins/agent-mcp/tests/native/generation_headed_transport.py"
 
 permissions:
   contents: read
@@ -316,7 +317,7 @@ jobs:
           --test-file tests/native/test_owner_bootstrap_copilot_windows.py
           --allow-explicit-tiers --test-timeout 120 --timeout 180 --plugin-timeout 200
           --junit-dir "${{ runner.temp }}/mcp-owner-windows-client-${{ github.run_id }}"
-      - name: Exercise physical handover after publisher exit and through the retained wait owner
+      - name: Exercise physical handover after publisher exit, retained wait and copied headed receiving
         run: >-
           python tools/run-plugin-tests.py agent-mcp
           --test-file tests/native/test_generation_handover_copilot.py

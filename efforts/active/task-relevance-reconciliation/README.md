@@ -179,8 +179,15 @@ merged plan does not establish running adoption.
       caller adoption, native conclusion and running qualification remain open.
       The provider-first HTTP expansion exposes captured-owner preparation,
       validated state and terminal acknowledgement under existing authentication,
-      drain and terminal hooks. Its task-scoped exception is confined to these
-      closeout routes; worker caller migration remains separate.
+      drain and terminal hooks; source merged in #12435. Its task-scoped exception
+      is confined to these closeout routes, with post-observation authority
+      checks reaching the actual relationship invocation and content-free
+      scoped terminal replies. Automatic caller migration remains separate.
+      The conditional [worker CLI](../../../plugins/agent-dispatch/docs/relevance-closeout-worker.md)
+      now connects pinned own-closeout discovery, original-claim settlement,
+      canonical actual-worker finalization and independent acknowledgement.
+      Automatic wake-prompt adoption, native conclusion and running
+      qualification remain open; this does not close the aggregate item.
 - [ ] Publish receiver support before enabling new callers; document baseline,
       upgrade and rollback behavior against the executing runtime.
 
