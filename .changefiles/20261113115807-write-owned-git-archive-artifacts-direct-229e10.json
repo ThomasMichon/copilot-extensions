@@ -1,0 +1,9 @@
+{
+  "comment": "Write owned Git archive artifacts directly instead of buffering their bytes",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

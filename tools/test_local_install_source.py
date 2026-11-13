@@ -497,6 +497,105 @@ def test_main_snapshot_uses_portable_archive_eol_and_keeps_explicit_crlf(reposit
     assert (output / "source" / "binary.bin").read_bytes() == bytes(range(256))
 
 
+@pytest.mark.parametrize("relative", [False, True])
+def test_native_archive_writes_owned_file_without_captured_binary(
+    repository, tmp_path, monkeypatch, relative,
+):
+    repo, commit = repository
+    monkeypatch.chdir(tmp_path)
+    archive = Path("native.tar") if relative else tmp_path / "native.tar"
+    original = local.preparation_process.run
+    observed = []
+    deadline = time.monotonic() + 30
+
+    def run(argv, **options):
+        assert "--output=" + str(archive.absolute()) in argv
+        assert "stdout" not in options and options["capture_output"] is True
+        assert options["deadline"] == deadline
+        result = original(argv, **options)
+        assert not result.stdout
+        observed.append(result.returncode)
+        return result
+
+    monkeypatch.setattr(local.preparation_process, "run", run)
+    local.preparation._archive(repo, commit, archive, deadline=deadline)
+    assert observed == [0]
+    with tarfile.open(archive) as content:
+        stream = content.extractfile("version.txt")
+        assert stream is not None and stream.read() == b"released-version\n"
+    assert not (repo / "native.tar").exists()
+
+
+def test_native_archive_refuses_existing_destination_before_launch(tmp_path, monkeypatch):
+    archive = tmp_path / "existing.tar"
+    archive.write_bytes(b"retained artifact")
+    monkeypatch.setattr(local.preparation, "_git",
+                        lambda *_a, **_kw: pytest.fail("existing archive was overwritten"))
+    with pytest.raises(FileExistsError):
+        local.preparation._archive(tmp_path, "unused", archive)
+    assert archive.read_bytes() == b"retained artifact"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX group permissions; Windows uses native DACL checks")
+@pytest.mark.parametrize("shared", ["parent", "ancestor"])
+def test_native_archive_refuses_replacement_capable_directories(tmp_path, monkeypatch, shared):
+    root = tmp_path / "shared"
+    root.mkdir(mode=0o700)
+    parent = root / "output"
+    parent.mkdir(mode=0o700)
+    victim = tmp_path / "retained"
+    victim.write_bytes(b"untouched")
+    archive = parent / "source.tar"
+    archive.symlink_to(victim)
+    (parent if shared == "parent" else root).chmod(0o770)
+    monkeypatch.setattr(local.preparation, "_git",
+                        lambda *_a, **_kw: pytest.fail("replacement-capable path reached Git"))
+    with pytest.raises(PermissionError, match="another user's writes"):
+        local.preparation._archive(tmp_path, "unused", archive)
+    assert victim.read_bytes() == b"untouched" and archive.is_symlink()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX umask; Windows uses private directory creation")
+@pytest.mark.parametrize("entrypoint", ["compose", "prepare"])
+def test_source_entries_create_private_paths_under_group_writable_umask(
+    repository, tmp_path, entrypoint,
+):
+    from agent_procutil.owned_process import run_caller_owned
+
+    root = tmp_path / "new" / "output"
+    code = (
+        "import os,stat,sys,time\nfrom pathlib import Path\n"
+        "sys.path.insert(0,sys.argv[1])\nimport local_install_source as local\n"
+        "os.umask(0o002)\n"
+        "root=Path(sys.argv[2]); prep=local.preparation\n"
+        "original=prep._archive\n"
+        "class ArchiveVerified(Exception): pass\n"
+        "def verify(*args,**kwargs):\n"
+        "    original(*args,**kwargs)\n"
+        "    assert stat.S_IMODE(args[2].stat().st_mode)==0o600\n"
+        "    raise ArchiveVerified\n"
+        "prep._archive=verify\n"
+        "try:\n"
+        "    if sys.argv[5]=='prepare':\n"
+        "        prep._git(Path(sys.argv[3]),'update-ref','refs/remotes/origin/main',sys.argv[4])\n"
+        "        prep.prepare(Path(sys.argv[3]),sys.argv[4],'example',root,"
+        "branch='main',deadline=time.monotonic()+10)\n"
+        "    else:\n"
+        "        local.compose(Path(sys.argv[3]),sys.argv[4],sys.argv[4],root,"
+        "finalized_main=True,deadline=time.monotonic()+10)\n"
+        "except ArchiveVerified: pass\n"
+        "else: raise AssertionError('archive boundary not exercised')\n"
+        "assert stat.S_IMODE(root.stat().st_mode)==0o700\n"
+        "assert stat.S_IMODE(root.parent.stat().st_mode)==0o700\n"
+    )
+    result = run_caller_owned(
+        [sys.executable, "-c", code, str(Path(local.__file__).parent), str(root),
+         str(repository[0]), repository[1], entrypoint],
+        timeout=15, max_stdout_bytes=8192, max_stderr_bytes=8192,
+    )
+    assert result.returncode == 0, result.stderr
+
+
 @pytest.mark.skipif(os.name != "nt", reason="Windows extended-length paths")
 @pytest.mark.parametrize(
     ("reference", "problem"),
@@ -1134,8 +1233,12 @@ def test_complete_application_reuse_revalidates_outputs_without_constructing(
     snapshots = {"demo": str(snapshot)}
     with native.source_inputs.project_inputs(snapshot, "demo", deadline=deadline) as (observed, inputs):
         construction = native.source_inputs.application_inputs(observed, inputs)
-    application = snapshot / "applications" / "demo"
-    application.mkdir(parents=True)
+        application = snapshot / "applications" / "demo"
+        application.mkdir(parents=True)
+        wheels = application / "wheels"
+        wheels.mkdir()
+        for _name, _version, filename, _digest in inputs.distributions:
+            shutil.copyfile(inputs.snapshot.paths[filename], wheels / filename)
     (application / "application.json").write_text(json.dumps({"construction": construction}))
     (application / "uv.lock").write_text("version = 1\n")
     snapshot_record = native.source_inputs._read(snapshot / local.MANIFEST)
@@ -1203,7 +1306,9 @@ def test_complete_output_reuse_uses_one_provider_without_replaying_worker_failur
     repository = tmp_path / "checkout"
     repository.mkdir()
     root = tmp_path / "applications"
+    local.preparation_process.procutil_module("_daemon_instance_owner").mkdir_private(root)
     previous, output = root / "previous", root / "incoming"
+    local.preparation_process.procutil_module("_daemon_instance_owner").mkdir_private(previous)
     toolchain_dir = previous / "inputs" / "build-tools"
     toolchain_dir.mkdir(parents=True)
     record = {
@@ -2523,6 +2628,10 @@ def test_complete_application_preparation_uses_existing_owners(
     application.mkdir(parents=True)
     with source.project_inputs(snapshot, "demo-app") as (observed, inputs):
         construction = source.application_inputs(observed, inputs)
+        wheels = application / "wheels"
+        wheels.mkdir()
+        for _name, _version, filename, _digest in inputs.distributions:
+            shutil.copyfile(inputs.snapshot.paths[filename], wheels / filename)
     (application / "application.json").write_text(json.dumps({"construction": construction}))
     (application / "uv.lock").write_text("version = 1\n")
     (snapshot / source.MANIFEST).write_text(json.dumps(selected.record))
@@ -2542,6 +2651,7 @@ def test_complete_application_preparation_uses_existing_owners(
         assert repository == repo and commit == "a" * 40 and main == "c" * 40
         assert options == {
             "deadline": deadline, "finalized_main": False, "source_descriptor": None,
+            "projects": ("demo-app",),
         }
         calls.append("compose")
         shutil.copytree(snapshot, destination)
@@ -2683,7 +2793,7 @@ def test_complete_application_preparation_uses_existing_owners(
 ])
 def test_complete_application_preparation_refuses_before_source_effects(tmp_path, monkeypatch, case):
     repo = tmp_path / "checkout"
-    repo.mkdir()
+    local.preparation_process.procutil_module("_daemon_instance_owner").mkdir_private(repo)
     monkeypatch.setattr(local.preparation, "_admit", lambda *args, **kwargs: pytest.fail(
         "invalid application options reached source admission",
     ))
@@ -2723,13 +2833,14 @@ def test_single_profile_cli_keeps_selected_component_and_budget(tmp_path, monkey
         return {"phase": "registry-locked", "install_ready": False, "files": []}
 
     monkeypatch.setattr(native, "prepare_registry_lock", profile)
+    deadline = time.monotonic() + 30
     assert native.main([
         "--install-source", str(tmp_path / "source"), "--output", str(tmp_path / "output"),
-        "--uv", "selected-uv", "--deadline", "123", "--component", "demo-app",
+        "--uv", "selected-uv", "--deadline", str(deadline), "--component", "demo-app",
         "--extra", "one",
     ]) == 0
     assert calls == [(tmp_path / "source", tmp_path / "output", {
-        "uv": "selected-uv", "deadline": 123.0, "prepare_profile": False,
+        "uv": "selected-uv", "deadline": deadline, "prepare_profile": False,
         "download_origins": (), "component": "demo-app", "extras": ("one",),
     })]
     assert json.loads(capsys.readouterr().out)["install_ready"] is False
@@ -3210,23 +3321,30 @@ def test_application_adapter_runs_real_install_repeat_and_retains_failed_start(
     assert Path((root / "callback-cwd").read_text()).samefile(slot)
     record.update(setup=["--setup", "--new-setup"], start=["--start", "--new-start"])
     path.write_text(json.dumps(record))
-    automatic = source.install_application(snapshot, "demo-app", selected.payload, root, **options)
-    automatic_slot = Path(automatic["slot"])
-    assert automatic_slot != slot and ".repair." in automatic_slot.name
+    with pytest.raises(source.engine.ContentRepairRequired, match="declaration differs"):
+        source.install_application(snapshot, "demo-app", selected.payload, root, **options)
+    assert {name: (root / name).read_bytes() for name in before} == before
+    assert (slot / "application.json").read_bytes() == installed_declaration
+    assert len(activation_calls) == 2
+    replacement = source.install_application(
+        snapshot, "demo-app", selected.payload, root, repair=True, **options,
+    )
+    replacement_slot = Path(replacement["slot"])
+    assert replacement_slot != slot and ".repair." in replacement_slot.name
     assert json.loads((root / "setup.json").read_text()) == ["--setup", "--new-setup"]
     assert json.loads((root / "started.json").read_text()) == ["--start", "--new-start"]
-    automatic_selectors = {name: (root / name).read_bytes() for name in before}
-    automatic_declaration = (automatic_slot / "application.json").read_bytes()
-    automatic_marker = source.engine.runtime.marker_path(root, automatic_slot.name).read_bytes()
+    replacement_selectors = {name: (root / name).read_bytes() for name in before}
+    replacement_declaration = (replacement_slot / "application.json").read_bytes()
+    replacement_marker = source.engine.runtime.marker_path(root, replacement_slot.name).read_bytes()
     assert source.install_application(
         snapshot, "demo-app", selected.payload, root, **options,
-    ) == automatic
-    assert {name: (root / name).read_bytes() for name in before} == automatic_selectors
-    assert (automatic_slot / "application.json").read_bytes() == automatic_declaration
-    assert source.engine.runtime.marker_path(root, automatic_slot.name).read_bytes() == automatic_marker
+    ) == replacement
+    assert {name: (root / name).read_bytes() for name in before} == replacement_selectors
+    assert (replacement_slot / "application.json").read_bytes() == replacement_declaration
+    assert source.engine.runtime.marker_path(root, replacement_slot.name).read_bytes() == replacement_marker
     assert json.loads((root / "setup.json").read_text()) == ["--setup", "--new-setup"]
     assert json.loads((root / "started.json").read_text()) == ["--start", "--new-start"]
-    assert Path((root / "callback-cwd").read_text()).samefile(automatic_slot)
+    assert Path((root / "callback-cwd").read_text()).samefile(replacement_slot)
     before = {name: (root / name).read_bytes() for name in before}
     assert (slot / "application.json").read_bytes() == installed_declaration
     with pytest.raises(subprocess.CalledProcessError):
@@ -3234,7 +3352,7 @@ def test_application_adapter_runs_real_install_repeat_and_retains_failed_start(
             snapshot, "demo-app", selected.payload, root,
             arguments=("--fail-start",), repair=True, **options,
         )
-    failed = [path for path in (root / "versions").iterdir() if path not in (slot, automatic_slot)]
+    failed = [path for path in (root / "versions").iterdir() if path not in (slot, replacement_slot)]
     assert len(failed) == 1 and not (failed[0] / "install-success.json").exists()
     assert (root / "current-version").read_text().strip() == failed[0].name
     assert (root / "last-known-good").read_bytes() == before["last-known-good"]
@@ -3277,7 +3395,7 @@ def test_application_adapter_runs_real_install_repeat_and_retains_failed_start(
     )
     assert sequence == [
         (slot.name, ("--",)), (slot.name, ("--",)),
-        (automatic_slot.name, ("--",)), (automatic_slot.name, ("--",)),
+        (replacement_slot.name, ("--",)), (replacement_slot.name, ("--",)),
         (failed[0].name, ("--", "--fail-start")), (repaired_slot.name, ("--",)),
     ], diagnostic
     assert len(activation_calls) == 6, diagnostic
