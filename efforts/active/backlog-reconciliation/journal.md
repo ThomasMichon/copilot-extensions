@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-13 - Monitor goals and decline source completions](journal/2026/11.13-monitor-goals-and-decline-source-completions.md)
+
 - [2026-11-13 - Comment receiving and source qualification](journal/2026/11.13-comment-receiving-and-source-qualification.md)
 
 - [2026-11-13 - Adoption source and original-history boundaries](journal/2026/11.13-adoption-source-and-original-history.md)
