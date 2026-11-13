@@ -535,7 +535,9 @@ preserves the complete pre-amendment record.
   for the declared installed inventory. Retain the selected activation strategy;
   qualify coordinated toolset selection only where that strategy is used.
   Stage the complete required set before activation begins, without live
-  initialization, service starts, handoff or data migration. Use the same
+  initialization, live service activation, handoff or data migration. Private
+  candidate readiness retains its existing passive contract, with live work
+  admission closed and no live publication or shared-data migration. Use the same
   construction for absent and existing installations; activation owns
   compatibility and supported state transfer.
 

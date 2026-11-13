@@ -425,8 +425,11 @@ silently override the independently selected Manager or service source.
 
 Every required member of that installation is fully prepared before the
 activation phase begins. Staging constructs complete self-contained application
-footprints without initializing live runtime data, starting services, publishing
-current selections or attempting handoff. Activation then checks state
+footprints without initializing live runtime data, activating live services,
+publishing current selections or attempting handoff. App-owned private
+candidate readiness may use the existing passive contract, with live work
+admission closed and no live publication or shared-data migration. This is
+not service activation. Activation then checks state
 compatibility and lets incoming versions observe incumbents and attempt
 supported state transfer, start and cut over. Existing versions do not select
 a separate legacy construction flow. Outgoing retirement remains independent

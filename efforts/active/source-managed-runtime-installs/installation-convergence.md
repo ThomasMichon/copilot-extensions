@@ -44,6 +44,10 @@ is selected merely because the application inventory lists it.
 | Source acceptance becomes a release and then separately authorized installed acceptance. | This effort V10-V12, existing release owner and addressed deployment/adopter owners. | Required review/CI, actual source merge and containing release, then the actual installed inventory's readiness and preservation. No source-only or documentation-only rollout claim. |
 
 The stage barrier is not a claim of atomic multi-app selector publication.
+App-owned private candidate readiness may use the existing passive/ownership
+contract; it must keep live work admission closed and perform no live
+publication, handoff or shared-data initialization/migration. This does not
+permit activating an incoming live service before the required set is staged.
 Activation still uses the declared compatible strategy and dependency ordering;
 qualify an atomic selection contract only when that strategy actually requires it.
 Independent app contributions may land separately, but a full addressed-suite
