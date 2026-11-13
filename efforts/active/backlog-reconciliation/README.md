@@ -3177,6 +3177,11 @@ sources, transferring owners or turning partial/planning gains into completion.
   #2395's separate inhibition/expiry acceptance. Three canonical keepers
   and two actual primary-author gaps remain distinct; documentary delivery
   neither supplies technical proof nor releases source/resource custody.
+  Complete post-merge ROOT/strict-annex receiving readback now supports
+  #5820's [separate redundant-tracking retirement](journal/2026/11.13-resident-companion-lifecycle-intake.md#separate-resident-companion-receiving-judgment),
+  not technical completion. All ten S/local/global rows remain unchecked;
+  #2385's acceptance and #2395's independently open control plane remain.
+  One new arrival offsets this retirement: 860 whole open, 131 above target.
   The [finite recovery/account intake](journal/2026/11.13-finite-recovery-and-account-intake.md)
   proposes #5675's original guarded recovery/witness family directly under
   Dispatch Phase 3 and #5791's complete original plus #330/#2755 family
