@@ -50,7 +50,7 @@ def test_rehome_writes_registry_with_provenance(tmp_path, monkeypatch):
     assert {e["ref"] for e in loaded} == {"verbose-space", "m/p/child"}
     cs = next(e for e in loaded if e["ref"] == "verbose-space")
     assert cs["kind"] == "codespace" and cs["source_worktree"] == "wt-owner"
-    assert cs["machine"] == "m" and cs["project"] == "p"
+    assert "machine" not in cs and cs["project"] == "p"
     assert cs["disposition"] == "abandoned" and cs["abandoned_at"]
     assert cs["handoff_to"] == "operator-flow"
     assert cs["note"] == "borrowed"
