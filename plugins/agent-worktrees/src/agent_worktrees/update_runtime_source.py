@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 from agent_procutil import no_window_kwargs
 
 from .installation_probe import strict_json_object
+from .update_runtime_application import PreparedApplication
 
 if TYPE_CHECKING:
     from .update_runtime_plan import RuntimeUpdateStep
@@ -23,7 +24,8 @@ if TYPE_CHECKING:
 
 PIN_ENV = "COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN"
 SOURCES_SCHEMA = "copilot-extensions.prepared-runtime-sources"
-SOURCES_CONTRACT = 1
+SOURCES_CONTRACT = 2
+LEGACY_SOURCES_CONTRACT = 1
 PREPARED_INPUTS_CONTRACT = 2
 
 
@@ -104,37 +106,66 @@ def parse_sources(raw: str | None) -> dict[str, PreparedRuntimeSource] | None:
     """Decode a complete queued selection; absence alone means marketplace."""
     if raw is None:
         return None
+    if len(raw.encode("utf-8")) > 4 << 20:
+        raise ValueError("Prepared-runtime-sources packet exceeds its document bound")
     packet = json.loads(raw, object_pairs_hook=strict_json_object)
     if (
-        not isinstance(packet, dict) or set(packet) != {"schema", "version", "sources"}
+        not isinstance(packet, dict)
+        or set(packet) not in (
+            {"schema", "version", "sources"},
+            {"schema", "version", "source", "sources"},
+        )
         or packet["schema"] != SOURCES_SCHEMA or type(packet["version"]) is not int
-        or packet["version"] not in (SOURCES_CONTRACT, PREPARED_INPUTS_CONTRACT)
+        or packet["version"] not in (LEGACY_SOURCES_CONTRACT, SOURCES_CONTRACT)
         or not isinstance(packet["sources"], dict) or not packet["sources"]
+        or len(packet["sources"]) > 64
+    ):
+        raise ValueError("Unsupported prepared-runtime-sources packet")
+    application_packet = "source" in packet
+    if application_packet and (
+        packet["version"] != SOURCES_CONTRACT
+        or not isinstance(packet["source"], dict)
+        or set(packet["source"]) != {"commit", "tree", "main_seed"}
+        or any(not isinstance(value, str)
+               or re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", value) is None
+               for value in packet["source"].values())
     ):
         raise ValueError("Unsupported prepared-runtime-sources packet")
     sources: dict[str, PreparedRuntimeSource] = {}
-    selection: tuple[str, str] | None = None
+    selection: str | tuple[str, str] | None = None
     for name, record in packet["sources"].items():
-        if (
-            not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", name)
-            or not isinstance(record, dict)
-            or set(record) not in (
-                {"payload", "identity"},
-                *([{"payload", "identity", "install_source", "native"}]
-                  if packet["version"] == PREPARED_INPUTS_CONTRACT else []),
-            )
-            or not isinstance(record["payload"], str) or not record["payload"]
-            or not Path(record["payload"]).is_absolute()
-            or ("install_source" in record and (
-                not isinstance(record["install_source"], str) or not record["install_source"]
-            ))
-        ):
+        if not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", name) or not isinstance(record, dict):
             raise ValueError(f"Invalid prepared-runtime-sources entry: {name}")
-        source = PreparedRuntimeSource(
-            Path(record["payload"]), json.dumps(record["identity"]),
-            Path(record["install_source"]) if "install_source" in record else None,
-            json.dumps(record["native"], sort_keys=True) if "native" in record else None,
-        )
+        if application_packet:
+            if (
+                set(record) != {"snapshot", "profile"}
+                or not isinstance(record["snapshot"], str) or not record["snapshot"]
+                or not Path(record["snapshot"]).is_absolute()
+            ):
+                raise ValueError(f"Invalid prepared-runtime-sources entry: {name}")
+            application = PreparedApplication(
+                Path(record["snapshot"]), name, json.dumps(record["profile"], sort_keys=True),
+            )
+            source = PreparedRuntimeSource(application.payload, application.identity, application)
+        else:
+            if (
+                set(record) not in (
+                    {"payload", "identity"},
+                    *([{"payload", "identity", "install_source", "native"}]
+                      if packet["version"] == PREPARED_INPUTS_CONTRACT else []),
+                )
+                or not isinstance(record["payload"], str) or not record["payload"]
+                or not Path(record["payload"]).is_absolute()
+                or ("install_source" in record and (
+                    not isinstance(record["install_source"], str) or not record["install_source"]
+                ))
+            ):
+                raise ValueError(f"Invalid prepared-runtime-sources entry: {name}")
+            source = PreparedRuntimeSource(
+                Path(record["payload"]), json.dumps(record["identity"]),
+                install_source=Path(record["install_source"]) if "install_source" in record else None,
+                native=json.dumps(record["native"], sort_keys=True) if "native" in record else None,
+            )
         identity = json.loads(source.identity)["runtime_source"]
         commit, tree = identity.get("source_commit"), identity.get("source_tree")
         if (
@@ -144,9 +175,18 @@ def parse_sources(raw: str | None) -> dict[str, PreparedRuntimeSource] | None:
             or not re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", tree)
         ):
             raise ValueError(f"Prepared runtime selection does not identify {name}")
-        if selection is not None and selection != (commit, tree):
-            raise ValueError("Prepared runtimes must use one exact source commit and tree")
-        selection = commit, tree
+        if application_packet:
+            association = json.loads(application.association)
+            if packet["source"] != {
+                "commit": commit, "tree": tree, "main_seed": association["main_head"],
+            }:
+                raise ValueError(f"Prepared runtime selection does not identify {name}")
+            composition = json.dumps(association.get("composition"), sort_keys=True)
+        else:
+            composition = (commit, tree)
+        if selection is not None and selection != composition:
+            raise ValueError("Prepared runtimes must use one exact source commit, tree and composition")
+        selection = composition
         sources[name] = source
     return sources
 
@@ -168,6 +208,7 @@ def check_source_coverage(
 class PreparedRuntimeSource:
     payload: Path
     identity: str
+    application: PreparedApplication | None = None
     install_source: Path | None = None
     native: str | None = None
 
@@ -187,6 +228,11 @@ class PreparedRuntimeSource:
             raise ValueError("Prepared runtime requires a complete source selection")
         object.__setattr__(self, "payload", self.payload.resolve(strict=True))
         object.__setattr__(self, "identity", json.dumps(fields, sort_keys=True))
+        if self.application is not None and (
+            self.application.payload != self.payload or self.application.identity != self.identity
+            or self.install_source is not None or self.native is not None
+        ):
+            raise ValueError("Prepared source differs from its complete application selection")
         if (self.install_source is None) != (self.native is None):
             raise ValueError("Prepared installation requires both its snapshot and native selection")
         if self.install_source is not None:
@@ -204,6 +250,8 @@ class PreparedRuntimeSource:
 
     @property
     def version(self) -> str:
+        if self.application is not None:
+            return self.application.version
         return json.loads(self.native or self.identity)["runtime_version"]
 
     def installer_arguments(self, platform: str) -> list[str]:
@@ -272,6 +320,10 @@ class PreparedRuntimeSource:
         self, root: Path, owner: Path, *, target: SourceRuntimeTarget | None = None,
     ) -> str | None:
         """Only the selected slot and its complete source receipt can be current."""
+        if self.application is not None:
+            if target is not None:
+                raise ValueError("Application selection cannot use a legacy source target")
+            return self.application.deployed_version(root, owner)
         path = root / "deploy-manifest.json"
         try:
             if path.is_symlink() or (path.exists() and not path.is_file()):
@@ -367,5 +419,6 @@ class PreparedRuntimeSource:
             "--payload-root", str(owner), "--source-payload-root", str(owner),
             "--plugin-id", name, "--legacy-root", str(root),
             "--project-root", str(project), "--run-lifecycle", "--managed-deployment",
+            *(["--deferred-runtime"] if self.application is not None else []),
             "--", os.path.abspath(executable), *argv[1:],
         ]

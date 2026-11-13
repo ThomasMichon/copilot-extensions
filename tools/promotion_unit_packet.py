@@ -140,7 +140,12 @@ def _verify_coverage(coverage: dict, manifest: dict) -> None:
         if contextual_lines != {str(line) for line in executed}:
             raise UnitEvidenceError("coverage contexts and executed lines disagree")
     if observed_calls != set(manifest["nodes"]):
-        raise UnitEvidenceError("every admitted unit must contribute production call coverage")
+        missing = sorted(set(manifest["nodes"]) - observed_calls)
+        details = "; ".join(node[:512] + ("..." if len(node) > 512 else "") for node in missing[:20])
+        raise UnitEvidenceError(
+            "every admitted unit must contribute production call coverage; "
+            f"missing={len(missing)}; nodes=[{details}]; omitted={max(0, len(missing) - 20)}"
+        )
 
 
 def verify_packet(

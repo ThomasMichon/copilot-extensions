@@ -50,6 +50,45 @@ def profiles(monkeypatch):
     return importlib.import_module("runtime_profile")
 
 
+@pytest.mark.parametrize("profile", [None, "base", "provider-exec"])
+def test_application_profile_cli_reads_existing_intent_without_payload_or_writes(
+    profiles, tmp_path, monkeypatch, capsys, profile,
+):
+    root = tmp_path / "runtime"
+    if profile is not None:
+        root.mkdir()
+        (root / profiles.PROFILE_FILE).write_text(json.dumps({
+            "schema": profiles.PROFILE_SCHEMA, "version": 1, "profile": profile,
+        }))
+    before = {path: path.read_bytes() for path in root.glob("*")}
+    monkeypatch.setattr(profiles, "provision", lambda *a, **k: pytest.fail("profile query provisioned"))
+    monkeypatch.setattr(sys, "argv", ["runtime_profile.py", "--root", str(root), "--application-profile"])
+    assert profiles.main() == 0
+    assert json.loads(capsys.readouterr().out) == {
+        "schema": "copilot-extensions.runtime-application-profile", "version": 1,
+        "plugin": "agent-containers", "runtime_root": str(root),
+        "profile": profile or "base", "extras": ["provider-exec"] if profile == "provider-exec" else [],
+    }
+    assert {path: path.read_bytes() for path in root.glob("*")} == before
+    assert root.exists() == (profile is not None)
+
+
+@pytest.mark.parametrize("case", ["changed-policy", "construction-argument"])
+def test_application_profile_cli_refuses_unknown_policy_or_construction(
+    profiles, tmp_path, monkeypatch, capsys, case,
+):
+    if case == "changed-policy":
+        (tmp_path / profiles.PROFILE_FILE).write_text(json.dumps({
+            "schema": profiles.PROFILE_SCHEMA, "version": 1, "profile": "foreign",
+        }))
+    arguments = ["runtime_profile.py", "--root", str(tmp_path), "--application-profile"]
+    if case == "construction-argument":
+        arguments.extend(["--payload", str(tmp_path / "unread")])
+    monkeypatch.setattr(sys, "argv", arguments)
+    assert profiles.main() == 1
+    assert capsys.readouterr().out == ""
+
+
 @pytest.fixture
 def payload(tmp_path, profiles):
     root = tmp_path / "payload"
@@ -658,6 +697,7 @@ def test_legacy_selected_runtime_preserves_installed_ssh_capability(
     profiles.runtime.mark_complete(root, "0.9.0")
     profiles.runtime.activate(root, "0.9.0", link_free=True)
     assert profiles.selected_profile(root) == ("provider-exec" if paramiko else "base")
+    assert profiles.application_profile(root)["extras"] == (["provider-exec"] if paramiko else [])
     assert not (root / "runtime-profile.json").exists()
 
 

@@ -8,14 +8,15 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 import venv
 import zipfile
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from email import message_from_bytes
 from pathlib import Path
 
 import pytest
-from agent_procutil import no_window_kwargs
+from agent_procutil import no_window_kwargs, spawn_sync_in_kill_on_close_job
 
 from worktree_manager import self_install as si
 from _manager_process_fixture import synthetic_runtime
@@ -28,11 +29,9 @@ def _run(argv, *, env, cwd, timeout=20):
     )
 
 
-@pytest.mark.parametrize("shell", ["ps1", "sh"] if os.name == "nt" else ["sh"])
-@pytest.mark.parametrize("nested", [False, True])
-def test_installed_application_wheel_launch_callbacks_without_source_or_uv(
-    tmp_path, monkeypatch, shell, nested,
-):
+def _installed_application_wheel(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, nested: bool,
+) -> tuple[Path, Path, Path, Path]:
     source = tmp_path / "wheel-source"
     si._copy_payload(si.running_payload_dir(), source)
     wheels = tmp_path / "wheels"
@@ -94,6 +93,143 @@ def test_installed_application_wheel_launch_callbacks_without_source_or_uv(
         "-m", "worktree_manager", "--version",
     ], env=dict(os.environ, WORKTREE_MANAGER_ROOT=str(root)), cwd=tmp_path)
     assert warmed.returncode == 0, warmed.stdout + warmed.stderr
+    return root, slot, payload, python
+
+
+@contextmanager
+def _serving_installed_wheel(root: Path, slot: Path, python: Path, env: dict):
+    ready = root.parent / "serving-wheel.json"
+    code = """
+import json, os, sys
+from pathlib import Path
+from worktree_manager import mux_daemon as mux, mux_daemon_cutover as cutover
+root, slot, ready = map(Path, sys.argv[1:])
+lease = mux._acquire_daemon_lease(root)
+assert lease is not None, "fixture incumbent could not acquire its serving lease"
+runtime = None
+try:
+    runtime = mux.MuxDaemonRuntime(mux.registry_path(root), root=root, passive=False)
+    runtime.start()
+    assert runtime.port is not None
+    cutover.publish_route(runtime.port, root=root, pid=os.getpid(), version=slot.name)
+    assert mux.write_lock_data(mux.lock_path(root), runtime.lock_extra())
+    assert runtime.registry.register({
+        "project": "stage-fixture", "worktree_id": "incumbent",
+        "mux_session": "fixture-session", "mux_bin": sys.executable,
+        "mapping_revision": 1, "session_incarnation": "fixture:1", "live": True,
+    })["applied"]
+    temporary = ready.with_suffix(".tmp")
+    temporary.write_text(json.dumps({"pid": os.getpid(), "port": runtime.port}))
+    temporary.replace(ready)
+    sys.stdin.buffer.read()
+finally:
+    if runtime is not None:
+        runtime.shutdown()
+    cutover.clear_route_if_owner(os.getpid(), root=root)
+    mux._release_daemon_lease(lease)
+"""
+    # Serve control requests without the foreground loop's discovery/picker pumps.
+    process, job = spawn_sync_in_kill_on_close_job(
+        [str(python), "-I", "-B", "-c", code, str(root), str(slot), str(ready)],
+        require_job=True, allow_breakaway=False, env=env, cwd=root,
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        **no_window_kwargs(),
+    )
+    try:
+        deadline = time.monotonic() + 10
+        while not ready.exists() and process.poll() is None and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert ready.exists(), "installed fixture incumbent did not become ready"
+        assert process.poll() is None, "installed fixture incumbent exited before staging"
+        yield process, json.loads(ready.read_text())
+    finally:
+        try:
+            stdout, stderr = process.communicate(timeout=10)
+            assert process.returncode == 0, (stdout + stderr).decode("utf-8", "replace")
+        finally:
+            if job is not None:
+                job.close()
+
+
+@pytest.mark.parametrize("serving", [False, True])
+@pytest.mark.parametrize("nested", [False, True])
+def test_installed_application_wheel_passive_readiness_without_source_or_uv(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, nested: bool, serving: bool,
+) -> None:
+    root, slot, _payload, python = _installed_application_wheel(
+        tmp_path, monkeypatch, nested=nested,
+    )
+    home = tmp_path / "readiness-home"
+    home.mkdir()
+    providers = home / ".agent-worktrees" / "control-plane-providers.d"
+    from worktree_manager.mux_mapping_registry import registry_path
+
+    monitored = (
+        root / "current-version", root / "last-known-good", root / "mux-daemon.lock",
+        registry_path(root), slot / ".install-complete.json", slot / ".runtime-input-origins.json",
+    )
+    directories = (root / "mux-daemon-routing", home / ".local" / "bin", providers)
+
+    def publication_state() -> dict:
+        paths = {
+            *monitored,
+            *(path for directory in directories for path in directory.rglob("*") if path.is_file()),
+        }
+        return {
+            path: (path.stat().st_ino, path.stat().st_mtime_ns, path.read_bytes())
+            if path.exists() else None for path in paths
+        }
+
+    environment = dict(
+        os.environ, HOME=str(home), USERPROFILE=str(home), WORKTREE_MANAGER_ROOT=str(root),
+        AGENT_WORKTREES_CONTROL_PLANE_PROVIDERS_DIR=str(providers), PATH="", UV_OFFLINE="1",
+    )
+    with ExitStack() as lifetime:
+        if serving:
+            from worktree_manager.mux_daemon_cutover import ControlClient, routed_endpoint
+
+            for name in ("current-version", "last-known-good"):
+                (root / name).write_text(slot.name + "\n", encoding="utf-8")
+            commands = home / ".local" / "bin"
+            commands.mkdir(parents=True)
+            (commands / "worktree-manager").write_bytes(b"fixture incumbent command\n")
+            providers.mkdir(parents=True)
+            (providers / "fixture.json").write_bytes(b'{"provider":"fixture-incumbent"}\n')
+            incumbent, endpoint = lifetime.enter_context(
+                _serving_installed_wheel(root, slot, python, environment),
+            )
+            client = ControlClient(f"http://127.0.0.1:{endpoint['port']}", root=root)
+            health = client.health()
+            assert health["status"] == "ready" and health["active"] is True
+            assert health["runtime_generation"] == slot.name
+            route = routed_endpoint(root)
+            assert route is not None and route.pid == endpoint["pid"] and route.port == endpoint["port"]
+        before = publication_state()
+        readiness = _run([
+            str(python), "-I", "-B", "-m", "worktree_manager.runtime_stage", "--root", str(root),
+        ], env=environment, cwd=tmp_path)
+        assert readiness.returncode == 0, readiness.stdout + readiness.stderr
+        assert json.loads(readiness.stdout) == {
+            "schema": "copilot-extensions.manager-stage-readiness", "version": 1,
+            "generation": slot.name, "ready": True,
+        }
+        assert publication_state() == before
+        if serving:
+            assert incumbent.poll() is None
+            health = client.health()
+            assert health["status"] == "ready" and health["active"] is True
+            assert health["runtime_generation"] == slot.name
+            assert routed_endpoint(root) == route
+
+
+@pytest.mark.parametrize("shell", ["ps1", "sh"] if os.name == "nt" else ["sh"])
+@pytest.mark.parametrize("nested", [False, True])
+def test_installed_application_wheel_launch_callbacks_without_source_or_uv(
+    tmp_path, monkeypatch, shell, nested,
+):
+    root, slot, payload, _python = _installed_application_wheel(
+        tmp_path, monkeypatch, nested=nested,
+    )
     (root / "current-version").write_text(slot.name + "\n", encoding="utf-8")
     monkeypatch.syspath_prepend(str(Path(__file__).parent / "native"))
     from test_manager_mux_callbacks import exercise_retained_callbacks

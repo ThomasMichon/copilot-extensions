@@ -138,6 +138,23 @@ def test_source_reader_uses_one_bounded_metadata_and_blob_batch_without_export_a
     assert not any("archive" in arguments or "--filters" in arguments for _repo, arguments, _data in calls)
 
 
+def test_blob_batch_accounts_for_repeated_subject_bytes_before_reading_content(monkeypatch, tmp_path):
+    blob = "a" * 40
+    calls = []
+
+    def git(repo, arguments, *, data=None):
+        calls.append(arguments)
+        assert arguments == ["cat-file", "--batch-check"]
+        assert data == (blob + "\n").encode()
+        return f"{blob} blob 4\n".encode()
+
+    monkeypatch.setattr(source_io, "_git", git)
+    monkeypatch.setattr(source_io, "MAX_SOURCE_BYTES", 7)
+    with pytest.raises(ValueError, match="source bounds"):
+        source_io.read_blobs(tmp_path, [blob, blob])
+    assert len(calls) == 1
+
+
 @pytest.mark.parametrize("change", [
     "parent", "tree", "submodule", "mode", "duplicate", "metadata-count", "metadata-kind",
     "size", "blob-header", "blob-truncated", "blob-extra", "identity",

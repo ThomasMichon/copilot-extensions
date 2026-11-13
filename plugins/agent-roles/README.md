@@ -18,12 +18,25 @@ native Task session, a Bridge peer, or an `agent-dispatch` task/recipe.
 
 | Role | Skill | Charter | What it covers |
 |------|-------|---------|----------------|
-| Fleet monitor ("task master") | [`monitor-agent-fleet`](skills/monitor-agent-fleet/SKILL.md) | [charter](skills/monitor-agent-fleet/assets/CHARTER.md) | Reconstruct each agent's root goal from bounded history, classify time honestly, diagnose misdirection patterns and, only within an explicit steering scope, send deduplicated corrective steers |
+| Fleet monitor ("task master") | [`monitor-agent-fleet`](skills/monitor-agent-fleet/SKILL.md) | [charter](skills/monitor-agent-fleet/assets/CHARTER.md) | Keep assigned agents on task and drive them to resolution: reconstruct each agent's root goal, keep a summarized per-agent charter, diagnose misdirection, and only within explicit scopes send deduplicated steers or delegate graduated parallel repair of blocked agents |
 | Fleet maintainer ("maintain-and-update-fleet") | [`maintain-agent-fleet`](skills/maintain-agent-fleet/SKILL.md) | [charter](skills/maintain-agent-fleet/assets/CHARTER.md) | Worktree-owned release observation, separately authorized per-machine updates and original-session recovery through existing owners; no permanent anchor chat |
 | Sustained PR reviewer | [`review-pull-requests`](skills/review-pull-requests/SKILL.md) | [charter](skills/review-pull-requests/assets/CHARTER.md) | Independent review lanes with a work-conserving concurrency target, retained per-PR context, repository-specific verdict/merge policy and existing agent-to-agent communication |
 | Persistent issue triager | [`triage-issue-backlog`](skills/triage-issue-backlog/SKILL.md) | [charter](skills/triage-issue-backlog/assets/CHARTER.md) | Selected GitHub/ADO backlog and filter, durable harness/knowledge addenda, bounded read-only research, one publisher, evidence acceptance and change-driven revisits |
 | Finite backlog consolidator | [`consolidate-issue-backlog`](skills/consolidate-issue-backlog/SKILL.md) | [charter](skills/consolidate-issue-backlog/assets/CHARTER.md) | Duplicate/overlap cohorts, complete canonical receiving, evidenced dispositions and a whole-queue or selected-cohort target with retained ownership |
 | Topology dispatcher | [`managing-agent-topology`](skills/managing-agent-topology/SKILL.md) | [charter](skills/managing-agent-topology/assets/CHARTER.md) | Durable complete assignments, native worktree/current-head routing, eligible placement, temporary work separation and qualified minimum role coverage |
+
+**Monitor vs maintain.** The two fleet roles are distinct, not alternate
+spellings:
+
+| | `monitor-agent-fleet` | `maintain-agent-fleet` |
+|---|---|---|
+| Subject | Agents and their goals | Machines and tooling |
+| Asks | Is each agent on task and moving toward its finish line? | Are hosts and tool releases current and healthy? |
+| Effects (each separately granted) | Steers, per-agent charter upkeep, repair of one blocked agent's bridge, identity or session state | Release rollout, per-machine updates, recovery of sessions after a disruption |
+| Hands off | Host-wide or release faults to the maintainer | Agent progress and direction to the monitor |
+
+A status command that self-heals or resumes services belongs to the maintainer.
+Neither role inherits the other's authority.
 
 A static [progress instruction](instructions/progress.instructions.md) gives
 every agent in a consuming repository the worker-side kernel: name the unmet
@@ -36,6 +49,7 @@ parent return before a detour, and deliver once the actual gates pass.
 |---------|--------|
 | "Task master: audit the agents on these machines read-only" | Dated roster, inferred goals, history coverage, classified work/waits, matched misdirection patterns and ranked recommendations; **messages sent: none** |
 | "Monitor this fleet under this charter; steer within this scope" | The same assessment on the charter's cadence, plus at most one persisted, deduplicated steer per target and issue to the resolved current head |
+| "Unstick this blocked agent; repair up to rung R2" | Read-only diagnosis first, then one parallel sub-agent delegate per target climbing the repair ladder only to the granted ceiling; host-wide faults routed to the maintainer |
 | "Correct the charters of last week's dormant worktrees" | Per-candidate verdicts from full chronology; clear record corrections written through their owners with a pre-write liveness recheck and readback, ambiguous cases in one decision packet; **messages sent: none** |
 | "Set up sustained PR attention with three lanes" | A filled reviewer charter, qualified adapter/policy table, complete census and lane assignment through existing owners |
 | "Run the persistent issue triager role for example/project" | Resolved target/filter, durable triager charter and applicable rubric/addenda; continuous assessment through existing adapters, with writes only under an original grant |
@@ -164,6 +178,7 @@ references where available, and a private writable report home.
 |------|---------|
 | `skills/monitor-agent-fleet/SKILL.md` | Fleet monitor runbook |
 | `skills/monitor-agent-fleet/assets/CHARTER.md` | Fleet monitor charter template |
+| `skills/monitor-agent-fleet/assets/AGENT-CHARTER.md` | Per-agent summarized charter template kept in the monitor's private state |
 | `skills/monitor-agent-fleet/assets/scenarios.json` | Offline behavioral cases, not live commands |
 | `skills/monitor-agent-fleet/assets/WEAK-POINTS.md` | Weak-point catalogue template; the consuming repository owns its filled-in copy |
 | `skills/monitor-agent-fleet/references/misdirection-patterns.md` | Patterns, distinguishing evidence and corrective steers |
@@ -174,6 +189,8 @@ references where available, and a private writable report home.
 | `skills/monitor-agent-fleet/references/fabric-readers.md` | Optional existing reader adapters |
 | `skills/monitor-agent-fleet/references/dormant-correction.md` | Separately granted record correction for inactive owners |
 | `skills/monitor-agent-fleet/references/self-improvement.md` | Improve-the-fleet and improve-the-monitor loops; capture, fold and route learnings |
+| `skills/monitor-agent-fleet/references/repair-escalation.md` | Graduated, separately granted repair of blocked agents via parallel sub-agent delegates |
+| `skills/monitor-agent-fleet/references/agent-charters.md` | Per-agent charter upkeep, backfill, light touch and drive-to-resolution |
 | `skills/monitor-agent-fleet/references/thread-register.md` | Durable thread register: classify operator messages, delegate side-quests, close threads only on their exit criterion |
 | `skills/review-pull-requests/SKILL.md` | Sustained PR reviewer runbook |
 | `skills/review-pull-requests/assets/` | Reviewer charter and synthetic ledger example |

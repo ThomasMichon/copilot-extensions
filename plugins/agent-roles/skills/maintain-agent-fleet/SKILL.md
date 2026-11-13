@@ -48,9 +48,12 @@ and the owning workflow permits reuse. A routine updater grant is not a
 blanket process-termination grant.
 
 `monitor-agent-fleet` observes agent progress and sends separately authorized
-steers; this role observes tooling/machines and performs separately authorized
-maintenance. Neither role inherits the other's authority. Coordinate findings
-with the retained owner; do not take over a slow reviewer or unrelated worker.
+steers; under its own repair grant it also repairs one blocked agent's
+transport, identity or session state. This role observes tooling/machines and
+performs separately authorized maintenance, and owns host-wide tooling or
+runtime faults the monitor routes here.
+Neither role inherits the other's authority. Coordinate findings with the
+retained owner; do not take over a slow reviewer or unrelated worker.
 
 ## 2. Inventory and observe releases
 

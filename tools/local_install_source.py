@@ -497,12 +497,12 @@ def _built_projects(
         source_policy=source_policy, min_age_days=min_age_days, deadline=deadline,
     ) if reuse_source is not None else None
     builder = _load_module(Path(builder.__file__), "_local_install_artifact_builder") if reused is None else None
-    toolchain_options = {}
+    execution = {}
     if uv is not None:
-        toolchain_options["uv"] = uv
+        execution["uv"] = uv
     if deadline is not None:
-        toolchain_options["deadline"] = deadline
-    if toolchain_options and builder is not None:
+        execution["deadline"] = deadline
+    if execution and builder is not None:
         build_wheel = builder.build_wheel
 
         def bounded_build_wheel(*args, **kwargs):
@@ -528,17 +528,17 @@ def _built_projects(
             toolchain = resolve_toolchain_lock(
                 toolchain_dir, python=getattr(sys, "_base_executable", sys.executable),
                 source_policy=source_policy, min_age_days=min_age_days,
-                **toolchain_options,
+                **execution,
             )
         prepared = {}
         for key in selected:
-            if deadline is not None:
-                preparation._remaining(deadline)
+            preparation._remaining(deadline)
             if key == "composition:core":
                 from core_python_artifacts import build_core_artifacts
 
                 manifest = reused[key] if reused is not None else build_core_artifacts(
                     out_dir=output / "wheels" / "composition-core", toolchain=toolchain, builder=builder,
+                    **execution,
                 )
                 project = {"payload": "source", "wheels": "wheels/composition-core", "artifact": manifest}
             else:
@@ -550,8 +550,10 @@ def _built_projects(
                 manifest = reused[key] if reused is not None else (
                     build_standalone_artifacts(
                         component, out_dir=wheel_dir, toolchain=toolchain, builder=builder,
+                        **execution,
                     ) if standalone else builder.build_plugin_artifacts(
                         component, out_dir=wheel_dir, toolchain=toolchain,
+                        **execution,
                     )
                 )
                 project = {
@@ -810,7 +812,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--source-descriptor", type=json.loads, help="Existing installation source descriptor")
     parser.add_argument("--main-head", help="Fetched Main head; required only for --finalized-main")
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--reuse-install-source", type=Path)
+    parser.add_argument(
+        "--reuse-install-source", type=Path,
+        help="Reuse matching first-party wheels from this explicitly selected prior snapshot",
+    )
     parser.add_argument("--finalized-main", action="store_true")
     parser.add_argument("--prepare-applications", action="store_true")
     parser.add_argument("--application-extras", type=json.loads)

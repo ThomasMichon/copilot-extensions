@@ -528,6 +528,14 @@ def test_import_inside_a_test_is_not_executable_decision_body_coverage(tmp_path)
 
 
 def test_native_compiler_source_has_no_release_unit_admission(tmp_path):
+    assert relative_file("libs/agent-procutil/src/agent_procutil/native_daemon.ps1")
+    assert relative_file("tools/manager_application_provider.json")
+    for unreviewed in (
+        "libs/agent-procutil/src/agent_procutil/arbitrary.ps1",
+        "tools/arbitrary.json",
+    ):
+        with pytest.raises(UnitEvidenceError):
+            relative_file(unreviewed)
     native = "libs/agent-procutil/src/agent_procutil/daemon_instance_native.c"
     with pytest.raises(UnitEvidenceError):
         relative_file(native)

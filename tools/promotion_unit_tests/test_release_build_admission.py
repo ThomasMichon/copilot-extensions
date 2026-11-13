@@ -335,6 +335,35 @@ def runtime_builder(monkeypatch):
     return module, events
 
 
+def test_application_resources_keep_provider_metadata_without_broadening_other_assets(
+    tmp_path, runtime_builder,
+):
+    module, events = runtime_builder
+    expected = {
+        "scripts/runtime-source-tools/tools/provider.py",
+        "scripts/runtime-source-tools/libs/example/pyproject.toml",
+        "scripts/runtime-source-tools/tools/requirements.txt",
+        "scripts/runtime-source-tools/tools/uv.lock",
+        "bin/manager.sh",
+    }
+    excluded = {"bin/unrelated.txt", "scripts/unrelated.toml"}
+    for name in expected | excluded:
+        _write(tmp_path / name, name.encode())
+    (tmp_path / "scripts/runtime-source-tools/directory.py").mkdir()
+    selected = module.application_resources(tmp_path, "worktree_manager")
+    assert selected == {"_runtime_assets/" + name: tmp_path / name for name in expected}
+    assert resources.application_resources(tmp_path, "worktree_manager") == {
+        "worktree_manager/" + name: source for name, source in selected.items()
+    }
+    included = tmp_path / "sdist/src/worktree_manager/_runtime_assets"
+    for name in expected:
+        _write(included / name, name.encode())
+    assert module.application_resources(tmp_path / "sdist", "worktree_manager") == {
+        "_runtime_assets/" + name: None for name in expected
+    }
+    assert events == []
+
+
 @pytest.mark.parametrize("kind", ["ordinary", "missing", "directory", "linked-file", "linked-parent"])
 def test_runtime_resource_ordinary_file_decides_without_packaging_actor(
     tmp_path, runtime_builder, kind,

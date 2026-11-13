@@ -20,6 +20,7 @@ Usage::
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 import json
 import re
 import stat
@@ -64,20 +65,34 @@ def _check_changefile_path(path: Path) -> None:
         raise ValueError(f"unsafe changefile path: {path}")
 
 
-def read_changefiles() -> list[tuple[Path, dict]]:
+def _read_changefile(path: Path) -> tuple[Path, dict | None, str | None]:
+    try:
+        return path, json.loads(path.read_text(encoding="utf-8")), None
+    except (json.JSONDecodeError, OSError) as exc:
+        return path, None, f"changefile: skipping unreadable {path}: {exc}"
+
+
+def read_changefiles(*, parallel: bool = False) -> list[tuple[Path, dict]]:
     _check_changefile_path(CHANGEFILES_DIR)
     if not CHANGEFILES_DIR.is_dir():
         return []
-    out = []
     paths = sorted(CHANGEFILES_DIR.glob("*.json"))
     for path in paths:
         _check_changefile_path(path)
-    for f in paths:
-        try:
-            out.append((f, json.loads(f.read_text(encoding="utf-8"))))
-        except (json.JSONDecodeError, OSError) as exc:
-            print(f"changefile: skipping unreadable {f}: {exc}", file=sys.stderr)
-    return out
+
+    def collect(records):
+        out = []
+        for path, data, error in records:
+            if error is not None:
+                print(error, file=sys.stderr)
+            else:
+                out.append((path, data))
+        return out
+
+    if parallel and len(paths) >= 64:
+        with ThreadPoolExecutor(max_workers=8) as readers:
+            return collect(readers.map(_read_changefile, paths))
+    return collect(map(_read_changefile, paths))
 
 
 def cmd_add(args: argparse.Namespace) -> int:

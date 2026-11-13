@@ -13,13 +13,14 @@ import time
 
 import pytest
 from agent_procutil import no_window_kwargs
+from agent_procutil.daemon_instances import TEST_CONTEXT_ENV
 
-from runtime_install_fixture import isolate_account_profile
-import test_python_runtime_install as runtime_fixture
+from agent_worktrees.update_runtime_application import PreparedApplication
+
+from source_application_fixture import application_source
 from test_source_python_publication import native_hosts
 
 REPOSITORY = Path(__file__).resolve().parents[3]
-prepared_native_runtime_source = runtime_fixture.native_runtime_source
 
 
 def _copy_native_checkout(plugin: Path, repository: Path, checkout: Path, *, ignore=None) -> None:
@@ -128,7 +129,7 @@ def test_native_checkout_resolves_standalone_git_root(tmp_path, monkeypatch):
 
 @pytest.mark.timeout(1500)
 def test_native_prepared_source_preserves_managed_global_owner(
-    tmp_path, prepared_native_runtime_source, capsys,
+    tmp_path, monkeypatch, capsys,
 ):
     uv = shutil.which("uv")
     if uv is None:
@@ -150,10 +151,12 @@ def test_native_prepared_source_preserves_managed_global_owner(
     }), encoding="utf-8")
     environment = {
         key: value for key, value in os.environ.items()
-        if not key.startswith(("GIT_", "COPILOT_EXTENSIONS_", "AGENT_WORKTREES_"))
+        if (key == TEST_CONTEXT_ENV
+            or not key.startswith(("GIT_", "COPILOT_EXTENSIONS_", "AGENT_WORKTREES_")))
         and key not in ("COPILOT_PLUGIN_ROOT", "COPILOT_PLUGIN_STAGED_FROM", "VIRTUAL_ENV",
                         "PYTHONPATH", "PYTHONHOME")
     }
+    assert environment.get(TEST_CONTEXT_ENV), "native owner requires its runner-owned daemon lifecycle"
     environment.update(
         HOME=str(home), USERPROFILE=str(home), AGENT_HOME=str(home),
         COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT=str(project),
@@ -176,48 +179,18 @@ def test_native_prepared_source_preserves_managed_global_owner(
             print(f"Native source phase passed: {label} ({time.monotonic() - started:.3f}s)", flush=True)
         return completed.stdout
 
-    plugin, _commit = prepared_native_runtime_source
-    git = shutil.which("git")
-    assert git is not None
-    repository = Path(run(
-        [git, "-C", str(plugin), "rev-parse", "--show-toplevel"], "resolve frozen repository",
-    ).strip()).resolve()
-    checkout = tmp_path / "checkout"
-    _copy_native_checkout(plugin, repository, checkout)
-    shutil.copytree(
-        REPOSITORY / "libs/installer-engine", checkout / "libs/installer-engine",
-        ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".pytest_cache"),
+    monkeypatch.syspath_prepend(str(REPOSITORY / "tools"))
+    checkout, commit = application_source(
+        REPOSITORY, tmp_path / "source", home, deadline=time.monotonic() + 120,
     )
-    shutil.copytree(REPOSITORY / "worktree-manager/bin", checkout / "worktree-manager/bin")
-    narrative = Path("docs/patterns/entity-relationship-model.md")
-    (checkout / narrative).parent.mkdir(parents=True)
-    shutil.copyfile(REPOSITORY / narrative, checkout / narrative)
-    copied_plugin = checkout / "plugins/agent-worktrees"
-    isolate_account_profile(copied_plugin, home)
-    hooks = tmp_path / "empty-hooks"
-    hooks.mkdir()
-    git_prefix = [
-        git, "-C", str(checkout), "-c", f"core.hooksPath={hooks}",
-        "-c", "user.name=Runtime test", "-c", "user.email=runtime-test@example.invalid",
-        "-c", "commit.gpgsign=false", "-c", "core.longpaths=true",
-    ]
-    run([*git_prefix, "init", "-q", "--template", str(hooks)], "initialize isolated source")
-    run([*git_prefix, "add", "--all", "--force", "."], "stage isolated source")
-    run([*git_prefix, "commit", "--allow-empty", "-qm", "Isolated native source fixture"],
-        "commit isolated source")
-    commit = run([*git_prefix, "rev-parse", "HEAD"], "read source commit").strip()
-    run([*git_prefix, "update-ref", "refs/remotes/origin/dev", commit], "select merged source")
-    prepared = json.loads(run([
-        sys.executable, "-I", "-B", str(REPOSITORY / "tools/prepare_runtime_source.py"),
-        "--source", str(checkout), "--commit", commit, "--plugin", "agent-worktrees",
-        "--output", str(tmp_path / "prepared"),
-    ], "prepare admitted source"))
-    artifact = Path(prepared["payload"])
-    identity = prepared["identity"]
     owner = home / ".copilot/installed-plugins/example/agent-worktrees"
-    shutil.copytree(
-        artifact, owner, ignore=shutil.ignore_patterns("runtime-source.json"),
-    )
+    run([
+        sys.executable, "-I", "-B", "-c",
+        "import sys;from pathlib import Path;sys.path.insert(0,sys.argv[1]);"
+        "from prepare_runtime_source import _materialize;"
+        "_materialize(Path(sys.argv[2]),'agent-worktrees',Path(sys.argv[3]))",
+        str(REPOSITORY / "tools"), str(checkout), str(owner),
+    ], "materialize isolated release owner")
     root = home / ".agent-worktrees"
 
     def provision(payload, shell, executable):
@@ -251,6 +224,12 @@ def test_native_prepared_source_preserves_managed_global_owner(
     run(provision(owner, shell, executable), "provision release owner", 300)
     previous = (root / "current-version").read_text().strip()
     before = json.loads((root / "deploy-manifest.json").read_text())
+    owner_python = Path(before["venv"]) / (
+        "Scripts/python.exe" if os.name == "nt" else "bin/python"
+    )
+    from build_toolchain_lock import _query_marker_environment
+
+    owner_target = _query_marker_environment(owner_python, deadline=time.monotonic() + 30)
     binding_command = [
         sys.executable, "-I", "-B", str(owner / "scripts/command_binding.py"),
         "--payload-root", str(owner), "--plugin-id", "agent-worktrees",
@@ -289,46 +268,79 @@ def test_native_prepared_source_preserves_managed_global_owner(
         path: (path.read_bytes(), path.stat().st_ino, path.stat().st_mtime_ns)
         for path in (config, database, policy_path)
     }
-    owner_python = Path(before["venv"]) / (
-        "Scripts/python.exe" if os.name == "nt" else "bin/python"
+    snapshots = json.loads(run([
+        str(owner_python), "-I", "-B", str(REPOSITORY / "tools/local_install_source.py"),
+        "--source-checkout", str(checkout), "--source-commit", commit, "--main-head", commit,
+        "--output", str(tmp_path / "prepared"), "--prepare-applications",
+        "--branch", "dev", "--project", "agent-worktrees", "--uv", uv, "--timeout", "600",
+        "--source-descriptor", json.dumps({"source": "github", "repo": "Example/Plugins"}),
+    ], "prepare complete application", 660))
+    snapshot = Path(snapshots["agent-worktrees"])
+    prepared_profile = json.loads((snapshot / "profiles" / "agent-worktrees.json").read_text())
+    assert prepared_profile["target"]["environment"] == owner_target
+    reuse_probe = (
+        "import sys,time;from pathlib import Path;"
+        "repository,checkout,output,snapshot=map(Path,sys.argv[1:5]);"
+        "sys.path[:0]=[str(repository/'tools'),str(repository/'plugins/agent-worktrees/tests')];"
+        "from source_application_fixture import assert_application_reuse;"
+        "assert_application_reuse(checkout,sys.argv[5],'agent-worktrees',output,snapshot,"
+        "uv=sys.argv[6],deadline=time.monotonic()+120);"
+        "print('COMPLETE_PREPARATION_REUSED_WITHOUT_CONSTRUCTION')"
     )
+    assert "COMPLETE_PREPARATION_REUSED_WITHOUT_CONSTRUCTION" in run([
+        str(owner_python), "-I", "-B", "-c", reuse_probe, str(REPOSITORY), str(checkout),
+        str(tmp_path / "prepared-reuse"), str(snapshot), commit, uv,
+    ], "reuse complete promoted application without construction", 150)
+    application = PreparedApplication(snapshot, "agent-worktrees", "null")
     update_probe = (
         "import json,os,sys;from pathlib import Path;"
         "from agent_worktrees import update_runtime,update_runtime_plan;"
+        "from agent_worktrees.update_runtime_application import PreparedApplication;"
         "from agent_worktrees.update_runtime_source import PreparedRuntimeSource;"
-        "owner,artifact,project=map(Path,sys.argv[1:4]);"
-        "source=PreparedRuntimeSource(artifact,sys.argv[4]);"
+        "owner,snapshot,project=map(Path,sys.argv[1:4]);"
+        "app=PreparedApplication(snapshot,'agent-worktrees','null');"
+        "source=PreparedRuntimeSource(app.payload,app.identity,app);"
         "step=update_runtime_plan.plan_engine(owner,"
-        "'windows' if os.name=='nt' else 'linux',force=True,source=source,project_root=project);"
+        "'windows' if os.name=='nt' else 'linux',force=False,source=source,project_root=project);"
         "assert not step.status,step.status;"
-        "assert step.payload==owner and step.artifact==artifact;"
+        "assert step.payload==owner and step.artifact==app.payload;"
         "status=update_runtime._execute_runtime_step(step);assert status=='OK',status;"
-        "assert source.deployed_version(step.runtime_root,owner)==source.version;"
+        "assert source.deployed_version(step.runtime_root,owner)==app.version;"
         "print('PINNED_UPDATE_PRESERVED_GLOBAL_OWNER')"
     )
     assert "PINNED_UPDATE_PRESERVED_GLOBAL_OWNER" in run([
-        str(owner_python), "-I", "-B", "-X", "utf8", "-c", update_probe, str(owner), str(artifact),
-        str(project), json.dumps({
-            "runtime_source": identity, "runtime_version": identity["runtime_version"],
-        }),
+        str(owner_python), "-I", "-B", "-X", "utf8", "-c", update_probe, str(owner), str(snapshot),
+        str(project),
     ], "update prepared source through collected runtime plan", 300)
+    assert json.loads(run(binding_command, "read updated command binding")) == binding
     environment["COPILOT_PLUGIN_STAGED_FROM"] = str(owner)
+    slot = root / "versions" / application.version
+    complete = slot / ".install-complete.json"
+    completion = (complete.read_bytes(), complete.stat().st_mtime_ns)
     for shell, executable in hosts:
-        run(provision(artifact, shell, executable), f"deploy prepared source via {shell}", 180)
-        assert (root / "current-version").read_text().strip() == identity["runtime_version"]
-        manifest = json.loads((root / "deploy-manifest.json").read_text())
-        assert manifest["runtime_source"] == identity
+        command = (
+            [executable, "-NoProfile", "-File", str(slot / "install.ps1")] if shell == "ps1"
+            else [executable, (slot / "install.sh").as_posix()]
+        )
+        run(command, f"reuse complete application via {shell}", 180)
+        assert (complete.read_bytes(), complete.stat().st_mtime_ns) == completion
+        assert (root / "current-version").read_text().strip() == application.version
+        assert (root / "last-known-good").read_text().strip() == application.version
+        assert json.loads((slot / "application.json").read_text()) == json.loads(application.declaration)
+        assert json.loads((slot / "runtime-source.json").read_text()) == json.loads(
+            application.identity,
+        )["runtime_source"]
+        assert json.loads((slot / "install-success.json").read_text()) == {
+            "state": "installed", "version": application.version,
+        }
         assert json.loads(run(binding_command, "read retained command binding")) == binding
-        assert manifest["source"]["path"] == owner.as_posix()
-        assert manifest["source"]["version"] == before["source"]["version"]
-        assert Path(manifest["venv"]).parent == root / "versions"
         assert (root / "versions" / previous).is_dir()
         assert {
             path: (path.read_bytes(), path.stat().st_ino, path.stat().st_mtime_ns)
             for path in retained
         } == retained
         installation, info, module = json.loads(run([
-            str(Path(manifest["venv"]) / ("Scripts/python.exe" if os.name == "nt" else "bin/python")),
+            str(slot / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")),
             "-I", "-B", "-c",
             "import json,agent_worktrees;from agent_worktrees import config,_build_info;"
             "print(json.dumps([str(config.install_dir()),_build_info.BUILD_INFO,"
@@ -336,8 +348,8 @@ def test_native_prepared_source_preserves_managed_global_owner(
         ], "read installed identity"))
         assert Path(installation) == root
         assert info["commit"] == commit
-        assert info["runtime_version"] == identity["runtime_version"]
-        assert Path(module).is_relative_to(Path(manifest["venv"]))
+        assert info["runtime_version"] == application.version
+        assert Path(module).is_relative_to(slot / ".venv")
         shim = home / ".local/bin/agent-worktrees"
         if os.name == "nt":
             powershell = next(exe for kind, exe in hosts if kind == "ps1")
@@ -345,18 +357,18 @@ def test_native_prepared_source_preserves_managed_global_owner(
         else:
             entry = [executable, str(shim)]
         assert run([*entry, "--version"], "execute existing global command").startswith(
-            "agent-worktrees " + identity["runtime_version"] + " "
+            "agent-worktrees " + application.version + " "
         )
     with sqlite3.connect(database) as connection:
         assert connection.execute("SELECT value FROM retained").fetchall() == [("existing state",)]
-    selected_python = Path(manifest["venv"]) / (
+    selected_python = slot / ".venv" / (
         "Scripts/python.exe" if os.name == "nt" else "bin/python"
     )
     missing_owner = tmp_path / "removed-development-checkout"
     run([
         str(selected_python), "-I", "-B", "-c",
         "import pathlib,sys;"
-        "sys.path.insert(0,str(pathlib.Path(sys.prefix)/'.runtime-bootstrap'));"
+        "sys.path.insert(0,str(pathlib.Path(sys.prefix).parent/'.runtime-bootstrap'));"
         "import versioned_runtime as runtime;"
         "runtime.claim_dev(pathlib.Path(sys.argv[1]),sys.argv[2],previous_version=sys.argv[3])",
         str(root), str(missing_owner), previous,
@@ -365,6 +377,10 @@ def test_native_prepared_source_preserves_managed_global_owner(
     policy_path.rename(tmp_path / "retained-managed-policy.json")
     owner.rename(tmp_path / "removed-installed-publisher")
     checkout.rename(tmp_path / "removed-source-checkout")
+    snapshot.rename(tmp_path / "removed-prepared-application")
+    assert run([*entry, "--version"], "execute source-absent global command").startswith(
+        "agent-worktrees " + application.version + " "
+    )
     run([
         str(selected_python), "-I", "-B", "-m", "agent_worktrees",
         "dev-release", "--owner", str(missing_owner), "--json",

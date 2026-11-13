@@ -13,23 +13,32 @@ CONSUMER = Path("plugins/agent-containers")
 def application_resources(source: Path, package: str) -> dict[str, Path]:
     """Read the trusted build owner's declarations without executing candidate code."""
     helper = TRUSTED_ROOT / "libs" / "versioned-runtime" / "standalone_build.py"
-    declarations = [
-        node.value for node in ast.parse(helper.read_text(encoding="utf-8")).body
-        if isinstance(node, ast.Assign) and any(
-            isinstance(target, ast.Name) and target.id == "APPLICATION_RESOURCES"
-            for target in node.targets
-        )
-    ]
-    if len(declarations) != 1:
+    declarations = {}
+    for node in ast.parse(helper.read_text(encoding="utf-8")).body:
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name) and target.id in (
+                    "APPLICATION_RESOURCES", "APPLICATION_METADATA_RESOURCES",
+                ):
+                    if target.id in declarations:
+                        raise PromotionArtifactError("duplicate trusted application resource declaration")
+                    declarations[target.id] = ast.literal_eval(node.value)
+    if set(declarations) != {"APPLICATION_RESOURCES", "APPLICATION_METADATA_RESOURCES"}:
         raise PromotionArtifactError("invalid trusted application resource declaration")
-    patterns = ast.literal_eval(declarations[0])[package]
-    return {
+    patterns = declarations["APPLICATION_RESOURCES"][package]
+    resources = {
         package + "/_runtime_assets/" + path.relative_to(source).as_posix(): path
         for pattern in patterns for path in source.glob(pattern)
         if path.is_file() and path.suffix in {
             ".py", ".ps1", ".sh", ".cmd", ".conf", ".pyz", ".json", ".yaml", ".awk", ".cs",
         }
     }
+    resources.update({
+        package + "/_runtime_assets/" + path.relative_to(source).as_posix(): path
+        for pattern in declarations["APPLICATION_METADATA_RESOURCES"].get(package, ())
+        for path in source.glob(pattern) if path.is_file()
+    })
+    return resources
 
 
 def build_inputs(source: Path, *, root: Path | None) -> tuple[dict, dict[str, Path]]:

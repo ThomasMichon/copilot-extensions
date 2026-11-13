@@ -298,7 +298,6 @@
     "worktree-manager/src/worktree_manager/runtime_identity.py",
     "worktree-manager/src/worktree_manager/runtime_source.py",
     "worktree-manager/src/worktree_manager/runtime_source_config.py",
-    "worktree-manager/src/worktree_manager/self_install_runtime.py",
     "worktree-manager/src/worktree_manager/source_config.py"
   ],
   "importRoots": [
@@ -528,7 +527,6 @@
     "worktree_manager.runtime_identity",
     "worktree_manager.runtime_source",
     "worktree_manager.runtime_source_config",
-    "worktree_manager.self_install_runtime",
     "worktree_manager.source_config",
     "zdd",
     "zdd.breadcrumb",

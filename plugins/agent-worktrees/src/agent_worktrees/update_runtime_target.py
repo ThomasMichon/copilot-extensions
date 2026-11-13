@@ -22,6 +22,7 @@ TARGET_ENV = "COPILOT_EXTENSIONS_RUNTIME_SOURCE_TARGET"
 PROVIDER_SCHEMA = "copilot-extensions.runtime-source-target-provider"
 PROVIDER_FILE = "runtime-source-target.json"
 TARGET_CONTRACT = 1
+APPLICATION_PROFILE_SCHEMA = "copilot-extensions.runtime-application-profile"
 
 
 def _provider(payload: Path) -> dict | None:
@@ -62,6 +63,50 @@ class SourceRuntimeTarget:
         return json.loads(self.document)["profile"]
 
 
+def application_profile(
+    name: str, owner: Path, root: Path, environment: Mapping[str, str],
+) -> dict | None:
+    """Read the installed profile owner's preparation inputs, never provision."""
+    provider = _provider(owner)
+    if provider is None:
+        if name == "agent-containers":
+            raise ValueError("Containers application profile owner is unavailable; update its tooling")
+        return None
+    result = subprocess.run(
+        [
+            sys.executable, "-I", "-B", str(owner / provider["planner"]),
+            "--application-profile", "--root", str(root),
+        ],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+        stdin=subprocess.DEVNULL, env=dict(environment), timeout=30, check=False,
+        **no_window_kwargs(),
+    )
+    if result.returncode:
+        raise ValueError(
+            f"Installed application profile query failed: {result.stderr.strip() or result.returncode}"
+        )
+    if len(result.stdout.encode("utf-8")) > 65536:
+        raise ValueError("Installed application profile query exceeded its document bound")
+    value = json.loads(result.stdout, object_pairs_hook=strict_json_object)
+    if (
+        not isinstance(value, dict)
+        or set(value) != {"schema", "version", "plugin", "runtime_root", "profile", "extras"}
+        or value["schema"] != APPLICATION_PROFILE_SCHEMA
+        or type(value["version"]) is not int or value["version"] != 1
+        or value["plugin"] != name or not isinstance(value["runtime_root"], str)
+        or not Path(value["runtime_root"]).is_absolute()
+        or Path(value["runtime_root"]).resolve() != root.resolve()
+        or not isinstance(value["profile"], str)
+        or re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", value["profile"]) is None
+        or not isinstance(value["extras"], list) or len(value["extras"]) > 64
+        or any(not isinstance(extra, str) or re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", extra) is None
+               for extra in value["extras"])
+        or len(set(value["extras"])) != len(value["extras"])
+    ):
+        raise ValueError("Installed application profile query returned an invalid selection")
+    return value
+
+
 def plan_target(
     source: PreparedRuntimeSource, name: str, owner: Path, root: Path,
     environment: Mapping[str, str],
@@ -78,7 +123,8 @@ def plan_target(
         [
             sys.executable, "-I", "-B", str(owner / installed["planner"]),
             "--plan-source", "--root", str(root), "--payload", str(source.payload),
-            "--expected-source-version", source.version,
+            "--expected-source-version",
+            json.loads(source.identity, object_pairs_hook=strict_json_object)["runtime_version"],
             "--expected-source-identity", source.identity,
         ],
         capture_output=True, text=True, encoding="utf-8", errors="replace",

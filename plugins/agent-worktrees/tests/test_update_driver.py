@@ -566,7 +566,7 @@ def test_no_manager_does_not_bypass_the_queue(queued):
 
 def test_prepared_source_packet_is_durable_request_input_not_ambient_state(queued):
     seen, _request = queued
-    raw = '{"schema":"copilot-extensions.prepared-runtime-sources","version":1,"sources":{}}'
+    raw = '{"schema":"copilot-extensions.prepared-runtime-sources","version":2,"sources":{}}'
     assert boundary.cmd_update_request(_args(no_manager=True, runtime_sources=raw)) == 4
     assert seen["spec"].argv == ("--no-manager", "--runtime-sources", raw)
     assert seen["runner"].argv[-4:] == ("update", "--no-manager", "--runtime-sources", raw)

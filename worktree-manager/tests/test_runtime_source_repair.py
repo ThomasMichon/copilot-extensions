@@ -25,7 +25,8 @@ def selected(tmp_path, monkeypatch):
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
     config.set_source(config.RuntimeSource("dev", allow_dev=True))
     return ResolvedSource(
-        config.configured_source(), tmp_path / "checkout", "a" * 40, "b" * 40, "a" * 40,
+        config.configured_source(), tmp_path / "checkout", "a" * 40, "b" * 40,
+        "a" * 40, "e" * 40,
     )
 
 

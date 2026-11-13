@@ -501,7 +501,7 @@ def _plugins_needing_bump(
         )
         for manifest in groups:
             for name in manifest.files:
-                source = f"{manifest.canonical_dir_raw}/{name}"
+                source = manifest.source_relative(name)
                 packaged_sources.setdefault(source, set()).add(consumer)
     for path in changed:
         for consumer in packaged_sources.get(path, ()):

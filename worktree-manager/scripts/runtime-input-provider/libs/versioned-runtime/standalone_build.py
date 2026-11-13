@@ -31,6 +31,13 @@ APPLICATION_RESOURCES = {
     ),
     "agent_worktrees": ("scripts/**/*",),
 }
+APPLICATION_METADATA_RESOURCES = {
+    "worktree_manager": (
+        "scripts/runtime-source-tools/**/*.toml",
+        "scripts/runtime-source-tools/**/*.txt",
+        "scripts/runtime-source-tools/**/*.lock",
+    ),
+}
 
 
 def application_resources(project, package):
@@ -41,8 +48,14 @@ def application_resources(project, package):
     sources = {
         path.relative_to(project).as_posix(): path
         for pattern in patterns for path in project.glob(pattern)
-        if path.suffix in {".py", ".ps1", ".sh", ".cmd", ".conf", ".pyz", ".json", ".yaml", ".awk", ".cs"}
+        if path.is_file()
+        and path.suffix in {".py", ".ps1", ".sh", ".cmd", ".conf", ".pyz", ".json", ".yaml", ".awk", ".cs"}
     }
+    sources.update({
+        path.relative_to(project).as_posix(): path
+        for pattern in APPLICATION_METADATA_RESOURCES.get(package, ())
+        for path in project.glob(pattern) if path.is_file()
+    })
     if sources:
         return {"_runtime_assets/" + name: path for name, path in sources.items()}
     if not included.is_dir():

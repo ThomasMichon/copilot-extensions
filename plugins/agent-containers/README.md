@@ -418,6 +418,15 @@ provider-exec when their selected runtime already contains Paramiko. Fresh
 installs do not infer dependencies from whichever repository/config happens to
 be the installer's working directory.
 
+For complete-application preparation, the same owner exposes a read-only
+`scripts/runtime_profile.py --root <resolved-runtime-root> --application-profile`
+query. Its version-one `copilot-extensions.runtime-application-profile` document
+identifies that root and the selected profile, with `provider-exec` as an extra
+only when existing profile intent requires it. This query needs no incoming
+payload and neither provisions dependencies nor writes profile state. It is
+profile input for the complete-application consumer, not a legacy runtime-slot
+version or an installation receipt.
+
 Both profiles include the declared local repository-policy package in their
 explicit dependency targets, input fingerprint and installed-module health check.
 It resolves from the selected payload/source closure rather than relying on a

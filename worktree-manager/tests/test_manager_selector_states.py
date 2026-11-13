@@ -1,4 +1,4 @@
-"""Selector text is rollback state; only nonblank names need runtime custody."""
+"""Selector bytes are rollback state; only safe old names need runtime custody."""
 
 from contextlib import contextmanager
 from pathlib import Path
@@ -109,12 +109,7 @@ def test_selector_state_matrix(tmp_path, monkeypatch, current_state, last_good_s
     monkeypatch.setattr(publication, "publish_selectors", publishing_selectors)
     monkeypatch.setattr(publication, "_recover_uncontested_locked", recovering)
     monkeypatch.setattr(publication.os, "replace", replacing)
-    if "invalid" in (current_state, last_good_state):
-        with pytest.raises(ValueError):
-            adapter.activate(root, "2.0.0", expected=expected)
-        assert faults == [] and recoveries == []
-        assert _snapshot((current, last_good)) == before
-    elif operation == "apply":
+    if operation == "apply":
         adapter.activate(root, "2.0.0", expected=expected)
         assert current.read_bytes() == last_good.read_bytes() == b"2.0.0\n"
         assert faults == [] and recoveries == []
@@ -141,7 +136,7 @@ def test_blank_or_unsafe_target_is_still_refused(tmp_path, target):
     assert _snapshot((current, last_good)) == before
 
 
-@pytest.mark.parametrize("data", [None, b"", b" \t\r\n", b"1.0.0\n"])
+@pytest.mark.parametrize("data", [None, b"", b" \t\r\n", b"1.0.0\n", b"\xff\n", b"../unsafe\n"])
 def test_prior_text_does_not_relax_expected_selection(tmp_path, data):
     adapter = si._runtime_installer()
     root = tmp_path / "root"

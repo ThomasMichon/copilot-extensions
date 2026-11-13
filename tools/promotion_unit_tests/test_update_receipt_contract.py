@@ -51,7 +51,7 @@ def test_install_guard_dispatches_receipt_contract() -> None:
          "run = installer_run.run_installer if receipt_owned else subprocess.run", "run = subprocess.run"),
         ("update_runtime.py", "label=step.name, receipt_owned=True,", "label=step.name, receipt_owned=False,"),
         ("update_runtime.py", "target_version=step.target_version,", "target_version=None,"),
-        ("update_runtime.py", "return run(command).status", 'run(command)\n            return "OK"'),
+        ("update_runtime.py", "status = run(command).status", 'run(command)\n            status = "OK"'),
     ],
     ids=["false-success", "ignored-timeout", "ignored-exit", "wrong-watchdog", "bad-version",
          "unowned-adapter", "unowned-step", "missing-target", "ignored-status"],

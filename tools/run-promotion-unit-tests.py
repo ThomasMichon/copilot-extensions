@@ -29,6 +29,14 @@ ROOT = Path(__file__).resolve().parents[1]
 PACKET = ROOT / "tools/promotion_unit_tests"
 
 
+class FrameworkTemporaryPaths:
+    @staticmethod
+    def pytest_configure(config) -> None:
+        from pytest_portfolio_guard import configure_temp_links
+
+        configure_temp_links(config)
+
+
 def prepare_framework_io() -> None:
     if sys.platform == "win32":
         importlib.import_module("colorama")
@@ -144,7 +152,7 @@ def main() -> int:
                     "--rootdir", str(ROOT), "--confcutdir", str(ROOT),
                     "--basetemp", str(Path(temporary) / "pytest"),
                     str(ROOT / "tools/promotion_unit_tests"),
-                ], plugins=[run])
+                ], plugins=[run, FrameworkTemporaryPaths()])
             finally:
                 run.active = False
                 cov.stop()
@@ -198,7 +206,11 @@ def main() -> int:
             == set(manifest["composition"]["required_coverage_origins"])
         )
     if not complete:
-        raise UnitEvidenceError("coverage did not observe every admitted production target")
+        raise UnitEvidenceError(
+            "coverage did not observe every admitted production target; missing: "
+            + ", ".join(sorted(set(manifest["coverage_targets"]) - measured))
+            + "; unexpected: " + ", ".join(sorted(measured - set(manifest["coverage_targets"])))
+        )
     elapsed = time.monotonic() - started
     verify_observations(
         manifest["nodes"], run.collected, run.reports, run.effects,

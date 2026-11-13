@@ -114,6 +114,34 @@ def test_promote_reports_no_change_when_dev_matches_main(repo: Path):
     assert "no content change" in report["reason"]
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows Git long-path checkout")
+def test_scratch_git_handles_long_paths_without_changing_repository_configuration(repo: Path):
+    from native_test_paths import native_test_path
+
+    relative = Path("native") / ("x" * 80) / ("y" * 80) / "input.txt"
+    original = native_test_path(repo / relative)
+    original.parent.mkdir(parents=True)
+    original.write_text("committed fixture\n", encoding="utf-8")
+    commit = _commit(repo, "Long native checkout fixture")
+    _git(["config", "core.longpaths", "false"], repo)
+    configuration = repo / ".git" / "config"
+    before = configuration.read_bytes()
+    scratch = pr.add_scratch_worktree(commit, repo=repo)
+    try:
+        retained = native_test_path(scratch / relative)
+        assert len(str(scratch / relative)) > 260
+        assert retained.read_text(encoding="utf-8") == "committed fixture\n"
+        retained.write_text("staged fixture\n", encoding="utf-8")
+        pr._git(["add", "--", relative.as_posix()], cwd=scratch)
+        assert pr._git(["show", ":" + relative.as_posix()], cwd=scratch) == "staged fixture"
+        assert original.read_text(encoding="utf-8") == "committed fixture\n"
+    finally:
+        pr.remove_scratch_worktree(scratch, repo=repo)
+    assert not native_test_path(scratch).exists()
+    assert configuration.read_bytes() == before
+    assert _git(["config", "--get", "core.longpaths"], repo) == "false"
+
+
 def test_local_composition_uses_exact_inputs_and_main_versions(
     repo: Path, tmp_path: Path, monkeypatch,
 ) -> None:
@@ -1349,6 +1377,11 @@ def test_promote_syncs_instruction_projections_after_a_version_bump(tmp_path: Pa
     marker = rendered.partition("<!-- copilot-extension-instruction-projection ")[2].partition(" -->")[0]
     assert json.loads(marker)["pluginVersion"] == "0.1.1-dev1"
     assert f"[owner: {plugin}@0.1.0-dev1]" not in rendered
+    fallback = _git([
+        "show", f"{commit}:.github/copilot/context-fallbacks/{plugin}/demo-note.md",
+    ], root)
+    assert f"[owner: {plugin}@0.1.1-dev1]" in fallback
+    assert f"[owner: {plugin}@0.1.0-dev1]" not in fallback
 
 
 def test_promote_projection_sync_is_a_noop_without_customizing_copilot(repo: Path):

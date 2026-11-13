@@ -320,3 +320,20 @@ authorize executing a wipe or change the retained configuration/data, protected
 session/connectivity and installation-resource boundaries.
 The exact script spelling, implementation and validation decomposition remain
 agent-recommended realization choices, not additional operator requirements.
+
+## Successful V2 startup owns roll-forward
+
+Operator clarification during Manager staging implementation:
+
+> What is triggering selectors to roll back? The roll forward should occur on successful start of V2, nothing from V1 should be able to trigger a roll back
+
+The incoming V2's successful startup is the commit point. Start it through its
+own installed code and confirm that exact generation before publishing the
+selection. A displaced V1 may drain and retire; its condition or response is
+not authority to reverse the committed incoming generation.
+
+Cancellation after acknowledged V2 startup must settle forward publication,
+not restore V1's selector files. Unconfirmed startup remains an explicit
+incomplete outcome, not success. Publication failure after the commit point
+retains evidence for its owning installer rather than silently selecting the
+predecessor. This clarification changes no host permissions or rollout custody.

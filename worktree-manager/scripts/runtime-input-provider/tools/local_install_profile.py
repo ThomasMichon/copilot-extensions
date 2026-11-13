@@ -350,15 +350,14 @@ def _profile_policy(selected, environment: dict, download_origins: tuple[str, ..
 
     trusted = _validated_trusted_index_url(environment)
     if trusted is None:
-        raise ProfileError("native profile acquisition needs a configured non-public HTTPS feed")
-    policy = {
+        raise ProfileError("native profile acquisition needs a configured, affirmatively trusted governed feed")
+    return trusted, {
         "policyId": "sha256:" + _opaque_index_identity(json.dumps({
             "source": selected.identity.document(), "index": trusted,
             "downloadOrigins": download_origins,
         }, sort_keys=True)),
         "selection": {"downloadOrigins": list(download_origins)},
     }
-    return trusted, policy
 
 
 def _profile_feed(

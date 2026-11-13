@@ -32,6 +32,47 @@ SPEC.loader.exec_module(policy)
 NOW = datetime(2026, 10, 13, tzinfo=timezone.utc)
 
 
+@pytest.mark.parametrize("preparation_seconds,cap", [(3, None), (3, 2), (11, None)])
+def test_install_execution_uses_budget_remaining_after_retention(
+    monkeypatch, tmp_path, preparation_seconds, cap,
+):
+    from contextlib import contextmanager
+    from types import SimpleNamespace
+
+    now, calls, settled = [100.0], [], []
+    monkeypatch.setattr(policy._configuration.clock, "monotonic", lambda: now[0])
+
+    @contextmanager
+    def retain(uv, arguments, **options):
+        assert uv == "selected-uv" and arguments == ["example"]
+        assert options["deadline"] == 110.0
+        now[0] += preparation_seconds
+        try:
+            yield SimpleNamespace(argv=("selected-uv", "pip", "install", "example"),
+                                  environment={}, cwd=tmp_path)
+        finally:
+            settled.append(True)
+
+    def run(arguments, **options):
+        calls.append(options)
+        return CompletedProcess(arguments, 0)
+
+    monkeypatch.setattr(policy, "retain_uv_install", retain)
+    monkeypatch.setattr(policy.subprocess, "run", run)
+    options = {"timeout": cap} if cap is not None else {}
+    if preparation_seconds > 10:
+        with pytest.raises(policy.DependencyPolicyError, match="deadline"):
+            policy.run_uv_install("selected-uv", ["example"], deadline=110.0, **options)
+        assert calls == []
+    else:
+        assert policy.run_uv_install(
+            "selected-uv", ["example"], deadline=110.0, **options,
+        ).returncode == 0
+        assert calls[0]["timeout"] == (2 if cap == 2 else 7)
+        assert "deadline" not in calls[0]
+    assert settled == [True]
+
+
 @pytest.mark.parametrize("missing", [False, True])
 def test_copied_configuration_loads_only_its_sibling_argument_grammar(
     tmp_path, monkeypatch, missing,
