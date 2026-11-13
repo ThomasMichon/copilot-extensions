@@ -2548,14 +2548,14 @@ def _save_record_contents_unlocked(
     title_val = "null" if record.title is None else yaml.safe_dump(
         str(record.title), default_style='"', allow_unicode=False, width=float("inf"),
     ).strip()
-
+    started_val = yaml.safe_dump(str(record.started_at), default_style='"').strip()
     content = (
         f"worktree_id: {_yaml_scalar(record.worktree_id)}\n"
         f"branch: {_yaml_scalar(record.branch)}\n"
         f"worktree_path: {record.worktree_path}\n"
         f"repo: {record.repo}\n"
         + record_machine_identity.serialized_fields(record)
-        + f"started_at: {record.started_at}\n"
+        + f"started_at: {started_val}\n"
         f"last_resumed_at: {record.last_resumed_at}\n"
         f"resume_count: {record.resume_count}\n"
         f"title: {title_val}\n"

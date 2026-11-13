@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Protocol
 
@@ -75,7 +76,8 @@ def serialized_fields(record: IdentityRecord) -> str:
 
 def subject_fence(record: IdentityRecord, path: Path | None) -> tuple[object, ...]:
     """Identify the receiving ledger and allocation independently of its labels."""
-    return (path, *(getattr(record, name, None) or "" for name in (
+    ledger = None if path is None else os.path.normcase(os.path.abspath(str(path)))
+    return (ledger, *(getattr(record, name, None) or "" for name in (
         "repo", "worktree_id", "worktree_path", "branch", "started_at",
     )))
 

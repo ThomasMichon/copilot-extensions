@@ -161,6 +161,41 @@ def test_subject_fence_preserves_empty_legacy_start_across_cold_reads(tmp_path: 
     assert tracking.load_record(path).title == loaded.title
 
 
+@pytest.mark.parametrize("relative_load", [False, True])
+def test_subject_fence_accepts_equivalent_ledger_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, relative_load: bool,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    absolute = tmp_path / "owned.yaml"
+    relative = Path("owned.yaml")
+    tracking.save_record(_record(absolute), absolute)
+    loaded = tracking.load_record(relative if relative_load else absolute)
+    loaded.title = "same receiving ledger"
+    tracking.save_record(loaded, absolute if relative_load else relative)
+    assert tracking.load_record(absolute).title == loaded.title
+
+
+@pytest.mark.parametrize("timestamp", [
+    "2026-11-02T00:00:00Z",
+    "2026-11-02T00:00:00+00:00",
+    "2026-11-02T00:00:00.123456789Z",
+])
+def test_subject_fence_preserves_timestamp_spelling_after_cache_eviction(
+    tmp_path: Path, timestamp: str,
+) -> None:
+    from agent_worktrees import record_cache
+
+    path = tmp_path / "owned.yaml"
+    record = _record(path)
+    record.started_at = timestamp
+    tracking.save_record(record, path)
+    record_cache.clear()
+    assert tracking.load_record(path).started_at == timestamp
+    record.title = "same writer after cache eviction"
+    tracking.save_record(record, path)
+    assert tracking.load_record(path).title == record.title
+
+
 @pytest.mark.parametrize("defect", [
     "physical", "environment", "execution", "config-platform", "native", "snapshot",
 ])

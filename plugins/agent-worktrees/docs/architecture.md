@@ -387,6 +387,10 @@ after a successful save, and permits deliberate edits to a freshly loaded
 subject. The existing creation-nonce, receiving-allocation, relocation and
 machine-identity fences remain independent; this check does not authorize an
 allocation transfer or change the persisted identity format.
+Ledger spellings use the same lexical absolute-path key as the write lock;
+the original loaded path remains available for lookup. Start timestamps are
+quoted on write so YAML inference cannot change UTC spelling or precision
+between a cached snapshot and an uncached read.
 
 [Committed-save notifications](committed-save-notifications.md) describes the
 bounded optional capture and after-all-record/pair-holds delivery boundary.
