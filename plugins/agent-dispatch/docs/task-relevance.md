@@ -76,8 +76,9 @@ source revisions and reopened/new source episodes.
 
 The existing wake drainer sends the closeout prompt to the retained owner and
 native conversation. Busy/idle transport handling stays with Bridge. A suspended
-task remains suspended: the prompt tells its agent to take closeout steering,
-not run `start` or `resume`. Steering consumption selects the closeout instead
+task remains suspended: new prompts direct its agent through executing-CLI
+support discovery to the guarded original-worker closeout command, not `start`
+or `resume`. Steering consumption selects the closeout instead
 of older goal instructions and does not restore a suspended execution lease.
 Submitted work can use its recorded `completed_by` worker and retained native
 without reassigning the task. An owner absent at acceptance, or a conflicting
@@ -277,7 +278,9 @@ rollback, means closeout is unsupported before effects; no effectful probe or
 fallback to generic abandonment is equivalent. No old surface is retired.
 The conditional [original-worker caller](relevance-closeout-worker.md) connects
 preparation, canonical own-workspace finalization and acknowledgement.
-Automatic caller adoption, native conclusion and running qualification remain
+New closeout wakes conditionally direct the original worker through CLI support
+discovery and that guarded command; existing wakes are not rewritten.
+Native conclusion and running qualification remain
 tracked by the [active effort](../../../efforts/active/task-relevance-reconciliation/README.md).
 
 ## Registered receiver and compatibility

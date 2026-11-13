@@ -186,8 +186,11 @@ merged plan does not establish running adoption.
       The conditional [worker CLI](../../../plugins/agent-dispatch/docs/relevance-closeout-worker.md)
       now connects pinned own-closeout discovery, original-claim settlement,
       canonical actual-worker finalization and independent acknowledgement.
-      Automatic wake-prompt adoption, native conclusion and running
-      qualification remain open; this does not close the aggregate item.
+      New closeout wakes now direct the original worker through read-only
+      executing-CLI support discovery and that conditional caller, without a
+      generic task-read/steer prerequisite or rewriting accepted wakes.
+      Native conclusion and running qualification remain open; source prompt
+      adoption does not close the aggregate item.
 - [ ] Publish receiver support before enabling new callers; document baseline,
       upgrade and rollback behavior against the executing runtime.
 

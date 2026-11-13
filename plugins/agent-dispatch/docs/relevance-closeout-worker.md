@@ -42,9 +42,23 @@ It does not delete the checkout or directly release a reservation.
 
 ## Compatibility and retries
 
-The receiver expansion precedes this optional caller; no producer or wake
-prompt is automatically migrated by adding the command. Baseline commands
-and their semantics remain unchanged and no old surface is retired.
+The receiver expansion precedes this conditional caller. Newly accepted
+closeouts use the existing durable wake to direct the original worker to its
+session's attributable Dispatch command. The worker first reads that executing
+CLI's `--help`; only a CLI listing `relevance-closeout` is eligible for the
+invocation above. Do not select an ambient PATH command, infer support from a
+package version, or try an effectful command to discover support. The command
+then checks the serving coordinator through its own closeout route.
+
+A missing catalog command, prior CLI, unsupported receiver or unavailable
+authority leaves the original closeout pending and is reported in the existing
+conversation. There is no generic `show`/`steer take` prerequisite: a task-only,
+submitted or same-generation unassigned captured owner may not have those
+permissions. Do not mint credentials or fall back to generic abandonment.
+Existing accepted wakes, their request identities and sent/unknown outcomes are
+not rewritten or replayed when this prompt changes. Source adapters remain
+separately opt-in; baseline commands retain their semantics and no old surface
+is retired. Native conclusion and installed-runtime qualification remain open.
 
 Each mutation re-reads the same own-closeout discovery route. Missing, invalid
 or unsupported protocol metadata, including provider rollback, refuses before
