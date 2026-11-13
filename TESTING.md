@@ -2496,6 +2496,22 @@ leased instance ownership and exact cleanup, not host credentials, installed
 services, desktop observation or a production-lifetime claim. It is not part
 of required unit-only CI and does not activate the ordinary forwarder.
 
+The actual offline native-client packet is
+`python tools/run-plugin-tests.py agent-mcp --test-file tests/native/test_generation_handover_copilot.py --allow-explicit-tiers --timeout 240 --plugin-timeout 260 --test-timeout 180`.
+Set `COPILOT_NATIVE_TEST_EXECUTABLE` to an explicitly selected native executable.
+Linux uses the existing exec caller; Windows uses PowerShell and the existing
+suspended-creation publisher, which exits before ACP and delayed MCP startup.
+Only the private copied Windows runtime advertises the optional receiver for
+this qualification; production advertisement and caller enrollment stay off.
+The same native client, conduit, keeper and upstream must survive replacement,
+rollback and same-slot replacement, including three accepted in-flight tool
+calls, real client ping replies and withheld/unknown delivery without replay.
+Backend identity comes from its actual physical interpreter, not a Windows
+venv launcher's PID. Client exit, upstream EOF, exact process settlement and
+lease cleanup remain required. The path-gated workflow downloads digest-pinned
+clients on disposable Linux and Windows runners and retains separate source
+results. These are not installed-client or productive caller acceptance.
+
 The separate owner-only `mcp-caller-lifetime` hosted Windows packet selects
 `test_custody_native_lifetime.py::test_native_caller_jobs_and_session_owner_lifetime`.
 It prepares the canonical MCP test environment, then uses the existing native
