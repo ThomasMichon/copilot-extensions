@@ -333,7 +333,7 @@
       "r:plugins/agent-vault/scripts/command_lifecycle.py::run_lifecycle::Popen": 1,
       "r:plugins/agent-worktrees/scripts/command_lifecycle.py::run_lifecycle::Popen": 1,
       "r:plugins/budget-guidance/scripts/command_lifecycle.py::run_lifecycle::Popen": 1,
-      "r:plugins/agent-worktrees/scripts/runtime_install.py::install::Popen": 1,
+      "r:plugins/agent-worktrees/scripts/runtime_input_verifier.py::wait_for_settlement::Popen": 1,
       "r:plugins/agent-worktrees/scripts/runtime_install_modes.py::run::Popen": 1,
       "r:plugins/agent-bridge/scripts/installer_driver.py::execute::Popen": 1,
       "r:plugins/agent-codespaces/scripts/installer_driver.py::execute::Popen": 1,
