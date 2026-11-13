@@ -196,18 +196,35 @@ def test_older_core_refuses_before_creating_a_retained_receiver(tmp_path, monkey
     assert not (tmp_path / "not-created").exists()
 
 
-def test_retained_command_carries_only_existing_configuration_path_and_selection(tmp_path):
+@pytest.mark.parametrize("name,session", [
+    ("chosen", "selected"), ("--chosen", "selected"), ("chosen", "--selected"),
+])
+def test_retained_command_round_trips_configuration_path_and_literal_selection(
+    tmp_path, monkeypatch, name, session,
+):
     configuration = tmp_path / "entries.json"
-    configuration.write_text(json.dumps({"mcpServers": {"chosen": _entry()}}), encoding="utf-8")
+    configuration.write_text(json.dumps({"mcpServers": {name: _entry()}}), encoding="utf-8")
+    native = ["copilot.exe", "--session-id", session]
     command = owner_headed_bundle.prepare_headed_command(
-        ["copilot.exe", "--session-id", "selected"], configuration_path=configuration,
-        names=["chosen"], session_id="selected", attempt_directory=tmp_path / "attempt",
+        native, configuration_path=configuration,
+        names=[name], session_id=session, attempt_directory=tmp_path / "attempt",
         state_file=tmp_path / "state.json", cwd=str(tmp_path),
     )
     assert "--mcp-config" in command and str(configuration) in command
-    assert command[command.index("--server") + 1] == "chosen"
     assert "not-in-the-client-command" not in repr(command)
     assert configuration.read_text().find("not-in-the-client-command") != -1
+    observed = []
+
+    async def receive(argv, **kwargs):
+        observed.append((argv, kwargs))
+        return 23
+
+    monkeypatch.setattr(owner_headed, "os", SimpleNamespace(name="nt"))
+    monkeypatch.setattr(owner_headed, "run_headed", receive)
+    assert owner_headed.main(command[4:]) == 23
+    assert observed[0][0] == native
+    assert observed[0][1]["names"] == [name]
+    assert observed[0][1]["session_id"] == session
 
 
 def test_headless_mode_cannot_silently_discard_an_explicit_headed_receiver():

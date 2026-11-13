@@ -639,6 +639,8 @@ The explicit Python construction API
 producer with the existing Driver headed creation owner. It accepts the
 original native command, session, attempt directory, Host state file and cwd,
 plus an existing absolute `configuration_path` and exact `names` selection.
+Dash-prefixed server/session identifiers remain literal receiver values; the
+original native argument vector is unchanged.
 The optional `agent-mcp[headed]` dependency supplies the independent Driver core;
 ordinary MCP installation does not require or enable it.
 

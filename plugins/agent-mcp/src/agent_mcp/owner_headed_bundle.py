@@ -93,8 +93,8 @@ def prepare_headed_command(
     archive, _ = build_headed_bundle(attempt_directory / "runtime")
     return [
         interpreter, "-I", "-S", str(archive), "--mcp-config", str(configuration_path),
-        *(argument for name in names for argument in ("--server", name)),
-        "--", "--mode", "headed", "--session-id", session_id,
+        *("--server=" + name for name in names),
+        "--", "--mode", "headed", "--session-id=" + session_id,
         "--attempt-directory", str(attempt_directory), "--state-file", str(state_file),
         "--cwd", cwd, "--", *child_argv,
     ]
