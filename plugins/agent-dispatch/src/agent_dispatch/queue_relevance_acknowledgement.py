@@ -53,10 +53,14 @@ def _prepared(queue: TaskQueue, conn: sqlite3.Connection, task_id: str, argument
         or state["relationship"]["state"] != "closed"
     ):
         raise TaskError("relevance closeout requires readiness and its settled original claim")
-    return {
-        **state, "readiness": ready,
-        "task": dict(conn.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()),
-    }
+    task = dict(conn.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone())
+    # Liveness can advance while the independent workspace owner is observed.
+    for key in (
+        "activity", "activity_updated_at", "lease_expires_at", "updated_at",
+        "last_seen_at", "latest_progress",
+    ):
+        task.pop(key, None)
+    return {**state, "readiness": ready, "task": task}
 
 
 def finish(

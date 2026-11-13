@@ -1,0 +1,9 @@
+{
+  "comment": "Allow ordinary liveness updates during relevance closeout acknowledgement",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

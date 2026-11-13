@@ -82,6 +82,44 @@ def test_readiness_without_finalization_cannot_acknowledge(
     assert queue.relevance_snapshot(task.id)["closeout"].get("acknowledgement") is None
 
 
+@pytest.mark.parametrize("update", ["heartbeat", "activity", "progress"])
+def test_liveness_during_finalized_observation_preserves_closeout(
+    finalized: readiness.Ready, monkeypatch: pytest.MonkeyPatch, update: str,
+) -> None:
+    from agent_dispatch import pool_decline_observation
+
+    queue, _, workspace, task, _ = finalized
+    observe = pool_decline_observation.observe
+    before = queue.get(task.id)
+    key = queue.task_relationship(task.id)["request"]["reservation_key"]
+    reservation = queue.get_reservation(key)
+
+    def interleaved(*args: object) -> dict:
+        result = observe(*args)
+        if update == "heartbeat":
+            changed = queue.heartbeat(task.id, workspace.worker_id, now=before.updated_at + 1)
+            assert changed.lease_expires_at != before.lease_expires_at
+        elif update == "activity":
+            changed = queue.set_activity(
+                task.id, "ACTIVE", reservation_key=key, now=before.updated_at + 1,
+            )
+            assert changed.activity == "ACTIVE"
+        else:
+            changed = queue.record_progress(
+                task.id, workspace.worker_id, phase="closeout", summary="workspace finalized",
+                now=before.updated_at + 1,
+            )
+            assert changed.latest_progress != before.latest_progress
+        return result
+
+    monkeypatch.setattr(pool_decline_observation, "observe", interleaved)
+    result = finish(finalized)
+    assert result.event_type == "task.abandoned"
+    assert result.task.status == Status.ABANDONED and result.task.owner is None
+    assert queue.get_reservation(key) == reservation
+    assert queue.relevance_snapshot(task.id)["closeout"]["acknowledgement"] is not None
+
+
 def test_unprepared_claim_cannot_reach_finalized_observation(
     ready: readiness.Ready, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -159,7 +197,10 @@ def test_prepared_then_yielded_owner_finishes_and_retries_with_retained_native(
     assert second.event_type is None and second.task == first.task
 
 
-@pytest.mark.parametrize("change", ["hold", "native", "reservation", "relationship", "generation"])
+@pytest.mark.parametrize("change", [
+    "hold", "native", "reservation", "relationship", "generation",
+    "task-status", "task-title",
+])
 def test_change_during_finalized_observation_retains_task_and_receipt_absence(
     finalized: readiness.Ready, monkeypatch: pytest.MonkeyPatch, change: str,
 ) -> None:
@@ -190,6 +231,12 @@ def test_change_during_finalized_observation_retains_task_and_receipt_absence(
                     " '$.state','bound') WHERE task_id=? AND task_relationship IS NOT NULL",
                     (task.id,),
                 )
+            elif change.startswith("task-"):
+                column, value = {
+                    "task-status": ("status", Status.SUSPENDED),
+                    "task-title": ("title", "changed source intent"),
+                }[change]
+                conn.execute(f"UPDATE tasks SET {column}=? WHERE id=?", (value, task.id))
             else:
                 conn.execute(
                     "UPDATE spawn_reservations SET release_requested=1 WHERE task_id=?",
@@ -198,9 +245,10 @@ def test_change_during_finalized_observation_retains_task_and_receipt_absence(
         return result
 
     monkeypatch.setattr(pool_decline_observation, "observe", changed)
-    with pytest.raises(TaskError, match=r"closeout|incarnation|held"):
+    with pytest.raises(TaskError, match=r"closeout|incarnation|held|expected status"):
         finish(finalized)
-    assert queue.get(task.id).status == Status.STARTED
+    expected_status = Status.SUSPENDED if change == "task-status" else Status.STARTED
+    assert queue.get(task.id).status == expected_status
     assert queue.relevance_snapshot(task.id)["closeout"].get("acknowledgement") is None
 
 
