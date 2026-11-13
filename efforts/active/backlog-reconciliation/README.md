@@ -343,14 +343,16 @@ the non-public approval conversation.
 ## Plan
 
 The [inherited-allocator and parked-review intake](journal/2026/11.13-inherited-allocator-and-parked-review-intake.md)
-proposes eighteen direct unchecked rows across two existing ROOTs for #4217,
-#5183 and #5211. It retains the allocator's report AND log ownership,
+records reviewed delivery of eighteen direct unchecked rows across two existing
+ROOTs in #12467 and three separate `NOT_PLANNED` tracking retirements for
+#4217, #5183 and #5211. It retains the allocator's report AND log ownership,
 the semantic-revalidation OR addressed-feedback alternative, BOTH default
 round outputs and concrete soft-threshold tactics. The review ROOT stays
 Blocked; execution/resumption and every incumbent owner/hold remain unchanged.
-All three sources stay OPEN pending actual reviewed receiving, complete current
-readback and separate source judgments. The complete queue is 865 open,
-136 above fixed 729; one eligible arrival is metadata-only.
+Complete current receiving/history coverage and fresh source/custody readback
+support each separate judgment; no implementation or resumption is claimed.
+The complete queue is 862 open, 133 above fixed 729, with no intervening arrival,
+external departure or classification change.
 
 The [reviewed-receiving readiness unit](journal/2026/11.13-reviewed-receiving-readiness.md)
 screens 46 older mapped originals and verifies actual complete D4214
@@ -3466,8 +3468,11 @@ adds only direct Plan/local/global Validation, Coordination and dated-Journal
 text in the two existing receiving ROOTs. Independent byte proof preserves
 every incumbent row/check state: portfolio 270 to 275 unchecked with 13 checked
 unchanged; parked review 50 to 63 unchecked with three checked unchanged.
-Complete current receiving/history readback and separate source-specific
-acceptance remain pending; no source retirement or execution is claimed.
+Actual reviewed delivery in #12467, whole-current receiving/history coverage
+and exact source-specific acknowledgment/state readbacks verify the three
+separate redundant-tracking retirements. All ten T4217, six R5183 and seven
+R5211 technical/validation rows remain unchecked; the review ROOT stays Blocked.
+No execution, implementation, resumption or source/resource release is claimed.
 
 The [existing-receiving audit](journal/2026/11.13-reviewed-receiving-readiness.md)
 verifies eight whole documentary files and full primary histories, actual
