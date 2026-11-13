@@ -833,7 +833,7 @@ def test_session_register_uses_knowledge_backed_receiving_authority(
     ("failure", "message"),
     [
         ("nonzero", "cannot read committed authority"),
-        ("absent", "committed authority config is absent"),
+        ("absent", "config-free registration requires a proven local checkout"),
         ("remote_error", "cannot verify committed authority ref"),
         ("head_error", "cannot resolve committed authority HEAD"),
         ("head_malformed", "committed authority HEAD is malformed"),
@@ -911,6 +911,203 @@ def test_registration_authority_fails_closed_when_committed_config_is_unreadable
         config_authority.require_registration_record_mutation(
             SimpleNamespace(repo="harness"),
         )
+
+
+@pytest.fixture
+def config_free_checkout(tmp_path, monkeypatch):
+    from agent_worktrees import git_ops
+    from agent_worktrees.worktree_machine_identity import WorktreeMachineIdentity
+
+    anchor = tmp_path / "anchor"
+    anchor.mkdir()
+    git_ops.git("init", "-b", "main", cwd=anchor)
+    git_ops.git(
+        "-c", "user.name=Example", "-c", "user.email=example@example.invalid",
+        "commit", "--allow-empty", "-m", "fixture", cwd=anchor,
+    )
+    checkout = tmp_path / "worktrees" / "example"
+    git_ops.git("worktree", "add", "-b", "worktree/example", str(checkout), cwd=anchor)
+    project = tmp_path / "project"
+    records = project / "worktrees"
+    records.mkdir(parents=True)
+    monkeypatch.setattr(cfg, "project_dir", lambda name=None: project)
+    monkeypatch.setattr(cfg, "tracking_dir", lambda name=None: records)
+    monkeypatch.setattr(cfg, "global_config_path", lambda: tmp_path / "global.yaml")
+    monkeypatch.setattr(cfg.socket, "gethostname", lambda: "example-host")
+    monkeypatch.setattr(cfg.registry_paths, "installation_context_call", lambda *_args: None)
+    platform = cfg.detect_platform()
+    settings = {
+        "machine": "example-host",
+        "platform": platform,
+        "repos": {"project": {"anchor": str(anchor), "remote": ""}},
+    }
+    (project / "config.yaml").write_text(cfg.yaml.safe_dump(settings), encoding="utf-8")
+    identity = WorktreeMachineIdentity("example-host", platform, "example-host")
+    record = tracking.create_new_record(
+        "example", "worktree/example", str(checkout), "project", identity.machine,
+        platform, records, machine_identity=identity,
+    )
+    return SimpleNamespace(
+        anchor=anchor, checkout=checkout, project=project, record=record, settings=settings,
+    )
+
+
+def _register_config_free(fixture):
+    return tracking_session_registration_write.apply_session_register({
+        "worktree_id": "example", "yaml_path": str(fixture.record.yaml_path),
+        "session_id": "session",
+    })
+
+
+def test_config_free_registration_accepts_proven_local_checkout(config_free_checkout):
+    result = _register_config_free(config_free_checkout)
+    assert result == {"ok": True, "linked_handoff": None}
+    assert tracking.load_record(config_free_checkout.record.yaml_path).session_entry("session")
+
+
+def test_config_free_registration_uses_remote_tracking_default(config_free_checkout):
+    from agent_worktrees import git_ops
+
+    fixture = config_free_checkout
+    git_ops.git("update-ref", "refs/remotes/origin/main", "refs/heads/main", cwd=fixture.anchor)
+    git_ops.git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main", cwd=fixture.anchor)
+    fixture.settings["repos"]["project"]["remote"] = "origin"
+    (fixture.project / "config.yaml").write_text(cfg.yaml.safe_dump(fixture.settings), encoding="utf-8")
+    assert _register_config_free(fixture) == {"ok": True, "linked_handoff": None}
+
+
+def test_config_free_registration_rejects_missing_remote_tracking_ref(config_free_checkout):
+    from agent_worktrees import git_ops
+
+    fixture = config_free_checkout
+    git_ops.git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main", cwd=fixture.anchor)
+    fixture.settings["repos"]["project"]["remote"] = "origin"
+    (fixture.project / "config.yaml").write_text(cfg.yaml.safe_dump(fixture.settings), encoding="utf-8")
+    before = fixture.record.yaml_path.read_bytes()
+    result = _register_config_free(fixture)
+    assert result["error"] == "execution_space"
+    assert "remote tracking ref" in result["message"]
+    assert fixture.record.yaml_path.read_bytes() == before
+
+
+def test_config_free_registration_through_real_daemon(config_free_checkout, monkeypatch):
+    from agent_worktrees import locks, status_monitor_runtime
+
+    fixture = config_free_checkout
+    server = tracking_write.start_server(tracking_write.compute)
+    server.start()
+    try:
+        monkeypatch.setattr(locks, "read_lock", lambda _path: tracking_write.rendezvous_fields(server))
+        monkeypatch.setattr(status_monitor_runtime, "_status_monitor_enabled", lambda: False)
+        monkeypatch.setattr(tracking, "_owning_tracking_dir", lambda *_args: fixture.record.yaml_path.parent)
+        tracking.register_session("example", "daemon-session")
+    finally:
+        server.close()
+    assert tracking.load_record(fixture.record.yaml_path).session_entry("daemon-session")
+
+
+@pytest.mark.parametrize("obstacle", [
+    "working-config", "marketplace-config", "overlay-unreadable", "stateless",
+    "malformed-policy", "foreign-platform", "missing-checkout", "bad-global",
+])
+def test_config_free_registration_refuses_unproven_authority(config_free_checkout, monkeypatch, obstacle):
+    fixture = config_free_checkout
+    if obstacle == "working-config":
+        path = cfg.inrepo_config_path(fixture.anchor)
+        path.parent.mkdir(parents=True)
+        path.write_text("stateless: true\n", encoding="utf-8")
+    elif obstacle == "marketplace-config":
+        monkeypatch.setattr(
+            cfg.registry_paths, "installation_context_call",
+            lambda *_args: {"marketplaceId": "example"},
+        )
+        path = fixture.anchor / cfg.MARKETPLACE_OVERLAYS_DIR / "example" / cfg.GLOBAL_CONFIG_FILENAME
+        path.parent.mkdir(parents=True)
+        path.write_text("stateless: true\n", encoding="utf-8")
+    elif obstacle == "overlay-unreadable":
+        monkeypatch.setattr(
+            cfg.registry_paths, "installation_context_call",
+            lambda *_args: {"marketplaceId": "example"},
+        )
+        original = cfg.config_acquisition.source_exists
+
+        def inaccessible(path, stage, **kwargs):
+            if "marketplaces" in path.parts:
+                raise OSError("overlay is unavailable")
+            return original(path, stage, **kwargs)
+
+        monkeypatch.setattr(cfg.config_acquisition, "source_exists", inaccessible)
+    elif obstacle == "stateless":
+        fixture.settings["repos"]["project"]["stateless"] = True
+        (fixture.project / "config.yaml").write_text(cfg.yaml.safe_dump(fixture.settings), encoding="utf-8")
+    elif obstacle == "malformed-policy":
+        fixture.settings["repos"]["project"]["stateless"] = ""
+        (fixture.project / "config.yaml").write_text(cfg.yaml.safe_dump(fixture.settings), encoding="utf-8")
+    elif obstacle == "foreign-platform":
+        data = cfg.yaml.safe_load(fixture.record.yaml_path.read_text(encoding="utf-8"))
+        other = "wsl" if cfg.detect_platform() != "wsl" else "windows"
+        data.update(platform=other, environment=other)
+        fixture.record.yaml_path.write_text(cfg.yaml.safe_dump(data), encoding="utf-8")
+    elif obstacle == "missing-checkout":
+        data = cfg.yaml.safe_load(fixture.record.yaml_path.read_text(encoding="utf-8"))
+        data["worktree_path"] = str(fixture.checkout.parent / "missing")
+        fixture.record.yaml_path.write_text(cfg.yaml.safe_dump(data), encoding="utf-8")
+    elif obstacle == "bad-global":
+        cfg.global_config_path().write_text("machine: [\n", encoding="utf-8")
+    before = fixture.record.yaml_path.read_bytes()
+    result = _register_config_free(fixture)
+    assert result["error"] == "execution_space"
+    assert fixture.record.yaml_path.read_bytes() == before
+
+
+@pytest.mark.parametrize("versioned", [False, True])
+@pytest.mark.parametrize("topology", ["missing", "malformed", "mis-mapped"])
+def test_config_free_registration_retains_local_checkout_after_machine_change(
+    config_free_checkout, versioned, topology,
+):
+    fixture = config_free_checkout
+    platform = cfg.detect_platform()
+    if topology == "malformed":
+        (fixture.anchor / "machines.yaml").write_text("machines: [\n", encoding="utf-8")
+    elif topology == "mis-mapped":
+        (fixture.anchor / "machines.yaml").write_text(cfg.yaml.safe_dump({
+            "machines": {"wrong-space": {
+                "hostname": "example-host", "physical_host": "other-host",
+                "execution_platform": platform,
+            }},
+        }), encoding="utf-8")
+    data = cfg.yaml.safe_load(fixture.record.yaml_path.read_text(encoding="utf-8"))
+    data.update(machine="old-host", execution_machine="old-execution")
+    if not versioned:
+        for field in ("machine_identity_version", "environment", "execution_machine"):
+            data.pop(field, None)
+    fixture.record.yaml_path.write_text(cfg.yaml.safe_dump(data), encoding="utf-8")
+    assert _register_config_free(fixture) == {"ok": True, "linked_handoff": None}
+
+
+def test_absent_optional_branch_does_not_erase_committed_policy(tmp_path, monkeypatch):
+    from agent_worktrees import git_ops
+
+    committed_path = cfg.inrepo_config_path(Path()).as_posix()
+
+    def git(*args, **_kwargs):
+        if args[0] == "symbolic-ref":
+            return SimpleNamespace(returncode=0, stdout="refs/heads/main\n")
+        if args[0] == "show-ref":
+            return SimpleNamespace(returncode=0, stdout="")
+        if args[0] == "ls-tree":
+            return SimpleNamespace(
+                returncode=0, stdout=f"{committed_path}\n" if args[3].endswith("/main") else "",
+            )
+        if args[0] == "show":
+            return SimpleNamespace(returncode=0, stdout="default_branch: dev\nstateless: true\n")
+        raise AssertionError(args)
+
+    monkeypatch.setattr(git_ops, "git", git)
+    authority, _remote = config_authority._load_state_root_authority(
+        "project", str(tmp_path), cfg.detect_platform(), "",
+    )
+    assert authority["stateless"] is True
 
 
 def test_register_session_reaches_a_live_daemon(record_path, monkeypatch, monkeypatch_config):

@@ -373,6 +373,17 @@ qualified execution owner. It passes that configuration into the existing
 if-absent factory, rather than reloading ambient configuration. Receiving
 conflicts remain explicit errors, not a successful claim with no ledger.
 
+For a repository with no committed authority config, session registration
+accepts a record only when the default ref and the absence of the
+repository and selected marketplace policy fallbacks are proven, the machine
+configuration is readable and does not require external state, and the
+receiving ledger and linked Git checkout prove local ownership. Historical
+machine labels and optional topology do not defeat that local proof. Missing
+or ambiguous evidence and external-state policy still refuse; the ordinary
+ownership and allocation checks remain in force. This narrow compatibility
+path does not authorize a new allocation or infer an absent optional branch's
+policy.
+
 The timestamp/suffix-only `allocation` input still cannot admit a new tuple;
 the complete admitted value is required. These source APIs are not CLI flags,
 settings or rollout switches. All four low-level APIs retain their omitted-mode
