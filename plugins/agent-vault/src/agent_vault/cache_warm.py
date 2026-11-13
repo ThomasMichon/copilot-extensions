@@ -15,7 +15,7 @@ from .cache import cache_enabled
 from .cache_warm_status import WarmState
 from .credential_fields import canonical_field
 from .extensions import get_registry
-from .service_cache import get_cache
+from .service_cache import ReadAdmissionExpired, get_cache
 from .service_cache_store import ServiceCacheStore
 from .service_connections import settle_owned
 
@@ -49,6 +49,7 @@ class CacheWarmQueue:
         self._records: OrderedDict[tuple[str, str], WarmRequest] = OrderedDict()
         self._pending: OrderedDict[tuple[str, str], WarmRequest] = OrderedDict()
         self._epochs: dict[str, object] = {}
+        self._default_groups: dict[str, str] = {}
         self._refused: tuple[tuple[str, str], WarmState] | None = None
 
     def enqueue(self, kpdb: str, group: str | None, *, confirmed: bool = False) -> WarmState:
@@ -57,6 +58,8 @@ class CacheWarmQueue:
                 return WarmState("not-queued", "service-closing")
             if confirmed and kpdb in self._epochs:
                 self._epochs[kpdb] = object()
+            if confirmed and group is None:
+                self._default_groups.pop(kpdb, None)
         if not cache_enabled():
             return WarmState("disabled")
         selected_group = group
@@ -86,6 +89,8 @@ class CacheWarmQueue:
             token = self._epochs.get(kpdb)
             current = self._records.get(key)
             if current is not None and current.stamp == stamp and current.token is token:
+                if group is None:
+                    self._default_groups[kpdb] = selected_group
                 return replace(current.progress)
             if current is None and len(self._records) >= MAX_CONTEXTS:
                 reusable = next(
@@ -103,6 +108,7 @@ class CacheWarmQueue:
                 previous = self._records.pop(reusable)
                 if not any(request.kpdb == previous.kpdb for request in self._records.values()):
                     self._epochs.pop(previous.kpdb, None)
+                    self._default_groups.pop(previous.kpdb, None)
             if token is None:
                 token = object()
             self._epochs[kpdb] = token
@@ -115,6 +121,8 @@ class CacheWarmQueue:
                 sources,
             )
             self._records[key] = self._pending[key] = request
+            if group is None:
+                self._default_groups[kpdb] = selected_group
             self._records.move_to_end(key)
             if self._refused is not None and self._refused[0] == key:
                 self._refused = None
@@ -143,12 +151,16 @@ class CacheWarmQueue:
             return WarmState("disabled").describe()
         if kpdb is None:
             return WarmState("idle").describe()
-        selected_group = group if group is not None else config.load_config().group or ""
-        key = kpdb, selected_group
         with self._lock:
+            selected_group = group if group is not None else self._default_groups.get(kpdb)
+            if selected_group is None:
+                return WarmState("idle", "context-unavailable").describe()
+            key = kpdb, selected_group
             if self._refused is not None and self._refused[0] == key:
                 return self._refused[1].describe()
             request = self._records.get(key)
+            if request is not None and self._epochs.get(kpdb) is not request.token:
+                return WarmState("not-queued", "unlock-generation-changed").describe()
             return (request.progress if request is not None else WarmState("idle")).describe()
 
     def close(self) -> None:
@@ -215,6 +227,7 @@ class CacheWarmRuntime:
         progress = WarmState("running")
         self.queue.update(request, progress)
         self.service._request_ctx.require_existing_unlock = True
+        self.service._request_ctx.cache_warm_deadline = request.deadline
         try:
             reason = self._stopped(request)
             if reason:
@@ -283,6 +296,9 @@ class CacheWarmRuntime:
                     else:
                         progress.failed += 1
                     self.queue.update(request, progress)
+                except ReadAdmissionExpired:
+                    progress.reason = "deadline"
+                    break
                 except Exception:
                     progress.failed += 1
                     self.queue.update(request, progress)
@@ -300,6 +316,7 @@ class CacheWarmRuntime:
             progress.state, progress.reason = "failed", "cache-unavailable"
         finally:
             self.service._request_ctx.require_existing_unlock = False
+            self.service._request_ctx.cache_warm_deadline = None
             self.queue.update(request, progress)
 
     async def close(self) -> None:

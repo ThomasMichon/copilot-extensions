@@ -35,6 +35,8 @@ Each target uses the existing credential and backend custody. Warming requires
 the already-unlocked master password: it never invokes another provider or
 dialog if the password expires, including expiry while waiting for backend
 custody. It does not extend password lifetime or an inherited handoff deadline.
+The same internal deadline reaches the protected read owner, which checks it
+again immediately before admitting a KeePass entry read after custody waits.
 
 ## Protected results and failures
 
@@ -63,6 +65,9 @@ The existing full `ping` response adds `cache_warm` using contract
 `selected`, `cached`, `failed`, `remaining`, `failed_sources` and `truncated`.
 Counts and status are scoped to the selected database/group; no entry names,
 database paths, credential values or callback exception messages are included.
+Full ping never reloads configuration to select warming status. An omitted group
+uses the retained default-warming context; if none is known, status reports
+`context-unavailable` rather than guessing from another group's work.
 
 `agent-vault ping` renders this status conservatively. Unsupported, malformed or
 inconsistent metadata is unknown, never a successful warming claim. Older
@@ -71,8 +76,9 @@ syntax or synchronized client update is required. Health-only ping remains
 independent of credential work. Ordinary client `--cache-only` still never uses
 IPC or an unlock.
 
-Focused source coverage lives in `tests/test_cache_sources.py` and
-`tests/test_cache_warm.py`. The fresh-process native-protection fixture also
+Focused source coverage lives in `tests/test_cache_sources.py`,
+`tests/test_cache_warm.py` and `tests/test_cache_warm_status.py`.
+The fresh-process native-protection fixture also
 covers unlock-triggered warming before expiry and a synthetic unreadable
 caller. See the repository [testing guide](../../../TESTING.md) for execution
 and native qualification.

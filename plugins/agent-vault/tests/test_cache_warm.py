@@ -12,10 +12,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from agent_vault import cache, cache_warm, cli, extensions, service, service_cache
-from agent_vault.cache_warm_status import WarmState
+from agent_vault import cache, cache_sources, cache_warm, cli, extensions, service, service_cache
 from agent_vault.service_connections import VaultConnections, settle_owned
-from agent_vault.service_status import format_service_status
 
 from .test_service_cache import cached_service as cached_service
 
@@ -432,20 +430,44 @@ def test_existing_serving_housekeeping_drives_warming_and_settles_it_on_exit(
     assert vault._cache_warm.status(kpdb, "Allowed")["cached"] == 1
 
 
-@pytest.mark.parametrize("malformed", ["state", "count", "false-complete"])
-def test_status_rendering_does_not_echo_private_or_inconsistent_provider_fields(
-    malformed: str,
+def test_deadline_crossing_backend_custody_refuses_the_final_native_read(
+    warming_service: CacheFixture,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    status = WarmState("complete", selected=1, cached=1).describe()
-    if malformed == "state":
-        status["state"] = "private diagnostic"
-    elif malformed == "count":
-        status["cached"] = "private diagnostic"
-    else:
-        status["cached"], status["remaining"] = 0, 1
-    rendered = format_service_status(
-        {"pid": 1, "ttl": 10, "cached": 0, "cache_warm": status},
-        status="locked",
-        transport="fixture",
+    vault, _persistent, kpdb, _clock = warming_service
+    extensions.get_registry().register_cache_source(lambda _machine: ["entry"])
+    monotonic = [0.0]
+    clock = SimpleNamespace(monotonic=lambda: monotonic[0])
+    monkeypatch.setattr(cache_warm, "time", clock)
+    monkeypatch.setattr(cache_sources, "time", clock)
+    monkeypatch.setattr(
+        service_cache,
+        "time",
+        SimpleNamespace(monotonic=clock.monotonic, time=time.time, time_ns=time.time_ns),
     )
-    assert "cache warm=unknown" in rendered and "private" not in rendered
+    vault._cache_warm.enqueue(kpdb, "Allowed", confirmed=True)
+    request = vault._cache_warm._pending[(kpdb, "Allowed")]
+    custody: list[bool] = []
+    reads: list[str] = []
+
+    @contextlib.contextmanager
+    def late_custody(*_args: object) -> Iterator[None]:
+        custody.append(True)
+        monotonic[0] = request.deadline + 1
+        yield
+
+    monkeypatch.setattr(service_cache, "backend_custody", late_custody)
+    monkeypatch.setattr(
+        vault.cli,
+        "get_entry",
+        lambda _db, entry, _field: reads.append(entry) or "not-admitted",
+    )
+    status = asyncio.run(drain(vault, kpdb))
+    assert custody == [True] and reads == []
+    assert status["state"] == "partial" and status["reason"] == "deadline"
+    assert (status["selected"], status["cached"], status["failed"], status["remaining"]) == (
+        1,
+        0,
+        0,
+        1,
+    )

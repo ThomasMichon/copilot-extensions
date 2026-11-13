@@ -32,6 +32,7 @@ REASONS = frozenset(
         "cache-unavailable",
         "credential-custody-busy",
         "locked",
+        "context-unavailable",
     }
 )
 
