@@ -174,3 +174,25 @@ def test_fixed_receiver_uses_core_argument_admission_and_original_result(tmp_pat
     ], headed_run=receive) == 23
     assert observed[0][0] == ["copilot", "--session-id", "selected"]
     assert observed[0][1]["session_id"] == "selected"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("disappears", [True, False], ids=["natural-exit-race", "different-owner"])
+async def test_native_mux_cleanup_requires_identity_or_confirmed_absence(monkeypatch, disappears):
+    monkeypatch.syspath_prepend(str(Path(__file__).parent / "native"))
+    from test_owner_headed_windows import _settle_mux
+
+    def result(code=0, output=""):
+        return SimpleNamespace(returncode=code, stdout=output, stderr="")
+
+    query = Mock(side_effect=[
+        result(), result(output="" if disappears else "other-incarnation"), result(1),
+    ])
+    mux = SimpleNamespace(query=query, target="fixture")
+    if disappears:
+        await _settle_mux(mux, "original")
+        assert query.call_count == 3
+    else:
+        with pytest.raises(AssertionError):
+            await _settle_mux(mux, "original")
+    assert not any(call.args[0] == "kill-session" for call in query.call_args_list)

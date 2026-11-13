@@ -22,6 +22,26 @@ pytestmark = [
 ]
 
 
+async def _settle_mux(mux, identity):
+    for _ in range(100):
+        present = await asyncio.to_thread(mux.query, "has-session", "-t", mux.target)
+        if present.returncode == 1:
+            return
+        assert present.returncode == 0, present.stderr
+        observation = await asyncio.to_thread(
+            mux.query, "display-message", "-p", "-t", mux.target,
+            "#{session_id}:#{session_created}|#{pane_id}",
+        )
+        if not observation.stdout.strip():
+            await asyncio.sleep(0.05)
+            continue
+        assert identity and observation.returncode == 0 and observation.stdout.strip() == identity
+        stopped = await asyncio.to_thread(mux.query, "kill-session", "-t", mux.target)
+        assert stopped.returncode == 0, stopped.stderr
+        return
+    pytest.fail("Exact fixture mux settlement remains unconfirmed")
+
+
 def test_native_file_reader_receives_private_overlay_and_exact_creation_identity(tmp_path):
     configuration = {"mcpServers": {"chosen": {"env": {"SYNTHETIC": "private-fixture"}}}}
     transfer = OverlayPipe(configuration)
@@ -202,14 +222,4 @@ async def test_actual_retained_headed_receiver_publishes_client_not_coordinator(
         assert json.loads(state_file.read_text())["state"] == "child_exited"
     finally:
         if mux is not None:
-            present = await asyncio.to_thread(mux.query, "has-session", "-t", mux.target)
-            if present.returncode == 0:
-                observation = await asyncio.to_thread(
-                    mux.query, "display-message", "-p", "-t", mux.target,
-                    "#{session_id}:#{session_created}|#{pane_id}",
-                )
-                assert identity and observation.stdout.strip() == identity
-                stopped = await asyncio.to_thread(mux.query, "kill-session", "-t", mux.target)
-                assert stopped.returncode == 0, stopped.stderr
-            else:
-                assert present.returncode == 1, present.stderr
+            await _settle_mux(mux, identity)
