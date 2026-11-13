@@ -806,7 +806,8 @@ def fingerprint_source(
         # it -- so a declared root that is itself a symlink is classified
         # with its own lstat identity below, instead of being silently
         # resolved through to whatever it points at.
-        raw = Path(_normalize_windows_extended_path(os.fspath(p)))
+        value = os.fspath(p)
+        raw = Path(_normalize_windows_extended_path(value) if os.name == "nt" else value)
         if not raw.is_absolute():
             raw = Path.cwd() / raw
         parent = raw.parent

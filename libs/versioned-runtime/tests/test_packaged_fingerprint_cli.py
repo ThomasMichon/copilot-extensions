@@ -9,6 +9,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+from types import SimpleNamespace
 
 import pytest
 
@@ -106,6 +107,49 @@ def test_fingerprint_cli_preserves_deep_ordinary_source_paths(
     }
     extended = native(deep_input)
     assert runtime.fingerprint_source([extended]) == expected
+
+
+def test_fingerprint_preserves_declared_input_outside_windows(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    declared, other = tmp_path / "declared.py", tmp_path / "other.py"
+    declared.write_bytes(b"declared input\n")
+    other.write_bytes(b"other input\n")
+    expected = runtime.fingerprint_source([declared])
+    source = runtime._runtime_component("versioned_runtime_source")
+    monkeypatch.setattr(source, "os", SimpleNamespace(name="posix", fspath=os.fspath))
+
+    def normalize(value: str) -> str:
+        if value == str(declared):
+            return str(other)
+        return runtime._normalize_windows_extended_path(value)
+
+    def fingerprint() -> str:
+        return source.fingerprint_source(
+            [declared], _normalize_windows_extended_path=normalize,
+            _native_path=runtime._leases._native_path,
+        )
+
+    assert fingerprint() == expected
+    declared.write_bytes(b"changed declared input\n")
+    assert fingerprint() != expected
+
+
+@pytest.mark.skipif(os.name == "nt", reason="literal backslashes are POSIX filename bytes")
+def test_fingerprint_cli_preserves_posix_windows_prefix_filename(
+    primitive: Path, tmp_path: Path,
+) -> None:
+    declared = primitive.parent / r"\\?\payload.py"
+    declared.write_bytes(b"declared input\n")
+    (primitive.parent / "payload.py").write_bytes(b"other input\n")
+    expected = runtime.fingerprint_source([declared])
+    result = invoke(primitive, tmp_path / "runtime", ["fingerprint", declared.name])
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout == expected + "\n"
+    declared.write_bytes(b"changed declared input\n")
+    changed = invoke(primitive, tmp_path / "runtime", ["fingerprint", declared.name])
+    assert changed.returncode == 0, changed.stdout + changed.stderr
+    assert changed.stdout != result.stdout
 
 
 def test_fingerprint_cli_refuses_missing_shipped_component(primitive: Path, tmp_path: Path) -> None:
