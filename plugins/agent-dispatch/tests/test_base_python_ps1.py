@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
+import sys
 import threading
 
 import pytest
@@ -50,7 +51,8 @@ def native(tmp_path: Path, shell: str, body: str) -> subprocess.CompletedProcess
         " param($FilePath,$ArgList,[ref]$ErrorOutput)\n"
         " $script:probes++; $global:LASTEXITCODE = 0\n"
         " return (@{implementation='cpython';version=@(3,13,16);"
-        "machine='AMD64';bits=64;executable=$base;base_executable=$base}"
+        "machine='AMD64';bits=64;executable=$base;base_executable=$base;"
+        "base_matches=($base -ceq $ArgList[-1])}"
         " | ConvertTo-Json -Compress)\n"
         "}\n"
         + body,
@@ -91,7 +93,7 @@ function Invoke-Hidden {
     param($FilePath,$ArgList,[ref]$ErrorOutput)
     $global:LASTEXITCODE=0
     return (@{implementation='cpython';version=@(3,10,0);machine='AMD64';bits=64;
-        executable=$base;base_executable=$base} | ConvertTo-Json -Compress)
+        executable=$base;base_executable=$base;base_matches=$true} | ConvertTo-Json -Compress)
 }
 $env:AGENT_DISPATCH_BASE_PYTHON = $base
 if ((Resolve-DispatchBasePython) -cne $base) { throw 'signed 3.10 runtime base was rejected' }
@@ -192,6 +194,69 @@ $refused = $false
 try { Assert-DispatchCandidateBase -Python $candidate -BasePython $different } catch { $refused = $true }
 if (-not $refused) { throw 'mismatched completed candidate accepted' }
 if ([IO.File]::ReadAllText($candidate) -cne 'immutable-candidate') { throw 'candidate mutated' }
+""")
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("expected_kind", ["ordinary", "extended", "different", "missing"])
+def test_candidate_file_identity(tmp_path: Path, shell: str, expected_kind: str) -> None:
+    base = str(Path(sys._base_executable).resolve())
+    extended = "\\\\?\\UNC\\" + base[2:] if base.startswith("\\\\") else "\\\\?\\" + base
+    candidate = tmp_path / "candidate"
+    created = subprocess.run(
+        [extended, "-I", "-B", "-m", "venv", "--without-pip", str(candidate)],
+        capture_output=True, text=True, timeout=25, creationflags=HEADLESS,
+    )
+    assert created.returncode == 0, created.stdout + created.stderr
+    configuration = candidate / "pyvenv.cfg"
+    original = configuration.read_bytes()
+    expected = base if expected_kind == "ordinary" else extended
+    if expected_kind in {"different", "missing"}:
+        expected = str(tmp_path / "other-python.exe")
+        if expected_kind == "different":
+            shutil.copyfile(base, expected)
+    expected_error = {
+        "different": "different base Python",
+        "missing": "Dispatch base Python probe failed",
+    }.get(expected_kind)
+    harness = tmp_path / "candidate-identity.ps1"
+    harness.write_text(
+        "$ErrorActionPreference = 'Stop'\n"
+        f". '{SCRIPTS / 'versioned_runtime_native.ps1'}'\n"
+        f". '{SCRIPTS / 'base-python.ps1'}'\n"
+        "try {\n"
+        f" Assert-DispatchCandidateBase -Python '{candidate / 'Scripts' / 'python.exe'}'"
+        f" -BasePython '{expected}'\n"
+        + (" throw 'expected refusal'\n" if expected_error else "")
+        + "} catch {\n"
+        + (
+            f" if (-not $_.Exception.Message.Contains('{expected_error}')) {{ throw }}\n"
+            if expected_error else " throw\n"
+        )
+        + "}\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [shell, "-NoProfile", "-NonInteractive", "-File", str(harness)],
+        capture_output=True, text=True, timeout=25, creationflags=HEADLESS,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert configuration.read_bytes() == original
+
+
+@pytest.mark.parametrize("evidence", ["$null", "'true'", "1"])
+def test_candidate_identity_requires_boolean_evidence(
+    tmp_path: Path, shell: str, evidence: str,
+) -> None:
+    result = native(tmp_path, shell, f"""
+function Invoke-Hidden {{
+    param($FilePath,$ArgList,[ref]$ErrorOutput)
+    $global:LASTEXITCODE=0
+    return (@{{implementation='cpython';version=@(3,13,16);machine='AMD64';bits=64;
+        executable=$base;base_executable=$base;base_matches={evidence}}} | ConvertTo-Json -Compress)
+}}
+try {{ Assert-DispatchCandidateBase -Python $base -BasePython $base; throw 'invalid evidence accepted' }}
+catch {{ if ($_.Exception.Message -notlike '*must report executable identity*') {{ throw }} }}
 """)
     assert result.returncode == 0, result.stdout + result.stderr
 
@@ -327,7 +392,8 @@ if ('{outcome}' -eq 'base-mismatch') {{
         $global:LASTEXITCODE=0
         $reported = if ($FilePath -ceq $base) {{ $base }} else {{ Join-Path $InstallDir 'wrong.exe' }}
         return (@{{implementation='cpython';version=@(3,13,16);machine='AMD64';bits=64;
-            executable=$reported;base_executable=$reported}} | ConvertTo-Json -Compress)
+            executable=$reported;base_executable=$reported;
+            base_matches=($reported -ceq $ArgList[-1])}} | ConvertTo-Json -Compress)
     }}
 }}
 if ('{outcome}' -eq 'constructed') {{
@@ -352,7 +418,7 @@ try {{
     $expected = switch ('{outcome}') {{
         'published' {{ 'publication-boundary' }}
         'constructed' {{ 'publication-boundary' }}
-        'dependencies' {{ 'zdd install failed' }}
+        'dependencies' {{ 'Selected agent-dispatch [mcp] dependency installation failed' }}
         'health' {{ 'failed its health gate' }}
         'publication' {{ 'publication-refused' }}
         'base-mismatch' {{ 'different base Python' }}
@@ -407,7 +473,8 @@ def test_real_signed_base_and_candidate(
         f"  $receipt = Join-Path '{tmp_path}' \"console-$script:probeCount.json\"\n"
         "  $prefix = \"import ctypes,json,os; from pathlib import Path; Path(r'$receipt').write_text(json.dumps(dict(pid=os.getpid(),hwnd=ctypes.windll.kernel32.GetConsoleWindow()))); \"\n"
         "  $ArgList = @($ArgList)\n"
-        "  $ArgList[-1] = $prefix + $ArgList[-1]\n"
+        "  $codeIndex = [Array]::IndexOf($ArgList, '-c') + 1\n"
+        "  $ArgList[$codeIndex] = $prefix + $ArgList[$codeIndex]\n"
         " }\n"
         f" $phase = Join-Path '{tmp_path}' 'construction-active'\n"
         " $constructing = $ArgList -contains 'venv'\n"
