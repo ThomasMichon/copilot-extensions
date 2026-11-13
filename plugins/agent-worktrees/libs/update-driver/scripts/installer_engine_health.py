@@ -10,7 +10,7 @@ import subprocess
 from installer_dependency_policy import DependencyPolicyError, _native_retained_path
 from installer_engine_process import ChildLaunchError, ChildTimeoutExpired
 from installer_source_build import SourceWheelInputs
-from installer_wheel_inputs import _ordinary
+from installer_wheel_inputs import WheelDeadlineError, WheelError, _ordinary
 from installer_wheel_snapshot import WheelInstallInputs, WheelReuseInputs, _digest, _open, _unchanged
 
 
@@ -283,13 +283,20 @@ def verify_application_wheels(
         filename: digest for _name, _version, filename, digest in wheel_inputs.distributions
     }
     directory = slot / "wheels"
-    if {path.name for path in directory.iterdir()} != set(expected):
-        raise RuntimeError("Application wheel set differs from its retained construction inputs")
-    for filename, digest in expected.items():
-        path = directory / filename
-        before = _ordinary(path)
-        with _open(path) as stream:
-            opened = _unchanged(path, before, stream)
-            if _digest(stream, before.st_size, wheel_inputs.deadline)[0] != digest:
-                raise RuntimeError("Application wheel differs from its retained construction inputs")
-            _unchanged(path, before, stream, opened=opened)
+    try:
+        if directory.is_symlink() or {path.name for path in directory.iterdir()} != set(expected):
+            raise HealthRepairRequired("Application wheel set differs from its retained construction inputs")
+        for filename, digest in expected.items():
+            path = directory / filename
+            before = _ordinary(path)
+            with _open(path) as stream:
+                opened = _unchanged(path, before, stream)
+                if _digest(stream, before.st_size, wheel_inputs.deadline)[0] != digest:
+                    raise HealthRepairRequired("Application wheel differs from its retained construction inputs")
+                _unchanged(path, before, stream, opened=opened)
+    except WheelDeadlineError:
+        raise
+    except (FileNotFoundError, NotADirectoryError, WheelError) as error:
+        raise HealthRepairRequired(
+            "Application wheel content is not reusable; select a distinct repair generation"
+        ) from error

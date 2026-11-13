@@ -269,6 +269,17 @@ def selected_profile(root: Path, requested: str | None = None) -> str:
     return profile
 
 
+def application_profile(root: Path) -> dict:
+    """Translate existing installed profile intent into application extras."""
+    root = Path(os.path.abspath(root.expanduser()))
+    profile = selected_profile(root)
+    return {
+        "schema": "copilot-extensions.runtime-application-profile", "version": 1,
+        "plugin": "agent-containers", "runtime_root": str(root),
+        "profile": profile, "extras": ["provider-exec"] if profile == "provider-exec" else [],
+    }
+
+
 def _library_roots(payload: Path, *, prepared: bool = False) -> list[Path]:
     roots = []
     for name in LIBRARIES:
@@ -647,7 +658,7 @@ def provision(
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, required=True)
-    parser.add_argument("--payload", type=Path, required=True)
+    parser.add_argument("--payload", type=Path)
     parser.add_argument("--python")
     parser.add_argument("--uv")
     parser.add_argument("--profile", choices=PROFILES)
@@ -659,8 +670,19 @@ def main() -> int:
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--stamp-source", action="store_true")
     mode.add_argument("--plan-source", action="store_true")
+    mode.add_argument("--application-profile", action="store_true")
     args = parser.parse_args()
     try:
+        if args.application_profile:
+            if any((
+                args.payload, args.python, args.uv, args.profile, args.tsv,
+                args.expected_source_version, args.expected_source_identity,
+            )):
+                raise RuntimeError("Application profile selection requires only its runtime root")
+            print(json.dumps(application_profile(args.root), sort_keys=True))
+            return 0
+        if args.payload is None:
+            raise RuntimeError("Runtime provisioning and source operations require a payload")
         if args.plan_source:
             if (
                 not args.expected_source_version or not args.expected_source_identity

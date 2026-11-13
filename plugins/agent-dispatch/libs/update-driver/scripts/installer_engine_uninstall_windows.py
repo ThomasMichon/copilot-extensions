@@ -85,7 +85,11 @@ function Get-CensusProcessOwner($row) {
     try { $owner=Invoke-CimMethod -InputObject $row -MethodName GetOwnerSid -ErrorAction Stop } catch {
         if (-not (Get-Process -Id $row.ProcessId -ErrorAction SilentlyContinue)) { return }; throw
     }
-    if ($owner.ReturnValue -ne 0) { throw 'Cannot attribute candidate process ownership' }
+    if ($owner.ReturnValue -ne 0) {
+        if (Test-CensusProcessExited $row.ProcessId) { return }
+        throw ("Cannot attribute candidate process ownership (pid={0}, result={1})" -f
+            $row.ProcessId,$owner.ReturnValue)
+    }
     return $owner
 }
 function Get-CensusProcessMetadata($row) {

@@ -6310,9 +6310,9 @@ def main(argv: list[str] | None = None, *, publication: object | None = None) ->
         parser.parse_args(args_list[1:])
         if args_list[0] == "__source-setup":
             return inst.setup_application()
-        from .status_monitor_cutover import start_application
+        from .runtime_deployment import start_published_application
 
-        return start_application()
+        return start_published_application()
 
     # Policy inspection must not resolve/adopt a project or prepare runtime state.
     policy_args = front_door_cli.policy_invocation(args_list)

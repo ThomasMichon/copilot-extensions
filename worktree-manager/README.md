@@ -850,14 +850,22 @@ A completed matching slot without a nonempty valid selection is not
 `already-current`: dry-run plans repair, while apply health-checks/reuses the
 canonical ready candidate and restores selection without rebuilding it.
 
-Selector publication uses canonical created-object receipts and recovery while
-holding the selector lease. A partial write restores both previous selector
-states (including absence); prior selected/last-known-good runtimes remain
-retained until publication or recovery settles. Recovery never copies over
-foreign objects. An unsettled recovery retains custody rather than cutting over.
-Empty/whitespace-only prior selectors have no runtime to retain, but their
-existence and exact bytes remain rollback state. Target and nonblank prior slot
-names still receive canonical validation.
+Selector publication uses canonical created-object receipts while holding the
+selector lease. Normal bootstrap and self-update start the pinned incoming
+generation through its own installed activation entry before publishing commands,
+registrations or selectors. Successful V2 startup commits forward selection;
+V1 state or a late cancellation cannot restore the predecessor's selectors.
+Cancellation after startup finishes owned publication without restarting V2.
+Publication I/O failure retains its evidence and reports an incomplete operation.
+Selector-only operations that have not committed an application startup retain
+their previous-state recovery, including absence. Recovery never copies over
+foreign objects.
+Historical selectors retain their existence and exact bytes as rollback state,
+including empty, malformed UTF-8 and unsafe old names. Undecodable selection is
+reported as unknown; unsafe old names are never resolved or retained and cannot
+veto a valid incoming target. Valid old slots still receive runtime custody.
+Concurrent changes to either raw selector abort publication. Incoming target
+names remain strictly validated before selector or retention custody.
 
 On Windows, non-update bootstrap construction and `self-install --apply` enter
 the existing installation execution driver. A caller with a live inherited or
@@ -943,10 +951,16 @@ accepts `--install-source <absolute-snapshot>` before application arguments;
 `--repository` remains the application's repository-adoption argument.
 Unknown or ambiguous `--repo` syntax is not a Manager-source selector.
 
-`tools/local_install_source.py` freezes a Git commit and materializes its declared
-closure without changing package versions or consuming changefiles, then builds
-the Manager's first-party wheel. Existing commit/tree and assembly identities
-distinguish deployment generations even when package versions are unchanged.
+`tools/local_install_source.py` freezes a Git commit and builds the Manager's
+first-party wheels, or reuses explicitly selected matching prior inputs.
+A source selection with `--main-head` consumes the canonical
+Main-seeded, version-preserving local composition and retains its Git association
+through the prepared native profile. The selected source's changefiles remain
+untouched. Unseeded source preparation retains its historical behavior.
+See [the install contract](../docs/install-contract.md#local-wheel-applications-for-manager-and-worktrees)
+for the association, explicit first-party reuse, automatic complete-application
+output reuse and held-input checks. Existing commit/tree and assembly
+identities distinguish deployment generations even when package versions are unchanged.
 Use repeated `--project` selections for a bounded core preparation, for example
 `--project standalone:worktree-manager --project agent-worktrees`; this avoids
 building the rest of the portfolio. The default remains Manager only, and the
@@ -990,16 +1004,34 @@ execute first-party backends, clear automatic-update inhibition, or acquire
 permission from a running Manager. Independent native installation custody
 still governs publication; foreign or unsettled owners are not bypassed.
 
-While retaining the qualified candidate, the Windows installer adopts its
-finite launch broker through that slot's isolated installed
-`update_driver.windows_broker` entry, before selector publication and any
-daemon-activation callback. Broker retention/publication runs outside the
-application's selector lease. An application selector rollback does not undo a
-separately qualified broker action: its own durable runtime reference keeps
-that action valid independently of the selected application generation.
-Contained construction does not register a Task. The normal `spawn_daemon`
-default remains unchanged; this source integration does not authorize host
-installation or claim full cold-install, desktop or maintenance qualification.
+Read-only source selection and profile reuse live in
+`scripts/runtime_install_selection.py`. Unusable historical selectors, source
+bytes or constructor/completion receipts select fresh preparation instead of
+vetoing the incoming source. They never authorize reuse or an in-place rewrite
+of the incumbent. Incoming source identity, package selection, hashes and wheel
+inputs remain strict; failures reading incoming inputs retain their I/O cause.
+
+The programmatic `self_install(stage_only=True, dry_run=False)` boundary also
+supports a running nested wheel application. It qualifies that application's
+original source/profile and installed inputs under the existing retention
+owner, proves passive readiness for its exact generation, then rechecks the
+inputs before returning `staged`. It does not treat the installed slot as
+source, rebuild it, publish selectors/commands/providers or activate it.
+This does not add a high-level `self-install --stage` command or change the
+shared application project's environment-only `install --stage` entry.
+
+An explicit publishing install replaces its declared Manager command files
+even when their historical contents were edited or no longer match an old
+template. Unrelated commands are not removed. Existing path protections,
+publication custody and atomic replacement remain; real lock/write failures
+retain their I/O error instead of being masked by a historical-byte veto.
+
+Construction and stage-only readiness do not adopt or register a scheduled Task.
+Separate launch-broker operations keep their own owner and durable runtime
+reference; application selection does not undo those independently qualified
+actions. The normal `spawn_daemon` default remains unchanged. This source
+integration does not authorize host installation or claim complete cold-install,
+desktop or maintenance qualification.
 
 PowerShell, CMD and Bash launch the selected slot through the canonical retention
 bootstrap in isolated mode, preserve its exit status, and never resolve or acquire
@@ -2214,6 +2246,27 @@ install with `worktree-manager self-install` (dry-run) / `--apply`, and see it i
 project binstub discovers this Manager through the generic control-plane-provider
 registry rather than a literal `worktree-manager` PATH probe.
 
+### Prepare without publication
+
+The trusted prepared Manager's `scripts/runtime_install.py --describe-install`
+reports the executing provider's `stage` and `activate` contract generations,
+independently of package versions. Its `--root <root> --stage` operation constructs
+or reuses the candidate, proves actual installed passive-server readiness and
+closed work admission, then exits without selector, command, registration or
+serving-route publication. It cannot be combined with removal, recovery or
+application commands. Normal installation omits `--stage` and starts V2 before
+committing publication.
+
+This is the standalone provider boundary, not a `self-install --stage` option.
+Prepared-source support is discovered separately with `--describe-source-inputs`;
+use `--install-source` only when that executing entry supports it. A running
+app-only installation is not itself a preparation input: library staging without
+prepared inputs refuses rather than republishing it. Callers must discover the
+exact entry's support before sending new syntax. Older entries may reject
+discovery or staging; that names a capability gap, not permission to retry an
+effectful operation with a different spelling. Configured-Dev promotion/reuse
+orchestration and portfolio-wide staging still require whole-flow qualification.
+
 ### Older-client queue release
 
 An older installed Manager or Worktrees command may not understand
@@ -2546,6 +2599,9 @@ incoming readiness, not that every old process has already converged.
 
 For a prepared source payload, `self_install(..., dry_run=True)` compares the
 full retained source identity and assembled bytes, not just the package version.
+An explicitly supplied complete wheel profile also participates in dry-run
+selection: a different lock or local-package set is planned, not reused merely
+because the source identity matches.
 It reports the selected source/repair slot and marker on exact reuse, or the
 requested immutable generation when a different source is planned. Invalid
 source evidence is an explicit error; dry-run does not construct or publish.
@@ -2561,14 +2617,27 @@ and immutable prepared payloads live below
 data root and mux cutover owner are unchanged. Acquisition, preparation or
 receipt failures are reported without an unqualified fallback; this mode
 requires Git. Main and other refs retain their existing Git/GitHub-tarball
-path and are not yet source-qualified by this contract. The standalone
-bootstrap's Python adapter applies the same Dev qualification before constructing
-Manager, using only its own declared process helper and trusted preparer under
-an isolated base interpreter. A supplied prepared Manager payload is validated
-and retained exactly rather than resolving Dev again. Recovery-only and adopted
+path and are not yet source-qualified by this contract. Dev self-update now
+prepares a complete application snapshot once through the packaged canonical
+composition/build/profile owners, carrying one Main seed and deadline. Acquisition
+revalidates before handoff; the existing native input owner then holds the frozen
+source, wheels and application through the ordinary install/publication/cutover
+path. Preparation does not select or replace the service-runtime source policy.
+The standalone Dev bootstrap uses that same complete-input context after
+validating its declared process helper. The canonical provider borrows its held
+build toolchain for profile preparation, without requiring Packaging in the
+base parent. Frozen inputs remain held through the same Manager installer,
+publication and cutover; they settle before dispatching the requested command.
+Original source-digest and repair-SDK ownership checks still apply to the
+executing bootstrap payload, not the acquired replacement. An attributed Dev
+payload without `--install-source` is refused; the adapter never silently
+reselects it or treats raw source as a complete application. Explicit complete
+inputs retain the existing selection path. Recovery-only and adopted
 recovery entries do not acquire another Manager source. Qualifying Manager
 does not select the engine's build source; the independent service-source
 repair contract below owns that choice.
+Source/actor controls cover this handoff; actual cold-bootstrap and installed-host
+qualification remain open.
 
 `worktree-manager update` owns the update run's telemetry: it records the
 self-update as the `manager_self_update` phase, exports the run identity to the
@@ -2630,6 +2699,13 @@ fixed even if the upstream branch advances.
 It maintains a separately owned standalone clone below
 `<manager-root>/runtime-sources/`, holds the existing construction lease,
 fetches the selected branch/tag and returns its exact source identity as JSON.
+Every acquired result also records `main_head`, the freshly fetched Main commit
+available as a composition seed. Dev and Main are fetched in the same acquisition;
+the selected Dev commit/tree and Main seed remain separate frozen facts. A later
+acquisition refreshes Main even when Dev is unchanged, and unavailable Main is
+refused rather than replaced by the clone's stale ref. Legacy five-field
+`ResolvedSource` callers retain their prior document shape. This metadata does
+not select promoted outputs, construct a complete profile or authorize activation.
 Reuse never moves the clone's checked-out files. Dirty, linked, worktree-backed,
 unowned, unavailable, substituted or unmerged input fails explicitly; neither
 an ambient developer checkout nor a marketplace payload is a fallback. Fetched
@@ -2649,22 +2725,28 @@ checkout is refused; retry never overwrites or adopts another checkout.
 
 Ordinary `update` qualifies the **exact executing engine** through its existing
 installation inventory before source acquisition or Manager self-update. A
-missing or unsupported prepared-source declaration refuses with an engine
+missing or unsupported packet-V2 declaration refuses with an engine
 upgrade/repair diagnostic; it never tries an effectful new command and then
 replays marketplace delivery. For a capable engine, Manager acquires one exact
-service-source commit/tree and prepares every eligible runtime from it before
-either update stage. Existing `--skip-modules` semantics apply. Prepared
-generations persist below `<manager-root>/runtime-sources/prepared/`; the
+service-source commit/tree plus Main seed and prepares every eligible runtime
+through the canonical complete-application provider before either update stage.
+The inventory's owned profile selections supply each application's exact extras.
+Existing `--skip-modules` semantics apply. Prepared
+generations persist below `<manager-root>/runtime-sources/applications/<attempt>/`; the
 complete immutable packet crosses the existing engine process and durable
 request boundary. The capability read and execution use the same frozen engine
 argv, including call-scoped ownership rather than a stale inherited handle.
-The engine remains authoritative for complete portfolio admission, native
-installation, retries and outcomes; no alternate installer or recurring worker
+The engine remains authoritative for complete portfolio admission, application
+installation and outcomes; no alternate executor or recurring worker
 is introduced. Marketplace plugin-content refresh remains independent.
-Prepared payloads that require profile-qualified targets also require the actual
-engine's additive target capability before either update stage; see the
-[owned target contract](../plugins/agent-containers/docs/runtime-source-target.md).
-An old V1 source engine is sufficient only for the supported unprofiled baseline.
+Packet V2 requires complete retained wheel/profile/application snapshots, bound
+to that exact acquired source and composition. The engine revalidates the
+installed profile owner before planning and execution, then invokes the admitted
+source's canonical application entry through its existing executor. It does not
+adapt packet V1 or replay a failed application through the old shell installer.
+See the [owning packet contract](../plugins/agent-worktrees/docs/cli-reference.md#prepared-source-suite-input).
+Older pre-wheel providers require the separate standalone force-fresh migration;
+source-only consumer controls do not qualify that migration or live installation.
 
 Fresh suite repair can also honor that independent policy when the installed
 engine cannot provide inventory yet. It acquires one service-source selection,

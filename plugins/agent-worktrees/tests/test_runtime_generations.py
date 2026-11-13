@@ -12,6 +12,7 @@ import pytest
 from agent_procutil import no_window_kwargs
 
 from agent_worktrees import runtime_deployment as deployment
+from test_installer_command_binding import owned_install  # noqa: F401
 
 REPO = Path(__file__).resolve().parents[3]
 
@@ -222,6 +223,107 @@ def test_manifest_retains_source_identity_separately_from_package_version(tmp_pa
     assert manifest["runtime_version"] == slot.name
     assert manifest["runtime_source"] == document
     assert manifest["source"]["version"] == "1.0.0-dev7"
+
+
+@pytest.fixture
+def application_deployment(request, monkeypatch):
+    from agent_worktrees import _build_info, _command_binding as binding
+    from agent_worktrees import _installation_context as primitive, config
+
+    home, root = request.getfixturevalue("owned_install")
+    owner = home / ".copilot/installed-plugins/example/agent-worktrees"
+    arguments = dict(payload_root=owner, plugin_id="agent-worktrees", legacy_root=root)
+    binding.write_legacy_manifest(
+        primitive, {"schema_version": 3, "service": "agent-worktrees"}, **arguments,
+    )
+    original = binding.resolve_command_binding(primitive, **arguments)
+    decision = primitive.resolve_runtime_deployment(**arguments)
+    (root / "runtime-deployment.json").write_text(json.dumps({
+        "schema": primitive.RUNTIME_DEPLOYMENT_SCHEMA, "version": 1, "managed": True,
+        "owner": primitive._deployment_owner(decision, arguments),
+    }), encoding="utf-8")
+    document = {
+        "schema": "copilot-extensions.runtime-source", "version": 1,
+        "plugin": "agent-worktrees", "package_version": "1.0.0",
+        "runtime_version": "1.0.0+source." + "a" * 40 + "." + "b" * 16,
+        "source_commit": "a" * 40, "source_tree": "c" * 40, "assembly_hash": "b" * 64,
+    }
+    slot = root / "versions" / (document["runtime_version"] + ".profile." + "d" * 16)
+    environment = slot / ".venv"
+    environment.mkdir(parents=True)
+    (slot / "application.json").write_text(json.dumps({
+        "name": "agent-worktrees", "construction": {
+            "payload_hash": "f" * 64, "identity": {"runtime_source": document},
+        },
+    }), encoding="utf-8")
+    (root / "current-version").write_text(slot.name + "\n", encoding="utf-8")
+    monkeypatch.setattr(_build_info, "BUILD_INFO", {
+        "version": "1.0.0", "commit": document["source_commit"], "branch": "source",
+        "source": "source:" + document["source_commit"], "runtime_version": slot.name,
+        "runtime_generation": "e" * 32, "deployment_source": json.dumps(document),
+    })
+    monkeypatch.setattr(deployment, "version", lambda _name: "1.0.0")
+    monkeypatch.setattr(sys, "prefix", str(environment))
+    monkeypatch.setattr(config, "install_dir", lambda: root)
+    monkeypatch.setattr(binding, "_load_primitive", lambda _owner: primitive)
+    monkeypatch.setenv("COPILOT_PLUGIN_STAGED_FROM", str(owner))
+    monkeypatch.delenv("COPILOT_EXTENSIONS_COMMAND_LIFECYCLE", raising=False)
+    monkeypatch.delenv("COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT", raising=False)
+    return binding, primitive, arguments, original, slot
+
+
+@pytest.mark.parametrize("outcome", ["success", "startup-failed", "selection-changed"])
+def test_application_manifest_completes_only_healthy_original_owner(
+    application_deployment, monkeypatch, outcome,
+):
+    from agent_worktrees import status_monitor_cutover
+
+    binding, primitive, arguments, original, slot = application_deployment
+    root = slot.parent.parent
+    lifecycle = binding._load_lifecycle()
+    with lifecycle.legacy_lifecycle(
+        binding._rules(), primitive, managed_deployment=True, **arguments,
+    ) as lease:
+        monkeypatch.setenv(lifecycle.TICKET_ENV, json.dumps(lease.ticket))
+        reserved = deployment.read_manifest(root)
+
+        def start():
+            assert deployment.read_manifest(root) == reserved
+            if outcome == "startup-failed":
+                return 7
+            if outcome == "selection-changed":
+                (root / "current-version").write_text("another-slot\n", encoding="utf-8")
+            return 0
+
+        monkeypatch.setattr(status_monitor_cutover, "start_application", start)
+        finish = deployment.start_published_application
+
+        if outcome == "success":
+            finish()
+        else:
+            with pytest.raises(RuntimeError, match="startup failed|deployment changed"):
+                finish()
+            assert deployment.read_manifest(root) == reserved
+            assert binding.resolve_command_binding(primitive, **arguments)["reason"] == (
+                "legacy-lifecycle-incomplete"
+            )
+            return
+    assert binding.resolve_command_binding(primitive, **arguments) == original
+    manifest = json.loads(deployment.read_manifest(root))
+    assert manifest["commandLifecycle"]["state"] == "complete"
+    assert manifest["runtime_slot"] == slot.name
+    assert manifest["venv"] == (slot / ".venv").as_posix()
+    assert manifest["source"]["payload_fingerprint"] is None
+    monkeypatch.delenv(lifecycle.TICKET_ENV)
+    before = deployment.read_manifest(root)
+    with deployment.application_publication():
+        assert deployment.read_manifest(root) == before
+    assert deployment.read_manifest(root) == before
+    (root / "current-version").write_text("another-slot\n", encoding="utf-8")
+    with pytest.raises(binding.CommandOwnershipConflict, match="publication|Publication"):
+        with deployment.application_publication():
+            pytest.fail("another selected slot acquired management authority")
+    assert deployment.read_manifest(root) == before
 
 
 def test_manifest_storage_failure_preserves_previous_evidence(tmp_path, monkeypatch):

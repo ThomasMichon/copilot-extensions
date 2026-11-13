@@ -21,6 +21,7 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING
 
 from . import reconcile
+from .update_runtime_application import plan_step as _application_step
 
 if TYPE_CHECKING:
     from .update_runtime import _RegisteredPluginTarget
@@ -129,13 +130,16 @@ def _select_inputs(
             if step.name != "agent-index":
                 source.validate(step.name, step.payload, environment)
                 project = (project or Path.cwd()).resolve()
-            source.installer_arguments("windows" if sys.platform == "win32" else "posix")
-            source_target = (
-                plan_target(source, step.name, step.payload, root, environment)
-                if source.install_source is None else None
-            )
-            if source_target is not None:
-                environment[TARGET_ENV] = source_target.document
+            if source.application is not None:
+                source.application.validate(step.payload, root, environment)
+            else:
+                source.installer_arguments("windows" if sys.platform == "win32" else "posix")
+                source_target = (
+                    plan_target(source, step.name, step.payload, root, environment)
+                    if source.install_source is None else None
+                )
+                if source_target is not None:
+                    environment[TARGET_ENV] = source_target.document
             environment.update({
                 PIN_ENV: source.identity,
                 "COPILOT_PLUGIN_STAGED_FROM": str(step.payload.resolve()),
@@ -149,6 +153,7 @@ def _select_inputs(
             step, source=source, environment=environment, runtime_root=root,
             source_target=source_target,
             target_version=(
+                source.application.version if source and source.application else
                 source_target.version if source_target else
                 source.version if source else reconcile.payload_version(step.payload)
             ),
@@ -174,6 +179,8 @@ def _runtime_footprint_current(step: RuntimeUpdateStep) -> bool:
 
     if step.runtime_root is None:
         return False
+    if step.source is not None and step.source.application is not None:
+        return _deployed_version(step) == step.target_version
     probe = """
 import json, sys
 from pathlib import Path
@@ -261,6 +268,8 @@ def plan_registered(
             and reconcile._versions_equal(dver, pver)
             and (not check_footprint or _runtime_footprint_current(step))):
         return dataclasses.replace(step, status="SKIPPED (current)")
+    if source is not None and source.application is not None:
+        return _application_step(step, force=force)
     context = environment.get("COPILOT_EXTENSIONS_CONTEXT")
     if context is not None:
         if force:
@@ -364,6 +373,8 @@ def plan_module(
     if (name != "agent-bridge" and not force and pver and dver
             and pver == dver and (not check_footprint or _runtime_footprint_current(step))):
         return dataclasses.replace(step, status="SKIPPED (current)")
+    if source is not None and source.application is not None:
+        return _application_step(step, force=force)
     # Modules historically use install/update even in a selected cell. Never
     # replace that contract with the registered-runtime init/cell-provision path.
     prefix = _shell_prefix(
@@ -512,6 +523,10 @@ def plan_engine(
             and (not check_footprint or _runtime_footprint_current(step))):
         if "COPILOT_EXTENSIONS_CONTEXT" in environment or not reconcile.hook_shims_drifted(plugin_dir):
             return dataclasses.replace(step, status="SKIPPED (current)")
+    if action not in {"install", "update", "repair"}:
+        raise ValueError("Unsupported native engine installation action")
+    if source is not None and source.application is not None:
+        return _application_step(step, force=force or action == "repair")
     prefix = _shell_prefix(
         plugin_dir, platform_name,
         **({"prepared": True} if source and source.install_source is not None else {}),
@@ -519,8 +534,6 @@ def plan_engine(
     if isinstance(prefix, str):
         return dataclasses.replace(step, status=prefix)
     shell_prefix, _ = prefix
-    if action not in {"install", "update", "repair"}:
-        raise ValueError("Unsupported native engine installation action")
     argv = [*shell_prefix, action, "-InstallDir" if platform_name == "windows" else "--install-dir",
             str(root)]
     if source is not None:

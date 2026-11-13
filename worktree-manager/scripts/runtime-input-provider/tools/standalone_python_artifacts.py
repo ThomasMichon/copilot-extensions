@@ -181,7 +181,7 @@ def validate_build(source: Path, *, component: str, root: Path) -> dict:
 
 def build_standalone_artifacts(
     component: str, *, out_dir: Path, python: str | None = None, toolchain=None,
-    builder=None,
+    builder=None, uv: str = "uv", deadline: float | None = None,
 ) -> dict:
     if builder is None:
         import build_python_artifacts as builder
@@ -190,4 +190,5 @@ def build_standalone_artifacts(
     return builder.build_source_artifacts(
         identity={"component": component}, source_dir=source, dependencies=dependencies,
         resources=resources, out_dir=out_dir, python=python, toolchain=toolchain,
+        **({"uv": uv, "deadline": deadline} if uv != "uv" or deadline is not None else {}),
     )

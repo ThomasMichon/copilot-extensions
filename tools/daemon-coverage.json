@@ -353,7 +353,7 @@
       "r:worktree-manager/scripts/installer_driver.py::execute::Popen": 1,
       "r:worktree-manager/scripts/runtime_install.py::_activate_after_bootstrap_update::Popen": 1,
       "r:worktree-manager/scripts/runtime_install.py::_dispatch_manager::Popen": 2,
-      "r:worktree-manager/scripts/runtime_install.py::_install_payload::Popen": 1,
+      "r:worktree-manager/scripts/runtime_install.py::_install_selected_payload::Popen": 1,
       "r:worktree-manager/scripts/runtime_install.py::adopt_broker::Popen": 1,
       "r:plugins/agent-bridge/spikes/session-host/run_spike.py::_run_spike::Popen": 2,
       "r:plugins/agent-bridge/spikes/stale-daemon-reap/repro.py::_spawn_stand_in::Popen": 1,

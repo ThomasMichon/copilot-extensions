@@ -896,6 +896,52 @@ def test_runtime_removal_requires_prior_owned_broker_removal(installation, monke
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows native image attribution")
+@pytest.mark.parametrize("descendants", [False, True])
+@pytest.mark.parametrize("exited", [False, True])
+def test_nonzero_cim_owner_result_ignores_only_confirmed_exited_process(
+    tmp_path: Path, descendants: bool, exited: bool,
+):
+    native = MODULE._load(SOURCE.with_name("installer_engine_uninstall_windows.py"))
+    prelude = f"""
+$script:CimOwnerCalls=0
+function Add-Type {{ throw 'Fixture selects the CIM ownership fallback' }}
+function Get-CimInstance {{
+    [pscustomobject]@{{ProcessId=64123;ParentProcessId=0;Name='python.exe';
+        ExecutablePath='';CommandLine='fixture candidate'}}
+}}
+function Invoke-CimMethod {{
+    $script:CimOwnerCalls++
+    [pscustomobject]@{{ReturnValue=2}}
+}}
+function Get-Process {{
+    $result=[pscustomobject]@{{HasExited=${str(exited).lower()}}}
+    $result | Add-Member -MemberType ScriptMethod -Name Dispose -Value {{ }}
+    return $result
+}}
+"""
+
+    def run(argv):
+        process_lookup = "[Diagnostics.Process]::GetProcessById($processId)"
+        assert argv[-1].count(process_lookup) == 1
+        program = argv[-1].replace(process_lookup, "(Get-Process -Id $processId)")
+        checked = (
+            prelude + "\ntry {\n" + program
+            + "\n} finally { if ($script:CimOwnerCalls -lt 1) "
+            + "{ throw 'Fixture did not exercise CIM ownership' } }\n"
+        )
+        return MODULE._run(tmp_path, [*argv[:-1], checked])
+
+    inspect = lambda: native.inspect_processes(
+        tmp_path, HOST, "fixture_module", run, descendants=descendants,
+    )
+    if exited:
+        assert inspect() == []
+    else:
+        with pytest.raises(MODULE.UninstallRefused, match="Cannot attribute candidate process ownership"):
+            inspect()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows native image attribution")
 @pytest.mark.parametrize("same_birth", [True, False])
 def test_missing_cim_image_requires_matching_native_birth(installation, monkeypatch, same_birth):
     payload, root = installation

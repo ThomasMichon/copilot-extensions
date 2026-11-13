@@ -55,6 +55,28 @@ def isolate_account_profile(
     directories = [plugin / "scripts" / "installation-context"]
     if runtime_package is not None:
         directories.append(plugin / "src" / runtime_package)
+    _isolate_profile_directories(
+        directories, plugin / "scripts" / "installation-context" / "installation-context.sh", home,
+    )
+
+
+def isolate_source_account_profile(repository: Path, home: Path) -> None:
+    """Isolate canonical inputs before promotion materializes their consumers."""
+    if os.name == "nt":
+        return
+    canonical = repository / "libs" / "installation-context"
+    _isolate_profile_directories([canonical], canonical / "installation-context.sh", home)
+    for bootstrap in sorted(repository.glob("plugins/*/scripts/installation-context")):
+        plugin = bootstrap.parents[1]
+        isolate_account_profile(
+            plugin, home,
+            runtime_package="agent_worktrees" if plugin.name == "agent-worktrees" else None,
+        )
+
+
+def _isolate_profile_directories(
+    directories: list[Path], shell_context: Path, home: Path,
+) -> None:
     for directory in directories:
         resolution = directory / "_installation_context_resolution.py"
         source = resolution.read_text(encoding="utf-8")
@@ -63,7 +85,6 @@ def isolate_account_profile(
         resolution.write_text(source.replace(
             lookup, f"profile_value = Path({str(home)!r})",
         ), encoding="utf-8")
-    shell_context = plugin / "scripts" / "installation-context" / "installation-context.sh"
     source = shell_context.read_text(encoding="utf-8")
     lookup = 'canonical_path_into CURRENT_PROFILE_HOME "$home_path" true || return'
     assert source.count(lookup) == 1

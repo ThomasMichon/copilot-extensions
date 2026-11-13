@@ -23,8 +23,9 @@ Scope
   Observation period: <time range or "from now">
 
 Mode: read-only sweep | recurring observation | steering | dormant correction
-  Enforced goals: <G1-G4 for a finite sweep | G1-G5 for a recorded recurring
-    assignment; see SKILL.md "Enforced goals">
+  | repair (modes combine only when each has its own grant)
+  Enforced goals: <G1-G4 and G6 for a finite sweep | G1-G6 for a recorded
+    recurring assignment; see SKILL.md "Enforced goals">
   Cadence and wake source: <existing scheduler/event; required for recurring>
   Confidence cadence: <tight cadence used until confident, e.g. 15 minutes;
     recurring only>
@@ -46,7 +47,9 @@ Mode: read-only sweep | recurring observation | steering | dormant correction
 
 Steering scope (only if explicitly granted; else "none")
   Recipients: <owners/selectors allowed to receive steers>
-  Permitted purposes: <e.g. return to parent, smaller discriminating experiment>
+  Permitted purposes: <e.g. return to parent, smaller discriminating
+    experiment, next acceptance criterion, verify and finalize, rework own
+    charter/plan, backfill own charter>
   Excluded purposes: <e.g. scope change, merge, deploy, stop/start, approvals>
   Validity: <expiry, revision or revocation condition>
   Limits: <one outstanding steer per target+issue; other caps>
@@ -69,6 +72,27 @@ Dormant correction scope (only if explicitly granted; else "none")
     abandon, reset, approvals, deployment>
   Record publication: <monitor's own writable workspace and review gate>
   Validity: <expiry, revision or revocation condition>
+
+Repair scope (only if explicitly granted; else "none"; see
+    references/repair-escalation.md)
+  Recipients: <owners/selectors whose blockers may be repaired>
+  Rung ceiling: <R1 diagnose | R2 doctor records | R3 recover transport or
+    session | R4 named disruptive effects>
+  Host-shared services: <services that may be restarted, or "none">
+  Direct access: <declared SSH profiles/transports usable for diagnosis>
+  Delegation: <parallel sub-agent delegates allowed; concurrency bound; one
+    per target or shared service>
+  Excluded effects: <e.g. credential changes, session replacement, lock or
+    baton removal, owner-store hand edits; runtime updates and reinstalls
+    always route to the fleet maintainer>
+  Validity: <expiry, revision or revocation condition>
+
+Agent charter maintenance (see references/agent-charters.md)
+  Summary home: <monitor-owned private directory, one summary per target>
+  Backfill: <recommend only | steer agents to backfill | dormant backfill>
+  Light-touch rule: <exploratory agents get no completion or rework pressure
+    until set to work with a goal>
+  Churn report: <per recurring sweep: finalized, allocated, aging targets>
 
 Watchdog thresholds (see references/watchdog-checks.md)
   Question revisit time and required default: <e.g. 30 minutes; every
@@ -99,9 +123,9 @@ Acceptance: <what a completed sweep or a healthy service period must show>
 
 ## Acceptance checks
 
-- The report shows evidence for every applicable enforced goal (G1-G4, plus
-  G5 under a recorded recurring assignment); a missing goal marks the sweep
-  incomplete, and an open-ended assignment was never self-declared done.
+- The report shows evidence for every applicable enforced goal (G1-G4 and
+  G6, plus G5 under a recorded recurring assignment); a missing goal marks the
+  sweep incomplete, and an open-ended assignment was never self-declared done.
 - Every waste finding and steer maps to a weak-point pattern or "no new
   pattern", and monitor difficulties were captured as proposed improvements.
 - Every target resolves through an existing owner, or is a recorded gap.
@@ -116,6 +140,13 @@ Acceptance: <what a completed sweep or a healthy service period must show>
 - Each dormant correction had a liveness recheck and revision re-read
   immediately before the write and an owner readback after; live-idle, newly
   active and unknown targets were left unchanged.
+- Each repair stayed within the repair scope's recipients and rung ceiling,
+  climbed one rung at a time with evidence captured first and a readback
+  after, and each parallel delegate held one target or shared service and
+  never messaged or steered a worker.
+- Every target has a current charter summary with its kind; exploratory
+  targets received no completion pressure, and every completion target shows
+  its remaining acceptance and the resolution step due.
 - Holds, review bars, approvals, resource limits and ownership are unchanged
   by the monitor.
 - The monitor asked no blocking question; every wait it reports is classified

@@ -107,6 +107,8 @@ construction_lease = _leases.construction_lease
 _publication_lease = _leases._publication_lease
 _cleanup_lease = _leases._cleanup_lease
 _kernel_lease = _leases._kernel_lease
+_norm_version = _leases.normalize_version
+_normalize_windows_extended_path = _leases.normalize_windows_extended_path
 
 
 CURRENT_LINK = "current"
@@ -741,12 +743,6 @@ def _pid_cmdline_argv0(pid: int) -> str | None:
         return None
     argv0 = raw.split(b"\x00", 1)[0].decode("utf-8", "replace")
     return argv0 or None
-
-
-def _norm_version(v: str) -> str:
-    """Normalize a version string for matching (the recorded PEP 440 form
-    ``0.4.0.dev287`` vs the dir name ``0.4.0-dev287``)."""
-    return v.replace("-", ".").replace("_", ".")
 
 
 def _slot_of_path(path: str | None, versions_abs: str, versions: set[str]) -> str | None:
@@ -1518,15 +1514,6 @@ ADMIT_REUSE = "reuse"
 ADMIT_CONTENT_CONFLICT = "content-conflict"
 ADMIT_CONSTRUCT = "construct"
 ADMIT_HEALTH_REPAIR_REQUIRED = "health-repair-required"
-
-
-def _normalize_windows_extended_path(target: str) -> str:
-    """Normalize extended drive and UNC prefixes, preserving ordinary target names."""
-    if target.startswith("\\\\?\\UNC\\"):
-        return "\\\\" + target[len("\\\\?\\UNC\\"):]
-    if target.startswith("\\\\?\\"):
-        return target[4:]
-    return target
 
 
 def fingerprint_source(paths, *, on_progress=None, file_hashes=None, on_file=None) -> str:

@@ -8,8 +8,10 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
 import tomllib
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -558,6 +560,9 @@ def test_materialize_refuses_linked_source_content(tmp_path, native_file_symlink
     ), log
     assert (original / "module.py").read_text() == "value = 1\n"
     assert not (package / "src").exists() or kind == "source"
+    assert (package / "pyproject.toml").read_text() == (
+        '[project]\nname = "dependency"\nversion = "1"\n'
+    )
 
 
 def test_materialized_closure_allows_an_aliased_parent(tmp_path, native_file_symlink):
@@ -1027,6 +1032,159 @@ def test_extracted_pointer_candidate_still_refuses_a_symlink(tmp_path, native_fi
     assert victim.read_text() == contents
 
 
+@pytest.mark.parametrize("parallel,extra_files", [(False, 0), (False, 61), (True, 61)])
+@pytest.mark.parametrize("preselected", [False, True])
+def test_file_pointer_discovery_preserves_full_scan_and_caller_context(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, parallel: bool, extra_files: int,
+    preselected: bool,
+) -> None:
+    pointers = [
+        _file_pointer(tmp_path, "example", name, source="docs/source.md")
+        for name in ("last.unknown", "nested/first")
+    ]
+    (tmp_path / "not-a-pointer").write_bytes(b"\xff\x00")
+    for index in range(extra_files):
+        (tmp_path / f"plain-{index}").write_text("not a pointer\n", encoding="utf-8")
+    candidates = list(tmp_path.rglob("*")) if preselected else None
+    if preselected:
+        _file_pointer(tmp_path, "example", "unselected", source="docs/source.md")
+    else:
+        monkeypatch.setattr(Path, "is_file", lambda _path: pytest.fail(
+            "a full scan must use its directory-entry metadata, not re-stat each file",
+        ))
+    reader = mm._file_pointer_source
+    caller = threading.get_ident()
+    barrier = threading.Barrier(2)
+    observed = []
+    def context_allows_workers() -> bool:
+        assert extra_files, "a small scan must not query native context or create workers"
+        return parallel
+
+    monkeypatch.setattr(mm, "_parallel_pointer_reads", context_allows_workers)
+    if not parallel or preselected:
+        monkeypatch.setattr(mm, "_pointer_prefix_candidates", lambda _root: pytest.fail(
+            "a restricted caller or preselected scan must not launch a native prefilter",
+        ))
+
+    def read(path: Path) -> str | None:
+        if path in pointers:
+            if parallel:
+                assert threading.get_ident() != caller
+                barrier.wait(timeout=5)
+            else:
+                assert threading.get_ident() == caller
+            observed.append(path)
+        return reader(path)
+
+    monkeypatch.setattr(mm, "_file_pointer_source", read)
+    assert mm.find_file_pointers(tmp_path, candidates=candidates) == sorted(pointers)
+    assert set(observed) == set(pointers)
+
+
+@pytest.mark.parametrize("failure", ["missing", "timeout", "error", "foreign"])
+def test_pointer_prefilter_failure_keeps_the_complete_direct_scan(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str,
+) -> None:
+    pointer = _file_pointer(tmp_path, "example", "pointer", source="docs/source.md")
+    for index in range(70):
+        (tmp_path / f"ordinary-{index}").write_text("ordinary\n", encoding="utf-8")
+    calls = []
+
+    def run(*args, **kwargs):
+        calls.append((args, kwargs))
+        if failure == "missing":
+            raise FileNotFoundError("optional native scanner unavailable")
+        if failure == "timeout":
+            raise subprocess.TimeoutExpired(args[0], kwargs["timeout"])
+        return subprocess.CompletedProcess(
+            args[0], 2 if failure == "error" else 0,
+            str(tmp_path.parent / "foreign").encode("utf-8") + b"\0", b"",
+        )
+
+    monkeypatch.setattr(mm, "_parallel_pointer_reads", lambda: True)
+    monkeypatch.setattr(mm.subprocess, "run", run)
+    assert mm.find_file_pointers(tmp_path) == [pointer]
+    assert len(calls) == 1
+    assert "--no-index" in calls[0][0][0] and "--no-textconv" in calls[0][0][0]
+
+
+def test_native_pointer_prefilter_keeps_unicode_binary_and_later_line_candidates(tmp_path: Path):
+    if shutil.which("git") is None:
+        pytest.skip("optional native prefilter requires Git")
+    contents = {
+        "pointer.unusual": "<!--\u00a0VENDOR_POINTER: source=canonical kind=file -->\n".encode(),
+        "later": b"ordinary\n<!-- VENDOR_POINTER: source=canonical kind=file -->\n",
+        "binary": b"<\xff\x00",
+        "ordinary": b"ordinary\n",
+    }
+    for name, content in contents.items():
+        (tmp_path / name).write_bytes(content)
+    assert mm._pointer_prefix_candidates(tmp_path) == {
+        tmp_path / name for name in ("pointer.unusual", "later", "binary")
+    }
+    assert mm._file_pointer_source(tmp_path / "pointer.unusual") == "canonical"
+
+
+@pytest.mark.parametrize("layout", ["metadata", "root-reparse"])
+def test_nonordinary_pointer_trees_keep_the_direct_scan(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, layout: str,
+) -> None:
+    pointer = _file_pointer(tmp_path, "example", "pointer", source="docs/source.md")
+    expected = [pointer]
+    for index in range(70):
+        (tmp_path / f"ordinary-{index}").write_text("ordinary\n", encoding="utf-8")
+    monkeypatch.setattr(mm, "os", SimpleNamespace(name="nt", scandir=os.scandir))
+    if layout == "metadata":
+        metadata = tmp_path / ".GiT"
+        metadata.mkdir()
+        nested = metadata / "pointer"
+        nested.write_text("<!-- VENDOR_POINTER: source=canonical kind=file -->\n")
+        expected.append(nested)
+    else:
+        original = Path.lstat
+        mode = tmp_path.lstat().st_mode
+        monkeypatch.setattr(Path, "lstat", lambda path, *args, **kwargs: (
+            SimpleNamespace(st_mode=mode, st_file_attributes=0x400)
+            if path == tmp_path else original(path, *args, **kwargs)
+        ))
+    monkeypatch.setattr(mm, "_parallel_pointer_reads", lambda: True)
+    monkeypatch.setattr(mm, "_pointer_prefix_candidates", lambda _root: pytest.fail(
+        "nonordinary trees require the original direct reader",
+    ))
+    assert mm.find_file_pointers(tmp_path) == sorted(expected)
+
+
+@pytest.mark.parametrize("opened,error", [(False, 1008), (False, 5), (True, 0)])
+def test_parallel_pointer_reads_require_the_windows_process_identity(
+    monkeypatch: pytest.MonkeyPatch, opened: bool, error: int,
+) -> None:
+    import ctypes
+
+    closed = []
+
+    def current_thread() -> int:
+        return 17
+
+    def open_token(thread: int, access: int, as_self: bool, token: object) -> bool:
+        assert thread == 17 and access == 8 and as_self
+        return opened
+
+    def close_token(token: object) -> bool:
+        closed.append(token)
+        return True
+
+    kernel = SimpleNamespace(GetCurrentThread=current_thread, CloseHandle=close_token)
+    security = SimpleNamespace(OpenThreadToken=open_token)
+    monkeypatch.setattr(mm.sys, "platform", "win32")
+    monkeypatch.setattr(
+        ctypes, "WinDLL", lambda name, **_: kernel if name == "kernel32" else security,
+        raising=False,
+    )
+    monkeypatch.setattr(ctypes, "get_last_error", lambda: error, raising=False)
+    assert mm._parallel_pointer_reads() is (not opened and error == 1008)
+    assert len(closed) == int(opened)
+
+
 def test_build_materializes_file_pointers_end_to_end(tmp_path: Path):
     source = tmp_path / "source"
     _canonical_file(source, "docs/patterns/thing.md", content="canonical\n")
@@ -1330,6 +1488,59 @@ def test_materialize_uv_editable_ref_into_refuses_a_path_outside_the_libs_tree(t
     assert not (consumer / "libs/other-plugin").exists()
 
 
+@pytest.mark.parametrize("eligible", [False, True])
+def test_plugin_copy_workers_preserve_tree_logs_and_standalone_dependency_order(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, eligible: bool,
+):
+    baseline = tmp_path / "baseline"
+    _canonical_lib(baseline, "shared-lib", version="1.0.0", content="shared\n")
+    for name in ("agent-dispatch", "other"):
+        plugin = _uv_editable_consumer(
+            baseline, f"plugins/{name}", "shared-lib", "../../libs/shared-lib",
+        )
+        (plugin / "src").mkdir()
+        (plugin / "src" / "module.py").write_text("value = 1\n", encoding="utf-8")
+    _uv_editable_consumer(
+        baseline, "services/dispatch", "agent-dispatch", "../../plugins/agent-dispatch",
+    )
+    candidate = tmp_path / "candidate"
+    shutil.copytree(baseline, candidate)
+    monkeypatch.setattr(mm, "_parallel_pointer_reads", lambda: False)
+    expected_log = mm.materialize_uv_editable_refs(baseline, canonical_root=baseline)
+    expected = {
+        path.relative_to(baseline): path.read_bytes()
+        for path in baseline.rglob("*") if path.is_file()
+    }
+    original = mm.materialize_uv_editable_ref_into
+    finished = set()
+    threads = []
+
+    def materialize(**kwargs):
+        destination = kwargs["dest_consumer_dir"]
+        if destination.parent.name == "plugins":
+            threads.append(threading.current_thread().name)
+            result = original(**kwargs)
+            finished.add(destination.name)
+            return result
+        assert finished == {"agent-dispatch", "other"}
+        return original(**kwargs)
+
+    monkeypatch.setattr(mm, "materialize_uv_editable_ref_into", materialize)
+    monkeypatch.setattr(mm, "_parallel_pointer_reads", lambda: eligible)
+    observed_log = mm.materialize_uv_editable_refs(candidate, canonical_root=candidate)
+    assert {
+        path.relative_to(candidate): path.read_bytes()
+        for path in candidate.rglob("*") if path.is_file()
+    } == expected
+    assert [line.replace(str(candidate), "ROOT") for line in observed_log] == [
+        line.replace(str(baseline), "ROOT") for line in expected_log
+    ]
+    assert threads and all(
+        name.startswith("ThreadPoolExecutor") if eligible else name == threading.current_thread().name
+        for name in threads
+    )
+
+
 def test_materialize_uv_editable_refs_whole_repo(tmp_path: Path):
     root = tmp_path / "repo"
     _canonical_lib(root, "zdd", version="0.1.0-dev1", content="x\n")
@@ -1501,9 +1712,25 @@ def test_real_repo_uv_editable_materialization_matches_current_canonical_trees(
     assert discovered, "expected at least one real uv-editable consumer"
     checked: list[str] = []
     actual_root = tmp_path / "actual"
+    tracked = subprocess.run(
+        ["git", "-c", "core.fsmonitor=false", "-C", str(repo), "ls-files", "-z"],
+        check=True, capture_output=True, text=True, encoding="utf-8",
+        env={name: value for name, value in os.environ.items() if not name.startswith("GIT_")},
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    included = set()
+    for name in tracked.stdout.split("\0"):
+        if name:
+            path = repo / name
+            included.update([path, *path.parents])
 
     def _consumer_snapshot_dir(root: Path, consumer: str) -> Path:
         return root / consumer if consumer in mm._EXTRA_CONSUMER_DIRS else root / "plugins" / consumer
+
+    def _ignore_snapshot(directory: str, names: list[str]) -> set[str]:
+        return mm._ignore(directory, names) | {
+            name for name in names if Path(directory) / name not in included
+        }
 
     for consumer, consumer_dir, refs in discovered:
         actual_consumer_dir = _consumer_snapshot_dir(actual_root, consumer)
@@ -1523,7 +1750,7 @@ def test_real_repo_uv_editable_materialization_matches_current_canonical_trees(
             retained = consumer_dir / directory
             if retained.is_dir():
                 shutil.copytree(
-                    retained, actual_consumer_dir / directory, ignore=mm._ignore,
+                    retained, actual_consumer_dir / directory, ignore=_ignore_snapshot,
                 )
         for ext in ("sh", "ps1"):
             installer = consumer_dir / "scripts" / f"install.{ext}"

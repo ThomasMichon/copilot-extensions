@@ -1,0 +1,385 @@
+"""Read pinned Git objects once and prepare the existing publisher's source subjects."""
+from __future__ import annotations
+
+import argparse
+from contextlib import contextmanager
+from contextvars import ContextVar
+import hashlib
+import math
+import os
+from pathlib import Path
+import re
+import stat
+import subprocess
+import time
+
+from promotion_complete_source import (
+    MAX_SOURCE_BYTES, MAX_SOURCE_FILES, canonical_bytes, source_archive, source_asset_name,
+    validate_identity, verify_source_archive,
+)
+from promotion_unit_contract import MAX_PACKET_FILE_BYTES, decode_json
+
+_DEADLINE: ContextVar[float | None] = ContextVar("promotion_deadline", default=None)
+
+
+@contextmanager
+def composition_budget(deadline: float | None):
+    if deadline is not None and (
+        isinstance(deadline, bool) or not isinstance(deadline, (float, int))
+        or not math.isfinite(deadline)
+    ):
+        raise ValueError("composition requires a finite deadline")
+    current = _DEADLINE.get()
+    selected = min(current, deadline) if current is not None and deadline is not None else (
+        current if deadline is None else deadline
+    )
+    token = _DEADLINE.set(selected)
+    try:
+        git_timeout_options()
+        yield
+    finally:
+        _DEADLINE.reset(token)
+
+
+def git_timeout_options(cap: float | None = None) -> dict[str, float]:
+    deadline = _DEADLINE.get()
+    if deadline is None:
+        return {} if cap is None else {"timeout": cap}
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise ValueError("composition deadline exceeded")
+    return {"timeout": remaining if cap is None else min(cap, remaining)}
+
+
+def git_environment(**overrides: str) -> dict[str, str]:
+    environment = {
+        key: value for key, value in os.environ.items() if not key.upper().startswith("GIT_")
+    }
+    return {**environment, **overrides}
+
+
+def run_composition_child(argv, **options):
+    deadline = _DEADLINE.get()
+    if deadline is None:
+        return subprocess.run(argv, **options)
+    from source_preparation_process import run
+
+    return run(argv, deadline=deadline, **options)
+
+
+def git_text(
+    repo: Path, args: list[str], *, check: bool = True,
+    env: dict[str, str] | None = None, input_text: str | None = None,
+) -> str:
+    environment = git_environment()
+    if env is not None:
+        candidate_identity = {
+            f"GIT_{role}_{field}"
+            for role in ("AUTHOR", "COMMITTER") for field in ("DATE", "NAME", "EMAIL")
+        }
+        environment.update({
+            key: value for key, value in env.items()
+            if not key.upper().startswith("GIT_") or key in candidate_identity
+        })
+    result = run_composition_child(
+        ["git", "--no-replace-objects", "-c", "core.fsmonitor=false",
+         *(["-c", "core.longpaths=true", "-c", "checkout.workers=2"] if os.name == "nt" else []),
+         *args],
+        cwd=str(repo), capture_output=True, env=environment,
+        input=input_text.encode("utf-8") if input_text is not None else None,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        **git_timeout_options(),
+    )
+    if check and result.returncode:
+        raise ValueError(f"git {' '.join(args)} failed: {result.stderr.decode('utf-8').strip()}")
+    return result.stdout.decode("utf-8").strip()
+
+
+def _git(repo: Path, args: list[str], *, data: bytes | None = None) -> bytes:
+    env = git_environment()
+    result = run_composition_child(
+        ["git", "--no-replace-objects", "-c", "core.fsmonitor=false", *args],
+        cwd=repo, env=env, input=data,
+        capture_output=True, **git_timeout_options(30),
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    if result.returncode:
+        raise ValueError(f"cannot read complete-source Git data: {result.stderr.decode(errors='replace')}")
+    return result.stdout
+
+
+def is_ancestor(repo: Path, ancestor: str, descendant: str) -> bool:
+    result = run_composition_child(
+        ["git", "--no-replace-objects", "-c", "core.fsmonitor=false",
+         "merge-base", "--is-ancestor", ancestor, descendant],
+        cwd=str(repo), capture_output=True, text=True, env=git_environment(),
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        **git_timeout_options(),
+    )
+    return result.returncode == 0
+
+
+def changefile_existed_at(rev: str, name: str, *, repo: Path) -> bool:
+    """Read whether a changefile was already present at the previous Dev boundary."""
+    result = run_composition_child(
+        ["git", "--no-replace-objects", "-c", "core.fsmonitor=false",
+         "cat-file", "-e", f"{rev}:.changefiles/{name}"],
+        cwd=str(repo), capture_output=True, text=True, env=git_environment(),
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        **git_timeout_options(),
+    )
+    return result.returncode == 0
+
+
+def main_version_inputs(repo: Path, main_head: str, paths: list[str]) -> dict[str, str]:
+    selected = set(paths)
+    if not selected:
+        return {}
+    objects = {}
+    for row in _git(repo, ["ls-tree", "-rz", main_head]).split(b"\0"):
+        if not row:
+            continue
+        metadata, raw_path = row.split(b"\t", 1)
+        path = raw_path.decode("utf-8", errors="surrogateescape")
+        if path in selected:
+            _mode, kind, blob = metadata.decode("ascii").split()
+            if kind == "blob":
+                objects[path] = blob
+    blobs = read_blobs(repo, list(objects.values()))
+    return {path: blobs[blob].decode("utf-8") for path, blob in objects.items()}
+
+
+def candidate_tree_and_parent(repo: Path, *, candidate_sha: str) -> tuple[str, str]:
+    if not isinstance(candidate_sha, str) or not re.fullmatch(r"[0-9a-f]{40}", candidate_sha):
+        raise ValueError("invalid original build candidate")
+    headers = _git(repo, ["cat-file", "commit", candidate_sha]).split(b"\n\n", 1)[0].splitlines()
+    parents = [line.removeprefix(b"parent ") for line in headers if line.startswith(b"parent ")]
+    if (
+        not headers or not headers[0].startswith(b"tree ") or len(parents) != 1
+        or not re.fullmatch(rb"[0-9a-f]{40}", headers[0][5:])
+        or not re.fullmatch(rb"[0-9a-f]{40}", parents[0])
+    ):
+        raise ValueError("original build candidate is not a single-parent Git tree")
+    return headers[0][5:].decode("ascii"), parents[0].decode("ascii")
+
+
+def read_tree(repo: Path, *, candidate_sha: str, main_before: str, tree: str) -> dict:
+    """Batch raw blobs, not a worktree or git-archive's export-filtered representation."""
+    if any(not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{40}", value)
+           for value in (candidate_sha, main_before, tree)):
+        raise ValueError("invalid pinned complete-source Git identity")
+    headers = _git(repo, ["cat-file", "commit", candidate_sha]).split(b"\n\n", 1)[0].splitlines()
+    if (
+        not headers or headers[0] != b"tree " + tree.encode()
+        or [line for line in headers if line.startswith(b"parent ")] != [b"parent " + main_before.encode()]
+    ):
+        raise ValueError("complete-source candidate is not the admitted Main child/tree")
+    records = _git(repo, ["ls-tree", "-rz", tree]).split(b"\0")
+    entries = {}
+    for record in records:
+        if not record:
+            continue
+        metadata, path = record.split(b"\t", 1)
+        mode, kind, blob = metadata.decode("ascii").split()
+        name = path.decode("utf-8")
+        if (
+            kind != "blob" or mode not in ("100644", "100755", "120000")
+            or not re.fullmatch(r"[0-9a-f]{40}", blob) or name in entries
+        ):
+            raise ValueError("complete source contains an unsupported or duplicate Git entry")
+        entries[name] = (mode, blob)
+    if not 1 <= len(entries) <= MAX_SOURCE_FILES:
+        raise ValueError("complete-source Git inventory is empty or oversized")
+    blobs = read_blobs(repo, [blob for _mode, blob in entries.values()])
+    return {name: (mode, blobs[blob]) for name, (mode, blob) in entries.items()}
+
+
+def read_blobs(repo: Path, requested: list[str]) -> dict[str, bytes]:
+    """Read bounded raw blobs; commit/path admission remains with the caller."""
+    if not requested:
+        return {}
+    if any(not isinstance(blob, str) or not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", blob)
+           for blob in requested):
+        raise ValueError("invalid pinned Git blob identity")
+    identifiers = sorted(set(requested))
+    request = ("\n".join(identifiers) + "\n").encode()
+    metadata = _git(repo, ["cat-file", "--batch-check"], data=request).splitlines()
+    if len(metadata) != len(identifiers):
+        raise ValueError("incomplete complete-source blob metadata")
+    sizes = {}
+    for blob, line in zip(identifiers, metadata, strict=True):
+        fields = line.decode("ascii").split()
+        if len(fields) != 3 or fields[:2] != [blob, "blob"] or not fields[2].isdigit():
+            raise ValueError("invalid complete-source blob metadata")
+        sizes[blob] = int(fields[2])
+    if (
+        any(size > MAX_PACKET_FILE_BYTES for size in sizes.values())
+        or sum(sizes[blob] for blob in requested) > MAX_SOURCE_BYTES
+    ):
+        raise ValueError("complete-source Git blobs exceed the existing source bounds")
+    output = _git(repo, ["cat-file", "--batch"], data=request)
+    blobs, position = {}, 0
+    for blob in identifiers:
+        header = f"{blob} blob {sizes[blob]}\n".encode()
+        if output[position:position + len(header)] != header:
+            raise ValueError("complete-source batch returned another blob")
+        position += len(header)
+        end = position + sizes[blob]
+        if output[end:end + 1] != b"\n":
+            raise ValueError("truncated complete-source blob")
+        blobs[blob] = output[position:end]
+        position = end + 1
+    if position != len(output):
+        raise ValueError("unexpected complete-source batch bytes")
+    return blobs
+
+
+def source_identity(index_raw: bytes, receipt: dict, *, qualification_digest: str) -> dict:
+    index = decode_json(index_raw)
+    if (
+        not isinstance(index, dict) or index.get("schema_version") != 2
+        or not isinstance(receipt, dict) or receipt.get("profile") not in ("source-units-v2", "candidate-units-v3")
+        or index.get("dev_head") != receipt.get("dev_sha")
+        or hashlib.sha256(canonical_bytes(receipt)).hexdigest() != qualification_digest
+    ):
+        raise ValueError("complete-source inputs differ from the source index or qualification")
+    identity = {
+        key: receipt.get(key)
+        for key in ("dev_sha", "candidate_sha", "main_before", "control_sha", "tree")
+    }
+    identity.update(
+        content_tree=index.get("content_tree"),
+        source_index_sha256=hashlib.sha256(index_raw).hexdigest(),
+        qualification_digest=qualification_digest,
+    )
+    validate_identity(identity)
+    return identity
+
+
+def _regular(path: Path, *, limit: int) -> bytes:
+    info = path.lstat()
+    if (
+        not stat.S_ISREG(info.st_mode) or path.is_symlink()
+        or getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT
+        or info.st_size > limit
+    ):
+        raise ValueError("complete-source subject is indirect, nonregular or oversized")
+    raw = path.read_bytes()
+    if len(raw) != info.st_size:
+        raise ValueError("complete-source subject changed while reading")
+    return raw
+
+
+def read_source_assets(directory: Path, *, identity: dict) -> dict[str, bytes]:
+    validate_identity(identity)
+    return _read_source_assets(
+        directory, identity=identity, name_for=source_asset_name, verify=verify_source_archive,
+        archive_kind="complete-source", manifest_kind="source-manifest",
+    )
+
+
+def _read_source_assets(
+    directory: Path, *, identity: dict, name_for, verify, archive_kind: str, manifest_kind: str,
+) -> dict[str, bytes]:
+    info = directory.lstat()
+    if (
+        directory.is_symlink() or not stat.S_ISDIR(info.st_mode)
+        or getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT
+    ):
+        raise ValueError("complete-source subject directory is unavailable or indirect")
+    paths = list(directory.iterdir())
+    manifests = [path for path in paths if path.suffix == ".json"]
+    archives = [path for path in paths if path.suffix == ".zip"]
+    if len(paths) != 2 or len(manifests) != 1 or len(archives) != 1:
+        raise ValueError("complete-source subjects have an unexpected inventory")
+    manifest_raw = _regular(manifests[0], limit=MAX_PACKET_FILE_BYTES)
+    manifest = decode_json(manifest_raw)
+    archive_raw = _regular(archives[0], limit=MAX_SOURCE_BYTES)
+    if (
+        manifest_raw != canonical_bytes(manifest)
+        or manifests[0].name != name_for(manifest_kind, identity, hashlib.sha256(manifest_raw).hexdigest())
+        or archives[0].name != name_for(archive_kind, identity, hashlib.sha256(archive_raw).hexdigest())
+    ):
+        raise ValueError("complete-source subjects have a noncanonical identity")
+    verify(archive_raw, manifest, identity=identity)
+    return {manifests[0].name: manifest_raw, archives[0].name: archive_raw}
+
+
+def prepare_source(directory: Path, *, repo: Path, index_raw: bytes, receipt: dict) -> dict:
+    identity = source_identity(
+        index_raw, receipt, qualification_digest=hashlib.sha256(canonical_bytes(receipt)).hexdigest(),
+    )
+    raw, manifest = source_archive(
+        read_tree(repo, candidate_sha=identity["candidate_sha"], main_before=identity["main_before"],
+                  tree=identity["tree"]),
+        identity=identity,
+    )
+    subjects = {
+        source_asset_name("complete-source", identity, hashlib.sha256(raw).hexdigest()): raw,
+        source_asset_name("source-manifest", identity, hashlib.sha256(canonical_bytes(manifest)).hexdigest()):
+            canonical_bytes(manifest),
+    }
+    directory.mkdir(parents=True, exist_ok=False)
+    for name, content in subjects.items():
+        (directory / name).write_bytes(content)
+    return manifest
+
+
+def read_build_assets(directory: Path, *, identity: dict) -> dict[str, bytes]:
+    from promotion_build_source import asset_name, validate_identity, verify_build_archive
+
+    validate_identity(identity)
+    return _read_source_assets(
+        directory, identity=identity, name_for=asset_name, verify=verify_build_archive,
+        archive_kind="build-source", manifest_kind="build-manifest",
+    )
+
+
+def prepare_build_source(
+    directory: Path, *, repo: Path, index_raw: bytes, candidate_sha: str,
+) -> dict:
+    import promote_release as promotion
+    from promotion_build_source import asset_name, build_archive, build_identity
+
+    tree, main_before = candidate_tree_and_parent(repo, candidate_sha=candidate_sha)
+    identity = build_identity(index_raw, candidate_sha=candidate_sha, tree=tree, main_before=main_before)
+    if promotion._tree_excluding_state(tree, repo=repo) != identity["content_tree"]:
+        raise ValueError("original build tree differs from the signed source index")
+    raw, manifest = build_archive(
+        read_tree(repo, candidate_sha=candidate_sha, main_before=identity["main_before"], tree=tree),
+        identity=identity,
+    )
+    manifest_raw = canonical_bytes(manifest)
+    subjects = {
+        asset_name("build-source", identity, hashlib.sha256(raw).hexdigest()): raw,
+        asset_name("build-manifest", identity, hashlib.sha256(manifest_raw).hexdigest()): manifest_raw,
+    }
+    directory.mkdir(parents=True, exist_ok=False)
+    for name, content in subjects.items():
+        (directory / name).write_bytes(content)
+    return manifest
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--repo", type=Path, required=True)
+    parser.add_argument("--directory", type=Path, required=True)
+    parser.add_argument("--source-index", type=Path, required=True)
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--qualification-receipt", type=Path)
+    mode.add_argument("--build-candidate")
+    args = parser.parse_args()
+    if args.build_candidate is not None:
+        prepare_build_source(
+            args.directory, repo=args.repo, index_raw=_regular(args.source_index, limit=1 << 20),
+            candidate_sha=args.build_candidate,
+        )
+        return
+    prepare_source(
+        args.directory, repo=args.repo, index_raw=_regular(args.source_index, limit=1 << 20),
+        receipt=decode_json(_regular(args.qualification_receipt, limit=MAX_PACKET_FILE_BYTES)),
+    )
+
+
+if __name__ == "__main__":
+    main()

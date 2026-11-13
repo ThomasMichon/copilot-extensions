@@ -10,6 +10,8 @@ from types import SimpleNamespace
 import pytest
 
 import materialize_installer_engine as mie
+import materialize_main
+import nested_uv_editable_ref
 
 
 @pytest.fixture
@@ -18,8 +20,13 @@ def tmp_path():
         yield Path(directory)
 
 
+@pytest.fixture(params=[mie, materialize_main, nested_uv_editable_ref])
+def ancestor(request):
+    return request.param._find_symlinked_ancestor
+
+
 @pytest.mark.parametrize("exists", [False, True])
-def test_ordinary_descendant_resolves_only_the_root(tmp_path, monkeypatch, exists):
+def test_ordinary_descendant_needs_no_path_resolution(tmp_path, monkeypatch, exists, ancestor):
     root = tmp_path.resolve()
     candidate = root / "plugins" / "example" / "scripts" / "asset.py"
     candidate.parent.mkdir(parents=True)
@@ -33,12 +40,12 @@ def test_ordinary_descendant_resolves_only_the_root(tmp_path, monkeypatch, exist
         return original(path, *args, **kwargs)
 
     monkeypatch.setattr(Path, "resolve", resolve)
-    assert mie._find_symlinked_ancestor(candidate, root) is None
-    assert calls == [root]
+    assert ancestor(candidate, root) is None
+    assert calls == []
 
 
 @pytest.mark.parametrize("linked", ["leaf", "parent"])
-def test_ordinary_descendant_keeps_live_symlink_refusal(tmp_path, monkeypatch, linked):
+def test_ordinary_descendant_keeps_live_symlink_refusal(tmp_path, monkeypatch, linked, ancestor):
     root = tmp_path.resolve()
     candidate = root / "directory" / "asset.py"
     candidate.parent.mkdir()
@@ -52,10 +59,10 @@ def test_ordinary_descendant_keeps_live_symlink_refusal(tmp_path, monkeypatch, l
         return original(path, *args, **kwargs)
 
     monkeypatch.setattr(Path, "lstat", lstat)
-    assert mie._find_symlinked_ancestor(candidate, root) == forbidden
+    assert ancestor(candidate, root) == forbidden
 
 
-def test_reparse_metadata_retains_resolved_ancestor_walk(tmp_path, monkeypatch):
+def test_reparse_metadata_retains_resolved_ancestor_walk(tmp_path, monkeypatch, ancestor):
     root = tmp_path.resolve()
     candidate = root / "directory" / "asset.py"
     candidate.parent.mkdir()
@@ -76,11 +83,11 @@ def test_reparse_metadata_retains_resolved_ancestor_walk(tmp_path, monkeypatch):
 
     monkeypatch.setattr(Path, "lstat", lstat)
     monkeypatch.setattr(Path, "resolve", resolve)
-    assert mie._find_symlinked_ancestor(candidate, root) is None
+    assert ancestor(candidate, root) is None
     assert candidate in calls
 
 
-def test_relative_path_retains_resolved_ancestor_walk(tmp_path, monkeypatch):
+def test_relative_path_retains_resolved_ancestor_walk(tmp_path, monkeypatch, ancestor):
     root = tmp_path.resolve()
     monkeypatch.chdir(root)
     candidate = Path("directory") / "asset.py"
@@ -94,12 +101,12 @@ def test_relative_path_retains_resolved_ancestor_walk(tmp_path, monkeypatch):
         return original(path, *args, **kwargs)
 
     monkeypatch.setattr(Path, "resolve", resolve)
-    assert mie._find_symlinked_ancestor(candidate, root) is None
+    assert ancestor(candidate, root) is None
     assert candidate in calls
 
 
 @pytest.mark.parametrize("kind", ["outside", "dotdot"])
-def test_nonordinary_path_retains_resolved_ancestor_walk(tmp_path, monkeypatch, kind):
+def test_nonordinary_path_retains_resolved_ancestor_walk(tmp_path, monkeypatch, kind, ancestor):
     root = tmp_path.resolve() / "root"
     root.mkdir()
     if kind == "outside":
@@ -117,11 +124,11 @@ def test_nonordinary_path_retains_resolved_ancestor_walk(tmp_path, monkeypatch, 
         return original(path, *args, **kwargs)
 
     monkeypatch.setattr(Path, "resolve", resolve)
-    assert mie._find_symlinked_ancestor(candidate, root) is None
+    assert ancestor(candidate, root) is None
     assert candidate in calls
 
 
-def test_ancestor_metadata_is_fresh_on_every_call(tmp_path, monkeypatch):
+def test_ancestor_metadata_is_fresh_on_every_call(tmp_path, monkeypatch, ancestor):
     root = tmp_path.resolve()
     candidate = root / "directory" / "asset.py"
     candidate.parent.mkdir()
@@ -135,12 +142,12 @@ def test_ancestor_metadata_is_fresh_on_every_call(tmp_path, monkeypatch):
         return original(path, *args, **kwargs)
 
     monkeypatch.setattr(Path, "lstat", lstat)
-    assert mie._find_symlinked_ancestor(candidate, root) is None
+    assert ancestor(candidate, root) is None
     linked = True
-    assert mie._find_symlinked_ancestor(candidate, root) == candidate.parent
+    assert ancestor(candidate, root) == candidate.parent
 
 
-def test_metadata_permission_failure_is_not_accepted(tmp_path, monkeypatch):
+def test_metadata_permission_failure_is_not_accepted(tmp_path, monkeypatch, ancestor):
     root = tmp_path.resolve()
     candidate = root / "asset.py"
     original = Path.lstat
@@ -152,4 +159,4 @@ def test_metadata_permission_failure_is_not_accepted(tmp_path, monkeypatch):
 
     monkeypatch.setattr(Path, "lstat", lstat)
     with pytest.raises(PermissionError, match="metadata refused"):
-        mie._find_symlinked_ancestor(candidate, root)
+        ancestor(candidate, root)

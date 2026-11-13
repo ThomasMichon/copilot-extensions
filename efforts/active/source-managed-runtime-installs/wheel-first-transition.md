@@ -119,6 +119,26 @@ for missing outputs or permit reuse across incompatible interpreters/platforms.
 This introduces no parallel cache identity or source-fingerprint framework.
 Staging and activation still obey the following application boundary.
 
+The current local preparation tool can reuse explicitly selected matching
+first-party snapshots through the
+[existing install contract](../../../docs/install-contract.md#local-wheel-applications-for-manager-and-worktrees).
+The complete-application provider now also selects and validates prior completed
+snapshot/wheel/profile outputs under its existing applications root. Both
+configured Manager callers use that provider; a valid hit performs no backend,
+profile resolution or toolchain provisioning. Its source/actor controls are not
+actual native configured-update, retained-toolchain or performance qualification.
+
+The bounded source prerequisite is the canonical promotion owner's
+version-preserving composition: `tools/local_runtime_promotion.py` consumes
+exact source/Main-seed commits through that owner's existing seeding and
+materialization and returns a Git tree without publishing a release.
+The local install-source adapter now consumes that composed tree when a Main seed
+is selected, preserving original source, seed and composed-output associations
+through its prepared profile. The association checks are locally qualified, not
+the complete snapshot/wheel output cache, an installed update route or the proposed
+source/stage CLI. They remain part of the whole-flow implementation, not separate
+rollout proof.
+
 ## Installation and activation
 
 Every app exposes a stage-only preparation boundary and a normal-install
@@ -128,7 +148,7 @@ a proposal requiring provider-first contract support:
 | Proposed operation | Required boundary |
 |---|---|
 | `install --stage` | Assemble the candidate venv from promoted inputs and verify app-owned cutover readiness. Do not change active version redirects, global binstubs or consumer registrations, publish serving state, or admit live work. |
-| `install` | Publish the prepared selection, binstub and registration updates; launch the now-current versions and let displaced owners sunset after successor startup. Reuse staged inputs without a first-party rebuild or repeated source preparation. |
+| `install` | Start prepared V2 through its own installed code and confirm that exact generation, then publish its selection, binstubs and registrations. Displaced V1 sunsets without authority to roll back V2. Reuse staged inputs without a first-party rebuild or repeated source preparation. |
 
 For an atomic toolset, all members stage before its coordinated activation;
 per-app staging cannot publish an independent premature redirect.
@@ -170,6 +190,10 @@ first-install usability without requiring a separate manual command.
   caller need not wait for complete draining after admitted startup. Connection
   reset and partial handoff outcomes must follow explicit commit-forward or
   rollback semantics, not a success-shaped timeout.
+- Successful V2 startup commits roll-forward. Cancellation thereafter finishes
+  owned publication before returning; V1 responses never trigger selector
+  rollback. Unconfirmed startup or blocked publication remains explicit and
+  unresolved, with retained evidence and no false completion.
 - Keep global launchers stable across version changes. The first migration away
   from a running legacy CMD launcher must happen outside that launcher's mutable
   execution stream. Every owned consumer registration resolves through the

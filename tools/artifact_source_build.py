@@ -54,6 +54,26 @@ def read_build_system_requires(
     return requires
 
 
+def read_project_version(
+    project_dir: Path, *, error_type: type[Exception] = PromotionArtifactError,
+) -> str:
+    """Read the raw declared version, preserving its release-tag spelling."""
+    pyproject = project_dir / "pyproject.toml"
+    try:
+        data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
+        raise error_type(f"{pyproject}: could not read/parse: {exc}") from exc
+    project_table = data.get("project", {})
+    if not isinstance(project_table, dict):
+        raise error_type(f"{pyproject}: [project] is not a table")
+    version = project_table.get("version")
+    if not isinstance(version, str) or not version:
+        raise error_type(
+            f"{pyproject}: [project].version is missing or not a string"
+        )
+    return version
+
+
 def parse_wheel_identity(
     path: Path, *, error_type: type[Exception] = PromotionArtifactError,
     numeric_version: bool = False,

@@ -1,0 +1,994 @@
+"""Self-contained headless creation and caller-owned finite containment.
+README.md owns the launch, interpreter and lifetime contracts.
+Async helpers and native ABI types load lazily.
+"""
+
+from __future__ import annotations
+
+import logging
+import math
+import os
+import re
+import subprocess
+import sys
+import time
+import uuid
+from collections.abc import Mapping, Sequence
+from typing import TYPE_CHECKING, Any, BinaryIO
+
+if TYPE_CHECKING:
+    import asyncio as asyncio
+    import ctypes as ctypes
+
+    from ._async import spawn_in_kill_on_close_job
+    from ._windows_job_types import _JobBasicAccountingInformation as _JobBasicAccountingInformation
+    from .daemon_broker import WindowsDaemonProcess
+
+# Win32 process-creation flags. Read from ``subprocess`` when present (Windows)
+# and fall back to the stable ABI literals so this module imports cleanly off
+# Windows too. CREATE_BREAKAWAY_FROM_JOB has no ``subprocess`` alias.
+_CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+_DETACHED_PROCESS = getattr(subprocess, "DETACHED_PROCESS", 0x00000008)
+_CREATE_NEW_PROCESS_GROUP = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
+_CREATE_BREAKAWAY_FROM_JOB = 0x01000000
+_CREATE_SUSPENDED = 0x00000004
+_CONTAINED_TEST_ENV = "COPILOT_EXTENSIONS_TEST_CONTAINED"
+_JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000
+# Permit explicitly requested successor breakaway; ordinary descendants stay contained.
+_JOB_OBJECT_LIMIT_BREAKAWAY_OK = 0x0800
+_JobObjectExtendedLimitInformation = 9
+_PROCESS_SET_QUOTA = 0x0100
+_PROCESS_TERMINATE = 0x0001
+_PROCESS_SUSPEND_RESUME = 0x0800
+_ERROR_ACCESS_DENIED = 5
+_JOB_SCOPES_ENV = "COPILOT_EXTENSIONS_OWNED_JOB_SCOPES"
+_JOB_SCOPE_NAME = re.compile(r"Local\\ce-owned-job-[0-9a-f]{32}\Z")
+
+log = logging.getLogger("agent-procutil")
+
+__all__ = [
+    "DaemonSpawnError",
+    "JobHandle",
+    "SyncProcessLaunchError",
+    "contained_test_mode",
+    "detached_kwargs",
+    "direct_python",
+    "no_window_flags",
+    "no_window_kwargs",
+    "python_cache_args",
+    "spawn_daemon",
+    "spawn_in_kill_on_close_job",
+    "spawn_sync_in_kill_on_close_job",
+    "windowless_daemon_kwargs",
+    "windowless_python",
+    "windowless_python_env",
+]
+
+
+def python_cache_args(
+    root: str | os.PathLike[str], *, runtime: str | os.PathLike[str] | None = None,
+) -> list[str]:
+    """Select enabled external bytecode for the target installed generation.
+
+    ``runtime`` is the target interpreter or venv, not the current redirect.
+    Omit it only when launching this process's own installed environment.
+    """
+    if __name__ in sys.modules:
+        from .python_cache import cache_arguments
+    else:
+        import importlib.util
+        from pathlib import Path
+        spec = importlib.util.spec_from_file_location(
+            __name__ + ".python_cache", Path(__file__).with_name("python_cache.py"),
+        )
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        cache_arguments = module.cache_arguments
+
+    return cache_arguments(root, runtime=runtime)
+
+
+def contained_test_mode() -> bool:
+    """Whether the process is running beneath the repository test supervisor."""
+    return os.environ.get(_CONTAINED_TEST_ENV) == "1"
+
+
+def _is_windows() -> bool:
+    return os.name == "nt"
+
+
+def _new_job_name() -> str:
+    return "Local\\ce-owned-job-" + uuid.uuid4().hex
+
+
+def _job_scope_names(environment) -> tuple[str, ...]:
+    value = environment.get(_JOB_SCOPES_ENV)
+    if value is None:
+        return ()
+    if not isinstance(value, str) or len(value) > 4096:
+        raise ValueError("invalid owned Job scope metadata")
+    names = value.split(";")
+    if (
+        len(names) > 64 or len(set(names)) != len(names)
+        or any(_JOB_SCOPE_NAME.fullmatch(name) is None for name in names)
+    ):
+        raise ValueError("invalid owned Job scope metadata")
+    return tuple(names)
+
+
+def _job_child_environment(
+    environment=None, *, append: str | None = None, inherit_current: bool = True,
+) -> dict[str, str]:
+    if type(inherit_current) is not bool:
+        raise ValueError("owned Job scope inheritance must be a boolean")
+    child = dict(os.environ if environment is None else environment)
+    names = list(_job_scope_names(os.environ)) if inherit_current else []
+    for key in tuple(child):
+        if key.upper() == _JOB_SCOPES_ENV:
+            names.extend(_job_scope_names({_JOB_SCOPES_ENV: child.pop(key)}))
+    names = list(dict.fromkeys(names))
+    if append is not None:
+        names.append(append)
+    if names:
+        child[_JOB_SCOPES_ENV] = ";".join(names)
+        _job_scope_names(child)
+    return child
+
+
+def _publish_job_scope(name: str) -> None:
+    os.environ[_JOB_SCOPES_ENV] = _job_child_environment(append=name)[_JOB_SCOPES_ENV]
+
+
+class JobHandle:
+    """Own a Windows Job for its assigned child's bounded lifetime.
+    Closing a KILL_ON_JOB_CLOSE Job terminates remaining members.
+    Non-Windows callers never receive a Job owner.
+    """
+
+    def __init__(self, handle: Any, *, name: str | None = None) -> None:
+        self._handle = handle
+        self.name = name
+
+    @property
+    def handle(self) -> Any:
+        return self._handle
+
+    def close(self) -> None:
+        handle = self._handle
+        if not handle:
+            return
+        self._handle = None
+        try:
+            _kernel32().CloseHandle(handle)
+        except Exception:
+            log.debug("CloseHandle(job) failed", exc_info=True)
+
+    def terminate_and_wait(self, timeout_seconds: float) -> None:
+        """Terminate this owned Job, confirm zero active processes, then close.
+
+        Native failures and timeout retain the handle so the caller can retry.
+        An already-closed handle cannot attest that the Job is empty.
+        """
+        if (
+            isinstance(timeout_seconds, bool)
+            or not isinstance(timeout_seconds, (int, float))
+            or not math.isfinite(timeout_seconds) or timeout_seconds <= 0
+        ):
+            raise ValueError("timeout_seconds must be finite and positive")
+        handle = self._handle
+        if not handle:
+            raise RuntimeError("Job handle is closed; cannot confirm empty Job")
+        import ctypes
+        accounting_type = __getattr__("_JobBasicAccountingInformation")
+
+        kernel32 = _kernel32()
+        _configure_job_teardown_api(kernel32)
+        deadline = time.monotonic() + timeout_seconds
+        if not kernel32.TerminateJobObject(handle, 1):
+            raise ctypes.WinError(ctypes.get_last_error())
+        while True:
+            accounting = accounting_type()
+            returned = ctypes.c_uint32()
+            if not kernel32.QueryInformationJobObject(
+                handle, 1, ctypes.byref(accounting), ctypes.sizeof(accounting),
+                ctypes.byref(returned),
+            ):
+                raise ctypes.WinError(ctypes.get_last_error())
+            if returned.value != ctypes.sizeof(accounting):
+                raise RuntimeError("Job accounting returned an unexpected structure size")
+            if accounting.ActiveProcesses == 0:
+                if not kernel32.CloseHandle(handle):
+                    raise ctypes.WinError(ctypes.get_last_error())
+                self._handle = None
+                return
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("Job still has active processes after termination timeout")
+            time.sleep(min(0.05, remaining))
+
+    def try_terminate_and_confirm_empty(self) -> bool:
+        """Perform one owned-Job settlement step without waiting.
+
+        Busy/error retains the handle; only verified emptiness permits close.
+        """
+        handle = self._handle
+        if not handle:
+            raise RuntimeError("Job handle is closed; cannot confirm empty Job")
+        import ctypes
+        accounting_type = __getattr__("_JobBasicAccountingInformation")
+        kernel32 = _kernel32()
+        _configure_job_teardown_api(kernel32)
+        if not kernel32.TerminateJobObject(handle, 1):
+            raise ctypes.WinError(ctypes.get_last_error())
+        accounting = accounting_type()
+        returned = ctypes.c_uint32()
+        if not kernel32.QueryInformationJobObject(
+            handle, 1, ctypes.byref(accounting), ctypes.sizeof(accounting),
+            ctypes.byref(returned),
+        ):
+            raise ctypes.WinError(ctypes.get_last_error())
+        if returned.value != ctypes.sizeof(accounting):
+            raise RuntimeError("Job accounting returned an unexpected structure size")
+        if accounting.ActiveProcesses:
+            return False
+        if not kernel32.CloseHandle(handle):
+            raise ctypes.WinError(ctypes.get_last_error())
+        self._handle = None
+        return True
+
+    def __enter__(self) -> JobHandle:
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        self.close()
+
+    def __del__(self) -> None:
+        self.close()
+
+
+def _kernel32() -> Any:
+    import ctypes
+
+    return ctypes.WinDLL("kernel32", use_last_error=True)
+
+
+def _configure_job_teardown_api(kernel32: Any) -> None:
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32.TerminateJobObject.argtypes = [wintypes.HANDLE, wintypes.UINT]
+    kernel32.TerminateJobObject.restype = wintypes.BOOL
+    kernel32.QueryInformationJobObject.argtypes = [
+        wintypes.HANDLE, ctypes.c_int, wintypes.LPVOID, wintypes.DWORD,
+        ctypes.POINTER(ctypes.c_uint32),
+    ]
+    kernel32.QueryInformationJobObject.restype = wintypes.BOOL
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.CloseHandle.restype = wintypes.BOOL
+
+
+def _ntdll() -> Any:
+    import ctypes
+
+    return ctypes.WinDLL("ntdll", use_last_error=True)
+
+
+def _build_job_extended_limit_info() -> type[ctypes.Structure]:
+    import ctypes
+    from ctypes import wintypes
+
+    ulong_ptr = ctypes.c_size_t
+
+    class _BasicLimit(ctypes.Structure):
+        _fields_ = [
+            ("PerProcessUserTimeLimit", wintypes.LARGE_INTEGER),
+            ("PerJobUserTimeLimit", wintypes.LARGE_INTEGER),
+            ("LimitFlags", wintypes.DWORD),
+            ("MinimumWorkingSetSize", ctypes.c_size_t),
+            ("MaximumWorkingSetSize", ctypes.c_size_t),
+            ("ActiveProcessLimit", wintypes.DWORD),
+            ("Affinity", ulong_ptr),
+            ("PriorityClass", wintypes.DWORD),
+            ("SchedulingClass", wintypes.DWORD),
+        ]
+
+    class _IoCounters(ctypes.Structure):
+        _fields_ = [
+            ("ReadOperationCount", ctypes.c_ulonglong),
+            ("WriteOperationCount", ctypes.c_ulonglong),
+            ("OtherOperationCount", ctypes.c_ulonglong),
+            ("ReadTransferCount", ctypes.c_ulonglong),
+            ("WriteTransferCount", ctypes.c_ulonglong),
+            ("OtherTransferCount", ctypes.c_ulonglong),
+        ]
+
+    class _ExtendedLimit(ctypes.Structure):
+        _fields_ = [
+            ("BasicLimitInformation", _BasicLimit),
+            ("IoInfo", _IoCounters),
+            ("ProcessMemoryLimit", ctypes.c_size_t),
+            ("JobMemoryLimit", ctypes.c_size_t),
+            ("PeakProcessMemoryUsed", ctypes.c_size_t),
+            ("PeakJobMemoryUsed", ctypes.c_size_t),
+        ]
+
+    return _ExtendedLimit
+
+
+def _configure_job_api(kernel32: Any) -> None:
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32.CreateJobObjectW.restype = wintypes.HANDLE
+    kernel32.CreateJobObjectW.argtypes = [wintypes.LPVOID, wintypes.LPCWSTR]
+    kernel32.SetInformationJobObject.argtypes = [
+        wintypes.HANDLE,
+        ctypes.c_int,
+        wintypes.LPVOID,
+        wintypes.DWORD,
+    ]
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel32.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+
+
+def _configure_resume_api(kernel32: Any, ntdll: Any) -> None:
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    ntdll.NtResumeProcess.argtypes = [wintypes.HANDLE]
+    ntdll.NtResumeProcess.restype = ctypes.c_long
+
+
+def _log_job_failure(operation: str) -> None:
+    import ctypes
+
+    error = ctypes.get_last_error()
+    if error == _ERROR_ACCESS_DENIED:
+        log.debug("%s failed with access denied; child job binding skipped", operation)
+    else:
+        log.debug("%s failed with Windows error %d; child job binding skipped", operation, error)
+
+
+def _assign_suspended_to_kill_on_close_job(
+    pid: int, *, allow_breakaway: bool = True, name: str | None = None,
+) -> JobHandle | None:
+    """Bind a still-suspended child or this process to an owned kill-on-close Job.
+    Hold the returned handle until ordinary child cleanup finishes.
+    """
+    if not _is_windows():
+        return None
+    if pid <= 0:
+        log.debug("invalid pid %r; child job binding skipped", pid)
+        return None
+    import ctypes
+
+    job = None
+    process = None
+    try:
+        kernel32 = _kernel32()
+        _configure_job_api(kernel32)
+
+        name = name or _new_job_name()
+        job = kernel32.CreateJobObjectW(None, name)
+        if not job:
+            _log_job_failure("CreateJobObjectW")
+            return None
+        if ctypes.get_last_error() == 183:
+            raise OSError("owned Job identity already exists")
+
+        limit_info = _build_job_extended_limit_info()()
+        limit_info.BasicLimitInformation.LimitFlags = _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        if allow_breakaway:
+            limit_info.BasicLimitInformation.LimitFlags |= _JOB_OBJECT_LIMIT_BREAKAWAY_OK
+        if not kernel32.SetInformationJobObject(
+            job,
+            _JobObjectExtendedLimitInformation,
+            ctypes.byref(limit_info),
+            ctypes.sizeof(limit_info),
+        ):
+            _log_job_failure("SetInformationJobObject")
+            return None
+
+        process = kernel32.OpenProcess(
+            _PROCESS_SET_QUOTA | _PROCESS_TERMINATE,
+            False,
+            int(pid),
+        )
+        if not process:
+            _log_job_failure("OpenProcess")
+            return None
+
+        if not kernel32.AssignProcessToJobObject(job, process):
+            _log_job_failure("AssignProcessToJobObject")
+            return None
+
+        owned = JobHandle(job, name=name)
+        if pid == os.getpid():
+            _publish_job_scope(name)
+        job = None
+        return owned
+    except Exception:
+        log.debug("failed to bind pid %s to a kill-on-close job", pid, exc_info=True)
+        return None
+    finally:
+        try:
+            if process:
+                _kernel32().CloseHandle(process)
+        except Exception:
+            log.debug("CloseHandle(process) failed", exc_info=True)
+        try:
+            if job:
+                _kernel32().CloseHandle(job)
+        except Exception:
+            log.debug("CloseHandle(job) failed", exc_info=True)
+
+
+def _resume_suspended_process(pid: int) -> bool:
+    if not _is_windows():
+        return True
+    process = None
+    try:
+        kernel32 = _kernel32()
+        ntdll = _ntdll()
+        _configure_resume_api(kernel32, ntdll)
+        process = kernel32.OpenProcess(_PROCESS_SUSPEND_RESUME, False, int(pid))
+        if not process:
+            _log_job_failure("OpenProcess(PROCESS_SUSPEND_RESUME)")
+            return False
+        status = ntdll.NtResumeProcess(process)
+        if status != 0:
+            log.debug("NtResumeProcess failed with NTSTATUS %#x", status)
+            return False
+        return True
+    except Exception:
+        log.debug("failed to resume suspended pid %s", pid, exc_info=True)
+        return False
+    finally:
+        try:
+            if process:
+                _kernel32().CloseHandle(process)
+        except Exception:
+            log.debug("CloseHandle(process) failed", exc_info=True)
+
+
+def __getattr__(name: str) -> Any:
+    if name == "ctypes":
+        import ctypes
+        value = ctypes
+    elif name == "asyncio":
+        import asyncio
+        value = asyncio
+    elif name == "_JobBasicAccountingInformation":
+        if name in globals():
+            return globals()[name]
+        import threading
+        with globals().setdefault("_job_type_lock", threading.Lock()):
+            if name not in globals():
+                import ctypes
+                class _JobBasicAccountingInformation(ctypes.Structure):
+                    _fields_ = [
+                        ("TotalUserTime", ctypes.c_int64),
+                        ("TotalKernelTime", ctypes.c_int64),
+                        ("ThisPeriodTotalUserTime", ctypes.c_int64),
+                        ("ThisPeriodTotalKernelTime", ctypes.c_int64),
+                        ("TotalPageFaultCount", ctypes.c_uint32),
+                        ("TotalProcesses", ctypes.c_uint32),
+                        ("ActiveProcesses", ctypes.c_uint32),
+                        ("TotalTerminatedProcesses", ctypes.c_uint32),
+                    ]
+                globals()[name] = _JobBasicAccountingInformation
+            return globals()[name]
+    elif name == "spawn_in_kill_on_close_job":
+        from ._async import asyncio, spawn_in_kill_on_close_job
+        globals().setdefault("asyncio", asyncio)
+        value = spawn_in_kill_on_close_job
+    else:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    globals()[name] = value
+    return value
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | set(__all__) | {"asyncio", "ctypes", "_JobBasicAccountingInformation"})
+
+
+class SyncProcessLaunchError(OSError):
+    """Process creation failed before any child or Job handle was returned."""
+
+    def __init__(self, error: OSError):
+        super().__init__(*error.args)
+        for name in ("errno", "strerror", "filename", "filename2", "winerror"):
+            if hasattr(error, name):
+                setattr(self, name, getattr(error, name))
+
+
+class SyncProcessNotFoundError(SyncProcessLaunchError, FileNotFoundError):
+    """Keep native missing-file handling compatible with the typed boundary."""
+
+
+def spawn_sync_in_kill_on_close_job(
+    argv: list[str] | str,
+    *,
+    require_job: bool = False,
+    allow_breakaway: bool = True,
+    **kwargs: Any,
+) -> tuple[subprocess.Popen, JobHandle | None]:
+    """Create a suspended Windows child, bind its Job and scopes, then resume.
+    Retain the returned Job for whole-tree cleanup; root kill alone is not enough.
+    Required assignment fails before resume; disabling breakaway forbids escape.
+    Failed optional assignment resumes with unknown custody and unresolved scopes.
+    POSIX returns plain Popen; creation OS errors retain SyncProcessLaunchError.
+    README.md owns the full compatibility and lifetime contract.
+    """
+    if type(allow_breakaway) is not bool:
+        raise ValueError("allow_breakaway must be a boolean")
+    if (
+        not allow_breakaway
+        and int(kwargs.get("creationflags", 0)) & _CREATE_BREAKAWAY_FROM_JOB
+    ):
+        raise ValueError("CREATE_BREAKAWAY_FROM_JOB conflicts with allow_breakaway=False")
+    if not _is_windows():
+        try:
+            return subprocess.Popen(argv, **kwargs), None  # noqa: S603 - argv list, no shell
+        except OSError as error:
+            kind = (
+                SyncProcessNotFoundError
+                if isinstance(error, FileNotFoundError) else SyncProcessLaunchError
+            )
+            raise kind(error) from error
+
+    spawn_kwargs = dict(kwargs)
+    job_name = _new_job_name()
+    spawn_kwargs["env"] = _job_child_environment(
+        spawn_kwargs.get("env"), append=job_name,
+    )
+    spawn_kwargs["creationflags"] = (
+        int(spawn_kwargs.get("creationflags", 0)) | _CREATE_SUSPENDED
+    )
+    try:
+        process = subprocess.Popen(argv, **spawn_kwargs)  # noqa: S603 - argv list, no shell
+    except OSError as error:
+        kind = (
+            SyncProcessNotFoundError
+            if isinstance(error, FileNotFoundError) else SyncProcessLaunchError
+        )
+        raise kind(error) from error
+    job_handle: JobHandle | None = None
+    try:
+        pid = process.pid
+        if allow_breakaway:
+            job_handle = _assign_suspended_to_kill_on_close_job(pid, name=job_name)
+        else:
+            job_handle = _assign_suspended_to_kill_on_close_job(
+                pid, allow_breakaway=False, name=job_name,
+            )
+        if job_handle is None and (require_job or not allow_breakaway):
+            process.kill()
+            process.wait(timeout=5)
+            raise RuntimeError("Windows descendant Job assignment failed before child resume")
+        if not _resume_suspended_process(pid):
+            if require_job or not allow_breakaway:
+                process.kill()
+                process.wait(timeout=5)
+                raise RuntimeError(f"failed to resume suspended process {pid}")
+            log.debug("killing pid %s because suspended-start resume failed", pid)
+            try:
+                process.kill()
+            except (ProcessLookupError, OSError):
+                pass
+            if job_handle is not None:
+                job_handle.close()
+            raise RuntimeError(f"failed to resume suspended process {pid}")
+    except BaseException:
+        if job_handle is not None:
+            job_handle.close()
+        raise
+    return process, job_handle
+
+
+def _physical_executable(path: str) -> str | None:
+    # Minimal bundles and installer loaders use short-lived helpers without
+    # packaging interpreter-selection dependencies.
+    from ._interpreter import physical_executable
+
+    return physical_executable(path)
+
+
+def _local_pythonw(python: str) -> str | None:
+    return _physical_executable(os.path.join(os.path.dirname(python), "pythonw.exe"))
+
+
+def _venv_home_python(python: str, filename: str) -> str | None:
+    from ._interpreter import venv_home_python
+
+    return venv_home_python(python, filename, resolve_executable=_physical_executable)
+
+
+def _venv_home_pythonw(python: str) -> str | None:
+    """Prefer the venv's physical base GUI interpreter over its local trampoline."""
+    return _venv_home_python(python, "pythonw.exe")
+
+
+def no_window_flags() -> int:
+    """The ``CREATE_NO_WINDOW`` creation-flag **int** on Windows, else ``0``.
+
+    For call sites that pass ``creationflags=`` directly (rather than splatting
+    kwargs)::
+
+        subprocess.run(cmd, capture_output=True, creationflags=no_window_flags())
+
+    Off Windows this is ``0`` (a harmless no-op creationflags value).
+    """
+    return _CREATE_NO_WINDOW if _is_windows() else 0
+
+
+def no_window_kwargs() -> dict:
+    """``subprocess`` kwargs that suppress a console window on Windows.
+
+    Returns ``{"creationflags": CREATE_NO_WINDOW}`` on Windows and ``{}``
+    elsewhere, so it splats into a ``subprocess.run`` / ``Popen`` call while
+    still allowing captured stdout/stderr over pipes (unlike a full detach).
+    """
+    if _is_windows():
+        return {"creationflags": _CREATE_NO_WINDOW}
+    return {}
+
+
+def windowless_python(
+    executable: str | os.PathLike[str] | None = None, *, require_windowless: bool = False,
+) -> str:
+    """Return the interpreter for a fully detached Python daemon.
+
+    A Windows venv ``python.exe`` is a console-subsystem launcher. Even when it
+    starts under ``DETACHED_PROCESS``, it can re-exec a base ``python.exe`` as a
+    child, which allocates a fresh console that Windows Terminal may capture.
+    Prefer the base install's own ``pythonw.exe`` recorded in ``pyvenv.cfg``
+    when available; otherwise fall back to the local ``pythonw.exe`` sibling.
+    Off Windows, or when no windowless interpreter exists, return the requested
+    interpreter unchanged. On Windows, ``require_windowless=True`` instead
+    refuses that console fallback. GUI intent comes from selecting the
+    pythonw entry, not from the resolved target's filename.
+    """
+    python = os.fspath(executable) if executable is not None else sys.executable
+    if not _is_windows():
+        return python
+    base_pythonw = _venv_home_pythonw(python)
+    if base_pythonw:
+        return base_pythonw
+    physical = _local_pythonw(python)
+    if physical:
+        return physical
+    if require_windowless:
+        raise RuntimeError("A Windows windowless Python interpreter is unavailable.")
+    return python
+
+
+def windowless_python_env(
+    executable: str | os.PathLike[str] | None = None,
+) -> dict[str, str]:
+    """Extra child environment needed by :func:`windowless_python`.
+
+    When ``windowless_python()`` skips a relocatable venv's local trampoline and
+    targets the base install's real ``pythonw.exe``, CPython still needs the
+    original venv launcher path in ``__PYVENV_LAUNCHER__`` so it keeps the venv
+    ``sys.prefix`` / ``site-packages`` instead of falling back to the base
+    install. Other cases need no environment changes.
+    """
+    python = os.fspath(executable) if executable is not None else sys.executable
+    if not _is_windows():
+        return {}
+    if _venv_home_pythonw(python):
+        return {"__PYVENV_LAUNCHER__": python}
+    local_gui = _local_pythonw(python)
+    config = os.path.join(os.path.dirname(os.path.dirname(python)), "pyvenv.cfg")
+    candidate = os.path.abspath(os.path.join(os.path.dirname(python), "pythonw.exe"))
+    if (
+        local_gui and os.path.isfile(config)
+        and os.path.normcase(local_gui) != os.path.normcase(candidate)
+    ):
+        return {"__PYVENV_LAUNCHER__": python}
+    return {}
+
+
+def direct_python(executable: str) -> tuple[str, dict[str, str]]:
+    """Bypass Windows venv redirectors without losing the selected venv."""
+    if not _is_windows():
+        return executable, {}
+    python = windowless_python(executable)
+    extra_env = windowless_python_env(executable)
+    config = os.path.join(os.path.dirname(os.path.dirname(executable)), "pyvenv.cfg")
+    if os.path.isfile(config) and not extra_env:
+        raise RuntimeError(
+            "Cannot start daemon directly: the Windows venv's base "
+            "pythonw.exe is unavailable; repair the Python installation."
+        )
+    if (
+        extra_env or python != executable or os.path.basename(python).lower() == "pythonw.exe"
+        or _local_pythonw(executable)
+    ):
+        console = (
+            _venv_home_python(executable, "python.exe") if extra_env
+            else (
+                _physical_executable(os.path.join(os.path.dirname(executable), "python.exe"))
+                or _physical_executable(os.path.join(os.path.dirname(python), "python.exe"))
+            )
+        )
+        if not console:
+            raise RuntimeError(
+                "Cannot start daemon directly: the base python.exe "
+                "is unavailable; repair the Python installation."
+            )
+        python = console
+    return _physical_executable(python) or python, extra_env
+
+
+def detached_kwargs(*, breakaway: bool = False) -> dict:
+    """``Popen`` kwargs that fully **detach** a background child from its parent.
+
+    On Windows, ``DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP`` cuts the child
+    from the parent console and process group -- a detached process has no
+    console, so no window ever appears. Pass ``breakaway=True`` to also add
+    ``CREATE_BREAKAWAY_FROM_JOB`` so the child survives when the parent lives in
+    a Job object that would otherwise kill its whole tree (the case for a
+    daemon spawned from a session-start hook).
+
+    On POSIX, ``start_new_session=True`` puts the child in its own session so a
+    parent exit / signal never reaps it. When
+    ``COPILOT_EXTENSIONS_TEST_CONTAINED=1``, Windows Job breakaway and POSIX
+    session detachment are suppressed so the test runner retains descendant
+    ownership.
+    """
+    if _is_windows():
+        flags = _DETACHED_PROCESS | _CREATE_NEW_PROCESS_GROUP
+        if breakaway and not contained_test_mode():
+            flags |= _CREATE_BREAKAWAY_FROM_JOB
+        return {"creationflags": flags}
+    if contained_test_mode():
+        return {}
+    return {"start_new_session": True}
+
+
+def windowless_daemon_kwargs(*, breakaway: bool = False) -> dict:
+    """``Popen`` kwargs for a survivable daemon whose children stay windowless.
+
+    Windows uses ``CREATE_NO_WINDOW`` rather than ``DETACHED_PROCESS`` because
+    a console-subsystem child spawned by a detached process can allocate a new
+    visible console. POSIX uses the same new-session behavior as
+    :func:`detached_kwargs`. Contained tests suppress Job breakaway and POSIX
+    session detachment.
+    """
+    if _is_windows():
+        flags = _CREATE_NO_WINDOW
+        if breakaway and not contained_test_mode():
+            flags |= _CREATE_BREAKAWAY_FROM_JOB
+        return {"creationflags": flags}
+    if contained_test_mode():
+        return {}
+    return {"start_new_session": True}
+
+
+_PAYLOAD_DIR_MARKER = "installed-plugins"
+
+# The only creation flags a spawn_daemon caller may add: process priority
+# classes and CREATE_DEFAULT_ERROR_MODE. Console, process-group, Job, session,
+# debug and suspend flags belong to spawn_daemon's own windowless and lifetime
+# contract (CREATE_NEW_CONSOLE, for instance, makes Windows ignore
+# CREATE_NO_WINDOW, and CREATE_BREAKAWAY_FROM_JOB defeats ``breakaway=False``
+# and contained test mode), so an allowlist rather than a denylist.
+_DAEMON_EXTRA_CREATIONFLAGS = (
+    0x00000020  # NORMAL_PRIORITY_CLASS
+    | 0x00000040  # IDLE_PRIORITY_CLASS
+    | 0x00000080  # HIGH_PRIORITY_CLASS
+    | 0x00000100  # REALTIME_PRIORITY_CLASS
+    | 0x00004000  # BELOW_NORMAL_PRIORITY_CLASS
+    | 0x00008000  # ABOVE_NORMAL_PRIORITY_CLASS
+    | 0x04000000  # CREATE_DEFAULT_ERROR_MODE
+)
+
+
+class DaemonSpawnError(OSError):
+    """:func:`spawn_daemon` could not give the daemon its own lifetime."""
+
+    def __init__(
+        self, message: str = "", *, cleanup_confirmed: bool = True,
+        process_created: bool | None = None, admission_sent: bool = True,
+        process_identity: tuple[int, str] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.cleanup_confirmed = cleanup_confirmed
+        self.process_created = process_created
+        self.admission_sent = admission_sent
+        self.process_identity = process_identity
+
+
+def _validated_daemon_cwd(cwd: str | os.PathLike[str] | None) -> str:
+    """Reject a daemon cwd that is missing, relative, or inside a plugin payload.
+
+    A long-lived daemon pins its cwd for its whole life. An inherited cwd (a
+    worktree that is later finalized) or a payload directory (replaced on the
+    next plugin update) breaks every relative-path child it spawns once that
+    directory disappears, and on Windows it also blocks the directory's removal.
+    """
+    if cwd is None:
+        raise ValueError("spawn_daemon requires an explicit cwd (a runtime root or home)")
+    path = os.fspath(cwd)
+    if not path or not os.path.isabs(path):
+        raise ValueError(f"spawn_daemon cwd must be an absolute path, got {path!r}")
+    if not os.path.isdir(path):
+        raise ValueError(f"spawn_daemon cwd does not exist: {path}")
+    # Check the resolved target too: a symlink or junction such as
+    # ``<runtime>/current -> .../installed-plugins/...`` would otherwise pass.
+    for candidate in (path, os.path.realpath(path)):
+        if _is_inside_payload(candidate):
+            raise ValueError(
+                f"spawn_daemon cwd is inside a plugin payload ({path}"
+                + (f" -> {candidate}" if candidate != path else "")
+                + "); use the daemon's runtime root or home directory instead"
+            )
+    return path
+
+
+def _is_inside_payload(path: str) -> bool:
+    parts = {part.lower() for part in os.path.normpath(path).replace("\\", "/").split("/")}
+    return _PAYLOAD_DIR_MARKER in parts
+
+
+def _validated_daemon_log_path(
+    log_path: str | os.PathLike[str] | None, name: str = "log_path"
+) -> str:
+    """Reject a log path that is missing, relative, or inside a plugin payload.
+
+    The daemon holds its log open for its whole life, so a log inside a
+    payload directory pins that directory exactly like a payload cwd would.
+    """
+    if log_path is None:
+        raise ValueError(f"spawn_daemon requires a {name}")
+    path = os.fspath(log_path)
+    if not path or not os.path.isabs(path):
+        # Never resolved against ``cwd``: a caller-relative path would silently
+        # land somewhere else once the daemon's cwd differs from the caller's.
+        raise ValueError(f"spawn_daemon {name} must be an absolute path, got {path!r}")
+    for candidate in (path, os.path.realpath(path)):
+        if _is_inside_payload(candidate):
+            raise ValueError(
+                f"spawn_daemon {name} is inside a plugin payload ({path}"
+                + (f" -> {candidate}" if candidate != path else "")
+                + "); keep the daemon log under its runtime root or home directory"
+            )
+    return path
+
+
+def _validated_extra_creationflags(flags: object) -> int:
+    if isinstance(flags, bool) or not isinstance(flags, int):
+        raise TypeError(f"spawn_daemon extra_creationflags must be an int, got {flags!r}")
+    owned = flags & ~_DAEMON_EXTRA_CREATIONFLAGS
+    if owned:
+        raise ValueError(
+            f"spawn_daemon extra_creationflags {owned:#x} are not permitted: console, "
+            "process-group, Job and session flags belong to spawn_daemon itself; "
+            "only priority classes and CREATE_DEFAULT_ERROR_MODE may be added"
+        )
+    return flags
+
+
+def _daemon_popen_kwargs(
+    *, console_children: bool, breakaway: bool, extra_creationflags: int
+) -> dict:
+    kwargs = (
+        windowless_daemon_kwargs(breakaway=breakaway)
+        if console_children
+        else detached_kwargs(breakaway=breakaway)
+    )
+    if _is_windows() and extra_creationflags:
+        kwargs["creationflags"] = kwargs.get("creationflags", 0) | extra_creationflags
+    return kwargs
+
+
+def _breakaway_denied(exc: OSError, kwargs: dict) -> bool:
+    flags = kwargs.get("creationflags", 0)
+    return bool(flags & _CREATE_BREAKAWAY_FROM_JOB) and (
+        getattr(exc, "winerror", None) == _ERROR_ACCESS_DENIED
+    )
+
+
+_DAEMON_LOG_MODE = 0o600
+_DAEMON_LOG_DIR_MODE = 0o700
+
+
+def _open_daemon_log(log_file: str) -> BinaryIO:
+    """Open the daemon log for binary append, private to its owner on POSIX.
+
+    The log receives the daemon's raw stdout/stderr, which may include
+    credential-bearing errors. On POSIX a new log is created ``0600`` (and a
+    missing parent directory ``0700``); an existing log readable by group or
+    others is tightened to ``0600`` before any child can write to it, failing
+    closed if that is not permitted. Pre-existing parent directories are left
+    alone. Windows has no POSIX modes: the log keeps the ACL it inherits.
+    """
+    os.makedirs(os.path.dirname(log_file), mode=_DAEMON_LOG_DIR_MODE, exist_ok=True)
+
+    def opener(path: str, flags: int) -> int:
+        # O_BINARY keeps the Windows CRT from translating newlines on this fd.
+        return os.open(path, flags | getattr(os, "O_BINARY", 0), _DAEMON_LOG_MODE)
+
+    log_fh = open(log_file, "ab", opener=opener)
+    if os.name == "posix":
+        try:
+            fd = log_fh.fileno()
+            if os.fstat(fd).st_mode & 0o077:
+                os.fchmod(fd, _DAEMON_LOG_MODE)
+        except BaseException:
+            log_fh.close()
+            raise
+    return log_fh
+
+
+def _header_field(value: object) -> str:
+    """Escape control and line-break characters so a field stays on one line.
+
+    Lone surrogates (undecodable POSIX path bytes) pass through here and are
+    escaped by the ``backslashreplace`` encode in :func:`_daemon_log_header`.
+    """
+    text = str(value)
+    if text.isprintable():
+        return text
+    return "".join(
+        ch if ch.isprintable() or 0xD800 <= ord(ch) <= 0xDFFF
+        else ch.encode("unicode_escape").decode("ascii")
+        for ch in text
+    )
+
+
+def _daemon_log_header(stamp: str, cwd: str, executable: str, display: str | None) -> bytes:
+    """The durable launch header: never the argv tail or the environment.
+
+    Always exactly one line, and never fails to encode, whatever bytes a valid
+    path holds.
+    """
+    header = (
+        f"{stamp} spawn_daemon cwd={_header_field(cwd)} "
+        f"executable={_header_field(executable)}"
+    )
+    if display:
+        header += " display=" + _header_field(" ".join(str(display).split()))
+    return (header + "\n").encode("utf-8", errors="backslashreplace")
+
+
+def spawn_daemon(
+    argv: Sequence[str | os.PathLike[str]],
+    *,
+    cwd: str | os.PathLike[str],
+    log_path: str | os.PathLike[str],
+    env: Mapping[str, str] | None = None,
+    env_overrides: Mapping[str, str] | None = None,
+    console_children: bool = False,
+    breakaway: bool = True,
+    contained_fallback: bool = False,
+    extra_creationflags: int = 0,
+    display: str | None = None,
+    stderr_log_path: str | os.PathLike[str] | None = None,
+    instance=None,
+    python_bootstrap_root: str | os.PathLike[str] | None = None,
+    stdio_fds: tuple[int, int, int] | None = None,
+) -> subprocess.Popen | WindowsDaemonProcess:
+    """Launch a resident daemon; load its implementation only for daemon callers.
+
+    Short-lived standalone loaders and minimal bundles can use this file's
+    containment helpers without carrying the resident-daemon module closure.
+    The complete lifetime, logging and validation contract is in the README.
+    """
+    from .daemon import spawn_daemon as launch
+
+    return launch(
+        argv, cwd=cwd, log_path=log_path, env=env, env_overrides=env_overrides,
+        console_children=console_children, breakaway=breakaway,
+        contained_fallback=contained_fallback, extra_creationflags=extra_creationflags,
+        display=display, stderr_log_path=stderr_log_path, instance=instance,
+        python_bootstrap_root=python_bootstrap_root,
+        stdio_fds=stdio_fds,
+    )

@@ -133,8 +133,9 @@ def _response_deadline(response: http.client.HTTPResponse, deadline: float):
     remaining = deadline - time.monotonic()
     if remaining <= 0:
         raise SeasonedVersionError("public toolchain resolution deadline exceeded")
-    # Interrupt the owned transport: closing a buffered reader from another
-    # thread can wait on the very read that needs to be interrupted.
+    # Header/body parsing can receive indefinitely while every socket read
+    # clears its idle timeout, including inside chunk framing. Interrupt the
+    # owned transport, not the buffered reader's potentially locked close().
     transport = response.fp.raw._sock
     expired = threading.Event()
 

@@ -2215,20 +2215,23 @@ retired, and rollback never authorizes replay as a broader suite update.
 #### Prepared-source suite input
 
 The executing engine's inventory additionally advertises
-`runtime_sources: {schema: "copilot-extensions.prepared-runtime-sources", version: 1}`
-when it supports a complete prepared-source portfolio. This declaration belongs
+`runtime_sources: {schema: "copilot-extensions.prepared-runtime-sources", version: 2}`
+when it supports a complete prepared-application portfolio. This declaration belongs
 to that exact provider, not to the currently installed marketplace payload.
 Older inventory readers may ignore the additive field. A caller must establish
 this support before sending `update --no-manager --runtime-sources <JSON>`;
 missing, malformed or unsupported declarations require an explicit provider
 upgrade, never a marketplace fallback or an effectful trial/replay.
 
-The JSON packet has exactly `schema`, integer `version: 1` and a nonempty
-`sources` object keyed by plugin identifier. Each record contains an absolute
-prepared `payload` directory and `identity`, the canonical
-`{runtime_source: <complete source document>, runtime_version: <slot>}` selection
-from source preparation. All records must identify the same full source commit
-and tree. Duplicate fields, unknown request fields and relative/missing inputs
+The JSON packet has exactly `schema`, integer `version: 2`, `source` and a nonempty
+`sources` object keyed by plugin identifier. `source` records the acquired
+`commit`, `tree` and `main_seed`. Each runtime record contains an absolute
+complete `snapshot` directory and its installed-owner `profile` selection
+(or `null` for an unprofiled application). Snapshots must include the associated
+first-party artifacts, complete wheel profile, retained wheels and emitted
+application. All records must identify the acquired source and one exact
+composition, or its declared finalized Main form without Dev composition.
+Duplicate fields, unknown request fields and relative/missing inputs
 are refused. Keep prepared generations available through queued execution and
 retry; the packet is stored in the existing durable request argv, not read from
 a mutable pointer or inherited environment.
@@ -2249,15 +2252,24 @@ and installation root, but consume the matching prepared artifact. Every
 eligible runtime must have exactly one source record; missing, unexpected,
 inactive or now-gated selections block the whole runtime portfolio before any
 installer or local integration runs. Owner validation, exact source pinning,
-selected/completed-slot currentness, native lifecycle, retry and outcome handling
-are retained. Profile-qualified sources additionally use the
-[installed owner's target contract](../../agent-containers/docs/runtime-source-target.md):
-the actual target is separate from the original source pin and is revalidated
-before every attempt. Inventory advertises this support through additive
-`runtime_sources.target_contract: {schema: "copilot-extensions.runtime-source-target", version: 1}`.
-An old engine or missing/conflicting owner planner requires tooling upgrade,
-never profile substitution. Queued source records remain exactly `payload` and
-`identity`. Omitting the option retains ordinary marketplace runtime delivery.
+selected/completed-slot currentness and outcome handling are retained. The existing
+executor invokes the admitted source's canonical `install_application` entry;
+it does not run the old shell installer or replay a failed application as a
+legacy install. `--force` selects a distinct repair generation. Currentness requires
+the selected application's matching source/construction declaration, hash-qualified
+completion, slot-local interpreter, success receipt and last-known-good selector;
+a legacy deploy manifest cannot certify or veto it. Application callbacks retain
+their setup/start and serving-state ownership.
+
+Inventory's `runtime_sources.application_profiles` records each profile owner's
+read-only selection or explicit query error. Manager uses those exact extras
+when preparing the complete portfolio, and the engine re-reads the owner before
+planning and execution. Missing required profile support requires a tooling upgrade,
+never profile substitution. Raw packet V1 belongs to the explicitly retired
+pre-wheel boundary; it is refused rather than adapted. Use the
+[standalone force-fresh migration](../../../visions/installer/README.md#legacy-force-fresh-installation)
+when the installed provider cannot support V2. Omitting the option retains
+ordinary marketplace runtime delivery.
 This suite-only input cannot combine with target/authentication/inspection or
 recovery operations and never delegates to an older Manager. The
 [Manager caller](../../../worktree-manager/README.md#independent-runtime-source-acquisition)

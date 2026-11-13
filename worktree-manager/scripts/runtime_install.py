@@ -11,7 +11,6 @@ import shutil
 import stat
 import subprocess
 import sys
-import time
 import tempfile
 import uuid
 from contextlib import ExitStack, contextmanager
@@ -25,92 +24,16 @@ import installer_engine as engine  # noqa: E402
 from installer_engine_process import _settle  # noqa: E402
 import versioned_runtime as runtime  # noqa: E402
 import versioned_runtime_source as runtime_source  # noqa: E402
-
-
-def base_python() -> Path:
-    return Path(getattr(sys, "_base_executable", sys.executable)).resolve(strict=True)
-
-
-def source_install_selection(
-    payload: Path, version: str, selected: Path | None,
-) -> tuple[str, bool]:
-    """Resolve requested source identity without constructing or publishing."""
-    identity = runtime_source.read_source_identity(payload, version, plugin="worktree-manager")
-    if identity is None:
-        return version, True
-    if _source_profile_reuse(payload, identity, selected) is not None:
-        return identity.runtime_version, True
-    if selected is None or not (
-        selected.name == identity.runtime_version
-        or selected.name.startswith(identity.runtime_version + ".repair.")
-    ):
-        return identity.runtime_version, False
-    matches = runtime.is_complete(selected.parent.parent, selected.name)
-    if matches:
-        matches = runtime_source.read_source_identity(
-            selected / "payload", version, plugin="worktree-manager",
-        ) == identity
-    return identity.runtime_version, matches
-
-
-def _source_profile_reuse(payload: Path, identity, selected: Path | None):
-    """Qualify an existing closed-wheel generation, never construct from a receipt."""
-    if selected is None or re.fullmatch(
-        re.escape(identity.runtime_version) + r"\.profile\.[0-9a-f]{16}(?:\.repair\.[0-9a-f]{32})?",
-        selected.name,
-    ) is None:
-        return None
-    root = selected.parent.parent
-    if not runtime.is_complete(root, selected.name):
-        return None
-    if runtime_source.read_source_identity(
-        selected / "payload", identity.package_version, plugin="worktree-manager",
-    ) != identity:
-        return None
-    reader = runtime._runtime_component("versioned_runtime_construction")
-    try:
-        record = reader.read_completion(
-            selected / ".runtime-input-origins.json",
-            object_pairs_hook=runtime._unique_object_pairs_hook,
-        )
-        if not isinstance(record, dict) or record.get("schema") != "installer-engine.frozen-input-origins":
-            raise ValueError("source profile has no constructor origins")
-        if type(record.get("version")) is not int or record["version"] != 2:
-            raise ValueError("source profile has unsupported constructor origins")
-        reuse = engine.WheelReuseInputs(
-            selected.name,
-            json.dumps(record["wheel_inputs"], sort_keys=True, separators=(",", ":"), allow_nan=False),
-            time.monotonic() + 30,
-        )
-        receipt = reuse.receipt()
-        profile = receipt["binding"]
-        if (
-            profile.get("component") != "worktree-manager" or profile.get("mode") != "source"
-            or profile.get("release") != {
-                "identity": "source:" + identity.source_commit,
-                "sha256": "sha256:" + identity.assembly_hash,
-            }
-            or re.fullmatch(
-                re.escape(identity.runtime_version + ".profile." + receipt["lock_id"][7:23])
-                + r"(?:\.repair\.[0-9a-f]{32})?", selected.name,
-            ) is None
-        ):
-            raise ValueError("source profile differs from its selected source/generation")
-        packages = engine._package_roots(payload)
-        expected_local = tuple(sorted(
-            engine._package_name(package) for package in packages
-            if engine._package_name(package) in receipt["distributions"]
-        ))
-        if record.get("local_packages") != list(expected_local):
-            raise ValueError("source profile differs from its local package selection")
-        construction = engine._wheel_construction_hash(
-            engine._construction_hash(engine._source_files(packages), (), expected_local), reuse,
-        )
-        if not runtime.is_complete(root, selected.name, expect_hash=construction):
-            raise ValueError("source profile differs from its completed construction")
-        return reuse, expected_local
-    except (OSError, ValueError, TypeError, KeyError) as error:
-        raise RuntimeError("Manager source-profile evidence is invalid") from error
+from runtime_install_selection import (  # noqa: E402
+    _source_profile_reuse,
+    base_python as base_python,
+    prepared_manager_inputs as prepared_manager_inputs,
+    selection_workspace as _selection_workspace,
+    selector_text as _selector_text,
+    source_digest as _source_digest,
+    selected_version as _selected_version,
+    source_install_selection as source_install_selection,
+)
 
 
 @contextmanager
@@ -156,7 +79,7 @@ def candidate(
             wheel_inputs = native_wheel_inputs
             local_packages = tuple(selected["local_packages"])
         if wheel_inputs is None and identity is not None:
-            current = runtime.current_version(root)
+            current = _selected_version(root)
             reused = _source_profile_reuse(
                 payload, identity, runtime.version_dir(root, current) if current else None,
             )
@@ -204,7 +127,7 @@ def candidate(
             arguments["validate_candidate"] = validate_candidate
         if application is not None:
             arguments["application"] = application
-        current = runtime.current_version(root)
+        current = _selected_version(root)
         if (
             not reuse_only and (identity is not None or native_wheel_inputs is not None) and current
             and re.fullmatch(re.escape(generation) + r"(?:[.+]repair\.[0-9a-f]{32})?", current)
@@ -237,9 +160,56 @@ def candidate(
             yield ready
 
 
+def stage_application(root: Path, slot: Path, version: str, unchanged):
+    """Prove readiness while the caller retains qualified application inputs."""
+    from worktree_manager.runtime_stage import probe
+    from worktree_manager.self_install import SelfInstallResult
+
+    probe(root)
+    unchanged()
+    return SelfInstallResult(
+        version=version, action="staged", root=str(root), slot=str(slot), marker=slot.name,
+    )
+
+
+def verify_stage_readiness(
+    root: Path, ready: engine.ReadyCandidate, *, wheel_inputs=None, timeout: float = 60,
+) -> None:
+    """Probe the installed app under the candidate's existing retained custody."""
+    root = root.resolve()
+    if ready.slot.parent != root / "versions":
+        raise RuntimeError("Manager staging candidate belongs to another installation")
+    python = runtime.slot_python(root, ready.slot.name)
+    if python is None:
+        raise RuntimeError("Manager staging candidate has no interpreter")
+    inputs = engine.FrozenInputs(
+        ready.frozen_plugin, engine._package_roots(ready.frozen_plugin), ready.payload_hash,
+        wheel_inputs=wheel_inputs,
+    )
+    result = engine._child(
+        [
+            str(python), "-I", "-S", "-B", "-X", "utf8",
+            str(ready.slot / ".runtime-bootstrap" / "runtime_launcher.py"),
+            "-m", "worktree_manager.runtime_stage", "--root", str(root),
+        ],
+        inputs=inputs, descriptor=ready.descriptor, timeout=timeout,
+        cwd=root, candidate=ready.slot, environment=_installation_child_options().get("env"),
+    )
+    record = json.loads(result.stdout)
+    if (
+        not isinstance(record, dict) or type(record.get("version")) is not int
+        or record.get("ready") is not True or record != {
+            "schema": "copilot-extensions.manager-stage-readiness", "version": 1,
+            "generation": ready.slot.name, "ready": True,
+        }
+    ):
+        raise RuntimeError("Manager staging candidate returned no exact readiness result")
+
+
 def activate(root: Path, version: str, *, expected: str | None, after_publish=None,
-             before_publish=None) -> None:
-    """Publish or recover both selectors without releasing runtime custody."""
+             before_publish=None, forward_only=None) -> None:
+    """Publish under custody; acknowledged incoming startup is forward-only."""
+    runtime._validate_dev_previous_version(version)
     root = root.resolve()
     publication = runtime._runtime_component("versioned_runtime_publication")
     targets = [root / "current-version", root / "last-known-good"]
@@ -249,17 +219,20 @@ def activate(root: Path, version: str, *, expected: str | None, after_publish=No
             path: publication.CopyPublication._bytes(path, before)
             for path, before in baseline.items() if before is not None
         }
-        selected = contents.get(targets[0], b"").decode("utf-8").strip() or None
+        selected = _selector_text(contents.get(targets[0], b""))
         if selected not in (expected, version):
             raise RuntimeError("Manager selection changed during construction")
     # Cleanup takes retention before publication. Acquire in that same order,
     # then compare both snapshots under publication to close the unlocked gap.
     with ExitStack() as custody:
-        previous = {data.decode("utf-8").strip() for data in contents.values()}
-        generations = {version, *(previous - {""})}
+        generations = {version}
+        for generation in filter(None, {_selector_text(data) for data in contents.values()}):
+            try:
+                runtime._validate_dev_previous_version(generation)
+            except ValueError:
+                continue
+            generations.add(generation)
         for generation in sorted(generations):
-            # Canonical ordinary-slot validation also governs rollback references.
-            runtime._validate_dev_previous_version(generation)
             if runtime.version_dir(root, generation).is_dir():
                 custody.enter_context(runtime.retention_lease(root, generation))
         with runtime._publication_lease(root):
@@ -267,8 +240,8 @@ def activate(root: Path, version: str, *, expected: str | None, after_publish=No
                 raise RuntimeError("Manager selectors changed before publication")
             inputs = root / ".installer-inputs"
             inputs.mkdir(exist_ok=True)
-            with tempfile.TemporaryDirectory(prefix="manager-selection-", dir=inputs) as temporary:
-                workspace = Path(temporary)
+            cancelled = None
+            with _selection_workspace(inputs) as workspace:
                 bindings = []
                 for index, path in enumerate(targets):
                     before = baseline[path]
@@ -283,7 +256,6 @@ def activate(root: Path, version: str, *, expected: str | None, after_publish=No
                                      before.digest if before else ""])
                 context = workspace / "context.json"
                 publication.create_context(context, root, bindings)
-                forward = workspace / "forward.jsonl"
                 receipts = []
                 digest = hashlib.sha256((version + "\n").encode()).hexdigest()
                 declared = [[str(path), digest] for path in targets]
@@ -310,22 +282,41 @@ def activate(root: Path, version: str, *, expected: str | None, after_publish=No
                         if output.exists():
                             receipts.append(output)
 
-                try:
-                    if before_publish is not None:
-                        before_publish()
-                    runtime._activate(root, version, link_free=True, ownership_receipt=forward)
-                    if after_publish is not None:
-                        after_publish()
-                except BaseException:
-                    if forward.exists():
-                        receipts.append(forward)
-                    _settle(recover)
-                    raise
+                while True:
+                    forward = workspace / f"forward.{len(receipts)}.jsonl"
+                    try:
+                        if before_publish is not None:
+                            before_publish()
+                        runtime._activate(root, version, link_free=True, ownership_receipt=forward)
+                        if after_publish is not None:
+                            after_publish()
+                        break
+                    except BaseException as error:
+                        if forward.exists():
+                            receipts.append(forward)
+                        committed = forward_only is not None and forward_only()
+                        if committed and isinstance(error, (KeyboardInterrupt, SystemExit)):
+                            cancelled = cancelled or error
+                            continue
+                        if not committed:
+                            _settle(recover)
+                        raise
+            if cancelled is not None:
+                raise cancelled
+
+
+class ActivationStarted(BaseException):
+    """V2 acknowledged startup; finish publication before propagating the error."""
+
+    def __init__(self, interruption: BaseException, outcome: dict) -> None:
+        self.interruption, self.outcome = interruption, outcome
 
 
 def _activate_after_bootstrap_update(
     root: Path, slot: Path, *, start_if_missing: bool = False,
-) -> None:
+) -> dict:
+    from worktree_manager.bootstrap_activation import started_outcome
+
     python = runtime.slot_python(root, slot.name)
     if python is None:
         raise RuntimeError("Constructed Manager has no activation interpreter")
@@ -343,17 +334,33 @@ def _activate_after_bootstrap_update(
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         **_installation_child_options(),
     )
+    interrupted = None
     try:
         stdout, stderr = process.communicate()
-    except BaseException:
-        _settle(process.communicate)
-        raise
+    except BaseException as error:
+        interrupted, output = error, []
+        try:
+            _settle(lambda: output.append(process.communicate()))
+        except BaseException:
+            if not output:
+                raise
+        stdout, stderr = output[-1]
     if stdout:
         print(stdout, end="", flush=True)
     if stderr:
         print(stderr, end="", file=sys.stderr, flush=True)
-    if process.returncode:
-        raise RuntimeError(f"Constructed Manager daemon activation failed ({process.returncode})")
+    outcome = started_outcome(stdout, slot.name)
+    if outcome is not None:
+        if interrupted is not None or process.returncode:
+            raise ActivationStarted(
+                interrupted or RuntimeError(f"Manager activation helper exited after V2 startup ({process.returncode})"),
+                outcome,
+            )
+        return outcome
+    if interrupted is not None:
+        print("Manager V2 startup is unconfirmed; selection was not published", file=sys.stderr, flush=True)
+        raise interrupted
+    raise RuntimeError(f"Constructed Manager did not acknowledge V2 startup ({process.returncode})")
 
 
 def _windows_console_stream(stream: TextIO | None) -> bool:
@@ -477,10 +484,6 @@ def adopt_broker(root: Path, slot: Path) -> None:
         custody.assert_owned()
 
 
-def _source_digest(payload: Path) -> str:
-    return runtime.fingerprint_source(engine._source_files(engine._package_roots(payload)))
-
-
 def _validate_update_request(args) -> None:
     expected = getattr(args, "admitted_source", None)
     if expected is not None:
@@ -563,6 +566,9 @@ def _foreground_install(args, driver) -> Path | int:
     if args.repair_update:
         arguments.append("--repair-update")
         identity.append("repair-update")
+    if getattr(args, "stage_only", False):
+        arguments.append("--stage")
+        identity.append("stage")
     if args.recover_adopted is not None:
         evidence = str(args.recover_adopted.resolve())
         arguments.extend(["--recover-adopted", evidence])
@@ -599,7 +605,10 @@ def _foreground_install(args, driver) -> Path | int:
         raise RuntimeError("Manager bootstrap returned no bounded installation receipt")
     receipt = json.loads(lines[-1])
     if not isinstance(receipt, dict) or type(receipt.get("version")) is not int or receipt != {
-        "schema": "copilot-extensions.manager-bootstrap", "version": 1,
+        "schema": (
+            "copilot-extensions.manager-stage" if getattr(args, "stage_only", False)
+            else "copilot-extensions.manager-bootstrap"
+        ), "version": 1,
         "root": str(args.root.resolve()), "source": digest, "slot": receipt.get("slot"),
     }:
         raise RuntimeError("Manager bootstrap installation receipt does not match admission")
@@ -616,47 +625,9 @@ def _foreground_install(args, driver) -> Path | int:
 
 
 def _uninstall(args) -> int:
-    from runtime_uninstall import report_absent_target, uninstall, validate_frontdoor
+    from runtime_uninstall import submit_uninstall
 
-    if validate_frontdoor(args.root, as_json=args.json):
-        return 1
-    if os.name != "nt" or not args.apply:
-        return uninstall(args.root, apply=args.apply, as_json=args.json)
-    absent = report_absent_target(args.root, as_json=args.json)
-    if absent is not None:
-        return absent
-    sys.path.insert(0, str(args.payload / "src"))
-    driver = _execution_driver(args.payload)
-    with _installation_custody() as custody:
-        if custody is not None:
-            custody.assert_owned()
-            return uninstall(args.root, apply=True, as_json=args.json)
-        from worktree_manager.update_driver_cli import _CONTEXT_KEYS, request_context
-
-        arguments = [
-            sys.executable, "-I", "-S", "-B", "-X", "utf8", str(SCRIPTS / "runtime_install.py"),
-            "--root", str(args.root.resolve()), "--uninstall", "--apply",
-        ]
-        if args.json:
-            arguments.append("--json")
-        request = driver.enqueue(
-            driver.RequestSpec(
-                "manager-uninstall", ("--apply", *(("--json",) if args.json else ())),
-                project=str(args.root.resolve()), cwd=str(args.payload.resolve()),
-                source=_source_digest(args.payload),
-                context=tuple({
-                    **request_context(), "WORKTREE_MANAGER_ROOT": str(args.root.resolve()),
-                }.items()),
-            ),
-            runner=driver.TrustedRunner(
-                tuple(arguments), str(args.payload.resolve()), context_keys=_CONTEXT_KEYS,
-            ),
-        )
-        driver.drain()
-        result = driver.wait(request.id, output=sys.stdout)
-        if result.state != "completed" or result.exit_code is None:
-            raise RuntimeError(f"Manager removal did not complete: {result.state}")
-        return result.exit_code
+    return submit_uninstall(args, _execution_driver, _installation_custody, _source_digest)
 
 
 def _install(args) -> Path | int:
@@ -670,19 +641,9 @@ def _install(args) -> Path | int:
             return _install_payload(args, native_wheel_inputs=wheels)
     if getattr(args, "install_source", None) is None:
         return _install_payload(args)
-    from install_source import _member, manager_inputs
-
-    with manager_inputs(args.install_source) as (selected, wheels):
+    with prepared_manager_inputs(args.install_source) as (selected, options):
         if selected.payload.resolve() != args.payload.resolve():
             raise ValueError("Manager installation source selection changed")
-        installed = {row[0] for row in wheels.distributions}
-        local = tuple(
-            engine._package_name(path) for path in engine._package_roots(args.payload)
-            if engine._package_name(path) in installed
-        )
-        options = {"wheel_inputs": wheels, "local_packages": local}
-        if "application" in selected.project:
-            options["application"] = _member(args.install_source, selected.project["application"])
         return _install_payload(args, **options)
 
 
@@ -705,22 +666,38 @@ def _install_payload(
             validate_manager_ownership(args.root, args.payload, expected=prior_commands)
         _validate_update_request(args)
 
-    # Only bootstrap installer modules are read from source. Application execution
-    # happens below under the constructed interpreter and retention bootstrap.
+    with ExitStack() as source_custody:
+        install_payload = args.payload
+        options = {
+            "wheel_inputs": wheel_inputs, "local_packages": local_packages,
+            "application": application, "native_wheel_inputs": native_wheel_inputs,
+        }
+        if (
+            args.recover_adopted is None and getattr(args, "install_source", None) is None
+            and native_wheel_inputs is None
+        ):
+            from source_acquisition import manager_payload
+
+            try:
+                install_payload, prepared_options = source_custody.enter_context(
+                    manager_payload(args.payload, args.root),
+                )
+            except (OSError, ValueError, RuntimeError, ImportError) as error:
+                print(f"Manager source acquisition refused: {error}", file=sys.stderr)
+                return 1
+            options.update(prepared_options)
+        return _install_selected_payload(
+            args, install_payload, before_publish=before_publish, reconcile=reconcile, **options,
+        )
+
+
+def _install_selected_payload(
+    args, install_payload: Path, *, before_publish, reconcile: bool,
+    wheel_inputs, local_packages, application, native_wheel_inputs,
+) -> Path | int:
+    # Application execution stays under the constructed interpreter and retention bootstrap.
     from worktree_manager.self_install import self_install
 
-    install_payload = args.payload
-    if (
-        args.recover_adopted is None and getattr(args, "install_source", None) is None
-        and native_wheel_inputs is None
-    ):
-        from source_acquisition import manager_payload
-
-        try:
-            install_payload = manager_payload(args.payload, args.root)
-        except (OSError, ValueError, RuntimeError, ImportError) as error:
-            print(f"Manager source acquisition refused: {error}", file=sys.stderr)
-            return 1
     if args.recover_adopted is not None:
         evidence = json.loads(args.recover_adopted.read_text(encoding="utf-8"))
         if evidence.get("root") != str(args.root.resolve()):
@@ -773,23 +750,21 @@ def _install_payload(
                 _native_wheel_inputs=native_wheel_inputs,
                 _base_python=args.wheel_python, _uv=args.wheel_uv,
             )
-        if args.repair_update or wheel_inputs is not None or native_wheel_inputs is not None:
-            result = self_install(
-                install_payload, root=args.root, dry_run=False,
-                _before_publish=before_publish,
-                _after_activate=lambda slot: _activate_after_bootstrap_update(args.root, slot),
-                _transactional_activation=True,
-                _reconcile_instances=reconcile,
-                **source_options,
+        staged = getattr(args, "stage_only", False)
+        result = self_install(
+            install_payload, root=args.root, dry_run=False,
+            _before_publish=before_publish,
+            _after_activate=None if staged else lambda slot: _activate_after_bootstrap_update(args.root, slot),
+            _transactional_activation=not staged,
+            _reconcile_instances=reconcile,
+            **source_options,
+            **({"stage_only": True} if staged else {}),
+        )
+        if result.action == "error" or (staged and result.action != "staged"):
+            print(
+                result.reason if result.action == "error" else "Manager staging returned a non-staged result",
+                file=sys.stderr,
             )
-        else:
-            result = self_install(
-                install_payload, root=args.root, dry_run=False, _reconcile_instances=reconcile,
-                _before_publish=before_publish,
-                **source_options,
-            )
-        if result.action == "error":
-            print(result.reason, file=sys.stderr)
             return 1
         slot = Path(result.slot)
     return slot
@@ -798,9 +773,12 @@ def _install_payload(
 def _finish(args, slot: Path | int, command: list[str]) -> int:
     if isinstance(slot, int):
         return slot
-    if args.install_only:
+    if args.install_only or getattr(args, "stage_only", False):
         print(json.dumps({
-            "schema": "copilot-extensions.manager-bootstrap", "version": 1,
+            "schema": (
+                "copilot-extensions.manager-stage" if getattr(args, "stage_only", False)
+                else "copilot-extensions.manager-bootstrap"
+            ), "version": 1,
             "root": str(args.root.resolve()), "source": args.source_digest, "slot": str(slot),
         }), flush=True)
         return 0
@@ -838,6 +816,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--root", type=Path)
     parser.add_argument("--payload", type=Path, default=SCRIPTS.parent)
     parser.add_argument("--bootstrap-attempt", help=argparse.SUPPRESS)
+    parser.add_argument("--describe-install", action="store_true")
+    parser.add_argument("--stage", dest="stage_only", action="store_true")
     parser.add_argument("--recover-adopted", type=Path)
     parser.add_argument("--describe-recovery", action="store_true")
     parser.add_argument("--repair-update", action="store_true")
@@ -865,7 +845,7 @@ def main(argv: list[str] | None = None) -> int:
             args.recover_adopted, args.describe_recovery, args.repair_update,
             args.recover_for_repair, args.json, args.install_only, args.update_participant,
             args.source_digest,
-            args.skip_instance_reconcile,
+            args.skip_instance_reconcile, args.describe_install, args.stage_only,
         )):
             parser.error("Source-input discovery cannot be combined with an operation")
         print(json.dumps({
@@ -873,6 +853,26 @@ def main(argv: list[str] | None = None) -> int:
             "capabilities": ["install-source"],
         }))
         return 0
+    if args.describe_install:
+        if (
+            args.root is not None or args.payload.resolve() != SCRIPTS.parent
+            or args.stage_only or args.recover_adopted or args.describe_recovery
+            or args.repair_update or args.recover_for_repair or args.uninstall or args.apply
+            or args.json or args.install_only or args.source_digest
+            or args.skip_instance_reconcile or args.command or args.install_source
+            or args.describe_source_inputs
+        ):
+            parser.error("--describe-install accepts no installation or application arguments")
+        print(json.dumps({
+            "schema": "copilot-extensions.manager-install-entry", "version": 1,
+            "provider": "worktree-manager", "capabilities": {"stage": 1, "activate": 1},
+        }))
+        return 0
+    if args.stage_only and (
+        args.recover_adopted or args.describe_recovery or args.repair_update
+        or args.recover_for_repair or args.uninstall or args.apply or args.json or args.command
+    ):
+        parser.error("--stage cannot be combined with recovery, removal or application commands")
     if args.install_source is not None:
         if args.uninstall or args.recover_for_repair or args.recover_adopted or args.describe_recovery:
             parser.error("--install-source cannot change recovery or uninstall source")
