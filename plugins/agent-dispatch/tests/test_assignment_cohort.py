@@ -17,7 +17,7 @@ from tests.test_assignment_relationships import assignment as assignment, claim
 from tests.test_pool_placement import place, pool, publish
 
 
-def managed_task(queue, request_id):
+def managed_task(queue, request_id, **kwargs):
     grant = queue.handoff_producer_scope(
         TEST_REPO, "emitter", producer_id="source-reader", expected_generation=0,
     )
@@ -26,6 +26,7 @@ def managed_task(queue, request_id):
         producer_scope={"repo": TEST_REPO, "source": "emitter"},
         producer_id="source-reader", producer_generation=grant.state.current_generation,
         producer_capability=grant.producer_capability, producer_request_id=request_id,
+        **kwargs,
     )
     return task, grant
 
@@ -143,3 +144,100 @@ def test_old_relationship_is_not_backfilled_from_current_source_or_pool(assignme
     restarted = TaskQueue(queue.db_path)
     assert restarted.task_relationship(task.id) == original
     assert "cohort" not in read_snapshot(restarted, task.id)["relationship"]
+
+
+def test_allocation_cohort_commits_with_real_pool_claim_before_any_body(assignment):
+    queue, _, workspace, _ = assignment
+    task, _ = managed_task(queue, "allocation-request")
+    publish(queue, pool("original-pool", machine=workspace.machine))
+    reservation, _ = place(queue, task)
+    original = reservation.allocation_cohort
+    assert reservation.worktree is None and reservation.session_handle is None
+    assert original["emitter"]["task_id"] == task.id
+    assert original["pool"] == asdict(queue.task_pool_assignment(task.id))
+    assert "producer_capability" not in original["emitter"]
+    with TestClient(create_app(queue, enable_mcp=False, verification_interval=0)) as api:
+        response = api.get(f"/spawn-reservations/{reservation.key}")
+    assert response.status_code == 200 and response.json()["allocation_cohort"] == original
+    reservation.allocation_cohort["pool"]["registration_id"] = "changed-return"
+    restarted = TaskQueue(queue.db_path)
+    assert restarted.get_reservation(reservation.key).allocation_cohort["pool"]["registration_id"] == "original-pool"
+    with queue._connect() as conn, pytest.raises(sqlite3.IntegrityError, match="immutable"):
+        conn.execute(
+            "UPDATE spawn_reservations SET allocation_cohort=NULL WHERE key=?", (reservation.key,),
+        )
+
+
+def test_allocation_cohort_survives_retry_and_different_deduplicated_task(tmp_path):
+    queue = TaskQueue(tmp_path / "queue.db")
+    task, _ = managed_task(queue, "first-episode", dedup_key="logical-work")
+    first, _ = queue.reserve_spawn(task.id)
+    original = first.allocation_cohort
+    queue.fail_spawn(first.key, detail="preparation did not complete")
+    retry, _ = queue.reserve_spawn(task.id)
+    assert retry.allocation_cohort == original
+    queue.fail_spawn(retry.key, detail="preparation still pending")
+    queue.claim_one("worker", task_id=task.id)
+    queue.start(task.id, "worker")
+    queue.complete(task.id, "worker")
+    later_task = queue.create("later episode", repo=TEST_REPO, dedup_key="logical-work")
+    assert later_task.id != task.id and later_task.producer_fence is None
+    restarted = TaskQueue(queue.db_path)
+    later, _ = restarted.reserve_spawn(later_task.id)
+    assert later.allocation_reservation_key == first.key
+    assert later.allocation_cohort == original
+    assert later.allocation_cohort["emitter"]["task_id"] == task.id
+    assert restarted.get_reservation(first.key).allocation_cohort == original
+
+
+def test_legacy_allocation_absence_is_not_backfilled_on_restart_or_retry(tmp_path, monkeypatch):
+    from agent_dispatch import queue_assignment_cohort
+
+    queue = TaskQueue(tmp_path / "queue.db")
+    task, _ = managed_task(queue, "legacy")
+    with monkeypatch.context() as legacy:
+        legacy.setattr(queue_assignment_cohort, "retain_allocation_cohort", lambda *a, **k: None)
+        first, _ = queue.reserve_spawn(task.id)
+    assert first.allocation_cohort is None
+    restarted = TaskQueue(queue.db_path)
+    assert restarted.get_reservation(first.key).allocation_cohort is None
+    restarted.fail_spawn(first.key, detail="legacy preparation unavailable")
+    retry, _ = restarted.reserve_spawn(task.id)
+    assert retry.allocation_reservation_key == first.key and retry.allocation_cohort is None
+
+
+def test_disposed_revision_captures_the_new_allocation_episode(tmp_path):
+    queue = TaskQueue(tmp_path / "queue.db")
+    task, _ = managed_task(queue, "disposed-episode", dedup_key="logical-work")
+    first, _ = queue.reserve_spawn(task.id)
+    queue.record_spawn_worktree(first.key, "original-workspace", ownership="created")
+    queue.fail_spawn(
+        first.key, conclusion_state="complete",
+        conclusion_detail=json.dumps({"action": "removed"}),
+    )
+    queue.claim_one("worker", task_id=task.id)
+    queue.start(task.id, "worker")
+    queue.complete(task.id, "worker")
+    later_task = queue.create("replacement episode", repo=TEST_REPO, dedup_key="logical-work")
+    replacement, _ = queue.reserve_spawn(later_task.id, allocation_revision=2)
+    assert replacement.allocation_reservation_key == replacement.key
+    assert replacement.allocation_cohort["emitter"] is None
+    assert queue.get_reservation(first.key).allocation_cohort["emitter"]["task_id"] == task.id
+
+
+def test_cohort_capture_failure_rolls_back_pool_claim_and_reservation(assignment, monkeypatch):
+    from agent_dispatch import queue_assignment_cohort
+
+    queue, _, workspace, _ = assignment
+    task, _ = managed_task(queue, "rollback")
+    publish(queue, pool(machine=workspace.machine))
+
+    def fail_capture(*args, **kwargs):
+        raise TaskError("cohort capture unavailable")
+
+    monkeypatch.setattr(queue_assignment_cohort, "capture_cohort", fail_capture)
+    with pytest.raises(TaskError, match="cohort capture unavailable"):
+        place(queue, task)
+    assert queue.get(task.id) == task
+    assert queue.task_pool_assignment(task.id) is None
+    assert queue.list_reservations(task_id=task.id) == []
