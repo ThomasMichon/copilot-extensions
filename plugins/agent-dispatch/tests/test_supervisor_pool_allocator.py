@@ -231,6 +231,7 @@ def test_installed_machine_marker_precedes_supervisor_file(monkeypatch, tmp_path
 @pytest.mark.parametrize("enabled", [None, "0", "1"])
 def test_actual_cli_allocation_is_default_off_and_passes_exact_instance(q, api, monkeypatch, enabled):
     monkeypatch.setattr(identity, "resolve_machine", lambda: "host-a")
+    monkeypatch.setattr("agent_dispatch.supervise_cli.configure_file_logging", lambda *_: None)
     if enabled is None:
         monkeypatch.delenv("AGENT_DISPATCH_POOL_ALLOCATION", raising=False)
     else:
@@ -275,6 +276,63 @@ def test_ordinary_backend_places_then_refreshes_real_claim_before_first_seed(q, 
         assert replay["reserved"] is False
     assert len(q.list_reservations(task_id=requested.id)) == 1
     assert not any(request.url.path == "/spawn-reservations" for request in requests)
+
+
+@pytest.mark.parametrize("ordinary", [True, False])
+def test_origin_discovery_precedes_current_catalog_snapshot(q, api, monkeypatch, ordinary):
+    from agent_dispatch import session_origin
+
+    publish(q, pool())
+    requested = task(q)
+    revisions = []
+
+    def discover(client, *, ordinary=False):
+        q.publish_pool_catalog_scope(
+            "host-a", "linux", "publisher-0", generation=1, expected_revision=1,
+            registration_revision=q.pool_registration_revision(), expected_cohort_revision=1,
+            input_revision="inputs", definitions=(pool(),), now=101,
+        )
+        revisions.append(q.pool_catalog_snapshot().revision)
+        return {}
+
+    monkeypatch.setattr(session_origin, "reservation_options", discover)
+    requests = []
+    with controls.connected(api, requests) as client:
+        placed = reserve_for_backend(
+            client, asdict(requested), "worker", ordinary=ordinary, pool_driver="cli",
+            instance=("worker", "host-a", "linux"),
+        )
+    assert placed["reserved"]
+    assert placed["assignment"]["catalog_revision"] == revisions[-1]
+    assert q.get(requested.id).status == Status.CLAIMED
+    assert sum(request.method == "POST" for request in requests) == 1
+
+
+def test_catalog_losing_readiness_during_origin_discovery_does_not_place(q, api, monkeypatch):
+    from agent_dispatch import session_origin
+
+    publish(q, pool())
+    requested = task(q)
+
+    def discover(client, *, ordinary=False):
+        q.publish_pool_catalog_scope(
+            "host-a", "linux", "publisher-0", generation=1, expected_revision=1,
+            registration_revision=q.pool_registration_revision(), expected_cohort_revision=1,
+            input_revision="unavailable", definitions=(), reason="source unavailable", now=101,
+        )
+        return {}
+
+    monkeypatch.setattr(session_origin, "reservation_options", discover)
+    requests = []
+    with controls.connected(api, requests) as client:
+        with pytest.raises(DispatchError, match="complete current catalog"):
+            reserve_for_backend(
+                client, asdict(requested), "worker", ordinary=True,
+                instance=("worker", "host-a", "linux"),
+            )
+    assert all(request.method == "GET" for request in requests)
+    assert q.get(requested.id).status == Status.QUEUED
+    assert q.list_reservations(task_id=requested.id) == []
 
 
 @pytest.mark.parametrize("ordinary,restricted", [(False, False), (False, True), (True, True)])
