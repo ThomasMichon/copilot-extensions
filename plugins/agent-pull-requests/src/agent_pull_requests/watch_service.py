@@ -196,8 +196,8 @@ class WatchService:
                     if self.store.repository_filtered:
                         for sponsor in self.filter_sponsors:
                             scope = self.gateway.bindings[(sponsor["principal"], sponsor["target"])]
-                            self.observer.repositories.definitions.resolve(sponsor["definition"]).require(
-                                self.observer.repositories.capabilities[scope.account], {scope.repo},
+                            self.observer.repositories.require(
+                                scope.account, self.observer.repositories.definitions.resolve(sponsor["definition"]),
                             )
                 for workspace in self.gateway.workspaces.values():
                     # Attention has its own explicit layout contract; never relabel

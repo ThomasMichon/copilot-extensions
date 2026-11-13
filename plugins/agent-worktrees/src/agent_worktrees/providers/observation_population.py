@@ -9,6 +9,7 @@ from datetime import datetime
 from urllib.parse import quote, urlencode, urlsplit
 
 from pr_filters import Expression, PROTOCOL
+from pr_filters.acquisition import PROTOCOL as ACQUISITION_PROTOCOL, plan
 
 from .base import ProviderError, run_cli
 from .observation_credentials import ObservationCredentials
@@ -17,11 +18,17 @@ from .observation_inventory import MAX_BYTES, MAX_PAGES, PAGE_SIZE
 MAX_REQUESTS = 64
 MAX_PULLS = 1000
 MAX_IDENTITIES = 128
+ACQUISITION = {
+    "protocol": ACQUISITION_PROTOCOL, "user_ids": "uuid-lowercase",
+    "query_fields": {"from": "creatorId", "assigned": "reviewerId"},
+    "max_query_branches": MAX_REQUESTS,
+}
 CAPABILITIES = {
     "protocol": PROTOCOL,
     "fields": ["repo", "from", "assigned", "age", "tags", "publication"],
     "groups": [],
     "age_fields": ["created"],
+    "acquisition": ACQUISITION,
 }
 _GUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 
@@ -48,25 +55,6 @@ def contract() -> dict:
     }
 
 
-def _queries(node):
-    """A bounded cover, not DNF: conjunction can use any one narrowing child."""
-    if "any" in node:
-        result = set()
-        for child in node["any"]:
-            branch = _queries(child)
-            if not branch:
-                return set()
-            result.update(branch)
-        return result
-    if "all" in node:
-        choices = [_queries(child) for child in node["all"]]
-    else:
-        choices = [{(key, value) for value in node.get(field, {}).get("users", [])}
-                   for field, key in (("from", "creatorId"), ("assigned", "reviewerId"))]
-    return min((choice for choice in choices if choice), key=lambda x: (len(x), sorted(x)),
-               default=set())
-
-
 def validate(provider, repo, api_base, expression, max_pages, max_pulls):
     if provider != "azure-devops" or (
         not isinstance(repo, str) or repo.count("/") != 1 or len(repo) > 256
@@ -88,20 +76,7 @@ def validate(provider, repo, api_base, expression, max_pages, max_pulls):
         raise ValueError("population requires a literal organization endpoint")
     expression.require(CAPABILITIES, {repo})
 
-    def identities(node):
-        if "all" in node or "any" in node:
-            for child in next(iter(node.values())):
-                identities(child)
-        else:
-            for name in ("from", "assigned"):
-                if any(not _GUID.fullmatch(value) for value in node.get(name, {}).get("users", [])):
-                    raise ValueError("population requires canonical provider user IDs")
-
-    identities(expression.document()["where"])
-    queries = sorted(_queries(expression.document()["where"]))
-    if len(queries) > MAX_REQUESTS:
-        raise ValueError("population query branch limit")
-    return queries or [None]
+    return plan(expression, ACQUISITION)
 
 
 def _read(url, credentials, deadline):

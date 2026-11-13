@@ -31,3 +31,18 @@ def test_invalid_identity_is_not_admitted(change):
     ).document() | change
     with pytest.raises(ValueError):
         RepositoryIdentity.parse(value)
+
+
+@pytest.mark.parametrize("repo", ["My Project/repository", "Project/répertoire", "Project/repo name"])
+def test_ado_repository_names_preserve_native_scope_without_relaxing_other_drivers(repo):
+    identity = RepositoryIdentity("namespace", "azure-devops", "https://dev.azure.com/example", "reader", repo)
+    assert RepositoryIdentity.parse(identity.document()) == identity
+    for provider in ("github", "gitea"):
+        with pytest.raises(ValueError):
+            replace(identity, provider=provider)
+
+
+@pytest.mark.parametrize("repo", ["Project/..", "/repo", "a/b/c", "Project/repo\x7f", "a/" + "b" * 255])
+def test_ado_repository_scope_rejects_native_invalid_names(repo):
+    with pytest.raises(ValueError):
+        RepositoryIdentity("namespace", "azure-devops", "https://dev.azure.com/example", "reader", repo)
