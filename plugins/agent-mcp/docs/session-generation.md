@@ -573,6 +573,37 @@ integration remain disabled. The section requires no new process, network reques
 filesystem scan or steady-state message work; installed launch/update latency
 remains unqualified until caller adoption.
 
+The opt-in native packet
+`tests/native/test_owner_bootstrap_copilot_windows.py` supplies actual offline
+Windows Copilot to that existing suspended-creation owner, publishes from its
+real creation handle and exits the publisher before ACP initialization or
+session creation. Actual delayed MCP startup must consume the anonymous
+bootstrap, select its physical interpreter and report the same native client
+PID/birth after a real upstream ping/client reply. An ordinary configuration
+in the same workspace supplies the context and settlement baseline. The packet
+observes the pinned publisher, client and physical receiver settle and the
+final section disappear; the bounded runner owns all fixture descendants.
+Late ACP session notifications are validated while draining through stream EOF.
+Client exit must be natural, not test-forced termination.
+The persisted launch plan uses a minimal Windows process-variable allowlist
+with explicit private home, application-data and temporary directories. It
+never copies the rest of the caller environment; a focused serialization
+control plants synthetic inherited credentials and requires their absence.
+Cleanup receives a process handle only after that same handle's native birth,
+principal and liveness are verified. A mismatched candidate is closed without
+becoming a cleanup target; a native negative control requires the mismatched
+fixture process to remain alive until its own input reaches EOF.
+
+The physical receiver's exit code and Python finalization/EOF witness must
+match that ordinary baseline. A native client that abruptly settles its MCP
+child on disconnect does not become a graceful upstream-EOF qualification.
+The JUnit properties retain that distinction and bounded launch/round-trip
+timings. This packet qualifies native configuration consumption and the
+creation-bound handoff, not installed custody, Windows physical-generation
+handover, productive caller enrollment or update latency. The existing optional
+source workflow pins the public client asset and runs this packet only on its
+Windows runner; required unit-only CI is unchanged.
+
 ### Hosted originating-owner qualification
 
 The explicit `mcp-caller-lifetime` hosted Windows qualification packet uses the

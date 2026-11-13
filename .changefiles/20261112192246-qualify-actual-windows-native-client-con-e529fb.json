@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify actual Windows native client consumption of snapshot-bound MCP bootstrap after publisher exit",
+  "changes": [
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    }
+  ]
+}
