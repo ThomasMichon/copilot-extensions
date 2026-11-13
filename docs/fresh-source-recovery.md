@@ -103,3 +103,100 @@ publication gates still apply.
 The downloaded toolkit is retained for install operations too; its checkout is
 reported separately from the target source. This preserves code and evidence
 needed by native custody after an uncertain or interrupted outcome.
+
+## Repository-declaration integration contract
+
+**Implementation boundary:** the entry described above still supports request
+schema 1 only. Repository-suite selection below is the integration contract for
+the [Installer vision](../visions/installer/README.md#repository-selected-suite-source),
+tracked under [#7028](https://github.com/ThomasMichon/copilot-extensions/issues/7028).
+It is not a callable capability, a production pin or native qualification.
+
+### Input and cold interpretation
+
+An explicit repository-suite operation addresses the consuming repository
+separately from both the upstream suite repository and a Git object-source
+checkout. Resolve an available local repository first through the existing
+repository owner. An unregistered absolute local checkout must also work on a
+first installation; a working registry, old Manager or plugin runtime is not
+a prerequisite. Do not select policy from ambient cwd.
+
+Read the addressed repository's `.copilot-extensions/config.yaml` as data.
+Its `current_version` expresses the desired commit or symbolic Git selection;
+an optional source-repository override identifies where that selection belongs.
+The implementation must publish the precise field schema and validation before
+consumers author it. Preserve unrelated existing configuration and do not write
+defaults, a pin, history or machine-local source policy merely to inspect it.
+
+The trusted current toolkit owns parsing before target-suite acquisition.
+It must neither import nor execute adopter setup or code from the requested
+suite to learn the selection. Any required YAML/parser dependency is prepared
+through the existing trusted bootstrap dependency owner, not inferred from an
+installed application's environment or a second ad hoc package installer.
+Missing parser support is an explicit unavailable interpretation, not proof that
+the repository has no declaration. Duplicate, malformed or unsupported policy
+must not be reinterpreted as an absent pin.
+
+### Selection, fallback and native handoff
+
+Retain the consuming repository association, declaration authority, requested
+source/ref, immutable resolved commit/tree and any explicit fallback reason.
+Resolve symbolic input once for the operation. Changing the ref during
+preparation cannot mix commits across Manager, engine, applications or content.
+Explicit supported source overrides keep their existing precedence and
+admission; this contract does not permit arbitrary refs to bypass native
+source, integrity or authorization checks.
+
+When the consuming repository is not yet available or has no selection,
+canonical current Main can establish the public foundation before private
+repository access. Report that fallback without claiming the unresolved
+repository's pin was installed or qualified. A known invalid declaration,
+denied source or failure after admitting a source is not an availability
+fallback. Do not catch every acquisition failure and retry Main.
+
+Feed the resulting fixed selection into the existing recovery
+request/selection boundary before `runtime_source.acquire()`. Reuse native
+materialization, complete prepared-application production and installation
+execution; do not create a second producer, updater or supervisor. Manager
+self-source, service-runtime source and Copilot content remain separate
+domains: report which were addressed and actually consumed the selection.
+Preserve independent policy unless its explicit source-change operation
+authorizes replacement.
+
+Later normal update must use the installation's explicitly associated
+repository selection, including an older desired suite, rather than treating
+an arbitrary calling checkout as authority to retarget shared runtimes.
+Establish and preserve that association through the existing installation
+owner, not from discovery or a successful configuration read.
+
+Bounded retained-good history is a separate qualification/write concern.
+A reader does not invent a retention limit, advance history, label an
+unexercised candidate good or enable automatic rollback. Historical
+qualification retains immutable source and consuming-repository association.
+
+### Compatibility and acceptance
+
+Advertise repository-policy support through passive bootstrap discovery before
+callers use a distinct supported request revision. Keep schema 1 strict, with
+its existing Main/commit/configured-Main-pin behavior. `project` remains an
+execution selector, and `selection.checkout` remains a Git object source.
+Neither becomes a silent repository-policy override.
+
+Required focused implementation controls:
+
+| Case | Required result |
+|---|---|
+| Cold interpretation without installed packages or registry | Addressed local declaration is read without adopter code execution or host-policy writes |
+| Missing repository or absent pin | Explicit Main-foundation fallback, no claimed pinned readiness |
+| Invalid/duplicate policy or unavailable parser | Truthful refusal/unavailable state, not an absent-pin fallback |
+| Symbolic selection moves during preparation | One requested/resolved identity throughout the native operation |
+| Repository override, denied or invalid admitted source | Existing source admission and failure preserved; no silent Main retry |
+| Supported explicit override and independent source policy | Existing precedence and protected domains preserved |
+| Existing installation and older desired source | Explicit association and desired-source convergence without unrelated retargeting |
+| Old/new request combinations and unsupported bootstrap | Existing schema 1 behavior preserved; capability-selected new requests or pre-effect refusal |
+
+Use synthetic repositories and an isolated physical interpreter/process for
+the cold control; an installed-reader unit test is insufficient. Real native
+construction/activation, content delivery and protected-adopter acceptance
+retain their own lanes and effect authority. A passing reader or source merge
+does not complete those gates.

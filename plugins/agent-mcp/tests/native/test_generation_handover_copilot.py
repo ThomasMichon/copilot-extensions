@@ -8,6 +8,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import shutil
 import sys
 from typing import Callable
 
@@ -32,8 +33,17 @@ _spec.loader.exec_module(provider)
 
 pytestmark = [
     pytest.mark.portfolio_tier("T3"),
-    pytest.mark.skipif(not sys.platform.startswith("linux"), reason="native Linux exec"),
+    pytest.mark.skipif(
+        not (sys.platform.startswith("linux") or sys.platform == "win32"),
+        reason="native Linux or Windows client",
+    ),
 ]
+
+
+@pytest.fixture
+def tmp_path(tmp_path_factory):
+    return tmp_path_factory.mktemp("h")
+
 
 UPSTREAM = r"""
 import json, os, signal, sys, threading, time
@@ -124,7 +134,20 @@ async def test_actual_native_client_responds_through_replacement_and_rollback(
     if not executable:
         pytest.skip("Select the pinned native Copilot asset on a disposable runner")
     executable = Path(executable)
-    assert executable.is_absolute() and executable.name == "copilot" and executable.is_file()
+    windows = sys.platform == "win32"
+    assert executable.is_absolute() and executable.name == (
+        "copilot.exe" if windows else "copilot"
+    ) and executable.is_file()
+    native = client_handle = producer_handle = None
+    if windows:
+        if not shutil.which("pwsh"):
+            pytest.skip("Select PowerShell for the native creation owner")
+        spec = importlib.util.spec_from_file_location(
+            "windows_native_client", Path(__file__).with_name("test_owner_bootstrap_copilot_windows.py"),
+        )
+        windows_client = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(windows_client)
+        native = windows_client.SectionNative()
     monkeypatch.setenv("UV_OFFLINE", "1")
     cache = Path(os.environ["COPILOT_EXTENSIONS_TEST_VENV_ROOT"]) / ".uv-cache"
     monkeypatch.setenv("UV_CACHE_DIR", str(cache))
@@ -157,12 +180,13 @@ async def test_actual_native_client_responds_through_replacement_and_rollback(
     with contextlib.ExitStack() as retained:
         root, slots = fixture.build_runtimes(
             tmp_path, retained, observations=observations, caller_context=caller_context,
+            windows_owner_entry=windows,
         )
         with daemon_test_lifecycle(
             owner="native-copilot-mcp-handover", registry_root=tmp_path / "instances",
             cleanup_results=cleanup,
         ) as lifetime:
-            environment = {
+            environment = windows_client._environment(home) if windows else {
                 key: value for key, value in os.environ.items()
                 if not key.startswith(("COPILOT_", "AGENT_", "WORKTREE_", "OTEL_"))
                 and key not in {
@@ -269,27 +293,55 @@ async def test_actual_native_client_responds_through_replacement_and_rollback(
                     COPILOT_PROVIDER_WIRE_API="completions",
                 )
                 (root / "current-version").write_text(slots["old"][0], encoding="utf-8")
-                python = slots["old"][1] / "bin" / "python"
+                python = slots["old"][1] / ("Scripts/python.exe" if windows else "bin/python")
                 entries = home / "entries.json"
-                entries.write_text(json.dumps({"mcpServers": {"physical-fixture": {
+                configuration = {"mcpServers": {"physical-fixture": {
                     "type": "local", "command": str(python),
                     "cwd": str(workspace),
                     "args": ["-I", "-m", "agent_mcp", "bridge", "--config", str(config)],
                     "tools": ["*"],
-                }}}), encoding="utf-8")
+                }}}
+                if windows:
+                    from agent_mcp.owner_exec import windows_overlay
+
+                    script = windows_client._publisher(
+                        tmp_path, workspace, executable,
+                        windows_overlay(configuration, ["physical-fixture"], binding="a" * 64),
+                        environment, True, server="physical-fixture",
+                        tools=("physical-fixture(fixture_0)",),
+                    )
+                    command = [shutil.which("pwsh"), "-NoLogo", "-NoProfile", "-File", str(script)]
+                else:
+                    entries.write_text(json.dumps(configuration), encoding="utf-8")
+                    command = [
+                        str(python), "-I", "-m", "agent_mcp", "exec-client",
+                        "--mcp-config", str(entries), "--server", "physical-fixture", "--",
+                        str(executable), "-C", str(workspace), "--acp", "--stdio", "--no-auto-update",
+                        "--disable-builtin-mcps", "--no-custom-instructions", "--no-color", "--no-ask-user",
+                        "--allow-tool=physical-fixture(fixture_0)",
+                        "--log-dir", str(tmp_path / "logs"),
+                    ]
                 client = await asyncio.create_subprocess_exec(
-                    str(python), "-I", "-m", "agent_mcp", "exec-client",
-                    "--mcp-config", str(entries), "--server", "physical-fixture", "--",
-                    str(executable), "-C", str(workspace), "--acp", "--stdio", "--no-auto-update",
-                    "--disable-builtin-mcps", "--no-custom-instructions", "--no-color", "--no-ask-user",
-                    "--allow-tool=physical-fixture(fixture_0)",
-                    "--log-dir", str(tmp_path / "logs"),
+                    *command,
                     cwd=workspace, env=environment, stdin=asyncio.subprocess.PIPE,
                     stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
                     **no_window_kwargs(),
                 )
                 stderr = asyncio.create_task(client.stderr.read())
-                client_birth = birth_identity(client.pid)
+                if windows:
+                    producer_handle = native.require(native.k.OpenProcess(0x101000, False, client.pid))
+                    retained.callback(native.close, producer_handle)
+                    line = await asyncio.wait_for(client.stdout.readline(), 30)
+                    assert line, (await asyncio.wait_for(stderr, 5)).decode(errors="replace")
+                    published = json.loads(line)
+                    client_pid, client_birth = published["pid"], published["birth"]
+                    client_handle = windows_client._pin(native, client_pid, client_birth, 0x101001)
+                    retained.callback(native.close, client_handle)
+                    assert await asyncio.to_thread(native.k.WaitForSingleObject, producer_handle, 10000) == 0
+                    assert not caller_context.exists()
+                    assert not observations.with_suffix(".owner.json").exists()
+                else:
+                    client_pid, client_birth = client.pid, birth_identity(client.pid)
                 initialized, _ = await provider.rpc(client, stderr, 1, "initialize", {
                     "protocolVersion": 1, "clientCapabilities": {},
                     "clientInfo": {"name": "physical-owner-fixture", "version": "1"},
@@ -313,9 +365,9 @@ async def test_actual_native_client_responds_through_replacement_and_rollback(
                 first = await exchange("old", old_pid, refresh=False)
                 upstream_identity = first["pid"], birth_identity(first["pid"])
                 owner = json.loads(observations.with_suffix(".owner.json").read_text(encoding="utf-8"))
-                assert (owner["owner_pid"], owner["owner_birth"]) == (client.pid, client_birth)
+                assert (owner["owner_pid"], owner["owner_birth"]) == (client_pid, client_birth)
                 conduit_identity = owner["conduit_pid"], owner["conduit_birth"]
-                assert conduit_identity[0] != client.pid
+                assert conduit_identity[0] != client_pid
                 keepers = [
                     row for row in inspect_instances(tmp_path / "instances")
                     if row["state"] == "running" and row["service"] == "agent-mcp-custody"
@@ -324,8 +376,11 @@ async def test_actual_native_client_responds_through_replacement_and_rollback(
                 keeper_identity = int(keepers[0]["pid"]), keepers[0]["birth"]
 
                 def retained_identities() -> None:
-                    assert client.returncode is None
-                    assert identity_state(client.pid, client_birth) == "matching"
+                    if windows:
+                        assert native.k.WaitForSingleObject(client_handle, 0) == 258
+                    else:
+                        assert client.returncode is None
+                    assert identity_state(client_pid, client_birth) == "matching"
                     assert identity_state(*keeper_identity) == "matching"
                     assert identity_state(*conduit_identity) == "matching"
                     assert identity_state(*upstream_identity) == "matching"
@@ -360,7 +415,7 @@ async def test_actual_native_client_responds_through_replacement_and_rollback(
                 for label in ("new", "old", "old"):
                     nonce = "native-fixture-" + str(len(model.calls) + 1)
                     hold.write_text(nonce, encoding="utf-8")
-                    pending = asyncio.create_task(tool_call(previous_label, old.pid))
+                    pending = asyncio.create_task(tool_call(previous_label, old_pid))
 
                     async def accepted_call() -> bool:
                         return any(
@@ -374,7 +429,7 @@ async def test_actual_native_client_responds_through_replacement_and_rollback(
                     async def quiescing_call() -> bool:
                         path = observations.with_suffix(".quiescing")
                         return path.is_file() and any(
-                            row["backend_pid"] == old.pid and row["accepted"] > 0
+                            row["backend_pid"] == old_pid and row["accepted"] > 0
                             and row["settlers"] > 0
                             for row in map(json.loads, path.read_text().splitlines())
                         )
@@ -393,7 +448,7 @@ async def test_actual_native_client_responds_through_replacement_and_rollback(
                     await exchange(label, incoming_pid)
                     retained_identities()
                     await tool_call(label, incoming_pid)
-                    old, old_handle = incoming, handles[-1]
+                    old, old_handle, old_pid = incoming, handles[-1], incoming_pid
                     previous_label = label
                 sequence += 1
                 dropped = "fixture-ping-" + str(sequence)
@@ -443,7 +498,7 @@ async def test_actual_native_client_responds_through_replacement_and_rollback(
                     if not loss.is_file() or not unknown.is_file():
                         return {}
                     dropped = json.loads(loss.read_text())
-                    assert dropped["backend_pid"] == old.pid and dropped["nonce"] == nonce
+                    assert dropped["backend_pid"] == old_pid and dropped["nonce"] == nonce
                     for row in map(json.loads, unknown.read_text().splitlines()):
                         if any(
                             message.get("params", {}).get("arguments", {}).get("nonce") == nonce
@@ -463,8 +518,7 @@ async def test_actual_native_client_responds_through_replacement_and_rollback(
                     return identity_state(*conduit_identity) == "dead"
 
                 await fixture.eventually(failed_stream_closed)
-                assert client.returncode is None
-                assert identity_state(client.pid, client_birth) == "matching"
+                assert identity_state(client_pid, client_birth) == "matching"
                 record_testsuite_property("actual_native_unknown_delivery_calls", 1)
                 record_testsuite_property("unknown_delivery_conduit_exit", "dead")
                 record_testsuite_property("actual_native_client", str(executable.name))
@@ -478,8 +532,10 @@ async def test_actual_native_client_responds_through_replacement_and_rollback(
                 failed = sys.exc_info()[0] is not None
                 try:
                     if client is not None:
-                        if client.returncode is None:
+                        if windows or client.returncode is None:
                             client.stdin.close()
+                        if windows:
+                            await windows_client._settle_client(native, client_handle)
                         await asyncio.wait_for(client.wait(), 10)
                         if not failed:
                             try:
@@ -520,21 +576,18 @@ async def test_actual_native_client_responds_through_replacement_and_rollback(
                             await fixture.eventually(upstream_settled)
                 finally:
                     await model.close()
-                    if pending is not None and not pending.done():
-                        pending.cancel()
-                        with contextlib.suppress(asyncio.CancelledError):
-                            await pending
-                    if session is not None and not session.done():
-                        session.cancel()
-                        with contextlib.suppress(asyncio.CancelledError):
-                            await session
+                    tasks = [task for task in (pending, session) if task is not None]
+                    for task in tasks:
+                        if not task.done():
+                            task.cancel()
+                    await asyncio.gather(*tasks, return_exceptions=True)
                     for handle in handles:
                         with contextlib.suppress(OSError):
                             await fixture.shutdown(handle)
                     for process in processes:
                         await asyncio.wait_for(process.wait(), 10)
         assert cleanup and all(result.status in {"settled", "missing"} for result in cleanup)
-        assert identity_state(client.pid, client_birth) == "dead"
+        assert identity_state(client_pid, client_birth) == "dead"
         assert identity_state(*upstream_identity) == "dead"
         assert identity_state(*keeper_identity) == "dead"
         assert identity_state(*conduit_identity) == "dead"

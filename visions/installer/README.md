@@ -9,7 +9,7 @@
   all three of its roles.
 - **Scope:** branch (application intent; configuration detail lives in its child)
 - **Status:** Active
-- **Last revised:** 2026-11-10
+- **Last revised:** 2026-11-12
 - **Reality docs:** [`docs/install-contract.md`](../../docs/install-contract.md) ·
   [`docs/architecture.md`](../../docs/architecture.md)
 
@@ -249,9 +249,10 @@ pre-installed harness tooling.
 The caller may optionally select a Git repository for adoption in that same
 attended transaction. The installer establishes its core toolkit first, then
 acquires the selected repository through Git's configured credential owner and
-hands off to explicitly trusted, repository-owned setup. Repository selection
-does not change the Manager's own installation or update source. Omitting it
-preserves the standalone Manager journey.
+hands off to explicitly trusted, repository-owned setup. Repository adoption
+alone does not change the Manager's own installation or update source; an
+explicit repository-suite source operation is a separate choice. Omitting
+repository selection preserves the standalone Manager journey.
 
 The neutral installer does not absorb the selected repository's organization,
 private knowledge, machine inventory or connectivity policy. Authentication
@@ -520,6 +521,27 @@ Source failures preserve the current healthy installation and name the
 blocked selection; they never substitute an ambient checkout or newer payload.
 Ordinary marketplace delivery of skills, instructions, hooks and extensions
 continues independently, including their non-deployment behavior.
+
+### repository-selected-suite-source
+An explicitly selected consuming repository can declare the suite source it
+intends to use: an immutable commit, symbolic Git selection or source-repository
+override. The trusted upstream bootstrap reads available local declarations
+before acquiring that suite, without executing the adopter's setup or requiring
+an installed application to interpret its intent. Requested and resolved
+identities remain distinguishable, with one immutable selection per operation.
+
+An unavailable repository or absent selection can establish the canonical
+current-Main foundation first, explicitly reporting the unresolved choice.
+Invalid policy and failures of an admitted source remain failures. Later
+authorized update converges to the resolved intended source even when it is
+older, without relying on monotonically increasing package versions.
+
+The existing runtime, Manager self-source and Copilot content owners consume
+the selection only for their explicitly addressed domains. Reading policy,
+adopting a repository or opening a checkout alone neither retargets a shared
+installation nor rewrites independent source settings. Qualified retained-good
+history stays bound to its consuming repository and immutable source, never an
+untested moving alias or implicit rollback authority.
 
 ### consented-background-maintenance
 Manager owns the optional background maintenance of an installation, including
