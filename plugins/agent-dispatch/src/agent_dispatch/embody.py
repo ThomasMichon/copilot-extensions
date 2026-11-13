@@ -110,6 +110,7 @@ def create_worktree(
     no_pair: bool = False,
     creation_key: str | None = None,
     allocation_cohort: dict | None = None,
+    cohort_transport: str = "baseline", runtime_prefix: list[str] | None = None,
 ) -> dict[str, str | None]:
     """Create a worktree without launching Copilot and return its id/path.
 
@@ -121,7 +122,7 @@ def create_worktree(
     workers have no bound knowledge repo to be given (see
     ``agent-worktrees create --no-pair``).
     """
-    exe_prefix = _agent_worktrees_launch_prefix()
+    exe_prefix = runtime_prefix or _agent_worktrees_launch_prefix()
     if exe_prefix is None:
         raise EmbodyUnavailable("agent-worktrees CLI not found on PATH")
     cmd = list(exe_prefix)
@@ -154,7 +155,7 @@ def create_worktree(
         cmd.append("--no-pair")
     if creation_key is not None:
         cmd += ["--creation-key", creation_key]
-    cmd += worktree_cohort.creation_arguments(exe_prefix, allocation_cohort)
+    cmd += worktree_cohort.creation_arguments(exe_prefix, allocation_cohort, cohort_transport)
     result = subprocess.run(  # noqa: S603 -- fixed argv, launcher resolved locally
         cmd,
         check=False,
@@ -254,10 +255,7 @@ def prepare_reusable_worktree(
             created=False,
         )
 
-    if allocation_client is not None:
-        from .workspace_binding import bind_allocation
-
-        bind_allocation(allocation_client, reservation, project)
+    runtime_prefix = worktree_cohort.prepare_creation(allocation_client, reservation, project) if allocation_client else None
     created = create_worktree(
         project=project,
         interface=interface,
@@ -271,6 +269,7 @@ def prepare_reusable_worktree(
         no_pair=no_pair,
         creation_key=reservation.get("creation_key"),
         allocation_cohort=reservation.get("allocation_cohort"),
+        cohort_transport=reservation.get("allocation_cohort_transport") or "baseline", runtime_prefix=runtime_prefix,
     )
     return prepared_result(created, project=project, ownership="created", created=True)
 

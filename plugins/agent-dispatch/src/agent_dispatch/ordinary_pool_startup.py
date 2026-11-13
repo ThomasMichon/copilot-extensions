@@ -140,6 +140,13 @@ def created_workspace_record(task: dict, reservation: dict, info: dict) -> dict:
         "creator_machine": reservation["execution_machine"], "ownership": "created",
     }
     allocation = record.get("dispatch_attempt")
+    if isinstance(allocation, dict) and (
+        "cohort" in allocation or reservation.get("allocation_cohort_transport") == "cohort-v1"
+    ):
+        original = reservation.get("allocation_cohort")
+        if not isinstance(original, dict):
+            raise TaskError("owned ordinary creation lacks its original cohort evidence")
+        expected["cohort"] = original
     if (
         not sessionless(record) or not isinstance(allocation, dict)
         or not isinstance(allocation.get("creator_machine"), str)

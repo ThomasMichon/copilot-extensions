@@ -43,18 +43,46 @@ def _supports_cohort(prefix: tuple[str, ...]) -> bool:
     )
 
 
-def creation_arguments(prefix: list[str], cohort: dict | None) -> list[str]:
-    """Keep unknown peers on the legacy baseline without probing an effect."""
+def selection(prefix: list[str], cohort: dict | None) -> str:
+    """Choose an optional wire form once, before the allocation binding commits."""
     if cohort is None:
-        return []
+        return "baseline"
     if (
         isinstance(cohort, dict) and cohort.get("schema") == _SCHEMA
         and type(cohort.get("version")) is int and cohort["version"] == 1
         and _supports_cohort(tuple(prefix))
     ):
+        return "cohort-v1"
+    _LOG.warning("Original Dispatch cohort support is unknown; retaining the legacy unattributed baseline")
+    return "baseline"
+
+
+def creation_arguments(prefix: list[str], cohort: dict | None, transport: str = "baseline") -> list[str]:
+    """Replay the retained form, never renegotiate immutable creation facts."""
+    if transport == "baseline":
+        return []
+    if (
+        transport == "cohort-v1" and isinstance(cohort, dict) and cohort.get("schema") == _SCHEMA
+        and type(cohort.get("version")) is int and cohort["version"] == 1
+        and _supports_cohort(tuple(prefix))
+    ):
         return ["--dispatch-cohort", json.dumps(cohort, sort_keys=True, separators=(",", ":"))]
-    _LOG.warning(
-        "Original Dispatch cohort is not transported: selected Worktrees support is unknown "
-        "or incompatible; creation retains the legacy unattributed baseline",
-    )
-    return []
+    from .workspace_binding import hold
+
+    hold("original cohort-bearing creation requires a capable Worktrees runtime; preserve its wire form")
+
+
+def prepare_creation(client, reservation: dict, project: str | None) -> list[str] | None:
+    """Persist selection through the existing allocation owner before effects."""
+    from .embody import _agent_worktrees_launch_prefix
+    from .workspace_binding import bind_allocation
+
+    prefix = _agent_worktrees_launch_prefix()
+    transport = None
+    if "allocation_cohort_transport" in reservation:
+        transport = reservation["allocation_cohort_transport"]
+        if transport is None:
+            transport = selection(prefix or [], reservation.get("allocation_cohort"))
+        creation_arguments(prefix or [], reservation.get("allocation_cohort"), transport)
+    bind_allocation(client, reservation, project, cohort_transport=transport)
+    return prefix

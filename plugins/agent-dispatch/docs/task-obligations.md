@@ -133,14 +133,26 @@ mutable-shim launchers and provider rollback use the existing five-field
 Dispatch attempt without a cohort flag, with an explicit unattributed warning.
 Legacy reservations without a snapshot need no discovery. This optional audit
 carrier grants no new lifecycle authority and does not gate baseline creation.
-An effectful creation failure is never replayed using a second syntax; ordinary
-creation-key recovery remains with the original owner. Prior callers still work
-with upgraded receivers. The old form has no scheduled retirement.
+Before the first creation, the existing allocation transaction seals
+`allocation_cohort_transport` as `baseline` or `cohort-v1`. New reservations can
+start unselected; historical reservations migrate to baseline because an old
+creation may already have taken effect. Retries and later task episodes inherit
+the original selection. A lost binding response holds creation until the
+coordinator confirms the same choice. A baseline attempt never gains a cohort
+on upgrade; a cohort-bearing attempt requires a capable provider after rollback,
+rather than dropping immutable facts. Migration does not guess legacy evidence.
+An effectful creation failure is never replayed using a second syntax.
+Creation-key recovery remains with the original owner. Prior callers still work
+with upgraded receivers on the baseline. The old form has no scheduled retirement.
 
 Only the new-allocation path sends the snapshot, using its original
 `allocation_reservation_key` task/attempt, never the current task's labels or
 assignment audit. Carried/targeted worktrees are resolved without discovery or
 restamping. Bridge session-state propagation remains separate and open.
+Ordinary initial-start validation admits the optional cohort only when it
+matches the retained allocation evidence, and requires it for a cohort-v1
+creation. All original sessionless task, reservation, attempt, driver,
+supervisor, creating-machine and ownership checks still apply before prompting.
 
 ## Original assignment cohort
 

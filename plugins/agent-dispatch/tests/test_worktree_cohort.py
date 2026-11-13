@@ -10,6 +10,9 @@ import sys
 import pytest
 
 from agent_dispatch import embody, worktree_cohort
+from agent_dispatch.queue import TaskQueue, TaskError
+from agent_dispatch.spawn_factories import SpawnPreparationRetained
+from tests.test_supervisor import QueueBackedClient
 
 
 def cohort(task="original", key="dispatch-task:original:1"):
@@ -64,6 +67,11 @@ for flag in ("origin", "interface", "dispatch-task-id", "dispatch-reservation-ke
 if isinstance(cap, dict) and cap.get("dispatch_cohort"):
     parser.add_argument("--dispatch-cohort", type=json.loads)
 parsed = parser.parse_args()
+facts = json.dumps(getattr(parsed, "dispatch_cohort", None), sort_keys=True)
+journal = Path(os.environ["CREATION_JOURNAL"])
+if journal.exists() and journal.read_text() != facts:
+    parser.error("original creation facts changed")
+journal.write_text(facts)
 if os.environ.get("FAIL_CREATE"):
     print("error: unknown argument after an indeterminate creation", file=sys.stderr)
     sys.exit(2)
@@ -75,7 +83,10 @@ print(json.dumps({
         encoding="utf-8",
     )
     log = tmp_path / "calls.jsonl"
-    environment = {**os.environ, "PYTHONPATH": str(tmp_path), "CALL_LOG": str(log)}
+    environment = {
+        **os.environ, "PYTHONPATH": str(tmp_path), "CALL_LOG": str(log),
+        "CREATION_JOURNAL": str(tmp_path / "creation.json"),
+    }
     prefix = [sys.executable, "-m", "agent_worktrees"]
     monkeypatch.setattr(embody, "_agent_worktrees_launch_prefix", lambda: prefix)
     monkeypatch.setattr(embody, "agent_worktrees_environment", lambda: environment.copy())
@@ -87,10 +98,12 @@ print(json.dumps({
     environment["CAPABILITIES"] = json.dumps(capabilities)
 
     def create(**kwargs):
+        original = kwargs.pop("allocation_cohort", cohort())
+        transport = kwargs.pop("cohort_transport", worktree_cohort.selection(prefix, original))
         return embody.create_worktree(
             project="example", task_id="original", reservation_key="dispatch-task:original:1",
             attempt=1, driver="agent-dispatch", supervisor="supervisor",
-            creation_key="original-creation", allocation_cohort=kwargs.pop("allocation_cohort", cohort()),
+            creation_key="original-creation", allocation_cohort=original, cohort_transport=transport,
             **kwargs,
         )
 
@@ -134,10 +147,10 @@ def test_cached_selected_runtime_and_provider_rollback(provider):
     prefix.insert(1, "-B")
     cap.pop("dispatch_cohort")
     env["CAPABILITIES"] = json.dumps(cap)
-    create()
-    assert len(calls()) == 5
-    assert "--dispatch-cohort" not in calls()[-1]
-    assert "--creation-key" in calls()[-1]
+    with pytest.raises(SpawnPreparationRetained, match="requires a capable"):
+        create(cohort_transport="cohort-v1")
+    assert len(calls()) == 4
+    assert calls()[-1] == ["worktree-allocation", "capabilities", "--json"]
 
 
 def test_creation_failure_is_not_an_effectful_syntax_probe(provider):
@@ -162,15 +175,15 @@ def test_unavailable_discovery_preserves_optional_baseline(monkeypatch, failure,
         raise failure
 
     monkeypatch.setattr(worktree_cohort.subprocess, "run", fail)
-    assert worktree_cohort.creation_arguments(
+    assert worktree_cohort.selection(
         [sys.executable, "-m", "agent_worktrees"], cohort(),
-    ) == []
+    ) == "baseline"
     assert "support is unknown" in caplog.text
 
 
 def test_mutable_shim_never_authorizes_new_syntax(monkeypatch):
     monkeypatch.setattr(worktree_cohort.subprocess, "run", lambda *_a, **_k: pytest.fail("no shim probe"))
-    assert worktree_cohort.creation_arguments(["/fixture/bin/worktrees"], cohort()) == []
+    assert worktree_cohort.selection(["/fixture/bin/worktrees"], cohort()) == "baseline"
 
 
 def test_new_creation_forwards_original_snapshot_not_current_task(monkeypatch):
@@ -210,3 +223,107 @@ def test_existing_workspace_is_never_restamped(monkeypatch, ownership):
         interface="cli", driver="agent-dispatch", supervisor="supervisor",
     )
     assert result["created"] is False
+
+
+@pytest.mark.parametrize("initial", ["baseline", "cohort-v1"])
+def test_lost_creation_response_restart_and_runtime_change_preserve_wire_choice(
+    provider, tmp_path, monkeypatch, initial,
+):
+    _, calls, env, prefix, cap = provider
+    if initial == "baseline":
+        env["CAPABILITIES"] = json.dumps({key: value for key, value in cap.items() if key != "dispatch_cohort"})
+    queue = TaskQueue(tmp_path / "queue.db")
+    task = queue.create(title="work", repo="example")
+    reservation, _ = queue.reserve_spawn(task.id)
+    original_run = subprocess.run
+    lost = [True]
+
+    def run(argv, **kwargs):
+        result = original_run(argv, **kwargs)
+        if "create" in argv and lost[0]:
+            lost[0] = False
+            raise subprocess.TimeoutExpired(argv, 5)
+        return result
+
+    monkeypatch.setattr(embody.subprocess, "run", run)
+
+    def prepare(q, reserved):
+        from dataclasses import asdict
+
+        return embody.prepare_reusable_worktree(
+            asdict(task), asdict(reserved), project="example", interface="cli",
+            driver="agent-dispatch", supervisor="supervisor", allocation_client=QueueBackedClient(q),
+        )
+
+    with pytest.raises(subprocess.TimeoutExpired):
+        prepare(queue, reservation)
+    assert queue.get_reservation(reservation.key).allocation_cohort_transport == initial
+    queue.defer_spawn(reservation.key, detail="creation outcome unknown")
+    restarted = TaskQueue(queue.db_path)
+    retry, _ = restarted.reserve_spawn(task.id)
+    assert retry.creation_key == reservation.creation_key
+    assert retry.allocation_cohort_transport == initial
+    prefix.insert(1, "-B")
+    env["CAPABILITIES"] = json.dumps(
+        cap if initial == "baseline" else {key: value for key, value in cap.items() if key != "dispatch_cohort"},
+    )
+    if initial == "cohort-v1":
+        with pytest.raises(SpawnPreparationRetained, match="requires a capable"):
+            prepare(restarted, retry)
+        assert sum("create" in call for call in calls()) == 1
+        prefix.insert(1, "-u")
+        env["CAPABILITIES"] = json.dumps(cap)
+    assert prepare(restarted, retry)["worktree"] == "workspace"
+    creations = [call for call in calls() if "create" in call]
+    assert len(creations) == 2
+    assert all(("--dispatch-cohort" in call) is (initial == "cohort-v1") for call in creations)
+    assert {call[call.index("--creation-key") + 1] for call in creations} == {reservation.creation_key}
+    with pytest.raises(TaskError, match="cannot change"):
+        restarted.record_spawn_allocation(
+            retry.key, "example", cohort_transport="baseline" if initial == "cohort-v1" else "cohort-v1",
+        )
+
+
+def test_transport_migration_preserves_legacy_baseline_and_new_unselected_intent():
+    import sqlite3
+    from agent_dispatch.queue_assignment_cohort import migrate_allocation_cohorts
+
+    conn = sqlite3.connect(":memory:")
+    conn.execute(
+        "CREATE TABLE spawn_reservations (key TEXT PRIMARY KEY, allocation_cohort TEXT,"
+        "allocation_reservation_key TEXT, creation_key TEXT)",
+    )
+    conn.execute("INSERT INTO spawn_reservations(key) VALUES ('legacy')")
+    migrate_allocation_cohorts(conn)
+    assert conn.execute("SELECT allocation_cohort_transport FROM spawn_reservations").fetchone()[0] == "baseline"
+    conn.execute("INSERT INTO spawn_reservations(key, allocation_cohort_transport) VALUES ('new', NULL)")
+    migrate_allocation_cohorts(conn)
+    assert conn.execute(
+        "SELECT allocation_cohort_transport FROM spawn_reservations WHERE key='new'",
+    ).fetchone()[0] is None
+    with pytest.raises(sqlite3.IntegrityError, match="transport is immutable"):
+        conn.execute("UPDATE spawn_reservations SET allocation_cohort_transport='cohort-v1' WHERE key='legacy'")
+    conn.close()
+
+
+def test_lost_allocation_binding_reply_never_reaches_creation(provider, tmp_path):
+    from dataclasses import asdict
+    from agent_dispatch.client import DispatchError
+
+    _, calls, _, _, _ = provider
+    queue = TaskQueue(tmp_path / "queue.db")
+    task = queue.create(title="work", repo="example")
+    reservation, _ = queue.reserve_spawn(task.id)
+
+    class LostReply(QueueBackedClient):
+        def record_spawn_allocation(self, *args, **kwargs):
+            super().record_spawn_allocation(*args, **kwargs)
+            raise DispatchError(503, "binding reply lost")
+
+    with pytest.raises(SpawnPreparationRetained, match="could not be recorded"):
+        embody.prepare_reusable_worktree(
+            asdict(task), asdict(reservation), project="example", interface="cli",
+            driver="agent-dispatch", supervisor="supervisor", allocation_client=LostReply(queue),
+        )
+    assert queue.get_reservation(reservation.key).allocation_cohort_transport == "cohort-v1"
+    assert calls() == [["worktree-allocation", "capabilities", "--json"]]
