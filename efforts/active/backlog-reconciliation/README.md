@@ -3168,7 +3168,14 @@ sources, transferring owners or turning partial/planning gains into completion.
   proposes 36 unchecked Dispatch Phase 3 rows for four complete families,
   preserving literal OR/AND choices, each source's actual Open condition,
   the checked Phase 6 transfer non-goal and all strict companions.
-  Two canonical keepers remain; no source or resource disposition follows.
+  Two canonical keepers remain; proposal delivery alone establishes no
+  source or resource disposition.
+  Reviewed #12519 actually merged; complete current receiving readback
+  supports the separate #6185 redundant-tracking retirement, not technical
+  completion. #6184/#6187/#6189 retain their distinct explicit conditions.
+  All 36 technical rows remain unchecked and every custodian remains.
+  Eligible arrival #12522 offsets that original-cohort departure: the
+  complete 23:46:16 UTC census remains 854 whole open, 125 above 729.
   The [link-capability/portable-timeout intake](journal/2026/11.13-link-capability-and-portable-timeout-intake.md)
   proposes twelve unchecked portfolio Phase 4 rows through the actual
   Phase 7 domain-review route. Three canonical keepers remain; #6082's
