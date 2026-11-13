@@ -116,6 +116,16 @@ placement is an explicit requirement; no option is a mandatory core dependency.
   transfer client lifecycle, credential/release, SSH, workload or ARC ownership.
   An offline role projection is not accepted as manager installation.
 
+- **Finite onboarding continuation:** F6030 retains the existing campaign,
+  deployment/adopter, #6240 release/construction, #6241 operation/admission,
+  Gateway/SSH, agent-ssh profile/registry, credential-provider and native/resource
+  owners. It neither takes the broader constructor reservation nor makes that
+  whole PR a prerequisite for the independently scoped installed consumer.
+  Existing source appointments, original-operation custody, source/release/
+  installed distinctions and separately authorized effects remain unchanged.
+  No enrollment, credential, service, network, capacity, migration or retirement
+  authority follows from this planning amendment.
+
 ## Context
 
 The reviewed machine-fleet vision already separates driver reachability,
@@ -464,6 +474,59 @@ Implementation sequencing below is **agent-recommended**:
 - [ ] Capture a fresh-environment receipt with exact release/images, commands,
   first readiness, remaining attended prerequisites and non-secret outcomes.
 
+#### Normal first-touch and installed SSH continuation
+
+These unchecked obligations refine the existing onboarding lane; they do not
+appoint another implementer or activate a fleet.
+
+- [ ] **F6030-P1.** Compose normal first touch through the existing supported
+  interpreter, explicitly activated configured-Vault and configuration-selected
+  transport/provider setup owners, including prerequisites and key enrollment.
+  Distinguish runtime installation, database registration, unlock, key availability
+  and readiness. Preserve explicit attended sign-in/unlock prerequisites, existing
+  keys and host trust, user-logon versus service lifetime, standalone use and
+  generic shared-owner tunnel/reconnect machinery; provider provisioning remains
+  behind its adapter. Do not assume a system agent or require a private executable
+  onboarding provider, second supervisor or implicit activation.
+- [ ] **F6030-P2.** Retain v1 token/proof, v2 external PEM and explicitly selected
+  v3 provider-owned continuity references through the existing finite ServiceCaller
+  and host lifetime. The provider owns protected-context validation, original
+  key/operation, requested machine/origin/principal/audience/service scope,
+  reference revision and selected CA comparison. Separate credential/reference
+  scopes from lease/writer ownership before key reads. Unsupported capability,
+  mixed forms or unsafe state refuses before effects; no private JWK parsing or
+  export, alternate issuer, PEM export, reenrollment, identity rotation or change
+  to enrollment/storage, SDK proof semantics or existing local writers.
+- [ ] **F6030-P3.** Complete the explicit selected Source/profile application and
+  SDK closure through the existing constructor and actual noneditable normal
+  Manager/selected-engine/Fleet SSH front door. Defaults remain inert; missing or
+  wrong selected sources/profile/capabilities refuse before identity or lifecycle
+  effects. Incoming readiness AND all applicable current selections are
+  authoritative: old-state provenance/recovery, missing predecessor proofs,
+  predecessor liveness or cleanup cannot veto them. Preserve current release
+  authentication/admission, the monotonic admitted floor, existing good state and
+  strict exact old-object deletion custody independently. No alternate installer,
+  test preinstall or development-support surrogate qualifies this lane; the whole
+  broader constructor PR is not its prerequisite.
+
+##### Normal first-touch and installed SSH local validation
+
+- [ ] **F6030-LV1.** Qualify the selected installed first-touch prerequisites and
+  explicit attended boundaries, key/trust preservation, configured versus ready
+  states and interactive/service lifetime through the original owners and native
+  tiers. Capability enablement or database discovery is not readiness.
+- [ ] **F6030-LV2.** Exercise v1/v2/v3 compatibility, protected provider-reference
+  revision/CA and scope checks, unsupported/mixed forms, original-operation
+  retry/UNKNOWN reconciliation and secret-free refusal without credential export,
+  issuer replacement or alternate fallback.
+- [ ] **F6030-LV3.** Exercise the actual noneditable normal Manager-to-selected-engine
+  Fleet SSH consumer with its selected application/SDK closure: source/payload
+  denial, inert default, first touch, failed-candidate preservation, repeat/update,
+  retained identity/operation, exact readiness and stop/cancellation. Prove healthy
+  incoming selection without predecessor-state veto while retaining current
+  authentication/admission and separate physical cleanup custody. Record native,
+  feed/source-independent installed, release and adopter tiers separately.
+
 ### Phase 3 - Named role deployment
 - [x] Supply explicit configuration-selected role/provider reference planning
   in the installed SDK, preserving custom declarations and bootstrap evidence
@@ -698,6 +761,15 @@ All entries are **agent-recommended implementation gates**.
   fixtures, a count, SDK construction or old code slots alone do not prove
   these native/adopter outcomes.
 
+- [ ] **F6030-G.** Resolve the normal first-touch, credential-reference and
+  noneditable installed-frontdoor obligations above at their original selected
+  consumer/native tiers, including explicit attended prerequisites, keys/trust,
+  v1/v2/v3 refusal/UNKNOWN compatibility, authoritative incoming readiness AND all
+  applicable current selections, preserved good state and exact stop. Existing
+  lifecycle/provider/source owners and strict physical removal custody remain;
+  bounded source/native prerequisites are not containing release, installed
+  rollout, provider/adopter, mesh, migration or retirement acceptance.
+
 ## Proposal
 
 [Safe fleet setup and refresh](fleet-setup-reconciliation.md).
@@ -707,6 +779,27 @@ Runtime package/API details belong to the implementation contract after review,
 not to the vision. This effort does not acquire or migrate live capacity.
 
 ## Journal
+
+### 2026-11-13 - Finite normal first-touch and installed SSH intake
+
+The existing #6030 refinements through comment6702057494 retain normal
+first-touch setup, provider-owned v1/v2/v3 credential-reference composition and
+the actual noneditable Manager/selected-engine/Fleet SSH consumer. The additive
+Plan, local Validation and actual global Validation rows preserve the complete
+existing fleet/cohort contract, checked credit, incoming-first selection policy
+and current owners; no incumbent row or status changes.
+
+Bounded #10929/#10954/#11009/#11023/#11041/#11204/#11227 source and prerequisite
+credit remains credited, not reopened as missing implementation. Those results
+do not establish the containing release, installed rollout, provider/adopter,
+mesh, migration or retirement. The older development-supported witness is not
+the normal source-independent product cohort, and completion of the whole
+broader constructor PR is not this independent consumer's prerequisite.
+
+This is planned unfinished work, not an execution appointment, live
+qualification, accepted resource transfer or issue retirement. Existing #7192
+named-owner transfer and #5861-specific receiving conditions remain scoped to
+their actual contracts.
 
 ### 2026-11-09 UTC - Provider-effect review fixes under the existing source gate
 

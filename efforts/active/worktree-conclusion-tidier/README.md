@@ -47,6 +47,14 @@ does not add a daemon or give a model a force-delete escape hatch.
   `efforts/active/terminal-worktree-reclamation/README.md`; this effort does
   not replace its session/worktree teardown loop.
 
+- **Finite conclusion clarification:** The design coordinator and existing
+  lifecycle/Dispatch maintainers retain this Draft proposal. T6060 records
+  report-only evidence handling and the concluded-checkout distinction; it
+  does not select pilot candidates, budgets, evaluator or report destination,
+  run a pilot, implement apply capability, post candidate steering or enable
+  scheduling. Existing Phase 1 approval gates remain first. Mutation fencing
+  remains before apply-capable implementation, not before a read-only audit.
+
 ## Context
 
 The existing dispatch supervisor can run a declared periodic emitter and a
@@ -171,6 +179,24 @@ Mutation-fencing implementation is not an audit gate._
 - [ ] Validate the safety cases below and obtain operator review of the
   proposed actions before any apply-mode pilot.
 
+#### Shared-context audit continuation
+
+- [ ] **T6060-P1.** Collate shared controller/effort evidence once for sibling
+  candidates, then independently verify each child's landing and obligations.
+  Retain the bounded candidate roster and per-item receipts; truncated output is
+  incomplete evidence. Stop dependent actions on each mutation refusal. Distinguish
+  filesystem orphans, already-absent abandoned resources and missing controller
+  projections; access denial and ambiguous ownership remain holds. Measure
+  time/evidence cost and untouched, removed, blocked and unknown outcomes without
+  executing the original objective or mutating candidates in audit mode.
+
+##### Shared-context audit local validation
+
+- [ ] **T6060-V1.** Verify bounded shared-context/per-child evidence handling,
+  complete receipts, refusal ordering and distinct unknown/access/projection
+  outcomes. Audit writes remain limited to approved worker-run/report state and
+  tool-owned ephemeral collation; no candidate record or posted steering mutation.
+
 ### Phase 3 - Pilot explicitly approved safe actions
 
 _Agent-recommended; blocked on a separate pilot approval._
@@ -183,6 +209,26 @@ _Agent-recommended; blocked on a separate pilot approval._
 - [ ] Corroborate every claimed outcome and preserve every refusal.
 - [ ] Review false-conclusion rates, retained responsibility, runtime cost,
   and net workspace reduction.
+
+#### Concluded-checkout continuation
+
+- [ ] **T6060-P2.** Distinguish checkout conclusion from parent-effort completion.
+  A concluded checkout may retire while its parent remains Active only if the
+  EXACT remaining Plan/Validation roster has a named durable receiver with
+  operator-authorized OR recipient-accepted custody; ALL staged, unstaged,
+  untracked and unlanded content is landed OR explicitly disposed of without loss
+  under existing authority; and PR, resource-claim, liveness, ownership, pairing
+  and ordinary lifecycle checks pass. Use supported effort-binding transfer, not
+  issue creation, an archive, an old merged PR or an invented parent Done state.
+
+##### Concluded-checkout local validation
+
+- [ ] **T6060-V2.** Verify accepted exact continuing custody and lossless handling
+  of every local content category, including later commits, before supported
+  binding transfer and ordinary checkout retirement. An Active parent is not by
+  itself a checkout hold, but unique content, unresolved claims, unknown ownership
+  or unaccepted transfer is. Parent completion still requires its own whole
+  Plan/Validation gate; this distinction grants no apply or removal authority.
 
 ### Phase 4 - Decide recurring adoption
 
@@ -229,6 +275,16 @@ _Agent-recommended acceptance cases for the future implementation._
 - [x] CLI and both MCP recipe surfaces retain report verification and
   project-scoped exclusivity; report-only drive never resolves/unwinds work.
 
+- [ ] **T6060-G.** Resolve shared-context/per-child receipts, mutation-refusal
+  ordering, report-only boundaries and distinct unknown outcomes AND the
+  concluded-checkout/Active-parent cases above. Retain the exact remaining
+  Plan/Validation roster with operator-authorized OR recipient-accepted named
+  custody, lossless disposition of ALL local content and supported binding/PR/
+  claim/liveness/ownership/pairing/lifecycle gates. Issue creation, archival or an
+  old merge is not acceptance, checkout retirement is not parent completion, and
+  audit snapshots never authorize apply. Pilot parameters/approval, apply fencing
+  and recurring/default decisions remain at their existing separate gates.
+
 ## Proposal
 
 [charter.md](charter.md) is the governing draft. The initial capability is
@@ -237,6 +293,20 @@ and private report parameters. No live worker, emitter, schedule, supervisor
 registration, or apply-mode pilot has been started by this effort.
 
 ## Journal
+
+### 2026-11-13 - Shared-context and concluded-checkout clarification
+
+The additive T6060 Plan/local/global Validation retains #6060
+comment6105339115's bounded shared-context/per-child evidence procedure and
+comment6227498995's distinction between checkout retirement and parent-effort
+completion. The charter receives the same explicit transfer clarification
+without deleting its older safeguards or changing any checkbox.
+
+Draft status, completed FINAL/report-only capability credit, selected-parameter
+and explicit audit-pilot gates remain unchanged. No pilot, apply capability,
+posted candidate mutation, recurring/default schedule, removal override or
+execution resource is authorized. Accepted continuing custody preserves the
+exact remaining parent responsibilities; it does not manufacture parent Done.
 
 ### 2026-10-10 - Design-only kickoff
 
