@@ -4,12 +4,12 @@
   "guards": {
     "statelessness_guard.py": "b126e1ef0fc96d93476b8b25ae471b3e14034d0a31184f88ef958b0f1255f02b",
     "cross_repo_guard.py": "a54dc2ee9c3310140e338507d90bddf598a23c537657d2421e933f5b50b0d275",
-    "anchor_write_guard.py": "cf354630e43adfc9e04cd86f3f5d0461bba9aeedb2d9edf85083c19c3f170d69",
+    "anchor_write_guard.py": "e86b82c8a4cd6c73476fd17fe00c62c8804ea1c5af654b69fb1feb2879b46c67",
     "pr_supersede_guard.py": "405514834a48658e8006ee226d838a4305a70eff0d539ab274670c21013bf140"
   },
   "nativeWriteDependencies": {
     "tool_call_forms.py": "faa348d246fe91676f26e097d9cc00e2356be6af7cc852d2e3eacbebced14d21",
-    "guarded_anchor_map.py": "19e5b15f8f90dc503f1dea0947ae451a82937bcb1fffa85ebbd1410d15e4cb7f"
+    "guarded_anchor_map.py": "43f24ef4f8e793e6387abebfa8bfc98cb901646700647888707d9db3dec8a5e9"
   },
   "nativeShellReadCommands": [
     "Get-Date",

@@ -75,6 +75,7 @@ def test_all_installers_deploy_every_py_hook():
         "guarded_anchor_map.py",
         "anchor_write_guard.py",
         "anchor_shell_parser.py",
+        "anchor_registry.py",
         "pr_supersede_guard.py",
         "nudge_status.py",
         "bind_nudge.py",
@@ -103,6 +104,8 @@ def test_all_installers_deploy_every_py_hook():
             missing.append(
                 f"{name} deploys anchor_shell_parser.py after its importer"
             )
+        if text.find("anchor_registry.py") > text.find("anchor_write_guard.py"):
+            missing.append(f"{name} deploys anchor_registry.py after its importer")
         if text.find("hook_runtime.py") > text.find("hook_client.py"):
             missing.append(
                 f"{name} deploys hook_runtime.py after its importer"

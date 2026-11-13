@@ -1574,3 +1574,86 @@ def test_base_repo_adoption_is_not_guarded(tmp_path, monkeypatch, no_pyyaml):
 
 def test_load_worktree_anchors_missing_file_is_empty(tmp_path):
     assert guard.load_worktree_anchors(tmp_path / "nope") == []
+
+
+@pytest.mark.parametrize("fallback", [False, True])
+def test_anchor_inventory_report_preserves_original_values_and_single_reads(tmp_path, monkeypatch, fallback):
+    if fallback:
+        monkeypatch.setitem(sys.modules, "yaml", None)
+    else:
+        import yaml
+
+        assert yaml.safe_load("repos: {}") == {"repos": {}}
+    (tmp_path / "repos.yaml").write_text(
+        'repos:\n  "kept repo":\n    class: worktree\n'
+        '    windows: "C:\\\\Source\\\\kept"\n    wsl: /mnt/source/kept\n'
+        '    linux: /source/kept\n  excluded:\n    class: worktree\n'
+        '    linux: /source/excluded\n  knowledge:\n    class: knowledge\n'
+        '    linux: /source/knowledge\n  reference:\n    class: reference\n'
+        '    linux: /source/reference\n  singleton:\n    class: singleton\n'
+        '    linux: /source/singleton\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "projects.yaml").write_text(
+        'projects:\n  excluded:\n    base_repo: true\n', encoding="utf-8",
+    )
+    expected = guard.load_worktree_anchors(tmp_path)
+    reads = []
+    original = Path.read_text
+
+    def observed(path, *args, **kwargs):
+        if path.parent == tmp_path:
+            reads.append(path.name)
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", observed)
+    report = guard.anchor_inventory_report(tmp_path)
+    assert report["rows"] == expected == [
+        {"name": "kept repo", "path": "C:\\Source\\kept"},
+        {"name": "kept repo", "path": "/mnt/source/kept"},
+        {"name": "kept repo", "path": "/source/kept"},
+    ]
+    assert reads == ["projects.yaml", "repos.yaml"]
+    assert report["status"] == "observed"
+    assert [item["parser"] for item in report["observations"]] == [
+        "fallback" if fallback else "pyyaml",
+    ] * 2
+
+
+@pytest.mark.parametrize("failure", ["missing", "parser", "shape", "opaque"])
+def test_anchor_inventory_report_retains_unavailable_original_results(tmp_path, monkeypatch, failure):
+    (tmp_path / "repos.yaml").write_text(
+        "repos:\n  target:\n    class: worktree\n    linux: /source/target\n",
+        encoding="utf-8",
+    )
+    projects = tmp_path / "projects.yaml"
+    if failure != "missing":
+        projects.write_text("projects: {}\n", encoding="utf-8")
+    if failure == "parser":
+        import yaml
+
+        def broken(_text):
+            raise ValueError("synthetic parser failure")
+
+        monkeypatch.setattr(yaml, "safe_load", broken)
+    elif failure == "shape":
+        projects.write_text("projects: [unexpected]\n", encoding="utf-8")
+    elif failure == "opaque":
+        monkeypatch.setattr(guard, "load_base_repo_names", lambda root: set())
+    expected = guard.load_worktree_anchors(tmp_path)
+    report = guard.anchor_inventory_report(tmp_path)
+    assert report["rows"] == expected == [{"name": "target", "path": "/source/target"}]
+    assert report["status"] == "unavailable"
+    assert any(item["status"] == "unavailable" for item in report["observations"])
+
+
+def test_anchor_inventory_observed_empty_is_not_missing(tmp_path):
+    (tmp_path / "repos.yaml").write_text("repos: {}\n", encoding="utf-8")
+    (tmp_path / "projects.yaml").write_text("projects: {}\n", encoding="utf-8")
+    report = guard.anchor_inventory_report(tmp_path)
+    assert report["rows"] == []
+    assert report["status"] == "observed"
+    (tmp_path / "repos.yaml").unlink()
+    report = guard.anchor_inventory_report(tmp_path)
+    assert report["rows"] == []
+    assert report["status"] == "unavailable"

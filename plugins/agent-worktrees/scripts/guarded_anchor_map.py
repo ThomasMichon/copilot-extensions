@@ -176,6 +176,57 @@ class MapRead(NamedTuple):
     reason: str = ""
     postures: list[dict] | None = None
     posture_errors: list[str] | None = None
+    anchor_inventory: dict | None = None
+
+
+def unavailable_anchor_inventory(reason: str) -> dict:
+    return {
+        "version": 1, "status": "unavailable", "qualification": "managed-observation",
+        "rows": [], "observations": [], "reason": reason,
+    }
+
+
+def read_anchor_inventory(value: object, *, row_limit: int | None = None) -> dict:
+    """Validate supplemental original-owner facts without probing their paths."""
+    invalid = unavailable_anchor_inventory("invalid-anchor-inventory")
+    if (
+        not isinstance(value, dict) or type(value.get("version")) is not int
+        or value["version"] != 1 or not isinstance(value.get("status"), str)
+        or value["status"] not in {"observed", "unavailable"}
+        or value.get("qualification") != "managed-observation"
+        or not isinstance(value.get("rows"), list)
+        or len(value["rows"]) > (MAX_ROOTS if row_limit is None else min(MAX_ROOTS, row_limit))
+        or not isinstance(value.get("observations"), list) or len(value["observations"]) > 2
+        or not isinstance(value.get("reason", ""), str) or len(value.get("reason", "")) > 128
+    ):
+        return invalid
+    for row in value["rows"]:
+        if (
+            not isinstance(row, dict) or set(row) != {"name", "path"}
+            or any(not isinstance(row[key], str) or len(row[key]) > 4096 or "\0" in row[key]
+                   for key in ("name", "path"))
+            or not row["path"]
+        ):
+            return invalid
+    for item in value["observations"]:
+        if (
+            not isinstance(item, dict) or set(item) != {"source", "parser", "status", "reason"}
+            or not isinstance(item["source"], str) or not item["source"] or len(item["source"]) > 4096
+            or "\0" in item["source"]
+            or not isinstance(item["parser"], str)
+            or item["parser"] not in {"pyyaml", "fallback", "none", "opaque"}
+            or not isinstance(item["status"], str) or item["status"] not in {"observed", "unavailable"}
+            or not isinstance(item["reason"], str) or len(item["reason"]) > 128
+        ):
+            return invalid
+    if value["status"] == "observed" and (
+        len(value["observations"]) != 2 or any(
+            item["status"] != "observed" or item["parser"] not in {"pyyaml", "fallback"}
+            or item["reason"] for item in value["observations"]
+        )
+    ):
+        return invalid
+    return value
 
 
 def read_map(source_root: str | Path, registry_root: str | Path) -> MapRead:
@@ -236,7 +287,11 @@ def read_map(source_root: str | Path, registry_root: str | Path) -> MapRead:
         for row in postures:
             if row.get("posture") not in {"", "reference", "worktree"} or type(row.get("elevated")) is not bool:
                 raise ValueError("invalid repository posture")
-        return MapRead("ready", data["roots"], postures=postures, posture_errors=posture_errors)
+        inventory = read_anchor_inventory(
+            data["anchor_inventory"], row_limit=MAX_ROOTS - len(data["roots"]) - len(postures),
+        ) if "anchor_inventory" in data else None
+        return MapRead("ready", data["roots"], postures=postures,
+                       posture_errors=posture_errors, anchor_inventory=inventory)
     except FileNotFoundError:
         return MapRead("missing", [], "guard map not prepared")
     except (OSError, UnicodeError, ValueError, TypeError, RuntimeError) as exc:
