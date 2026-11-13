@@ -332,7 +332,7 @@ def test_http_placement_and_affirmative_start_use_real_transactions(q):
         "ordinary_initial_start_versions": [1],
         "ordinary_writer_requirement_versions": [1],
         "prepared_writer_requirement_versions": [1],
-        "session_origin_binding_versions": [1],
+        "session_origin_reservation_versions": [1],
         "cli_initial_start_versions": [1],
         "instance_bound_placement_versions": [1],
         "instance_scoped_reservation_versions": [1],

@@ -122,8 +122,6 @@ def test_create_store_send_order_and_readable_identity(startup):
 
 
 def test_lost_baseline_create_reply_cannot_gain_origin_on_retry(startup, monkeypatch):
-    from agent_dispatch.queue_session_origin import bind
-
     queue, task, client, calls = startup
     original = ordinary_bridge.subprocess.run
 
@@ -148,7 +146,7 @@ def test_lost_baseline_create_reply_cannot_gain_origin_on_retry(startup, monkeyp
     assert retry.creation_key == first.creation_key
     assert retry.session_origin_transport == "baseline"
     with pytest.raises(TaskError, match="cannot change"):
-        bind(restarted, retry.key, startup_revision=1, transport="origin-v1")
+        restarted.reserve_spawn(task["id"], session_origin_transport="origin-v1")
     assert len(calls) == 1
 
 

@@ -187,43 +187,39 @@ identifies that original reservation. Driver changes do not borrow an acquisitio
 request as the original ordinary creation. A new allocation key gets its own
 snapshot; an existing targeted/reused workspace is never restamped.
 
-New reservations start with unselected `session_origin_transport`. The additive
-`POST /spawn-reservations/{key}/session-origin` accepts exactly
-`{"startup_revision": 1, "transport": "baseline"}` or the `origin-v1` transport.
-It binds the choice on the original and current reservation under one write lock,
-requiring the current reserving startup and a representable snapshot for
-`origin-v1`. Concurrent conflicting choices cannot both commit. Evidence and
-original-reservation references are immutable; a selected baseline cannot gain
-origin metadata after upgrade, and an origin-v1 retry cannot silently downgrade.
-Lost responses are reconciled by reading/repeating that same binding, not by
-sending another native creation form.
+The existing reservation and pool-placement operations optionally accept
+`session_origin_transport: "baseline"` or `"origin-v1"`. Selection commits with
+the original snapshot and claim, never in a later preparation transaction.
+Omission selects baseline for a new native request. Thus an unchanged caller
+cannot send baseline while leaving a mutable pending choice for a later retry.
+Origin-v1 requires representable original evidence. Evidence, original-owner
+references and the selected transport are immutable.
 
-Existing allocation and workspace-preparation operations also seal baseline
-when the caller omitted origin selection, before it can send a native request.
-An explicit origin choice must precede preparation; later preparation preserves
-that choice. All ordinary attempts for a creation key participate in transport
-reconciliation, not just its first reservation. An earlier unselected attempt,
-or recorded preparation/native history without selection, may already have sent
-a baseline request and cannot later gain origin-v1. An intervening rolled-back
-provider's baseline is retained; conflicting sealed history refuses visibly
-rather than guessing which request won.
+All ordinary attempts for a creation key participate in transport reconciliation,
+including an intervening rolled-back provider's baseline. Historical null choices
+remain conservatively baseline; contradictory sealed choices refuse. An active
+reservation replay cannot change its transport. A separately keyed acquisition
+or first ordinary creation can select origin-v1 despite inherited workspace
+facts: carrying a project/path is not current-attempt preparation.
+Lost responses retain the same reservation/request, never a second native form.
 
-The running coordinator advertises `session_origin_binding_versions: [1]`
+The running coordinator advertises `session_origin_reservation_versions: [1]`
 through its existing pool-placement contract. The explicit client checks that
-selected peer before sending the new request. An older caller still uses its
-unchanged operations; an older, invalid or rolled-back provider receives no new
-binding request. Historical rows migrate to baseline with null evidence and
-remain unattributed on restart/retry. The old form has no scheduled retirement.
-This expansion does not yet migrate automatic session callers, qualify Bridge
-adoption, change startup admission or confer cleanup authority.
+selected peer before sending the optional property and confirms the returned
+selection before permitting startup. Older callers retain unchanged request
+bodies; an older, invalid or rolled-back provider receives no new syntax.
+Historical rows migrate to baseline with null evidence and remain unattributed.
+The old form has no scheduled retirement. No separate selection endpoint or
+preparation marker is introduced. This expansion does not yet migrate automatic
+session callers, qualify Bridge adoption or confer cleanup authority.
 
 Capture adds indexed reservation/creation-key reads plus the existing
 producer and exact-assignment point reads, once per newly committed reservation.
 Ordinary transport reconciliation examines that creation key's indexed attempt
 lineage and returns grouped choices; it does not scan unrelated reservations.
 Reads do not enrich or recapture it. No process, network request, registrar scan,
-background flow or additional ownership registry is introduced. Binding uses one
-existing coordinator transaction and updates at most two reservation rows.
+background flow or additional ownership registry is introduced. Selection stays
+inside the existing reservation transaction.
 
 ## Original assignment cohort
 

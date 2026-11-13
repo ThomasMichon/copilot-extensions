@@ -15,6 +15,26 @@ from typing import Any
 import httpx
 
 
+def require_session_origin_support(contract: dict) -> None:
+    from .client_errors import DispatchError
+
+    versions = contract.get("session_origin_reservation_versions")
+    if not isinstance(versions, list) or not any(type(v) is int and v == 1 for v in versions):
+        raise DispatchError(426, "coordinator lacks session origin reservation version 1")
+
+
+def selected_session_origin(result: dict, requested: str | None) -> dict:
+    from .client_errors import DispatchError
+
+    if requested is not None and (
+        not isinstance(result, dict) or not isinstance(result.get("reservation"), dict)
+        or result["reservation"].get("session_origin_transport") != requested
+        or requested == "origin-v1" and not isinstance(result["reservation"].get("session_origin"), dict)
+    ):
+        raise DispatchError(502, "session origin reservation outcome is unknown")
+    return result
+
+
 class SpawnReservationClientMixin:
     """``list_reservations``/``get_reservation``, mixed into
     ``DispatchClient``.
@@ -84,20 +104,6 @@ class SpawnReservationClientMixin:
                    if worktree_writer_requirement is not None else {}),
             },
             **options,
-        ))
-
-    def bind_spawn_session_origin(
-        self, key: str, *, startup_revision: int, transport: str,
-    ) -> dict:
-        """Seal optional birth metadata through the selected reservation owner."""
-        from .client_errors import DispatchError
-
-        versions = self.pool_placement_contract().get("session_origin_binding_versions")
-        if not isinstance(versions, list) or not any(type(v) is int and v == 1 for v in versions):
-            raise DispatchError(426, "coordinator lacks session origin binding version 1")
-        return self._unwrap(self._http.post(
-            f"/spawn-reservations/{key}/session-origin",
-            json={"startup_revision": startup_revision, "transport": transport},
         ))
 
     def record_created_agent(

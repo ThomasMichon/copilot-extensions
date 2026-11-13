@@ -151,7 +151,8 @@ merged plan does not establish running adoption.
       acquisition negotiation merged in #12387. The ordinary keyed-creation
       CLI/client carrier and executing-CLI declarations merged in #12396.
       The reservation owner now captures session-origin candidates separately
-      from reusable allocation evidence and exposes optional immutable wire binding.
+      from reusable allocation evidence and seals optional wire selection in its
+      existing reservation/placement transaction.
       Ordinary keyed retries retain their original session request; acquisition
       deliveries retain their own attempt. Automatic callers remain unmodified.
       Dispatch session-origin caller migration and running qualification remain open.

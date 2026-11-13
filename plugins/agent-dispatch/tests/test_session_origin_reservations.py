@@ -16,20 +16,21 @@ from agent_dispatch.client import DispatchClient, DispatchError
 from agent_dispatch.coordinator import create_app
 from agent_dispatch.queue import TaskError, TaskQueue
 from agent_dispatch.queue_pool_placement import pool_placement_contract
-from agent_dispatch.queue_session_origin import bind, migrate
+from agent_dispatch.queue_session_origin import migrate
 from tests.test_assignment_cohort import managed_task
 from tests.test_pool_placement import place, pool, publish
 
 
-def test_current_pool_assignment_is_saved_before_body_and_survives_mutable_changes(tmp_path):
+@pytest.mark.parametrize("transport", [None, "origin-v1"])
+def test_current_pool_assignment_is_saved_before_body_and_survives_mutable_changes(tmp_path, transport):
     queue = TaskQueue(tmp_path / "queue.db")
     task, _ = managed_task(queue, "original")
     publish(queue, pool())
-    reservation, _ = place(queue, task)
+    reservation, _ = place(queue, task, session_origin_transport=transport)
     origin = reservation.session_origin
     assert reservation.worktree is None and reservation.session_handle is None
     assert reservation.session_origin_reservation_key == reservation.key
-    assert reservation.session_origin_transport is None
+    assert reservation.session_origin_transport == (transport or "baseline")
     assert origin == {
         "task_id": task.id, "reservation_key": reservation.key,
         "cohort": {
@@ -58,7 +59,7 @@ def test_new_acquisition_attempt_in_reused_allocation_has_its_own_origin(tmp_pat
     first, _ = queue.reserve_spawn(task.id, driver="cli")
     queue.record_spawn_worktree(first.key, "workspace", ownership="created", driver="cli")
     queue.fail_spawn(first.key, detail="native did not start")
-    retry, _ = queue.reserve_spawn(task.id, driver="cli")
+    retry, _ = queue.reserve_spawn(task.id, driver="cli", session_origin_transport="origin-v1")
     assert retry.worktree == "workspace" and retry.worktree_ownership == "reused"
     assert retry.allocation_cohort == first.allocation_cohort
     assert retry.session_origin["reservation_key"] == retry.key
@@ -68,7 +69,7 @@ def test_new_acquisition_attempt_in_reused_allocation_has_its_own_origin(tmp_pat
     queue.start(task.id, "worker")
     queue.complete(task.id, "worker")
     later_task = queue.create("later episode", repo=task.repo, dedup_key="logical")
-    later, _ = queue.reserve_spawn(later_task.id, driver="cli")
+    later, _ = queue.reserve_spawn(later_task.id, driver="cli", session_origin_transport="origin-v1")
     assert later.worktree == "workspace"
     assert later.allocation_cohort["emitter"]["task_id"] == task.id
     assert later.session_origin == {
@@ -81,8 +82,7 @@ def test_new_acquisition_attempt_in_reused_allocation_has_its_own_origin(tmp_pat
 def test_keyed_ordinary_retry_lost_reply_and_later_episode_keep_original_choice(tmp_path, transport):
     queue = TaskQueue(tmp_path / "queue.db")
     task, _ = managed_task(queue, "original", dedup_key="logical")
-    first, _ = queue.reserve_spawn(task.id, driver="ordinary-bridge")
-    selected = bind(queue, first.key, startup_revision=1, transport=transport)
+    first, _ = queue.reserve_spawn(task.id, driver="ordinary-bridge", session_origin_transport=transport)
     queue.defer_spawn(first.key, detail="creation reply lost")
     restarted = TaskQueue(queue.db_path)
     retry, _ = restarted.reserve_spawn(task.id, driver="ordinary-bridge")
@@ -90,10 +90,9 @@ def test_keyed_ordinary_retry_lost_reply_and_later_episode_keep_original_choice(
     assert retry.session_origin == first.session_origin
     assert retry.session_origin_reservation_key == first.key
     assert retry.session_origin_transport == transport
-    assert bind(restarted, retry.key, startup_revision=1, transport=transport).session_origin == selected.session_origin
+    assert restarted.reserve_spawn(task.id, session_origin_transport=transport)[0].session_origin == first.session_origin
     with pytest.raises(TaskError, match="cannot change"):
-        bind(restarted, retry.key, startup_revision=1,
-             transport="baseline" if transport == "origin-v1" else "origin-v1")
+        restarted.reserve_spawn(task.id, session_origin_transport="baseline" if transport == "origin-v1" else "origin-v1")
     restarted.fail_spawn(retry.key, detail="retained for later retry")
     restarted.claim_one("worker", task_id=task.id)
     restarted.start(task.id, "worker")
@@ -114,7 +113,7 @@ def test_unselected_ordinary_retry_retains_baseline_for_unknown_earlier_send(tmp
     retry, _ = queue.reserve_spawn(task.id, driver="ordinary-bridge")
     assert retry.session_origin_transport == "baseline"
     with pytest.raises(TaskError, match="cannot change"):
-        bind(queue, retry.key, startup_revision=1, transport="origin-v1")
+        queue.reserve_spawn(task.id, session_origin_transport="origin-v1")
     assert queue.get_reservation(first.key).session_origin_transport == "baseline"
     assert queue.get_reservation(retry.key).session_origin_transport == "baseline"
 
@@ -123,12 +122,11 @@ def test_switch_from_acquisition_to_keyed_creation_does_not_inherit_its_session_
     queue = TaskQueue(tmp_path / "queue.db")
     task = queue.create("work", repo="example")
     first, _ = queue.reserve_spawn(task.id, driver="cli")
-    bind(queue, first.key, startup_revision=1, transport="baseline")
     queue.fail_spawn(first.key, detail="before native")
-    ordinary, _ = queue.reserve_spawn(task.id, driver="ordinary-bridge")
+    ordinary, _ = queue.reserve_spawn(task.id, driver="ordinary-bridge", session_origin_transport="origin-v1")
     assert ordinary.creation_key == first.creation_key
     assert ordinary.session_origin["reservation_key"] == ordinary.key
-    assert ordinary.session_origin_transport is None
+    assert ordinary.session_origin_transport == "origin-v1"
 
 
 def test_legacy_migration_and_keyed_retry_do_not_backfill_origin(tmp_path, monkeypatch):
@@ -151,8 +149,8 @@ def test_legacy_migration_and_keyed_retry_do_not_backfill_origin(tmp_path, monke
     assert retry.session_origin is None and retry.session_origin_transport == "baseline"
     assert retry.session_origin_reservation_key == first.key
     with pytest.raises(TaskError, match="cannot change"):
-        bind(restarted, retry.key, startup_revision=1, transport="origin-v1")
-    assert bind(restarted, retry.key, startup_revision=1, transport="baseline").session_origin is None
+        restarted.reserve_spawn(task.id, session_origin_transport="origin-v1")
+    assert restarted.reserve_spawn(task.id, session_origin_transport="baseline")[0].session_origin is None
 
     with sqlite3.connect(":memory:") as conn:
         conn.execute("CREATE TABLE spawn_reservations (key TEXT, creation_key TEXT, driver TEXT)")
@@ -164,7 +162,8 @@ def test_legacy_migration_and_keyed_retry_do_not_backfill_origin(tmp_path, monke
         ).fetchone() == (None, None, "baseline")
 
 
-def test_capture_failure_rolls_back_original_pool_claim_and_reservation(tmp_path, monkeypatch):
+@pytest.mark.parametrize("failure", ["capture", "unrepresentable"])
+def test_capture_failure_rolls_back_original_pool_claim_and_reservation(tmp_path, monkeypatch, failure):
     from agent_dispatch import queue_session_origin
 
     queue = TaskQueue(tmp_path / "queue.db")
@@ -172,11 +171,13 @@ def test_capture_failure_rolls_back_original_pool_claim_and_reservation(tmp_path
     publish(queue, pool())
 
     def fail(*args, **kwargs):
+        if failure == "unrepresentable":
+            return {"schema": "unsupported"}
         raise TaskError("session snapshot unavailable")
 
     monkeypatch.setattr(queue_session_origin, "capture_cohort", fail)
-    with pytest.raises(TaskError, match="session snapshot unavailable"):
-        place(queue, task)
+    with pytest.raises(TaskError, match="session snapshot unavailable|representable original evidence"):
+        place(queue, task, session_origin_transport="origin-v1")
     assert queue.get(task.id) == task
     assert queue.task_pool_assignment(task.id) is None
     assert queue.list_reservations(task_id=task.id) == []
@@ -188,12 +189,10 @@ def test_rollback_attempt_cannot_be_ignored_when_selecting_keyed_creation_transp
 
     queue = TaskQueue(tmp_path / "queue.db")
     task = queue.create("work", repo="example")
-    first, _ = queue.reserve_spawn(task.id, driver="ordinary-bridge")
-    if initial:
-        bind(queue, first.key, startup_revision=1, transport=initial)
+    first, _ = queue.reserve_spawn(task.id, driver="ordinary-bridge", session_origin_transport=initial)
     queue.defer_spawn(first.key, detail="preparation response unknown")
 
-    def old_provider(conn, task, *, key):
+    def old_provider(conn, task, *, key, requested):
         conn.execute(
             "UPDATE spawn_reservations SET session_origin_transport='baseline' WHERE key=?", (key,),
         )
@@ -203,12 +202,9 @@ def test_rollback_attempt_cannot_be_ignored_when_selecting_keyed_creation_transp
         old, _ = queue.reserve_spawn(task.id, driver="ordinary-bridge")
     assert old.creation_key == first.creation_key and old.session_origin is None
     restarted = TaskQueue(queue.db_path)
-    if initial:
-        with pytest.raises(TaskError, match="conflicting.*history"):
-            bind(restarted, old.key, startup_revision=1, transport="baseline")
-    else:
+    if not initial:
         with pytest.raises(TaskError, match="cannot change"):
-            bind(restarted, old.key, startup_revision=1, transport="origin-v1")
+            restarted.reserve_spawn(task.id, session_origin_transport="origin-v1")
     restarted.defer_spawn(old.key, detail="rolled-back sender result unknown")
     if initial:
         with pytest.raises(TaskError, match="conflicting.*history"):
@@ -228,9 +224,7 @@ def test_legacy_preparation_seals_baseline_but_keeps_an_explicit_origin_choice(t
     queue = TaskQueue(tmp_path / "queue.db")
     for selected in (None, "origin-v1"):
         task = queue.create("work", repo="example")
-        reservation, _ = queue.reserve_spawn(task.id, driver=driver)
-        if selected:
-            bind(queue, reservation.key, startup_revision=1, transport=selected)
+        reservation, _ = queue.reserve_spawn(task.id, driver=driver, session_origin_transport=selected)
         if preparation == "allocation":
             result = queue.record_spawn_allocation(reservation.key, "example")
         else:
@@ -241,90 +235,89 @@ def test_legacy_preparation_seals_baseline_but_keeps_an_explicit_origin_choice(t
         assert result.session_origin == reservation.session_origin
         if not selected:
             with pytest.raises(TaskError, match="cannot change"):
-                bind(queue, reservation.key, startup_revision=1, transport="origin-v1")
+                queue.reserve_spawn(task.id, session_origin_transport="origin-v1")
 
 
 @pytest.mark.parametrize("driver", ["cli", "ordinary-bridge"])
-def test_same_attempt_prepared_by_rolled_back_owner_cannot_gain_origin(tmp_path, monkeypatch, driver):
-    from agent_dispatch import queue_session_origin
-
+def test_inherited_workspace_facts_do_not_block_new_session_origin_selection(tmp_path, driver):
     queue = TaskQueue(tmp_path / "queue.db")
     task = queue.create("work", repo="example")
-    reservation, _ = queue.reserve_spawn(task.id, driver=driver)
-    with monkeypatch.context() as rollback:
-        rollback.setattr(queue_session_origin, "seal_preparation", lambda *a: None)
-        queue.record_spawn_allocation(reservation.key, "example")
-    assert queue.get_reservation(reservation.key).session_origin_transport is None
+    first, _ = queue.reserve_spawn(task.id, driver="cli")
+    queue.record_spawn_allocation(first.key, "example")
+    first = queue.record_spawn_worktree(
+        first.key, "workspace", ownership="created", driver="cli",
+        allocation_project="example", worktree_path="/fixture/workspace",
+    )
+    queue.fail_spawn(first.key, detail="before native")
     restarted = TaskQueue(queue.db_path)
-    with pytest.raises(TaskError, match="cannot change"):
-        bind(restarted, reservation.key, startup_revision=1, transport="origin-v1")
-    assert bind(
-        restarted, reservation.key, startup_revision=1, transport="baseline",
-    ).session_origin == reservation.session_origin
+    current, _ = restarted.reserve_spawn(task.id, driver=driver, session_origin_transport="origin-v1")
+    assert current.worktree == first.worktree and current.allocation_project == "example"
+    assert current.worktree_ownership == "reused"
+    assert current.session_origin_transport == "origin-v1"
+    assert current.session_origin["reservation_key"] == current.key
+    assert current.session_origin_reservation_key == current.key
+    assert current.allocation_cohort == first.allocation_cohort
+    assert restarted.get_reservation(first.key).session_origin_transport == "baseline"
 
 
 def test_concurrent_wire_choices_have_one_transactional_winner(tmp_path):
     queue = TaskQueue(tmp_path / "queue.db")
     task = queue.create("work", repo="example")
-    reservation, _ = queue.reserve_spawn(task.id, driver="ordinary-bridge")
     barrier = Barrier(2)
 
     def choose(transport):
         barrier.wait()
         try:
-            return bind(queue, reservation.key, startup_revision=1, transport=transport).session_origin_transport
+            return queue.reserve_spawn(task.id, driver="ordinary-bridge", session_origin_transport=transport)[0].session_origin_transport
         except TaskError:
             return "refused"
 
     with ThreadPoolExecutor(max_workers=2) as threads:
         outcomes = list(threads.map(choose, ["baseline", "origin-v1"]))
     assert outcomes.count("refused") == 1
-    assert queue.get_reservation(reservation.key).session_origin_transport == next(
+    assert queue.latest_reservation(task.id).session_origin_transport == next(
         item for item in outcomes if item != "refused"
     )
 
 
-@pytest.mark.parametrize("condition", ["revision", "fenced", "released", "terminal"])
-def test_stale_startup_cannot_choose_a_wire_form(tmp_path, condition):
+@pytest.mark.parametrize("condition", ["fenced", "released"])
+def test_existing_startup_cannot_choose_another_wire_form(tmp_path, condition):
     queue = TaskQueue(tmp_path / "queue.db")
     task = queue.create("work", repo="example")
     reservation, _ = queue.reserve_spawn(task.id)
-    revision = 2 if condition == "revision" else 1
-    if condition == "terminal":
-        queue.fail_spawn(reservation.key, detail="no native")
-    elif condition != "revision":
-        column = "startup_fenced" if condition == "fenced" else "release_requested"
-        with queue._connect() as conn:
-            conn.execute(f"UPDATE spawn_reservations SET {column}=1 WHERE key=?", (reservation.key,))
-    with pytest.raises(TaskError, match="current reserving startup"):
-        bind(queue, reservation.key, startup_revision=revision, transport="origin-v1")
-    assert queue.get_reservation(reservation.key).session_origin_transport is None
+    column = "startup_fenced" if condition == "fenced" else "release_requested"
+    with queue._connect() as conn:
+        conn.execute(f"UPDATE spawn_reservations SET {column}=1 WHERE key=?", (reservation.key,))
+    with pytest.raises(TaskError, match="cannot change"):
+        queue.reserve_spawn(task.id, session_origin_transport="origin-v1")
+    assert queue.get_reservation(reservation.key).session_origin_transport == "baseline"
 
 
-def test_current_http_binding_replay_and_strict_invalid_request(tmp_path):
+def test_current_http_reservation_selects_origin_atomically_and_rejects_rebinding(tmp_path):
     queue = TaskQueue(tmp_path / "queue.db")
     task = queue.create("work", repo="example")
-    reservation, _ = queue.reserve_spawn(task.id)
     with TestClient(create_app(queue, enable_mcp=False, verification_interval=0)) as api:
         support = api.get(f"/tasks/{task.id}/pool-start/contract").json()["pool_placement"]
-        assert support["session_origin_binding_versions"] == [1]
-        url = f"/spawn-reservations/{reservation.key}/session-origin"
-        body = {"startup_revision": 1, "transport": "origin-v1"}
+        assert support["session_origin_reservation_versions"] == [1]
+        url = "/spawn-reservations"
+        body = {"task_id": task.id, "session_origin_transport": "origin-v1"}
         response = api.post(url, json=body)
-        assert response.status_code == 200 and response.json()["session_origin"] == reservation.session_origin
-        assert api.post(url, json=body).json() == response.json()
+        assert response.status_code == 200 and response.json()["reserved"] is True
+        reservation = response.json()["reservation"]
+        assert reservation["session_origin_transport"] == "origin-v1"
+        assert reservation["session_origin"]["reservation_key"] == reservation["key"]
+        replay = api.post(url, json=body).json()
+        assert replay["reserved"] is False and replay["reservation"] == reservation
         for invalid in (
-            {**body, "startup_revision": True}, {**body, "transport": "future"},
-            {**body, "session_origin": {}},
+            {**body, "session_origin_transport": True}, {**body, "session_origin_transport": "future"},
         ):
             assert api.post(url, json=invalid).status_code == 422
-        assert api.post(url, json={**body, "transport": "baseline"}).status_code == 409
+        assert api.post(url, json={**body, "session_origin_transport": "baseline"}).status_code == 409
 
 
-def test_current_client_lost_binding_reply_recovers_same_owner_without_native_send(tmp_path):
+def test_current_client_lost_reservation_reply_recovers_same_owner_without_native_send(tmp_path):
     queue = TaskQueue(tmp_path / "queue.db")
     task = queue.create("work", repo="example")
-    reservation, _ = queue.reserve_spawn(task.id, driver="ordinary-bridge")
     lost = [True]
     with TestClient(create_app(queue, control_token="control", enable_mcp=False, verification_interval=0)) as api:
         def respond(request):
@@ -334,37 +327,61 @@ def test_current_client_lost_binding_reply_recovers_same_owner_without_native_se
             if request.method == "POST" and lost[0]:
                 lost[0] = False
                 assert response.status_code == 200
-                raise httpx.ReadTimeout("binding response lost")
+                raise httpx.ReadTimeout("reservation response lost")
             return httpx.Response(response.status_code, json=response.json())
 
         with DispatchClient(
             "http://testserver", control_token="control", transport=httpx.MockTransport(respond),
         ) as client:
             with pytest.raises(httpx.ReadTimeout):
-                client.bind_spawn_session_origin(reservation.key, startup_revision=1, transport="origin-v1")
+                client.reserve_spawn(task.id, driver="ordinary-bridge", session_origin_transport="origin-v1")
+            reservation = queue.latest_reservation(task.id)
             stored = client.get_reservation(reservation.key)
             assert stored["session_origin_transport"] == "origin-v1"
             assert stored["session_origin"] == reservation.session_origin
-            confirmed = client.bind_spawn_session_origin(
-                reservation.key, startup_revision=1, transport="origin-v1",
-            )
+            replay = client.reserve_spawn(task.id, driver="ordinary-bridge", session_origin_transport="origin-v1")
+            assert replay["reserved"] is False
+            confirmed = replay["reservation"]
             assert confirmed["session_origin"] == stored["session_origin"]
             assert confirmed["session_handle"] is None and confirmed["worktree"] is None
 
 
+def test_current_pool_client_selects_original_origin_in_its_claim_transaction(tmp_path):
+    queue = TaskQueue(tmp_path / "queue.db")
+    task = queue.create("work", repo="example")
+    revision = publish(queue, pool())
+    with TestClient(create_app(queue, control_token="control", enable_mcp=False, verification_interval=0)) as api:
+        def respond(request):
+            response = api.request(request.method, str(request.url), content=request.content, headers=request.headers)
+            return httpx.Response(response.status_code, json=response.json())
+
+        with DispatchClient("http://testserver", control_token="control", transport=httpx.MockTransport(respond)) as client:
+            result = client.place_pool_task(
+                task.id, reserved_by="allocator", catalog_revision=revision, session_origin_transport="origin-v1",
+            )
+    assert result["reserved"] is True and queue.get(task.id).status == "claimed"
+    reservation = result["reservation"]
+    assert reservation["session_origin_transport"] == "origin-v1"
+    assert reservation["session_origin"]["cohort"]["pool"] == result["assignment"]
+
+
 @pytest.mark.parametrize("versions", [None, [], [True], [2]])
-def test_new_client_refuses_prior_or_invalid_coordinator_before_post(versions):
+@pytest.mark.parametrize("operation", ["reserve", "pool"])
+def test_new_client_refuses_prior_or_invalid_coordinator_before_post(versions, operation):
     calls = []
 
     def respond(request):
         calls.append(request)
         if request.method == "GET":
             return httpx.Response(200, json={
-                **pool_placement_contract(), "session_origin_binding_versions": versions,
+                **pool_placement_contract(), "session_origin_reservation_versions": versions,
             })
-        pytest.fail("no binding sent to unsupported provider")
+        pytest.fail("no new reservation form sent to unsupported provider")
 
     with DispatchClient("http://fixture", transport=httpx.MockTransport(respond)) as client:
-        with pytest.raises(DispatchError, match="session origin binding"):
-            client.bind_spawn_session_origin("reservation", startup_revision=1, transport="origin-v1")
+        with pytest.raises(DispatchError, match="session origin reservation"):
+            if operation == "reserve":
+                client.reserve_spawn("task", session_origin_transport="origin-v1")
+            else:
+                client.place_pool_task("task", reserved_by="allocator", catalog_revision=1, session_origin_transport="origin-v1")
     assert len(calls) == 1
