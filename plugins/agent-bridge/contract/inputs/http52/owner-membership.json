@@ -186,6 +186,7 @@
     "live_question_answers": 1,
     "mux_question_answers": 1,
     "dispatch_acp_session_origin": 1,
+    "dispatch_cli_session_origin": 1,
     "portable_capabilities": {
       "portable_mux": 1,
       "portable_inbox": 1,

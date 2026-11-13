@@ -505,6 +505,7 @@ def test_http51_capture_actual_observations(
     observed["live_question_answers"] = health["capabilities"]["live_question_answers"]
     observed["mux_question_answers"] = health["capabilities"]["mux_question_answers"]
     observed["dispatch_acp_session_origin"] = health["capabilities"]["dispatch_acp_session_origin"]
+    observed["dispatch_cli_session_origin"] = health["capabilities"]["dispatch_cli_session_origin"]
     observed["portable_capabilities"] = {
         key: health["capabilities"][key] for key in vector["expected"]["portable_capabilities"]
     }
