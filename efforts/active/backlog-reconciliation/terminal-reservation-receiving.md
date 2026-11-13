@@ -5,6 +5,28 @@
 Parent: [Backlog Reconciliation](README.md), continuing Phase 2.
 Method: [Weighted Semantic Consolidation](semantic-density-consolidation.md).
 
+## Delivered receiving and separate source retention
+
+The plan merged in [#12374](https://github.com/ThomasMichon/copilot-extensions/pull/12374).
+Fresh complete source/receiver qualification preceded additive publication.
+Whole actual #7116 readback verifies the direct A9R1-A9RT contract alongside
+all nine incumbent outcomes, continuation/relay, first-create, validation and
+coordination clauses. Its existing text, discussions, check states, title,
+labels, assignments and custody remain intact.
+
+The [separate source judgment](https://github.com/ThomasMichon/copilot-extensions/issues/7805#issuecomment-6844896867)
+keeps **#7805 OPEN**. Its earlier retention explicitly requires actual
+same-owner Dev merge **and full matching acceptance before the finite source
+issue can close**. The later correction credits #7836's real merge but retains
+unverified matching source acceptance. That literal condition and the continuing
+bounded recovery claim remain unresolved; the parent receipt supplies neither
+technical acceptance nor source/resource release. No installed/native or new
+acknowledgement bar is added.
+
+The proposal and crosswalk below retain the reviewed rationale. Only actual
+receiving and the separate keep-open judgment are complete; product rows stay
+unchecked and no closure was attempted.
+
 ## Existing parent and bounded intake
 
 Propose existing [#7116](https://github.com/ThomasMichon/copilot-extensions/issues/7116)
@@ -131,11 +153,11 @@ definitive original-caller completion/fencing.
 
 ### A9RT - Receiving and separate disposition
 
-- [ ] Review and append this complete direct sublane to existing #7116,
+- [x] Review and append this complete direct sublane to existing #7116,
   preserving every incumbent body/discussion/check state/label/assignment
   and owner. Recheck full current eligibility and read back the whole actual
   receiver before any source-specific disposition.
-- [ ] Separately judge redundant #7805 tracking only after all unique
+- [x] Separately judge redundant #7805 tracking only after all unique
   original/refined requirements and actual retention/claim conditions are
   accounted for. A qualifying retirement uses `NOT_PLANNED`, not
   `COMPLETED`, with the full unfinished source acceptance and recovery lane
