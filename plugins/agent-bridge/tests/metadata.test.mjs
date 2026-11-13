@@ -531,6 +531,19 @@ test("ambiguous private roots remain unresolved unless additional WSL evidence i
   })).environment, "wsl");
 });
 
+test("native Linux overlay roots retain the safe older-provider fallback", async () => {
+  const observation = await executionObservation({
+    platform: "linux", host: "host", kernel: "generic-linux", isFile: async () => false,
+    read: async (path) => path.endsWith("mountinfo")
+      ? "29 23 0:25 / / rw - overlay root rw" : "generic-linux",
+  });
+  assert.equal(observation.environment, "linux");
+  const lookup = machineLookup(async () => ({ status: 404, ok: false }), {
+    observe: async () => observation,
+  });
+  assert.equal(await lookup(), undefined);
+});
+
 test("live naming uses the reporter and permits CLI fallback only for an absent provider route", async (t) => {
   const cli = useHangingAgentWorktrees(t);
   const observation = { hostname: "host", environment: "wsl" };

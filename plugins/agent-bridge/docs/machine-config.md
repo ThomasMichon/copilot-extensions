@@ -64,10 +64,12 @@ that same 404 path; the legacy adapter remains supported with no retirement
 scheduled. Current-provider heartbeats do not spawn the Worktrees CLI for
 machine naming. Native composed latency remains a separate measurement from
 the deterministic no-spawn and fresh-configuration regressions.
-Execution roots identified only by the additional mount evidence do not use
-the older CLI fallback, whose substrate classifier may not recognize them.
+On a WSL kernel, execution roots identified only by the additional mount
+evidence do not use the older CLI fallback, whose substrate classifier may not
+recognize them.
 They remain unresolved against an older provider rather than advertise its
 potentially incorrect WSL name.
+Native Linux overlay roots retain the safe older-provider fallback.
 
 ## Overview
 

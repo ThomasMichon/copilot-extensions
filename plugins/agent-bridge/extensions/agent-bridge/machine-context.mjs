@@ -21,12 +21,13 @@ export async function executionObservation({
         return mount?.split(" ")[4] === "/"
           && /^(overlay|fuse(?:\.fuse)?[.-]overlayfs)\s/.test(filesystem || "");
       });
+      const version = await read("/proc/version").catch(() => "");
+      const wslKernel = /microsoft/i.test(`${kernel}\n${version}`);
       if (containerRoot) {
         // An older CLI may still classify this execution root by its WSL kernel.
-        legacyFallbackAllowed = false;
+        if (wslKernel) legacyFallbackAllowed = false;
       } else {
-        const version = await read("/proc/version").catch(() => "");
-        if (/microsoft/i.test(`${kernel}\n${version}`)) {
+        if (wslKernel) {
           const privateOrMissingCgroup = !cgroup.trim()
             || cgroup.trim().split("\n").every((line) => line.split(":").at(-1) === "/");
           if (privateOrMissingCgroup && !await isFile("/proc/sys/fs/binfmt_misc/WSLInterop")) return null;
