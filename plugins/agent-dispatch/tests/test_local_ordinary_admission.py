@@ -28,7 +28,7 @@ def local(ordinary, monkeypatch):
     o = ordinary
     o.q._relationship_writer = None
     o.q._ordinary_relationship_writer = native.LocalOrdinaryRelationshipWriter(o.q)
-    monkeypatch.setattr(native, "resolve_machine", lambda: "host-a")
+    monkeypatch.setattr(native, "local_execution_machine", lambda: "host-a")
     monkeypatch.setattr(native, "agent_bridge_launch_prefix", lambda: ("bridge",))
     monkeypatch.setattr(
         worktree_owner_launch, "retained_selection", lambda: ("selected-worktrees",)
@@ -214,6 +214,71 @@ def test_null_head_never_substitutes_for_the_indexed_session_identity(local, nat
         with pytest.raises(TaskError, match="native"):
             writer(workspace, "inspect", payload)
     assert local.relationship_owner.claims == before
+
+
+@pytest.mark.parametrize("ordinary", [True], indirect=True)
+@pytest.mark.parametrize("binding", ["machine", "supervisor.env"])
+def test_native_writer_uses_durable_machine_binding_from_neutral_service_cwd(
+    local,
+    monkeypatch,
+    binding,
+):
+    from agent_dispatch import identity, ordinary_pool_startup
+
+    value = "HOST-A\n" if binding == "machine" else "AGENT_DISPATCH_SUPERVISE_MACHINE='HOST-A'\n"
+    (local.install_root / binding).write_text(value, encoding="utf-8")
+    monkeypatch.chdir(local.install_root)
+    monkeypatch.setenv("AGENT_DISPATCH_SUPERVISE_MACHINE", "ambient-other-host")
+    monkeypatch.setattr(
+        native, "local_execution_machine", ordinary_pool_startup.local_execution_machine
+    )
+
+    def no_project():
+        pytest.fail("native relationship admission probed project identity from the service cwd")
+
+    monkeypatch.setattr(identity, "resolve_machine", no_project)
+    assert launch(local)["session"] == "local-body:bridge-a"
+    request = local.q.task_relationship(local.task["id"])["request"]
+    writer = local.q._ordinary_relationship_writer.bind_request(request)
+    assert (
+        writer(
+            native.AssignmentWorkspace.from_dict(request["workspace"]),
+            "inspect",
+            {"request_id": request["request_id"], "allow_missing": True},
+        )["phase"]
+        == "bound"
+    )
+
+
+@pytest.mark.parametrize("ordinary", [True], indirect=True)
+@pytest.mark.parametrize("binding", ["foreign", "directory", "invalid-utf8"])
+def test_binding_drift_during_native_admission_never_falls_back_to_project(
+    local,
+    monkeypatch,
+    binding,
+):
+    from agent_dispatch import identity, ordinary_pool_startup
+
+    launch(local)
+    request = local.q.task_relationship(local.task["id"])["request"]
+    before = copy.deepcopy(local.relationship_owner.claims)
+    path = local.install_root / "machine"
+    if binding == "foreign":
+        path.write_text("other-host\n", encoding="utf-8")
+    elif binding == "directory":
+        path.mkdir()
+    else:
+        path.write_bytes(b"\xff")
+    monkeypatch.setattr(
+        native, "local_execution_machine", ordinary_pool_startup.local_execution_machine
+    )
+    monkeypatch.setattr(
+        identity, "resolve_machine", lambda: pytest.fail("binding failure fell back")
+    )
+    with pytest.raises(TaskError, match="host-local|binding is unreadable"):
+        local.q._ordinary_relationship_writer.bind_request(request)
+    assert local.relationship_owner.claims == before
+    assert local.q.task_relationship(local.task["id"])["state"] == "bound"
 
 
 @pytest.mark.parametrize("ordinary", [True], indirect=True)

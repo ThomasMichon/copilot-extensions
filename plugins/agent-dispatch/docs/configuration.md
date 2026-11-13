@@ -66,6 +66,10 @@ and exact-conclusion release still settle through those original owners.
 Selecting `RELATIONSHIP_ADMISSION=local-ordinary` and
 `RELATIONSHIP_AUTHORITY=local` assembles admission inside the existing queue
 owner, on demand. Startup neither probes siblings nor enables pool allocation.
+Host resolution shares ordinary startup's strict installed-binding-first
+owner, so a coordinator's neutral runtime directory needs no project discovery
+when its durable binding is available. Unreadable or mismatched bindings never
+fall back to a matching project or ambient machine variable.
 This scope governs new `ordinary-bridge` reservations only; ordinary manual
 claims, CLI-driver pools and the native standing assembly keep their existing
 behavior. Health's version-1 `task_relationships` object reports the additive

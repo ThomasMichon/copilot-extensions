@@ -11,8 +11,8 @@ from typing import TYPE_CHECKING
 
 from .assignment_relationship_owner import WorktreeRelationshipWriter
 from .assignment_workspace import AssignmentWorkspace, RelationshipWriter, same_assignment_worker
-from .identity import resolve_machine
 from .ordinary_agent_facts import identity, sessionless
+from .ordinary_pool_startup import local_execution_machine
 from .ordinary_writer_admission import OrdinaryWriterAdmission
 from .procutil import agent_bridge_launch_prefix
 from .queue_records import TaskError
@@ -31,7 +31,7 @@ class LocalOrdinaryRelationshipWriter:
         if not isinstance(request, dict):
             raise TaskError("ordinary admission requires its original queue request")
         workspace = AssignmentWorkspace.from_dict(request.get("workspace"))
-        machine = resolve_machine()
+        machine = local_execution_machine()
         if (
             request.get("authority") != "local"
             or not isinstance(machine, str)
