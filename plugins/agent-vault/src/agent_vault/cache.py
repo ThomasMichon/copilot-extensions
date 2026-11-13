@@ -479,9 +479,11 @@ class PersistentCache:
         return entries, fields
 
     @classmethod
-    def _pending_alias(cls, store: dict, entry: str, field: str, *, strict: bool) -> bool:
+    def _matching_aliases(
+        cls, store: dict, entry: str, field: str, *, strict: bool,
+    ) -> list[tuple[str, str, dict]]:
         identity = normalize_entry(entry, "")
-        pending = False
+        matches = []
         for path, fields in store["entries"].items():
             if normalize_entry(path, "") != identity:
                 continue
@@ -491,9 +493,16 @@ class PersistentCache:
             for attribute in fields:
                 if canonical_field(attribute) == canonical_field(field):
                     record = cls._field_record(store, path, attribute, strict=strict)
-                    if isinstance(record, dict) and "rotation" in record:
-                        pending = True
-        return pending
+                    if isinstance(record, dict):
+                        matches.append((path, attribute, record))
+        return matches
+
+    @classmethod
+    def _pending_alias(cls, store: dict, entry: str, field: str, *, strict: bool) -> bool:
+        return any(
+            "rotation" in record
+            for _path, _attribute, record in cls._matching_aliases(store, entry, field, strict=strict)
+        )
 
     def get(
         self,
@@ -771,13 +780,24 @@ class PersistentCache:
                             entry = legacy_entry
                 _, fields = self._fields_for_write(store, entry)
                 current = fields.get(field)
+                aliases = self._matching_aliases(store, entry, field, strict=True)
                 if (
                     generation is not None
-                    and isinstance(current, dict)
-                    and "rotation" not in current
-                    and int(current.get("generation", 0)) > generation
+                    and any(
+                        "rotation" not in record and int(record.get("generation", 0)) > generation
+                        for _path, _attribute, record in aliases
+                    )
                 ):
-                    return True
+                    return (
+                        isinstance(current, dict) and "rotation" not in current
+                        and int(current.get("generation", 0)) > generation
+                        and not any("rotation" in record for _p, _f, record in aliases)
+                    )
+                for path, attribute, _record in aliases:
+                    if (path, attribute) != (entry, field):
+                        del store["entries"][path][attribute]
+                        if path != entry and not store["entries"][path]:
+                            del store["entries"][path]
                 fields[field] = {
                     "value": value,
                     "cached_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
@@ -805,6 +825,8 @@ class PersistentCache:
             with self.replacement_lock(), self._store_lock():
                 require_source(self._root_dir, record)
                 store = self._read_store(readonly=True, strict=True)
+                if self._pending_alias(store, entry, field, strict=True):
+                    return False
                 entries = store["entries"]
                 if entry in entries:
                     fields = entries[entry]

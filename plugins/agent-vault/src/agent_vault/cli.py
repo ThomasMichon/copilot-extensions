@@ -909,8 +909,10 @@ def cmd_set_password(args):
         args.entry,
         config.resolve_context().group,
     )
-    persistent.migrate_entry(args.entry, cache_entry, "password")
     with persistent.replacement_lock():
+        legacy = legacy_cache_entry(args.entry, cache_entry)
+        if legacy is not None:
+            persistent.migrate_entry(legacy, cache_entry, "password")
         pending = persistent.pending_replace(cache_entry, "password")
         if pending is not None:
             recovery = send_command({
@@ -1400,7 +1402,9 @@ def cmd_cache_populate(args):
                         entry,
                         config.resolve_context().group,
                     )
-                    cache.migrate_entry(entry, cache_entry, field)
+                    legacy = legacy_cache_entry(entry, cache_entry)
+                    if legacy is not None and not cache._recovery:
+                        cache.migrate_entry(legacy, cache_entry, field)
                     generation = resp.get("generation")
                     update = cache.recover_missing if cache._recovery else cache.reconcile_authoritative
                     if not update(

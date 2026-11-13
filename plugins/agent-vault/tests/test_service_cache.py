@@ -912,3 +912,92 @@ def test_direct_client_cannot_reuse_a_root_credential_for_a_group_relative_looku
     assert credential_reads.read_credential(
         SimpleNamespace(entry="/token", field="password", cache_only=True),
     ).value == "value-token"
+
+
+@pytest.mark.parametrize("pending", [False, True])
+@pytest.mark.parametrize("operation", ["failed-rotation", "population"])
+def test_grouped_write_paths_preserve_root_values_and_journals(
+    cached_service, monkeypatch: pytest.MonkeyPatch, pending: bool, operation: str,
+) -> None:
+    _vault, persistent, _kpdb, _clock = cached_service
+    assert persistent.put("token", "password", "root-value", 1)
+    if pending:
+        assert persistent.begin_replace("token", "password", "root-candidate", 2)
+    root = persistent._read_store()["entries"]["token"]
+    monkeypatch.setattr(cache, "get_cache", lambda: persistent)
+    monkeypatch.setattr(cli, "_ensure_unlocked_service", lambda: True)
+    monkeypatch.setattr(cli, "ensure_service", lambda: True)
+    monkeypatch.setattr(persistent, "prepare", lambda: {"state": "ready"})
+
+    def selected(request: dict, **_kwargs: object) -> dict:
+        if operation == "failed-rotation":
+            assert request["action"] == "set-password"
+            return {"ok": False, "error": "rejected"}
+        assert request["action"] == "get" and request["refresh"] is True
+        return {"ok": True, "value": "group-value", "generation": 3}
+
+    monkeypatch.setattr(cli, "send_command", selected)
+    if operation == "failed-rotation":
+        assert cli.cmd_set_password(SimpleNamespace(entry="token", password="group-candidate")) == 1
+        assert persistent.get("Allowed/token") is None
+    else:
+        arguments = SimpleNamespace(
+            entry=["token"], manifest=None, machine=None, verify=False, prompt=False,
+        )
+        assert cli.cmd_cache_populate(arguments) == 0
+        assert persistent.get("Allowed/token") == "group-value"
+    assert persistent._read_store()["entries"]["token"] == root
+
+
+@pytest.mark.parametrize("journal_entry", ["Allowed/entry", "/Allowed/entry"])
+@pytest.mark.parametrize("operation", ["refresh", "population"])
+def test_confirmed_authority_reconciles_equivalent_alias_journals_atomically(
+    cached_service, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    journal_entry: str, operation: str,
+) -> None:
+    _vault, persistent, _kpdb, _clock = cached_service
+    assert persistent.begin_replace(journal_entry, "Password", "candidate", 2)
+    monkeypatch.setattr(cache, "get_cache", lambda: persistent)
+    monkeypatch.setattr(cli, "ensure_service", lambda: True)
+    monkeypatch.setattr(persistent, "prepare", lambda: {"state": "ready"})
+    monkeypatch.setattr(cli, "send_command", lambda *_a, **_kw: {
+        "ok": True, "value": "confirmed-value", "generation": 3,
+    })
+    if operation == "refresh":
+        result = credential_reads.read_credential(SimpleNamespace(
+            entry="entry", field="Password", refresh=True,
+        ))
+        assert result.code == 0 and result.value == "confirmed-value"
+    else:
+        assert cli.cmd_cache_populate(SimpleNamespace(
+            entry=["entry:Password"], manifest=None, machine=None, verify=False, prompt=False,
+        )) == 0
+    assert persistent.pending_replace(journal_entry, "Password") is None
+    monkeypatch.setattr(cli, "ensure_service", lambda: pytest.fail("cache-only contacted service"))
+    assert credential_reads.read_credential(SimpleNamespace(
+        entry="entry", field="Password", cache_only=True,
+    )).value == "confirmed-value"
+    assert cli.cmd_cache_verify(SimpleNamespace(entry=["entry:Password"], json=True)) == 0
+    assert "confirmed-value" not in capsys.readouterr().out
+
+
+def test_missing_only_recovery_does_not_clear_an_alias_owned_journal(
+    cached_service, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _vault, persistent, _kpdb, _clock = cached_service
+    assert persistent.begin_replace("Allowed/entry", "Password", "candidate", 2)
+    before = persistent._cache_file.read_bytes()
+    monkeypatch.setattr("agent_vault.cache_recovery.require_source", lambda *_args: None)
+    assert not persistent.recover_missing("Allowed/entry", "password", "confirmed", 3)
+    assert persistent._cache_file.read_bytes() == before
+
+
+def test_older_authority_cannot_claim_to_reconcile_a_newer_value_with_an_alias_journal(
+    cached_service,
+) -> None:
+    _vault, persistent, _kpdb, _clock = cached_service
+    assert persistent.put("Allowed/entry", "password", "newer", 50)
+    assert persistent.begin_replace("Allowed/entry", "Password", "candidate", 51)
+    before = persistent._cache_file.read_bytes()
+    assert not persistent.reconcile_authoritative("Allowed/entry", "password", "older", 49)
+    assert persistent._cache_file.read_bytes() == before

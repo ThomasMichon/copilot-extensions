@@ -617,6 +617,12 @@ legacy record is a miss until the selected grouped entry is populated
 authoritatively; cache-only requests still never contact the service.
 `cache-verify` uses the same subject selection, so its readiness result cannot
 count an ambiguous root credential as a grouped cache hit.
+Password-rotation and population migrations apply the same guard, preserving
+root records and their pending journals during grouped writes.
+After a confirmed authoritative read, ordinary client reconciliation replaces
+equivalent alias journals atomically with the canonical value. Ordinary cache
+reads and missing-only recovery never clear those journals; a newer retained
+value prevents an older response from claiming successful journal reconciliation.
 
 Authoritative refresh never returns a cached value or deletes the caller's
 existing recovery record before trying the backend. A successful read updates
