@@ -623,6 +623,8 @@ After a confirmed authoritative read, ordinary client reconciliation replaces
 equivalent alias journals atomically with the canonical value. Ordinary cache
 reads and missing-only recovery never clear those journals; a newer retained
 value prevents an older response from claiming successful journal reconciliation.
+Service generation floors include equivalent legacy field/path records, so clock
+rollback cannot make confirmed authority appear older than those retained values.
 
 Authoritative refresh never returns a cached value or deletes the caller's
 existing recovery record before trying the backend. A successful read updates

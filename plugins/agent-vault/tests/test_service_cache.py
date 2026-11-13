@@ -544,18 +544,31 @@ def test_revocation_compaction_and_explicit_clear_retain_fences_without_exhausti
     assert _store(persistent, kpdb).record("entry")["value"] == "fresh-value"
 
 
+@pytest.mark.parametrize("legacy_entry", ["Allowed/entry", "/Allowed/entry"])
+@pytest.mark.parametrize("legacy_field", ["password", "Password"])
 def test_refresh_and_password_commit_generations_advance_beyond_persisted_values_after_clock_rollback(
-    cached_service, monkeypatch: pytest.MonkeyPatch,
+    cached_service, monkeypatch: pytest.MonkeyPatch, legacy_entry: str, legacy_field: str,
 ) -> None:
     vault, persistent, kpdb, clock = cached_service
     monkeypatch.setattr(service.time, "time_ns", lambda: 500)
     first = _get(vault)
-    assert persistent.put("Allowed/entry", "password", "old-client-value", 2000)
+    assert persistent.put(legacy_entry, legacy_field, "old-client-value", 2000)
     clock[0] = 900
     monkeypatch.setattr(vault.cli, "get_entry", lambda *_args: "refreshed-value")
     refreshed = _get(vault, refresh=True)
     assert refreshed["value"] == "refreshed-value"
     assert refreshed["generation"] > max(first["generation"], 2000)
+    monkeypatch.setattr(cache, "get_cache", lambda: persistent)
+    monkeypatch.setattr(cli, "ensure_service", lambda: True)
+    monkeypatch.setattr(
+        cli, "send_command",
+        lambda request, **_kw: vault.handle_request({**request, "group": "Allowed"}),
+    )
+    confirmed = credential_reads.read_credential(SimpleNamespace(
+        entry="entry", field=legacy_field, refresh=True,
+    ))
+    assert confirmed.code == 0 and confirmed.value == "refreshed-value"
+    assert persistent.get("Allowed/entry", readonly=True) == "refreshed-value"
     monkeypatch.setattr(vault.cli, "edit_password", lambda *_args: (True, "updated"))
     changed = vault.handle_request({
         "action": "set-password", "entry": "entry", "group": "Allowed", "password": "changed-value",

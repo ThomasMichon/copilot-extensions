@@ -201,7 +201,9 @@ class ServiceCacheStore:
                     and _entry(record) == entry and _field(record) == field
                 ]
                 floors = [counter, *(
-                    record["generation"] for record in [*relevant, prior]
+                    record["generation"] for record in [
+                        *relevant, prior, *(record for _path, _attribute, record in aliases),
+                    ]
                     if isinstance(record, dict) and type(record.get("generation")) is int
                     and record["generation"] >= 0
                 )]
