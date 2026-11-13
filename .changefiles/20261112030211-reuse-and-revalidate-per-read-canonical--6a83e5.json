@@ -1,0 +1,9 @@
+{
+  "comment": "Reuse and revalidate per-read canonical reference directories without increasing scan budgets or skipping aliases",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
