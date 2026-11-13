@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, ContextManager, Protocol, TypeVar, TypedDict, 
 if TYPE_CHECKING:
     import ctypes
     from installer_dependency_arguments import (
+        captured_environment as captured_environment,
         check_compile_projection as check_compile_projection,
         cutoff_arguments as cutoff_arguments,
         cutoff_value as cutoff_value,
@@ -161,6 +162,7 @@ argument_pairs = cast(_ArgumentPairs, _arguments.argument_pairs)
 balanced = cast(_RawBalanced, _arguments.balanced)
 uv_command = cast(_UVCommand, _arguments.uv_command)
 if not TYPE_CHECKING:
+    captured_environment = _arguments.captured_environment
     check_compile_projection = _arguments.check_compile_projection
     cutoff_arguments = _arguments.cutoff_arguments
     cutoff_value = _arguments.cutoff_value

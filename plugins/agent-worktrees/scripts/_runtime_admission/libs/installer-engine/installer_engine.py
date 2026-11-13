@@ -43,6 +43,7 @@ from installer_source_build import (
     SourceWheelInputs, _selected_extras as _selected_extras,
     _source_deadline, _source_phase, retained_input_graph, retained_source_wheels,
     revalidate_input_content, check_dev_owner,
+    _wheel_construction_hash as _wheel_construction_hash,
 )
 
 from installer_engine_health import (
@@ -104,15 +105,6 @@ def _construction_hash(
     return hashlib.sha256(json.dumps({
         "schema": "installer-engine.dependency-profile", "version": 1,
         **profile,
-    }, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
-
-
-def _wheel_construction_hash(source_hash: str, wheels: WheelInstallInputs | WheelReuseInputs | None) -> str:
-    if wheels is None:
-        return source_hash
-    return hashlib.sha256(json.dumps({
-        "schema": "installer-engine.closed-wheel-inputs", "version": 1,
-        "source_hash": source_hash, "wheel_inputs": wheels.receipt(),
     }, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
 
 

@@ -42,6 +42,15 @@ def native_construction_options(plugin: Path, inputs) -> tuple[str, dict]:
     }
 
 
+def selected_version(root: Path, runtime) -> str | None:
+    python = runtime.resolve_python(root)
+    if python is None or not python.is_absolute() or ".." in python.parts:
+        return None
+    environment = python.parent.parent
+    version = environment.parent.name if environment.name == ".venv" else environment.name
+    return version if runtime.slot_python(root, version) == python else None
+
+
 def installed_identity(slot: Path, runtime, refusal) -> dict:
     python = runtime.slot_python(slot.parent.parent, slot.name)
     if python is None:

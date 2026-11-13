@@ -34,10 +34,19 @@ from installer_source_wheel_cache import cached_source_wheel
 from installer_wheel_inputs import (
     WheelDeadlineError, WheelError, WheelLimits, _check_deadline, inspect_archive,
 )
-from installer_wheel_snapshot import _digest, _open, _ordinary, _unchanged
+from installer_wheel_snapshot import WheelInstallInputs, WheelReuseInputs, _digest, _open, _ordinary, _unchanged
 
 if TYPE_CHECKING:
     from installer_engine import FrozenInputs
+
+
+def _wheel_construction_hash(source_hash: str, wheels: WheelInstallInputs | WheelReuseInputs | None) -> str:
+    if wheels is None:
+        return source_hash
+    return hashlib.sha256(json.dumps({
+        "schema": "installer-engine.closed-wheel-inputs", "version": 1,
+        "source_hash": source_hash, "wheel_inputs": wheels.receipt(),
+    }, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
 
 
 def _build_tools_root(reported, tooling):

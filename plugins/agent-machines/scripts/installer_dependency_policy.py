@@ -67,13 +67,9 @@ class _SourceCompileMetadata(set):
 
 
 def _captured_environment(env):
-    result = {}
-    for key, value in (os.environ if env is None else env).items():
-        key = key.upper() if os.name == "nt" else key
-        if key in result and result[key] != value:
-            raise DependencyPolicyError("dependency installation environment has conflicting variable identities")
-        result[key] = value
-    return result
+    return _configuration.captured_environment(
+        os.environ if env is None else env, windows=os.name == "nt", error_type=DependencyPolicyError,
+    )
 
 
 def _toml_parser():
@@ -365,12 +361,6 @@ def _anchor_roots() -> tuple[Path, ...]:
         raise DependencyPolicyError("canonical source ownership could not be established") from exc
 
 
-def _balanced(text: str, start: int, opening: str, closing: str) -> tuple[str, int]:
-    return _configuration.balanced(
-        text, start, opening, closing, error_type=DependencyPolicyError,
-    )
-
-
 def cutoff_arguments(
     settings: str, *, now: datetime | None = None, _operation: str = "install",
 ) -> list[str]:
@@ -572,6 +562,7 @@ _bounded_content_map = _configuration.bounded_content_map
 _temporary_inputs = _configuration.temporary_inputs
 tempfile = _configuration.tempfile
 _write_toml = partial(_configuration.write_toml, error_type=DependencyPolicyError)
+_balanced = partial(_configuration.balanced, error_type=DependencyPolicyError)
 _private_retained_root = partial(_configuration.private_retained_root, error_type=DependencyPolicyError)
 _merge_config = _configuration.merge_config
 _select_uv_executable = partial(_configuration.select_uv_executable, error_type=DependencyPolicyError)
