@@ -1,0 +1,145 @@
+"""Frontend-side connector for a Session Host.
+
+Dials a host, performs the reattach handshake, and exposes a clean frame-level
+API: iterate ACP frames (with their stable ``seq``), ``ack`` them to advance the
+durable delivery cursor, ``write`` client->agent ACP bytes, and ``terminate``.
+
+Phase 1 exposes this frame-level surface (fully testable). Phase 2 adapts it
+into the ``asyncio.StreamReader``/``StreamWriter`` pair that
+``acp_client.AcpClient`` feeds to the ACP ``ClientSideConnection``, so ACP flows
+through the host transparently.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+from dataclasses import dataclass
+from typing import Any
+
+from ..session_preferences import MAX_RECEIPT_BYTES, validate_receipt
+
+from . import protocol as proto
+
+
+@dataclass
+class Hello:
+    max_seq: int
+    child_pid: int
+    preference_receipt: dict[str, Any] | None = None
+
+
+class SessionHostClient:
+    def __init__(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        self._reader = reader
+        self._writer = writer
+        self._child_alive = True
+        self._child_exit = 0
+        self._closed = False
+
+    @classmethod
+    async def connect(cls, host: str = "127.0.0.1", *, port: int) -> SessionHostClient:
+        # Size the reader to the protocol's max message: a relayed ACP frame can
+        # far exceed asyncio's default 64 KiB line limit (e.g. a large PR diff).
+        reader, writer = await asyncio.open_connection(
+            host, port, limit=proto.MAX_MESSAGE_BYTES)
+        return cls(reader, writer)
+
+    @property
+    def child_alive(self) -> bool:
+        return self._child_alive
+
+    @property
+    def child_exit_code(self) -> int:
+        return self._child_exit
+
+    async def attach(self, last_acked: int = 0, *, nonce: bytes = b"") -> Hello:
+        """Send the reattach handshake; return the host's HELLO.
+
+        ``last_acked`` is the last frame ``seq`` this frontend durably recorded.
+        The host replays everything after it -- no gap, no re-stream. ``nonce``
+        is the optional connect-auth token: a host launched with a nonce closes
+        the connection unless it matches (defense-in-depth so a stray same-user
+        process cannot drive the child by dialing the port); an unsecured host
+        ignores it.
+        """
+        await proto.write_message(self._writer, proto.MsgType.ATTACH,
+                                  proto.pack_attach(last_acked, nonce))
+        msg = await proto.read_message(self._reader)
+        if msg is None or msg[0] != proto.MsgType.HELLO:
+            raise ConnectionError("session host did not send HELLO")
+        payload = msg[1]
+        if len(payload) < 16:
+            raise ConnectionError("session host HELLO has a truncated cursor/PID prefix")
+        child_pid = proto.unpack_u64(payload[8:16])
+        receipt = None
+        if 16 < len(payload) <= 16 + MAX_RECEIPT_BYTES:
+            try:
+                receipt = validate_receipt(json.loads(payload[16:]), child_pid)
+            except (ValueError, UnicodeError):
+                pass
+        return Hello(max_seq=proto.unpack_u64(payload[:8]),
+                     child_pid=child_pid, preference_receipt=receipt)
+
+    async def frames(self):
+        """Async-iterate ``(seq, frame_bytes)`` until the connection ends.
+
+        A ``LIVENESS(dead)`` control message updates ``child_alive`` and ends
+        iteration once the buffered frames are drained.
+        """
+        while True:
+            msg = await proto.read_message(self._reader)
+            if msg is None:
+                return
+            mtype, payload = msg
+            if mtype == proto.MsgType.FRAME:
+                yield proto.unpack_frame(payload)
+            elif mtype == proto.MsgType.LIVENESS:
+                self._child_alive, self._child_exit = proto.unpack_liveness(payload)
+                if not self._child_alive:
+                    return
+
+    async def ack(self, seq: int) -> None:
+        await proto.write_message(self._writer, proto.MsgType.ACK, proto.pack_u64(seq))
+
+    async def write(self, data: bytes) -> None:
+        """Relay client->agent ACP bytes into the child's stdin."""
+        await proto.write_message(self._writer, proto.MsgType.WRITE, data)
+
+    async def send_status(self, reapable: bool) -> None:
+        """Tell the host whether the child is REAPABLE (idle, no active
+        background tasks). Best-effort: a failed send must never disturb the
+        ACP turn flow sharing this socket (#51)."""
+        if self._closed:
+            return
+        try:
+            await proto.write_message(
+                self._writer, proto.MsgType.STATUS, proto.pack_flag(reapable))
+        except (OSError, ConnectionError):
+            pass
+
+    async def detach(self, reapable: bool) -> None:
+        """Signal a GRACEFUL disconnect (vs a hard drop) and the child's current
+        reapable state, so the host reaps a reapable child promptly instead of
+        after the unexpected-disconnect grace window. Best-effort (#51)."""
+        if self._closed:
+            return
+        try:
+            await proto.write_message(
+                self._writer, proto.MsgType.DETACH, proto.pack_flag(reapable))
+        except (OSError, ConnectionError):
+            pass
+
+    async def terminate(self) -> None:
+        """Request the host reap the child (explicit, sanctioned termination)."""
+        await proto.write_message(self._writer, proto.MsgType.TERMINATE)
+
+    async def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        try:
+            self._writer.close()
+            await asyncio.wait_for(self._writer.wait_closed(), 2)
+        except (OSError, ConnectionError, asyncio.TimeoutError):
+            self._writer.transport.abort()

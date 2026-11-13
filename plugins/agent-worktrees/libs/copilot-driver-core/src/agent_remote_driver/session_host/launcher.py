@@ -838,7 +838,7 @@ def _require_receiving_policy(cwd: str | None, context: str | None) -> None:
 
 def main(
     argv: list[str] | None = None, *, run: Callable[..., Any] = run_host,
-    legacy: bool = False,
+    legacy: bool = False, headed_run: Callable[..., Any] | None = None,
 ) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     from importlib.util import find_spec
@@ -868,6 +868,7 @@ def main(
             "lifetime_policies": list(lifetime_policies),
             "startup_admission": ["live-owner-v1"],
             "headed_process_receipts": ["native-child-v1"] if headed_available else [],
+            "headed_receivers": ["explicit-inprocess-v1"] if headed_available else [],
             "headed_client": ["native-send-v1"] if headed_available else [],
             "mux_creation": ["posix-private-create-v1"] if not legacy and sys.platform != "win32" else [],
             "automatic_idle_retirement": {
@@ -947,7 +948,7 @@ def main(
         try:
             for signum in interrupt_signals:
                 previous_handlers[signum] = signal.signal(signum, lambda _signal, _frame: None)
-            result = asyncio.run(run_headed(
+            result = asyncio.run((headed_run or run_headed)(
                 child_argv, session_id=args.session_id, attempt_directory=args.attempt_directory,
                 state_file=args.state_file, cwd=args.cwd, port=args.port, ws_port=args.ws_port,
                 policy_context=args.repository_policy_context,
@@ -956,6 +957,8 @@ def main(
         finally:
             for signum, handler in previous_handlers.items():
                 signal.signal(signum, handler)
+    if headed_run is not None:
+        ap.error("an explicitly supplied headed receiver requires headed execution")
     if lifetime_policy == "cli" or args.attempt_directory is not None:
         ap.error("cli lifetime and attempt directory require headed execution")
 

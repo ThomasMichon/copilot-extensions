@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+from importlib.resources import files
 import json
 import os
 from pathlib import Path
@@ -53,7 +54,7 @@ def windows_overlay(configuration: dict, names: list[str], *, binding: str) -> d
     from .owner_snapshot import section_name
 
     section_name(binding)
-    snapshot = Path(__file__).with_name("owner_snapshot.py").read_text(encoding="utf-8")
+    snapshot = files("agent_mcp").joinpath("owner_snapshot.py").read_text(encoding="utf-8")
     return _overlay(configuration, names, {"binding": binding}, snapshot=snapshot)
 
 
@@ -86,7 +87,7 @@ def _overlay(configuration: dict, names: list[str], owner: dict, *, snapshot: st
             }
             replacement["command"] = str(Path(sys._base_executable).absolute())
             replacement["args"] = [
-                "-I", "-S", "-c", snapshot + "\n" + Path(__file__).with_name("owner_bootstrap.py").read_text(
+                "-I", "-S", "-c", snapshot + "\n" + files("agent_mcp").joinpath("owner_bootstrap.py").read_text(
                     encoding="utf-8",
                 ), json.dumps(request, ensure_ascii=True),
             ]
