@@ -4,6 +4,24 @@
 
 Parent: [Backlog Reconciliation](README.md), continuing Phase 2.
 
+## Delivered receiving and separate tracking outcome
+
+The plan merged in [#12386](https://github.com/ThomasMichon/copilot-extensions/pull/12386).
+Fresh complete source/receiver qualification preceded additive publication.
+The whole actual #9448 body directly retains the clauses below, all three
+complete originals and #9476's narrowing comment, with its incumbent body
+preserved. Full readback preceded separate judgments and public explanations:
+[#9464](https://github.com/ThomasMichon/copilot-extensions/issues/9464#issuecomment-6846428014),
+[#9466](https://github.com/ThomasMichon/copilot-extensions/issues/9466#issuecomment-6846430593)
+and [#9476](https://github.com/ThomasMichon/copilot-extensions/issues/9476#issuecomment-6846433336)
+are now CLOSED/NOT_PLANNED as redundant tracking. #9448 stays OPEN.
+
+Only the completed tracking bookkeeping row is checked. Every unfinished
+product requirement, native/release/installed condition, owner, claim and
+resource custodian remains. This is tracking acceptance, not technical
+fulfillment, installed repair or claim release. The proposal below preserves
+the reviewed rationale.
+
 ## Receiving direction
 
 Expand existing OPEN [#9448](https://github.com/ThomasMichon/copilot-extensions/issues/9448)
@@ -100,7 +118,7 @@ finish first.
   containment. For any separately authorized rollout, record concrete
   selected/installed/serving health AND total elapsed time. No foreground
   fallback, deadline inflation, new scheduler or automatic preference change.
-- [ ] FV-TRACKING - After review, append these complete direct clauses and
+- [x] FV-TRACKING - After review, append these complete direct clauses and
   the three complete originals plus #9476's narrowing comment to #9448.
   Read the whole current receiver and verify preserved incumbent content
   and owners. Then judge each source's tracking disposition separately;
