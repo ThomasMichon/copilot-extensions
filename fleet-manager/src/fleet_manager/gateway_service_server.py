@@ -37,6 +37,9 @@ from .gateway_service_handler import PROFILE
 from .gateway_service_handler import CallerContext, RequestLifetime, ServiceRequest, ServiceResponse
 from .gateway_local_handler import LocalHandlerBinding, LocalServiceRequest, settled
 from .gateway_service_policy import CallerGrant
+from .gateway_controller_services import (
+    PROFILE as CONTROLLER_PROFILE, ConnectedService, ControllerService, admitted_services, services,
+)
 from .machine_identity import PROFILE as MACHINE_PROFILE
 from .ledger import OperationLedger
 from .planning import PlanError
@@ -54,6 +57,12 @@ class Ticket:
     candidate: ServiceCandidate
     deadline: float
     caller_context: bool = False
+    services: tuple[ControllerService, ...] | None = None
+
+    @property
+    def profile(self) -> str | None:
+        return CONTROLLER_PROFILE if self.services is not None else (
+            PROFILE if self.caller_context else None)
 
 
 @dataclass(frozen=True)
@@ -195,12 +204,156 @@ class ServiceRuntime:
         raise TransportError("route-unavailable", 404)
 
     def checkpoint(self, channel: Channel, pending: Pending) -> None:
+        if pending.relay_checkpoint is not None:
+            pending.relay_checkpoint()
+            return
         self.authority.revalidate_service(channel.grant)
         scope = self.authority.revalidate_caller(pending.caller)
         slot, _ = self.route(pending.path, pending.method)
         check(self.channels.get(slot.name) is channel and scope.slot == slot
               and scope.method == pending.method and scope.target_uri == pending.target_uri,
               "authorization-withdrawn", 403)
+        check(pending.service_offer is None or (
+            channel.services is not None and pending.service_offer in channel.services),
+            "controller-service-withdrawn", 503)
+
+    def service_offers(self, service: str) -> tuple[ConnectedService, ...]:
+        """Current authenticated observations; source permission remains separate."""
+        result = []
+        if self.stopping:
+            return ()
+        for name, channel in sorted(self.channels.items()):
+            if channel.closed or channel.services is None:
+                continue
+            try:
+                slot = self.authority.revalidate_service(channel.grant)
+            except ServicePolicyError:
+                continue
+            for item in channel.services:
+                if item.service == service:
+                    result.append(ConnectedService(
+                        name, channel.incarnation, channel.offer_epochs[item],
+                        slot.principal, item.service, item.prefix))
+        return tuple(result)
+
+    def check_service_offer(self, offer: ConnectedService) -> None:
+        check(type(offer) is ConnectedService, "controller-service-unavailable", 503)
+        channel = self.channels.get(offer.controller)
+        check(not self.stopping and channel is not None and not channel.closed
+              and channel.services is not None and channel.incarnation == offer.connection,
+              "controller-service-unavailable", 503)
+        slot = self.authority.revalidate_service(channel.grant)
+        selected = ControllerService(offer.service, offer.prefix)
+        check(slot.principal == offer.principal
+              and channel.offer_epochs.get(selected) == offer.generation,
+              "controller-service-unavailable", 503)
+
+    def local_service_offers(
+        self, local: LocalServiceRequest, binding: LocalHandlerBinding, service: str,
+    ) -> tuple[ConnectedService, ...]:
+        local.checkpoint()
+        selected = next((item for item in binding.sources if item.service == service), None)
+        check(selected is not None, "controller-source-denied", 403)
+        result = []
+        for offer in self.service_offers(service):
+            if offer.controller not in selected.controllers:
+                continue
+            try:
+                self.authority.authorize_service_call(local._grant, slot=offer.controller)
+            except ServicePolicyError as exc:
+                if exc.code != "source-caller-denied":
+                    raise
+                continue
+            result.append(offer)
+        local.checkpoint()
+        return tuple(result)
+
+    async def dispatch_local_service(
+        self, local: LocalServiceRequest, binding: LocalHandlerBinding,
+        offer: ConnectedService, *, target: str, body: bytes, timeout: float,
+    ) -> ServiceResponse:
+        from .gateway_service_channel import target as parse_target
+
+        check(type(offer) is ConnectedService, "controller-source-denied", 403)
+        relative, query = parse_target(target)
+        check(type(body) is bytes and len(body) <= BODY_BYTES, "body-limit", 413)
+        check(type(timeout) in (int, float) and 0 < timeout <= 30, "invalid-source-timeout")
+        method = local.request.method
+        path = offer.prefix + (relative if relative != "/" else "")
+
+        def checkpoint() -> None:
+            local.checkpoint()
+            check(any(item.service == offer.service and offer.controller in item.controllers
+                      for item in binding.sources),
+                  "controller-source-denied", 403)
+            self.authority.authorize_service_call(local._grant, slot=offer.controller)
+            self.check_service_offer(offer)
+            slot, route = self.route(path, method)
+            check(slot.name == offer.controller and route.prefix == offer.prefix,
+                  "controller-source-denied", 403)
+
+        checkpoint()
+        channel = self.channels[offer.controller]
+        pending = Pending(
+            local._grant, path, method, local._grant.target_uri,
+            service_offer=ControllerService(offer.service, offer.prefix),
+            relay_checkpoint=checkpoint)
+        check(self.pending < GLOBAL_REQUESTS, "request-limit", 429)
+        channel.admit(pending)
+        self.pending += 1
+
+        async def exchange() -> ServiceResponse:
+            checkpoint()
+            scope = self.authority.revalidate_caller(local._grant)
+            pending.dispatched = True
+            await send(channel.ws, {
+                "type": "request", "id": pending.id, "method": method,
+                "target": relative + query, "headers": dict(local.request.headers),
+                "body": base64.b64encode(body).decode("ascii"), "timeout": timeout,
+                "service": offer.service,
+                "context": {
+                    "fleet": self.listener.fleet, "gateway": self.listener.gateway,
+                    "slot": offer.controller, "principal": scope.principal,
+                    "expires_at": min(scope.expires_at, channel.grant.expires_at),
+                },
+                "origin": {
+                    "slot": scope.slot.name, "method": scope.method,
+                    "target_uri": scope.target_uri,
+                },
+            })
+            first = await pending.queue.get()
+            if isinstance(first, TransportError):
+                raise first
+            checkpoint()
+            buffered = bytearray()
+            while True:
+                frame = await pending.queue.get()
+                if isinstance(frame, TransportError):
+                    raise frame
+                checkpoint()
+                if frame["type"] == "end":
+                    return ServiceResponse(
+                        first["status"], tuple(first["headers"].items()), bytes(buffered))
+                data = binary(frame["data"], 16384)
+                check(len(buffered) + len(data) <= BODY_BYTES, "response-limit", 502)
+                buffered.extend(data)
+                pending.unacknowledged = False
+                await send(channel.ws, {"type": "ack", "id": pending.id, "seq": frame["seq"]})
+
+        try:
+            response = await asyncio.wait_for(exchange(), timeout)
+        finally:
+            self.pending -= 1
+            await channel.cancel(pending)
+        checkpoint()
+        return response
+
+    async def controller_challenge(self, request: web.Request) -> web.Response:
+        self.control_budget()
+        check(request.method == "GET", "method-denied", 405)
+        return web.json_response(
+            {"profile": CONTROLLER_PROFILE, "nonce": self.authority.challenge()},
+            headers={"Cache-Control": "no-store"})
 
     async def challenge(self, request: web.Request) -> web.Response:
         self.control_budget()
@@ -261,10 +414,18 @@ class ServiceRuntime:
         value = unpack(payload.decode("utf-8"))
         machine = self.authority.machine_profile()
         caller_context = "profile" in value
+        controller = value.get("profile") == CONTROLLER_PROFILE
         fields = {"slot"} if machine else {"slot", "access", "proof"}
-        shape(value, fields | {"profile"} if caller_context else fields)
-        check(not caller_context or value["profile"] == PROFILE, "unsupported-profile")
-        check(all(isinstance(v, str) for v in value.values()), "invalid-admission")
+        shape(value, fields | {"profile", "services"} if controller else (
+            fields | {"profile"} if caller_context else fields))
+        check(not caller_context or value["profile"] in (PROFILE, CONTROLLER_PROFILE),
+              "unsupported-profile")
+        check(all(isinstance(v, str) for k, v in value.items() if k != "services"),
+              "invalid-admission")
+        offers = services(value["services"]) if controller else None
+        if offers is not None:
+            check(self.context is not None, "not-configured", 503)
+            admitted_services(offers, self.context.slot(value["slot"]))
         self.expire_tickets()
         check(len(self.tickets) < 64, "ticket-limit", 429)
         access, proof = credentials(request, machine=True) if machine else (
@@ -276,7 +437,7 @@ class ServiceRuntime:
             self.authority.release_candidate(candidate)
             raise TransportError("slot-locally-owned", 409)
         ticket = secrets.token_hex(32)
-        self.tickets[ticket] = Ticket(candidate, time.monotonic() + 30, caller_context)
+        self.tickets[ticket] = Ticket(candidate, time.monotonic() + 30, caller_context, offers)
         return web.json_response({"ticket": ticket}, headers={"Cache-Control": "no-store"})
 
     async def attach(self, request: web.Request) -> web.WebSocketResponse:
@@ -305,10 +466,11 @@ class ServiceRuntime:
             candidate = ticket.candidate
             self.authority.revalidate_candidate(candidate)
             await send(ws, {"type": "attached", **(
-                {"profile": PROFILE} if ticket.caller_context else {})})
+                {"profile": ticket.profile} if ticket.profile is not None else {})})
             grant = self.authority.promote_service(candidate)
             candidate = None
-            channel = Channel(ws, self.authority, grant, caller_context=ticket.caller_context)
+            channel = Channel(ws, self.authority, grant, caller_context=ticket.caller_context,
+                              services=ticket.services)
             previous = self.channels.get(grant.slot)
             self.channels[grant.slot] = channel
             if previous:
@@ -386,6 +548,10 @@ class ServiceRuntime:
             check(channel is not None and not channel.closed, "service-unavailable", 503)
             assert channel is not None
             pending = Pending(grant, path, request.method, uri)
+            if channel.services is not None:
+                pending.service_offer = next(
+                    (item for item in channel.services if item.prefix == route.prefix), None)
+                check(pending.service_offer is not None, "controller-service-unavailable", 503)
             self.checkpoint(channel, pending)
             channel.admit(pending)
             self.pending += 1
@@ -405,6 +571,9 @@ class ServiceRuntime:
                 "target": stripped + query, "headers": selected,
                 "body": base64.b64encode(payload).decode("ascii"), "timeout": DEADLINE,
                 **({"context": context} if context is not None else {}),
+                **({"service": pending.service_offer.service}
+                   if pending.service_offer is not None else {}),
+                **({"origin": None} if channel.services is not None else {}),
             })
             self.checkpoint(channel, pending)
             pending.dispatched = True
@@ -488,7 +657,11 @@ class ServiceRuntime:
                 request.method, (path[len(route.prefix):] or "/") + query,
                 tuple(headers(request.headers.items(), REQUEST_HEADERS).items()), payload)
             lifetime = local_request.lifetime
-            local = LocalServiceRequest(local_request, self.authority, grant, checkpoint)
+            local = LocalServiceRequest(
+                local_request, self.authority, grant, checkpoint,
+                _offers=lambda service: self.local_service_offers(local, binding, service),
+                _dispatch=lambda offer, **options: self.dispatch_local_service(
+                    local, binding, offer, **options))
             request[DISPATCHED] = True
             task = asyncio.ensure_future(binding.handle(local))
             self.local_active[task] = lifetime
@@ -640,6 +813,7 @@ async def build_app(listener: Listener, policy_path: Path, *, reload_interval: f
     app[STATE] = state
     app.on_response_prepare.append(no_store_response)
     app.router.add_route("*", "/_fleet/challenge", state.challenge)
+    app.router.add_route("*", "/_fleet/controller-challenge", state.controller_challenge)
     app.router.add_route("*", "/_fleet/machine-challenge", state.machine_challenge)
     app.router.add_route("*", "/_fleet/enrollment-challenge", state.enrollment_challenge)
     app.router.add_route("*", "/_fleet/enroll", state.enroll)

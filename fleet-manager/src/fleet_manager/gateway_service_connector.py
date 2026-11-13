@@ -26,11 +26,14 @@ from .gateway_service_channel import (
     binary, check, close_socket, headers, origin, response_status, send, shape, target,
     unpack, wire_headers,
 )
-from .gateway_service_context import METHODS
+from .gateway_service_context import METHODS, ServicePolicyError, identifier
 from .machine_identity import PROFILE as MACHINE_PROFILE, machine_headers, make_machine_proof
 from .planning import canonical
 from .gateway_service_handler import (
-    PROFILE, HandlerBinding, RequestLifetime, ServiceRequest, respond,
+    PROFILE, HandlerBinding, RelayOrigin, RequestLifetime, ServiceRequest, respond,
+)
+from .gateway_controller_services import (
+    PROFILE as CONTROLLER_PROFILE, ControllerService, service_values, services as parse_services,
 )
 
 LOG = logging.getLogger(__name__)
@@ -88,7 +91,8 @@ class ServiceConnector:
                  gateway_ca: str | None = None, backend_ca: str | None = None,
                  methods: frozenset[str] = METHODS,
                  handler: HandlerBinding | None = None,
-                 machine_principal: str | None = None, machine_audience: str | None = None) -> None:
+                 machine_principal: str | None = None, machine_audience: str | None = None,
+                 services: tuple[ControllerService, ...] | None = None) -> None:
         check(isinstance(slot, str) and 0 < len(slot) <= 128, "invalid-slot")
         check(bool(methods) and methods <= METHODS, "invalid-methods")
         self._machine = isinstance(machine_principal, str) and bool(machine_principal) \
@@ -99,6 +103,13 @@ class ServiceConnector:
         self._principal, self._audience = machine_principal, machine_audience
         check((backend_origin is None) != (handler is None), "select-one-backend")
         check(handler is None or type(handler) is HandlerBinding, "invalid-handler")
+        check(services is None or handler is not None, "controller-handler-required")
+        self.services = (parse_services(service_values(services))
+                         if services is not None else None)
+        self._service_socket: aiohttp.ClientWebSocketResponse | None = None
+        self._services_revision = 0
+        self._services_ack: asyncio.Future[bool] | None = None
+        self._services_lock = asyncio.Lock()
         self.slot = slot
         self.gateway = origin(gateway_origin)
         self.backend = origin(backend_origin, tls=False) if backend_origin is not None else None
@@ -124,14 +135,26 @@ class ServiceConnector:
             raise TransportError("invalid-frame") from None
 
     async def _admit(self, session: aiohttp.ClientSession) -> str:
-        endpoint = "/_fleet/machine-challenge" if self._machine else "/_fleet/challenge"
+        controller = self.services is not None
+        endpoint = "/_fleet/controller-challenge" if controller else (
+            "/_fleet/machine-challenge" if self._machine else "/_fleet/challenge")
         async with session.get(self.gateway + endpoint,
                                ssl=self._gateway_tls, allow_redirects=False) as response:
+            if controller:
+                check(response.status == 200, "unsupported-controller-profile", 409)
             challenge = await self._json(response)
-        shape(challenge, {"nonce", "profile"} if self._machine else {"nonce"})
-        check(not self._machine or challenge["profile"] == MACHINE_PROFILE, "unsupported-profile")
+        if controller:
+            check(set(challenge) == {"nonce", "profile"}
+                  and challenge["profile"] == CONTROLLER_PROFILE,
+                  "unsupported-controller-profile", 409)
+        else:
+            shape(challenge, {"nonce", "profile"} if self._machine else {"nonce"})
+            check(not self._machine or challenge["profile"] == MACHINE_PROFILE,
+                  "unsupported-profile")
         uri = self.gateway + "/_fleet/service-admit"
-        payload = {"slot": self.slot, **({"profile": PROFILE} if self.handler else {})}
+        payload = {"slot": self.slot, **(
+            {"profile": CONTROLLER_PROFILE, "services": service_values(self.services)}
+            if controller else ({"profile": PROFILE} if self.handler else {}))}
         authenticated = {}
         if self._machine:
             body = canonical(payload)
@@ -155,6 +178,8 @@ class ServiceConnector:
 
     def _request(self, value: dict) -> RequestSpec:
         names = {"type", "id", "method", "target", "headers", "body", "timeout"}
+        if self.services is not None:
+            names.update({"service", "origin"})
         shape(value, names | {"context"} if self.handler else names)
         check(value["type"] == "request"
               and isinstance(value["id"], str) and len(value["id"]) == 48)
@@ -168,10 +193,41 @@ class ServiceConnector:
         request = None
         if self.handler:
             context = self.handler.context(value["context"], self.slot)
+            if self.services is not None:
+                try:
+                    identifier(value["service"])
+                except ServicePolicyError:
+                    raise TransportError("invalid-controller-service") from None
             request = ServiceRequest(
                 context, value["method"], path + query, tuple(selected.items()), body,
-                response_limit=self.handler.response_limit)
+                response_limit=self.handler.response_limit,
+                service=value["service"] if self.services is not None else None,
+                origin=RelayOrigin.parse(value["origin"]) if self.services is not None else None)
         return value["method"], path + query, selected, body, timeout, request
+
+    async def advertise(self, services: tuple[ControllerService, ...]) -> None:
+        """Replace current observations on this channel; never admit a service."""
+        selected = parse_services(service_values(services))
+        async with self._services_lock:
+            ws = self._service_socket
+            check(self.services is not None and ws is not None and self.connected.is_set(),
+                  "controller-channel-unavailable", 503)
+            self.services = selected
+            self._services_revision += 1
+            ack = asyncio.get_running_loop().create_future()
+            self._services_ack = ack
+            try:
+                await send(ws, {"type": "services", "revision": self._services_revision,
+                                "services": service_values(selected)})
+                accepted = await asyncio.wait_for(asyncio.shield(ack), 5)
+                check(accepted, "controller-channel-unavailable", 503)
+            except BaseException:
+                await close_socket(ws)
+                raise
+            finally:
+                if self._services_ack is ack:
+                    self._services_ack = None
+                ack.cancel()
 
     async def _proxy(self, ws: aiohttp.ClientWebSocketResponse,
                      session: aiohttp.ClientSession,
@@ -198,6 +254,9 @@ class ServiceConnector:
         try:
             if admitted is not None:
                 assert self.handler is not None
+                check(self.services is None or any(
+                    item.service == admitted.service for item in self.services),
+                    "request-disconnected", 503)
                 response = respond(ws, exchange, self.handler, admitted)
             else:
                 response = self._response(ws, session, exchange, method, path, selected, body)
@@ -295,14 +354,25 @@ class ServiceConnector:
                 check(attached.type == aiohttp.WSMsgType.TEXT, "channel-refused")
                 confirmation = unpack(attached.data)
                 check(confirmation == {"type": "attached", **(
-                    {"profile": PROFILE} if self.handler else {})}, "channel-refused")
+                    {"profile": CONTROLLER_PROFILE if self.services is not None else PROFILE}
+                    if self.handler else {})}, "channel-refused")
                 attached_at = asyncio.get_running_loop().time()
+                self._service_socket = ws if self.services is not None else None
+                self._services_revision = 0
                 self.connected.set()
                 try:
                     async for message in ws:
                         check(message.type == aiohttp.WSMsgType.TEXT)
                         value = unpack(message.data)
                         kind, correlation = value.get("type"), value.get("id")
+                        if kind == "services-accepted" and self.services is not None:
+                            shape(value, {"type", "revision"})
+                            check(type(value["revision"]) is int
+                                  and value["revision"] == self._services_revision
+                                  and self._services_ack is not None
+                                  and not self._services_ack.done())
+                            self._services_ack.set_result(True)
+                            continue
                         check(isinstance(correlation, str) and len(correlation) == 48)
                         if kind == "request":
                             request = self._request(value)
@@ -336,6 +406,9 @@ class ServiceConnector:
                 finally:
                     self._attached_lifetime = asyncio.get_running_loop().time() - attached_at
                     self.connected.clear()
+                    self._service_socket = None
+                    if self._services_ack is not None and not self._services_ack.done():
+                        self._services_ack.set_result(False)
                     for exchange in self.active.values():
                         exchange.disconnect()
                     tasks = [e.task for e in self.active.values() if e.task is not None]

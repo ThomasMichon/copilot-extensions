@@ -630,6 +630,26 @@ class ServiceAuthority:
             del self._callers[grant.generation]
             return True
 
+    def authorize_service_call(self, grant: CallerGrant, *, slot: str) -> ServiceSlot:
+        """Check an internal same-method call without retargeting its proof.
+
+        The original request retains grant custody. Both caller and destination
+        policy must independently allow the source; a local handler registration
+        or a Controller advertisement cannot supply that permission.
+        """
+        with self._lock:
+            scope = self.revalidate_caller(grant)
+            record = self._callers[grant.generation]
+            context, _, _ = self._active(user=type(record.identity) is BearerIdentity)
+            caller = (context.user_caller(scope.principal)
+                      if type(record.identity) is BearerIdentity
+                      else context.caller(scope.principal))
+            selected = context.slot(slot)
+            require(slot in caller.slots and scope.method in caller.methods
+                    and any(scope.method in route.methods for route in selected.routes),
+                    "source-caller-denied")
+            return selected
+
     def authorize_operation(
         self, grant: CallerGrant, intent: OperationIntent, admission: AdmissionAuthority, *,
         authority: str, role: str, installation: str, checkpoint: Callable[[], None],
