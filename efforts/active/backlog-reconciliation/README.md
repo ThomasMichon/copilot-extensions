@@ -342,6 +342,13 @@ the non-public approval conversation.
 
 ## Plan
 
+The [Dispatch/Bridge eighteen-primary study](journal/2026/11.12-dispatch-and-bridge-retained-contracts.md)
+retains 59 requirement/admission groups: eight complete unfinished unions,
+four whole metadata holds and six inherited-reference contract gaps. Existing
+direct intake is not redundancy; #5694's CLOSED-unmerged metadata does not
+settle the retained Windows portfolio. Actual preflight failures and whole
+unit exclusions remain explicit; the dated complete queue is 904 open.
+
 The [lifetime and receiving-boundary study](journal/2026/11.12-lifetime-and-current-receiving-boundaries.md)
 retains 82 requirement/admission groups, fourteen whole unfinished outcomes
 and four whole-source provenance gaps. Changed Fleet V2 ROOT and Dispatch
@@ -3263,6 +3270,13 @@ sources, transferring owners or turning partial/planning gains into completion.
   normal publication flow.
 
 ## Validation Plan
+
+The [Dispatch/Bridge evidence audit](journal/2026/11.12-dispatch-and-bridge-retained-contracts.md)
+preserves full admitted originals/discussions/edits, complete final metadata
+and selected-source coverage without inventing receiving, runtime or global
+completion. Two improperly rendered source units and six prematurely emitted
+titles supply no admission or technical credit. All literal alternatives,
+source-specific acceptance conditions and actual custodians remain unchanged.
 
 The [lifetime and receiving audit](journal/2026/11.12-lifetime-and-current-receiving-boundaries.md)
 preserves complete original unions, literal alternatives, source-specific
