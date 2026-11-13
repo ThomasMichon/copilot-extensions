@@ -42,10 +42,12 @@ def _supports_required_read(python: Path) -> bool:
     )
 
 
-def _selected_runtime(*, budget: OwnedExecutionBudget | None = None) -> tuple[list[str], dict[str, str]]:
+def _selected_runtime(
+    *, project_root: Path | None = None, budget: OwnedExecutionBudget | None = None,
+) -> tuple[list[str], dict[str, str]]:
     from .machines_runtime import selected
 
-    prefix, environment, python = selected(budget=budget)
+    prefix, environment, python = selected(project_root=project_root, budget=budget)
     if not _supports_required_read(python):
         raise ValueError("The selected Machines runtime does not support required application observation")
     return prefix, environment
@@ -118,7 +120,7 @@ def new_application_preflight(config, *, source: str, checked_profile: str | Non
         if time.monotonic() >= budget.execution_deadline:
             raise TimeoutError("Required application profile selection exhausted its budget")
         stage = "runtime selection"
-        prefix, environment = _selected_runtime(budget=budget)
+        prefix, environment = _selected_runtime(project_root=Path(source), budget=budget)
         remaining = budget.execution_deadline - time.monotonic()
         if remaining <= 0:
             raise TimeoutError("Required application selection exhausted its budget")
