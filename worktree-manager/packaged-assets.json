@@ -118,6 +118,11 @@
       ]
     },
     {
+      "canonicalDir": "worktree-manager",
+      "payloadDir": "scripts/runtime-input-provider/worktree-manager",
+      "files": ["setup.py"]
+    },
+    {
       "canonicalDir": "worktree-manager/scripts",
       "payloadDir": "scripts/runtime-input-provider/worktree-manager/scripts",
       "files": ["install_source.py"]

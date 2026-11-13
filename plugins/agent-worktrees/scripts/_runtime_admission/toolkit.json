@@ -11,6 +11,7 @@
     "runtime_artifact_inputs"
   ],
   "files": [
+    "fleet-manager/setup.py",
     "libs/agent-procutil/setup.py",
     "libs/agent-procutil/src/agent_procutil/__init__.py",
     "libs/agent-procutil/src/agent_procutil/_async.py",
@@ -252,6 +253,12 @@
     "libs/zdd/src/zdd/singleton_manager.py",
     "libs/zdd/src/zdd/singleton_state.py",
     "plugins/agent-containers/setup.py",
+    "plugins/agent-worktrees/setup.py",
+    "services/chat/setup.py",
+    "services/index/_build_runtime_resource.py",
+    "services/index/setup.py",
+    "services/pr/_build_runtime_resource.py",
+    "services/pr/setup.py",
     "tools/artifact_attestation.py",
     "tools/artifact_builder_cli.py",
     "tools/artifact_bundle_validation.py",
@@ -300,6 +307,7 @@
     "tools/standalone_consumers.py",
     "tools/standalone_python_artifacts.py",
     "tools/uv_editable_ref.py",
+    "worktree-manager/setup.py",
     "worktree-manager/src/worktree_manager/__init__.py",
     "worktree-manager/src/worktree_manager/config_write_lock.py",
     "worktree-manager/src/worktree_manager/engine_acquisition_budget.py",

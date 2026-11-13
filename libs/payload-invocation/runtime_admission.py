@@ -27,6 +27,14 @@ _RESOURCES = (
     "libs/agent-procutil/setup.py",
     "libs/versioned-runtime/standalone_build.py",
     "plugins/agent-containers/setup.py",
+    "plugins/agent-worktrees/setup.py",
+    "worktree-manager/setup.py",
+    "fleet-manager/setup.py",
+    "services/chat/setup.py",
+    "services/index/setup.py",
+    "services/index/_build_runtime_resource.py",
+    "services/pr/setup.py",
+    "services/pr/_build_runtime_resource.py",
 )
 
 
