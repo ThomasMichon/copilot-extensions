@@ -19,7 +19,7 @@ HOOKS = (
     "register-nudge.ps1", "register-nudge.sh", "register-session.ps1", "register-session.sh",
     "deregister-session.ps1", "deregister-session.sh", "anchor-hygiene-check.ps1",
     "anchor-hygiene-check.sh", "provision-check.ps1", "provision-check.sh", "statelessness_guard.py",
-    "guarded_anchor_map.py", "cross_repo_guard.py", "anchor_shell_parser.py", "anchor_write_guard.py", "pr_supersede_guard.py",
+    "guarded_anchor_map.py", "cross_repo_guard.py", "anchor_shell_parser.py", "anchor_registry.py", "anchor_write_guard.py", "pr_supersede_guard.py",
     "registry_root.py", "nudge_status.py", "bind_nudge.py", "hook_runtime.py", "hook_process_identity.py", "hook_pre_relevance.py", "hook_pre_policy.py", "hook_policy_process.py",
     "hook_lifecycle_runtime.py", "native_source_context.py", "pretool_killswitch.py", "hook_client.py",
     "managed_session.py", "tool_call_forms.py", "managed-session.ps1", "managed-session.sh", "execution_platform.py",

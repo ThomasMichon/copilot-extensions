@@ -1,0 +1,9 @@
+{
+  "comment": "Publish original standalone-anchor acquisition observations through existing bounded guard facts",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

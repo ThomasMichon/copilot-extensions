@@ -54,6 +54,40 @@ def test_missing_map_is_unavailable_not_complete_empty(tmp_path):
     path.write_text(json.dumps(_snapshot(reader, caller, registry)))
     result = reader.read_map(caller, registry)
     assert result.status == "ready" and result.roots == []
+    assert result.anchor_inventory is None
+
+
+@pytest.mark.parametrize("damage", ["status", "parser", "row", "count", "shared-count"])
+def test_invalid_anchor_inventory_does_not_discard_confirmed_roots(tmp_path, damage):
+    reader = _load("guarded_anchor_map")
+    caller = _repo(tmp_path / "caller")
+    target = _repo(tmp_path / "target")
+    registry = tmp_path / "registry"
+    root = {
+        "name": "target", "delegate": "agent-bridge", "path": reader.canonical(target),
+        "identity": reader.repository_identity(target),
+    }
+    inventory = reader.unavailable_anchor_inventory("synthetic")
+    if damage == "status":
+        inventory["status"] = []
+    elif damage == "parser":
+        inventory["observations"] = [{
+            "source": "repos.yaml", "parser": [], "status": "observed", "reason": "",
+        }]
+    elif damage == "row":
+        inventory["rows"] = [{"name": "target", "path": "\0"}]
+    else:
+        count = reader.MAX_ROOTS + (damage == "count")
+        inventory["rows"] = [{"name": "target", "path": "/source/target"}] * count
+    value = _snapshot(reader, caller, registry, [root])
+    value["anchor_inventory"] = inventory
+    path = reader.map_path(caller, registry)
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps(value), encoding="utf-8")
+    result = reader.read_map(caller, registry)
+    assert result.status == "ready" and result.roots == [root]
+    assert result.anchor_inventory["status"] == "unavailable"
+    assert result.anchor_inventory["reason"] == "invalid-anchor-inventory"
 
 
 def test_git_marker_probe_failure_cannot_fall_back_to_parent_repository(tmp_path, monkeypatch):
@@ -707,6 +741,59 @@ def producer(tmp_path, monkeypatch):
         reader=reader, related=related_values, configurations=configurations, registry=registry,
         registered_entry_root=registered_entry_root,
     )
+
+
+def test_original_anchor_inventory_uses_original_files_and_managed_project_refresh(producer, monkeypatch):
+    from agent_worktrees.repos_registry_transaction import revision
+
+    p = producer
+    p.root.mkdir()
+    source = p.root / "repos.yaml"
+    source.write_text(
+        'repos:\n  target:\n    class: worktree\n'
+        '    windows: "C:\\\\Source\\\\target"\n    linux: /source/target\n'
+        '  knowledge:\n    class: knowledge\n    linux: /source/knowledge\n',
+        encoding="utf-8",
+    )
+    p.registry._baseline = (str(source.resolve()), revision(source.read_bytes()))
+    projects = p.root / "projects.yaml"
+    projects.write_text("projects: {}\n", encoding="utf-8")
+    p.module.refresh(p.callers, registry_root=p.root)
+    before = p.reader.read_map(p.callers[0], p.root)
+    assert before.anchor_inventory["status"] == "observed"
+    assert before.anchor_inventory["rows"] == [
+        {"name": "target", "path": "C:\\Source\\target"},
+        {"name": "target", "path": "/source/target"},
+    ]
+    monkeypatch.setattr(p.module.registry_paths, "registry_root", lambda *args, **kwargs: p.root)
+    p.module.managed_write(lambda: projects.write_text(
+        "projects:\n  target:\n    base_repo: true\n", encoding="utf-8",
+    ))
+    after = p.reader.read_map(p.callers[0], p.root)
+    assert after.status == "ready" and after.roots == before.roots
+    assert after.anchor_inventory["status"] == "observed"
+    assert after.anchor_inventory["rows"] == []
+    projects.unlink()
+    p.module.refresh(p.callers, registry_root=p.root)
+    unavailable = p.reader.read_map(p.callers[0], p.root)
+    assert unavailable.status == "ready" and unavailable.roots == before.roots
+    assert unavailable.anchor_inventory["status"] == "unavailable"
+    assert unavailable.anchor_inventory["rows"] == before.anchor_inventory["rows"]
+
+
+def test_anchor_inventory_byte_bound_preserves_existing_publication(producer, monkeypatch):
+    p = producer
+    p.module.refresh(p.callers, registry_root=p.root)
+    path = p.reader.map_path(p.callers[0], p.root)
+    value = json.loads(path.read_text(encoding="utf-8"))
+    value.pop("anchor_inventory")
+    monkeypatch.setattr(p.reader, "MAX_BYTES", len(json.dumps(value, ensure_ascii=False).encode("utf-8")) + 64)
+    monkeypatch.setattr(p.module, "_reader", lambda: p.reader)
+    p.module.refresh([p.callers[0]], registry_root=p.root, include_prepared=False)
+    result = p.reader.read_map(p.callers[0], p.root)
+    assert result.status == "ready" and result.roots == value["roots"]
+    assert result.anchor_inventory is None
+    assert path.stat().st_size <= p.reader.MAX_BYTES
 
 
 def test_producer_keeps_directional_callers_and_withdraws_removed_policy(producer):

@@ -360,7 +360,7 @@ def test_cached_native_pre_command_uses_real_relevance(client, monkeypatch, tmp_
         "hook_client.py", "hook_runtime.py", "hook_pre_relevance.py", "hook_pre_policy.py",
         "hook_policy_process.py", "pretool_killswitch.py", "statelessness_guard.py",
         "guarded_anchor_map.py", "cross_repo_guard.py", "anchor_write_guard.py",
-        "anchor_shell_parser.py", "pr_supersede_guard.py", "registry_root.py",
+        "anchor_shell_parser.py", "anchor_registry.py", "pr_supersede_guard.py", "registry_root.py",
         "managed_session.py", "managed_project_identity.py", "execution_platform.py",
         "remote_identity.py", "tool_call_forms.py",
     ):

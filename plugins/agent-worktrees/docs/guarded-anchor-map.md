@@ -162,6 +162,30 @@ Shell path attribution distinguishes mutating destinations from copy sources,
 `dd` input files and PowerShell value arguments; merely reading or quoting a
 guarded path does not require a write grant.
 
+The optional `anchor_inventory` is a different, version-1 supplemental fact.
+It carries the standalone anchor guard's original acquisition result, not the
+posture inventory: exact `class: worktree`, every Windows/WSL/Linux path in
+original order, and the original `projects.yaml` base-repository exclusions.
+Paths remain original registry strings; publication does not require them to
+exist on this platform or turn them into Git-identity postures.
+
+The original loader reads each input once and records its actual PyYAML or
+fallback branch. `status: observed` distinguishes an observed empty list from
+unavailable reads, known parser/shape failures and substituted acquisition
+owners. Unavailable reports retain the original tolerant result for diagnosis,
+but do not assert complete inventory. `qualification: managed-observation`
+does not provide reusable input closure or freshness for out-of-band changes.
+The map's existing caller/registry identity, generation and managed publication
+boundary scope these facts; there is no separate store, refresh or watcher.
+
+Supplemental rows share the existing 4096-row bound with roots/postures and the
+whole file retains its 1 MiB bound. Invalid or over-count inventory becomes
+unavailable independently; if additive bytes do not fit, the publisher omits
+this optional field instead of withdrawing otherwise usable roots. Older maps
+without it remain readable, and older readers ignore it. No current guard
+decision consumer uses this inventory: modes, live grants, target evaluation,
+guard order and the original standalone acquisition remain unchanged.
+
 Git identity uses bounded filesystem metadata reads, including ordinary `.git`
 directories, relative/absolute gitdir pointers, linked worktree `commondir`,
 bare repositories and the nearest nested repository/submodule. No Git
