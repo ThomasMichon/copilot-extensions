@@ -67,7 +67,7 @@ AFFECTED = (
         "status_carrier.py", "routes/status.py", "client_status.py",
         "events.py", "live_message_receipts.py", "remote_operations.py",
         "restored_app.py", "app.py", "runtime_transfer.py",
-        "dispatch_origin.py", "persisted_session_views.py", "acquisition_plugins.py",
+        "dispatch_origin.py", "dispatch_cli_origin.py", "persisted_session_views.py", "acquisition_plugins.py",
         "acquisition_local_launch.py", "creation_local_launch.py",
         "worktree_native_resume.py", "singleton_resume.py", "agent_registry_resolver.py", "routes/dispatch_tasks.py",
         "routes/worktrees.py",
@@ -124,6 +124,7 @@ EXTRA_PATHS = (
     "plugins/agent-bridge/docs/live-question-answers.md",
     "plugins/agent-bridge/tests/test_workspace_creation.py",
     "plugins/agent-bridge/tests/test_dispatch_session_origin.py",
+    "plugins/agent-bridge/tests/test_dispatch_cli_origin.py",
     "plugins/agent-bridge/tests/test_worktree_native_resume.py",
     "plugins/agent-bridge/docs/dispatch-session-origin.md",
     "plugins/agent-bridge/docs/retained-acquisition-writer.md",
@@ -145,6 +146,17 @@ EXTRA_PATHS = (
 )
 PROBES = {
     **retained.PROBES,
+    "test_origin_client_negotiates_mode_capability_before_acquisition": 10,
+    "test_connected_cli_creation_persists_before_delivery_and_replays": 1,
+    "test_unconfirmed_first_save_keeps_pending_effect_without_prompt_or_relaunch": 1,
+    "test_original_snapshot_survives_restart_heartbeat_alias_and_mutable_targeting": 1,
+    "test_resume_into_existing_conversation_preserves_its_stamp_or_absence": 2,
+    "test_resume_gate_never_stamps_provisional_or_legacy_identity": 1,
+    "test_incoherent_origin_refuses_registration_without_claiming_reservation": 3,
+    "test_foreign_driver_cannot_claim_origin_and_failed_fold_rolls_back_first_save": 1,
+    "test_legacy_and_opaque_storage_remain_unattributed": 1,
+    "test_schema45_upgrade_preserves_legacy_absence_and_requires_writable_preparation": 1,
+    "test_current_schema_without_origin_storage_is_not_silently_repaired": 2,
     "test_origin_rejects_malformed_or_cross_assignment_evidence": 9,
     "test_origin_detaches_nested_input_and_legacy_request_digest_is_unchanged": 1,
     "test_acquisition_refuses_unqualified_modes_and_other_assignments": 3,
@@ -299,6 +311,7 @@ PROBES = {
 TEST = retained.TEST
 CAPABILITY_VERSIONS = {
     "dispatch_acp_session_origin": 1,
+    "dispatch_cli_session_origin": 1,
     "host_status_feed": 1,
     **retained.CAPABILITY_VERSIONS, "owner_membership": 52,
     "bridge-session-current-requests-v1": 1,
