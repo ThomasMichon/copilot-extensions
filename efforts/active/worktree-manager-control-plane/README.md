@@ -60,6 +60,15 @@
 
 ## Guiding Intent
 
+For installation and update, the
+[shared convergence map](../source-managed-runtime-installs/installation-convergence.md)
+connects Manager's existing bootstrap, prerequisite and onboarding owners to
+one incoming flow. Establish Manager first, derive the selected repository's
+required dependency/downstream-app closure, stage the required set, then let
+application owners activate it. Existing UI, setup, source and native owners
+and their acceptance gates remain unchanged; this is not another installer or
+a claim that the current onboarding UI already implements the complete flow.
+
 Deliver the **Worktree Manager** — the single, standalone, **out-of-plugin** app
 that (1) **bootstraps** a bare machine into a working harness, (2) **configures,
 validates, updates, and repairs** it, and (3) serves as the **optional worktree-
