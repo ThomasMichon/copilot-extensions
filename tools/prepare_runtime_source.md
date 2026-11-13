@@ -47,9 +47,12 @@ the process owner captures diagnostics, not the complete archive in memory.
 Relative artifact paths are bound to the caller's directory before Git's
 source-directory selection. The existing native permission owner checks the
 artifact directory and its ancestors against foreign modification before Git
-can reopen that path. Local composition creates missing output directories
+can reopen that path. Local composition and standalone preparation share
+creation of missing output directories
 with private permissions at creation, independent of umask; it never repairs
-an existing shared directory. Existing deadlines and cleanup ownership remain.
+an existing shared directory. The archive itself uses the same native private
+file owner, preventing group-writable file contents even in a readable,
+non-writable parent. Existing deadlines and cleanup ownership remain.
 Configured source acquisition and preparation explicitly disable Git's ambient
 automatic line-ending conversion, so their clean-checkout checks observe the
 same literal source bytes on Windows and POSIX. Repository-owned attributes

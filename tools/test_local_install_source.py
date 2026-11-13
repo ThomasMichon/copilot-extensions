@@ -556,20 +556,41 @@ def test_native_archive_refuses_replacement_capable_directories(tmp_path, monkey
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX umask; Windows uses private directory creation")
-def test_compose_directories_are_created_private_under_group_writable_umask(tmp_path):
+@pytest.mark.parametrize("entrypoint", ["compose", "prepare"])
+def test_source_entries_create_private_paths_under_group_writable_umask(
+    repository, tmp_path, entrypoint,
+):
     from agent_procutil.owned_process import run_caller_owned
 
     root = tmp_path / "new" / "output"
     code = (
-        "import os,stat,sys\nfrom pathlib import Path\n"
+        "import os,stat,sys,time\nfrom pathlib import Path\n"
         "sys.path.insert(0,sys.argv[1])\nimport local_install_source as local\n"
         "os.umask(0o002)\n"
-        "root=Path(sys.argv[2])\nlocal._private_output_directory(root)\n"
+        "root=Path(sys.argv[2]); prep=local.preparation\n"
+        "original=prep._archive\n"
+        "class ArchiveVerified(Exception): pass\n"
+        "def verify(*args,**kwargs):\n"
+        "    original(*args,**kwargs)\n"
+        "    assert stat.S_IMODE(args[2].stat().st_mode)==0o600\n"
+        "    raise ArchiveVerified\n"
+        "prep._archive=verify\n"
+        "try:\n"
+        "    if sys.argv[5]=='prepare':\n"
+        "        prep._git(Path(sys.argv[3]),'update-ref','refs/remotes/origin/main',sys.argv[4])\n"
+        "        prep.prepare(Path(sys.argv[3]),sys.argv[4],'example',root,"
+        "branch='main',deadline=time.monotonic()+10)\n"
+        "    else:\n"
+        "        local.compose(Path(sys.argv[3]),sys.argv[4],sys.argv[4],root,"
+        "finalized_main=True,deadline=time.monotonic()+10)\n"
+        "except ArchiveVerified: pass\n"
+        "else: raise AssertionError('archive boundary not exercised')\n"
         "assert stat.S_IMODE(root.stat().st_mode)==0o700\n"
         "assert stat.S_IMODE(root.parent.stat().st_mode)==0o700\n"
     )
     result = run_caller_owned(
-        [sys.executable, "-c", code, str(Path(local.__file__).parent), str(root)],
+        [sys.executable, "-c", code, str(Path(local.__file__).parent), str(root),
+         str(repository[0]), repository[1], entrypoint],
         timeout=15, max_stdout_bytes=8192, max_stderr_bytes=8192,
     )
     assert result.returncode == 0, result.stderr
