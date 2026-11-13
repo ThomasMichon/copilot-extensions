@@ -6,7 +6,7 @@
   machines, and venue providers.
 - **Scope:** leaf (a per-plugin vision under the [agent-fabric](../../agent-fabric/README.md) branch)
 - **Status:** Draft
-- **Last revised:** 2026-11-05
+- **Last revised:** 2026-11-13
 - **Reality docs:** [`plugins/agent-bridge/README.md`](../../../plugins/agent-bridge/README.md) ·
   [`plugins/agent-bridge/docs/architecture.md`](../../../plugins/agent-bridge/docs/architecture.md)
 
@@ -48,9 +48,10 @@ that no future wake-up is implied.
 The bridge's contracts must also evolve without requiring every participant to
 update in lockstep. Clients, daemons, session hosts, providers, relays, and
 durable records may be on different supported generations at the same time.
-Compatibility is therefore selected explicitly before work begins, retained for
-the lifetime of each session instance, and retired only when no live,
-recoverable, or rollback reference still depends on it.
+Compatibility follows the endpoint operations and schema meanings actually
+supported, not a shared installation or process history. Session-creation and
+other stateful contracts retain their supported upgrade and rollback semantics;
+ordinary messaging follows the smaller compatibility-first contract below.
 
 ## Concepts & Components
 
@@ -94,6 +95,41 @@ The **bridge CLI** is the agent-facing and operator-facing headless console for
 the mesh. It lets a caller start, send to, wait on, inspect, interrupt, stop,
 resume, and observe sessions without choosing a different tool for each venue or
 transport.
+
+### compatibility-first ordinary messaging
+
+Ordinary messaging has one flow: resolve the machine, resolve its repository,
+resolve the target agent, enqueue the message in the Bridge coordinator,
+return a receipt, and optionally wait for delivery in the CLI caller. Local,
+direct-SSH and routed-machine forms select the same operation rather than
+different admission models.
+
+A target resolves through a directly registered ACP/session endpoint or a
+matching system-owned worktree known to Worktrees or Bridge. ACP Session Hosts
+register with Bridge when created. Live mux-hosted agents register through
+their receiving extension; that responsibility converges on Copilot Driver.
+A dormant agent is not a live receiver: raw send rejects it and the caller
+must explicitly request resume first. Sending never silently creates, resumes
+or replaces the addressed agent.
+
+Compatible authenticated endpoints and database schemas are sufficient for
+ordinary message admission and delivery. Installation governance, database
+ownership, process birth, process incarnation and installation changes are not
+messaging prerequisites. Supported additive schema differences and independently
+updated peers must not introduce provenance or generation ceremonies into the
+send path. Incompatible required operations or schema meanings produce a clear
+compatibility error rather than a guessed success.
+
+The receipt identifies the original queued message and supports follow-up.
+Queue admission, transport delivery and agent consumption remain distinct
+observations; a caller wait does not enqueue a second message. Reconnects and
+lost responses preserve the original message identity and report uncertainty
+honestly.
+
+This communication contract does not remove authentication, authorize a new
+destination or change independent lifecycle and process-retirement safeguards.
+Registration or receiving failures remain observable instead of making a known
+live agent indistinguishable from an unknown target.
 
 ### workspace allocation and session embodiment
 
