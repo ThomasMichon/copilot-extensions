@@ -440,13 +440,25 @@ handover. Preserve held sessions and the separate pre-feature adoption hold.
       current-head approval, required CI and hosted Windows/Linux qualification.
       Headed/default caller adoption, release and installed acceptance remain
       separate.
-    - [ ] **Headed native-child creation seam:** qualify an explicitly selected
+    - [x] **Headed native-child creation seam:** qualify an explicitly selected
       in-process publisher at the existing headed client's actual suspended
       creation, retaining its original native handle, streams, wait and cleanup.
       Keep default and auth-wait paths unchanged. Refuse forwarding/coordinator
       images and unsupported custody before publication; preserve uncertain
       cleanup without replay. Retained-executable caller selection and the
       productive MCP overlay remain separate integration work.
+      #12389 merged at `c86ac86473bd3ba9483b129b9344a23494452b2d` after
+      current-head Copilot approval, required CI and hosted Windows/Linux
+      qualification. This closes the in-process creation/callback boundary,
+      not productive MCP publication or retained-executable caller adoption.
+    - [ ] **Explicit retained headed MCP producer:** join the section publisher,
+      actual suspended native-child owner and fixed copied executable with
+      session-only private configuration transport. Qualify actual MCP startup
+      attribution, wrong-reader refusal, original wait and exact cleanup;
+      retain old-core refusal and unchanged default/auth behavior. Source
+      controls are prepared; review and hosted qualification remain open.
+      Installed handover, release and productive/default enrollment are
+      independent remaining gates.
   - [x] **Explicit Linux exec caller:** capture the exec owner's native pair
     and pass a sealed, session-only overlay for explicitly named configured
     entries, with actual-start discovery bound to a physical optional receiver.

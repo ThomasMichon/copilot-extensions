@@ -1,0 +1,17 @@
+{
+  "comment": "Compose opt-in retained Windows headed MCP ownership with private native-client configuration transfer",
+  "changes": [
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    },
+    {
+      "plugin": "libs-copilot-driver-core",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-remote-driver",
+      "type": "patch"
+    }
+  ]
+}
