@@ -514,7 +514,7 @@ def test_unrelated_tasks_do_not_expand_candidate_scan_under_writer_lock(q, perio
     def connect():
         conn = original()
         conn.set_trace_callback(lambda sql: selections.append(sql) if sql.startswith(
-            "SELECT t.id FROM tasks t LEFT JOIN task_relevance_evaluations e"
+            "SELECT t.id FROM tasks t"
         ) else None)
         return conn
 
@@ -542,3 +542,86 @@ def test_unrelated_tasks_do_not_expand_candidate_scan_under_writer_lock(q, perio
         emitted(q, evaluator_ref="unrelated-loop", now=80)
     after = candidate_steps()
     assert after <= before + 50
+
+
+@pytest.mark.parametrize("selection", ["candidate", "retry", "retry_wait"])
+def test_ineligible_same_evaluator_cohort_has_bounded_raw_pages(q, periodic, monkeypatch, selection):
+    original = q._connect
+    queries = []
+    prefix = (
+        "SELECT t.id FROM tasks t" if selection == "candidate"
+        else "SELECT * FROM task_relevance_evaluations WHERE registration_id="
+    )
+
+    def connect():
+        conn = original()
+        conn.set_trace_callback(lambda sql: queries.append(sql) if sql.startswith(prefix) else None)
+        return conn
+
+    monkeypatch.setattr(q, "_connect", connect)
+
+    def steps():
+        tick(q, periodic, runner=Mock(side_effect=AssertionError("not due")))
+        with original() as conn:
+            count = [0]
+
+            def progress():
+                count[0] += 1
+                return 0
+
+            conn.set_progress_handler(progress, 1)
+            assert len(list(conn.execute(queries[-1]))) <= 2
+            conn.set_progress_handler(None, 0)
+        return count[0]
+
+    before = steps()
+    for _ in range(200):
+        t = emitted(q, evaluator_ref="review-loop", now=99 if selection == "retry" else 80)
+        with original() as conn:
+            conn.execute(
+                "INSERT INTO task_relevance_evaluations"
+                " (task_id,generation,registration_id,status,attempts,next_due,snapshot_json)"
+                " VALUES (?,0,?,'pending',?,?,?)",
+                (t.id, periodic[2], int(selection == "retry_wait"),
+                 100 if selection == "retry" else 200, "{}"),
+            )
+    after = steps()
+    assert after <= before + 100
+
+
+@pytest.mark.parametrize("verdict", ["needed", "obsolete"])
+def test_final_attempt_recovers_committed_report_after_crash(q, periodic, venue, monkeypatch, verdict):
+    declaration(venue[1], "review-evaluator", "evaluator", {
+        **periodic[1], "periodic_relevance": {
+            **periodic[1]["periodic_relevance"], "max_attempts": 1,
+        },
+    })
+    t = task(q)
+    check = runner(verdict)
+
+    class Crash(BaseException):
+        pass
+
+    with monkeypatch.context() as scoped:
+        scoped.setattr(q, "finish_relevance_evaluation", Mock(side_effect=Crash))
+        with pytest.raises(Crash):
+            tick(q, periodic, runner=check)
+    row = q.relevance_evaluations(t.id)[0]
+    saved = json.loads(row["report_json"])
+    assert row["attempts"] == 1
+    assert q.relevance_receipt(t.id, saved["request_id"]) is not None
+    periodic[3][0] = row["expires_at"] + 1
+    from tests._helpers import RepoDefaultingQueue
+
+    restarted = RepoDefaultingQueue(q.db_path)
+    restarted._now = q._now
+    recovered = tick(restarted, periodic, runner=Mock(side_effect=AssertionError("saved report")))
+    assert recovered["accepted"][0]["request_id"] == saved["request_id"]
+    row = restarted.relevance_evaluations(t.id)[0]
+    assert row["status"] == ("pending" if verdict == "needed" else "finished")
+    assert check.call_count == 1
+    if verdict == "needed":
+        periodic[3][0] = row["next_due"]
+        for _ in range(2):
+            tick(restarted, periodic, runner=check)
+        assert check.call_count == 2

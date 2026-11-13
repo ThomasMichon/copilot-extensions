@@ -58,8 +58,10 @@ class QueueRelevanceEvaluationsMixin:
             " ON task_relevance_evaluations(registration_id, status, next_due)"
         )
         conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_relevance_evaluations_retry"
+            "CREATE INDEX IF NOT EXISTS idx_relevance_evaluations_retry_work"
             " ON task_relevance_evaluations(registration_id,status,task_id,generation)"
+            " WHERE status='pending'"
+            " AND (report_json IS NOT NULL OR attempts>0 OR retry_requested=1)"
         )
         for name, keys in (
             ("idx_relevance_candidates", "evaluator_ref,owner,kind,id"),
@@ -123,10 +125,9 @@ class QueueRelevanceEvaluationsMixin:
             retries = conn.execute(
                 "SELECT * FROM task_relevance_evaluations WHERE registration_id=?"
                 " AND status='pending' AND (report_json IS NOT NULL OR attempts>0 OR retry_requested=1)"
-                " AND next_due<=?"
-                " AND (token IS NULL OR expires_at<=?) AND (task_id,generation)>(?,?)"
+                " AND (task_id,generation)>(?,?)"
                 " ORDER BY task_id,generation LIMIT ?",
-                (selector.registration_id, ts, ts, *retry_after, policy.batch_size),
+                (selector.registration_id, *retry_after, policy.batch_size),
             ).fetchall()
             if not retries:
                 self._advance_relevance_retry_cursor(conn, selector.registration_id, "", -1)
@@ -134,6 +135,10 @@ class QueueRelevanceEvaluationsMixin:
                 self._advance_relevance_retry_cursor(
                     conn, selector.registration_id, row["task_id"], row["generation"],
                 )
+                if row["next_due"] > ts or (
+                    row["token"] is not None and row["expires_at"] > ts
+                ):
+                    continue
                 task = self._fetch(conn, row["task_id"])
                 if task is not None and any(
                     item["kind"] == "emitter"
@@ -143,7 +148,7 @@ class QueueRelevanceEvaluationsMixin:
                     for item in effective.registrations.values()
                 ):
                     continue
-                if row["attempts"] >= policy.max_attempts:
+                if row["report_json"] is None and row["attempts"] >= policy.max_attempts:
                     conn.execute(
                         "UPDATE task_relevance_evaluations SET status='failed',"
                         " last_error='periodic relevance retry budget exhausted'"
@@ -183,28 +188,16 @@ class QueueRelevanceEvaluationsMixin:
                     )
                 # A saved report is recovered unchanged before any fresh check.
                 return self._lease_relevance_evaluation(conn, entry, ts, lease_seconds)
-            conn.execute(
-                "UPDATE task_relevance_evaluations SET status='failed',"
-                " last_error='periodic relevance retry budget exhausted'"
-                " WHERE registration_id=? AND status='pending' AND attempts>=?"
-                " AND token IS NOT NULL AND expires_at<=?",
-                (selector.registration_id, policy.max_attempts, ts),
-            )
             after = cursor["task_id"] if cursor else ""
             repo_clause = "" if reg["spec"].get("all_repos") else " AND t.repo=?"
             repo_args = () if not repo_clause else (reg["spec"].get("repo"),)
             rows = conn.execute(
-                "SELECT t.id FROM tasks t LEFT JOIN task_relevance_evaluations e"
-                " ON e.task_id=t.id AND e.generation=t.generation AND e.registration_id=?"
+                "SELECT t.id FROM tasks t"
                 " WHERE t.id>? AND t.kind='finite' AND t.status IN ('proposed','queued')"
-                " AND t.owner IS NULL AND t.created_at<=? AND t.evaluator_ref=?"
+                " AND t.owner IS NULL AND t.evaluator_ref=?"
                 + repo_clause +
-                " AND NOT EXISTS (SELECT 1 FROM task_relevance_closeouts c WHERE c.task_id=t.id)"
-                " AND (e.task_id IS NULL OR (e.status='pending' AND e.next_due<=?"
-                " AND (e.token IS NULL OR e.expires_at<=?)))"
                 " ORDER BY t.id LIMIT ?",
-                (selector.registration_id, after, ts - policy.min_age_seconds,
-                 reg["spec"]["evaluator_ref"], *repo_args, ts, ts, policy.batch_size),
+                (after, reg["spec"]["evaluator_ref"], *repo_args, policy.batch_size),
             ).fetchall()
             conn.execute(
                 "INSERT INTO task_relevance_evaluation_cursors (registration_id,task_id) VALUES (?, ?)"
@@ -213,6 +206,21 @@ class QueueRelevanceEvaluationsMixin:
             )
             for candidate in rows:
                 task = self._fetch(conn, candidate["id"])
+                if task.created_at > ts - policy.min_age_seconds or conn.execute(
+                    "SELECT 1 FROM task_relevance_closeouts WHERE task_id=?", (task.id,),
+                ).fetchone():
+                    continue
+                row = conn.execute(
+                    "SELECT * FROM task_relevance_evaluations"
+                    " WHERE task_id=? AND generation=? AND registration_id=?",
+                    (task.id, task.generation, selector.registration_id),
+                ).fetchone()
+                if row is not None and (
+                    row["status"] != "pending" or row["next_due"] > ts
+                    or (row["token"] is not None and row["expires_at"] > ts)
+                    or (row["report_json"] is None and row["attempts"] >= policy.max_attempts)
+                ):
+                    continue
                 try:
                     resolve_registration(
                         conn, task, selector, disabled_ids=disabled_ids,
@@ -220,11 +228,6 @@ class QueueRelevanceEvaluationsMixin:
                     )
                 except TaskError:
                     continue
-                row = conn.execute(
-                    "SELECT * FROM task_relevance_evaluations"
-                    " WHERE task_id=? AND generation=? AND registration_id=?",
-                    (task.id, task.generation, selector.registration_id),
-                ).fetchone()
                 entry = dict(row) if row is not None else {
                     "task_id": task.id, "generation": task.generation,
                     "registration_id": selector.registration_id, "status": "pending",
@@ -269,7 +272,8 @@ class QueueRelevanceEvaluationsMixin:
         conn: sqlite3.Connection, entry: dict, ts: float, lease_seconds: float,
     ) -> dict:
         entry.update(token=uuid.uuid4().hex, expires_at=ts + lease_seconds, retry_requested=0)
-        entry["attempts"] += 1
+        if entry["report_json"] is None:
+            entry["attempts"] += 1
         columns = (
             "task_id", "generation", "registration_id", "status", "attempts", "next_due",
             "token", "expires_at", "snapshot_json", "report_json", "last_error", "retry_requested",

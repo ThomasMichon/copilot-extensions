@@ -92,7 +92,10 @@ each registration's candidate scan, not its script concurrency. Persistent
 cursors prevent unattributed candidates or later registrations from starvation.
 Source commands and registrar discovery run outside queue write locks.
 Evaluator/repository/keyset indexes exclude unrelated queued work from candidate
-traversal under the writer lock.
+traversal under the writer lock. Candidate and retry queries bound their raw
+keyset pages before due/lease eligibility filtering, and retry traversal uses a
+partial index excluding successful recurring `needed` checks. Examined but
+ineligible rows advance their cursor without spending a check attempt.
 
 `needed` schedules another inspection after the configured interval.
 `unknown` and failures use exponential retry capped by that interval. Attempts
@@ -105,6 +108,8 @@ remote control endpoints or direct database-edit instructions.
 
 Before applying a judgment, the owner persists its complete request identity.
 Restart recovers that original request before invoking the script again.
+Saved-report recovery remains eligible after the final fresh-check attempt;
+recovering an accepted receipt does not spend another source-check attempt.
 The atomic receiver checks the delivery token/lease together with task and
 registration revision fences. Post-commit callback failures recover the accepted
 receipt, not a second abandonment/steer. If receipt state cannot be read,
