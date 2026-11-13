@@ -7,7 +7,7 @@ import sqlite3
 from dataclasses import asdict, dataclass, replace
 from typing import Any
 
-from .queue_common import RunWaiterWakeOperation, WakeOperation
+from .queue_common import RunWaiterWakeOperation, Task, WakeOperation
 from .queue_execution_custody import (
     ExecutionSendUnresolved, SendOutcome, execution_scope_qualified, require_custody_scope,
     require_execution_send_reconciliation,
@@ -34,6 +34,36 @@ def wake_table(wake: Wake) -> str:
 class WakeSendAdmission:
     identity: str | None
     send_required: bool
+
+
+def _known_busy_retry(row: sqlite3.Row, wake: Wake, task: Task) -> bool:
+    if row["execution_send_state"] != "not_sent":
+        return False
+    try:
+        previous = json.loads(row["execution_send"])
+        refusal = json.loads(row["execution_send_detail"])
+    except (TypeError, ValueError):
+        return False
+    return (
+        isinstance(previous, dict) and isinstance(refusal, dict)
+        and previous.get("outbox") == wake_table(wake)
+        and previous.get("wake_id") == wake.id
+        and type(previous.get("task_generation")) is int
+        and previous["task_generation"] == task.generation
+        and isinstance(wake.owner_session_id, str) and bool(wake.owner_session_id.strip())
+        and previous.get("owner_session_id") == wake.owner_session_id
+        and isinstance(previous.get("delivery_token"), str)
+        and bool(previous["delivery_token"])
+        and previous["delivery_token"] != wake.delivery_token
+        and refusal.get("schema") == "dispatch-native-prompt-refusal"
+        and type(refusal.get("version")) is int and refusal["version"] == 1
+        and refusal.get("outcome") == "refused_busy" and refusal.get("reason") == "busy"
+        and refusal.get("retryable") is True
+        and refusal.get("invocation_key") == wake.id
+        and refusal.get("native_session_id") == wake.owner_session_id
+        and isinstance(refusal.get("bridge_session_id"), str)
+        and bool(refusal["bridge_session_id"].strip())
+    )
 
 
 def wake_custody_clear_sql(outbox: str) -> str:
@@ -309,7 +339,8 @@ class QueueExecutionWakesMixin:
             ):
                 raise TaskError("wake reservation release or retirement advanced")
             require_execution_send_reconciliation(conn, task.id, exclusive_key=task.exclusive_key)
-            if row["execution_send"] is not None:
+            previous_send = row["execution_send"]
+            if previous_send is not None and not _known_busy_retry(row, current_wake, task):
                 raise TaskError("settled wake send is observation only; retain its transport history")
             if isinstance(wake, RunWaiterWakeOperation) and wake.sender == CLAIM_RELEASE_SENDER:
                 raise TaskError("claim-release bookkeeping must not request execution custody")
@@ -331,6 +362,8 @@ class QueueExecutionWakesMixin:
                 if execution_scope_qualified(conn, task.repo, task.source):
                     raise TaskError("qualified wake send requires coordinator provenance")
                 if not local_recovery and not local_closeout:
+                    if previous_send is not None:
+                        raise TaskError("retained wake retry cannot drop its original send accounting")
                     return WakeSendAdmission(None, True)
                 fields = {
                     "protocol": "task_relevance_closeout/v1" if local_closeout else "pool_recovery_wake/v1",
@@ -346,6 +379,7 @@ class QueueExecutionWakesMixin:
                         "SELECT steer_id FROM task_relevance_closeouts WHERE task_id=?", (task.id,),
                     ).fetchone()["steer_id"]
                 identity = json.dumps(fields, sort_keys=True, separators=(",", ":"))
+                self._retain_busy_retry(conn, task, current_wake, row)
                 conn.execute(
                     f"UPDATE {table} SET execution_send=?, execution_send_state='pending',"
                     " execution_send_detail='' WHERE id=?", (identity, wake.id),
@@ -378,6 +412,7 @@ class QueueExecutionWakesMixin:
                 },
                 sort_keys=True, separators=(",", ":"),
             )
+            self._retain_busy_retry(conn, task, current_wake, row)
             conn.execute(
                 f"UPDATE {table} SET execution_scope_key = ?, execution_send = ?,"
                 " execution_send_state = 'pending', execution_send_detail = '' WHERE id = ?",
@@ -385,6 +420,20 @@ class QueueExecutionWakesMixin:
             )
             conn.commit()
         return WakeSendAdmission(identity, True)
+
+    def _retain_busy_retry(self, conn: sqlite3.Connection, task: Task, wake: Wake, row: sqlite3.Row) -> None:
+        if row["execution_send"] is None:
+            return
+        self._audit(
+            conn, task.id, ts=self._now(None), from_status=task.status,
+            to_status=task.status, worker=wake.owner,
+            note="wake known-not-sent retry: " + json.dumps({
+                "version": 1, "outbox": wake_table(wake), "wake_id": wake.id,
+                "identity": json.loads(row["execution_send"]),
+                "refusal": json.loads(row["execution_send_detail"]),
+                "next_delivery_token": wake.delivery_token,
+            }, sort_keys=True, separators=(",", ":")),
+        )
 
     def settle_execution_wake(
         self,
