@@ -656,6 +656,40 @@ def test_native_archive_refuses_existing_destination_before_launch(tmp_path, mon
     assert archive.read_bytes() == b"retained artifact"
 
 
+def test_source_staging_uses_private_creation_and_cleans_failed_preparation(
+    repository, tmp_path, monkeypatch,
+):
+    repo, commit = repository
+    local.preparation._git(repo, "update-ref", "refs/remotes/origin/main", commit)
+    owner = local.preparation_process.procutil_module("_daemon_instance_owner")
+    permissions = local.preparation_process.procutil_module("python_cache_permissions")
+    create = owner.mkdir_private
+    created = []
+
+    def private(path, **options):
+        create(path, **options)
+        created.append(path)
+
+    class ArchiveBoundary(Exception):
+        pass
+
+    def archive(_source, _commit, path, **_options):
+        assert path.parent in created
+        permissions.check(path.parent, private=True)
+        raise ArchiveBoundary
+
+    monkeypatch.setattr(owner, "mkdir_private", private)
+    monkeypatch.setattr(local.preparation, "_archive", archive)
+    output = tmp_path / "prepared"
+    with pytest.raises(ArchiveBoundary):
+        local.preparation.prepare(
+            repo, commit, "worktree-manager", output,
+            branch="main", deadline=time.monotonic() + 30,
+        )
+    assert output.is_dir() and not list(output.iterdir())
+    assert (repo / "version.txt").read_bytes() == b"released-version\n"
+
+
 @pytest.mark.skipif(os.name == "nt", reason="POSIX group permissions; Windows uses native DACL checks")
 @pytest.mark.parametrize("shared", ["parent", "ancestor"])
 def test_native_archive_refuses_replacement_capable_directories(tmp_path, monkeypatch, shared):

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from functools import partial
@@ -11,11 +12,11 @@ import math
 import os
 from pathlib import Path, PurePosixPath
 import re
+import secrets
 import shutil
 import subprocess
 import sys
 import tarfile
-import tempfile
 import time
 from typing import BinaryIO
 
@@ -145,6 +146,18 @@ def _archive(source: Path, commit: str, archive: Path, *, deadline: float | None
             source, "-c", "tar.umask=0022", "-c", "core.eol=lf",
             "archive", "--format=tar", "--output=" + git_path, commit, deadline=deadline,
         )
+
+
+@contextmanager
+def _private_work_directory(parent: Path, prefix: str):
+    from source_preparation_process import procutil_module
+
+    work = parent / (prefix + secrets.token_hex(16))
+    procutil_module("_daemon_instance_owner").mkdir_private(work)
+    try:
+        yield work
+    finally:
+        shutil.rmtree(work)
 
 
 def _admit(source: Path, commit: str, branch: str, *, deadline: float | None = None) -> tuple[str, str]:
@@ -332,8 +345,7 @@ def prepare(
     if os.name == "nt":
         output = Path(os.path._getfinalpathname(output))
     prefix = f".prepare-{plugin}-{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}-"
-    with tempfile.TemporaryDirectory(prefix=prefix, dir=output) as temporary:
-        work = Path(temporary)
+    with _private_work_directory(output, prefix) as work:
         archive = work / "source.tar"
         _archive(source, commit, archive, deadline=deadline)
         snapshot = work / "source"
