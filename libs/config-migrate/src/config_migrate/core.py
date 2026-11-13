@@ -25,10 +25,9 @@ Safety properties both paths guarantee:
   same way (a missing migrator surfaces as ``SchemaError`` at registration).
 
 Formatting: when a migration adds *only* the version marker (no shape change --
-the baseline stamp), the marker is inserted **textually** so existing comments
-and hand-formatting survive. When a real ``vN->vN+1`` transform runs (the shape
-genuinely changes), the document is reserialized via ``yaml.safe_dump`` -- the
-rewrite the shape change already implies.
+the baseline stamp), textual insertion preserves existing comments and formatting
+when it produces the intended YAML mapping. Other root forms and real
+``vN->vN+1`` transforms are reserialized via ``yaml.safe_dump``.
 """
 
 from __future__ import annotations
@@ -208,7 +207,7 @@ def migrate_file(
     A missing file is skipped (nothing to migrate). A file that is already
     current is a no-op (idempotent). Otherwise the migrated document is written
     atomically with a ``.bak`` backup; when the only change is the version marker
-    the marker is inserted textually to preserve comments/formatting.
+    textual insertion is preferred when it preserves the intended YAML mapping.
 
     Raises:
         NewerThanCurrentError: the file is newer than the current version.
@@ -240,6 +239,8 @@ def migrate_file(
     except yaml.YAMLError as exc:
         raise MigrationError(f"{path}: malformed YAML: {exc}") from exc
 
+    if parsed is not None and not isinstance(parsed, dict):
+        raise MigrationError(f"{path}: config root must be a mapping")
     doc: dict[str, Any] = parsed if isinstance(parsed, dict) else {}
     from_version = read_version(doc, baseline=spec.baseline_version)
     new_doc, changed = migrate_doc(doc, schema_id, registry)
@@ -253,19 +254,21 @@ def migrate_file(
             to_version=spec.current_version,
         )
 
-    shape_changed = from_version != spec.current_version
-    if shape_changed:
-        # A real vN->vN+1 transform ran: the shape changed, so reserialize.
+    new_text = None
+    if from_version == spec.current_version:
+        candidate = _insert_marker_textually(raw_text, spec.current_version)
+        try:
+            if yaml.safe_load(candidate) == new_doc:
+                new_text = candidate
+        except yaml.YAMLError:
+            pass
+    if new_text is None:
         header = f"{SCHEMA_VERSION_KEY}: {spec.current_version}\n"
         body = {k: v for k, v in new_doc.items() if k != SCHEMA_VERSION_KEY}
         dumped = yaml.safe_dump(
             body, default_flow_style=False, sort_keys=False, allow_unicode=True
         )
         new_text = header + (dumped if body else "")
-    else:
-        # Baseline stamp only (no shape change): preserve the file textually.
-        new_text = _insert_marker_textually(raw_text, spec.current_version)
-
     _atomic_write(path, new_text, backup=backup)
     return MigrationResult(
         path=path,
