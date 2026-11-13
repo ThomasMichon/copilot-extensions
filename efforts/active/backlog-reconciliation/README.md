@@ -342,6 +342,11 @@ the non-public approval conversation.
 
 ## Plan
 
+The [current account and custody study](journal/2026/11.12-account-source-credit-and-retained-custody.md)
+retains eighteen source-specific outcomes and eighty requirement groups,
+including two independently verified current-source corrections and one
+provenance-only original. No source retirement or new receiving is inferred.
+
 The [Index data and inherited-fixture checkpoint](journal/2026/11.12-index-data-receiving-and-inherited-fixture-scope.md)
 records eighteen exact source outcomes, the separate verified #5302 tracking
 retirement, the accepted complete #5245/#6675 receiving extension and its
@@ -3238,6 +3243,12 @@ sources, transferring owners or turning partial/planning gains into completion.
   normal publication flow.
 
 ## Validation Plan
+
+The [account-source credit checkpoint](journal/2026/11.12-account-source-credit-and-retained-custody.md)
+separates #5763/#5791's actual finite helper repairs from their whole
+operation/inherited compatibility gates. Both nonterminal public comments
+have fresh qualification and exact live readback; partial ROOT acquisition
+is not whole receiving acceptance or a passing technical result.
 
 The [eighteen-primary Index/fixture study](journal/2026/11.12-index-data-receiving-and-inherited-fixture-scope.md)
 distinguishes thirteen whole admitted unions from five provenance-only gaps.
