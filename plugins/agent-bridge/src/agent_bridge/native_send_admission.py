@@ -87,8 +87,7 @@ async def submit(
             except SessionNotRunningError:
                 if request.no_resume or not may_resume:
                     raise
-                # The child can exit before the host's STOPPED projection arrives.
-                session.status = SessionStatus.STOPPED
+                # Resume owns the distinction between transport loss and child exit.
                 return None
             saved = stored_receipt(manager.db, session_id, request)
             if saved is None:
