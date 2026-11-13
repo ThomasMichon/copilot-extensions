@@ -494,7 +494,6 @@ def _reuse_projects(
 
 def _source_projects(source: Path, record: dict, projects: tuple[str, ...] | None):
     from promotion_python_artifacts import candidate_projects
-    from standalone_python_artifacts import COMPONENTS
     from application_sources import canonical_application
     from versioned_runtime_source import (
         SOURCE_FILE, SourceIdentity, assembly_hash, payload_package_version, runtime_version,
@@ -539,7 +538,7 @@ def _built_projects(
     import build_python_artifacts as builder
     from build_toolchain_lock import resolve_toolchain_lock
     from promotion_python_artifacts import project_key
-    from standalone_python_artifacts import COMPONENTS, build_standalone_artifacts
+    from standalone_python_artifacts import build_standalone_artifacts
     from versioned_runtime_source import assembly_hash
 
     preparation._remaining(deadline)
