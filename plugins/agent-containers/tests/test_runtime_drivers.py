@@ -185,7 +185,8 @@ def test_drivers_cli_lists_manifests(fake, capsys):
 def test_podman_bundled_fallback_preserves_explicit_drivers(fake, monkeypatch):
     monkeypatch.setattr(external_driver.shutil, "which", lambda _: None)
     spec = find_driver("podman")
-    assert spec.command == (sys.executable, "-m", "agent_containers.podman_driver")
+    assert spec.command == (sys.executable, "-I", "-B", "-X", "utf8", "-m",
+                            "agent_containers.podman_driver")
     assert spec.source == "bundled"
     monkeypatch.setattr(external_driver.shutil, "which", lambda _: "/tools/custom-podman")
     assert find_driver("podman").source == "PATH"
@@ -193,6 +194,63 @@ def test_podman_bundled_fallback_preserves_explicit_drivers(fake, monkeypatch):
         "schema_version": 1, "name": "podman", "command": [sys.executable, "custom.py"],
     }), encoding="utf-8")
     assert find_driver("podman").command == (sys.executable, "custom.py")
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.parametrize("shadow_location", ("checkout", "pythonpath"))
+def test_bundled_podman_imports_installed_driver_not_checkout(
+    fake, tmp_path, monkeypatch, shadow_location,
+):
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    shadow = checkout if shadow_location == "checkout" else tmp_path / "injected"
+    package = shadow / "agent_containers"
+    package.mkdir(parents=True)
+    marker = tmp_path / "checkout-imported"
+    (package / "__init__.py").write_text(
+        f"from pathlib import Path\nPath({str(marker)!r}).touch()\nraise SystemExit(0)\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(checkout)
+    monkeypatch.setenv("PYTHONPATH", str(shadow))
+    monkeypatch.setattr(external_driver.shutil, "which", lambda _: None)
+    driver = ExternalDriver(
+        find_driver("podman"), "example",
+        FleetConfig(driver="podman", driver_options={"image": "example"}),
+    )
+    original = driver._request
+    driver._request = lambda payload: {**original(payload), "protocolVersion": 2}
+    with pytest.raises(DriverError) as raised:
+        driver.call("capabilities")
+    assert raised.value.code == "unsupported_protocol"
+    assert not marker.exists()
+
+
+@pytest.mark.parametrize("component", ("engine", "driver"))
+def test_readiness_podman_lookup_excludes_checkout(fake, tmp_path, monkeypatch, component):
+    from agent_containers.podman_driver import PodmanDriver
+
+    tools = tmp_path / "host-tools"
+    tools.mkdir()
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    name = "podman" if component == "engine" else "agent-containers-driver-podman"
+    filename = name + (".exe" if os.name == "nt" else "")
+    approved = tools / filename
+    for candidate in (approved, checkout / filename):
+        candidate.write_bytes(b"fixture executable")
+        candidate.chmod(0o755)
+    monkeypatch.chdir(checkout)
+    monkeypatch.setenv("PATH", "." + os.pathsep + str(tools))
+    monkeypatch.setenv("NoDefaultCurrentDirectoryInExePath", "1")
+    command = (
+        PodmanDriver({
+            "protocolVersion": 1, "driver": "podman", "fleet": "example",
+            "driverOptions": {"image": "example"},
+        }).command if component == "engine" else find_driver("podman").command
+    )
+    assert Path(command[0]) == approved
 
 
 @pytest.mark.parametrize("filename", ["podman.json", "PODMAN.json", "podman.JSON", "PODMAN.JSON"])

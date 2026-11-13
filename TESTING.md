@@ -99,6 +99,45 @@ that remaining gate, real assertions, cleanup and resource bounds. Required
 CI and review remain unchanged; a shared native quiet window still needs its
 affected owners' agreement.
 
+### Selected read-only readiness execution
+
+Machines' `tests/test_installation_repair.py -k readonly_environment` runs the
+actual platform-native Index gate from a Git checkout with marker-writing local
+Git commands and relative PATH entries. It also checks an all-relative PATH
+refuses rather than restoring cwd lookup. The existing project-context controls
+retain selected-project semantics and unchanged installer cwd.
+The same selection includes an actual Bash startup-file control: a relative
+`BASH_ENV` must not execute from the read-only child's project cwd, while the
+ordinary-action environment retains it. This runs with Git Bash on Windows
+or native Bash where available; it is not native POSIX runtime qualification.
+
+Vault's explicit T3 selection is
+`tests/test_identity_payload_gate.py -k installed_readiness_does_not_import`
+with `--allow-explicit-tiers`. It creates a private namespaced payload/runtime,
+places a shadow module in the checkout, and invokes the real payload front door.
+The installed module must report missing private service readiness, not import
+the shadow. No service is provisioned. Windows covers the CMD/Windows PowerShell
+entry and PowerShell 7; POSIX covers its native gate, with unavailable platform
+cases skipped rather than credited.
+
+The `payload-invocation` selection
+`--test-file tests/test_evaluator_bootstrap_consumers.py --test-file tests/test_readiness_dispatcher_imports.py
+-k 'readonly_runtime_excludes_checkout or readiness_dispatcher_preserves_project' --allow-explicit-tiers`
+invokes the real dispatchers against private installed modules and
+marker-writing checkout shadows. It covers Windows PowerShell, modern
+PowerShell and forced Legacy argument passing for CodeSpaces/Containers,
+plus Machines/Worktrees on each available native platform. Assertions retain
+the selected cwd, installed site packages, isolation, UTF-8 output, no bytecode
+and immutable payload files. Index's
+`tests/test_runtime_gate.py -k posix_readiness_parser_never`
+separately exercises its inline JSON parser from a checkout containing
+`json.py`; a Windows skip is not POSIX evidence.
+`libs/configuration-layers/tests/test_configuration_context.py` additionally
+launches the actual nested owner prefix against a private installed package
+from a shadow-bearing selected project. It checks startup-hook imports,
+isolation, UTF-8, site packages, cwd and bytecode immutability through the
+canonical sandbox/environment/process-containment APIs.
+
 ### Selected native ADO discussion resolution
 
 The focused Worktrees packet `--test-file tests/test_ado_thread_resolution.py
@@ -280,6 +319,20 @@ it never opts into host credentials or changes a packet's deadlines.
 Omitting files is an error unless `--full-suite` explicitly selects the named
 plugin/library suite or tool suite. Broad runs are an escape hatch, not the
 default after a timeout.
+
+For a narrow Manager census diagnosis, select
+`submit --tools --test-file tools/test_manager_census_native.py --allow-explicit-tiers`.
+The four T3 cases run the same local DCOM census with six seconds
+of quiet, single-child churn or eight-child CPU/churn bursts using base Python
+or a private no-pip Windows venv (the `venv-burst` case). They retain sanitized
+failure phase/category/numeric HRESULT and aggregate scan/query-pipeline timing
+in the JUnit `census_profile` property. Query-pipeline timing includes record
+consumption; it is not a provider-only measurement. Any census or session-close
+error still fails. Children remain contained and are reaped. This short profile
+does not install the suite, qualify lifecycle acceptance, waive a prior failed
+census or change the full native packet's deadlines. Use `-k burst` to select
+the concurrent-pressure cases after the lighter cases are measured, or
+`-k venv` for just the venv launcher/base-child residual.
 
 `submit --packet bridge-http52 --source <full-commit>` invokes the candidate's
 canonical capture with `--write`, a separate same-source no-write capture,
@@ -1219,6 +1272,18 @@ escape sequences from a redraw stream is not itself a rendered-screen witness.
 Failure diagnostics retain bounded event-type counts and the private provider's
 request count, never inference request bodies. These distinguish an unfinished
 native turn from completed history whose reply has not rendered.
+The final message-sequence diagnostic retains at most 32 user/assistant labels,
+content sizes/hashes and fixed envelope/source classifications, not message
+text. Extra messages are diagnostic observations, not by themselves valid
+conversation-continuity evidence.
+The installed-core case keeps that exact four-user/four-assistant contract.
+The fresh all-plugin case separately accounts for actual CLI user events
+explicitly marked `source: system`: all four operator prompts still occur
+exactly once in order with their matching replies. A repeated matching reply
+is valid only after another marked system-context event, never an unmarked
+input, duplicate operator prompt, foreign reply or unexplained duplicate.
+Each requested reply must have its own subsequent turn-end event; earlier hook
+turns cannot supply that completion.
 Native-process observations retain pinned parent IDs, bounded option names,
 script basenames and the matching history's lock PIDs, never raw argument values.
 Failures retain the rendered Manager screen as well as the bounded stream tail.
@@ -1232,6 +1297,10 @@ counting only when its sole argument is an ordinary, owned
 lock-bound conversation owner, and it has no conversation lock itself.
 Unknown children, additional owners and orphaned extension hosts still refuse.
 All processes remain under the original pinned native Job custody.
+Native image attribution reuses the installed-TTY retained-handle helper:
+an image query failure is ignored only after that same handle confirms exit
+within its existing bounded wait. A live or unverified access denial still
+fails; an exited process ID is never reopened as a substitute identity.
 The stateless harness has a real private knowledge repository, registered and
 bound before New; the installed coordination-readiness command must resolve it.
 Before constructing runtimes, the case requires an empty, confirmed native
@@ -2522,6 +2591,14 @@ missing-deployment and corrupt-completion fixtures, source identity preservation
 and unchanged incumbent bytes. The POSIX FIFO adapter requires native POSIX
 Python; Git Bash feeding a Windows Python is not qualified. These controls do
 not perform full installation, old-owner retirement or installed-host rollout.
+
+Dispatch's focused `test_bootstrap_check_reconcile_always_on.py -k
+powershell_current_nested_runtime` runs the actual legacy bootstrap on both
+Windows PowerShell and PowerShell 7. Healthy flat/nested selections must return
+before policy evaluation; incomplete, stale and fallback-only nested selections
+must reach a fixture-owned refusing policy boundary. No installer executes,
+reconcile state is not created and resolver tracing stays read-only. These are
+bootstrap regression controls, not installed-suite acceptance.
 
 The same optional lane separately executes MCP's `test_reap_versions.py` and
 procutil's `test_process_retirement.py` and `test_retirement_custody.py` on Windows and Linux. A real synthetic
@@ -8051,6 +8128,14 @@ actual performance assertions are unchanged.
 
 ### SSH snapshot split gates under load
 
+`tests/test_snapshot_payload_stability.py` uses real completed SSH/Worktrees
+fixture runtimes with cold, uncompiled payloads. The ordinary contained runner
+executes the actual writer and mesh wrappers through native PowerShell 5/7 or
+POSIX Bash twice, requires a bound external-state snapshot and compares every
+payload file and directory entry. Environment cache controls stay enabled to
+cover their being ignored by isolated child interpreters. Platform skips are
+not qualification, and this packet does not prove latency or host rollout.
+
 The same opt-in profile also accepts only `agent-ssh`'s complete
 `tests/test_snapshot_runtime.py` and `tests/test_snapshot_windows_visibility.py`
 files, separately or together:
@@ -10035,16 +10120,19 @@ assembled suite's ordinary-update/repair paths or scheduled registrations.
 
 Whole-suite replacement has a separate manual Windows VM portfolio:
 `installation-context-full.yml`, `portfolio=manager-suite`. It runs normal
-update and repair in independent disposable GitHub-hosted Windows jobs:
+update, repair and fresh installation in independent disposable GitHub-hosted
+Windows jobs:
 
 ```text
 python tools/run-manager-suite-acceptance.py --root .v --mode normal
 python tools/run-manager-suite-acceptance.py --root .v --mode repair
+python tools/run-manager-suite-acceptance.py --root .v --mode fresh
 ```
 
-These commands refuse local execution before creating fixtures. Each case
-constructs V1 and V2 through canonical materialization, starts the applicable
-V1 portfolio, and calls the real installed Manager for normal updates or its
+These commands refuse local execution before creating fixtures. Normal and repair
+each construct
+V1 and V2 through canonical materialization, start the applicable
+V1 portfolio, and call the real installed Manager for normal updates or its
 native bootstrap repair entrypoint for repair, against the same default HOME
 and durable data. The private repaired-engine handoff is not a substitute for
 constructing the fresh Manager first. Controlled acquisition replaces only external artifact
@@ -10055,6 +10143,44 @@ The disposable project explicitly opts Vault into runtime participation with
 `enabled: true`; plugin visibility alone is not activation. This does not alter
 the default inactive behavior or any operator configuration.
 
+Fresh mode uses the complete frozen required-readiness profile and real CLI
+payload acquisition described above. An explicitly uncounted discovery engine
+precedes construction from the CLI-selected payloads; the installed Manager then
+executes its normal updater. Every eligible installed runtime must import from
+its selected private slot at the exact payload version, and the actual selected
+Machines owner must satisfy required application readiness. The lifecycle
+witness reuses the installed-core Create/Open/detach/exit/Resume actions, mocking
+only inference. It rechecks payload bytes, selected origins and native executable
+hashes across the two stages, retaining the exact Git transport endpoint when
+restarting the bounded fixture server. The outer coordinator keeps its existing
+1800-second preparation, 900-second exercise, 300-second assertion and
+90-second finally-owned settlement limits. Default private HOME roots allow the
+existing registration/resident cleanup owner to settle both failure and success.
+Fresh construction is neither an admitted baseline-to-candidate upgrade nor
+required promotion enforcement. Its result explicitly grants no source admission;
+the original synthetic replacement and installed-core witnesses remain separate.
+
+Fresh Manager observation verifies selected-slot origin/version, every installed
+candidate Python module and constructor-record hashes against the frozen artifact.
+It explicitly grants no source admission and does not manufacture an exact-source
+receipt. The admitted installed-core witness retains its existing receipt checks.
+Completed runtime-closure diagnostics are retained even if the later Manager
+observation fails; they are not a successful fresh lifecycle result.
+
+The fresh job also supplies a pinned official portable KeePassXC CLI for Vault's
+real backend readiness; it does not create or unlock a database. Failed required
+readiness retains bounded raw reports through the selected Machines owner's
+admitted, execution-bound read-only actions, without applying repair or relaxing
+the original readiness refusal.
+Delivered payloads retain exact full-manifest identity after runtime construction;
+failed comparisons retain bounded path/hash differences without cache exemptions.
+Post-lifecycle comparison retains one bounded report for every changed payload
+before raising the original first refusal, including secondary diagnostic-write
+errors as notes. It does not stop at the first changed owner or certify any
+changed payload.
+Index configuration, role and catalog helpers explicitly disable bytecode writes;
+the runtime's existing owned-cache policy is unchanged.
+
 If baseline preparation reports a Vault activation refusal, the fixture also
 runs the retained payload's read-only activation reader under a bounded native
 owner. Caught payload exceptions and a refused configuration owner's bounded
@@ -10064,6 +10190,14 @@ Missing payloads and settled probe timeouts/output-limit failures are secondary
 diagnostics: the original assertion or `check=False` result remains intact.
 Unconfirmed execution or cleanup still propagates with its exact process/Job
 custody rather than being reduced to a diagnostic result.
+If a driver refuses before advertising its request, diagnostics may retain
+bounded, strictly named request logs from that case's isolated driver directory.
+Advertised requests retain priority; unrelated files, witness data and other
+homes or subdirectories are not scanned.
+The fresh-suite command owner uses that same collector before propagating a
+failed bootstrap command, so an outer participant-close exception does not
+silently discard the case-owned original request log. This is diagnostic
+retention, not recovery, participant release or acceptance of the failed install.
 
 The Index host role is written as YAML readable by both native and
 dependency-free role resolvers. Preparation explicitly provisions its full
@@ -10105,12 +10239,38 @@ module and cache-flag observations. Raw command lines and argument values are
 not retained. Readiness and the final stop/report are checked; scan failures
 remain explicit failures. This trace supplies candidate launch evidence, not
 proof that a particular process wrote a changed file.
+For fresh selected-suite installation, the trace starts only after preparation
+has recorded readiness; constructor processes cannot consume the lifecycle
+record allowance. Scan failures retain at most eight exception types and
+HRESULTs and numeric CIM native/status codes, never exception messages or
+argument values, and still fail the lane.
+The already-caught exception also supplies only allowlisted UInt16/UInt32
+error-data fields and at most four inner HRESULTs, with explicit unavailable
+and truncated indicators. String-valued codes, arbitrary properties and inner
+messages are omitted; diagnostic codes do not change failure classification
+or acceptance. No extra provider query is issued to obtain them.
+The census requests only its four consumed process properties. Scan-error
+samples also retain elapsed milliseconds and the record count at failure;
+polling cadence and failure policy remain unchanged.
+After the observation window arms, one owned local DCOM CIM session is reused
+for the census and closed in `finally`. Creation retains its one-second limit;
+each query has the explicitly approved five-second limit. The outer deadline,
+cadence and record/failure caps are unchanged. A scan or session-close failure remains fatal; an unarmed
+window creates no session. No service or remote endpoint is provisioned.
 The assembled Manager update retains a finite stderr allowance of 4 MiB per
 declared component plus Manager, rather than applying one component's 4 MiB
 capture to the entire suite. Other fixture calls and stdout keep their existing
 limits; execution deadlines and per-unit source progress remain unchanged.
 
 Cold preparation has an 1800-second owned-process deadline; exercise has 900 seconds.
+The fresh lifecycle witness separately waits up to 120 seconds for the actual
+initial or resumed user event, covering the two existing 60-second New
+required-readiness passes before the unchanged 60-second completed-turn check.
+Resume's actual prompt attachment shares that same 120-second launch allowance;
+waiting for its user event does not reset the clock after attachment.
+Both waits remain clipped to the exercise deadline. The installed-core witness
+keeps its existing timing; this phase split neither changes production
+readiness deadlines nor permits incomplete conversation or pane evidence.
 Assertions retain a separate 300-second runner boundary and the usual pytest
 item limit. Settlement runs independently after success, stage failure or
 timeout. The disposable VM owns the outer scheduled-registration and explicit
@@ -10118,6 +10278,22 @@ product-daemon lifetime boundary; this flow does not run inside a restrictive
 local test Job. The workflow retains synthetic diagnostics and cannot pass on
 failed or missing settlement. Neither this test flow nor a passing component
 test asserts that whole-suite acceptance has already passed.
+Fresh lifecycle teardown also retains a bounded daemon-instance outcome
+projection with total unsettled and omitted counts. A held reservation outside
+the sample still fails, and a diagnostic-write error cannot mask the original
+unsettled-custody refusal.
+The retained-payload check after lifecycle execution uses the same bounded
+path/hash difference projection as construction diagnostics. Added bytecode is
+still a change, never an exemption or a reason to reseal the frozen manifest.
+The runtime-resolution source guard distinguishes canonical selected-slot
+layout comparisons from direct nested-venv launches and root-link comparisons;
+only the former are readiness observations rather than launch paths.
+Index's payload-stability packet executes the actual session scope writer and
+native shell entries twice against a cold copied payload, including its
+configuration-reader dependencies. It sets Python environment cache controls
+deliberately ignored by `-E`; explicit `-B` must still preserve every payload
+file. Role/construction fixtures use real Git roots and complete reader inputs,
+not invalid explicit repository overrides or successful configuration callbacks.
 
 The bootstrap RedirectionGuard controls create links as an unprivileged user:
 Windows deliberately [trusts administrator-created links](https://www.microsoft.com/en-us/msrc/blog/2025/06/redirectionguard-mitigating-unsafe-junction-traversal-in-windows).
@@ -10517,6 +10693,29 @@ PowerShell 5/7 construction checks compare every payload file before and after
 actual execution, and require real completion evidence. Windows uses Git Bash,
 not WSL, for the Bash case. Run it directly with pytest; it needs neither an
 Index service nor package downloads.
+
+Worktrees' `tests/test_hook_payload_stability.py` executes the actual raw
+session-start/pre-tool/post-tool hook declarations with a cold copied payload
+and an ordinary, unadmitted directory. Native PowerShell 5/7 or POSIX Bash calls
+repeat against the same payload and compare every entry, retaining the
+no-provisioning assertion. A separate actual import control preserves the
+resident runtime's cache policy. This is a cold hook/no-op regression, not
+qualification of the admitted Manager lifecycle or a substitute for its hosted
+immutable-payload comparison.
+
+AI-attribution's writer controls similarly copy a cold payload and invoke the
+actual standalone Python and native shell entrypoints twice against a real Git
+repository. They require available policy guidance and compare every payload
+entry without mocking the producer. Missing-repository no-op behavior is not a
+substitute for that control, and POSIX skips on Windows remain uncredited.
+
+Budget-guidance's existing real payload-writer control also copies cold scripts
+and source, invokes standalone Python or native PowerShell 5/7/POSIX wrappers,
+and compares every payload file and directory after both startup and resume.
+It preserves the unavailable-config cue, empty output envelope, no-provisioning
+assertion and original deadline controls. This does not refresh or authorize any
+external quota reader, and local success does not replace native artifact and
+census evidence.
 
 Dependency fixtures must also preserve source attribution. Stage matching
 publisher/project metadata and the declared local library graph at the real

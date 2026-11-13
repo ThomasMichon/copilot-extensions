@@ -320,8 +320,8 @@ def _process_arguments(handle, *, owned_root=None):
     }
 
 
-def _case_environment(root):
-    env = installed._environment(root)
+def _case_environment(root, *, environment=None):
+    env = installed._environment(root) if environment is None else dict(environment)
     identities = {
         "SESSION_ID",
         "WORKTREE_ID",
@@ -347,7 +347,7 @@ def _case_environment(root):
     copilot_home = Path(env["USERPROFILE"]) / ".copilot"
     copilot_home.mkdir(parents=True, exist_ok=True)
     data = root / "x"
-    data.mkdir()
+    data.mkdir(exist_ok=environment is not None)
     env.update(
         {
             "COPILOT_HOME": str(copilot_home),
@@ -378,10 +378,91 @@ def _events(path, owner):
     ]
 
 
+def _message_sequence(events):
+    labels = {
+        **{prompt: f"prompt-{index}" for index, prompt in enumerate(PROMPTS, 1)},
+        **{f"LIFECYCLE_REPLY_{index}": f"reply-{index}" for index in range(1, 5)},
+    }
+    messages = []
+    count = 0
+    for event in events:
+        if event["type"] not in ("user.message", "assistant.message"):
+            continue
+        count += 1
+        if len(messages) == 32:
+            continue
+        data = event["data"]
+        text = data.get("content")
+        encoded = text.encode("utf-8") if isinstance(text, str) else None
+        messages.append({
+            "type": event["type"], "fixture_label": labels.get(text) if encoded is not None else None,
+            "content_bytes": len(encoded) if encoded is not None else None,
+            "content_sha256": hashlib.sha256(encoded).hexdigest() if encoded is not None else None,
+            "context_handoff_prefix": isinstance(text, str) and text.startswith("[Context Handoff]"),
+            "system_reminder_envelope": isinstance(text, str) and text.startswith("<system_reminder>"),
+            "datetime_envelope": isinstance(text, str) and text.startswith("<current_datetime>"),
+            "source": data.get("source") if data.get("source") in ("user", "hook", "system", "cli") else None,
+        })
+    return {"messages": messages, "omitted": count - len(messages)}
+
+
+def _assert_conversation_sequence(events, *, system_context=False):
+    if not system_context:
+        assert [
+            event["data"]["content"] for event in events if event["type"] == "user.message"
+        ] == list(PROMPTS)
+        assert [
+            event["data"]["content"] for event in events if event["type"] == "assistant.message"
+        ] == [f"LIFECYCLE_REPLY_{number}" for number in range(1, 5)]
+        return
+    prompts, replies = [], []
+    replied = system_since_reply = False
+    for event in events:
+        if event["type"] == "user.message":
+            content = event["data"]["content"]
+            assert isinstance(content, str), "Native conversation input is not text"
+            if event["data"].get("source") == "system" and content not in PROMPTS:
+                system_since_reply = True
+                continue
+            assert not prompts or replied, "An operator prompt lost its completed reply"
+            assert len(prompts) < len(PROMPTS) and content == PROMPTS[len(prompts)], (
+                "Operator conversation input is missing, duplicated, reordered or unattributed"
+            )
+            prompts.append(content)
+            replied = system_since_reply = False
+        elif event["type"] == "assistant.message":
+            assert prompts and event["data"]["content"] == f"LIFECYCLE_REPLY_{len(prompts)}", (
+                "The assistant reply does not match the current operator prompt"
+            )
+            assert not replied or system_since_reply, "An assistant reply duplicated without system context"
+            if not replied:
+                replies.append(event["data"]["content"])
+            replied, system_since_reply = True, False
+    assert prompts == list(PROMPTS), "The original operator conversation is incomplete"
+    assert replies == [f"LIFECYCLE_REPLY_{number}" for number in range(1, 5)], (
+        "The original operator replies are incomplete"
+    )
+
+
+def _prompt_turn_complete(events, prompt, reply):
+    prompt_seen = reply_seen = False
+    for event in events:
+        if event["type"] == "user.message" and event["data"].get("content") == prompt:
+            prompt_seen, reply_seen = True, False
+        elif (
+            event["type"] == "assistant.message" and prompt_seen
+            and event["data"].get("content") == reply
+        ):
+            reply_seen = True
+        elif event["type"] == "assistant.turn_end" and reply_seen:
+            return True
+    return False
+
+
 class _Witness:
     def __init__(
         self, root, env, manager_python, engine, copilot, budget, provider_requests=(),
-        *, mux_binary=None,
+        *, mux_binary=None, run=None, launch_timeout=None, system_context=False,
     ):
         self.root, self.env = root, env
         self.manager_python = manager_python
@@ -395,6 +476,9 @@ class _Witness:
         self.input_observation = None
         self.provider_requests = provider_requests
         self.mux_binary = mux_binary
+        self.run = installed._run if run is None else run
+        self.launch_timeout = launch_timeout
+        self.system_context = system_context
         self.stack = ExitStack()
 
     def rendered(self, console):
@@ -564,7 +648,7 @@ for row in rows:
 print(json.dumps({"diagnostic":"failure-only-current-roster-before-teardown",
                   "captured_at_ns":time.time_ns(),"rows":observations}),flush=True)
 """
-        return installed._run(
+        return self.run(
             [self.manager_python, "-I", "-B", "-c", program, self.root, PROJECT],
             self.env,
             self.root / PROJECT,
@@ -657,11 +741,11 @@ print(json.dumps({"diagnostic":"failure-only-current-roster-before-teardown",
                             console,
                             handle,
                         )
-                        or not installed._image(
-                            console,
-                            handle,
-                        ).samefile(self.copilot)
                     ):
+                        console._close(handle)
+                        continue
+                    image = installed._live_image(console, handle)
+                    if image is None or not image.samefile(self.copilot):
                         console._close(handle)
                         continue
                     identity = (pid, console.birth(handle))
@@ -721,7 +805,37 @@ print(json.dumps({"diagnostic":"failure-only-current-roster-before-teardown",
             error.add_note(f"Native owner observation: {diagnostic_error}")
         raise error
 
+    def _turn_started(self, prompt, number):
+        paths = (
+            [self.history] if self.history else sorted(
+                (Path(self.env["COPILOT_HOME"]) / "session-state").glob("*/events.jsonl"),
+            )
+        )
+        observed = any(
+            event["type"] == "user.message" and event["data"].get("content") == prompt
+            for path in paths for event in _events(path, Path(self.env["COPILOT_HOME"]))
+        )
+        self.turn_observation = {
+            "phase": "launch-readiness", "turn": number, "prompt_seen": observed,
+            "histories": len(paths), "provider_requests": len(self.provider_requests),
+        }
+        return observed
+
     def turn(self, prompt, number, console):
+        launch_elapsed = None
+        launch_timeout = getattr(self, "launch_timeout", None)
+        if launch_timeout is not None and number in (1, 4):
+            started = (
+                getattr(self, "resume_launch_started", time.monotonic())
+                if number == 4 else time.monotonic()
+            )
+            self.wait(
+                lambda: self._turn_started(prompt, number),
+                f"Native launch/readiness did not record {prompt}",
+                timeout=max(0, launch_timeout - (time.monotonic() - started)),
+            )
+            launch_elapsed = time.monotonic() - started
+
         def finished():
             paths = (
                 [self.history]
@@ -758,6 +872,10 @@ print(json.dumps({"diagnostic":"failure-only-current-roster-before-teardown",
                     prompt in texts
                     and turn_ends >= number
                     and histories[-1]["reply_seen"]
+                    and (
+                        not getattr(self, "system_context", False)
+                        or _prompt_turn_complete(events, prompt, f"LIFECYCLE_REPLY_{number}")
+                    )
                 ):
                     matches.append(path)
             self.turn_observation = {
@@ -766,6 +884,8 @@ print(json.dumps({"diagnostic":"failure-only-current-roster-before-teardown",
                 "histories": histories,
                 "reply_in_terminal": f"LIFECYCLE_REPLY_{number}" in installed._visible(console.output),
             }
+            if launch_elapsed is not None:
+                self.turn_observation["launch_readiness_seconds"] = launch_elapsed
             if len(matches) > 1:
                 raise RuntimeError("One Manager operation produced multiple conversations")
             if not matches:
@@ -791,7 +911,7 @@ print(json.dumps({"diagnostic":"failure-only-current-roster-before-teardown",
         )
         if self.mux_binary is None:
             raise RuntimeError("Rendered-pane evidence requires the selected native mux binary")
-        rendered = installed._run(
+        rendered = self.run(
             [
                 self.mux_binary, *namespace, "capture-pane", "-p",
                 "-t", "wt-" + record["id"], "-S", "-60",
@@ -814,7 +934,7 @@ print(json.dumps({"diagnostic":"failure-only-current-roster-before-teardown",
             " for r in rows if r.kind=='session']))"
         )
         rows = json.loads(
-            installed._run(
+            self.run(
                 [self.engine, "-I", "-B", "-c", code],
                 self.env,
                 self.root,
@@ -848,13 +968,23 @@ print(json.dumps({"diagnostic":"failure-only-current-roster-before-teardown",
             lambda: self._action_location(console, verb) is not None,
             f"Real Manager discovery did not offer {verb}",
         )
+        launch_timeout = getattr(self, "launch_timeout", None) if verb == "Resume" else None
+        if launch_timeout is not None:
+            self.resume_launch_started = time.monotonic()
         console.send(b"\r")
 
         def attached():
             screen = self.rendered(console)
             return "Start of Prompt Indicator" in screen and "Interactive" in screen
 
-        self.wait(attached, f"Real Manager {verb} did not attach the native CLI prompt")
+        label = f"Real Manager {verb} did not attach the native CLI prompt"
+        if launch_timeout is None:
+            self.wait(attached, label)
+        else:
+            self.wait(
+                attached, label,
+                timeout=max(0, launch_timeout - (time.monotonic() - self.resume_launch_started)),
+            )
 
     def _action_location(self, console, label):
         self.rendered(console)
@@ -974,10 +1104,14 @@ print(json.dumps({"diagnostic":"failure-only-current-roster-before-teardown",
                     failure.add_note(f"Input diagnostic write: {write_error}")
             if self.turn_observation is not None:
                 try:
+                    if self.history is not None:
+                        self.turn_observation["message_sequence"] = _message_sequence(
+                            _events(self.history, Path(self.env["COPILOT_HOME"])),
+                        )
                     (self.root / "diagnostics" / "lifecycle-conversation.json").write_text(
                         json.dumps(self.turn_observation), encoding="utf-8",
                     )
-                except OSError as write_error:
+                except Exception as write_error:
                     if failure is None:
                         raise
                     failure.add_note(f"Conversation diagnostic write: {write_error}")
@@ -1035,7 +1169,7 @@ else:
     data["bootstrap_error"]="No private selected engine; no backend executed"
 print(json.dumps(data),flush=True)
 """
-        installed._run(
+        self.run(
             [self.manager_python, "-I", "-B", "-c", program, self.root, PROJECT],
             self.env,
             self.root / PROJECT,
@@ -1076,11 +1210,12 @@ def _identity():
     }
 
 
-def _project(root, env, engine, copilot):
+def _project(root, env, engine, copilot, *, profile=None, run=None):
+    run = installed._run if run is None else run
     project = root / PROJECT
-    project.mkdir()
+    project.mkdir(exist_ok=profile is not None)
     diagnostics = root / "diagnostics"
-    installed._run(
+    run(
         ["git", "init", "-q", "-b", "main", project],
         env,
         root,
@@ -1088,7 +1223,19 @@ def _project(root, env, engine, copilot):
         "project-init",
         timeout=30,
     )
-    arguments = installed._harness_registration(engine, project, root / "payloads")
+    if profile is not None:
+        origin = root / "project-origin.git"
+        run(
+            ["git", "init", "--bare", "-q", "-b", "main", origin],
+            env, root, diagnostics, "project-origin-init", timeout=30,
+        )
+        run(
+            ["git", "-C", project, "remote", "add", "origin", origin],
+            env, root, diagnostics, "project-origin-select", timeout=30,
+        )
+    arguments = installed._harness_registration(
+        engine, project, root / "payloads", profile=profile,
+    )
     arguments[arguments.index("--no-agent")] = "--agent"
     config = project / ".agent-worktrees" / "config.yaml"
     value = yaml.safe_load(config.read_text(encoding="utf-8"))
@@ -1102,10 +1249,10 @@ def _project(root, env, engine, copilot):
     ]
     value["launch"] = {"windows": launch}
     config.write_text(yaml.safe_dump(value), encoding="utf-8")
-    installed._run(arguments, env, project, diagnostics, "register-project", timeout=30)
+    run(arguments, env, project, diagnostics, "register-project", timeout=30)
     knowledge = root / KNOWLEDGE
     knowledge.mkdir()
-    installed._run(
+    run(
         ["git", "init", "-q", "-b", "main", knowledge],
         env,
         root,
@@ -1136,7 +1283,7 @@ def _project(root, env, engine, copilot):
                 ],
             ),
         ):
-            installed._run(
+            run(
                 ["git", "-C", repository, *args],
                 env,
                 root,
@@ -1144,7 +1291,12 @@ def _project(root, env, engine, copilot):
                 name + "-" + label,
                 timeout=30,
             )
-    installed._run(
+    if profile is not None:
+        run(
+            ["git", "-C", project, "push", "-u", "origin", "main"],
+            env, root, diagnostics, "project-origin-push", timeout=30,
+        )
+    run(
         [
             engine,
             "-I",
@@ -1172,7 +1324,7 @@ def _project(root, env, engine, copilot):
     configuration["knowledge_repo"] = KNOWLEDGE
     binding.write_text(yaml.safe_dump(configuration), encoding="utf-8")
     readiness = json.loads(
-        installed._run(
+        run(
             [engine, "-I", "-B", "-m", "agent_worktrees", "coordination-readiness"],
             env,
             project,
@@ -1185,7 +1337,7 @@ def _project(root, env, engine, copilot):
         knowledge,
     ):
         raise RuntimeError("The installed harness did not resolve its real private knowledge repo")
-    selected = installed._run(
+    selected = run(
         [
             engine,
             "-I",
@@ -1513,12 +1665,81 @@ def test_lifecycle_conversation_diagnostics_distinguish_history_from_rendering(t
         assert row["event_types_omitted"] == 0
 
 
+@pytest.mark.parametrize(
+    "launch_timeout,execution_deadline,completed,expected_clock",
+    [(None, 200, False, 60), (120, 200, True, 100), (120, 95, False, 100)],
+)
+def test_fullsuite_launch_phase_preserves_core_turn_and_outer_deadlines(
+    tmp_path, monkeypatch, launch_timeout, execution_deadline, completed, expected_clock,
+):
+    from types import SimpleNamespace
+
+    home = tmp_path / "copilot-home"
+    history = home / "session-state" / "fixture-session" / "events.jsonl"
+    history.parent.mkdir(parents=True)
+    clock = [0]
+    witness = _Witness(
+        tmp_path, {"COPILOT_HOME": str(home)}, None, None, None,
+        SimpleNamespace(execution_deadline=execution_deadline), launch_timeout=launch_timeout,
+    )
+    witness._capture_processes = lambda: None
+    witness.one_native = lambda: (101, 1001)
+
+    def sleep(_seconds):
+        clock[0] += 10
+        if clock[0] >= 90:
+            assert witness.history is None
+            events = [{"type": "user.message", "data": {"content": PROMPTS[0]}}]
+            if clock[0] >= 100:
+                events.extend([
+                    {"type": "assistant.message", "data": {"content": "LIFECYCLE_REPLY_1"}},
+                    {"type": "assistant.turn_end", "data": {}},
+                ])
+            history.write_text("".join(json.dumps(row) + "\n" for row in events), encoding="utf-8")
+
+    monkeypatch.setitem(
+        _Witness.turn.__globals__, "time",
+        SimpleNamespace(monotonic=lambda: clock[0], sleep=sleep),
+    )
+    console = SimpleNamespace(output=b"LIFECYCLE_REPLY_1")
+    if completed:
+        assert witness.turn(PROMPTS[0], 1, console) == (101, 1001)
+        assert witness.history == history
+        assert witness.turn_observation["launch_readiness_seconds"] == 90
+    else:
+        with pytest.raises(TimeoutError, match="Native conversation did not finish"):
+            witness.turn(PROMPTS[0], 1, console)
+    assert clock[0] == expected_clock
+
+
+@pytest.mark.parametrize("extra", ("private fixture text", "[Context Handoff] private fixture text"))
+def test_lifecycle_message_sequence_classifies_extras_without_retaining_content(extra):
+    events = [
+        {"type": "user.message", "data": {"content": PROMPTS[0]}},
+        {"type": "user.message", "data": {"content": extra, "source": "hook"}},
+        {"type": "assistant.message", "data": {"content": "LIFECYCLE_REPLY_1"}},
+        {"type": "assistant.message", "data": {"content": "LIFECYCLE_REPLY_1"}},
+    ]
+    projection = _message_sequence(events)
+    assert extra not in json.dumps(projection) and "private fixture text" not in json.dumps(projection)
+    assert [row["fixture_label"] for row in projection["messages"]] == [
+        "prompt-1", None, "reply-1", "reply-1",
+    ]
+    unknown = projection["messages"][1]
+    assert unknown["source"] == "hook"
+    assert unknown["content_bytes"] == len(extra.encode("utf-8"))
+    assert unknown["content_sha256"] == hashlib.sha256(extra.encode("utf-8")).hexdigest()
+    assert unknown["context_handoff_prefix"] is extra.startswith("[Context Handoff]")
+    bounded = _message_sequence(events * 10)
+    assert len(bounded["messages"]) == 32 and bounded["omitted"] == 8
+
+
 @pytest.mark.parametrize("rendered", [True, False])
 @pytest.mark.parametrize("persisted", [True, False])
 @pytest.mark.parametrize("number", [1, 4])
 @pytest.mark.skipif(os.name != "nt", reason="The native pane uses a private PSMux namespace")
 def test_lifecycle_completed_turn_uses_the_bound_rendered_pane(
-    tmp_path, monkeypatch, rendered, persisted, number,
+    tmp_path, rendered, persisted, number,
 ):
     from types import SimpleNamespace
     from plugin_test_command_safety import private_mux_args
@@ -1567,7 +1788,7 @@ def test_lifecycle_completed_turn_uses_the_bound_rendered_pane(
         return f"LIFECYCLE_REPLY_{number}" if rendered else "unfinished"
 
     witness.records = records
-    monkeypatch.setattr(installed, "_run", capture)
+    witness.run = capture
     result = witness.turn(PROMPTS[number - 1], number, SimpleNamespace(output=b"cursor redraw"))
     assert result == (("native-pid", "native-birth") if rendered and persisted else None)
     assert owners == ([history] if rendered and persisted else [])
@@ -1575,6 +1796,108 @@ def test_lifecycle_completed_turn_uses_the_bound_rendered_pane(
         binary, *namespace, "capture-pane", "-p",
         "-t", "wt-fixture-worktree", "-S", "-60",
     ]] if persisted else [])
+
+
+@pytest.mark.parametrize(
+    "fault", (
+        "none", "unmarked-context", "nontext-context", "duplicate-prompt",
+        "unpaired-reply", "wrong-reply", "missing-reply",
+    ),
+)
+def test_fullsuite_history_requires_operator_continuity_despite_runtime_system_context(fault):
+    events = []
+    for index, prompt in enumerate(PROMPTS, 1):
+        events.append({"type": "user.message", "data": {"content": prompt}})
+        if index == 1:
+            events.append({"type": "user.message", "data": {"content": "startup annotation", "source": "system"}})
+        events.extend([
+            {"type": "assistant.message", "data": {"content": f"LIFECYCLE_REPLY_{index}"}},
+            {"type": "assistant.turn_end", "data": {}},
+        ])
+        if index == 1:
+            events.extend([
+                {"type": "user.message", "data": {"content": "runtime guidance", "source": "system"}},
+                {"type": "assistant.message", "data": {"content": "LIFECYCLE_REPLY_1"}},
+                {"type": "assistant.turn_end", "data": {}},
+            ])
+        if index == 3:
+            events.append({"type": "user.message", "data": {"content": "resume annotation", "source": "system"}})
+    if fault == "unmarked-context":
+        events[1]["data"].pop("source")
+    elif fault == "nontext-context":
+        events[1]["data"]["content"] = None
+    elif fault == "duplicate-prompt":
+        events[1]["data"]["content"] = PROMPTS[0]
+    elif fault == "unpaired-reply":
+        del events[4]
+    elif fault == "wrong-reply":
+        events[5]["data"]["content"] = "foreign response"
+    elif fault == "missing-reply":
+        events = [event for event in events if event["data"].get("content") != "LIFECYCLE_REPLY_2"]
+    if fault == "none":
+        _assert_conversation_sequence(events, system_context=True)
+        with pytest.raises(AssertionError):
+            _assert_conversation_sequence(events)
+    else:
+        with pytest.raises(AssertionError):
+            _assert_conversation_sequence(events, system_context=True)
+
+
+@pytest.mark.parametrize("previous_ends,completed", ((0, False), (4, False), (4, True)))
+def test_fullsuite_completion_cannot_borrow_earlier_system_turn_ends(previous_ends, completed):
+    events = [
+        *[{"type": "assistant.turn_end", "data": {}} for _ in range(previous_ends)],
+        {"type": "user.message", "data": {"content": PROMPTS[3]}},
+        {"type": "assistant.message", "data": {"content": "LIFECYCLE_REPLY_4"}},
+    ]
+    if completed:
+        events.append({"type": "assistant.turn_end", "data": {}})
+    assert _prompt_turn_complete(events, PROMPTS[3], "LIFECYCLE_REPLY_4") is completed
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Native retained process attribution")
+@pytest.mark.parametrize("exited_after_query", (False, True))
+def test_lifecycle_native_image_failure_ignores_only_the_same_confirmed_exited_handle(
+    tmp_path, monkeypatch, exited_after_query,
+):
+    from types import SimpleNamespace
+    import agent_procutil._windows_caller_owned as windows
+
+    handle, job = object(), object()
+    checks, closed = [], []
+    error = PermissionError("controlled native image teardown")
+    error.winerror = 5
+    console = SimpleNamespace(job=SimpleNamespace(handle=job), handles={handle}, pin=lambda _: handle)
+
+    def exited(actual, timeout=0):
+        assert actual is handle
+        checks.append(timeout)
+        return exited_after_query if timeout else False
+
+    def close(actual):
+        assert actual is handle
+        closed.append(actual)
+        console.handles.remove(actual)
+
+    def unreadable(actual_console, actual_handle):
+        assert actual_console is console and actual_handle is handle
+        raise error
+
+    console.exited, console._close = exited, close
+    monkeypatch.setattr(windows, "_job_pids", lambda actual: [101] if actual is job else [])
+    monkeypatch.setitem(_Witness.native.__globals__, "_job_member", lambda *_: True)
+    monkeypatch.setattr(installed, "_image", unreadable)
+    monkeypatch.setattr(installed, "_WORK_DEADLINE", None)
+    witness = _Witness(tmp_path, {}, None, None, tmp_path / "copilot.exe", None)
+    witness.consoles.append(console)
+    if exited_after_query:
+        assert witness.native() == {}
+    else:
+        with pytest.raises(PermissionError) as caught:
+            witness.native()
+        assert caught.value is error
+    assert checks == [0, 0, 250] and closed == [handle]
+    assert not witness.native_handles
 
 
 def test_lifecycle_diagnostic_write_cannot_mask_unsettled_custody(tmp_path):
@@ -1971,6 +2294,58 @@ def test_lifecycle_selection_waits_for_the_current_cli_prompt(tmp_path, attached
     assert len(checks) == 3
 
 
+@pytest.mark.parametrize(
+    "launch_timeout,event_after,expected_clock,completed",
+    [(None, 65, 30, False), (120, 65, 75, True), (120, 130, 120, False)],
+)
+def test_fullsuite_resume_shares_launch_budget_with_prompt_attachment(
+    tmp_path, monkeypatch, launch_timeout, event_after, expected_clock, completed,
+):
+    from types import SimpleNamespace
+
+    home = tmp_path / "copilot-home"
+    history = home / "session-state" / "fixture-session" / "events.jsonl"
+    history.parent.mkdir(parents=True)
+    history.write_text("", encoding="utf-8")
+    clock = [0]
+    witness = _Witness(
+        tmp_path, {"COPILOT_HOME": str(home)}, None, None, None,
+        SimpleNamespace(execution_deadline=200), launch_timeout=launch_timeout,
+    )
+    witness.history = history
+    witness._capture_processes = witness._capture_liveness = lambda: None
+    witness._refresh_before_resume = lambda *_: None
+    witness._action_location = lambda *_: (1, 1)
+    witness.one_native = lambda: (101, 1001)
+    witness.rendered = lambda _: "Start of Prompt Indicator Interactive" if clock[0] >= 45 else "Loading"
+    console = SimpleNamespace(output=b"c123 LIFECYCLE_REPLY_4", send=lambda _: None)
+
+    def sleep(_seconds):
+        clock[0] += 5
+        if clock[0] >= event_after:
+            events = [{"type": "user.message", "data": {"content": PROMPTS[3]}}]
+            if clock[0] >= event_after + 10:
+                events.extend([
+                    {"type": "assistant.message", "data": {"content": "LIFECYCLE_REPLY_4"}},
+                    *[{"type": "assistant.turn_end", "data": {}} for _ in range(4)],
+                ])
+            history.write_text("".join(json.dumps(row) + "\n" for row in events), encoding="utf-8")
+
+    monkeypatch.setitem(
+        _Witness.turn.__globals__, "time",
+        SimpleNamespace(monotonic=lambda: clock[0], sleep=sleep),
+    )
+    if completed:
+        witness.select(console, {"id": "fixture-c123"}, "Resume")
+        assert witness.turn(PROMPTS[3], 4, console) == (101, 1001)
+        assert witness.turn_observation["launch_readiness_seconds"] == event_after
+    else:
+        with pytest.raises(TimeoutError, match="did not attach|did not record"):
+            witness.select(console, {"id": "fixture-c123"}, "Resume")
+            witness.turn(PROMPTS[3], 4, console)
+    assert clock[0] == expected_clock
+
+
 @pytest.mark.parametrize("case", ["stopped", "wrong-highlight", "still-unknown"])
 def test_lifecycle_resume_refresh_requires_a_safe_action_and_real_stopped_frame(tmp_path, case):
     from types import SimpleNamespace
@@ -2121,9 +2496,12 @@ def test_frozen_git_transport_preserves_ignored_artifact_bytes_without_mutating_
     artifact = controls._artifact(tmp_path)
     (artifact / ".gitignore").write_text("generated.txt\n")
     (artifact / "generated.txt").write_bytes(b"Frozen generated bytes\n\x00done\n")
-    (artifact / ".gitattributes").write_bytes(b"*.ps1 text eol=crlf\n*.cmd text eol=crlf\n")
+    (artifact / ".gitattributes").write_bytes(
+        b"*.ps1 text eol=crlf\n*.cmd text eol=crlf\n*.toml text eol=lf\n"
+    )
     (artifact / "launcher.ps1").write_bytes(b"Write-Output 'Frozen LF bytes'\n")
     (artifact / "launcher.cmd").write_bytes(b"@echo Frozen LF bytes\n")
+    (artifact / "generated.toml").write_bytes(b'[generated]\r\nsource = "frozen"\r\n')
     environment = {
         key: value for key, value in os.environ.items() if not key.upper().startswith("GIT_")
     }
@@ -2156,7 +2534,7 @@ def test_frozen_git_transport_preserves_ignored_artifact_bytes_without_mutating_
     }
     with serve_git_transport(transport, **serving) as served:
         run(
-            ["git", "clone", "--depth", "1", "--progress", served["url"], copied],
+            ["git", "clone", "--depth", "1", "--progress", "--branch", "main", served["url"], copied],
             {**environment, "GIT_TEMPLATE_DIR": transport["checkout_template"]},
             project, tmp_path, "clone", timeout=30,
         )
@@ -2173,7 +2551,8 @@ def test_frozen_git_transport_preserves_ignored_artifact_bytes_without_mutating_
     assert _PROVENANCE["content_manifest"](artifact) == before
     assert not (artifact / ".git").exists()
     with pytest.raises(RuntimeError, match="controlled acquisition failure"):
-        with serve_git_transport(transport, **serving):
+        with serve_git_transport(served, **serving) as resumed:
+            assert resumed["url"] == served["url"]
             raise RuntimeError("controlled acquisition failure")
     with pytest.raises(ValueError, match="fresh fixture-owned"):
         prepare_git_transport(
@@ -2309,6 +2688,79 @@ def test_installed_suite_payload_closure_uses_the_real_cli(record_testsuite_prop
         assert installed._host_state() == before_host
 
 
+def _actions(witness):
+    """The same real Manager controls qualify core and complete-suite installs."""
+    first = witness.manager()
+    first.send(b"\r")
+    witness.wait(
+        lambda: witness._new_create_focused(first),
+        "The real New-worktree dialog did not focus Create",
+    )
+    first.send(b"\t")
+    witness.wait(
+        lambda: witness._new_prompt_focused(first),
+        "The New dialog did not render its focused prompt caret",
+    )
+    _paste_prompt(first, PROMPTS[0])
+    witness.wait(
+        lambda: PROMPTS[0] in witness.rendered(first),
+        "The New dialog did not render the entered prompt",
+    )
+    first.send(b"\r")
+    witness.wait(
+        lambda: witness._new_create_focused(first),
+        "The New dialog did not focus Create after accepting the prompt",
+    )
+    first.send(b"\r")
+    original = witness.turn(PROMPTS[0], 1, first)
+    record = witness.records("records-created")
+    actual = witness.run(
+        ["git", "-C", record["path"], "rev-parse", "--show-toplevel"],
+        witness.env, witness.root, witness.root / "diagnostics",
+        "real-created-worktree", timeout=30,
+    )
+    assert Path(actual).samefile(record["path"])
+
+    second = witness.manager()
+    witness.select(second, record, "Open")
+    second.send(PROMPTS[1].encode() + b"\r")
+    assert witness.turn(PROMPTS[1], 2, second) == original
+    if not first.exited(first.process.process):
+        first.send(b"\x02d")
+    assert first.wait(15000) == 0
+    assert witness.one_native() == original
+    second.send(PROMPTS[2].encode() + b"\r")
+    assert witness.turn(PROMPTS[2], 3, second) == original
+    assert witness.records("records-opened") == record
+    witness.close_cli(second, original)
+    assert not witness.one_native()
+    assert witness.records("records-after-exit") == record
+
+    resumed = witness.manager()
+    witness.select(resumed, record, "Resume")
+    resumed.send(PROMPTS[3].encode() + b"\r")
+    replacement = witness.turn(PROMPTS[3], 4, resumed)
+    assert replacement != original
+    assert witness.records("records-resumed") == record
+    copilot_home = Path(witness.env["COPILOT_HOME"])
+    _assert_conversation_sequence(
+        _events(witness.history, copilot_home),
+        system_context=getattr(witness, "system_context", False),
+    )
+    assert any(
+        all(prompt in json.dumps(request) for prompt in PROMPTS)
+        for request in witness.provider_requests
+    )
+    witness.close_cli(resumed, replacement)
+    assert not witness.one_native()
+    return {
+        "worktree": record["id"], "conversation": witness.history.parent.name,
+        "native_before_open": original, "native_after_resume": replacement,
+        "create": True, "open_existing": True, "detach_preserved": True,
+        "normal_exit": True, "resume_continued": True,
+    }
+
+
 @pytest.mark.skipif(os.name != "nt", reason="Native installed Windows Manager lifecycle")
 @pytest.mark.timeout(900)
 def test_installed_manager_creates_resumes_and_opens_one_real_cli(record_testsuite_property):
@@ -2395,78 +2847,7 @@ def test_installed_manager_creates_resumes_and_opens_one_real_cli(record_testsui
                 with _Witness(
                     root, env, manager, engine, copilot, budget, requests, mux_binary=psmux,
                 ) as witness:
-                    first = witness.manager()
-                    first.send(b"\r")
-                    witness.wait(
-                        lambda: witness._new_create_focused(first),
-                        "The real New-worktree dialog did not focus Create",
-                    )
-                    first.send(b"\t")
-                    witness.wait(
-                        lambda: witness._new_prompt_focused(first),
-                        "The New dialog did not render its focused prompt caret",
-                    )
-                    _paste_prompt(first, PROMPTS[0])
-                    witness.wait(
-                        lambda: PROMPTS[0] in witness.rendered(first),
-                        "The New dialog did not render the entered prompt",
-                    )
-                    first.send(b"\r")
-                    witness.wait(
-                        lambda: witness._new_create_focused(first),
-                        "The New dialog did not focus Create after accepting the prompt",
-                    )
-                    first.send(b"\r")
-                    original = witness.turn(PROMPTS[0], 1, first)
-                    record = witness.records("records-created")
-                    actual = installed._run(
-                        ["git", "-C", record["path"], "rev-parse", "--show-toplevel"],
-                        env,
-                        root,
-                        root / "diagnostics",
-                        "real-created-worktree",
-                        timeout=30,
-                    )
-                    assert Path(actual).samefile(record["path"])
-
-                    second = witness.manager()
-                    witness.select(second, record, "Open")
-                    second.send(PROMPTS[1].encode() + b"\r")
-                    assert witness.turn(PROMPTS[1], 2, second) == original
-                    if not first.exited(first.process.process):
-                        first.send(b"\x02d")
-                    assert first.wait(15000) == 0
-                    assert witness.one_native() == original
-                    second.send(PROMPTS[2].encode() + b"\r")
-                    assert witness.turn(PROMPTS[2], 3, second) == original
-                    assert witness.records("records-opened") == record
-                    witness.close_cli(second, original)
-                    assert not witness.one_native()
-                    assert witness.records("records-after-exit") == record
-
-                    resumed = witness.manager()
-                    witness.select(resumed, record, "Resume")
-                    resumed.send(PROMPTS[3].encode() + b"\r")
-                    replacement = witness.turn(PROMPTS[3], 4, resumed)
-                    assert replacement != original
-                    assert witness.records("records-resumed") == record
-                    assert [
-                        event["data"]["content"]
-                        for event in _events(witness.history, copilot_home)
-                        if event["type"] == "user.message"
-                    ] == list(PROMPTS)
-                    assert [
-                        event["data"]["content"]
-                        for event in _events(witness.history, copilot_home)
-                        if event["type"] == "assistant.message"
-                    ] == [f"LIFECYCLE_REPLY_{number}" for number in range(1, 5)]
-                    assert any(
-                        all(prompt in json.dumps(request) for prompt in PROMPTS)
-                        for request in requests
-                    )
-                    witness.close_cli(resumed, replacement)
-                    assert not witness.one_native()
-                    conversation = witness.history.parent.name
+                    actions = _actions(witness)
                 rejected = installed._negative_control(
                     manager,
                     lambda: installed._witness(
@@ -2489,15 +2870,7 @@ def test_installed_manager_creates_resumes_and_opens_one_real_cli(record_testsui
                         "identity": identity,
                         "profile": "installed-core",
                         "installation": {"manager": manager_origin, "engine": engine_origin},
-                        "worktree": record["id"],
-                        "conversation": conversation,
-                        "native_before_open": original,
-                        "native_after_resume": replacement,
-                        "create": True,
-                        "open_existing": True,
-                        "detach_preserved": True,
-                        "normal_exit": True,
-                        "resume_continued": True,
+                        **actions,
                         "launch_refusal": True,
                         "elapsed_seconds": time.monotonic() - (budget.deadline - 720),
                     }

@@ -1152,6 +1152,131 @@ def test_first_party_wheels_ignore_source_and_ambient_timestamps(
     assert results[0][0] != results[2][0]
 
 
+def _real_provider_wheel(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, plugin: str):
+    uv = shutil.which("uv")
+    if not uv:
+        pytest.skip("uv is required for the real wheel-delivery control")
+    try:
+        setuptools = importlib.metadata.version("setuptools")
+    except importlib.metadata.PackageNotFoundError:
+        pytest.skip("setuptools is required for the real wheel-delivery control")
+    repository = MODULE_PATH.parent.parent
+    monkeypatch.syspath_prepend(str(repository / "libs" / "configuration-layers" / "src"))
+    from configuration_context.readiness import (
+        CONTRACT_FILE, payload_contract, runtime_contract_path,
+    )
+
+    monkeypatch.setattr(bpa.subprocess, "run", _REAL_SUBPROCESS_RUN)
+    monkeypatch.setenv("UV_OFFLINE", "1")
+    monkeypatch.setenv("UV_NO_CONFIG", "1")
+    monkeypatch.setenv("UV_PYTHON_DOWNLOADS", "never")
+    payload = repository / "plugins" / plugin
+    contract = payload_contract(payload, plugin)
+    source = tmp_path / "source"
+    source.mkdir(parents=True)
+    for name in ("pyproject.toml", "README.md", CONTRACT_FILE):
+        shutil.copy2(payload / name, source / name)
+    shutil.copytree(payload / "src", source / "src", ignore=shutil.ignore_patterns(
+        "__pycache__", "*.pyc", "*.egg-info",
+    ))
+    lock = bpa.ToolchainLock(
+        Path(sys.executable), {"setuptools": setuptools},
+        provenance={
+            "source_policy": "governed", "python": sys.executable,
+            "validated_index_identity": "fixture",
+        },
+    )
+    deadline = time.monotonic() + 25
+    wheel = bpa.build_wheel(source, tmp_path / "dist", toolchain=lock, deadline=deadline, uv=uv)
+    with zipfile.ZipFile(wheel) as archive:
+        descriptor = [
+            name for name in archive.namelist()
+            if name.endswith(".data/data/" + runtime_contract_path(contract.module).as_posix())
+        ]
+        assert len(descriptor) == 1
+        assert archive.read(descriptor[0]) == (payload / CONTRACT_FILE).read_bytes()
+        metadata = next(name for name in archive.namelist() if name.endswith(".dist-info/WHEEL"))
+        assert f"Generator: {lock.generator}" in archive.read(metadata).decode("utf-8")
+    return uv, wheel, contract
+
+
+@pytest.mark.parametrize("plugin", [
+    "agent-bridge", "agent-codespaces", "agent-containers", "agent-dispatch",
+    "agent-index", "agent-machines", "agent-mcp", "agent-vault", "agent-worktrees",
+])
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("filesystem")
+@pytest.mark.effect("process")
+def test_real_provider_wheel_delivers_readiness_contract(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, plugin: str,
+):
+    uv, wheel, contract = _real_provider_wheel(tmp_path, monkeypatch, plugin)
+    from configuration_context.readiness import (
+        ProbeContractError, runtime_contract, runtime_contract_path,
+    )
+
+    deadline = time.monotonic() + 10
+    prefix = tmp_path / "installed"
+    environment = bpa.sanitize_subprocess_env()
+    bpa.strip_package_source_env_vars(environment, strip_credentials=True)
+    for command in (
+        [uv, "venv", "--offline", "--no-config", "--no-python-downloads",
+         "--python", sys.executable, str(prefix)],
+        [uv, "pip", "install", "--offline", "--no-index", "--no-config", "--no-deps",
+         "--no-compile", "--python", str(bpa._venv_python_path(prefix)), str(wheel)],
+    ):
+        result = bpa._build_child(command, environment, deadline)
+        assert result.returncode == 0, (result.stdout, result.stderr)
+    python = bpa._venv_python_path(prefix)
+    delivered = runtime_contract(python, contract.module, plugin=plugin)
+    assert delivered.path == prefix / runtime_contract_path(contract.module)
+    assert delivered.sha256 == contract.sha256
+    with pytest.raises(ProbeContractError):
+        runtime_contract(python, contract.module, plugin="another-provider")
+    delivered.path.unlink()
+    with pytest.raises(ProbeContractError):
+        runtime_contract(python, contract.module, plugin=plugin)
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("filesystem")
+@pytest.mark.effect("process")
+def test_real_provider_wheels_keep_independent_contracts_in_shared_prefix(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    wheels = [
+        _real_provider_wheel(tmp_path / plugin, monkeypatch, plugin)
+        for plugin in ("agent-machines", "agent-worktrees")
+    ]
+    from configuration_context.readiness import ProbeContractError, runtime_contract
+
+    deadline = time.monotonic() + 10
+    prefix = tmp_path / "core"
+    python = bpa._venv_python_path(prefix)
+    environment = bpa.sanitize_subprocess_env()
+    bpa.strip_package_source_env_vars(environment, strip_credentials=True)
+    uv = wheels[0][0]
+    for command in (
+        [uv, "venv", "--offline", "--no-config", "--no-python-downloads",
+         "--python", sys.executable, str(prefix)],
+        [uv, "pip", "install", "--offline", "--no-index", "--no-config", "--no-deps",
+         "--no-compile", "--python", str(python), *(str(wheel) for _, wheel, _ in wheels)],
+    ):
+        result = bpa._build_child(command, environment, deadline)
+        assert result.returncode == 0, (result.stdout, result.stderr)
+    for _, _, contract in wheels:
+        assert runtime_contract(python, contract.module, plugin=contract.plugin).sha256 == contract.sha256
+    result = bpa._build_child(
+        [uv, "pip", "uninstall", "--offline", "--no-config", "--python", str(python),
+         "agent-machines"], environment, deadline,
+    )
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    with pytest.raises(ProbeContractError):
+        runtime_contract(python, "agent_machines", plugin="agent-machines")
+    remaining = wheels[1][2]
+    assert runtime_contract(python, remaining.module, plugin=remaining.plugin).sha256 == remaining.sha256
+
+
 # --- build_plugin_artifacts (end-to-end, mocked build_wheel) ---------------
 
 @pytest.mark.parametrize("provenance", [None, {}, {"source_policy": "governed"}])

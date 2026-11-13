@@ -33,6 +33,70 @@ installation receipts, registrations, descriptors or resource/state records as
 authority. **Owners must select eligible ordinary preferences through their
 native parsers and retain every independent veto/admission/custody check.**
 
+### Read-only owner transport compatibility
+
+The separate `configuration_context.readiness` transport helper reads the
+`copilot-extensions.readiness-isolation` version-1 support declaration. Its
+required fields are `schema`, integer `version`, `plugin` and Python `module`;
+additive fields are ignored. Duplicate fields, unknown versions, linked files,
+invalid identities and files larger than 4 KiB are refused. Package versions
+are deliberately absent from this behavioral contract.
+
+`payload_contract(root, plugin)` reads only that selected payload's
+`readiness-isolation.json`. `runtime_contract(python, module, plugin=...)` reads
+only `share/copilot-extensions/<module>/readiness-isolation.json` beneath the exact
+selected interpreter's environment prefix, including a slot's nested `.venv`.
+Each provider's runtime descriptor must be delivered by its ordinary wheel.
+Module-scoped paths coexist in a shared core prefix without overwriting another
+provider's declaration. A current
+payload, mutable deployment-root stamp or another slot cannot qualify an older
+selected runtime. These are support declarations from already-admitted owners,
+not independent installation identity or permission.
+
+Within an isolated probe tree, the reserved
+`COPILOT_EXTENSIONS_READONLY_PROBE=isolated-imports-v1` marker carries the
+requirement to nested owners. `ready_owner_prefix` then refuses an unqualified
+runtime before returning an executable prefix. Ordinary calls without this
+marker retain their existing behavior. Callers must separately qualify any
+selected payload before loading its resolver code and preserve installation
+admission, completion and custody.
+
+`ProbeContractError` is deliberately separate from ordinary configuration,
+value and runtime errors. Native owner reads preserve only the typed exit-126
+compatibility refusal as that exception; unrelated errors retain their prior
+handling. Same-cell peer resolution checks the selected payload before loading
+its primitives, then checks the exact resolved runtime before using it. The
+standalone bootstrap serializes a nested refusal from the installed package
+without converting it into failed readiness.
+
+The same stdlib-only helper can be shipped as a trusted payload bootstrap.
+Invoked with `-I -B -X utf8`, it checks both declarations before entering the
+provider module in that same process; it never probes the old provider to ask
+whether it is safe. Unknown support exits 126 with a versioned
+`copilot-extensions.probe-compatibility` refusal and owning-update recovery.
+There is no fallback execution or automatic installation. Old callers ignore
+the new descriptor; new read-only callers refuse legacy/rolled-back providers
+without it. This does not qualify an older upgrade baseline or retire ordinary
+commands and separately authorized installer actions.
+
+For early payload-owned readers, `--script <absolute-path>` enters an ordinary
+file within the same qualified payload instead of its module, after both
+declarations pass. `--payload-only` is restricted to that script mode and is
+for an evaluator with no selected installed provider yet. It still qualifies
+the payload and carries the recursive requirement into any nested owner reads;
+it does not qualify or permit executing an undeclared installed runtime.
+This keeps activation and identity-cache reads behind the same refusal boundary
+without adding a throwaway preflight process.
+
+`--origin` qualifies both declarations before locating the installed module.
+For a top-level provider it does not import the package merely to inspect its
+origin. The dispatcher still validates that origin against the admitted slot.
+`qualify_resolver` permits only the executing interpreter's retained SDK or a
+qualified payload's SDK before import. Mutable deployed shell resolvers have
+no such provenance and refuse inside a probe tree before spawning; their
+ordinary completion-selection behavior remains available outside that tree.
+`qualify_payload_code` applies the same boundary to borrowed peer scripts.
+
 ## One owner-supplied contract
 
 ```json
@@ -186,10 +250,11 @@ binding/identity adapter; this SDK does not discover one or guess a legacy ID.
 ### Ready-only owner transport
 
 `configuration_context.ready_owner_prefix` composes a native module invocation
-using a caller-qualified completion resolver. Its interpreter receives `-B`
-before module execution, so read-only owner queries do not create bytecode in
-the selected installation, including imports performed by Python startup hooks.
-This does not change the selected runtime, its environment or readiness rules.
+using a caller-qualified completion resolver. Its interpreter receives
+`-I -B -X utf8` before module execution. Read-only owner queries exclude
+checkout-local imports and ambient Python paths, retain installed site packages,
+emit UTF-8 and do not create bytecode, including during Python startup hooks.
+This does not change the selected runtime, configuration cwd or readiness rules.
 Legacy Machines and SSH supply
 `configuration_context.runtime.deployed_runtime_python`, passing their actual
 installed `bin/resolve-runtime.sh` or `.ps1`, the explicitly admitted peer root,

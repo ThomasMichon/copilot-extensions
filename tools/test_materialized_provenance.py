@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from contextlib import contextmanager
 import importlib.util
 import io
 import json
@@ -148,6 +149,7 @@ def source(tmp_path: Path) -> tuple[Path, str]:
     (root / "tools").mkdir()
     for name in (
         "materialize_main.py", "materialize_installer_engine.py",
+        "materialize_payload_invocation.py",
         "materialize_launch_wrapper_assets.py", "nested_uv_editable_ref.py",
         "uv_editable_ref.py", "launch_wrapper_assets_ref.py",
         "installer_engine_ref.py", "standalone_consumers.py",
@@ -197,6 +199,79 @@ def test_builder_does_not_inherit_repository_selection(source, tmp_path, monkeyp
     dest = tmp_path / "candidate"
     PROVENANCE.build(dest, source_root=root)
     assert PROVENANCE.verify(dest, head) == head
+
+
+@pytest.mark.parametrize("autocrlf", ["true", "false"])
+def test_builder_does_not_project_ambient_git_line_endings(source, tmp_path, autocrlf):
+    root, _head = source
+    plugin = root / "plugins" / "example"
+    (plugin / ".gitattributes").write_bytes(b"*.txt text\n")
+    (plugin / ".gitignore").write_bytes(b"generated/\ncache/\n")
+    (plugin / "plain.txt").write_bytes(b"frozen first line\nfrozen second line\n")
+    _git(root, "-c", "core.autocrlf=false", "-c", "core.eol=lf", "add", ".")
+    _git(root, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+         "commit", "--quiet", "-m", "committed line endings")
+    head = _git(root, "rev-parse", "HEAD")
+    _git(root, "config", "core.autocrlf", autocrlf)
+    _git(root, "config", "core.eol", "crlf")
+    dest = tmp_path / "candidate"
+    PROVENANCE.build(dest, source_root=root)
+    assert PROVENANCE.verify(dest, head) == head
+    assert (dest / "plugins" / "example" / ".gitignore").read_bytes() == b"generated/\ncache/\n"
+    assert (dest / "plugins" / "example" / "plain.txt").read_bytes() == (
+        b"frozen first line\nfrozen second line\n"
+    )
+    assert _git(root, "config", "core.autocrlf") == autocrlf
+    assert _git(root, "config", "core.eol") == "crlf"
+
+
+def test_builder_canonicalizes_its_allocated_source_root_before_extraction(
+    source, tmp_path, monkeypatch,
+):
+    root, head = source
+    allocate = PROVENANCE.tempfile.TemporaryDirectory
+    extract = PROVENANCE.extract_source
+
+    @contextmanager
+    def aliased_temporary_directory(*, prefix):
+        with allocate(prefix=prefix, dir=tmp_path) as raw:
+            alias = Path(raw) / "existing-child"
+            alias.mkdir()
+            yield str(alias / "..")
+
+    def extract_canonical(tree, snapshot):
+        assert snapshot == snapshot.resolve(strict=True)
+        extract(tree, snapshot)
+
+    monkeypatch.setattr(PROVENANCE.tempfile, "TemporaryDirectory", aliased_temporary_directory)
+    monkeypatch.setattr(PROVENANCE, "extract_source", extract_canonical)
+    dest = tmp_path / "candidate"
+    PROVENANCE.build(dest, source_root=root)
+    assert PROVENANCE.verify(dest, head) == head
+    assert (dest / "plugins/example/docs/shared.md").read_text() == "# Materialized\n"
+
+
+@pytest.mark.parametrize("oversized", [False, True])
+def test_builder_retains_bounded_unresolved_source_reasons_without_receipt(
+    source, tmp_path, oversized,
+):
+    root, _head = source
+    log = ["SKIP plugins/example: canonical source missing"]
+    if oversized:
+        log += ["SKIP " + "x" * 2000] * 20
+    (root / "tools/materialize_main.py").write_text(
+        "def build(dest, **kwargs):\n    dest.mkdir()\n    return " + repr(log) + "\n",
+    )
+    _git(root, "add", ".")
+    _git(root, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+         "commit", "--quiet", "-m", "unresolved committed materializer")
+    dest = tmp_path / "candidate"
+    with pytest.raises(ValueError, match="unresolved source") as caught:
+        PROVENANCE.build(dest, source_root=root)
+    assert "plugins/example: canonical source missing" in str(caught.value)
+    assert f"({len(log)})" in str(caught.value)
+    assert len(str(caught.value)) < 3400
+    assert not (dest / PROVENANCE.RECEIPT).exists()
 
 
 @pytest.mark.parametrize("module", ["materialize_main.py", "uv_editable_ref.py"])

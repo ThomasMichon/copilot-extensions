@@ -297,6 +297,13 @@ healthy-service shortcut. A completed runtime slot remains immutable and can be
 reused when retrying the service phase.
 Health probes, completeness checks, activation, and current-version reads
 suppress selected-slot bytecode writes explicitly.
+Scope-guidance producer calls use explicit `-B` with their existing `-E`
+isolation to keep payload imports read-only. Their guidance output and normal
+runtime-owned caching are unchanged.
+The configuration reader resolves implicit Git, Worktrees and PowerShell commands
+only from absolute PATH entries, never the current directory or a relative PATH
+entry. Windows executable suffixes still follow PATHEXT; explicit Worktrees
+command overrides retain their existing precedence.
 Deployment and verification share the scoped `service.env` settings. Ordinary
 `-devN`/`.devN` spellings compare equivalently; source-qualified generation
 identities remain exact.

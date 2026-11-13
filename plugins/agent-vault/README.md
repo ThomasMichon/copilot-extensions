@@ -40,6 +40,10 @@ their fixed owning-source provision action to its durable queue, without holding
 an outer provisioning lock or installing in the caller. They wait for the
 recorded outcome, then dispatch the selected runtime. Healthy runtime invocation
 does not start the foundation or submit work.
+Payload gates invoke readiness and invocation-contract metadata reads with
+isolated, bytecode-free Python and explicit UTF-8 output (`-I -B -X utf8`),
+excluding checkout-local modules and user site packages while preserving the
+selected configuration directory. Normal operational command caching is unchanged.
 The default execution root is `~/.copilot-extensions/update-driver`; launch
 diagnostics do not imply request acceptance. Missing/incompatible packaged
 support and cold namespaced or unsupported-platform calls require explicit

@@ -30,6 +30,33 @@ COMMAND="${1:-status}"
 case "$COMMAND" in __cell-bootstrap|__cell-service-ensure) exit 0 ;; esac
 PY_GATE="$(command -v python3 || command -v python || true)"
 EFFECTIVE_RESOLVER="$SCRIPT_DIR/resolve_effective_config.py"
+PROBE_BOOTSTRAP="$SCRIPT_DIR/versioned_runtime_probe.py"
+if [ "$COMMAND" = installer-readiness ]; then
+    export COPILOT_EXTENSIONS_READONLY_PROBE=isolated-imports-v1
+fi
+
+_probe_refusal() {
+    if [ "$COMMAND" = installer-readiness ] && [ "$1" -eq 126 ]; then
+        [ -z "$2" ] || printf '%s\n' "$2"
+        exit 126
+    fi
+}
+
+_payload_reader() {
+    local script="$1"
+    shift
+    if [ "$COMMAND" = installer-readiness ]; then
+        if [ ! -f "$PROBE_BOOTSTRAP" ]; then
+            printf '%s\n' '{"schema":"copilot-extensions.probe-compatibility","version":1,"status":"unknown","requirement":"isolated-imports-v1","recovery":"update-owning-installation"}'
+            return 126
+        fi
+        "$PY_GATE" -I -B -X utf8 "$PROBE_BOOTSTRAP" \
+            --plugin agent-index --module agent_index \
+            --payload-only --script "$script" -- "$@"
+    else
+        "$PY_GATE" -B -E -X utf8 "$script" "$@"
+    fi
+}
 
 _emit_readiness() {
     local state="$1" detail="$2"
@@ -53,10 +80,13 @@ _emit_inactive() {
 if [ -z "$PY_GATE" ] || [ ! -f "$EFFECTIVE_RESOLVER" ]; then
     _configuration_failure
 fi
-EFFECTIVE_JSON="$("$PY_GATE" -E -X utf8 "$EFFECTIVE_RESOLVER" \
-    --cwd "${AGENT_INDEX_REPO:-$PWD}" 2>/dev/null)" || _configuration_failure
+EFFECTIVE_JSON="$(_payload_reader "$EFFECTIVE_RESOLVER" \
+    --cwd "${AGENT_INDEX_REPO:-$PWD}" 2>/dev/null)"
+effective_code=$?
+_probe_refusal "$effective_code" "$EFFECTIVE_JSON"
+[ "$effective_code" -eq 0 ] || _configuration_failure
 EFFECTIVE_FLAT="$(
-    printf '%s' "$EFFECTIVE_JSON" | "$PY_GATE" -E -X utf8 -c '
+    printf '%s' "$EFFECTIVE_JSON" | "$PY_GATE" -I -B -X utf8 -c '
 import json, sys
 value = json.load(sys.stdin)
 if (not isinstance(value, dict) or value.get("schema") != "agent-index.effective-config"
@@ -335,7 +365,7 @@ if [ "$COMMAND" = __session-stamp ]; then
         exit 126
     fi
     # Python owns the no-follow lock descriptor through every metadata write.
-    "$PY_GATE" -I -X utf8 "$SCRIPT_DIR/session-stamp.py" "$ROOT" "$PAYLOAD_ROOT" "$ACTUAL_MODE"
+    "$PY_GATE" -I -B -X utf8 "$SCRIPT_DIR/session-stamp.py" "$ROOT" "$PAYLOAD_ROOT" "$ACTUAL_MODE"
     exit $?
 fi
 
@@ -358,8 +388,11 @@ _configured_role() {
         args+=(--repo "$AGENT_INDEX_REPO")
     fi
     if [ "${#args[@]}" -gt 2 ]; then
-        role="$("$PY_GATE" -E -X utf8 "$SCRIPT_DIR/resolve-activation-role.py" \
-            "${args[@]}" 2>/dev/null)" || return 2
+        role="$(_payload_reader "$SCRIPT_DIR/resolve-activation-role.py" \
+            "${args[@]}" 2>/dev/null)"
+        local role_code=$?
+        _probe_refusal "$role_code" "$role"
+        [ "$role_code" -eq 0 ] || return 2
         case "$role" in host|client) printf '%s' "$role"; return 0 ;; esac
         [ "$role" = unconfigured ] || return 2
         [ -z "${AGENT_INDEX_REPO:-}" ] || return 0
@@ -393,10 +426,15 @@ _runtime_origin_ok() {
             *) return 1 ;;
         esac
     fi
+    local origin_args=(-c 'from pathlib import Path; import agent_index; print(Path(agent_index.__file__).resolve())')
+    if [ "$COMMAND" = installer-readiness ]; then
+        origin_args=("$PROBE_BOOTSTRAP" --plugin agent-index --module agent_index --origin)
+    fi
     origin="$(CDPATH= cd -- "$slot_abs" 2>/dev/null &&
-        "$python" -I -B -X utf8 -c \
-        'from pathlib import Path; import agent_index; print(Path(agent_index.__file__).resolve())' \
-        2>/dev/null)" || return 1
+        "$python" -I -B -X utf8 "${origin_args[@]}" 2>/dev/null)"
+    local origin_code=$?
+    _probe_refusal "$origin_code" "$origin"
+    [ "$origin_code" -eq 0 ] || return 1
     [ -n "$origin" ] && [ -f "$origin" ] || return 1
     origin_dir="$(dirname -- "$origin")"
     origin_abs="$(CDPATH= cd -- "$origin_dir" 2>/dev/null && pwd -P)/$(basename -- "$origin")" ||
@@ -421,11 +459,19 @@ _resolve_ready_runtime() {
             printf '%s\n' '[agent-index] Python is unavailable for installation-cell validation.' >&2
             exit 126
         }
-        validation="$("$cell_python" -I -X utf8 "$cell_runtime" launch-validate \
+        local validation_args=("$cell_runtime")
+        if [ "$COMMAND" = installer-readiness ]; then
+            validation_args=(-B "$PROBE_BOOTSTRAP" --plugin agent-index --module agent_index
+                --payload-only --script "$cell_runtime" --)
+        fi
+        validation="$("$cell_python" -I -X utf8 "${validation_args[@]}" launch-validate \
             --context "$CONTEXT" \
             --expected-marketplace-id "$MARKETPLACE_ID" \
             --durable-home "$CONTEXT_DURABLE_HOME" \
-            "--command=$COMMAND")" || {
+            "--command=$COMMAND")"
+        local validation_code=$?
+        _probe_refusal "$validation_code" "$validation"
+        [ "$validation_code" -eq 0 ] || {
                 printf '%s\n' '[agent-index] selected installation runtime failed operative validation.' >&2
                 exit 126
             }
@@ -668,7 +714,10 @@ _restore_setup_role() {
 }
 
 _resolve_ready_runtime
-ROLE="$(_configured_role)" || _configuration_failure
+ROLE="$(_configured_role)"
+role_code=$?
+_probe_refusal "$role_code" "$ROLE"
+[ "$role_code" -eq 0 ] || _configuration_failure
 RUNTIME_STATE="$(_runtime_state)"
 
 case "$COMMAND" in
@@ -689,7 +738,10 @@ case "$COMMAND" in
         exec "$AGENT_RT_PY" -I -X utf8 -m agent_index "$@"
         ;;
     installer-readiness)
-        if [ -n "${AGENT_RT_PY:-}" ]; then exec "$AGENT_RT_PY" -I -B -X utf8 -m agent_index "$@"; fi
+        if [ -n "${AGENT_RT_PY:-}" ]; then
+            exec "$AGENT_RT_PY" -I -B -X utf8 "$PROBE_BOOTSTRAP" \
+                --plugin agent-index --module agent_index -- "$@"
+        fi
         if [ -z "$ROLE" ]; then
             _emit_readiness configuration-empty 'No indexer is designated for the current repository.'
             exit 0

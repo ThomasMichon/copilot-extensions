@@ -102,6 +102,15 @@ def _fixture(fixture: dict[str, Any], *, route: str = "selected", namespaced: bo
         encoding="utf-8",
     )
     python = _completed_slot(fixture)
+    declaration = json.dumps({
+        "schema": "copilot-extensions.readiness-isolation", "version": 1,
+        "plugin": plugin, "module": plugin.replace("-", "_"),
+    })
+    (fixture["payload"] / "readiness-isolation.json").write_text(declaration, encoding="utf-8")
+    descriptor = (python.parent.parent / "share" / "copilot-extensions" /
+                  plugin.replace("-", "_") / "readiness-isolation.json")
+    descriptor.parent.mkdir(parents=True)
+    descriptor.write_text(declaration, encoding="utf-8")
     site = python.parent.parent / "Lib/site-packages"
     (site / (plugin.replace("-", "_") + ".py")).write_text(
         "import json, site, sys\n"
@@ -321,6 +330,54 @@ def test_native_argument_modes_preserve_empty_numeric_and_quoted_arguments(bindi
     assert json.loads(result.stdout) == [str(value) for value in forwarded]
 
 
+@pytest.mark.parametrize("command", ("installer-readiness", "invocation-contract"))
+@pytest.mark.parametrize("legacy", (False, True))
+def test_readonly_runtime_excludes_checkout_imports_in_every_argument_mode(
+    binding_fixture: dict[str, Any], host: str, command: str, legacy: bool,
+) -> None:
+    if legacy and "pwsh" not in Path(host).name.lower():
+        pytest.skip("Windows PowerShell already uses legacy argument passing")
+    environment = _fixture(binding_fixture)
+    home = binding_fixture["home"]
+    project = home / "selected-project"
+    project.mkdir()
+    marker = home / "shadow-executed"
+    for name in (binding_fixture["consumer"].replace("-", "_"), "json", "base64"):
+        (project / f"{name}.py").write_text(
+            f"from pathlib import Path\nPath({str(marker)!r}).touch()\n"
+            "raise RuntimeError('checkout import executed')\n", encoding="utf-8",
+        )
+    module = (
+        Path(environment["TEST_RUNTIME_PYTHON"]).parent.parent / "Lib/site-packages"
+        / (binding_fixture["consumer"].replace("-", "_") + ".py")
+    )
+    module.write_text(
+        "import json, os, sys\n"
+        "print(json.dumps({'args':sys.argv[1:],'cwd':os.getcwd(),"
+        "'isolated':sys.flags.isolated,'no_bytecode':sys.flags.dont_write_bytecode,"
+        "'utf8':sys.flags.utf8_mode,'no_site':sys.flags.no_site}))\n",
+        encoding="utf-8",
+    )
+    environment["PYTHONPATH"] = str(project)
+    script = str(binding_fixture["payload"] / "scripts/runtime-gate.ps1").replace("'", "''")
+    result = subprocess.run(
+        [host, "-NoProfile", "-NonInteractive", "-Command",
+         ("$PSNativeCommandArgumentPassing='Legacy';" if legacy else "")
+         + f"& '{script}' '{command}'; exit $LASTEXITCODE"],
+        env=environment, cwd=project, capture_output=True, text=True,
+        encoding="utf-8", timeout=30, creationflags=cast(Any, subprocess).CREATE_NO_WINDOW,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    report = json.loads(result.stdout)
+    assert report == {
+        "args": [command], "cwd": str(project),
+        "isolated": 1, "no_bytecode": 1, "utf8": 1, "no_site": 0,
+    }
+    assert not marker.exists()
+    assert not list(project.rglob("*.pyc"))
+    assert not list(module.parent.rglob("*.pyc"))
+
+
 def test_containers_keeps_the_validated_runtime_root_check(base_binding_fixture: dict[str, Any], host: str) -> None:
     fixture = {**base_binding_fixture, "consumer": "agent-containers"}
     environment = _fixture(fixture, namespaced=True)
@@ -332,6 +389,37 @@ def test_containers_keeps_the_validated_runtime_root_check(base_binding_fixture:
     assert "generation does not match governance" in result.stderr
     assert [read["args"][0] for read in reads] == ["status", "validate"]
     assert Path(environment["TEST_DISPOSED"]).exists()
+
+
+@pytest.mark.parametrize("legacy", (False, True))
+def test_dispatcher_refuses_older_runtime_before_import_in_each_argument_mode(
+    binding_fixture: dict[str, Any], host: str, legacy: bool,
+) -> None:
+    if legacy and "pwsh" not in Path(host).name.lower():
+        pytest.skip("Windows PowerShell already uses legacy argument passing")
+    fixture = binding_fixture
+    environment = _fixture(fixture)
+    python = Path(environment["TEST_RUNTIME_PYTHON"])
+    descriptor = (python.parent.parent / "share" / "copilot-extensions" /
+                  fixture["consumer"].replace("-", "_") / "readiness-isolation.json")
+    descriptor.unlink()
+    marker = fixture["home"] / "older-provider-executed"
+    module = fixture["consumer"].replace("-", "_") + ".py"
+    (python.parent.parent / "Lib" / "site-packages" / module).write_text(
+        f"from pathlib import Path\nPath({str(marker)!r}).touch()\n", encoding="utf-8",
+    )
+    script = str(fixture["payload"] / "scripts" / "runtime-gate.ps1").replace("'", "''")
+    result = subprocess.run(
+        [host, "-NoProfile", "-NonInteractive", "-Command",
+         ("$PSNativeCommandArgumentPassing='Legacy';" if legacy else "")
+         + f"& '{script}' installer-readiness; exit $LASTEXITCODE"],
+        env=environment, cwd=fixture["home"], capture_output=True, text=True,
+        encoding="utf-8", timeout=30, creationflags=cast(Any, subprocess).CREATE_NO_WINDOW,
+    )
+    assert result.returncode == 126, result.stdout + result.stderr
+    assert json.loads(result.stdout)["status"] == "unknown"
+    assert json.loads(result.stdout)["recovery"] == "update-owning-installation"
+    assert not marker.exists()
 
 
 @pytest.mark.parametrize("failure", (

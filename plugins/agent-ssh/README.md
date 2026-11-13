@@ -118,6 +118,10 @@ POSIX or strict, non-breakaway Job on Windows, including nested runtimes.
 The Windows writer loads the process primitive from this payload's shipped
 `agent-procutil` dependency (or the canonical in-repository development source),
 not an ambient Python package. It does not install that dependency at launch.
+The writer, snapshot helpers and nested optional-peer reads explicitly disable
+Python bytecode writes, including isolated interpreters that ignore environment
+cache controls. Cold reads preserve every admitted payload entry; they do not
+exclude cache files from integrity checks or reseal the installed payload.
 If the combined 4 KiB budget is exceeded, a fitting command
 catalog is preserved and snapshot omission is explicit. Run the catalog's
 `session-snapshot --json` command for the full current report; use the

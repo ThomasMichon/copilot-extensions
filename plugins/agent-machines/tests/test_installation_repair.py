@@ -148,6 +148,10 @@ def repair_fixture(tmp_path):
         "noSelfProvisionEnv": "AGENT_EXAMPLE_NO_SELFPROVISION",
         "payloadRootEnv": "AGENT_EXAMPLE_PAYLOAD_ROOT", "purpose": "Fixture runtime",
     })
+    write_json(payload / "readiness-isolation.json", {
+        "schema": "copilot-extensions.readiness-isolation", "version": 1,
+        "plugin": "agent-example", "module": "agent_example",
+    })
     scripts = payload / "scripts"
     scripts.mkdir()
     # Actual native owner actions: readiness may read but never create its state.
@@ -258,7 +262,7 @@ def test_installer_runtime_optional_owner_preserves_required_census(repair_fixtu
 
 
 def test_readiness_probe_names_selected_project_outside_payload(repair_fixture, monkeypatch):
-    home, project, payload, _, _ = repair_fixture
+    home, project, _, _, _ = repair_fixture
     calls = []
 
     def capture(argv, *, cwd, environment, **_):
@@ -276,7 +280,7 @@ def test_readiness_probe_names_selected_project_outside_payload(repair_fixture, 
     assert plan["requiredSatisfied"]
     assert calls
     for cwd, environment in calls:
-        assert Path(cwd) == payload
+        assert Path(cwd) == project.resolve()
         assert Path(environment["COPILOT_PROJECT_DIR"]) == project.resolve()
 
 
@@ -675,6 +679,224 @@ def test_readiness_only_refuses_effectful_or_unrequired_scope_before_state(monke
         repair_api.repair(Path("unused"), readiness_only=True, **options)
 
 
+@pytest.mark.parametrize("changed", ("missing", "reparse"))
+def test_readonly_invocation_refuses_changed_project_context_before_execution(
+    repair_fixture, monkeypatch, changed,
+):
+    import stat
+    from types import SimpleNamespace
+
+    home, project, _, _, _ = repair_fixture
+    platform = repair_api.current_platform()
+    host = admit_host(project, home=home, readiness_only=True)
+    selected = repair_api._closure(host, repair_api._required_modules(host), platform)
+    _inputs, owners = repair_api._binding_inputs(host, selected, platform)
+    module = selected[0]
+    original = Path.lstat
+
+    def lstat(path, *args, **kwargs):
+        if path == project:
+            if changed == "missing":
+                raise FileNotFoundError("project context disappeared")
+            return SimpleNamespace(st_mode=stat.S_IFDIR, st_file_attributes=0x400)
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "lstat", lstat)
+    monkeypatch.setattr(repair_api, "run_action", lambda *a, **k: pytest.fail("changed context executed"))
+    result = repair_api._invoke(
+        module, owners[module.owner.owner_id], platform, readonly=True, timeout=1,
+    )
+    assert result.status == "invocation-refused"
+
+
+@pytest.mark.parametrize("contract", ["missing", "unknown", "changed"])
+def test_readiness_refuses_unqualified_payload_before_execution_without_blocking_installer(
+    repair_fixture, monkeypatch, contract,
+):
+    home, project, payload, _, _ = repair_fixture
+    platform = repair_api.current_platform()
+    host = admit_host(project, home=home)
+    selected = repair_api._closure(host, repair_api._required_modules(host), platform)
+    _inputs, owners = repair_api._binding_inputs(host, selected, platform)
+    module = selected[0]
+    declaration = payload / "readiness-isolation.json"
+    if contract == "missing":
+        declaration.unlink()
+    else:
+        value = json.loads(declaration.read_text())
+        value["version" if contract == "unknown" else "newOptionalField"] = 2
+        write_json(declaration, value)
+    calls = []
+
+    def run(argv, *, readonly, **kwargs):
+        assert readonly is False
+        calls.append(argv)
+        return repair_api.ActionResult("exited", 0)
+
+    monkeypatch.setattr(repair_api, "run_action", run)
+    observation = repair_api._observe(module, owners[module.owner.owner_id], platform, 1)
+    assert observation.state == "unknown"
+    assert observation.reason == (
+        "readiness-invocation-refused" if contract == "changed"
+        else "readiness-isolation-unqualified"
+    )
+    assert not calls
+    assert repair_api._invoke(
+        module, owners[module.owner.owner_id], platform, readonly=False, timeout=1,
+    ).status == "exited"
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("qualified_refusal", [True, False])
+def test_runtime_contract_refusal_stays_unknown_with_owning_update_recovery(
+    repair_fixture, monkeypatch, qualified_refusal,
+):
+    from configuration_context.readiness import REFUSAL
+
+    home, project, _, _, _ = repair_fixture
+    platform = repair_api.current_platform()
+    host = admit_host(project, home=home, readiness_only=True)
+    selected = repair_api._closure(host, repair_api._required_modules(host), platform)
+    _inputs, owners = repair_api._binding_inputs(host, selected, platform)
+    module = selected[0]
+    output = json.dumps(REFUSAL).encode() if qualified_refusal else b"unrelated failure"
+    monkeypatch.setattr(
+        repair_api, "run_action",
+        lambda *args, **kwargs: repair_api.ActionResult("exited", 126, output),
+    )
+    observed = repair_api._observe(module, owners[module.owner.owner_id], platform, 1)
+    assert observed.state == "unknown"
+    assert observed.reason == (
+        "readiness-isolation-unqualified" if qualified_refusal else "readiness-invalid-output"
+    )
+    assert observed.evidence().get("recovery") == (
+        "update-owning-installation" if qualified_refusal else None
+    )
+
+
+def test_readiness_project_context_does_not_change_installer_working_directory(
+    repair_fixture, monkeypatch,
+):
+    home, project, payload, _, _ = repair_fixture
+    platform = repair_api.current_platform()
+    host = admit_host(project, home=home)
+    selected = repair_api._closure(host, repair_api._required_modules(host), platform)
+    _inputs, owners = repair_api._binding_inputs(host, selected, platform)
+    module = selected[0]
+
+    def run(argv, *, cwd, readonly, **kwargs):
+        assert cwd == payload and readonly is False
+        assert repair_api.PROBE_ENV not in kwargs["environment"]
+        return repair_api.ActionResult("exited", 0)
+
+    monkeypatch.setattr(repair_api, "run_action", run)
+    assert repair_api._invoke(
+        module, owners[module.owner.owner_id], platform, readonly=False, timeout=1,
+    ).status == "exited"
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.parametrize("relative,absolute", (("", True), (".", True), ("tools", True), (".", False)))
+def test_readonly_environment_excludes_checkout_git_before_actual_index_gate(
+    repair_fixture, relative, absolute,
+):
+    from dataclasses import replace
+
+    home, project, _, _, _ = repair_fixture
+    subprocess.run(["git", "init", "-q", str(project)], check=True, **no_window_kwargs())
+    shell = shutil.which("pwsh") or shutil.which("powershell") if os.name == "nt" else shutil.which("bash")
+    if shell is None:
+        pytest.skip("native gate interpreter is unavailable")
+    local = project / relative if relative else project
+    local.mkdir(exist_ok=True)
+    marker = project / "checkout-git-executed"
+    shadow = local / ("git.cmd" if os.name == "nt" else "git")
+    shadow.write_text(
+        f'@echo shadow>"{marker}"\r\n@exit /b 99\r\n' if os.name == "nt" else
+        f'#!/bin/sh\nprintf shadow > "{marker.as_posix()}"\nexit 99\n',
+        encoding="utf-8",
+    )
+    shadow.chmod(0o755)
+    owner = next(iter(admit_host(project, home=home, readiness_only=True).bindings.values()))
+    source = dict(owner.environment)
+    source["PATH"] = relative + (os.pathsep + source["PATH"] if absolute else "")
+    environment = repair_api._environment(replace(owner, environment=source), readonly=True)
+    assert all(Path(entry).is_absolute() for entry in environment["PATH"].split(os.pathsep))
+    assert environment["NoDefaultCurrentDirectoryInExePath"] == "1"
+    scripts = Path(__file__).resolve().parents[3] / "plugins/agent-index/scripts"
+    command = (
+        [shell, "-NoProfile", "-File", str(scripts / "runtime-gate.ps1")] if os.name == "nt"
+        else [shell, str(scripts / "runtime-gate.sh")]
+    )
+    result = subprocess.run(
+        [*command, "installer-readiness"], cwd=project, env=environment,
+        capture_output=True, text=True, timeout=20, **no_window_kwargs(),
+    )
+    assert result.returncode == (0 if absolute else 1), result.stdout + result.stderr
+    assert json.loads(result.stdout)["state"] == ("configuration-empty" if absolute else "failed")
+    assert not marker.exists()
+
+
+@pytest.mark.timeout(30)
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.skipif(os.name != "nt", reason="native Windows executable discovery")
+@pytest.mark.parametrize("relative", ("", ".", "tools"))
+def test_readiness_host_discovery_excludes_checkout_interpreter(
+    repair_fixture, monkeypatch, relative,
+):
+    from installer_readiness.model import Invocation, Platform
+
+    _, project, payload, _, _ = repair_fixture
+    script = payload / "host-probe.ps1"
+    script.write_text("'installed-host'\n", encoding="utf-8")
+    local = project / relative if relative else project
+    local.mkdir(exist_ok=True)
+    for name in ("pwsh.exe", "powershell.exe"):
+        (local / name).write_bytes(b"not an admitted interpreter")
+    monkeypatch.chdir(project)
+    monkeypatch.setenv("PATH", relative + os.pathsep + os.environ["PATH"])
+    argv = repair_api._argv(Invocation("payload-script", script, ()), Platform.WINDOWS)
+    assert Path(argv[0]).is_absolute()
+    assert Path(argv[0]).parent != local
+    result = run_action(
+        argv, cwd=project, environment=os.environ, timeout=10, readonly=True,
+    )
+    assert result.status == "exited" and result.exit_code == 0
+    assert result.stdout.strip() == b"installed-host"
+
+
+@pytest.mark.timeout(30)
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.parametrize("readonly", (False, True))
+def test_readonly_environment_excludes_relative_bash_startup(repair_fixture, readonly):
+    from dataclasses import replace
+    from .test_invoke_payload_runtime_lock import _bash
+
+    bash = _bash()
+    if bash is None:
+        pytest.skip("Bash is unavailable")
+    home, project, payload, _, _ = repair_fixture
+    startup = project / "checkout-startup.sh"
+    startup.write_text("printf sourced > checkout-startup-ran\n", encoding="utf-8")
+    script = payload / "readiness.sh"
+    script.write_text("printf '{\"state\":\"ready\"}\\n'\n", encoding="utf-8")
+    owner = next(iter(admit_host(project, home=home, readiness_only=True).bindings.values()))
+    source = dict(owner.environment, BASH_ENV="./checkout-startup.sh")
+    environment = repair_api._environment(replace(owner, environment=source), readonly=readonly)
+    result = run_action(
+        [bash, script.as_posix()], cwd=project, environment=environment,
+        timeout=10, readonly=readonly,
+    )
+    assert result.status == "exited" and result.exit_code == 0
+    assert json.loads(result.stdout)["state"] == "ready"
+    assert (project / "checkout-startup-ran").exists() is (not readonly)
+    assert ("BASH_ENV" in environment) is (not readonly)
+    assert source["BASH_ENV"] == "./checkout-startup.sh"
+
+
 @pytest.mark.timeout(30)
 @pytest.mark.portfolio_tier("T2")
 @pytest.mark.effect("process")
@@ -684,12 +906,31 @@ def test_readiness_only_actual_caller_observes_without_constructing_an_install_p
     from agent_procutil.owned_process import run_caller_owned
 
     home, project, payload, _, _ = repair_fixture
+    windows = payload / "scripts" / "action.ps1"
+    windows.write_text(windows.read_text().replace(
+        "$state =",
+        "if (-not [string]::Equals((Get-Location).ProviderPath, $env:REPAIR_EXPECTED_PROJECT, "
+        "[StringComparison]::OrdinalIgnoreCase)) {\n"
+        "  @{schema='copilot-extensions.module-readiness'; version=1; module=$Module; "
+        "state='failed'; detail='wrong project context'} | ConvertTo-Json -Compress\n"
+        "  exit 1\n}\n$state =",
+        1,
+    ), encoding="utf-8")
+    posix = payload / "scripts" / "action.sh"
+    posix.write_text(posix.read_text().replace(
+        'state="$HOME/',
+        'if [ "$PWD" != "$REPAIR_EXPECTED_PROJECT" ]; then\n'
+        '  printf \'{"schema":"copilot-extensions.module-readiness","version":1,'
+        '"module":"%s","state":"failed","detail":"wrong project context"}\\n\' "$2"\n'
+        '  exit 1\nfi\nstate="$HOME/',
+        1,
+    ), encoding="utf-8")
     plugin = "service-example" if generic else "agent-example"
     if generic:
         payload = payload.rename(payload.with_name(plugin))
         for path in (
             payload / "plugin.json", payload / "payload-invocation.json",
-            payload / "installer-readiness.json",
+            payload / "installer-readiness.json", payload / "readiness-isolation.json",
             payload.parent / ".claude-plugin" / "marketplace.json",
             project / ".github" / "copilot" / "settings.json",
         ):
@@ -722,15 +963,17 @@ def test_readiness_only_actual_caller_observes_without_constructing_an_install_p
         (home / f"{plugin}-{name}.ready").write_text("ready")
     with (payload / "unrelated.bin").open("wb") as stream:
         stream.truncate(8 * 1024 * 1024 + 1)
+    environment = ordinary_environment(os.environ, home=home, payload=payload)
+    environment["REPAIR_EXPECTED_PROJECT"] = str(project)
     result = run_caller_owned(
         [sys.executable, "-m", "agent_machines", "installation-repair",
          "--project-root", str(project), "--required", "--caller-owned-readiness"],
-        cwd=project, env=ordinary_environment(os.environ, home=home, payload=payload),
+        cwd=home, env=environment,
         timeout=15, max_stdout_bytes=65536, max_stderr_bytes=65536,
     )
     assert result.returncode == 0, result.stderr
     observed = json.loads(result.stdout)
-    assert observed["requiredSatisfied"] and observed["callerOwnedReadiness"]
+    assert observed["requiredSatisfied"] and observed["callerOwnedReadiness"], observed
     assert not observed["apply"] and not any(row["attempted"] for row in observed["outcomes"])
     assert not (home / ("." + plugin)).exists()
 
@@ -1197,11 +1440,11 @@ def test_installation_repair_refuses_binding_changed_during_refreshed_readiness(
 def test_installation_repair_powershell_fallback_has_process_scoped_policy(
     repair_fixture, monkeypatch,
 ):
-    original = shutil.which
+    original = repair_api.path_interpreter
     if not original("powershell"):
         pytest.skip("Windows PowerShell is unavailable")
     monkeypatch.setattr(
-        repair_api.shutil, "which", lambda name: None if name == "pwsh" else original(name),
+        repair_api, "path_interpreter", lambda name: None if name == "pwsh" else original(name),
     )
     monkeypatch.setenv("PSExecutionPolicyPreference", "Restricted")
     plan = invoke(repair_fixture)

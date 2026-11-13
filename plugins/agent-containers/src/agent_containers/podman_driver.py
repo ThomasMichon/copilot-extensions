@@ -16,6 +16,7 @@ from typing import Any
 from agent_procutil.owned_process import run_caller_owned
 
 from .config import FLEET_LABEL, SECURITY_PROFILE_LABEL, TRUSTED_PROFILE
+from .external_driver import _resolve_executable
 from .runtime_drivers import DRIVER_LABEL, INSTANCE_LABEL
 
 _NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}")
@@ -81,7 +82,11 @@ class PodmanDriver:
         connection = options.get("connection")
         if connection is not None:
             connection = _text(connection, "driverOptions.connection")
-        selected = shutil.which(executable)
+        selected = (
+            _resolve_executable(executable)
+            if os.environ.get("NoDefaultCurrentDirectoryInExePath") == "1"
+            else shutil.which(executable)
+        )
         if selected is None:
             raise PodmanError("runtime_unavailable", "selected Podman executable is unavailable")
         self.command = [selected]

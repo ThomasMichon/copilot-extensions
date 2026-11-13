@@ -120,7 +120,7 @@ def runtime_command(payload: Path, plugin: str, environment: dict) -> tuple[list
     )
     for key in ("PYTHONPATH", "PYTHONHOME", "PYTHONEXECUTABLE", "VIRTUAL_ENV"):
         selected.pop(key, None)
-    return [str(python), "-I", "-X", "utf8", "-m", plugin.replace("-", "_")], selected
+    return [str(python), "-I", "-X", "utf8", "-B", "-m", plugin.replace("-", "_")], selected
 
 
 def legacy_worktrees_command(owner: Path, environment: dict) -> tuple[list[str], dict]:

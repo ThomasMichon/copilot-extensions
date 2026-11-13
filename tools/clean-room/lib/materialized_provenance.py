@@ -123,12 +123,13 @@ def build(dest: Path, *, source_root: Path) -> list[str]:
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     ).stdout.strip()
     archive = subprocess.run(
-        ["git", "-C", str(source_root), "archive", "--format=tar", head],
+        ["git", "-c", "core.autocrlf=false", "-c", "core.eol=lf",
+         "-C", str(source_root), "archive", "--format=tar", head],
         check=True, capture_output=True, timeout=120, env=git_env,
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     ).stdout
     with tempfile.TemporaryDirectory(prefix="materialized-source-") as temporary:
-        source = Path(temporary)
+        source = Path(temporary).resolve(strict=True)
         with tarfile.open(fileobj=io.BytesIO(archive)) as tree:
             extract_source(tree, source)
         if (source / RECEIPT).exists() or (source / RECEIPT).is_symlink():
@@ -153,8 +154,12 @@ def build(dest: Path, *, source_root: Path) -> list[str]:
         log = json.loads(result.stdout)
         if not isinstance(log, list) or any(not isinstance(line, str) for line in log):
             raise ValueError("committed materializer returned an invalid log")
-    if any(line.startswith("SKIP") for line in log):
-        raise ValueError("candidate materialization refused an unresolved source")
+    refused = [line for line in log if line.startswith("SKIP")]
+    if refused:
+        detail = "\n".join(line[:400] for line in refused[:8])
+        raise ValueError(
+            f"candidate materialization refused an unresolved source ({len(refused)}):\n{detail}"
+        )
     receipt = {"schema": SCHEMA, "version": 1, "source_commit": head,
                "paths": content_manifest(dest)}
     (dest / RECEIPT).write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")

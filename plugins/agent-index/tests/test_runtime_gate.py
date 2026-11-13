@@ -52,6 +52,14 @@ DEFAULT_FAKE_RUNTIME = (
 )
 
 
+def _qualify_probe(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({
+        "schema": "copilot-extensions.readiness-isolation", "version": 1,
+        "plugin": "agent-index", "module": "agent_index",
+    }), encoding="utf-8")
+
+
 def test_installer_readiness_uses_supported_update_arguments() -> None:
     manifest = json.loads((PLUGIN / "plugin.json").read_text(encoding="utf-8"))
     readiness = json.loads(
@@ -147,7 +155,9 @@ def test_activation_import_checks_use_target_slot_python() -> None:
     assert "else { $LinkPython }" not in ps_activate
 
 
-def _fixture(tmp_path: Path, shell: str) -> tuple[Path, dict[str, str]]:
+def _fixture(
+    tmp_path: Path, shell: str, *, native_configuration_owner: bool = True,
+) -> tuple[Path, dict[str, str]]:
     subprocess.run(
         ["git", "init", "--quiet", str(tmp_path)],
         check=True,
@@ -163,10 +173,28 @@ def _fixture(tmp_path: Path, shell: str) -> tuple[Path, dict[str, str]]:
     payload = tmp_path / f"payload-{shell}"
     scripts = payload / "scripts"
     scripts.mkdir(parents=True)
+    shutil.copy2(
+        PLUGIN / "scripts" / "versioned_runtime_probe.py",
+        scripts / "versioned_runtime_probe.py",
+    )
+    shutil.copytree(
+        PLUGIN / "scripts" / "configuration-layers",
+        scripts / "configuration-layers",
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+    )
+    _qualify_probe(payload / "readiness-isolation.json")
     shutil.copytree(
         SOURCE_ROOT, payload / "src",
         ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
     )
+    if not native_configuration_owner:
+        # Synthetic dispatcher receipts do not qualify the independent preference owner.
+        layers = payload / "src" / "agent_index" / "configuration_layers.py"
+        layers.write_text(
+            layers.read_text(encoding="utf-8")
+            + "\ndef owner_report(*args, **kwargs):\n    return None\n",
+            encoding="utf-8",
+        )
     (payload / "pyproject.toml").write_text(
         '[project]\nname = "agent-index"\nversion = "9.9.9"\n',
         encoding="utf-8",
@@ -201,6 +229,8 @@ def _fixture(tmp_path: Path, shell: str) -> tuple[Path, dict[str, str]]:
         PLUGIN / "scripts" / "resolve_effective_config.py",
         scripts / "resolve_effective_config.py",
     )
+    for name in ("config_commands.py", "resolve_effective_probe.py"):
+        shutil.copy2(PLUGIN / "scripts" / name, scripts / name)
     shutil.copy2(
         PLUGIN / "scripts" / "resolve-activation-role.py",
         scripts / "resolve-activation-role.py",
@@ -302,6 +332,22 @@ def _configure_repository_role(root: Path, env: dict[str, str], role: str) -> No
     env["AGENT_INDEX_ROLE"] = role
 
 
+@pytest.mark.skipif(os.name == "nt", reason="Native POSIX gate")
+def test_posix_readiness_parser_never_imports_checkout_json(tmp_path: Path) -> None:
+    script, env = _fixture(tmp_path, "bash")
+    (tmp_path / ".agent-index" / "config.yaml").unlink()
+    marker = tmp_path / "shadow-json-executed"
+    (tmp_path / "json.py").write_text(
+        f"from pathlib import Path\nPath({str(marker)!r}).touch()\n"
+        "raise RuntimeError('checkout json imported')\n", encoding="utf-8",
+    )
+    result = _run("bash", script, env, "installer-readiness", cwd=tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(result.stdout)["state"] == "configuration-empty"
+    assert not marker.exists()
+    assert not list(tmp_path.glob("__pycache__/*.pyc"))
+
+
 def _run(
     shell: str,
     script: Path,
@@ -375,6 +421,7 @@ def _fake_runtime(
     package.mkdir()
     (package / "__init__.py").write_text("", encoding="utf-8")
     (package / "__main__.py").write_text(main_source, encoding="utf-8")
+    _qualify_probe(slot / "share" / "copilot-extensions" / "agent_index" / "readiness-isolation.json")
     return interpreter
 
 
@@ -413,6 +460,13 @@ def _real_setup_runtime(
         site_packages / "agent_index",
         ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
     )
+    # This setup CLI shares the dispatch fixture's synthetic receipt boundary.
+    layers = site_packages / "agent_index" / "configuration_layers.py"
+    layers.write_text(
+        layers.read_text(encoding="utf-8")
+        + "\ndef owner_report(*args, **kwargs):\n    return None\n",
+        encoding="utf-8",
+    )
     dependency_paths = {
         str(Path(value).resolve())
         for value in sys.path
@@ -427,6 +481,7 @@ def _real_setup_runtime(
         {
             str(_procutil_src().resolve()),
             str((PLUGIN / "libs" / "zdd" / "src").resolve()),
+            str((PLUGIN / "scripts" / "configuration-layers" / "src").resolve()),
         }
     )
     (site_packages / "test-runtime-dependencies.pth").write_text(
@@ -473,7 +528,7 @@ def test_fresh_namespaced_setup_reaches_role_writing(
 ) -> None:
     if shell == "bash" and (os.name == "nt" or shutil.which("bash") is None):
         pytest.skip("POSIX runtime-gate test")
-    script, env = _fixture(tmp_path, shell)
+    script, env = _fixture(tmp_path, shell, native_configuration_owner=False)
     cell_root = tmp_path / "cell" / "plugins" / "agent-index"
     context = cell_root / "install.json"
     context.parent.mkdir(parents=True)
@@ -599,7 +654,11 @@ def test_bootstrap_does_not_import_any_runtime_or_repo_shadow(
     shutil.copy2(PLUGIN / "scripts" / bootstrap.name, bootstrap)
     shutil.copy2(PLUGIN / "scripts" / f"bootstrap-killswitch-guard.{suffix}", scripts)
     shutil.copy2(PLUGIN / "scripts" / f"runtime-gate.{suffix}", scripts)
-    shutil.copy2(PLUGIN / "scripts" / "resolve_effective_config.py", scripts)
+    for name in (
+        "resolve_effective_config.py", "resolve_effective_probe.py",
+        "config_commands.py", "resolve-activation-role.py",
+    ):
+        shutil.copy2(PLUGIN / "scripts" / name, scripts)
     plugin_name = "agent-index-bootstrap-probe"
     (payload / "plugin.json").write_text(
         json.dumps({"name": plugin_name}),
@@ -736,7 +795,7 @@ def test_windows_powershell5_dispatches_from_non_ascii_path(
     if shutil.which("powershell.exe") is None:
         pytest.skip("Windows PowerShell 5 is unavailable")
     unicode_root = tmp_path / "célula-索引"
-    script, env = _fixture(unicode_root, "powershell")
+    script, env = _fixture(unicode_root, "powershell", native_configuration_owner=False)
     cell_root = unicode_root / "célula" / "plugins" / "agent-index"
     context = cell_root / "install.json"
     context.parent.mkdir(parents=True)
@@ -858,6 +917,7 @@ def test_installer_readiness_never_provisions_at_session_start(
         pytest.skip("bash is not installed")
     script, env = _fixture(tmp_path, shell)
     env["TEST_PYTHON"] = ""
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
     home = Path(env["AGENT_INDEX_HOME"])
 
     result = _run(shell, script, env, "installer-readiness")
@@ -868,6 +928,63 @@ def test_installer_readiness_never_provisions_at_session_start(
     assert payload["detail"]
     assert "::agent-provisioning::" not in result.stdout + result.stderr
     assert not home.exists()
+    assert not list(script.parent.parent.rglob("__pycache__"))
+
+
+@pytest.mark.parametrize("shell", ["bash", "powershell", "pwsh"])
+@pytest.mark.parametrize("qualification", ["bootstrap-missing", "payload-missing", "runtime-missing", "qualified"])
+def test_readiness_qualifies_early_readers_and_runtime_before_import(
+    tmp_path: Path, shell: str, qualification: str,
+) -> None:
+    script, env = _fixture(tmp_path, shell, native_configuration_owner=False)
+    python = Path(env["TEST_PYTHON"])
+    runtime = python.parent.parent
+    package = next(runtime.rglob("agent_index/__init__.py"))
+    imported = tmp_path / "runtime-imported"
+    package.write_text(
+        f"from pathlib import Path\nPath({str(imported)!r}).touch()\n", encoding="utf-8",
+    )
+    (package.parent / "__main__.py").write_text(
+        "import json, os, sys\n"
+        "assert (sys.flags.isolated, sys.flags.dont_write_bytecode) == (1, 1)\n"
+        "assert os.environ['COPILOT_EXTENSIONS_READONLY_PROBE'] == 'isolated-imports-v1'\n"
+        "print(json.dumps({'state':'configuration-empty','cwd':os.getcwd()}))\n",
+        encoding="utf-8",
+    )
+    early = tmp_path / "early-reader-executed"
+    reader = script.parent / "resolve_effective_config.py"
+    reader.write_text(
+        f"from pathlib import Path\nPath({str(early)!r}).touch()\n"
+        + reader.read_text(encoding="utf-8").replace(
+            "from __future__ import annotations", "",
+        ), encoding="utf-8",
+    )
+    if qualification == "bootstrap-missing":
+        (script.parent / "versioned_runtime_probe.py").unlink()
+    elif qualification == "payload-missing":
+        (script.parent.parent / "readiness-isolation.json").unlink()
+    elif qualification == "runtime-missing":
+        (runtime / "share" / "copilot-extensions" / "agent_index" / "readiness-isolation.json").unlink()
+    shadow = tmp_path / "shadow-imported"
+    (tmp_path / "agent_index.py").write_text(
+        f"from pathlib import Path\nPath({str(shadow)!r}).touch()\n", encoding="utf-8",
+    )
+    result = _run(shell, script, env, "installer-readiness", cwd=tmp_path)
+    observed = json.loads(result.stdout)
+    if qualification == "qualified":
+        assert result.returncode == 0, result.stderr
+        assert observed["state"] == "configuration-empty"
+        assert Path(observed["cwd"]) == tmp_path
+        assert imported.exists()
+    else:
+        assert result.returncode == 126, result.stderr
+        assert observed["schema"] == "copilot-extensions.probe-compatibility"
+        assert observed["status"] == "unknown"
+        assert not imported.exists()
+    assert early.exists() is (qualification not in {"bootstrap-missing", "payload-missing"})
+    assert not shadow.exists()
+    assert not list(script.parent.parent.rglob("*.pyc"))
+    assert not list(runtime.rglob("*.pyc"))
 
 
 @pytest.mark.parametrize("shell", ["bash", "pwsh"])
@@ -1074,6 +1191,8 @@ def test_real_resolver_absent_or_explicit_false_preserves_legacy(
         PLUGIN / "scripts" / "resolve_effective_config.py",
         scripts / "resolve_effective_config.py",
     )
+    for name in ("config_commands.py", "resolve_effective_probe.py"):
+        shutil.copy2(PLUGIN / "scripts" / name, scripts)
     shutil.copy2(
         PLUGIN / "scripts" / "resolve-activation-role.py",
         scripts / "resolve-activation-role.py",
@@ -1081,6 +1200,13 @@ def test_real_resolver_absent_or_explicit_false_preserves_legacy(
     shutil.copytree(
         PLUGIN / "scripts" / "installation-context",
         scripts / "installation-context",
+    )
+    shutil.copytree(
+        SOURCE_ROOT, payload / "src",
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+    )
+    shutil.copytree(
+        PLUGIN / "scripts" / "configuration-layers", scripts / "configuration-layers",
     )
     (scripts / "resolve-runtime.ps1").write_text(
         "$AgentRtPy = $null\n",
@@ -1195,7 +1321,7 @@ def test_posix_existing_regular_policy_is_not_treated_as_absent(
 def test_blocked_installation_states_never_fall_back_to_legacy(
     tmp_path: Path, status: str, reason: str
 ) -> None:
-    script, env = _fixture(tmp_path, "pwsh")
+    script, env = _fixture(tmp_path, "pwsh", native_configuration_owner=False)
     env["TEST_INSTALLATION_STATUS"] = json.dumps(
         {
             "status": status,
@@ -1231,7 +1357,7 @@ def test_blocked_installation_states_never_fall_back_to_legacy(
 def test_active_cell_option_command_is_one_validator_argument(
     tmp_path: Path, shell: str, command: str,
 ) -> None:
-    script, env = _fixture(tmp_path, shell)
+    script, env = _fixture(tmp_path, shell, native_configuration_owner=False)
     cell_root = tmp_path / "cell" / "plugins" / "agent-index"
     context = cell_root / "install.json"
     context.parent.mkdir(parents=True)
@@ -1268,7 +1394,7 @@ def test_active_cell_option_command_is_one_validator_argument(
 
 
 def test_active_cell_dispatch_sets_cell_roots_and_context(tmp_path: Path) -> None:
-    script, env = _fixture(tmp_path, "pwsh")
+    script, env = _fixture(tmp_path, "pwsh", native_configuration_owner=False)
     cell_root = tmp_path / "cell" / "plugins" / "agent-index"
     context = cell_root / "install.json"
     context.parent.mkdir(parents=True)
@@ -1511,7 +1637,7 @@ def test_active_cell_rejects_validator_interpreter_outside_selected_slot(
 ) -> None:
     if shell == "bash" and (os.name == "nt" or shutil.which("bash") is None):
         pytest.skip("POSIX runtime-gate test")
-    script, env = _fixture(tmp_path, shell)
+    script, env = _fixture(tmp_path, shell, native_configuration_owner=False)
     cell_root = tmp_path / "cell" / "plugins" / "agent-index"
     context = cell_root / "install.json"
     context.parent.mkdir(parents=True)

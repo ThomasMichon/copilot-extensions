@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import os
+import runpy
 import shlex
 import shutil
 import subprocess
@@ -189,6 +190,69 @@ def _clean_env(overrides: dict[str, str]) -> dict[str, str]:
         env["PATH"] = os.pathsep.join(p for p in parts if "WindowsApps" not in p)
     env.update(overrides)
     return env
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows bootstrap consumer")
+@pytest.mark.parametrize("host_name", ("pwsh", "powershell.exe"))
+@pytest.mark.parametrize("case", (
+    "flat", "nested", "nested-incomplete", "nested-stale", "nested-fallback",
+))
+def test_powershell_current_nested_runtime_never_enters_reconciliation(
+    tmp_path, host_name, case,
+):
+    host = shutil.which(host_name)
+    if not host:
+        pytest.skip("PowerShell host unavailable")
+    root = _PLUGIN_ROOT.parents[1]
+    shared = runpy.run_path(
+        str(root / "libs/versioned-runtime/tests/test_bootstrap_selected_readiness.py"),
+    )
+    payload, home, install = shared["_fixture"](tmp_path, _PLUGIN_NAME)
+    scripts = payload / "scripts"
+    for name in ("bootstrap-check.ps1", "resolve-runtime.ps1", "versioned_runtime_native.ps1"):
+        shutil.copyfile(_PLUGIN_ROOT / "scripts" / name, scripts / name)
+    (scripts / "action_controls.py").write_text(
+        "import os\nfrom pathlib import Path\n"
+        "Path(os.environ['USERPROFILE']).joinpath('policy-boundary').write_text('reconcile')\n"
+        "raise SystemExit(126)\n",
+        encoding="utf-8",
+    )
+    (scripts / "install.ps1").write_text(
+        "throw 'fixture installer must never execute'\n", encoding="utf-8",
+    )
+    slot = shared["_slot"](
+        install, shared["VERSION"], complete=case not in {"nested-incomplete", "nested-fallback"},
+    )
+    environment = slot
+    if case != "flat":
+        environment = slot / ".venv"
+        environment.mkdir()
+        shutil.move(slot / "bin", environment / "bin")
+    (environment / "Scripts").mkdir()
+    (environment / "Scripts" / "python.exe").write_bytes(b"must not execute")
+    if case == "nested-fallback":
+        shared["_slot"](install, "0.9.9")
+        (install / "last-known-good").write_text("0.9.9", encoding="utf-8")
+    (install / "current-version").write_text(
+        "0.0.0" if case == "nested-stale" else shared["VERSION"], encoding="utf-8",
+    )
+    env = _clean_env({
+        "HOME": str(home), "USERPROFILE": str(home),
+        "PATH": str(Path(sys._base_executable).parent) + os.pathsep + os.environ.get("PATH", ""),
+    })
+    result = subprocess.run(
+        [host, "-NoProfile", "-NonInteractive", "-File", str(scripts / "bootstrap-check.ps1")],
+        cwd=home, env=env, capture_output=True, text=True, timeout=30,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    healthy = case in {"flat", "nested"}
+    assert result.returncode == (0 if healthy else 126), result.stdout + result.stderr
+    assert result.stdout == "{}"
+    assert (home / "policy-boundary").exists() is (not healthy)
+    assert not (install / "reconcile.lock").exists()
+    assert not (install / "reconcile-status.json").exists()
+    assert not (install / "reconcile.log").exists()
+    assert not (install / "logs").exists()
 
 
 @pytest.mark.skipif(_BASH is None, reason="bash not available")

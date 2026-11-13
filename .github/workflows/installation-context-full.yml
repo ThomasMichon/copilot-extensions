@@ -1280,7 +1280,7 @@ jobs:
           version: "0.12.6"
       - name: Prepare pinned native lifecycle prerequisites
         shell: pwsh
-        run: |
+        run: &manager-native-prerequisites |
           $ErrorActionPreference = 'Stop'
           $root = Join-Path $env:RUNNER_TEMP "manager-lifecycle-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
           $null = New-Item -ItemType Directory -Path $root
@@ -1522,19 +1522,20 @@ jobs:
 
   manager-suite-windows:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'manager-suite'
-    name: Manager whole-suite replacement (Windows, ${{ matrix.mode }})
+    name: Manager whole-suite acceptance (Windows, ${{ matrix.mode }})
     runs-on: windows-latest
     timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
-        mode: [normal, repair]
+        mode: [normal, repair, fresh]
     env:
       UV_PYTHON: "3.12"
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
+          fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
@@ -1542,6 +1543,26 @@ jobs:
       - uses: astral-sh/setup-uv@v9.0.0
         with:
           version: "0.12.6"
+      - name: Prepare pinned full-suite lifecycle prerequisites
+        if: matrix.mode == 'fresh'
+        shell: pwsh
+        run: *manager-native-prerequisites
+      - name: Prepare pinned Vault backend for fresh suite readiness
+        if: matrix.mode == 'fresh'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = Join-Path $env:RUNNER_TEMP "manager-vault-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          $null = New-Item -ItemType Directory -Path $root
+          $archive = Join-Path $root 'keepassxc.zip'
+          & ".\tools\download_pinned_native.ps1" -Uri 'https://github.com/keepassxreboot/keepassxc/releases/download/2.7.11/KeePassXC-2.7.11-Win64.zip' -OutFile $archive -TimeoutSeconds 120
+          if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash -ne '63ec66632bf5b1448c873f8d959a8a5885bbccdd7dcf1af0231667ce4d7121f0') {
+            throw 'Pinned KeePassXC prerequisite archive digest mismatch'
+          }
+          Expand-Archive -LiteralPath $archive -DestinationPath (Join-Path $root 'payload')
+          $binaries = @(Get-ChildItem -LiteralPath $root -Filter keepassxc-cli.exe -Recurse -File)
+          if ($binaries.Count -ne 1) { throw 'Expected exactly one pinned KeePassXC CLI' }
+          $binaries[0].DirectoryName >> $env:GITHUB_PATH
       - name: Record exact native source
         shell: pwsh
         env:
@@ -1551,12 +1572,12 @@ jobs:
           if ($LASTEXITCODE -ne 0 -or $actual -cne $env:EXPECTED_SOURCE) {
             throw 'Suite replacement source does not match the dispatch SHA'
           }
-      - name: Qualify installed V1 to V2 through the real Manager
+      - name: Qualify the selected installed suite through the real Manager
         shell: pwsh
         run: >-
           python tools\run-manager-suite-acceptance.py
           --root .v --mode ${{ matrix.mode }}
-      - name: Retain synthetic qualification diagnostics
+      - name: Retain installed suite qualification diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -1565,6 +1586,8 @@ jobs:
             .v/*-runner.json
             .v/*-process-trace.json
             .v/*/result.json
+            .v/*/setup.json
+            .v/*/diagnostics/*
             .v/*/preparation-error.json
             .v/*/settlement.json
             .v/*/commands.jsonl

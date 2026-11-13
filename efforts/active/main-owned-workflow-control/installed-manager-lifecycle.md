@@ -72,6 +72,52 @@ activation. A private fixture backend is not the operator's PSMux namespace.
 No new daemon, scheduler, promotion writer or competing qualification effort
 is introduced. Plan approval does not imply acceptance of a source handoff.
 
+## Scope Approvals
+
+### November 12 readiness compatibility approval
+
+The decision prompt was:
+
+> Older-payload compatibility needs a behavior decision. A current dispatcher
+> can still select older runtime code with unisolated nested imports. Should
+> readiness return `unknown` before executing such an unqualified probe, with
+> the owning updater as recovery? Ordinary commands and explicitly authorized
+> installer actions would remain available; this would not count as qualifying
+> an older upgrade baseline.
+
+The selected option was:
+
+> Return unknown until payload and runtime meet the isolation contract
+> (recommended)
+
+The operator's exact response was `refuse-unqualified-probes`.
+
+This authorizes implementing that read-only compatibility policy in the
+existing source slice, with qualification of both the selected payload and
+installed runtime before probe execution. It does not authorize a live update,
+probe replay, operator installation, shared repair, baseline admission or
+Main activation. Ordinary commands and separately authorized installer actions
+remain available. The parent's older-baseline upgrade proof remains open.
+
+### November 12 census query budget approval
+
+The decision prompt was:
+
+> All three Windows cases failed because the strict process census recorded WMI timeout status 0x40004. The fixture stages and settlement passed, but those scan errors still block acceptance. Changing the existing one-second query limit needs a specific decision: may I raise only the per-query limit to five seconds, add focused controls, and seek new native proof? Session creation, overall job/stage deadlines, cadence, caps and fatal-error policy would stay unchanged. This would not authorize rollout or waive the failed run.
+
+The selected option was:
+
+> Allow a five-second query limit; require new tests and native proof
+
+The operator's exact response was `allow-query-five-seconds`.
+
+This authorizes only the query-limit source change and its focused controls
+and new native qualification through the existing disposable Windows owner.
+The session-creation limit remains one second. Existing cadence, record/failure
+caps, outer deadline, job/stage limits and fatal scan/session-close policy
+remain unchanged. Run 43336441832 remains failed; no prior result is relabeled.
+This adds no rollout, shared-repair, baseline-admission or Main authority.
+
 ## Plan
 
 The following implementation decomposition is **agent-recommended**.
@@ -85,22 +131,28 @@ The following implementation decomposition is **agent-recommended**.
   seams with #11377 and #3336; preserve their active PRs and source custody.
   Proceed independently on the assigned new witness/profile files rather than
   make Main-PR completion or a blanket acknowledgement a prerequisite.
-- [ ] Select the representative generic harness and its complete declared suite
+- [x] Select the representative generic harness and its complete declared suite
   installation recipe from canonical owners. Enumerate what is installed and
   enabled; a manually assembled Manager/engine pair cannot be called a suite
   installation without proving the selected suite closure.
+  Frozen payload delivery is verified by #11972 and exact-source run
+  42933306312 for all 24 declared payloads. Run 43014684583 additionally
+  verifies complete fresh runtime construction and actual Machines readiness.
+  Run 43352995266 at `40f1e6c4bd` completes the fresh selected-suite lifecycle
+  with all 24 payloads and 13 installed runtime origins. This closes source
+  profile selection, not authentic-baseline upgrade or promotion admission.
 
 ### Phase 2 - Extend the authentic installed consumer
 
-- [ ] Reuse the canonical candidate installation, provenance and native
+- [x] Reuse the canonical candidate installation, provenance and native
   terminal owners in fresh private HOME, config, registry and mux state.
   Keep configured feed/security policy; do not borrow selected host runtimes.
 - [x] Invoke generated project entry points, observe the installed Manager,
   and use normal UI controls for Create. Prove an actual Git worktree,
   installed launch resolution, real Copilot readiness and a deterministic
   request/response through the local inference endpoint.
-  Installed-core proof: #11864, exact-source run 42892225611. Complete selected
-  suite installation remains a separate open item above.
+  Installed-core proof: #11864, exact-source run 42892225611. Selected-suite
+  source proof: run 43352995266 at `40f1e6c4bd`; promotion remains separate.
 - [x] Exit Copilot through its normal user flow, close and reopen Manager,
   select Resume, and prove the same worktree and durable conversation with a
   further endpoint-backed turn. Do not repair tracking or rewrite session IDs.
@@ -110,8 +162,10 @@ The following implementation decomposition is **agent-recommended**.
   Closing Manager or detaching its view preserves the original owner and its
   ability to complete another turn; no duplicate Copilot is admitted.
   The same installed-core run verifies native birth/lock ownership and detach.
-- [ ] Exercise the relevant cold and retained/warm backend states without
+- [x] Exercise the relevant cold and retained/warm backend states without
   allowing accidental reuse of a host server to supply success.
+  The same source-qualified fresh run covers cold Create and warm Open/Resume;
+  its normal/repair cases separately cover retained resident replacement.
 
 ### Phase 3 - Bind the complete result before publication
 
@@ -148,10 +202,10 @@ The following implementation decomposition is **agent-recommended**.
 
 ## Validation Plan
 
-- [ ] Fresh representative harness and authentic selected-suite installation:
+- [x] Fresh representative harness and authentic selected-suite installation:
   no source imports, preexisting completion state, hand-injected launch plan,
   direct low-level Create/Resume replacement or production-policy bypass.
-- [ ] Native Windows entry points traverse installed path resolution, actual
+- [x] Native Windows entry points traverse installed path resolution, actual
   admission, generated launch assets, real terminal and private PSMux. A Linux
   scenario alone cannot qualify the reported Windows failure classes.
 - [x] Real Manager Create yields the expected Git worktree and real Copilot
@@ -163,8 +217,9 @@ The following implementation decomposition is **agent-recommended**.
 - [x] A second Manager's Open attaches to the exact active owner rather than
   creating a replacement. Original process birth, session and pane identity
   remain consistent; detach/Manager exit leaves that session usable.
-  These three action/continuity items are verified by #11864's installed-core
-  run 42892225611; they do not close selected-suite or promotion acceptance.
+  These three action/continuity items were verified by #11864's installed-core
+  run 42892225611 and now by selected-suite source run 43352995266 at
+  `40f1e6c4bd`. They do not close frozen-candidate or promotion acceptance.
 - [ ] Install-success/entry-launch failure, launch/path-resolution refusal and
   fixture-scoped mux connection failure each fail the appropriate lifecycle
   phase. Expected-negative classification requires its specific observed
@@ -1073,3 +1128,2099 @@ and transport-cleanup failures. Focused controls cover an ordinary request
 failure followed by backend or caller custody failure and verify that the
 real sandbox retains its files. The reviewed correction needs new exact-head
 native qualification and a passing subsequent review.
+
+### 2026-11-11 - Complete payload closure accepted; runtime construction started
+
+PR #11972 merged to Dev as `0286b3f71537d1a3d8128e2833add3a980b9b51f`.
+Exact-source native run 42933306312 at
+`c51a191e0c1cf651fa5e9dadfc652f69104a3f44` passed actual CLI acquisition,
+installed-engine discovery and strict full-manifest comparison for all 24
+private payloads in 308.756 seconds. The unchanged installed-core lifecycle
+passed in 260.986 seconds on that same source. Both producing-run receipts
+passed their workflow validators and retained the original finite limits.
+
+Copilot re-review 5851823621 confirmed no open findings after the custody fix;
+its sole remaining pending-native concern was resolved by that exact run.
+All review threads were resolved. The first managed merge correctly refused
+a newly expected metadata-triggered required PR gate; after CI run
+42935102060 passed, the managed retry merged normally under the configured
+Maintainer flow. Only the separate CODEOWNER vote was omitted; no CI failure,
+review finding, draft, hold or conflict was bypassed. Parent #6237 remains open.
+
+This closes payload acquisition only. Its receipt explicitly reports runtime
+installation unobserved; no full-runtime/Machines, authentic update, mandatory
+candidate enforcement or Main activation acceptance is inferred. The next
+active slice is a separate companion using the existing canonical installation
+and normal Manager update owners to construct the declared runtimes and reach
+actual Machines/required-readiness discovery in the disposable Windows venue.
+Use genuinely merged source admission; the fixture's Git transport commit is
+data delivery, never an admitted baseline. Preserve the existing full-suite
+preparation/exercise limits and coordinate concrete shared-helper/result edits.
+
+### 2026-11-11 - Fresh hosted runtime adapter implemented; native proof pending
+
+The separate runtime companion now calls the installed Manager's normal update,
+requires the complete eligible private runtime portfolio, checks actual installed
+imports and exact versions, and invokes the selected Machines owner's required
+readiness contract. Its refusal controls do not establish native construction.
+
+Fresh mode is integrated alongside normal/repair in the existing hosted
+`manager-suite` portfolio. It retains the original preparation/exercise/assertion/
+settlement limits and default private HOME roots. An uncounted discovery engine
+precedes final construction from actual CLI-selected payloads; the canonical
+Manager/engine constructors and the already-qualified lifecycle action sequence
+are reused. The original core defaults and synthetic replacement witnesses are
+preserved. The Git fixture can reopen its same private endpoint across stages,
+without keeping an unowned server alive between them.
+
+The narrowed contained source packet passed all 45 runtime, profile, transport
+and lifecycle controls; all 58 runner/workflow controls passed. A standalone
+isolated-interpreter invocation also refused this shared host before creating
+its requested fixture. Changed-source lint, workflow syntax and the install
+contract passed. An earlier broad source packet exceeded its aggregate budget;
+it is not accepted evidence. Native fresh construction and actual Machines
+readiness have not yet run. The authentic admitted-baseline update, mandatory
+frozen-candidate enforcement and separate Main adoption remain open, with no
+operator rollout or shared-host repair authorized.
+
+Run 42946413939 exercised draft #12013 at exact source
+`e24b119f1f483843538243b0c28f0baab4a9d516`. All three cases failed preparation,
+and each retained successful finally-owned settlement. Fresh stopped at the
+canonical materializer's unresolved-source refusal, before payload acquisition
+or runtime construction. The original error omitted its actual refusal reasons.
+A local exact-source diagnostic hit the unchanged 120-second materialization
+limit and supplied no replacement acceptance evidence.
+
+Normal and repair reached installed-origin observation but failed to spawn a
+selected interpreter. Their common resolver assumed only venv-as-slot layout;
+it now also recognizes the canonical nested `.venv` layout, without changing
+selected generations or installing a substitute. The canonical materialization
+error now retains up to eight bounded refusal reasons and still emits no
+receipt on failure. Two controls for each correction passed, with changed-source
+lint and staged diff checks. The unresolved fresh source must be diagnosed
+from the next retained reason; no runtime, readiness or lifecycle result is
+credited from this failed run, and no deadline or provenance rule is waived.
+
+The corrected diagnostics in run 42948793163 at
+`cd0848ac317b6fbbf541b6179d0700a0808bcfbe` identified eight identical native-asset
+refusals: the allocated extraction root retained the Windows `RUNNER~1` short
+spelling while its owner check used the resolved long spelling. The builder now
+canonicalizes only its newly allocated private extraction root before extracting
+or invoking committed materializer code. Derived-asset link, traversal,
+single-link and containment guards remain unchanged.
+
+A real committed-source construction control reproduces an equivalent lexical
+alias and requires canonical root delivery before extraction. It also exposed
+an incomplete test fixture, which now copies the committed materializer's
+Invocation helper rather than relying on an ambient fallback. The full provenance
+packet passes 42 tests with two platform-inapplicable skips; the seven focused
+root/committed-code/diagnostic cases and changed-source lint pass. Native
+construction on this correction remains unverified, and the fresh case on
+`cd0848ac` is still failed, with successful settlement, not superseded acceptance.
+
+Run 42949961145 at `9edfc0b14b0da25b588e940e1bf376f50c840810` passed
+materialization but failed fresh bootstrap: the low-level Worktrees constructor
+correctly required live native update-driver custody. Failure rendering itself
+then failed because captured strings were passed to a file-based diagnostic
+reader. The adapter now passes retained output paths and enters the canonical
+native driver for both private engine roots. Its 38 contained runtime controls
+pass; that is source evidence, not native runtime acceptance.
+
+Run 42952406260 at `ab0ad1ec417e694767a5677739a97ff8ca9ac6d7` advanced through
+driver-owned bootstrap construction and then failed frozen marketplace
+registration. Retained bootstrap logs show that the full native `install`
+action had already registered the public marketplace and acquired a plugin.
+That acquisition is not frozen-suite evidence. The adapter now requests the
+canonical lean `provision` action, which constructs the selected source runtime
+without launcher/plugin acquisition. The actual CLI still owns subsequent
+complete frozen payload acquisition, and no existing registration is erased or
+silently treated as the requested source.
+
+The normal/repair failures on `cd0848ac` and `9edfc0b` are distinct. Their
+Codespaces on-demand owner started successfully, but their required scheduled
+task was absent. The native update log explicitly reported the default
+preserve policy and no task creation; preparation and settlement reported no
+cleanup errors. The disposable replacement fixture now explicitly declares
+installation-local `windows_scheduled_task: enabled` before installation,
+preserving its strict native task ownership assertion and production defaults.
+Two focused configuration controls pass through the actual Codespaces policy
+and native/dependency-free Index role readers. Native registration, runtime
+closure, actual Machines readiness and all later acceptance remain open.
+
+Run 42954102322 at `f6f0ed98a4e2484dce4b0a2327ace1ca5a646c76` passed lean
+bootstrap and actual CLI acquisition, then correctly rejected byte differences
+in the first frozen payload. Sample digests exactly match CRLF artifact bytes
+versus LF installed bytes. A read-only real-Git reproduction shows that archive
+honors ambient `core.autocrlf`: the same committed file produces those two
+digests under true versus false. The builder now supplies per-command
+`core.autocrlf=false` and `core.eol=lf`, without changing repository/global Git
+settings or normalizing an installed payload after acquisition. Explicit source
+attributes remain in effect. The full provenance packet passes 44 tests with
+two platform-inapplicable skips, including two new real-Git controls covering
+ambient autocrlf and text/eol projections.
+
+Required CI independently refused the provenance helper's stale admitted-unit
+source digest. Its single manifest source binding is updated to the corrected
+helper; test nodes, coverage targets, packet budget and controller selection are
+unchanged. Native payload comparison, complete runtime construction and actual
+readiness remain unverified. No failed hosted case is credited as acceptance.
+
+Run 42956773294 at `ca0e62ec8840c34cce1ab7e6d7abd6e07e25b72e`
+completed normal and repair successfully. Fresh still failed strict payload
+comparison, with 72 changed files and no missing or extra paths; settlement
+succeeded. Its actual CLI inventory reported released versions rather than
+the candidate's source versions. The archive correction alone did not establish
+frozen acquisition, and no fresh runtime or readiness acceptance is claimed.
+
+A tiny actual-CLI reproduction isolates the remaining source-selection error.
+Without folder trust, nested project settings select the loopback fixture.
+With the fresh adapter's real `trustedFolders` configuration and an enclosing
+Git repository, installation instead selects that enclosing repository's
+marketplace. The contradictory source in the reproduction is an unreachable
+loopback URL, so this failure cannot silently acquire a public replacement.
+Initializing the private project as its own Git root before acquisition makes
+the same trusted CLI install the fixture version and preserve all three
+distinguishable files, including conflicting CRLF/text attributes.
+
+The adapter now initializes that root before any constructor or acquisition.
+Its existing later initialization remains idempotent. All 39 contained runtime
+controls pass, including a real-Git regression that checks the private settings
+root before construction. The extended real-Git transport control also preserves
+CRLF bytes under conflicting attributes. These are unit and lightweight
+first-touch CLI/transport checks, not complete native suite acceptance. A fresh
+hosted run must still prove all frozen payloads, complete runtime construction
+and actual Machines readiness; the authentic upgrade, frozen enforcement and
+separate Main adoption remain open.
+
+Run 42961736606 at `9202df599847242d1600c1f645ae765551ad247d`
+passed normal and repair again. Fresh passed complete frozen payload acquisition
+and reached the ordinary Manager update, but did not complete runtime
+construction. Vault activation configuration refused the adopted harness's
+missing stable remote identity; Manager self-update also tried to clone the
+fixture's raw commit as a branch. Settlement independently failed with an owned
+Index resident still live, despite the stop command returning zero: its retained
+stderr reported missing repository context. These failures remain failures.
+
+The fresh fixture now initializes `main` explicitly and persists its actual
+project root before construction, so cooperative shutdown enters that root
+rather than the replacement fixture's otherwise-unused `project` directory.
+The shared command owner accepts only an existing direct fixture child; normal,
+repair and pre-project cleanup keep their previous working directory. Fresh
+adoption alone creates a real private bare origin before registration and
+pushes the actual project commit, supplying a resolvable canonical identity and
+an ordinary cloneable anchor. The synthetic replacement profiles are unchanged.
+Manager source selection uses the frozen transport's sole `main` branch, with
+the same exact commit/tree verification before and after the update.
+
+The focused contained packet passes 70 controls with 158 unrelated tests
+deselected. It covers real Git registration input and cloning, explicit `main`
+selection, retained payload bytes under conflicting attributes, shutdown
+working-directory ownership and unchanged strict runtime/readiness refusals.
+Changed-source lint and whitespace checks pass. This is unit and lightweight
+integration evidence; the real private clones are first-touch inputs, not an
+authentic admitted upgrade baseline. The next disposable hosted run owns full
+native clean-room construction, Machines readiness and cooperative settlement.
+No shared-host installation, cleanup waiver, source admission or Main activation
+is authorized or credited by these controls.
+
+Documentation-impact review: these corrections change only native test inputs
+and command ownership, not a released installer, runtime API or operator
+procedure. This journal records the evidence and limitations; no public usage
+documentation changes are needed. The install-contract guard passes for all
+13 plugins.
+
+Run 42966913273 at `d8e7f834e0b74d9cb526cc335bf635112b8c52d1`
+passed normal and repair; fresh reached successful ordinary Manager update
+(exit zero after 518.2 seconds) and then failed the witness's portfolio
+comparison. Its actual installed planner returned all 24 selected plugins:
+13 eligible runtime entries and 11 explicitly ineligible payload-only entries
+with null runtime roots. Comparing that whole map with the runtime-only
+expectation incorrectly treated those legitimate payload entries as extra
+runtimes. Fresh settlement now succeeds with no errors or remaining tasks.
+Required CI independently passes all three required jobs at this exact head.
+
+The observation validator now classifies those extra entries only when the
+frozen inventory declares them payload-only, the planner explicitly reports
+that status with no runtime eligibility/root, and the payload path matches
+the acquired selection. Unknown extras, a missing runtime, a rooted/eligible
+payload-only entry and failed/foreign runtime selections still fail. The
+construction control now models the actual mixed planner response instead of
+an unrealistically runtime-only response. All 48 focused runtime controls pass,
+including the classification's success and refusal cases; lint and whitespace
+checks pass. This remains a fixture-only correction with no operator-document
+or install-contract change. Actual selected imports, Machines readiness and
+Manager lifecycle actions still need the next exact-head disposable run; a
+successful update command alone does not establish those later contracts.
+
+Run 42970992493 at `04df70053e6920a9eaee2852d3f1fc9b53085f34`
+passed normal and repair again. Fresh passed the mixed planner observation and
+all 13 selected runtime import/version checks, then correctly refused actual
+Machines required-readiness: Index and Vault reported failed. Fresh settlement
+again succeeds without errors or remaining tasks; required CI also passes.
+No fresh result or lifecycle acceptance is credited.
+
+Vault's native installation log explicitly reports missing `keepassxc-cli`.
+Its readiness contract correctly requires that real backend even when no
+database is configured. The fresh disposable job now provides the official
+portable KeePassXC 2.7.11 archive, released 2025-11-23, through the existing
+bounded downloader, with its published SHA-256 verified before extraction.
+The same archive was independently downloaded, hash-checked and its actual
+CLI returned version 2.7.11 without host installation, service startup or vault
+state creation. Only the fresh job receives this path; the shared prerequisite
+anchor, installed-core and normal/repair cases are unchanged.
+
+Index's raw failed-readiness detail was not retained by Machines' normalized
+observation. Its installer reported a healthy service cutover and an activation
+role warning; neither establishes why the readiness adapter failed. The witness
+now retains bounded failure-only details through the selected Machines runtime,
+its admitted owner binding and canonical read-only invocation. It does not
+apply repair or change acceptance. Ordinary diagnostic errors retain the
+original readiness refusal, and unresolved cleanup custody still takes
+precedence. The next hosted run must establish the exact Index reason rather
+than treating a warning, unknown corpus state or successful service start as
+satisfied readiness.
+
+All 51 runtime controls and 58 workflow/coordinator controls pass. Changed-source
+lint, whitespace, YAML loading and native PowerShell syntax checks pass.
+Documentation-impact review: these are disposable qualification inputs and
+failure diagnostics, not a released runtime or operator procedure. The full
+native clean-room/readiness result remains pending the next exact-head run;
+authentic admitted upgrade, frozen enforcement and separate Main adoption are
+still open.
+
+Run 42977725641 at `162112b586d4505a9ee410ceacdf4b193bb42ed1`
+passed normal and repair; fresh still refused actual Machines readiness for
+Index and Vault, with successful settlement and required CI. The Vault
+installer now confirms that the real `keepassxc-cli` prerequisite is found.
+That removes the known missing-backend input, not the remaining readiness
+failure.
+
+The added failure diagnostic returned `invocation-refused`, not either owner's
+raw reason. It had obtained the host owner bindings but omitted the canonical
+execution-binding step that `repair` performs before `_invoke`. The diagnostic
+now uses `_binding_inputs` on only the requested failed modules before
+read-only invocation. A contained check through the actual Machines API and
+native fixture action proves the difference: the previous program returns
+`invocation-refused`, the corrected program exits with the owner's raw
+`not-ready` reason, and no installer state is created. Four focused regression,
+original-refusal and custody-precedence controls pass; lint and whitespace
+checks pass. No production repair API or acceptance policy changes. Index and
+Vault causes remain unproven until the next exact-head native diagnostic;
+neither the backend input nor this observation fix is fresh acceptance.
+
+Run 42982347366 at `8999810d27bc792acf1acbe67cb46093ab83f0db`
+passed normal and repair, with successful fresh settlement and required CI.
+Its now execution-bound diagnostics report the real refusals: Index cannot
+read effective repository configuration, and Vault cannot resolve activation
+configuration. The selected Machines conductor invokes those repository-aware
+readiness gates from each installed payload directory, losing the explicitly
+requested adopted project context.
+
+The existing actual-caller readiness regression now requires the selected
+project directory inside both native payload-script and payload-command
+actions, while starting the caller outside that project. Both Windows cases
+fail before the correction and pass after it. Machines now binds the admitted
+project root into each owner and the opaque plan digest, revalidates that
+directory before each read-only action, and runs the probe there. Manifest
+action paths, executable/content binding, no-self-provision behavior, installer
+payload working directories and apply authority are unchanged. Missing or
+indirect project contexts refuse execution instead of falling back elsewhere.
+
+This narrow production correction is coordinated on the existing conductor
+issue #6464; it does not supersede #10757's separate inactive-participation
+change. The complete repair test file passes 122 controls, including actual
+native callers, context replacement refusals, unchanged installer context,
+cancellation, changed-input rejection and the original budget cases
+(466.53 seconds; wrapper including preparation/cleanup 491.91 seconds).
+Changed-source lint, whitespace and the 13-plugin install-contract guard pass.
+
+Intent and contract review: this restores the existing selected-project
+readiness contract under the installer vision's authoritative replacement
+goal, not a new conductor or relaxed owner judgment. The internal owner binding
+and opaque digest now include the action's repository context; an earlier
+digest must be replanned rather than reused. No public invocation syntax or
+readiness descriptor changes. Documentation-impact review updates Machines'
+README and the suite's testing guidance; a generated Machines patch changefile
+covers the production behavior. Native tests above exercise Windows; the POSIX
+fixture counterpart is retained but is not claimed as executed on this host.
+The next existing disposable fresh run must still prove real Index/Vault
+configuration and complete Machines readiness before lifecycle acceptance.
+
+Run 42988759861 at `a9dd8eaa96675e9cd4240b8a666e70eaaa336d33`
+passed normal and repair, with successful fresh settlement and required CI.
+Vault now satisfies actual required readiness as `configuration-empty`; Index
+alone still refuses effective repository configuration. No complete fresh
+readiness or lifecycle acceptance is credited.
+
+A configuration-only reproduction isolates another fixture input: fresh
+`_roles` wrote JSON into Index's `config.yaml`. The dependency-free native reader
+does not support that JSON form. The exact JSON input returns
+`repository-config-invalid` with `expected a mapping entry`, without any runtime,
+service or configuration owner present. An earlier YAML-only cold check did not
+reproduce the fixture input and did not establish the cause. The fresh adapter
+now emits native YAML, retaining the same indexer aliases and role selection.
+The production parser and readiness judgments are unchanged.
+
+A focused regression calls the real native YAML reader against the actual
+`_roles` output under isolated `-I -S` Python and proves PyYAML is unavailable.
+It passes (one selected test, 51 unrelated deselected); changed-source lint and
+whitespace pass. Temporary tracing/preflight code used during diagnosis was
+removed rather than shipped after this smaller input correction was identified.
+This is fixture-only, with no additional runtime protocol or operator-document
+change. The next exact-head disposable run must still prove the installed-owner
+path and full readiness; local parser success alone is not that acceptance.
+
+Run 42995152279 at `0a091a8cda54990e359c6050cd3ae5b926782a81`
+passes all 13 actual runtime import/version checks and actual selected Machines
+required-readiness. All nine required module observations are satisfied,
+including Index and Vault `configuration-empty`. Fresh then correctly fails
+the post-update exact payload comparison for Index; settlement succeeds.
+This is readiness evidence, not a complete runtime-closure or lifecycle result.
+Repair passes. Normal independently fails its initial Manager constructor in
+`driver.drain` with `ParticipantError: transaction returned with unclosed
+participants`; its case also settles successfully.
+
+A contained real-reader comparison demonstrates an immutable-payload defect:
+Index's configuration helper uses `-E`, so the cache environment flag is
+ignored. It creates ten cache paths in a copied payload; explicit `-B` leaves
+the entire manifest unchanged. The native gate's configuration, role and
+session-stamp helpers now use explicit no-bytecode flags on both platforms.
+Generator-owned catalog gates receive the same correction; only Index declares
+that gate, and only its two catalog outputs change on regeneration. Runtime
+owned-cache behavior, source selection and readiness judgments are unchanged.
+A generated Index patch changefile covers this production correction.
+
+Fixture payload failures now retain bounded exact path/hash differences, with
+no bytecode exclusion or resealing. A failed diagnostic write preserves the
+original immutable-payload refusal. The normal builder's original log was not
+advertised before the cleanup exception. PR #11121 owns overlapping foreground
+bootstrap hunks, so the failure is reported cooperatively there rather than
+pre-patched. Only fixture diagnostics change: without an advertised request,
+they may retain bounded strictly named logs from this case's private driver
+directory, never witness data, unrelated files or other homes. The normal
+failure's underlying cause remains unproven and unwaived.
+
+Source validation includes 65 runtime/diagnostic controls and three subsequent
+diagnostic-write/refusal edge controls, plus two passing generated-catalog
+controls with one POSIX execution skip. The broader Index packet exposed stale
+synthetic dispatcher fixtures: a contained old/new-flags comparison reproduces
+the same configuration refusal in both. Those cases now explicitly isolate
+the independent preference owner when using synthetic receipts; native reader
+and readiness cases retain the real owner path by default. Missing source/SDK
+inputs in private fixture payloads and setup runtimes are supplied. After these
+corrections, 51 Index gate/catalog cases pass in the broad packet; its remaining
+two duplicate-copy setup errors are corrected and both targeted cases pass.
+The 37 platform skips are not native POSIX proof. These fixture changes confer
+no namespaced-owner or live acceptance.
+
+Changed-source lint, generated-file consistency, the 13-plugin install contract,
+documentation consistency and whitespace pass. The generator's existing
+eligible-unit source digest is refreshed from the exact staged LF bytes; nodes,
+coverage targets, effect restrictions and budgets are unchanged. Metadata/source
+binding validation is not a substitute for the next exact-head required CI.
+Documentation-impact review updates the suite's evidence/diagnostic guidance;
+there is no new operator syntax or mutable runtime policy. The existing
+disposable Windows lane must still prove unchanged payloads, complete fresh
+actions and settlement, and resolve or expose the normal bootstrap failure.
+Authentic upgrade, mandatory frozen enforcement and separate Main adoption
+remain open.
+
+Required CI at `c0887c9d3a6ced56286ed93aa95ca6686630f21d` exposes a second
+binding that the native-helper literal change must maintain. The Linux eligible
+unit job passes 4,711 cases, then refuses the closed catalog typing witness:
+`Catalog module/validator/renderer binding changed`. This failure is not waived
+by the source-digest refresh or native controls.
+
+The semantic AST comparison confirms only the module and `render` hashes
+changed; `_load_command`, `load_manifest` and `expected_files` retain their
+reviewed bindings. The closed `python-catalog-inputs.json` declaration now
+records those two reviewed shapes, and its existing eligible-unit source
+digest is refreshed from staged LF bytes. Source membership, validator/enum/
+conversion checks, declared functions, unit nodes, coverage and budgets remain
+unchanged. All 18 catalog correspondence/refusal controls pass. This is binding
+maintenance, not a weaker witness or operator-facing protocol change; the next
+exact-head required CI still owns the full Linux unit result. The already-running
+`c0887c9d` native matrix is left running and will retain its own exact-head
+outcome rather than being cancelled or credited to a later metadata commit.
+
+Run 43006825243 at `c0887c9d3a6ced56286ed93aa95ca6686630f21d`
+passes normal and repair. Fresh completes the runtime-closure function,
+including all 13 imports/versions, actual Machines required-readiness, exact
+post-update payload and transport checks, and frozen artifact verification.
+It then fails the next Manager observer because the admitted-core helper
+requires `runtime-source.json`. Fresh intentionally has no such source-admission
+receipt. Settlement succeeds; no fresh lifecycle result is accepted. The prior
+normal bootstrap failure did not recur here, but its old underlying cause is
+still unproven and the cooperative report remains open.
+
+The fresh companion now has a separate non-admission Manager observer, using
+the existing installed-origin/version contract plus every frozen Manager Python
+module byte, selected private generation and constructor-record hashes.
+Candidate identity is bound to the verified frozen artifact; evidence explicitly
+records `source_admission: not-granted`. Foreign roots, escaped generations,
+changed modules and missing/empty constructor records fail. The existing
+admitted-core helper and its retained source-receipt checks are untouched.
+No exact-source receipt is invented in the artifact or installed snapshot.
+Runtime-closure data is retained as diagnostic evidence before the later Manager
+observation, without changing the final ready/result gate.
+
+The eight origin controls and thirteen final evidence controls pass in targeted
+packets, including wrong-candidate, false-admission and incomplete-record-hash
+refusal. This is source-level validation; the next exact-head
+hosted run still owns actual fresh Manager observation and all UI actions.
+The previously committed typing-binding correction is included in that next
+candidate, and required CI must independently pass it. Documentation-impact
+review updates the fresh-versus-admitted observation distinction in TESTING.md.
+Complete fresh acceptance, authentic upgrade, frozen enforcement and separate
+Main adoption remain open.
+
+### November 11 - Fresh launch phase and bounded lifecycle observation
+
+Required CI passes at `bedaf3e3eb574d96e3e41811361321762f65693e`.
+Exact-source run 43014684583 passes normal and repair. Fresh preparation now
+passes complete construction, all 13 runtime imports/versions, actual Machines
+readiness, unchanged frozen payload/transport/artifact checks and the separate
+non-admission Manager observation. Exercise still fails: paired worktree and
+instruction preparation finish, but no user history or provider request exists
+when the witness's 60-second completed-turn clock expires. Settlement succeeds.
+No fresh Create/Resume/Open acceptance or source admission is inferred.
+
+Source tracing identifies two existing, independently bounded 60-second New
+required-readiness passes, including one after instruction preparation. Fresh
+now separately waits up to 120 seconds for the actual initial/resumed user event,
+then applies the unchanged 60-second completed-turn proof. Both waits are clipped
+to the unchanged exercise deadline; core timing, production readiness, UI
+actions, duplicate-owner/history checks and rendered reply requirements remain
+unchanged. Three virtual-clock controls prove unchanged core timeout, fresh
+phase completion and refusal at the outer deadline.
+
+The same run's observer consumed its 512 process identities during construction
+and reported one scan error. Its cause is still unproven. Fresh now arms this
+trace only after preparation records readiness. The cap and scan-error failure
+remain; the first eight failures retain only exception type and HRESULT, never
+messages or arguments. A real controlled PowerShell scan failure still exits
+nonzero with sanitized diagnostics.
+
+The focused phase/pane/trace packet passes all 19 controls. A broader local
+packet passes 231 cases before exposing one overstrict synthetic cache
+expectation; both installed stop-selection cases pass after correction.
+Encountered stale test fixtures now use the witness's injected runner, advance
+a virtual progress clock through the real throttled emitter, verify the current
+unsealed Index cache namespace, and retain exact construction exit-code/stderr
+proof without requiring one obsolete leading message. No production runtime
+hunks change in this slice. Four hosted-native acceptance cases were explicitly
+not credited locally: they require their actual executable or prepared disposable
+VM inputs. Ruff, the 13-plugin install contract, documentation consistency and
+whitespace pass.
+
+Documentation-impact review updates TESTING.md's fresh launch and trace phases;
+no public invocation, readiness policy or deadline changes. The next exact-head
+hosted matrix must still prove complete fresh UI actions and settlement.
+Authentic upgrade, mandatory frozen enforcement and separate Main adoption
+remain open, as does the older cooperatively reported normal bootstrap cause.
+
+### November 11 - Resume attachment shares the fresh launch allowance
+
+Required CI passes at `30da5278ca50c5ed46169f00aff137fff1607e9e`.
+Exact-source run 43024963735 passes normal. Fresh again passes preparation
+and now completes actual Create, active Open, detach and three provider-backed
+turns. It fails before the final resumed turn: the separate prompt-attachment
+wait still uses the core 30-second default. The retained final rendered frame
+contains both required prompt markers. Fresh settlement succeeds; the four
+actions are not accepted as a complete result.
+
+Fresh Resume attachment and its subsequent actual-user-event wait now share
+one 120-second launch allowance from action activation. The user-event wait
+uses only the remaining time, never a new 120 seconds. Core attachment remains
+30 seconds; completed-turn and outer exercise deadlines remain unchanged.
+Virtual-clock controls prove core refusal, fresh completion and exhaustion
+of the shared allowance before a late user event.
+
+The process observer still reports four CIM exceptions and a truncated
+512-identity trace after arming at the correct phase. Exception type and
+HRESULT alone do not identify their cause. Diagnostics now additionally retain
+numeric CIM native/status codes, with nulls for non-CIM failures. All scan errors
+still fail; query timeout, cadence, cap and argument/message omission remain
+unchanged. Both real CIM-exception and ordinary-exception controls prove
+sanitized reports and nonzero exit.
+
+Repair fails initial Manager bootstrap before its repair mutation. Newly
+retained private-driver output ends with the original error,
+`Proof object is not owned by this principal`, after successful wheel
+installation and payload inventory. The outer unclosed-participant error masks
+that physical publication-proof refusal. Exact offending path/principal and
+root cause are still unproven. Settlement succeeds with no errors or remaining
+tasks. This distinct evidence was reported cooperatively on #11121 at its
+still-open head `c3770520b3cbde2fc86e23251b393b8832b51c55`; no competing
+constructor/publication change is made here.
+
+All 21 phase/selection/pane/trace controls and changed-source lint pass.
+Documentation-impact review records the single shared Resume launch allowance
+and numeric diagnostics in TESTING.md. The next unchanged hosted matrix remains
+required for complete fresh actions, strict scan observation and settlement.
+No authentic upgrade, frozen enforcement, Main activation or rollout is claimed.
+
+### November 11 - Completed resumed turn, final sequence still refuses
+
+Required CI and exact-source run 43030233768's normal and repair cases pass at
+`4447ddb60cd5f1df26a9f05e7e0cfa4d00e89f89`. Fresh preparation and settlement
+pass. The shared Resume launch allowance now reaches the original conversation,
+replacement native owner and fourth provider-backed reply; its launch phase
+takes 32.7 seconds. The final exact sequence assertion still refuses acceptance.
+The history has seven user and five assistant messages, not four each, with
+five provider requests. Earlier rendered evidence contains a Context Handoff
+intervention and an extra first reply, but that does not establish the identity
+of every extra event. No event is ignored and no complete result is credited.
+
+Failure diagnostics now project at most 32 user/assistant events as fixture
+labels, content byte counts/hashes, fixed envelope flags and a closed source
+classification. They retain no message text and do not alter any sequence,
+owner or continuity assertion. Diagnostic-read errors preserve an already
+failing original exception. Focused controls retain duplicate reply labels,
+classify an unknown/known-prefix extra, omit its private text and bound output.
+
+The trace again fails, now with three CIM exceptions whose native and status
+codes are both generic failure (1). Its cause remains unproven. The census
+requests only the four process properties it consumes, reducing unnecessary
+provider serialization without filtering out any previously eligible process.
+Samples add elapsed milliseconds and record count at failure. The one-second
+query limit, 100-millisecond cadence, 512-record cap and fatal scan-error policy
+stay unchanged. Controls verify the exact requested projection, process-birth
+identity, bounded output and sanitized nonzero ordinary/CIM failure reports.
+
+All 16 focused diagnostic/deadline/trace controls and changed-source lint pass.
+Documentation-impact review updates TESTING.md's content-free sequence and scan
+diagnostics. The prior repair publication-proof refusal did not recur at this
+head; that alone does not establish its cause or repair, and its cooperative
+#11121 report remains open. The next exact-head hosted matrix must identify
+the extra history events and prove strict final sequence and scan success.
+Authentic upgrade, mandatory frozen enforcement and separate Main adoption
+remain open.
+
+### November 11 - Attribute runtime system context and retained image teardown
+
+Required CI and run 43036181824's normal/repair cases pass at
+`a50ae2b375035634d28cdd1e835a99ac30dd3de1`. Fresh preparation and settlement
+pass. The reduced four-property census completes with zero scan errors and no
+truncation in this shorter run; that is not complete-window acceptance.
+The failure occurs after the third completed provider-backed turn: native
+image lookup returns access denied. Source inspection finds this observer
+calls the raw query rather than the installed-TTY helper already designed
+for image teardown preceding the retained handle's exit signal.
+
+Native attribution now reuses that existing helper, with no shared-helper edit.
+It may ignore a query failure only when the same pinned handle confirms exit
+within the helper's existing 250-millisecond bound (clipped by its deadline).
+Live/unverified query failures still propagate. Focused controls prove both
+outcomes and exact handle closure, without reopening a PID or relaxing
+native-owner/birth/history binding.
+
+The message projection identifies two extra startup user events explicitly
+marked by the actual CLI as `source: system`, one before the first reply and
+one between that reply and its duplicate. Operator prompts retain their
+unmarked source. These are runtime context events, not duplicate operator
+input. Fresh alone now validates this distinction: exactly four ordered
+operator prompts and matching replies, with an additional matching reply
+permitted only after new explicitly marked system context. Unmarked or
+non-text context, duplicate operator prompts even when marked system,
+unpaired/foreign replies and missing operator replies fail. Core retains its
+original exact four-user/four-assistant comparison.
+
+Fresh turn completion additionally requires the current prompt's exact reply
+followed by a turn-end event; the extra hook turn cannot inflate a cumulative
+count into false completion. Neither the system-context classification nor
+image helper supplies an inference result, history, owner or success callback.
+The selected-suite adapter alone enables this observed all-plugin contract.
+No frozen-candidate source admission or promotion enforcement is inferred.
+
+The initial 34 focused context/deadline/pane/trace and retained-image controls
+pass, including the existing helper's own two attribution controls.
+The broader affected-file packet passes all 250 locally supported cases after
+adding malformed-context refusal; four hosted acceptance cases remain explicitly
+uncredited locally. Changed-source lint passes.
+Documentation-impact review records the distinct core/fresh history contract
+and confirmed-exit-only image behavior in TESTING.md. Complete fresh lifecycle,
+ordinary admitted-baseline update, mandatory frozen enforcement and separate
+Main adoption remain open.
+
+### November 11 - Complete actions reach strict daemon cleanup
+
+Required CI and run 43043246633's normal/repair cases pass at
+`fa0dd539837130678948d90916358b95ff2ad684`. Fresh preparation and all four
+actions, typed-system-context history, native ownership, final normal exit and
+provider-continuity checks complete. Exercise then correctly refuses its
+unsettled daemon-instance results: two MCP launch reservations remain held
+with unknown launch outcome and no PID. Independent settlement succeeds, but
+does not convert those held outcomes into accepted lifecycle evidence.
+
+The verified MCP interpreter is physically under its selected generation's
+`.venv`. The canonical resolver supports that layout, but the bootstrap's
+healthy-generation shortcut accepts only flat `Scripts/python.exe` or
+`bin/python`. Four new healthy nested controls reproduce unnecessary
+provision-supervisor submission before the fix, in PowerShell 7 and Windows
+PowerShell for ordinary and source-repair generations. The shortcut now
+recognizes the canonical nested paths as well, preserving exact selected
+generation/source, completion and resolver link checks. Its synchronized
+POSIX block is updated consistently in Bridge, Dispatch and MCP; no shared
+service is repaired or installed. Current paginated #11121 file inspection
+shows no overlapping bootstrap files; its constructor/publication hunks
+remain untouched.
+
+The complete MCP bootstrap packet passes 56 cases after the correction,
+including flat/nested healthy, incomplete, wrong-generation and foreign-source
+controls. Fourteen native POSIX cases remain untested on Windows; block
+synchronization is separately verified. Patch changefiles cover all three
+affected plugins. MCP's canonical footprint refresher updates only the script
+producer digest: revision 36, contract semantics and the `src` digest remain
+unchanged. The full install-contract guard passes after that binding refresh.
+
+The same native run reports three generic CIM scan failures taking 5,754,
+1,940 and 1,284 milliseconds, despite the existing one-second operation limit.
+Their exact underlying cause remains unproven. The tracer now lazily creates
+one owned local DCOM session after arming and reuses it, rather than relying
+on implicit per-poll sessions. A bounded three-scan read-only host probe verifies
+the client path is supported; it is not full-suite acceptance. Creation and
+query limits, cadence, cap and fatal-error policy stay unchanged. `finally`
+closes that exact session; close failure is also fatal. No service, remote
+endpoint or credential deployment is introduced.
+
+Thirteen Manager controls pass, including actual two-poll mock-session reuse,
+creation/query/close failure, pre-window no-acquisition, strict held cleanup
+beyond the 32-record diagnostic sample and preservation of original custody
+failure on diagnostic-write error. Fresh teardown now retains that bounded
+cleanup projection before refusing. No reservation is fabricated, deleted or
+reclassified as settled. Changed-source lint, the 13-plugin install contract,
+documentation consistency and whitespace pass. Documentation-impact review
+updates MCP's healthy-layout contract and TESTING.md's session/cleanup evidence.
+The next unchanged exact-head hosted matrix must still prove complete cleanup,
+strict scan success and the final post-lifecycle checks. Authentic update,
+mandatory frozen enforcement and separate Main adoption remain open.
+
+### November 11 - Reconcile the source-binding conflict before CI
+
+The published `bf22bb3f5e6cbfadd9ff4f83cbf32c80130b3b69` has successful
+trusted lockdown and source-attribution checks, but no PR CI run. Live CI
+triggers match the candidate and still include draft PR updates. GitHub reports
+a merge conflict, not a successful or skipped CI result. Run 43053171740 remains
+owned at its original frozen source; it is neither cancelled nor credited to a
+later reconciled candidate.
+
+A local backup preserves that published tip. Rebase onto
+`7508f32f3ba0abef31d63c192052866079ecf39b` replays 21 owned commits cleanly
+and exposes only the final MCP footprint producer-digest conflict. Both branches
+retain revision 36 and identical semantic contract fields. The resolution
+preserves newer upstream code and source binding, then uses the canonical
+refresher to recompute the merged producer digests. It does not choose an old
+manifest wholesale, change footprint policy, reset files or use shared stash.
+
+The reconciled code at `72611a2eff79a9668c0a62aafa2d9eb484adeaba` passes
+56 MCP bootstrap cases and all 257 locally supported Manager cases, plus
+install-contract, documentation and whitespace checks. Four hosted acceptance
+cases and fourteen native POSIX cases remain uncredited locally. The managed
+rewrite preview confirms the exact old published-head lease; it is not itself
+publication. Actual managed rewrite, current-head CI and a new exact-source
+hosted matrix remain required before review/merge acceptance. No old green
+check or native result is reused across the rebase.
+
+### November 11 - Cleanup and census pass; post-lifecycle immutability refuses
+
+The retained frozen-source run 43053171740 at
+`bf22bb3f5e6cbfadd9ff4f83cbf32c80130b3b69` passes normal and repair.
+Fresh preparation, all actual actions/continuity checks and all six daemon
+cleanup outcomes complete successfully. Its census has zero errors and closes
+the owned CIM session; the 512-record truncation remains explicitly recorded.
+Fresh still fails: the next post-lifecycle frozen-payload comparison finds an
+Index change. Independent settlement passes. No complete result or immutable
+payload acceptance is inferred from the successful earlier phases.
+
+Current required CI 43056366851 at
+`e530d48508ed38053b81641537c31e37ab8680cb` passes eligible units, then its
+runtime-resolution source guard flags the new nested paths in the healthy-slot
+comparisons as venv-link launches. The code already consumes the canonical
+marker resolver and compares its result with physical paths beneath the exact
+selected generation. The guard now recognizes only those two established
+Bash/PowerShell comparison shapes. It still flags direct nested-venv launch
+assignment, root-link comparison and a forbidden path on a mixed line.
+No per-line allow marker or general launch exemption is introduced.
+
+Nineteen guard controls and the actual repository-wide strict scan pass.
+The post-lifecycle payload verifier now reuses the bounded path/hash difference
+projection so the next refusal identifies the added/removed/changed paths.
+Bytecode remains included; no path is exempted and no manifest is resealed.
+Two focused cases retain the exact added-cache refusal and preserve it even
+when the diagnostic write fails. The combined 14 Manager payload/cleanup/trace
+controls, changed-source lint and whitespace pass. Documentation-impact review
+updates TESTING.md; no runtime, profile, source-admission or budget policy changes.
+The still-running exact `e530` native matrix retains its own outcome, not the
+next source head's result. Current-head CI, complete fresh immutability and
+settlement, authentic upgrade, frozen enforcement and Main adoption remain open.
+
+### November 11 - Identify and stop scope-guidance payload bytecode
+
+Required CI 43060269249 passes at
+`2caee135fd988dc890a70fc274e2d70773e05c36`, including the corrected strict
+runtime-resolution guard. Exact-source run 43060369382 passes normal/repair.
+Fresh again passes preparation, actual actions/continuity, all six daemon
+cleanup outcomes and zero-error census/session close, then refuses post-lifecycle
+Index payload immutability. Settlement succeeds.
+
+The new bounded difference report identifies twelve added paths and no removed
+or changed original file: eight `.pyc` files and four cache directories beneath
+Index's configuration-reader scripts, vendored configuration helpers and source
+package. The active session scope writer invokes `emit_scope_binding.py` with
+`-E` but without `-B`; that script imports `resolve_effective_config` and the
+identified module chain. Its retained PowerShell/Bash wrappers have the same
+omission. Environment cache/no-bytecode flags are ignored by `-E`.
+
+Three actual cold-copy controls reproduce those eight cache files before the
+fix through the real session-writer function, PowerShell 7 and Windows
+PowerShell. The callers now explicitly add `-B`, preserving `-E`, UTF-8, cwd,
+guidance output, budgets and normal runtime-owned caching. No payload file is
+excluded, deleted or resealed. Current paginated #11121/#10757 file checks show
+no overlapping caller or payload-stability-test hunks. The existing Index patch
+changefile is clarified to include the scope-reader case, not duplicated.
+
+The broader packet also exposes three older role/construction fixtures whose
+explicit repository override is only a directory. The actual reader correctly
+reports `repository-override-unavailable`. Fixtures now initialize real Git
+roots and supply the complete copied configuration-reader inputs; production
+refusal of invalid overrides is unchanged. The actual role and construction
+assertions remain, rather than being replaced with success callbacks.
+
+All thirty configuration-scope/guidance/catalog/payload-stability cases pass,
+with nine platform skips uncredited. Each new helper case repeats against the
+same cold payload and proves every file unchanged. Changed-source lint,
+strict runtime-resolution, the 13-plugin install contract and whitespace pass.
+Documentation-impact review updates Index's read-only scope contract and
+TESTING.md. The next unchanged exact-head hosted matrix must still prove the
+final immutable comparison and complete result; authentic update, mandatory
+frozen enforcement and separate Main adoption remain open.
+
+### November 11 - Keep the burst pass separate from the actual launch shape
+
+The managed reconciled-head rewrite initially exceeds Git's existing
+30-second command limit. Git and the provider independently still report the
+old `7fe797` ref, so no successful publication or dispatch is inferred.
+One managed retry succeeds using the recorded exact lease, without a manual
+force, hook bypass or timeout change. The actual hook is the managed PR shim
+with no local companion; its generic error suggestion does not prove a
+runtime-update stall.
+
+Current source `c9e546c87d7268ad8c7dce3f234de3640344d1ac` is published,
+mergeable and draft. Its exact CI run 43120307991 passes. The source-bound
+burst request `4f7d4ceb484a48c6a92f71085c877123`, run 43120805625 attempt 1,
+also qualifies on the existing protected controller
+`85ffb5f56366635474bb78fb6864463683e50d5c`. The actual JUnit summary records
+128 short-lived children, 123 observed incarnations, 38 successful scans,
+query-pipeline total/max 1553/102 ms and session creation 255 ms. No scan or
+close error, missing stop, truncation or unowned child cleanup is admitted.
+This six-second pass does not reproduce or waive the original full-run
+failure.
+
+Further source/trace correlation corrects the workload model: the fresh census
+window arms only after runtime installation completes. The retained original
+records near failure show repeated direct parent/child Python launch pairs,
+whereas the short profiles used base Python. The next residual changes only
+that missing launch dimension: the same bounded burst uses an actual private
+standard-library no-pip Windows venv. No suite or dependency installation,
+shared runtime, provider substitution, global machine change or full-suite
+retry is introduced. Venv launcher/base-child behavior remains a hypothesis
+until that source-bound hosted case runs.
+
+The expanded profile's helper parses, F/E9 lint and documentation consistency
+pass, and ordinary contained selection skips all four T3 cases in 0.60 seconds.
+No native provider operation or venv construction runs in that default lane.
+The preceding exact-source CI and hosted burst success are retained at `c9e546`,
+not relabeled as evidence for this new residual.
+
+### November 11 - Close the short-profile investigation without waiving census
+
+The venv-only request `f45dea5b1cae41f995cd2ec1a5f8c33d`, run 43146338506
+attempt 1, qualifies exact source
+`5eacaa4c961dd0bfffaffc3f22a8294a9518accb` on protected controller
+`3c0e071e2113d7934b32f288d5400b02b9016b2b`. Its retained JUnit summary
+confirms actual venv execution, 128 short-lived children, 253 observed
+incarnations and 37 successful scans. Query-pipeline total/max is 1542/126 ms,
+with session creation 220 ms. Scan errors are zero, the session closes,
+the window and stop are observed, and no truncation occurs.
+
+All four short diagnostic dimensions now have real hosted evidence, but none
+reproduces the original long-workload failure. Stop growing this synthetic
+load matrix: buffering, short concurrent load and venv launch pairs have no
+positive causal evidence. No provider replacement, census exemption or
+larger timeout follows from these passes.
+
+Publication of `5eacaa4` was initially interrupted by local PowerShell
+startup stack-overflow/out-of-memory failures. Independent Git/provider reads
+prove that attempt had not published; the native profile was not submitted.
+After read-only host measurements show memory recovered, the normal managed
+publication and one new request succeed. No shared process termination,
+configuration change, runtime repair or bypass is performed.
+
+Dev moves during that interruption. A backup preserves `5eacaa4` before
+reconciling onto `8426b0512190e1c2944d2721714e9229af20f2e9`. The two
+conflicts are additive: Machines retains this branch's selected-project
+binding and the upstream script-only installer-runtime declaration/digest;
+MCP's canonical producer refresh preserves the merged scripts with revision
+36 unchanged. Range-diff retains all 35 owned commits, with only those
+two integration seams changed. Frozen profiles remain evidence for their
+original commits, not the reconciled tip.
+
+The remaining diagnostic criterion requires the original workload: capture
+the new passive failure phase, safe numeric embedded HRESULT/category and
+query-pipeline timing when the complete installed consumer executes. One
+instrumented exact-candidate run through the existing disposable native
+owner is justified after focused integration validation and publication.
+This is not an unchanged retry hoping for zero errors. Keep the existing
+60-minute job, 1800/900/300/90-second stage limits, one-second CIM operations,
+100-ms cadence, record/failure caps, fatal errors, strict payload comparison
+and exact owned cleanup. A pass cannot erase the earlier failed run or prove
+its root cause; a failure must be diagnosed from the new retained fields.
+No new workflow, runner capacity, operator installation or Main activation
+is authorized. Full acceptance, admitted-baseline upgrade, frozen enforcement
+and the parent's other open validation obligations remain separate.
+
+Reconciled validation passes 30 focused Machines installer-runtime/project-context
+cases and 33 MCP bootstrap/readiness/provider cases. The initial broader
+Machines file selection reaches its unchanged 180-second subsuite limit before
+completion; that full file is not credited as passing. The narrower selection
+exercises the actual merged seam without enlarging deadlines. All contributed
+Python passes F/E9 lint; strict runtime resolution, 13 install contracts,
+documentation consistency and whitespace pass. Documentation impact remains
+the testing reference and this journal; there is no new runtime command,
+configuration or policy. The pending exact-source CI is independent of these
+source controls and frozen earlier results.
+
+### November 11 - Verify the strict full consumer and address review
+
+Exact-source run 43148010946 attempt 1 at
+`e2d824d74d7881bdecf96bfce51550eff3712fd6` passes normal, repair and fresh.
+The actual fresh artifact binds the same candidate/source and tree, complete
+24-plugin runtime closure, all five lifecycle outcomes and original
+conversation continuity. Every stage returns zero. The result is written only
+after strict daemon cleanup and the second whole-payload comparison; no payload
+difference files exist. All six daemon instances settle, with no omitted or
+unsettled entry and no remaining tasks.
+
+The instrumented census performs 1,636 scans with zero errors; query-pipeline
+maximum is 464 ms and session creation 47 ms. It observes window/stop and closes
+its session. The declared 512-record list truncates, but polling and fatal-error
+enforcement continue afterward. This is a strict fresh-candidate observation,
+not proof that earlier intermittent CIM failures are repaired. Those historical
+failures, unavailable older artifacts and the original preparation-failure
+cause remain explicit limitations. CI 43147922441 also passes at exact `e2d824d`.
+
+The PR enters review with accurate current evidence and remaining boundaries.
+Copilot review 5868827517 names one blocking finding: selected-project readiness
+can expose Index's bare-name Git lookup to checkout-local commands on Windows
+or relative PATH entries. Preserve the selected context rather than undoing it.
+The reader now enumerates only absolute PATH directories and directory-qualified
+command candidates for implicit Git, Worktrees and PowerShell resolution.
+Windows suffixes explicitly follow PATHEXT, including Python 3.11's qualified
+lookup behavior. Explicit Worktrees command overrides and same-cell routing
+retain their existing precedence.
+
+Three focused cases place a marker-writing fake Git in the current directory,
+dot PATH and a relative tools directory. The actual probe still resolves the
+real repository without executing it. All 63 configuration-reader cases pass
+after correcting the first implementation's missing Windows suffix expansion
+and subsequent missing import; intermediate failures are not credited.
+F/E9 lint passes. README documents implicit versus explicit command selection.
+The existing Index patch changefile covers this review fix. It adds no command
+syntax, service, network lookup, new runtime or per-call child process.
+New-head CI, review and installed-consumer validation remain required; the
+successful `e2d824d` run is not silently relabeled.
+
+### November 11 - Complete the read-only execution boundary fix
+
+Frozen `f799e52` native run 43152583500 passes all three jobs. Its actual fresh
+artifact binds that source/tree, all five lifecycle outcomes, unchanged payloads,
+all stages zero, seven daemon instances settled and no remaining tasks. The
+census records 2,619 successful scans and zero errors, with a 1249-ms maximum
+query pipeline, session closure and observed stop/window. This again shows why
+pipeline elapsed time alone cannot classify the earlier generic CIM exceptions
+as provider timeouts. Neither this pass nor the earlier `e2d824d` evidence
+qualifies subsequent source changes.
+
+Both `f799e52` CI runs pass units/type contracts but fail the module-size guard:
+the reader grew past its shrink-only ceiling. Extract command lookup and bounded
+Git invocation into the payload-owned `config_commands.py`, loaded once per
+reader instance by absolute sibling path. Copied-reader fixtures include that
+helper. Canonical baseline refresh only tightens/removes existing ceilings;
+the complete source tree passes afterward. No ceiling is widened or guard
+bypassed.
+
+Copilot review 5868981392 identifies two remaining execution seams: Index's
+shell gate invokes Git before the Python reader, and Vault can import a
+checkout-local module. Machines read-only child environments now retain only
+absolute PATH directories and disable implicit Windows cwd lookup. An
+all-relative PATH becomes a non-directory null-device path, not an empty PATH
+that would restore cwd lookup. Installer environments and selected-project
+binding remain unchanged.
+
+The six declared readiness consumers with module-forwarding gates (Bridge,
+CodeSpaces, Containers, Dispatch, MCP and Vault) use `-I -B -X utf8` only for
+readiness and invocation-contract metadata. This excludes checkout/user-site
+imports on Python 3.10+, preserves explicit UTF-8 output and prevents metadata
+bytecode writes. Normal operational caching and arguments remain unchanged.
+Index already isolates its installed module; its bounded reader behavior stays
+native. The central pattern, Machines/Vault READMEs and TESTING.md describe the
+boundary. New patch changefiles cover Vault, CodeSpaces and Containers; existing
+ones cover the other changed plugins. MCP producer refresh preserves contract
+revision 36.
+
+Four actual platform-native Index gate cases cover empty/dot/relative PATH
+entries and all-relative refusal without executing a checkout-local Git.
+Together with preserved project-context cases, seven pass on Windows. The
+attempt to use Git Bash initially exposed a WindowsApps interpreter alias,
+not a supported POSIX result; the fixture now selects each platform's native
+gate. POSIX native execution is not inferred from the Windows result.
+
+Two explicit T3 cases run actual installed Vault entry points through Windows
+PowerShell and PowerShell 7, with a shadow module in a real checkout and a fresh
+private installation namespace. Both use the installed module, leave the shadow
+marker absent and truthfully report missing private service readiness. They do
+not provision a service. Earlier directory-only/legacy and malformed-config
+variants stopped at a different boundary or depended on the well-known service
+endpoint; they are not credited as the final import-isolation proof.
+
+Focused owner readiness controls pass Bridge 4, MCP 9, Dispatch 4, CodeSpaces 11
+and Containers 48. MCP's initial input-retention refusal occurred while this
+worker refreshed its generated footprint; no tests ran in that attempt. The
+stable-input residual passes. The Index component selection passes 69 cases
+with three platform skips; its one recovery fixture initially omitted the
+activation-role reader. A literal diagnostic confirms valid forwarded config
+followed by the missing role-reader failure. The completed reader bundle and
+declared fixture machine preserve real validation; the isolated recovery and
+cutover residual then passes. No assertion, native policy or deadline is waived.
+
+This closes the local fix/validation stretch, not the PR or parent objective.
+Publish one coherent source revision, obtain its actual CI, installed-consumer
+result and review, and retain every earlier result at its original source.
+Admitted-baseline upgrade, mandatory frozen enforcement, Main adoption and all
+other parent obligations remain open.
+
+### November 11 - Scope the generated size baseline to the owned extraction
+
+CI 43158756088 at `cb4a8ee` passes eligible units and type contracts, then
+fails the size guard on an unrelated Worktrees module. The whole-tree refresh
+tightened that entry to the local candidate's 6757 lines, while the actual
+merge input includes the newer Dev file at 6758 lines. Git blob comparison
+confirms distinct local versus Dev/merge inputs; this is not a platform
+line-count guess.
+
+Restore the pre-PR baseline entries outside this extraction and retain only
+the Index reader's reduction. Independent JSON comparison verifies exactly
+that one changed entry and no increased ceiling relative to the pre-PR
+baseline. The observed merged Worktrees file remains within its original
+accepted ceiling. No Worktrees implementation is changed, no size exception
+is introduced, and CI is not bypassed. The previous whole-tree local pass
+did not establish merged-input validity; it is not substituted for the
+required current-head result.
+
+The full ten-minute `cb4a8ee` review wait expires without a new verdict.
+That is not a passing review. Its already-owned native run remains frozen
+and supervised; no duplicate is submitted merely to change that result.
+Publish the actual baseline correction and obtain current CI/review. Retain
+exact-source qualification identity rather than relabel an older native
+artifact onto this metadata revision.
+
+### November 11 - Identify and stop snapshot-guidance payload bytecode
+
+Required CI 43069145815 is green at
+`594d9a3ff5d9a185e4100cc99f9f9faed4390239`. Exact-source native run
+43069195469 passes normal/repair. Fresh completes the actual four actions,
+same-conversation history and six settled daemon instances, then refuses
+post-lifecycle SSH payload immutability. Preparation and settlement return
+zero; settlement has no errors or remaining tasks.
+
+The actual difference report is captured first: seven added entries, no removed
+or changed original entry, without truncation. Four bytecode files belong to
+the payload's process primitive, snapshot dispatcher, runtime selector and
+installation-context primitive. Three cache directories account for the rest.
+This is not a Bridge communication failure.
+
+The SSH writer and retained mesh wrappers invoke isolated snapshot helpers
+without explicit `-B`; nested runtime and optional Worktrees request workers
+also load payload helpers. Environment cache controls do not survive `-I`.
+Four actual cold-copy Windows controls reproduce payload mutation while
+returning a valid bound external-state snapshot. The source correction adds
+explicit `-B` throughout those read-only caller chains, retaining isolation,
+UTF-8, invocation governance, current selections, output and production budgets.
+Ordinary runtime caching, payload integrity and admission are unchanged.
+No cache entry is excluded, deleted after admission or resealed.
+
+The focused after packet passes 54 tests, with four platform skips and six
+unselected longer native/latency controls uncredited. The four new Windows
+controls each repeat the actual caller and compare every file and directory
+in both SSH and Worktrees payloads. The cold fixture skips payload precompilation
+without changing default fixture behavior or installed-runtime preparation.
+Documentation-impact review updates SSH's read-only snapshot contract and
+TESTING.md. A fresh exact-head hosted matrix remains required before readiness;
+authentic baseline update, frozen enforcement and separate Main adoption are
+still open.
+
+### November 11 - Preserve cold standalone Worktrees hook payloads
+
+Required CI 43075895027 passes at
+`b46c83443eaeebb8d8a141e92f679e5895c890bb`. Exact-source native run
+43075917269 passes normal/repair. Fresh completes the actual four actions,
+same-conversation history and all six daemon settlement outcomes, then refuses
+Worktrees payload immutability. Preparation and settlement return zero with no
+errors or remaining tasks.
+
+The actual difference is captured before further changes: twelve added
+entries, ten bytecode files and two cache directories, with no removed/changed
+original entry or truncation. These belong to the standalone hook runtime,
+lifecycle/runtime context, managed-session and native-source helper imports.
+This is not a Bridge communication failure.
+
+The actual raw session-start declaration reproduces cache writes on PowerShell
+7 and Windows PowerShell, even for an ordinary unadmitted directory with no
+runtime available. Pre/post no-op controls preserve their payloads. The narrow
+correction disables bytecode writing only when `hook_client.py` executes as
+the standalone program, before its first sibling load. Importing the client
+does not change the resident runtime's cache policy; selected runtime-child
+caches and lifecycle decisions/budgets remain unchanged. Current paginated
+#11121/#10757 checks have no overlapping hook-client or new-test file.
+
+The focused after packet passes 54 tests, with four platform skips uncredited:
+actual raw-hook cold/repeat entry comparisons, an actual import-mode cache-policy
+control, existing fail-open hooks and native-source controls. The new no-op
+regression is not admitted lifecycle acceptance. Documentation-impact review
+updates Worktrees' standalone hook contract and TESTING.md. A new exact-head
+hosted matrix is still required; no cache is excluded/deleted/resealed and no
+parent baseline-update, frozen-enforcement or Main-adoption gate is closed.
+
+### November 11 - Retain fresh bootstrap logs before the outer driver error
+
+Required CI 43082224444 passes at
+`552a8e15e1cdba610fe59dffab0ae509d85d0479`. Exact-source native run
+43082234109 passes normal/repair, but fresh fails during preparation, before
+exercise or a payload comparison. The actual bootstrap engine command returns
+`ParticipantError: transaction returned with unclosed participants` through
+`runtime_install_driver._foreground -> driver.drain -> Transaction._close ->
+Witness.close`. No original builder/request error is present in its stderr.
+Preparation returns one; settlement returns zero with no errors or remaining
+tasks. Process tracing never arms and contains no lifecycle observations.
+
+This is not another observed hook-bytecode failure or a Bridge communication
+failure. The earlier #11121 cooperative reports retain the same masking
+boundary, but this run does not expose enough evidence to equate its underlying
+cause with the earlier proof-ownership error. The original contributor's PR
+remains open at `c3770520b3cbde2fc86e23251b393b8832b51c55`; its constructor,
+driver-drain and publication work is not pre-patched or superseded.
+
+The fresh fixture's command owner was missing the existing case-owned request-log
+retention call used by normal/repair. A real failing child reproduces the lost
+unannounced log. One call now delegates to the same bounded collector before
+raising the unchanged command failure. It scans no broader root, retains only
+strict request names under the private case, and changes no admission, custody,
+retry, installation or cleanup behavior. No constructor result is converted to
+success.
+
+All 71 fresh-runtime/diagnostic controls pass, followed by four explicitly
+selected existing bounded-log controls. Their initial empty selection is not
+credited: the native-directory collection exclusion was removed for only those
+four diagnostic controls, with all full-suite actions deselected. The actual
+fresh preparation failure remains unresolved pending its original request
+evidence. Documentation-impact review updates TESTING.md. A changed diagnostic
+candidate may gather that evidence in the existing hosted lane, but no unchanged
+retry, accepted flake, cache waiver or parent completion is claimed.
+
+### November 11 - Preserve attribution payload and complete failure diagnostics
+
+Required CI 43087596699 passes at
+`fc4115e08af6410964b25decdd89f5274555f2c3`. Exact-source native run
+43087608190 passes normal/repair. Fresh passes preparation and completes the
+four actual lifecycle actions and same-conversation history, then refuses
+AI-attribution payload immutability. Settlement returns zero with no errors or
+remaining tasks; all six daemon instances settle. No preparation request fails,
+so no original error is recovered for the prior #11121 masking boundary. That
+cause remains unproven, not fixed or waived by this later preparation pass.
+
+The actual difference is captured first: one profile-helper bytecode file and
+its cache directory are added, with no original entry changed or removed and
+no truncation. The standalone guidance writer imports `attribution_profile`
+before any bytecode control. Real Python/PowerShell 7/Windows PowerShell
+entrypoints reproduce the addition with valid current policy output. The first
+test fixture had only a directory and correctly received unavailable policy;
+it now initializes a real Git repository rather than changing the producer's
+admission. The source correction disables bytecode only for standalone writer
+execution, before the import. Policy/cache/profile behavior and imported callers'
+cache policy remain unchanged.
+
+The after packet passes 91 writer/profile controls, with eleven platform skips
+uncredited. Each new positive repeats the real caller and compares the complete
+payload. The final observer also now preserves bounded differences for every
+changed payload before raising the unchanged first refusal. A two-owner real
+manifest regression fails before the change because the second report is lost;
+all 72 fresh-runtime controls pass afterward. No cache is excluded, deleted or
+resealed and no changed owner is certified.
+
+This run also has one actual CIM scan failure: native error/status code one,
+elapsed 1349ms, at 32 records. The session is created and closed, but this is
+not clean native-census evidence. Existing one-second queries, cadence, caps and
+fatal-error rules remain unchanged; the next exact-head proof must satisfy them
+too. This is not a Bridge communication failure.
+
+Documentation-impact review updates AI-attribution's standalone-read contract
+and TESTING.md's complete failure-report and cold-writer flows. Full fresh
+acceptance, authentic baseline update, frozen enforcement and Main adoption
+remain open.
+
+### November 11 - Reconcile the attribution candidate with current Dev
+
+GitHub marks published `4bdf4a06e9138599c46ac4a02917eeaa63869a04`
+conflicting, so no current-head PR CI is delivered. The already-dispatched
+43093690653 native run remains owned at that frozen source, not evidence for a
+later reconciled candidate.
+
+The owned branch is backed up and rebased onto
+`a6b3ec102dae86ebe080144922602ad4617e1977`. Only TESTING.md, MCP's README and its
+generated uninstall profile overlap. The sole conflict is producer hashes;
+both sides retain revision 36 and identical footprint semantics. The canonical
+refresh tool preserves the newer upstream source binding while regenerating
+the merged script binding. Range-diff confirms all 29 owned commits remain,
+with no other patch changed. No constructor/publication logic, upstream
+readiness/provider change or source contract is discarded.
+
+Reconciled code `3205bdae272d7d3255afd48460cbcab5b087e0f2` passes 66 focused
+MCP bootstrap/readiness/provider controls, with fourteen platform skips
+uncredited. All 34 owned Python files pass F/E9 lint; strict runtime-resolution,
+13 install contracts, documentation consistency and whitespace also pass.
+Prior attribution/Manager source controls retain identical patches and their
+recorded revisions; the frozen native run is not silently relabeled.
+
+Publication uses the managed history-rewrite flow and exact recorded old-head
+lease, never manual force, a stash or a gate bypass. New current-head CI and
+exact-source native acceptance remain required before draft readiness; the
+earlier CIM scan and preparation masking gaps remain unwaived.
+
+### November 11 - Separate Actions failures from the budget cue mutation
+
+The frozen pre-rebase run 43093690653 at
+`4bdf4a06e9138599c46ac4a02917eeaa63869a04` finishes with all three jobs red.
+Normal and repair complete their qualification commands successfully, then
+artifact creation fails after five retries with an HTML response where the
+Actions client requires JSON. Fresh separately fails its post-actions retained
+payload comparison: `budget-guidance: the frozen installed payload changed`.
+The original source callsite is after `_actions` and native cleanup, not before
+the lifecycle. The outer observer also exits one. Preparation/settlement return
+zero and exercise one, with errors empty.
+
+All three artifact-upload steps fail and the artifact API lists no retained
+artifacts. The original complete path-difference, trace, cleanup and result
+files therefore remain unavailable; no exact hosted bytecode list, clean census
+or full native acceptance is inferred. This run cannot qualify the rebased
+candidate regardless. Current-head 43095516456 at `99e9ef18b9` separately reports
+an internal Actions startup error with no jobs. Its one accepted platform-start
+retry again produces no jobs; no further automatic start request is planned.
+The exact external blocker is recorded in #12013 comment 6806733466.
+
+Independent local reproduction uses the budget plugin's existing actual writer
+and wrappers with copied cold source, without a fake policy or provider. Python,
+PowerShell 7 and Windows PowerShell each add seven source bytecode files and
+one cache directory while returning the correct unavailable-config cue and
+empty output envelope. This proves a local mutation, not the contents of the
+lost hosted report. One standalone-only setting now disables bytecode before
+those imports. Imported callers, pure posture, reader/refresh restrictions,
+five-second writer deadline and no-provisioning behavior remain unchanged.
+
+All 47 guidance controls pass afterward, with four platform skips uncredited.
+The expanded existing control compares every file and directory after both
+startup and resume. Documentation-impact review updates the budget plugin's
+read-only cue contract and TESTING.md. No census rule, payload integrity,
+artifact-publication requirement or parent completion gate is relaxed.
+
+### November 11 - Close the attribution test's admitted type regression
+
+Current-head CI 43101429123 at
+`a31ad9dade070ee165f8aa37c1bb6d115b61af64` completes eligible units successfully,
+but its admitted Python contract reports seven errors in the new attribution
+cold-writer test. This is an owned test regression, not an accepted flake or
+infrastructure waiver. Missing function/return annotations, direct use of the
+private `sys._base_executable` attribute and nullable shell arguments are now
+corrected with explicit types, the existing attribute fallback idiom and real
+non-null assertions. Production behavior and the regression assertions remain
+unchanged.
+
+The canonical `typecheck.py ai-attribution --strict` contract passes all eight
+source targets for both Linux and Windows. Its missing environment is prepared
+only after the checker reports it missing. The corrected cold/repeat writer
+packet passes three native cases, with one POSIX skip uncredited; F/E9 lint and
+whitespace pass. No type admission, target or guard is removed or bypassed.
+Documentation-impact review requires only this validation journal; no operator
+syntax, configuration or policy has changed.
+
+The same CI run publishes a complete unit-evidence artifact
+(13892407316, 1,804,496 bytes). Actual jobs starting and artifact creation
+succeeding are concrete changed Actions boundaries relative to the prior
+startup/upload failures, not proof that every provider path is repaired.
+After publishing the type correction, one new-candidate native run may use the
+existing unchanged owner and budgets. This is not a third retry of the
+unexecuted `99e9` run; another startup failure still does not license a retry
+loop. Required current CI, native artifact/census/cleanup evidence and every
+parent gate remain open.
+
+### November 11 - Isolate the remaining real-provider census failure
+
+Exact-source run 43104575507 at
+`0935a801f18b548e5c664295ccf0365a7d2b0c5a` completes normal and repair
+successfully. Fresh preparation, exercise, result assertions and settlement
+also return zero. Its retained result records all five authentic lifecycle
+actions, the complete 24-plugin closure, unchanged frozen payloads and all six
+daemon instances settled. This remains a controlled candidate construction,
+not an admitted historical-baseline upgrade.
+
+The outer fresh observer still fails: two real CIM queries report generic
+`CimException` status/native code 1, HRESULT -2146233088, after 2348 and
+1930 milliseconds, with 39 and 298 accumulated records. Session creation and
+closure, baseline-window arming and cooperative stop are recorded. The bounded
+512-record list is truncated. These are fatal census failures, not full fresh
+acceptance; the existing query deadline is not evidence that either exception
+was a timeout.
+
+A separate short read-only provider probe does not support a buffering fix.
+All three inline and three buffered queries succeed despite deliberate
+300-millisecond consumption per owned row. Only the six probe-owned children
+are signalled and reaped. This is diagnostic evidence, not a local full-suite
+run or an acceptance retry.
+
+The existing observer now adds bounded aggregate scan/query-pipeline timing,
+failure phase, fixed error category and numeric-only embedded HRESULT
+classification. It never writes raw error messages or command arguments.
+The same one-second DCOM operations, 100-millisecond cadence, record/failure
+caps and fatal-error policy remain. Query-pipeline timing includes consumption;
+it is not claimed to measure only the provider.
+
+Thirteen focused real-PowerShell controls pass through the contained runner.
+Its first attempt exhausts the 240-second aggregate during preparation, before
+pytest reports a result. The completed cache fingerprint matches the candidate,
+and the same selection then passes with unchanged limits in 75.05 seconds.
+The two new six-second real-provider profiles are T3, skipped by default
+(two skips verified) and selected only explicitly through the existing
+owner-only Windows Tools qualification lane. Their hosted result is pending;
+neither a profile pass nor these controls waive the original census failure.
+F/E9 lint and whitespace pass. Documentation-impact review updates only the
+testing command/reference and this journal; no runtime interface, policy or
+installer behavior changes.
+
+The published Git ref identifies `0935`, but both PR provider surfaces still
+report the preceding `a31ad9` head. No repush, dummy commit, forced metadata
+edit, close/reopen or draft-readiness change is used to manufacture convergence.
+Publication and current-head CI remain separate gates. The next step is the
+narrow hosted quiet/churn profile, not an unchanged whole-suite retry.
+Admitted-baseline upgrade, complete fresh acceptance, frozen enforcement and
+separate Main adoption remain open under the parent.
+
+### November 11 - Measure the narrow hosted profiles and reconcile Dev
+
+Owner-only Windows Tools request `a11dc0049fd84a4ba3e865d7cffd4d81`, run
+43117520605 attempt 1, qualifies the exact `7fe797a01f2a6d0112a45cca61799ac7a32dc392`
+source on the existing protected controller
+`24c2a03a8e7d405e0b8890e61e69bedc03f0cfac`. The manifest independently binds
+that source and both successful cases; the controller commit is not a runtime
+Main pin or adoption result.
+
+The retained JUnit summaries show 47 successful scans per six-second case.
+Quiet observes one owned process, with query-pipeline total/max 964/90 ms
+and session creation 104 ms. Churn observes 34 owned process incarnations,
+with query-pipeline total/max 1010/72 ms and session creation 101 ms.
+Both record zero scan errors, cooperative stop, an armed window, no
+truncation and closed CIM sessions. The contained helper independently reaps
+its children. This disproves neither a rare provider failure nor a
+construction-pressure effect; it does not repair or waive the original
+full-suite census failure.
+
+The legitimate diagnostic push also restores current PR-head metadata, but
+Dev has moved and the PR is conflicting. A backup preserves `7fe797` before
+rebasing onto `f864f03fc0219a90e7756b371f8f5c950d50f2d5`. All 33 owned
+commits remain. The sole conflict is MCP's generated uninstall-profile
+producer hashes: the canonical refresh preserves upstream's newer source
+binding and the contributed script binding, with revision 36 and contract
+semantics unchanged. Range-diff confirms no other owned patch changes.
+The frozen hosted result remains evidence for `7fe797`, not the rebased tip.
+
+All 33 focused MCP bootstrap, readiness and provider-selection controls pass
+after reconciliation (160.16 seconds including environment preparation and
+cleanup). All contributed Python files pass F/E9 lint; strict runtime
+resolution, all 13 install contracts, documentation consistency and whitespace
+also pass. The original 13 census controls have an unchanged range-diff patch.
+The profile helper parses, but only real hosted execution can qualify the new
+burst case. Existing Manager patch changefiles cover this PR's fixture work;
+no version, runtime CLI or service contract changes.
+
+The next diagnostic selects only a new six-second eight-child CPU/churn burst
+through that same opt-in profile and existing owner. It changes the measured
+load dimension without an unchanged full-suite retry, host runtime effects,
+new fixture family, query/record-cap change or new workflow. Required
+current-head CI, strict complete fresh acceptance, admitted-baseline upgrade,
+frozen enforcement and separate Main adoption remain open.
+
+### November 12 - Close the remaining read-only import branches
+
+Review 5869520902 actually targets `cb4`, not the later baseline-only `f6`
+commit. Its body retains four High import-isolation paths: legacy PowerShell
+forwarding for CodeSpaces/Containers, Index's inline JSON parser, and the
+Machines/Worktrees payload dispatchers. The subsequent complete 600-second
+review wait expires with no new event. Neither a timeout nor the older
+Comment is a passing current-head verdict.
+
+Trace the full forwarding functions before editing. The payload-invocation
+generator emits binstubs pointing at the plugin-owned dispatchers; it does
+not generate these dispatcher bodies. The complete paginated changed-file
+inventory of #11121 contains none of the seven dispatcher/parser paths being
+changed. No constructor, runtime-source, publication or peer-owned hunk is
+taken over.
+
+Both legacy encoded-argument and modern module branches now receive the same
+readiness/metadata-only Python options. Machines and Worktrees explicitly use
+isolated, bytecode-free UTF-8 module entry for those reads; Worktrees avoids
+operational cache selection on that path. Index's inline JSON parser also
+uses isolated, bytecode-free UTF-8 Python. Ordinary commands, health collection,
+installer behavior, selected-project cwd and runtime selection are unchanged.
+
+The new Windows shadow regressions fail before the fix: 16 failures, four
+passes and eight platform/redundant-host skips. Every failure executes a
+checkout shadow through a missed legacy or payload-dispatch path. After the
+fix, the combined focused packet passes 44 cases with eight explicit skips,
+including unchanged ordinary argument forwarding and evaluator cleanup.
+This is real dispatcher/private-venv evidence, not trust-admission or
+complete-suite qualification.
+
+An adjacent Index bootstrap test exposes a second fixture that copied the
+effective reader without its new canonical command adapter. The bootstrap
+and real-resolver bundles now retain that helper, as the main gate fixture
+already does. The focused Index packet then passes four cases with three
+explicit platform skips. The new native POSIX inline-parser regression is
+among those skips on Windows; it is not credited as executed here.
+
+Separately, hosted run 43158874125 succeeds in all three unchanged modes
+against exact source `cb4a8eeca07244196dd4936e8f0ad175284fbeeb`. Its fresh
+artifact 13918091579 binds that source and tree, complete runtime installation,
+nine satisfied required modules and all five Create/Open/detach/normal-exit/
+Resume assertions. Prepare, exercise, assertions and settlement all return
+zero, with no error or payload-difference reports. Six owned daemon instances
+are explicitly settled; no task remains. Its trace records 2,096 successful
+scans, zero scan errors, maximum query-pipeline elapsed 1,138 ms, closed CIM
+session, armed window and cooperative stop. The bounded record set truncates.
+These are pipeline timings, not provider-only timeout measurements.
+
+That result is evidence for `cb4`, not this corrected runtime candidate, and
+does not repair or waive the original intermittent CIM failure. Final-head
+CI, actual review and the existing exact-source native lane remain required.
+Authentic admitted-baseline upgrade, mandatory frozen enforcement and separate
+Main adoption remain open. No operator rollout, shared repair, profile-matrix
+growth, Main pin change or parent completion is authorized or claimed.
+
+Touched Python passes F/E9 lint after removing one unused test import.
+All source modules remain within the existing ceilings; strict runtime
+resolution, all 13 install contracts, documentation consistency and whitespace
+checks pass. No baseline ceiling or required gate is weakened.
+
+### November 12 - Preserve isolation through the nested configuration owner
+
+Exact `dc1` CI 43164194507 passes eligible units, guards and the required PR
+gate. The existing manager-suite lane is dispatched once as run 43164869963
+against exact source `dc1caba05c6c724fad1f14ac6d9345cb5da8739a`, after
+checking the published ref and absence of another dispatch for that source.
+It remains owned and frozen; later source changes are not relabeled into it.
+
+Actual Copilot review 5869814210 is a Comment on `dc1`, not an approval.
+It retains High finding 4546199089 and specifically describes a nested
+readiness import through legacy runtimes and Index configuration.
+Trace the full Index configuration adapter: its qualified legacy Worktrees
+owner prefix comes from the canonical configuration-context library, which
+still returns `-B -m`. Top-level probe isolation does not protect that new
+interpreter. The same-cell peer prefix already uses isolated Python; no peer
+launch or operational dispatcher change is needed for this nested path.
+
+The canonical ready-only prefix now supplies `-I -B -X utf8`. The existing
+`sync-configuration-layers.py` propagates exactly three standalone payload
+copies. Installed site packages, qualified runtime selection, project cwd,
+required/optional owner semantics and read-only deadlines remain unchanged.
+The strengthened real-process owner test places module, JSON and startup-hook
+shadows in the selected checkout and on PYTHONPATH, while the actual installed
+owner emits the configuration report. It fails before the prefix fix with a
+configuration-owner refusal; all eight context contracts pass afterward.
+The test also retains its complete before/after package-byte comparison.
+These are source/private-venv controls, not installed-suite release evidence.
+
+The plugin CLI runner has no configuration-layers alias and refuses that
+selection before collecting tests. The successful library run therefore uses
+the existing `TestSandbox`, `isolated_environment` and `run_contained` APIs
+with an already-provisioned pytest interpreter, not an uncontained host run
+or newly installed dependencies.
+
+Meanwhile Dev moves and creates a real conflict. Preserve `dc1` on a local
+backup before rebasing onto `abb86e1c9d`. All 40 owned patches survive.
+The only conflicts are MCP's generated producer hashes at two replay points;
+canonical footprint refresh retains the newer upstream source digest and
+the contributed script digest. Range-diff confirms no other owned patch
+changes, with revision 36 and contract semantics unchanged.
+
+Shared-library consumer discovery includes both physical and canonical/
+transitive maps. Existing PR changefiles cover the other affected runtimes;
+fresh library, Logger and Conduct Guidance intents supply the remaining
+coverage. Versions are not hand-edited. This new combined source still needs
+focused post-rebase checks, required CI, actual current-head review and
+exact-source native qualification. No prior result waives those gates or the
+parent's upgrade, frozen-enforcement or Main-adoption obligations.
+
+The combined post-rebase dispatcher packet passes 44 cases with eight explicit
+skips (125.04 seconds). MCP's complete flat/nested bootstrap file passes
+28 cases with 14 native-POSIX skips (82.96 seconds). The eight configuration
+context controls, canonical-copy check, F/E9 lint, existing module ceilings,
+all 13 install contracts, strict runtime resolution, documentation and
+whitespace checks also pass. No skipped platform is credited as executed,
+and no acceptance predicate or budget changes.
+
+### November 12 - Bind the unit source and close implicit Bash startup
+
+Source `2bed` is published through the managed rebase-aware flow after clean
+merge preflight and complete library-consumer changefile coverage. Its required
+CI 43167101955 fails before running eligible units: the configuration-context
+source digest still identifies the preceding implementation. Guards, types,
+installation contracts and synchronization pass; the required PR gate correctly
+remains failed.
+
+Refresh exactly that canonical committed-source digest. The source change is
+the qualified prefix's Python option literals; the unit cohort, coverage
+targets, effect policy and bounds are unchanged. All 693 source bindings are
+independently verified against committed Git bytes. A direct Windows working-
+tree check instead encounters an unrelated CRLF template, so that template is
+not rebound to local bytes. Local tooling lacks the unit runner's coverage
+dependency; no local unit-packet pass is claimed. Actual Linux CI must execute
+the unchanged admitted packet on the corrected source.
+
+Actual current-head Copilot Comment 5870046863 retains the import finding and
+adds High 4547044620: inherited relative `BASH_ENV` can source checkout code
+before an otherwise admitted Bash readiness script. A real Bash control
+reproduces it through the production environment/action boundary: the ordinary
+case passes and the read-only case fails because the startup marker exists.
+Read-only environment construction now removes this variable alongside
+case-insensitive PATH keys, without changing the owner input or ordinary/
+installer environment. The full selected project/PATH/Bash packet passes
+nine cases in 11.95 seconds under the existing budgets.
+
+Older exact-source native run 43164869963 on `dc1` terminates failed: normal
+and repair succeed, but fresh fails the strict process observer despite four
+successful lifecycle stages. Fresh artifact 13920343015 records 2,698 query
+attempts, 2,697 successes and one fatal query-pipeline CimException. The
+failure reports 2,813 ms elapsed, 300 retained records, status/native code 1,
+HRESULT -2146233088 and no embedded HRESULT. Maximum observed query-pipeline
+elapsed is 4,180 ms. The session closes and the observation window stops.
+These are whole-pipeline measurements, not proof of provider-only duration or
+the underlying cause.
+
+The failed result is retained, not credited as qualification, waived as a
+flake or retried unchanged. This recurrence does not relax the one-second
+DCOM operation setting, cadence, caps, fatal-error contract or cleanup.
+Final combined-head CI, actual review and strict native qualification remain
+required, along with the parent's admitted-baseline update, frozen enforcement
+and separate Main-adoption obligations.
+
+The retained fresh result independently records all five lifecycle assertions,
+observed runtime installation and satisfied required modules. Six owned daemons
+settle, no task remains, and no payload-difference report is present. These
+facts do not override the failed observer. The Bash correction passes F/E9,
+module limits, all 13 install contracts, strict runtime resolution, documentation
+and whitespace checks; source admission changes exactly one digest, not a gate.
+
+### November 12 - Trace host and nested driver isolation
+
+The actual review on `38ac` clears the Bash startup finding but retains the
+import finding, naming Windows host discovery, Podman execution and older
+installed-payload compatibility. Trace those paths rather than treating the
+summary as a proved cause or a clean verdict.
+
+Three native Windows controls reproduce Machines selecting a checkout-local
+PowerShell executable through empty, dot and relative-tools PATH entries.
+Python 3.11's `shutil.which` prepends the current directory even when the child
+environment disables implicit Windows lookup. Interpreter admission now
+enumerates absolute PATH directories and directory-qualified PATHEXT candidates
+before hashing the selected executable. Twelve host, environment, context and
+fallback controls pass, including actual PowerShell execution. Installer
+working-directory semantics and process-scoped execution policy are unchanged.
+
+Containers' bundled Podman command is another Python process boundary. Two
+actual protocol controls fail before the fix with checkout/PYTHONPATH shadows,
+then pass with isolated, bytecode-disabled UTF-8 module dispatch. Two further
+native lookup controls reproduce checkout-local Podman engine and external
+driver selection despite the read-only flag. Those lookups now honor that flag
+by enumerating absolute PATH directories; ordinary unflagged lookup and
+explicit manifest precedence remain unchanged.
+
+The two driver files pass 126 controls with ten platform skips after updating
+the native-engine mock seam, excluding one existing full fake-provider
+roundtrip for diagnosis. The broader initial run times out in that roundtrip
+at its unchanged 30-second limit. Isolated execution passes in 26.82 seconds.
+This separates the observed results; it does not establish a cause, waive the
+earlier timeout or claim a clean combined run.
+
+Compatibility remains unresolved. Current legacy dispatch can select an older
+completed runtime, whose nested code need not contain the new import flags.
+An older enabled payload can itself contain an unisolated dispatcher; its
+declared no-self-provision variable alone is not an import-isolation contract.
+Do not claim these source fixes rewrite frozen older bytes, invent an admitted
+baseline or silently raise a support floor. An agent-proposed compatibility
+policy is to report unknown before executing an unqualified older probe,
+with an explicit owning update as recovery, while preserving ordinary commands
+and separately authorized installer actions. The operator then selects
+`refuse-unqualified-probes` under the scope approval above. Its producer/
+consumer qualification mechanism is not yet implemented.
+
+These are local source corrections and evidence, not publication, native
+qualification or rollout. The fatal native CIM observation, actual review,
+admitted-baseline upgrade, frozen enforcement and Main adoption remain open.
+
+### November 12 - Explicit probe-contract reader and payload admission
+
+The compatibility implementation begins with the existing read-only owner
+transport. Its new stdlib-only helper reads a versioned behavioral declaration,
+not a package-version floor. Payload qualification reads the exact selected
+payload. Runtime qualification reads wheel-owned metadata beneath the selected
+interpreter's environment prefix, not a mutable root stamp or a newer payload.
+Missing, invalid, foreign, linked or unknown-version declarations refuse before
+provider execution. Ordinary calls without the recursive-probe marker retain
+their prior path.
+
+The same helper can serve as the trusted payload bootstrap: use isolated,
+no-bytecode Python, validate the actual selected runtime's descriptor, then
+enter its module in that one process. This avoids a new handshake or separate
+preflight child. A typed version-1 compatibility refusal carries unknown support
+and owning-update recovery; it does not masquerade as module readiness.
+Current payload dispatchers, wheel descriptor producers and nested peer
+admission still need integration and qualification before this policy is
+complete. No production descriptor has yet been added, and no older baseline
+has been admitted.
+
+Machines now binds the selected payload's declaration digest to read-only
+execution, refuses absent/unqualified support before invoking its action, and
+recognizes the typed runtime refusal as unknown with owning-update recovery.
+Installer bindings and working directory are unchanged; installer environments
+do not inherit the recursive-probe requirement. An initial control exposed
+changed refusal ordering when the project directory disappeared or became a
+reparse point. Checking the existing project-context admission first preserves
+that prior refusal and its pre-execution boundary.
+
+Validation so far: 20 owner-transport controls pass, including the real
+single-process bootstrap refusing an unqualified runtime before its module
+runs, then observing a qualified installed module from a shadow-bearing
+project with no bytecode writes. The focused Machines packet passes 17 cases,
+including five new compatibility controls, prior project-context refusal,
+real host discovery and checkout/startup-file exclusion. These run through the
+existing isolated environment and process-containment APIs. The reader's
+standalone source copies are synchronized; the broader runtime/dispatcher
+integration, ordinary full-file regressions, combined driver timeout diagnosis,
+strict native observation and publication gates remain open. No live update,
+probe replay, shared repair, baseline admission or Main activation occurred.
+
+The next local delta wires that single-process bootstrap into the actual
+Machines and Containers payload dispatchers on both shell families. Containers
+retains its encoded Legacy native-argument path instead of retokenizing user
+arguments. The shared source synchronizer delivers the identical helper to all
+nine readiness-declaring Python runtime payloads, but delivering a helper does
+not declare those providers qualified.
+
+The focused real-dispatch packet passes 27 cases with 11 platform/argument-mode
+skips. It includes a current Machines payload refusing an older, unqualified
+runtime before importing its marker-writing module, and the same Containers
+refusal through native and forced Legacy argument modes. Qualified-module
+controls retain cwd, installed site packages, isolation, UTF-8, no bytecode and
+payload immutability. The 20 owner-transport controls pass again after this
+integration; all changed Python passes F/E9 and whitespace checks pass.
+
+Recursive peer admission, the other provider entry paths and wheel-owned
+descriptor production remain unfinished. In particular, nested compatibility
+refusals must survive ordinary configuration/readiness error adapters as
+unknown, not be collapsed into failed module readiness. Early provider use
+inside native activation/configuration helpers must also be qualified, rather
+than stamping a provider solely because its final CLI invocation is guarded.
+No production descriptors have been added and none of these local deltas has
+been published or merged. The original combined driver timeout and fatal
+native CIM observation remain unresolved and unwaived.
+
+### November 12 - Recursive refusal propagation and early Vault readers
+
+The source-only transport now preserves a distinct compatibility exception
+through nested configuration reads and peer bootstrap execution. Same-cell
+resolution checks the peer payload before importing its installation primitive
+or resolver, then qualifies the exact selected installed runtime before use.
+Ordinary peer calls without the requirement marker retain their prior path.
+The installed-package and standalone bootstrap copies have separate Python
+class identities; the real nested bootstrap control proves that the refusal
+still returns typed unknown rather than a traceback or failed readiness.
+
+Bridge, CodeSpaces, Dispatch, MCP and Worktrees now use the same qualified
+module entry as Machines and Containers. CodeSpaces preserves its encoded
+Legacy argument path. Vault additionally uses the qualified script entry for
+activation and pinned identity-cache validation before its final module call.
+An evaluator with no selected runtime may run only an explicitly selected
+script from the qualified payload; nested installed providers still require
+their own exact-runtime qualification. The early activation adapter preserves
+typed unknown instead of reporting a generic configuration failure.
+
+Validation: 47 contained owner-transport and peer controls pass, including
+actual installed Python/bootstrap execution, payload-script containment and
+ordinary-call preservation. The expanded real-dispatch packet initially has
+16 failures, 42 passes and 26 platform/argument-mode skips. All failures occur
+before the new bootstrap because the added Bridge/Dispatch fixtures lack the
+existing required read-only resolver header. Correcting those fixtures,
+without changing that guard, yields 16 passes and eight platform skips in the
+residual packet. Six real Vault payload controls pass: missing payload/runtime
+qualification refuses before activation code runs, while qualified execution
+retains the expected service-readiness failure. Python F/E9 and whitespace
+checks pass. These synthetic declarations are not an admitted upgrade baseline.
+
+Index remains unfinished: its early effective-configuration reader, nested
+state-root calls and selected-runtime origin import precede final dispatch.
+Legacy configuration resolver fallbacks and remaining readiness error adapters
+also require a final path audit. No production declaration or wheel producer
+has been added, and there is no new commit, push, merge, live probe replay,
+installation, shared repair or Main activation. Combined driver timeout and
+strict native CIM failure remain unresolved and unwaived.
+
+### November 12 - Index early qualification and borrowed resolver provenance
+
+Index's effective-configuration and activation-role scripts now run through
+the qualified payload-only reader. Its selected runtime is qualified before
+origin discovery and final module dispatch; top-level origin discovery no
+longer imports the package as a preliminary check. The installation-cell
+validator retains its own admission checks and runs without bytecode writes.
+Nested state-root reads preserve typed compatibility refusals. An unqualified
+legacy command is refused before execution, not tried as a fallback.
+
+Borrowed configuration SDKs now require either the actually executing
+interpreter's retained resolver or a qualified payload before import. Mutable
+deployed shell resolvers refuse inside this read-only tree before spawning;
+their ordinary completion-selection path remains available outside it.
+Conduct routing also qualifies its own and the selected peer's scripts before
+loading them. Four legacy callers now consume the canonical isolated prefix
+directly instead of prepending duplicate interpreter flags.
+
+Validation: 68 contained transport/resolver/peer controls pass with two POSIX
+skips. Real Index dispatcher and nested-owner controls pass 20 cases with seven
+platform skips. Routing passes 38, MCP configuration 30, Vault configuration
+68, Machines configuration 45 with six skips, SSH configuration 30 with five
+skips, and the focused Logger pre-import refusal passes. Windows PowerShell
+initially converted the helper's stderr into a terminating error; scoped
+native forwarding now preserves exit 126 and its typed stdout, including
+inside assignments and conditions. Configuration regression runs exposed and
+corrected the callers' duplicate-prefix expectations and a stale Vault
+capability expectation. Changed Python F/E9, whitespace and shared-helper
+synchronization checks pass.
+
+These are source and synthetic consumer results, not native lifecycle
+acceptance or an admitted older baseline. Production declarations, wheel
+delivery, full mixed-version and installer regression evidence, and source
+binding refresh remain pending. No new commit, push, merge, live probe replay,
+installation, shared repair or Main activation occurred. The original
+combined driver timeout and strict native CIM failure remain unresolved and
+unwaived.
+
+The subsequent adapter trace found no additional generic-exception conversion
+on the readiness entries inspected. Source declarations are now added for the
+nine guarded runtime providers and the payload-only Conduct reader; each
+runtime's setuptools declaration maps the file to its wheel-owned
+`share/copilot-extensions` prefix. Static schema, identity and data-file mapping
+checks pass. Actual wheel delivery is not yet verified and remains the next
+packaging check. The install-contract gate currently refuses MCP's changed
+script/source producer digests; refresh those bindings only after the remaining
+source changes are settled. This is not a waived gate or published declaration.
+
+### November 12 - Real wheel delivery and shared-prefix ownership
+
+The canonical artifact builder, using an existing prepared setuptools 84.2.1
+backend without network resolution or a relaxed build floor, built all nine
+provider wheels. Installing those wheels without dependencies in disposable
+environments delivered the exact descriptor bytes at the selected prefix.
+These are packaging controls, not runnable full-provider installations or
+an admitted older upgrade baseline.
+
+Reviewing the shared-core consumer exposed a collision in the initial mapping:
+every provider would have installed the same data-file path. Each ordinary
+wheel now owns `share/copilot-extensions/<module>/readiness-isolation.json`.
+The runtime reader selects only that module's declaration beneath the exact
+interpreter prefix. An actual two-provider wheel installation proves both
+declarations coexist and removing one provider does not invalidate the other.
+No mutable aggregate declaration or root stamp is introduced.
+
+Validation: the real wheel, shared-prefix and canonical transport controls pass
+78 cases with two platform skips. The actual dispatcher packet passes 58 with
+26 platform/argument-mode skips; Index's early-reader selection passes 20 with
+seven platform skips, and Vault's activation boundary passes six. The expanded
+Machines packet passes 14 but exposes one generic-provider fixture that renamed
+its plugin without renaming its new support declaration; that fixture is now
+corrected and its residual result is pending. No production guard was relaxed.
+MCP's source producer hashes are refreshed without changing contract revision
+36; all 13 installation contracts and shared-helper synchronization pass.
+
+Documentation now records module-scoped delivery, typed unknown, mixed
+payload/runtime and rollback refusal, ordinary-command preservation and the
+provider-first rollout requirement. Changefiles cover all 13 touched plugins.
+Publication and deployment remain pending: there is no new commit, push,
+merge, operator installation, probe replay, shared repair or Main activation.
+The original combined driver timeout, strict native CIM failure, admitted
+older-baseline proof, frozen enforcement and separate Main adoption remain
+unresolved and unwaived.
+
+The corrected Machines selection subsequently passes all 15 cases; four
+additional module-path controls reject traversal and invalid module names.
+All changed Python passes F/E9. The original two-file driver packet also now
+passes 127 cases with ten platform skips under its unchanged limits.
+Streaming diagnostics showed 17 sequential driver operations consuming nearly
+the entire 30-second test budget, not a single blocked operation. The fixture
+now uses base Python only for its stdlib-only fake native engine instead of
+reloading the plugin test environment for every fake engine invocation. The
+actual provider CLI, native process boundary, lifecycle assertions and cleanup
+remain intact. This closes the combined driver packet failure; it does not
+explain or waive the separate hosted CIM error.
+
+The existing diagnostic seam belongs to this campaign's earlier commit
+`9d700b8a57`; no foreign helper hunk is changed. Its caught CIM exception can
+carry structured error data that was previously omitted. The trace now retains
+only seven named numeric CIM/WMI fields and at most four inner HRESULTs, with
+explicit unavailable/truncated indicators. Existing classification, one-second
+queries, cadence, caps and fatal scan/close policy remain unchanged. No extra
+provider query or native retry is performed. All 21 controlled trace cases
+pass; these diagnose serialization/refusal, not the hosted failure's cause.
+
+The size guard found that the Index reader exceeded its shrink-only ceiling.
+The standalone reader's Worktrees invocation and typed-refusal boundary now
+lives in its payload-owned `resolve_effective_probe.py`, loaded by absolute
+sibling path. Existing reader call signatures, ordinary subprocess behavior
+and typed versus unrelated exit-126 handling remain intact. Copied-reader
+fixtures include the helper. The focused packet passes 23 cases with 11
+platform skips; three accessor failures are corrected by preserving the
+existing private reader accessor and their residual passes all three cases.
+The whole-source size guard passes without a baseline increase.
+
+### November 12 - Preserve the reviewed source through Dev reconciliation
+
+The coherent compatibility revision `80784fb10e` was published through managed
+incremental publication. GitHub then reported a real merge conflict and did not
+produce required CI. A retained local backup precedes rebase. All 43 owned
+commits survive reconciliation with current Dev; only MCP producer metadata
+and size-baseline hunks conflict. The canonical footprint tool regenerates the
+merged MCP sources with revision 36 unchanged. The final baseline differs from
+Dev only in the existing Index reduction. Whole-source size, synchronization,
+F/E9 and all 13 install contracts pass; all 701 merged canonical unit-source
+bindings verify. MCP's actual flat/nested bootstrap packet passes 28 cases with
+14 platform skips. These are source checks, not native acceptance.
+
+Actual Copilot review 5883130549 on published `80784fb10e` retains the High
+import-isolation thread and adds a Medium finding: Dispatch's PowerShell
+bootstrap still misses a current nested slot. The new Windows control
+reproduces unnecessary policy evaluation on both PowerShell 7 and Windows
+PowerShell while six flat/invalid-selection controls pass. The narrow fix uses
+the existing read-only resolver only for nested recognition, accepting only the
+exact current nested path. Flat/root-link and ordinary reconciliation policy
+are unchanged. Ten controls pass, including incomplete, stale and healthy
+fallback refusal; no installer executes. Dispatch's existing patch changefiles
+cover this correction. README and TESTING document its precise boundary.
+
+The rebased/corrected source still needs its own publication, required CI,
+actual review and strict installed-consumer proof. The generic hosted CIM
+failure remains unproven and fatal; no local full suite, native retry, extra
+provider query, profiling matrix or waiver is performed here. The parent
+admitted-baseline, frozen-enforcement and separate Main-adoption gates remain
+open.
+
+CI 43323857767 at `2c65e2bd1d` passes actual eligible units with coverage in
+2m37s, but its guard job stops on strict type errors in the new canonical
+readiness/peer code and fixtures. The annotations and optional module reference
+are corrected without a suppression or admission downgrade; both affected
+projects now pass their Python 3.10 Linux and Windows strict targets. All 72
+affected canonical tests pass with two platform skips. Canonical vendors and
+MCP revision-36 producer hashes are refreshed, and only the four affected
+unit-source digests change. Nodes, coverage targets, effect limits and deadlines
+remain unchanged.
+
+Actual review 5883284695 on the same head still retains both open threads and
+explicitly requires exact-head installed-suite acceptance. No new inline code
+finding accompanies it. The disclosed fatal CIM failure cannot be closed by
+these source controls; the changed source must be assessed by the existing
+bounded disposable Windows owner, with any recurring failure retaining its new
+numeric diagnostics and original fatal policy.
+
+CI 43325672417 at `5675e3704a` passes eligible coverage units in 1m51s,
+strict types, full source guards and installation/runtime checks, then refuses
+Bridge's current contract coverage: the synchronized peer launcher is an
+explicit semantic HTTP-52 source. Its current source declaration must change
+from the previous launcher hash, and a declaration alone cannot replace genuine
+current fixture evidence. The canonical `capture_bridge_http52.py --prepare`
+binds the committed source without changing protocol generation 52, prior
+capability floors, historical packets or immutable provenance. No guard is
+disabled and no old capture is relabeled.
+
+The existing source-only POSIX artifact lane, `bridge-http52-capture`, owns the
+next exact-source writer, independent no-write execution, historical guard and
+controlled artifact export. Its 30-minute job and ten-minute capture stages are
+unchanged. The prepared source checkpoint must be published before that lane
+can run; its expected missing-fixture refusal is not acceptance or merge
+authority. Windows installed-suite execution remains separate and on hold until
+the current required CI gate is green. Actual review 5883441074 on `5675e3704a`
+still retains both threads and requires exact-head native acceptance.
+
+Run 43328413912, attempt 1, succeeds at the published declaration checkpoint
+`37662d62d2370eff7bf5e45be8e6384c55a57d27`. The existing Ubuntu owner passes
+controlled artifact boundaries, the immutable peer-prefix consumer, actual
+HTTP-52 writer, independent no-write replay, historical publication guards,
+canonical validation and artifact export. The export records 403 controlled
+cases and 184 outputs. This is source-only compatibility evidence, not native
+Copilot or installed Manager acceptance.
+
+The repository-scoped provider verifies the run/source/job identity and artifact
+13995330579; the downloaded manifest matches the authenticated export digest
+`9785d29c9d20d9fc7383c4177bff817cb8815741e356fc21c9ba7acdfa3513f6`.
+The existing artifact adapter validates every output and source preimage at the
+same frozen HEAD, then materializes through its locked, registry-last
+publication owner. No raw log, environment, request, credential or executable
+artifact is imported. Historical generations, immutable provenance prefixes,
+protocol generation 52 and earlier capability floors are unchanged.
+
+The actual contract guard now passes both contracts and all 1,096 fixtures.
+Only current HTTP-52 evidence and its registry change; the unit-source manifest
+does not bind these repository-only outputs and needs no change. Publish the
+coherent capture delta and obtain current required CI before the separate
+Windows installed-suite attempt. The original fatal CIM failure and both review
+threads remain unwaived; no current native success or parent completion is
+inferred from this capture.
+
+Publishing that evidence encounters newer Dev MCP owner-entry work, not a
+Bridge source overlap. The retained backup precedes rebase onto Dev containing
+`8e0352bb07b637232b55c3547d4566101ec2dcd2`; the resulting branch's actual
+common ancestor is `03531e2f905d01bbd1c419d8fbe2634e952162d9`. All 47 owned patches survive;
+only two generated MCP producer-digest hunks need canonical regeneration,
+still at revision 36. None of the 2,238 captured execution-closure paths is
+among the upstream changes, and the actual contract guard passes without
+changing any captured source identity or provenance. The source-equivalence
+check preserves the original `37662d62d2` capture attribution; it is not a new
+execution claim. The combined actual MCP owner-entry, Windows fallback and
+flat/nested bootstrap packet passes 65 cases with 14 platform skips. Current
+required CI and exact-head installed Windows qualification remain separate.
+
+The subsequent #12319 publication creates the same concrete producer-field
+collision before CI can run. Comment 6839645338 coordinates only that observed
+MCP input window with the existing owner; it requests no blanket approval or
+whole-Main-PR dependency. Rebase onto
+`f84f0ed50599db4534f3809406f9a9781e72e459` preserves all 48 owned patches:
+46 compare equal, and only the two producer-digest patches differ. The canonical
+current capture owner independently recomputes the complete execution closure:
+all 2,238 entries equal the original capture, with no changed, added or removed
+input. Both contract validation and all 701 canonical unit bindings pass.
+No new capture or native success is claimed from this equivalence check.
+
+### Exact-head Windows attempt: fatal WMI timeout status retained
+
+Required CI 43335332650 succeeds at
+`4a634c7840a723103173911ffdeac702c5e34fc0`. The existing disposable Windows
+owner then executes run 43336441832, attempt 1, at that exact source. All three
+selected jobs fail: normal 131593706491, repair 131593706463 and fresh
+131593706555. This is failed qualification, not permission to merge or publish.
+
+The canonical runner records prepare, exercise, assertions and settlement
+returning zero in every case. Settlement reports no errors or remaining tasks.
+Fresh records all five authentic Create/Open/detach/normal-exit/Resume outcomes
+as true. Normal and repair retain their separate replacement witnesses; they
+are not relabeled as fresh Manager lifecycle evidence.
+
+Each process trace nevertheless records two fatal query-pipeline CIM failures.
+The newly captured structured `error_Code` is 262148 (`0x40004`) in all six
+failures, with `CIMStatusCode` 1 and `error_Category` 0. Microsoft documents
+`0x40004` as `WBEM_S_TIMEDOUT` in the
+[WBEMSTATUS enumeration](https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-wmi/a2899649-a5a3-4b13-9ffa-d8394dcdac63).
+The generic exception HRESULT remains -2146233088, native/status codes remain
+1, and no embedded or inner HRESULT is present. This identifies a timeout
+status that the earlier diagnostics could not expose; it does not establish
+why the provider timed out or isolate provider time from pipeline consumption.
+
+Normal completes 4,820 scans with 4,818 successes; repair 4,364 with 4,362;
+fresh 2,339 with 2,337. All traces observe the armed window, stop marker and
+successful CIM-session close. Each reaches the existing 512-record truncation
+bound. None of those facts cancels a scan failure or establishes a complete
+untruncated process census.
+
+Artifacts 13999510505 (normal), 13997633845 (repair) and 13997713593 (fresh)
+retain the canonical runner, setup, result, settlement and process traces.
+The one-second DCOM/query bounds, 100 ms cadence, failure/record caps, outer
+deadline and fatal scan/close policy remain unchanged. No unchanged retry,
+additional profile matrix, query relaxation, shared-host repair or rollout is
+performed. Both review threads, older-baseline upgrade, frozen-candidate
+enforcement and separate Main adoption remain open.
+
+The subsequent `allow-query-five-seconds` decision above explicitly authorizes
+only the per-query budget change. The existing PowerShell consumer controls
+first fail with the prior one-second query, then all 21 process-trace controls
+pass in 35.22 seconds with the approved five-second query. The controls retain
+one-second session creation, fatal scan/session-close behavior, birth identity,
+private argument filtering and the original record cap. Their two-call stop
+marker is now written before checking query arguments so an argument regression
+does not rely on the subprocess timeout to stop the fixture.
+
+The diagnostic profile roster is unchanged and is not rerun as another
+speculative matrix. No local whole-suite execution occurs. The next acceptance
+attempt must use a published exact-source revision, required green CI and the
+same existing disposable Windows owner. Unit/control success is not a native
+pass, and the previous timeout failures remain unwaived.
+
+The published query revision `56cb8b4b18` encounters newer Dev changes before
+required CI can run. Backup precedes rebase onto `3b3d15ad5e`; all 50 owned
+patches survive. Vault dispatcher conflicts preserve the newly merged ordinary
+`-I -X utf8` module isolation alongside readiness-only `-B` and typed probe
+qualification. A later replayed hunk initially undoes the ordinary PowerShell
+prefix; the actual project-shadow controls reproduce that regression before
+the combined dispatcher is corrected.
+
+All 11 combined Vault controls pass in 108.82 seconds: ordinary/help and
+readiness shadow-module/package refusal, real cache access without a service,
+and six native/PowerShell qualification cases. The qualified shadow fixture
+carries the real payload and runtime descriptors. Initial adjacent failures
+also reveal a 271-character fixture executable path; a shorter canonical
+TestSandbox prefix resolves that measured Windows launch failure without
+changing the product, fixture semantics, per-test or aggregate bounds. Earlier
+explicit-tier skips are not counted as passes.
+
+Contract validation passes both contracts and 1,096 fixtures, but independent
+complete-input comparison correctly prevents reuse of the old HTTP-52 capture.
+All 2,238 paths remain present; six upstream inputs differ: Config Migrate core,
+Worktrees installer and session shell, runtime resource discovery, standalone
+artifact tests and typecheck tests. No old result is relabeled onto those
+inputs. The existing bounded Ubuntu capture owner must earn current evidence
+before the next required-CI/native acceptance sequence. Module-size,
+installation/version contracts, documentation consistency and touched-source
+lint pass; the parent and both blocking review threads remain open.
+
+Run 43348968003, attempt 1, succeeds at exact `ecd9c4520f` through the
+existing Ubuntu owner: actual writer, independent no-write replay, historical
+publication guards, canonical validator and controlled export all pass.
+The export records 403 cases and 184 outputs. Artifact 14003945919 has provider
+archive digest
+`4a628c6bc58122b4b53e7f1335cb0b479c904b074e1fd4263bf79af5fb1b5b1d`;
+the downloaded manifest independently matches the trusted export digest
+`62b046c40e775a2454e6b1f46c06c050407ff755404e980ca83063865f825514`.
+The existing adapter validates all output/source preimages and materializes
+all 184 outputs through its locked publication owner at the same frozen HEAD.
+This is refreshed compatibility evidence, not installed Windows acceptance.
+
+Current-head CI 43348842272 passes eligible units with coverage but fails
+Ruff on a duplicate Machines `projectRoot` evidence key introduced by automatic
+reconciliation. Removing the older environment-derived duplicate preserves the
+merged authoritative selected-project field. The merged project's new test
+also expects the older payload cwd; it now verifies the established isolated
+readiness project cwd and explicit `COPILOT_PROJECT_DIR`, while the separate
+installer-cwd assertions remain unchanged. All ten selected-project, digest,
+installer-preservation and compatibility controls pass in 11.83 seconds.
+Full repository F/E9 passes after the duplicate-key removal.
+
+Actual Copilot review at `ecd9c4520f` still retains both threads and requires
+native validation of the query-budget and cross-provider isolation changes.
+No current passing review, thread waiver or Windows qualification is inferred
+from the capture or unit/control results. Publish the coherent evidence and
+reconciliation fixes, then obtain actual required green CI before the one
+changed-query Windows attempt.
+
+### Source-qualified Windows positive at the approved query budget
+
+Run 43352995266, attempt 1, succeeds at exact source
+`40f1e6c4bd5576140cbdd1ce4fd66782ed3b636e` and candidate tree
+`a2b855f1812fa51f3e679b5b194220c1489fb99a`. Normal job 131648282804 takes
+17m10s, fresh 131648283254 takes 19m21s and repair 131648283478 takes 28m00s.
+All prepare, exercise, assertion and settlement stages return zero.
+This is the new query-five qualification, not a relabel of an earlier failure.
+
+Canonical artifacts 14005836320 (normal), 14005691626 (fresh) and
+14005613642 (repair) bind the actual run/source. Fresh setup and result
+identities agree. The installed Manager records verified candidate bytes and
+305 module observations; its selected profile enumerates 24 payloads and 13
+installed runtime origins. Machines observes all nine selected required
+outcomes with `requiredSatisfied: true`, no refused owners, no interruption
+and no apply operation. The result explicitly retains `source_admission:
+not-granted` and `upgrade: not-exercised`.
+
+The authentic Create/Open/detach/normal-exit/Resume outcomes all pass with one
+durable conversation and the expected distinct post-exit resumed native owner.
+The cleanup projection records seven settled daemon instances, all with
+`process-exit-observed`, zero unsettled and zero omitted. Independent final
+settlement reports no errors or remaining scheduled registrations.
+
+Normal and repair preserve all 14 sealed component slots through update and
+settlement: each has 28 unchanged full-file snapshot comparisons, zero added,
+removed or changed entries, and durable data/schema continuity. All seven
+resident successor transitions retain their old-before-new readiness ordering
+and normal old-process exit. The separate Index engine correctly remains
+alive with the same birth/version/generation during update; its retained
+observation is not misrepresented as a final exit result. Normal shutdown and
+fixture settlement are separately checked.
+
+The strict traces complete 3,097 normal, 2,053 fresh and 5,203 repair queries
+with zero scan failures or close errors. Each observes its armed window and
+stop marker and closes its owned CIM session. Maximum pipeline times are
+1,737 ms, 1,076 ms and 2,946 ms respectively. The 512-record diagnostic samples
+are truncated in all three cases; they remain bounded samples, not a claim
+of an untruncated process census. Fatal error policy is unchanged.
+
+This closes the source-profile and positive installed-consumer items above.
+Expected-negative consumer cases, authentic admitted-baseline upgrade,
+mandatory frozen-candidate enforcement and separate Main adoption remain open.
+The earlier native failures remain failures. Current-head CI 43351872835 also
+passes all three required jobs, but actual review still needs assessment and
+newer Dev changes make the PR conflicting. Those changes include the existing
+owner's canonical wheel-application installer integration; reconcile their
+actual contracts before publishing another head. Neither native nor HTTP-52
+evidence may be silently carried onto changed complete execution inputs.
+
+### Current Dev integration after the qualified positive
+
+The owned source branch is rebased onto Dev
+`ce3a3c1a3db4e5012154d2b0f069fb1e311a3cde`. Actual conflicts were limited to
+generated unit-manifest data, MCP producer fingerprints and the module-size
+baseline. Current Dev declarations and ceilings are preserved; the only
+owned ceiling reduction remains the extracted Index configuration reader.
+The canonical footprint refresher regenerates MCP's complete producer hashes
+without changing revision 36 or its footprint semantics. Unit-manifest
+reconciliation retains current parameterized test nodes, adds the readiness
+source and refreshes the complete admitted source hashes.
+
+The integrated source passes 109 contained Manager suite-closure/readiness
+controls, the changed sparse-candidate materialization control, complete unit
+source admission (765 sources, 4,912 nodes), all 13 install contracts and the
+changed-file module-size check. These are source checks, not a second
+installed-suite or frozen-candidate pass. Dev changed the installed-TTY
+candidate snapshot helper and canonical installer inputs, so run 43352995266
+remains evidence for its original `40f1e6c4bd` source only. Complete HTTP-52
+input comparison, any required recapture, current-head CI and new installed
+qualification remain prerequisites before this changed head can be accepted.
+No constructor/publication ownership, baseline admission, rollout or Main
+authority is transferred by this integration.
+
+### Current closure recapture and checkout-byte correction
+
+Run 43359694729, attempt 1, succeeds at exact
+`8a6236f3d468c596151a1e38354014d229c4aa9f`. The existing Ubuntu owner passes
+all 403 capture cases, independently replays them without writing, verifies
+historical publication guards, validates canonical evidence and exports 184
+outputs. Artifact 14008591345 has provider archive digest
+`9801a64f305c3168d8f4196e0ae7306b56363bd2353ae1dbfea2710df6c30537`.
+Its independently downloaded manifest matches the trusted export digest
+`4d2332cd8ef5ef6baea75473b8875202357f5e7ce8af0dd31922eb5dfcaf5579`.
+The canonical adapter verifies complete source/output preimages and materializes
+all 184 outputs through its locked publisher at the same frozen source.
+This refreshes controlled compatibility evidence, not installed acceptance.
+
+CI 43359649568 at that source correctly fails before unit execution:
+the local manifest refresh accidentally bound three LF-declared invocation
+templates to stale CRLF working-tree bytes. The local raw-byte check therefore
+passed but did not prove the normal checkout contract. Only those three hashes
+are corrected; the product template blobs are unchanged. Their local formatting
+now matches declared LF. A complete batched comparison of all 765 committed
+sources with actual Git EOL attributes passes, as does the actual local
+source-admission check. The five admitted native PowerShell inputs retain
+their declared CRLF checkout hashes. No validator or checkout rule is weakened.
+
+Current-head CI and new installed-suite native proof remain required.
+Run 43352995266 remains the qualified positive for `40f1e6c4bd` only.
+Both outstanding review threads and the parent negative, admitted-baseline,
+frozen-candidate and Main-adoption gates remain open.

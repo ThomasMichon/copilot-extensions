@@ -51,6 +51,9 @@ run_runtime() {
     else
         unset COPILOT_EXTENSIONS_CONTEXT
     fi
+    case "${1:-}" in
+        installer-readiness|invocation-contract) exec "$AGENT_RT_PY" -I -B -X utf8 "$PAYLOAD_ROOT/scripts/versioned_runtime_probe.py" --plugin agent-mcp --module agent_mcp -- "$@" ;;
+    esac
     exec "$AGENT_RT_PY" -m agent_mcp "$@"
 }
 

@@ -1410,14 +1410,12 @@ def test_parent_lock_reenters_through_generated_launcher_for_recovery(
         '[project]\nname = "agent-index"\nversion = "9.9.9"\n',
         encoding="utf-8",
     )
+    for name in ("resolve_effective_config.py", "config_commands.py", "resolve-activation-role.py"):
+        shutil.copy2(PLUGIN / "scripts" / name, scripts / name)
     if os.name == "nt":
         shutil.copy2(
             PLUGIN / "scripts" / "runtime-gate.ps1",
             scripts / "runtime-gate.ps1",
-        )
-        shutil.copy2(
-            PLUGIN / "scripts" / "resolve_effective_config.py",
-            scripts / "resolve_effective_config.py",
         )
         (scripts / "resolve-runtime.ps1").write_text(
             "$AgentRtPy = $null\n",
@@ -1447,10 +1445,6 @@ def test_parent_lock_reenters_through_generated_launcher_for_recovery(
         shutil.copy2(
             PLUGIN / "scripts" / "runtime-gate.sh",
             scripts / "runtime-gate.sh",
-        )
-        shutil.copy2(
-            PLUGIN / "scripts" / "resolve_effective_config.py",
-            scripts / "resolve_effective_config.py",
         )
         shutil.copy2(
             PLUGIN / "scripts" / "installation-context" / "json-query.awk",
@@ -1608,6 +1602,7 @@ def test_parent_lock_reenters_through_generated_launcher_for_recovery(
             "HOME": str(profile),
             "USERPROFILE": str(profile),
             "AGENT_INDEX_ROLE": "host",
+            "AGENT_INDEX_MACHINE": "test-host",
             "AGENT_INDEX_CONFIG_DATA_B64": inline_config,
             "TEST_CAPTURE": str(capture),
             "TEST_CELL_ROOT": str(plugin_root),
@@ -1640,6 +1635,8 @@ def test_parent_lock_reenters_through_generated_launcher_for_recovery(
         environment["PATH"] = (
             f"{fake_bin}{os.pathsep}{environment.get('PATH', '')}"
         )
+    else:
+        environment["PATH"] = str(Path(sys.executable).parent) + os.pathsep + environment.get("PATH", "")
 
     with CELL._installation_lock(plugin_root) as lock_token:
         environment[CELL.LOCK_TOKEN_ENV] = lock_token

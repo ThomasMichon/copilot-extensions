@@ -332,6 +332,54 @@ def test_owner_mode_refusal_never_reads_configuration(tmp_path, monkeypatch, sta
         helper.qualified_owner_report(repo, PLUGIN, home, {})
 
 
+@pytest.mark.parametrize("qualification", ["own-missing", "peer-missing", "qualified"])
+def test_readonly_routing_qualifies_payloads_before_loading_owner_scripts(
+    tmp_path, monkeypatch, qualification,
+):
+    helper = _model_helper()
+    monkeypatch.syspath_prepend(str(PLUGIN / "scripts" / "configuration-layers" / "src"))
+    from configuration_context.readiness import PROBE_CONTRACT, PROBE_ENV, ProbeContractError
+
+    repo, home = _repo(tmp_path)
+    own = tmp_path / "payload"
+    peer = tmp_path / "peer"
+    own_script = own / "scripts" / "installation-context" / "installation_context.py"
+    registry = peer / "scripts" / "registry_root.py"
+    own_script.parent.mkdir(parents=True)
+    registry.parent.mkdir(parents=True)
+    own_marker, peer_marker = tmp_path / "own-imported", tmp_path / "peer-imported"
+    own_script.write_text(
+        f"from pathlib import Path\nPath({str(own_marker)!r}).touch()\n"
+        "def resolve_payload_source(**kwargs): return {}\n"
+        "def resolve_runtime_deployment(**kwargs):\n"
+        "    return {'status':'invalid','reason':'context-invalid'}\n", encoding="utf-8",
+    )
+    registry.write_text(
+        f"from pathlib import Path\nPath({str(peer_marker)!r}).touch()\n"
+        f"def _legacy_home(environment): return Path({str(home)!r})\n", encoding="utf-8",
+    )
+    for root, plugin, module in (
+        (own, "agent-conduct-guidance", "model_configuration"),
+        (peer, "agent-worktrees", "agent_worktrees"),
+    ):
+        missing = root == own and qualification == "own-missing" or root == peer and qualification == "peer-missing"
+        if not missing:
+            (root / "readiness-isolation.json").write_text(json.dumps({
+                "schema": "copilot-extensions.readiness-isolation", "version": 1,
+                "plugin": plugin, "module": module,
+            }), encoding="utf-8")
+    environment = {PROBE_ENV: PROBE_CONTRACT}
+    monkeypatch.setattr(
+        helper, "_qualified_peer_payload",
+        lambda *args: {"payloadRoot": str(peer), "marketplaceId": "declared"},
+    )
+    expected = ValueError if qualification == "qualified" else ProbeContractError
+    with pytest.raises(expected):
+        helper.qualified_owner_report(repo, own, home, environment)
+    assert own_marker.exists() is (qualification != "own-missing")
+    assert peer_marker.exists() is (qualification == "qualified")
+
+
 def test_schema_and_example_use_portable_placeholder_models() -> None:
     schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
     example = json.loads(EXAMPLE.read_text(encoding="utf-8"))

@@ -638,14 +638,48 @@ def test_catalog_gate_is_root_relative_and_rendered_on_both_platforms(
         manifest.parent / "scripts" / "emit-command-catalog.ps1"
     ]
     assert 'catalog_gate="$self_root/scripts/catalog_gate.py"' in posix
-    assert '"$py" -E -X utf8 "$catalog_gate" --check --cwd "$PWD"' in posix
+    assert '"$py" -B -E -X utf8 "$catalog_gate" --check --cwd "$PWD"' in posix
     assert "$catalogGate = Join-Path $selfRoot 'scripts\\catalog_gate.py'" in powershell
-    assert "-E -X utf8 $catalogGate --check" in powershell
+    assert "-B -E -X utf8 $catalogGate --check" in powershell
 
     data["catalogGate"] = "../escape.py"
     manifest.write_text(json.dumps(data), encoding="utf-8")
     with pytest.raises(ValueError, match="catalogGate"):
         generator.load_manifest(manifest)
+
+
+@pytest.mark.parametrize("shell", ["bash", "pwsh"])
+def test_catalog_gate_does_not_create_payload_bytecode(tmp_path: Path, shell: str) -> None:
+    if shell == "bash" and (os.name == "nt" or shutil.which("bash") is None):
+        pytest.skip("POSIX catalog execution test")
+    executable = shutil.which(shell)
+    if executable is None:
+        pytest.skip(f"{shell} is not installed")
+    manifest = _manifest(tmp_path)
+    scripts = manifest.parent / "scripts"
+    (scripts / "gate_helper.py").write_text("VALUE = True\n", encoding="utf-8")
+    (scripts / "catalog_gate.py").write_text("import gate_helper\n", encoding="utf-8")
+    data = json.loads(manifest.read_text())
+    data["catalogGate"] = "scripts/catalog_gate.py"
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+    generator.process_manifest(manifest, check=False)
+    environment = os.environ.copy()
+    environment.update(
+        HOME=str(tmp_path / "home"), USERPROFILE=str(tmp_path / "home"),
+        PYTHONDONTWRITEBYTECODE="1",
+        PATH=str(Path(sys.executable).parent) + os.pathsep + environment["PATH"],
+    )
+    command = [executable]
+    if shell == "pwsh":
+        command.extend(["-NoProfile", "-File", str(scripts / "emit-command-catalog.ps1")])
+    else:
+        command.append(str(scripts / "emit-command-catalog.sh"))
+    result = subprocess.run(
+        command, cwd=tmp_path, env=environment, check=True, capture_output=True,
+        text=True, timeout=30, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    assert "additionalContext" in json.loads(result.stdout)
+    assert not list(manifest.parent.rglob("__pycache__"))
 
 
 def test_required_installation_context_uses_fixed_dispatchers(tmp_path: Path) -> None:

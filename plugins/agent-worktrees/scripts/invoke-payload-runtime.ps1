@@ -484,6 +484,11 @@ function Invoke-AgentWorktreesRuntime([string]$Python) {
     $previousEap = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
+        if ($forwardArgs.Count -gt 0 -and $forwardArgs[0] -in @('installer-readiness', 'invocation-contract')) {
+            $probeEntry = Join-Path $payloadRoot 'scripts\versioned_runtime_probe.py'
+            & $Python -I -B -X utf8 $probeEntry --plugin agent-worktrees --module agent_worktrees -- @forwardArgs
+            exit $LASTEXITCODE
+        }
         $pythonCache = [IO.Path]::GetFullPath(
             (Join-Path $runtimeRoot ('cache\python\unsealed-' + [Guid]::NewGuid().ToString('N')))
         )

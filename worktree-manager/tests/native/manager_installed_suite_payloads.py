@@ -261,7 +261,18 @@ def serve_git_transport(
                 failures.append(error)
                 self.close_connection = True
 
-    server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+    port = 0
+    if "url" in transport:
+        location = urlsplit(transport["url"])
+        if (
+            location.scheme != "http" or location.hostname != "127.0.0.1"
+            or not location.port or location.path != prefix
+            or location.username is not None or location.password is not None
+            or location.query or location.fragment
+        ):
+            raise ValueError("A resumed frozen transport must retain its private loopback endpoint")
+        port = location.port
+    server = http.server.HTTPServer(("127.0.0.1", port), Handler)
     thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.05})
     started = False
     try:

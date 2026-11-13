@@ -79,10 +79,19 @@ def _run(
 
     # Same native owner as run_installation_owned, with explicit cwd/env so
     # concurrent read-only observation cannot race process-global HOME changes.
+    project = case / "project"
+    setup = case / "setup.json"
+    if setup.is_file() and "project_root" in (configuration := _read(setup)):
+        project = Path(configuration["project_root"])
+        if (
+            not project.is_absolute() or not project.is_dir() or project.is_symlink()
+            or project.resolve().parent != case.resolve()
+        ):
+            raise ValueError("Suite commands require a direct fixture-owned project root")
     started_at_ns = time.time_ns()
     result = run(
         list(map(str, argv)), timeout=timeout, input_text=None, capture=True,
-        cwd=case / "project", env={**_env(case), **(extra_env or {})},
+        cwd=project, env={**_env(case), **(extra_env or {})},
         allow_daemon_breakaway=True,
         max_stdout_bytes=4 * 1024 * 1024, max_stderr_bytes=max_stderr_bytes,
     )
@@ -119,7 +128,9 @@ def _commit(case: Path, root: Path) -> str:
 
 def _python(root: Path) -> Path:
     generation = (root / "current-version").read_text(encoding="utf-8").strip()
-    return root / "versions" / generation / "Scripts" / "python.exe"
+    slot = root / "versions" / generation
+    nested = slot / ".venv" / "Scripts" / "python.exe"
+    return nested if nested.is_file() else slot / "Scripts" / "python.exe"
 
 
 def _probe(case: Path, kind: str) -> dict[str, Any]:
@@ -645,7 +656,7 @@ def _cleanup(case: Path) -> list[str]:
 def _case(directory: Path, mode: str) -> tuple[Path, dict[str, Any]]:
     require_venue()
     directory = directory.resolve()
-    if mode not in {"normal", "repair"} or directory == REPO or not directory.is_relative_to(REPO):
+    if mode not in {"normal", "repair", "fresh"} or directory == REPO or not directory.is_relative_to(REPO):
         raise ValueError("Native stage must name a prepared mode below this checkout")
     case = directory / mode
     setup = _read(case / "setup.json")

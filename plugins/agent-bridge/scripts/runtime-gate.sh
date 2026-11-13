@@ -93,6 +93,9 @@ apply_runtime_env() {
 
 run_runtime() {
     apply_runtime_env
+    case "${1:-}" in
+        installer-readiness|invocation-contract) exec "$AGENT_RT_PY" -I -B -X utf8 "$PAYLOAD_ROOT/scripts/versioned_runtime_probe.py" --plugin agent-bridge --module agent_bridge -- "$@" ;;
+    esac
     exec "$AGENT_RT_PY" -m agent_bridge "$@"
 }
 

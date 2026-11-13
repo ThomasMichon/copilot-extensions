@@ -5,10 +5,10 @@ from __future__ import annotations
 
 import argparse
 import base64
+from functools import cache
 import json
 import os
 import platform
-import shutil
 import stat
 import subprocess
 import sys
@@ -630,28 +630,25 @@ def _configuration_knowledge_root(root):
     return _layer_adapter().knowledge_root_from_owner(root)
 
 
+@cache
+def _command_adapter() -> Any:
+    import importlib.util
+
+    path = Path(__file__).with_name("config_commands.py")
+    spec = importlib.util.spec_from_file_location("_index_config_commands", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("agent-index configuration commands are unavailable")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def _run_git(git: str, start: Path, *args: str) -> subprocess.CompletedProcess[str] | None:
-    try:
-        return subprocess.run(
-            # `-c safe.bareRepository=all` only widens what `-C start` itself
-            # is explicitly allowed to inspect (an already-known, registered
-            # repository path from this machine's own repository registry --
-            # never an ambient/inherited cwd), so it doesn't reopen the
-            # ambient-bare-repo attack surface that setting guards against.
-            [git, "-c", "safe.bareRepository=all", "-C", str(start), *args],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=5,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
+    return _command_adapter().run_git(git, start, *args)
 
 
 def _git_root(start: Path) -> Path | None:
-    git = shutil.which("git")
+    git = _command_adapter().path_command("git")
     if not git:
         return None
     result = _run_git(git, start, "rev-parse", "--show-toplevel")
@@ -705,7 +702,7 @@ def _worktrees_command() -> str | None:
     if explicit is not None:
         value = explicit.strip()
         return value or None
-    return shutil.which("agent-worktrees")  # marketplace-isolation: allow legacy-compatibility
+    return _command_adapter().path_command("agent-worktrees")  # marketplace-isolation: allow legacy-compatibility
 
 
 def _load_peer_launch() -> Any:
@@ -739,6 +736,23 @@ def _validate_index_owner_or_refuse(raw_context: str) -> dict[str, Any]:
         raise peer_launch.ContextRefused(
             f"agent-index installation context refused: {error}"
         ) from error
+
+
+@cache
+def _probe_support() -> Any:
+    import importlib.util
+
+    path = Path(__file__).with_name("resolve_effective_probe.py")
+    spec = importlib.util.spec_from_file_location("_index_probe_support", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("agent-index probe boundary is unavailable")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _readiness_support():
+    return _probe_support()._readiness_support()
 
 
 def _run_state_root_same_cell(
@@ -777,6 +791,7 @@ def _run_state_root_same_cell(
             f"Same-cell worktrees state-root invocation failed: {error}"
         ) from error
     if result.returncode == 126:
+        _probe_support().refuse_unqualified(result)
         raise peer_launch.ContextRefused(
             result.stderr.strip() or "Same-cell worktrees context refused"
         )
@@ -785,7 +800,7 @@ def _run_state_root_same_cell(
 
 def _worktrees_argv(command: str, *arguments: str) -> list[str]:
     if os.name == "nt" and Path(command).suffix.casefold() == ".ps1":
-        shell = shutil.which("pwsh") or str(
+        shell = _command_adapter().path_command("pwsh") or str(
             Path(os.environ.get("SystemRoot", r"C:\Windows"))
             / "System32"
             / "WindowsPowerShell"
@@ -844,28 +859,9 @@ def _project_name_for_root(root: Path) -> str | None:
 def _run_state_root(
     command: str, environment: dict[str, str], *, cwd: Path | None, project: str | None
 ) -> subprocess.CompletedProcess[str] | None:
-    arguments = ("state-root", "--json") if project is None else (
-        "--project", project, "state-root", "--json",
+    return _probe_support().run_state_root(
+        command, environment, cwd=cwd, project=project, argv=_worktrees_argv,
     )
-    try:
-        return subprocess.run(
-            _worktrees_argv(command, *arguments),
-            cwd=str(cwd) if cwd is not None else None,
-            env=environment,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=20,
-            check=False,
-            # `command` can resolve to the PATH `.cmd` binstub (shutil.which
-            # prefers .cmd over .ps1 on Windows), which Windows must interpret
-            # through a fresh cmd.exe -- CREATE_NO_WINDOW keeps that console
-            # invisible instead of flashing on every runtime-resolution probe.
-            creationflags=(0x08000000 if os.name == "nt" else 0),
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
 
 
 def _external_state_root_runner(

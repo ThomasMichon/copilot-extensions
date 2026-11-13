@@ -11,6 +11,8 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 
+import pytest
+
 SCRIPT = Path(__file__).resolve().parent / "check-runtime-resolution.py"
 
 _spec = importlib.util.spec_from_file_location("check_runtime_resolution", SCRIPT)
@@ -53,6 +55,31 @@ def test_real_venv_link_launch_is_flagged(tmp_path: Path) -> None:
     p.parent.mkdir(parents=True)
     p.write_text('_py="$_root/.venv/bin/python"\n', encoding="utf-8")
     assert _kinds(p) == ["venv-link"]
+
+
+@pytest.mark.parametrize("line", (
+    '[ "$resolved" = "$InstallDir/versions/$selected/.venv/bin/python" ]',
+    '[ "$resolved" = "$InstallDir/versions/$selected/.venv/Scripts/python.exe" ]',
+    r'$AgentRtPy -eq (Join-Path $InstallDir "versions\$cv\.venv\Scripts\python.exe")',
+    r'$AgentRtPy -eq (Join-Path $InstallDir "versions\$cv\.venv\bin\python")',
+))
+def test_selected_resolver_layout_comparison_is_not_a_link_launch(tmp_path: Path, line: str) -> None:
+    path = tmp_path / "readiness.ps1"
+    path.write_text(line, encoding="utf-8")
+    assert _kinds(path) == []
+
+
+@pytest.mark.parametrize("line", (
+    '_py="$InstallDir/versions/$selected/.venv/bin/python"',
+    r'$AgentRtPy = Join-Path $InstallDir "versions\$cv\.venv\Scripts\python.exe"',
+    '[ "$resolved" = "$InstallDir/.venv/bin/python" ]',
+    '[ "$resolved" = "$InstallDir/versions/$selected/.venv/bin/python" ]; '
+    '_py="$root/.venv/bin/python"',
+))
+def test_nested_slot_comparison_does_not_exempt_other_link_paths(tmp_path: Path, line: str) -> None:
+    path = tmp_path / "readiness.ps1"
+    path.write_text(line, encoding="utf-8")
+    assert _kinds(path) == ["venv-link"]
 
 
 def test_allow_marker_suppresses(tmp_path: Path) -> None:

@@ -20,7 +20,7 @@ The November 9 priority extends installed release qualification through the
 [Manager Create/Resume/Open lifecycle](installed-manager-lifecycle.md), reusing
 the existing #11377 native and #3336/#7529 release owners.
 
-## Guiding Intent
+## Goal
 
 Reduce redundant status checks and overall pipeline executions so Copilot review
 can run more often without unnecessary throttling. Preserve validation assurance
@@ -44,6 +44,27 @@ dev-backed-deployment consideration.
 The November 9 request explicitly adds the bounded installed-Manager lifecycle
 exception to that portfolio policy. It does not restore unrelated integration
 suites to fast PR CI or transfer the promotion writer.
+
+The November 12 readiness-compatibility amendment selects
+`refuse-unqualified-probes`: return unknown before executing an unqualified
+older probe, with the owning updater as recovery. Preserve ordinary commands,
+separately authorized installer actions and the older-baseline qualification
+requirement. The exact decision and its limits are recorded in the
+[installed-lifecycle scope approval](installed-manager-lifecycle.md#november-12-readiness-compatibility-approval).
+This adds no rollout, shared-repair or Main-activation authority.
+
+The subsequent census-budget decision selects `allow-query-five-seconds`:
+change only the process-census per-query limit from one to five seconds,
+add focused controls and require new native proof. Session creation, overall
+job/stage deadlines, cadence, caps and fatal-error policy stay unchanged.
+The [scope approval](installed-manager-lifecycle.md#november-12-census-query-budget-approval)
+preserves the exact prompt and response; it grants no rollout or failure waiver.
+
+## Guiding Intent
+
+The former Guiding Intent is retained verbatim in Goal above. The
+[Request](#request) preserves the originating operator wording and subsequent
+campaign amendments.
 
 ## Participants
 
@@ -518,6 +539,11 @@ authorizes critical main-path acceptance or a bounded administrative change.
   evidence must block promotion, not merely report an informational check.
   Installed-core action/continuity proof merged in #11864 at `fa93ea37c2`,
   backed by exact-source native run 42892225611 and current-head approval.
+  Complete frozen-payload acquisition merged in #11972 at `0286b3f715`,
+  backed by exact-source native run 42933306312: the actual CLI installed all
+  24 private payloads and every selected manifest matched the frozen artifact.
+  The separate installed-core lifecycle passed on that same source; the payload
+  receipt explicitly leaves runtime installation unobserved.
   Complete-suite construction/actual Machines readiness is now the active slice;
   authentic-baseline update, mandatory enforcement and Main adoption remain open.
 - [ ] Complete the [test validation burndown](test-validation-burndown.md):

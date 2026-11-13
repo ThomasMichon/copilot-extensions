@@ -28,6 +28,22 @@ CAPABILITY = "worktree-data-project-inventory-v1"
 REPOSITORY = "example.test/owner/source"
 
 
+@pytest.mark.no_autotrust
+def test_readonly_logger_resolver_refuses_before_import(tmp_path, monkeypatch):
+    from configuration_context.readiness import PROBE_CONTRACT, PROBE_ENV, ProbeContractError
+
+    payload = tmp_path / "payload"
+    resolver = payload / "scripts" / "versioned_runtime.py"
+    resolver.parent.mkdir(parents=True)
+    resolver.write_text("raise AssertionError('unqualified resolver imported')\n", encoding="utf-8")
+    (payload / "plugin.json").write_text('{"name":"agent-logger"}', encoding="utf-8")
+    monkeypatch.setattr(configuration_layers, "__file__", str(payload / "src" / "agent_logger" / "configuration_layers.py"))
+    monkeypatch.setattr(sys, "prefix", str(tmp_path / "non-retained"))
+    monkeypatch.setenv(PROBE_ENV, PROBE_CONTRACT)
+    with pytest.raises(ProbeContractError, match="unqualified"):
+        configuration_layers._legacy_owner_prefix()
+
+
 def admission(tmp_path: Path) -> Admission:
     return Admission(REPOSITORY, tmp_path / "checkout")
 

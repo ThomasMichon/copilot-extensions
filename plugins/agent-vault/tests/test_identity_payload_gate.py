@@ -129,6 +129,80 @@ def invoke(payload, env, cwd, *args):
     )
 
 
+@pytest.mark.portfolio_tier("T3")
+@pytest.mark.effect("process")
+@pytest.mark.parametrize("host", ["native", "pwsh"])
+@pytest.mark.parametrize("qualification", ["payload-missing", "runtime-missing", "qualified"])
+def test_installed_readiness_does_not_import_checkout_module(tmp_path, host, qualification):
+    from agent_procutil import no_window_kwargs
+
+    if host == "pwsh" and os.name != "nt":
+        pytest.skip("the POSIX native gate covers this platform")
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True, **no_window_kwargs())
+    home, payload, runtime, _, context = prepare_payload(tmp_path, "namespaced")
+    prepare_runtime(runtime, payload)
+    declaration = {
+        "schema": "copilot-extensions.readiness-isolation", "version": 1,
+        "plugin": "agent-vault", "module": "agent_vault",
+    }
+    if qualification != "payload-missing":
+        write_json(payload / "readiness-isolation.json", declaration)
+    if qualification == "qualified":
+        write_json(runtime / "versions" / "fixture" / "share" / "copilot-extensions" / "agent_vault" /
+                   "readiness-isolation.json", declaration)
+    activation_marker = tmp_path / "activation-reader-executed"
+    activation = payload / "scripts" / "runtime-activation.py"
+    activation.write_text(
+        activation.read_text(encoding="utf-8").replace(
+            "from __future__ import annotations\n",
+            "from __future__ import annotations\n"
+            f"from pathlib import Path\nPath({str(activation_marker)!r}).touch()\n",
+        ), encoding="utf-8",
+    )
+    marker = tmp_path / "checkout-module-executed"
+    (tmp_path / "agent_vault.py").write_text(
+        f"from pathlib import Path\nPath({str(marker)!r}).write_text('shadow')\n"
+        "print('{\"state\":\"ready\",\"detail\":\"checkout module\"}')\n",
+        encoding="utf-8",
+    )
+    environment = {
+        key: value for key, value in os.environ.items()
+        if not key.startswith(("AGENT_VAULT", "VAULT_", "IDENTITY_", "COPILOT_EXTENSIONS_"))
+        and key not in {"KPDB", "PYTHONPATH", "PYTHONHOME", "COPILOT_PLUGIN_ROOT"}
+    }
+    environment.update(
+        HOME=str(home), USERPROFILE=str(home), AGENT_VAULT_NO_SELFPROVISION="1",
+        AGENT_VAULT_HOME=str(runtime), AGENT_VAULT_PAYLOAD_ROOT=str(payload),
+        COPILOT_PLUGIN_ROOT=str(payload), COPILOT_EXTENSIONS_CONTEXT=context,
+    )
+    if host == "pwsh":
+        shell = shutil.which("pwsh")
+        if shell is None:
+            pytest.skip("PowerShell 7 unavailable")
+        command = [shell, "-NoProfile", "-File", str(payload / "bin/agent-vault.ps1")]
+    else:
+        command = launcher(payload)
+    result = subprocess.run(
+        [*command, "installer-readiness"], cwd=tmp_path, env=environment,
+        capture_output=True, text=True, timeout=30, **no_window_kwargs(),
+    )
+    assert not marker.exists(), result.stdout + result.stderr
+    assert result.stdout, (result.returncode, result.stderr)
+    observed = json.loads(result.stdout)
+    if qualification != "qualified":
+        assert observed["schema"] == "copilot-extensions.probe-compatibility"
+        assert observed["status"] == "unknown"
+        assert observed["recovery"] == "update-owning-installation"
+        assert result.returncode == 126, result.stderr
+        assert not activation_marker.exists()
+        return
+    assert activation_marker.exists()
+    assert observed["schema"] == "copilot-extensions.module-readiness"
+    assert observed["module"] == "agent-vault/runtime"
+    assert observed["state"] == "failed", observed
+    assert result.returncode == 1
+
+
 def test_shared_payload_pin_validator_rejects_foreign_cell_and_invalid_json(tmp_path):
     runtime = tmp_path / "runtime"
     database = tmp_path / "fixture.kdbx"

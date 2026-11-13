@@ -281,6 +281,10 @@ run_runtime() {
     else
         unset COPILOT_EXTENSIONS_CONTEXT
     fi
+    case "${1:-}" in
+        installer-readiness|invocation-contract)
+            exec "$AGENT_RT_PY" -I -B -X utf8 "$PAYLOAD_ROOT/scripts/versioned_runtime_probe.py" --plugin agent-worktrees --module agent_worktrees -- "$@" ;;
+    esac
     local nonce python_cache selected_cache
     nonce="$(LC_ALL=C od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
     [[ "$nonce" =~ ^[0-9a-f]{32}$ ]] || return 126

@@ -62,6 +62,9 @@ agent-mcp = "agent_mcp.__main__:console_entry"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.data-files]
+"share/copilot-extensions/agent_mcp" = ["readiness-isolation.json"]
+
 [tool.setuptools.package-data]
 "agent_mcp" = ["incoming-contract.json", "owner_section.cs"]
 # The code-mode decorator ships a Node harness alongside the Python package.

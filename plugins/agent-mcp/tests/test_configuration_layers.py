@@ -264,7 +264,7 @@ def test_slot_retained_resolver_qualifies_legacy_owner(tmp_path, monkeypatch, ne
 
     def run(argv, **kwargs):
         assert argv == [
-            str(python), "-I", "-X", "utf8", "-B", "-m", "agent_worktrees",
+            str(python), "-I", "-B", "-X", "utf8", "-m", "agent_worktrees",
             "state-root", "--configuration", "--json",
         ]
         assert kwargs["cwd"] == base
@@ -296,6 +296,25 @@ def test_slot_retained_resolver_qualifies_legacy_owner(tmp_path, monkeypatch, ne
     (peer / ".installation-ownership.json").write_text("{}", encoding="utf-8")
     with pytest.raises(configuration._peer_launch.ContextRefused, match="installation-cell ownership"):
         config.load_config(str(selected))
+
+
+def test_readonly_configuration_refuses_mutable_resolver_before_import(tmp_path, monkeypatch):
+    import sys
+    from pathlib import Path
+    from configuration_context.readiness import PROBE_CONTRACT, PROBE_ENV, ProbeContractError
+    from agent_mcp import configuration
+
+    home = tmp_path / "home"
+    resolver = home / ".agent-mcp" / "scripts" / "versioned_runtime.py"
+    resolver.parent.mkdir(parents=True)
+    resolver.write_text("raise AssertionError('unqualified resolver imported')\n", encoding="utf-8")
+    (home / ".agent-worktrees").mkdir()
+    monkeypatch.setattr(Path, "home", lambda: home)
+    monkeypatch.setattr(sys, "prefix", str(tmp_path / "non-retained"))
+    monkeypatch.setenv("AGENT_RT_ROOT", str(home / ".agent-mcp"))
+    monkeypatch.setenv(PROBE_ENV, PROBE_CONTRACT)
+    with pytest.raises(ProbeContractError, match="unqualified"):
+        configuration._legacy_report(tmp_path)
 
 
 def test_fresh_slot_loader_reads_qualified_peer_in_real_subprocess(tmp_path):

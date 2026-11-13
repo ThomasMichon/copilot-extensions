@@ -37,7 +37,7 @@ def _legacy_report(root: Path) -> tuple[dict, Path] | None:
     if not prefix:
         return None
     report = read_owner_context(
-        [prefix[0], "-I", "-X", "utf8", *prefix[1:]], root,
+        prefix, root,
         environment=environment,
     )
     return (report, legacy) if report is not None else None

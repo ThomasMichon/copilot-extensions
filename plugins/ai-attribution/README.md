@@ -141,6 +141,11 @@ optional pure decorator, see [docs/signature-profiles.md](docs/signature-profile
 | `examples/*.conf` | Generic operator and target-repository config examples. |
 | `tests/test_emit_policy.py` | Hook behavior, safety, exact-output, size, and parity tests. |
 
+The standalone session writer disables Python bytecode writes before loading
+its profile helper. Cold and repeated reads preserve the installed payload;
+the existing policy cache, profile discovery and disclosure decisions are
+unchanged. Importing the writer does not change its caller's cache policy.
+
 ## Troubleshooting, contributing & issues
 
 - **The hook emits `{}`:** that is the required output-free contract. Inspect the

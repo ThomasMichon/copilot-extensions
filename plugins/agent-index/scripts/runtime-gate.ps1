@@ -52,6 +52,30 @@ $PackageVersion = if ($VersionLine) { $VersionLine.Line -replace '.*=\s*"([^"]+)
 $GatePython = Get-Command python -ErrorAction SilentlyContinue
 if (-not $GatePython) { $GatePython = Get-Command py -ErrorAction SilentlyContinue }
 $EffectiveResolver = Join-Path $PSScriptRoot 'resolve_effective_config.py'
+$ProbeBootstrap = Join-Path $PSScriptRoot 'versioned_runtime_probe.py'
+if ($Command -eq 'installer-readiness') {
+    $env:COPILOT_EXTENSIONS_READONLY_PROBE = 'isolated-imports-v1'
+}
+
+function Stop-ProbeRefusal([int]$Code, [string]$Output) {
+    if ($Command -eq 'installer-readiness' -and $Code -eq 126) {
+        if ($Output) { [Console]::Out.WriteLine($Output.Trim()) }
+        exit 126
+    }
+}
+
+function Get-PayloadReaderArguments([string]$Script) {
+    if ($Command -eq 'installer-readiness') {
+        if (-not (Test-Path -LiteralPath $ProbeBootstrap -PathType Leaf)) {
+            [Console]::Out.WriteLine('{"schema":"copilot-extensions.probe-compatibility","version":1,"status":"unknown","requirement":"isolated-imports-v1","recovery":"update-owning-installation"}')
+            exit 126
+        }
+        return @('-I', '-B', '-X', 'utf8', $ProbeBootstrap,
+            '--plugin', 'agent-index', '--module', 'agent_index',
+            '--payload-only', '--script', $Script, '--')
+    }
+    return @('-B', '-E', '-X', 'utf8', $Script)
+}
 
 function Write-Readiness([string]$State, [string]$Detail) {
     [ordered]@{
@@ -92,9 +116,16 @@ try {
     } else {
         (Get-Location).Path
     }
-    $effectiveJson = (& $GatePython.Source -E -X utf8 $EffectiveResolver `
-        --cwd $effectiveCwd 2>$null | Out-String)
-    if ($LASTEXITCODE -ne 0) { throw 'Effective configuration reader failed' }
+    $readerArgs = @(Get-PayloadReaderArguments $EffectiveResolver)
+    $readerPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $effectiveJson = (& $GatePython.Source @readerArgs `
+            --cwd $effectiveCwd 2>$null | Out-String)
+        $effectiveExit = $LASTEXITCODE
+    } finally { $ErrorActionPreference = $readerPreference }
+    Stop-ProbeRefusal $effectiveExit $effectiveJson
+    if ($effectiveExit -ne 0) { throw 'Effective configuration reader failed' }
     $Effective = $effectiveJson | ConvertFrom-Json -ErrorAction Stop
     if ($Effective.schema -cne 'agent-index.effective-config' -or
         $Effective.version -ne 1 -or $Effective.opted_in -isnot [bool]) {
@@ -445,7 +476,7 @@ if ($Command -ceq '__session-stamp') {
         try { $held = $mutex.WaitOne(0) }
         catch [Threading.AbandonedMutexException] { $held = $true }
         if (-not $held) { exit 0 }
-        & $GatePython.Source -I -X utf8 (Join-Path $PSScriptRoot 'session-stamp.py') $Root $PayloadRoot $ActualMode
+        & $GatePython.Source -I -B -X utf8 (Join-Path $PSScriptRoot 'session-stamp.py') $Root $PayloadRoot $ActualMode
         exit $LASTEXITCODE
     } finally {
         if ($held) { [void]$mutex.ReleaseMutex() }
@@ -473,17 +504,28 @@ function Get-ConfiguredRole {
         [Environment]::MachineName
     }
     $roleResolver = Join-Path $PSScriptRoot 'resolve-activation-role.py'
-    $resolverArgs = @('-E', '-X', 'utf8', $roleResolver, '--machine', $machine)
+    $resolverArgs = @(Get-PayloadReaderArguments $roleResolver)
+    $resolverArgs += @('--machine', $machine)
+    $hasSource = $false
     if ($env:AGENT_INDEX_CONFIG_DATA_B64) {
         $resolverArgs += @('--data-b64', $env:AGENT_INDEX_CONFIG_DATA_B64)
+        $hasSource = $true
     } elseif ($env:AGENT_INDEX_EFFECTIVE_CONFIG) {
         $resolverArgs += @('--config', $env:AGENT_INDEX_EFFECTIVE_CONFIG)
+        $hasSource = $true
     } elseif ($env:AGENT_INDEX_REPO) {
         $resolverArgs += @('--repo', $env:AGENT_INDEX_REPO)
+        $hasSource = $true
     }
-    if ($resolverArgs.Count -gt 6) {
-        $resolved = (& $GatePython.Source @resolverArgs 2>$null | Out-String)
-        if ($LASTEXITCODE -ne 0) { throw 'Activation role reader failed' }
+    if ($hasSource) {
+        $readerPreference = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = 'Continue'
+            $resolved = (& $GatePython.Source @resolverArgs 2>$null | Out-String)
+            $roleExit = $LASTEXITCODE
+        } finally { $ErrorActionPreference = $readerPreference }
+        Stop-ProbeRefusal $roleExit $resolved
+        if ($roleExit -ne 0) { throw 'Activation role reader failed' }
         $role = ("$resolved").Trim().ToLowerInvariant()
         if ($role -in @('host', 'client')) { return $role }
         if ($role -ne 'unconfigured') { throw 'Invalid activation role response' }
@@ -544,12 +586,16 @@ function Test-RuntimeOrigin(
         $ErrorActionPreference = 'Continue'
         Set-Location -LiteralPath $slot
         [IO.Directory]::SetCurrentDirectory($slot)
-        $originOutput = @(
-            & $Interpreter -I -B -X utf8 -c (
+        $originArgs = @('-I', '-B', '-X', 'utf8', '-c', (
                 'from pathlib import Path; import agent_index; ' +
                 'print(Path(agent_index.__file__).resolve())'
-            ) 2>$null
-        )
+            ))
+        if ($Command -eq 'installer-readiness') {
+            $originArgs = @('-I', '-B', '-X', 'utf8', $ProbeBootstrap,
+                '--plugin', 'agent-index', '--module', 'agent_index', '--origin')
+        }
+        $originOutput = @(& $Interpreter @originArgs 2>$null)
+        Stop-ProbeRefusal $LASTEXITCODE ($originOutput -join "`n")
         if ($LASTEXITCODE -ne 0 -or $originOutput.Count -eq 0) {
             return $false
         }
@@ -584,13 +630,18 @@ function Resolve-ReadyRuntime {
             )
             exit 126
         }
+        $validationArgs = @('-I', '-X', 'utf8', $cellRuntime)
+        if ($Command -eq 'installer-readiness') {
+            $validationArgs = @(Get-PayloadReaderArguments $cellRuntime)
+        }
         $validationJson = @(
-            & $cellPython -I -X utf8 $cellRuntime launch-validate `
+            & $cellPython @validationArgs launch-validate `
                 --context $Context `
                 --expected-marketplace-id $MarketplaceId `
                 --durable-home $contextDurableHome `
                 "--command=$Command"
         )
+        Stop-ProbeRefusal $LASTEXITCODE ($validationJson -join "`n")
         if ($LASTEXITCODE -ne 0) {
             [Console]::Error.WriteLine(
                 '[agent-index] selected installation runtime failed operative validation.'
@@ -881,8 +932,13 @@ function Invoke-AgentIndexRuntime {
     $ErrorActionPreference = 'Continue'
     try {
         $pythonOptions = @('-I', '-X', 'utf8')
-        if ($Command -eq 'installer-readiness') { $pythonOptions += '-B' }
-        & $Python @pythonOptions -m agent_index @InvocationArgs
+        $entry = @('-m', 'agent_index')
+        if ($Command -eq 'installer-readiness') {
+            $pythonOptions += '-B'
+            $entry = @($ProbeBootstrap, '--plugin', 'agent-index',
+                '--module', 'agent_index', '--')
+        }
+        & $Python @pythonOptions @entry @InvocationArgs
     } finally {
         $ErrorActionPreference = $previousPreference
     }

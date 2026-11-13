@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve the selected project context in read-only installation readiness probes.",
+  "changes": [
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    }
+  ]
+}

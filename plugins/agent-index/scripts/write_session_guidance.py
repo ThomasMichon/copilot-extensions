@@ -106,7 +106,7 @@ def _scope_binding_context(root: Path, payload: dict) -> str:
     script = root / "scripts" / "emit_scope_binding.py"
     if not script.is_file():
         return ""
-    argv = [sys.executable, "-E", "-X", "utf8", str(script)]
+    argv = [sys.executable, "-B", "-E", "-X", "utf8", str(script)]
     cwd = payload.get("cwd")
     if isinstance(cwd, str) and cwd and os.path.isabs(cwd) and os.path.isdir(cwd):
         argv.extend(["--cwd", cwd])

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import os
 import math
+import re
+import shutil
 import signal
 import subprocess
 import sys
@@ -25,6 +27,26 @@ _termination = threading.local()
 _CANCEL_SIGNALS = (
     (signal.SIGINT,) if os.name == "nt" else (signal.SIGINT, signal.SIGTERM)
 )
+
+
+def path_interpreter(name: str) -> str | None:
+    """Resolve host tools without implicit Windows cwd or relative PATH lookup."""
+    names = [name]
+    if os.name == "nt":
+        names = [
+            name + extension
+            for extension in os.environ.get("PATHEXT", ".COM;.EXE;.BAT;.CMD").split(os.pathsep)
+            if re.fullmatch(r"\.[a-zA-Z0-9]+", extension)
+        ]
+    for entry in os.get_exec_path():
+        directory = Path(entry)
+        if not directory.is_absolute():
+            continue
+        for candidate in names:
+            selected = shutil.which(str(directory / candidate))
+            if selected:
+                return selected
+    return None
 
 
 def _ignore_cancellation():

@@ -12,6 +12,7 @@ from contextlib import contextmanager, nullcontext
 import json
 import os
 from pathlib import Path
+import re
 import runpy
 import socket
 import sys
@@ -33,6 +34,56 @@ def test_fullsuite_refuses_execution_outside_the_disposable_venue(monkeypatch: p
     monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
     with pytest.raises(RuntimeError, match="disposable GitHub-hosted Windows VM"):
         require_venue()
+
+
+@pytest.mark.parametrize("selection", ("default", "normal", "repair", "fresh", "outside", "missing", "case"))
+def test_command_owner_uses_only_the_existing_fixture_project_root(
+    tmp_path, monkeypatch, selection,
+):
+    from agent_procutil import _caller_owned
+
+    project = tmp_path / "project"
+    project.mkdir()
+    setup = {"mode": selection}
+    if selection not in {"default", "normal", "repair"}:
+        project = {
+            "fresh": tmp_path / "tty-harness",
+            "outside": tmp_path.parent,
+            "missing": tmp_path / "absent",
+            "case": tmp_path,
+        }[selection]
+        if selection == "fresh":
+            project.mkdir()
+        setup["project_root"] = str(project)
+    if selection != "default":
+        (tmp_path / "setup.json").write_text(json.dumps(setup))
+    calls = []
+
+    def run(argv, **options):
+        calls.append(options)
+        return subprocess.CompletedProcess(argv, 0, "cooperative stop", "")
+
+    monkeypatch.setattr(_caller_owned, "run", run)
+    if selection in {"outside", "missing", "case"}:
+        with pytest.raises(ValueError, match="fixture-owned project root"):
+            fixture._run(["not-executed"], tmp_path)
+        assert not calls
+    else:
+        assert fixture._run(["not-executed"], tmp_path).returncode == 0
+        assert calls[0]["cwd"] == project
+        assert calls[0]["allow_daemon_breakaway"] is True
+
+
+@pytest.mark.parametrize("nested", [False, True])
+def test_selected_runtime_python_uses_its_native_installed_layout(tmp_path, nested):
+    root = tmp_path / "runtime"
+    root.mkdir()
+    (root / "current-version").write_text("1.0")
+    slot = root / "versions" / "1.0"
+    python = (slot / ".venv" if nested else slot) / "Scripts" / "python.exe"
+    python.parent.mkdir(parents=True)
+    python.touch()
+    assert fixture._python(root) == python
 
 
 @pytest.mark.parametrize("mutation", ("none", "same-stat-content", "added", "removed"))
@@ -107,6 +158,8 @@ def test_assembled_update_capture_preserves_genuine_progress_with_a_finite_budge
     program = (
         "import sys;sys.path.insert(0,sys.argv[1]);"
         "import installer_source_build as builds;"
+        "import itertools;from types import SimpleNamespace;"
+        "builds.time=SimpleNamespace(monotonic=itertools.count().__next__);"
         "progress=builds._SourceProgress('source-selection',180,0);"
         "[progress.renew() for _ in range(100000)];print('settled')"
     )
@@ -127,7 +180,10 @@ def test_assembled_update_capture_preserves_genuine_progress_with_a_finite_budge
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows native diagnostic script")
 @pytest.mark.parametrize("extra", (0, 512))
-def test_process_trace_scopes_birth_identity_and_omits_argument_values(tmp_path: Path, extra: int) -> None:
+@pytest.mark.parametrize("close_fails", (False, True))
+def test_process_trace_scopes_birth_identity_and_omits_argument_values(
+    tmp_path: Path, extra: int, close_fails: bool,
+) -> None:
     from agent_procutil import no_window_kwargs
     from manager_suite_artifacts import _runtime_process_trace_script
 
@@ -141,8 +197,15 @@ def test_process_trace_scopes_birth_identity_and_omits_argument_values(tmp_path:
         "CreationDate=$birth;CommandLine=$line}};"
     ) if extra else ""
     prefix = (
-        "function Get-CimInstance {param($ClassName,$Filter,$OperationTimeoutSec);"
-        f"[IO.File]::WriteAllText('{str(stop).replace(chr(39), chr(39) * 2)}','stop');"
+        _trace_session_fixture(close_fails=close_fails) +
+        "$script:censusCalls=0;"
+        "function Get-CimInstance {param($ClassName,$Filter,$OperationTimeoutSec,$Property,$CimSession);"
+        "$script:censusCalls++;if($script:censusCalls -eq 2){"
+        f"[IO.File]::WriteAllText('{str(stop).replace(chr(39), chr(39) * 2)}','stop')}};"
+        "if(($Property -join ',') -ne 'ProcessId,ParentProcessId,CreationDate,CommandLine')"
+        "{throw 'Unexpected census projection'};"
+        "if($OperationTimeoutSec -ne 5 -or -not [object]::ReferenceEquals($CimSession,$script:ownedCim))"
+        "{throw 'The census did not use its bounded owned session'};"
         "$birth=[DateTime]::Parse('2026-01-01T00:00:00Z');"
         f"$line='\"{str(interpreter).replace(chr(39), chr(39) * 2)}\" "
         f"-B -m agent_worktrees {private}';"
@@ -160,11 +223,19 @@ def test_process_trace_scopes_birth_identity_and_omits_argument_values(tmp_path:
          prefix + _runtime_process_trace_script(home, ready, stop, report)],
         capture_output=True, text=True, timeout=15, **no_window_kwargs(),
     )
-    assert result.returncode == 0, result.stderr
+    assert result.returncode == int(close_fails), result.stderr
     raw = report.read_text(encoding="utf-8")
     trace = json.loads(raw)
     assert private not in raw and "CommandLine" not in raw and "foreign_module" not in raw
-    assert trace["stop_observed"] and trace["scan_errors"] == 0
+    assert trace["stop_observed"] and trace["scan_errors"] == int(close_fails)
+    assert trace["cim_session_created"] and trace["cim_session_closed"] is (not close_fails)
+    assert trace["timing"]["scan_attempts"] == trace["timing"]["scan_successes"] == 2
+    assert trace["timing"]["query_pipeline_attempts"] == 2
+    assert trace["timing"]["scan_total_ms"] >= trace["timing"]["scan_max_ms"] >= 0
+    assert trace["timing"]["query_pipeline_total_ms"] >= trace["timing"]["query_pipeline_max_ms"] >= 0
+    assert trace["timing"]["session_create_ms"] >= 0
+    if close_fails:
+        assert trace["scan_failures"][0]["phase"] == "session-close"
     assert trace["window_armed"]
     assert trace["truncated"] is bool(extra)
     records = trace["records"]
@@ -175,6 +246,22 @@ def test_process_trace_scopes_birth_identity_and_omits_argument_values(tmp_path:
     assert [row["no_bytecode"] for row in records[:2]] == [True, False]
 
 
+def _trace_session_fixture(*, close_fails=False):
+    return (
+        "$script:ownedCim=$null;$script:sessionCreations=0;"
+        "function New-CimSessionOption {param($Protocol);"
+        "if($Protocol -ne 'Dcom'){throw 'Expected local DCOM'};return 'fixture-dcom'};"
+        "function New-CimSession {param($SessionOption,$OperationTimeoutSec);"
+        "if($SessionOption -ne 'fixture-dcom' -or $OperationTimeoutSec -ne 1 -or $script:sessionCreations -ne 0)"
+        "{throw 'Unexpected census session creation'};"
+        "$script:sessionCreations++;"
+        "$script:ownedCim=[pscustomobject]@{owner='fixture'};return $script:ownedCim};"
+        "function Remove-CimSession {param($CimSession);"
+        "if(-not [object]::ReferenceEquals($CimSession,$script:ownedCim)){throw 'Foreign census session'};"
+        + ("throw 'controlled session close failure'" if close_fails else "$script:ownedCim=$null") + "};"
+    )
+
+
 @pytest.mark.skipif(os.name != "nt", reason="Windows native diagnostic script")
 def test_process_trace_does_not_consume_its_bound_before_the_baseline_window(tmp_path: Path) -> None:
     from agent_procutil import no_window_kwargs
@@ -182,6 +269,7 @@ def test_process_trace_does_not_consume_its_bound_before_the_baseline_window(tmp
 
     ready, stop, report = [tmp_path / name for name in ("ready", "stop", "report.json")]
     prefix = (
+        _trace_session_fixture() +
         "function Get-CimInstance {throw 'must not scan before baseline'};"
         "function Start-Sleep {param($Milliseconds);"
         f"[IO.File]::WriteAllText('{str(stop).replace(chr(39), chr(39) * 2)}','stop');}}"
@@ -194,7 +282,108 @@ def test_process_trace_does_not_consume_its_bound_before_the_baseline_window(tmp
     assert result.returncode == 0, result.stderr
     trace = json.loads(report.read_text(encoding="utf-8"))
     assert trace["stop_observed"] and trace["scan_errors"] == 0 and not trace["window_armed"]
+    assert not trace["cim_session_created"] and trace["cim_session_closed"] is None
     assert trace["records"] == [] and not trace["truncated"]
+    assert trace["timing"]["scan_attempts"] == trace["timing"]["query_pipeline_attempts"] == 0
+    assert trace["timing"]["session_create_ms"] is None
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows native diagnostic script")
+@pytest.mark.parametrize("kind", (
+    "non-cim", "cim", "timeout", "access-denied",
+    "cim-data", "cim-string-code", "cim-inner", "cim-inner-deep",
+))
+@pytest.mark.parametrize("stage", ("session", "scan"))
+def test_process_trace_retains_sanitized_scan_failure_and_still_refuses(
+    tmp_path: Path, kind: str, stage: str,
+) -> None:
+    from agent_procutil import no_window_kwargs
+    from manager_suite_artifacts import _runtime_process_trace_script
+
+    ready, stop, report = [tmp_path / name for name in ("ready", "stop", "report.json")]
+    (tmp_path / "process-trace-window").write_text("baseline")
+    private = "private query argument must not enter diagnostics"
+    code = {"timeout": "0x80041069", "access-denied": "0x80070005"}.get(kind, "")
+    error = (
+        f"[Microsoft.Management.Infrastructure.CimException]::new('{private} {code}')"
+        if kind != "non-cim" else f"'{private}'"
+    )
+    setup = ""
+    if kind in {"cim-data", "cim-string-code"}:
+        setup = (
+            "$data=[Microsoft.Management.Infrastructure.CimInstance]::new('CIM_Error');"
+            "foreach($pair in @(@('CIMStatusCode',[uint32]1),"
+            "@('ErrorType',[uint16]2),@('PerceivedSeverity',[uint16]5),"
+            "@('ProbableCause',[uint16]7),@('ErrorSourceFormat',[uint16]0),"
+            "@('error_Category',[uint16]3),"
+            f"@('Message','{private}'),@('ErrorSource','{private}'),"
+            "@('PrivateNumericField',[uint32]42))){"
+            "$data.CimInstanceProperties.Add("
+            "[Microsoft.Management.Infrastructure.CimProperty]::Create("
+            "$pair[0],$pair[1],[Microsoft.Management.Infrastructure.CimFlags]::None))};"
+            "$data.CimInstanceProperties.Add("
+            "[Microsoft.Management.Infrastructure.CimProperty]::Create('error_Code',"
+            + ("[uint32]0x80041069L" if kind == "cim-data" else "'2147749993'") +
+            ",[Microsoft.Management.Infrastructure.CimFlags]::None));"
+            "$script:fixtureError=[Microsoft.Management.Infrastructure.CimException]::new($data);"
+        )
+        error = "$script:fixtureError"
+    elif kind in {"cim-inner", "cim-inner-deep"}:
+        setup = (
+            "$inner=$null;"
+            f"foreach($index in 1..{5 if kind == 'cim-inner-deep' else 1}){{"
+            f"$inner=[InvalidOperationException]::new('{private}',$inner)}};"
+            f"$script:fixtureError=[Microsoft.Management.Infrastructure.CimException]::new('{private}',$inner);"
+        )
+        error = "$script:fixtureError"
+    target = "New-CimSession" if stage == "session" else "Get-CimInstance"
+    prefix = (
+        _trace_session_fixture() + setup +
+        f"function {target} {{throw {error}}};"
+        "function Start-Sleep {param($Milliseconds);"
+        f"[IO.File]::WriteAllText('{str(stop).replace(chr(39), chr(39) * 2)}','stop');}}"
+    )
+    result = subprocess.run(
+        [shutil.which("pwsh"), "-NoProfile", "-NonInteractive", "-Command",
+         prefix + _runtime_process_trace_script(tmp_path / "h", ready, stop, report)],
+        capture_output=True, text=True, timeout=15, **no_window_kwargs(),
+    )
+    assert result.returncode == 1
+    raw = report.read_text(encoding="utf-8")
+    assert private not in raw
+    trace = json.loads(raw)
+    assert trace["scan_errors"] == 1 and trace["stop_observed"]
+    assert trace["cim_session_created"] is (stage == "scan")
+    assert trace["cim_session_closed"] is (True if stage == "scan" else None)
+    (failure,) = trace["scan_failures"]
+    assert failure["type"] and isinstance(failure["hresult"], int)
+    assert isinstance(failure["elapsed_ms"], int) and failure["elapsed_ms"] >= 0
+    assert failure["records_at_failure"] == 0
+    assert failure["phase"] == ("session-create" if stage == "session" else "query-pipeline")
+    assert failure["error_category"]
+    assert failure["classification"] == {
+        "timeout": "timeout", "access-denied": "access-denied", "non-cim": "non-cim-error",
+    }.get(kind, "cim-error")
+    assert failure["embedded_hresult"] == (int(code, 16) if code else None)
+    expected_data = {
+        "CIMStatusCode": 1, "ErrorType": 2, "PerceivedSeverity": 5,
+        "ProbableCause": 7, "ErrorSourceFormat": 0, "error_Category": 3,
+    } if kind in {"cim-data", "cim-string-code"} else {}
+    if kind == "cim-data":
+        expected_data["error_Code"] = 0x80041069
+    assert failure["numeric_error_data"] == expected_data
+    assert failure["error_data_status"] == ("captured" if expected_data else "absent")
+    inner_count = {"cim-inner": 1, "cim-inner-deep": 4}.get(kind, 0)
+    assert failure["inner_hresults"] == [-2146233079] * inner_count
+    assert failure["inner_chain_truncated"] is (kind == "cim-inner-deep")
+    assert "PrivateNumericField" not in raw
+    assert trace["timing"]["scan_attempts"] == 1 and trace["timing"]["scan_successes"] == 0
+    assert trace["timing"]["query_pipeline_attempts"] == int(stage == "scan")
+    if kind != "non-cim":
+        assert failure["type"] == "Microsoft.Management.Infrastructure.CimException"
+        assert isinstance(failure["native_error_code"], int) and isinstance(failure["status_code"], int)
+    else:
+        assert failure["native_error_code"] is None and failure["status_code"] is None
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows process inventory")
@@ -277,6 +466,25 @@ def test_stdio_frontdoor_qualifies_its_actual_version_without_a_resolver_trace(
         with pytest.raises(RuntimeError, match="no actual V2 routing proof"):
             fixture._frontdoors(tmp_path, after)
     assert calls == ["--version"]
+
+
+def test_fixture_declares_the_native_codespaces_scheduling_it_requires(tmp_path: Path) -> None:
+    import runpy
+
+    (tmp_path / "project").mkdir()
+    payload = tmp_path / "published" / "plugins" / "agent-codespaces"
+    payload.mkdir(parents=True)
+    (payload / "plugin.json").write_text('{"name":"agent-codespaces","version":"1.0"}')
+    fixture._env(tmp_path)
+    fixture._configuration(tmp_path, {
+        "agent-codespaces": {"scope": "universal", "version": "1.0"},
+    })
+    reader = runpy.run_path(str(
+        fixture.REPO / "plugins" / "agent-codespaces" / "src" / "agent_codespaces"
+        / "scheduling.py"
+    ))["windows_scheduled_task"]
+    assert reader(tmp_path / "h" / ".agent-codespaces") == "enabled"
+    assert reader(tmp_path / "unconfigured-installation") == "preserve"
 
 
 @pytest.mark.skipif(os.name != "nt" or shutil.which("pwsh") is None, reason="Native Index role readers")
@@ -453,7 +661,10 @@ def test_native_stop_uses_installed_selection_when_payload_generation_is_not_ins
         [["stop"], ["engine", "stop"]] if component == "agent-index" else [["--stop"]]
     )
     if component == "agent-index":
-        assert all(Path(call["cache"]).samefile(root / "cache" / "python") for call in calls)
+        caches = [Path(call["cache"]) for call in calls]
+        assert all(cache.parent.samefile(root / "cache" / "python") for cache in caches)
+        assert all(re.fullmatch(r"unsealed-[0-9a-f]{32}", cache.name) for cache in caches)
+        assert len(set(caches)) == 1
 
 
 @pytest.mark.skipif(os.name != "nt" or shutil.which("pwsh") is None, reason="Native Bridge task resolver")
@@ -854,6 +1065,22 @@ def test_diagnostics_copy_only_advertised_request_logs(tmp_path: Path) -> None:
     assert (root / "witness.json").read_text(encoding="utf-8") == "opaque witness"
 
 
+def test_early_driver_refusal_retains_only_strictly_named_case_request_logs(tmp_path: Path) -> None:
+    root = tmp_path / "h" / ".copilot-extensions" / "update-driver"
+    root.mkdir(parents=True)
+    identifier = "a" * 32
+    log = root / (identifier + ".log")
+    log.write_text("original builder failure", encoding="utf-8")
+    (root / "operator.log").write_text("not a request log", encoding="utf-8")
+    (root / ("b" * 32 + ".log")).mkdir()
+    (root / "witness.json").write_text("opaque witness", encoding="utf-8")
+    diagnostics.retain_driver_logs(tmp_path, "transaction returned with unclosed participants")
+    copied = list((tmp_path / "driver-logs").iterdir())
+    assert [path.name for path in copied] == [log.name]
+    assert copied[0].read_text() == log.read_text() == "original builder failure"
+    assert (root / "witness.json").read_text() == "opaque witness"
+
+
 def test_diagnostics_bound_logs_without_mutating_the_source(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -982,7 +1209,7 @@ def test_construction_owner_failure_survives_closed_input_pipe(tmp_path: Path, o
         capture_output=True, text=True, timeout=30, **no_window_kwargs(),
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "Construction owner exited (9): fixture owner failure" in result.stdout
+    assert "(construction helper exit 9): fixture owner failure" in result.stdout
 
 
 @pytest.mark.parametrize("mode", ("normal", "repair"))

@@ -469,7 +469,7 @@ def render(
         "PROVISION_POWERSHELL": provision_powershell,
         "CATALOG_GATE_POSIX": (
             f'catalog_gate="$self_root/{data["catalogGate"]}"\n'
-            'if ! "$py" -E -X utf8 "$catalog_gate" --check --cwd "$PWD"; then\n'
+            'if ! "$py" -B -E -X utf8 "$catalog_gate" --check --cwd "$PWD"; then\n'
             "    printf '%s\\n' '{}'\n"
             "    exit 0\n"
             "fi\n"
@@ -482,7 +482,7 @@ def render(
             "$python = Get-Command python -ErrorAction SilentlyContinue\n"
             "if (-not $python) { $python = Get-Command py -ErrorAction SilentlyContinue }\n"
             "if (-not $python) { Write-Output '{}'; exit 0 }\n"
-            "& $python.Source -E -X utf8 $catalogGate --check "
+            "& $python.Source -B -E -X utf8 $catalogGate --check "
             "--cwd (Get-Location).Path *> $null\n"
             "if ($LASTEXITCODE -ne 0) { Write-Output '{}'; exit 0 }\n"
             if data["catalogGate"]

@@ -197,8 +197,9 @@ def test_adapter_later_phase_refuses_before_native_work(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("failed", ("prepare", "exercise", "assertions", None))
+@pytest.mark.parametrize("mode", ("normal", "repair", "fresh"))
 def test_native_stage_failure_always_settles(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failed: str | None,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failed: str | None, mode: str,
 ) -> None:
     calls = []
 
@@ -206,22 +207,26 @@ def test_native_stage_failure_always_settles(
         stage = next((name for name in ("prepare", "exercise", "settle")
                       if "--" + name in argv), "assertions")
         calls.append(stage)
+        if mode == "fresh":
+            assert str(runner.FRESH_FIXTURE) in argv
+        assert timeout == {"prepare": 1800, "exercise": 900, "assertions": 300, "settle": 90}[stage]
         return int(stage == failed)
 
     monkeypatch.setattr(runner, "_run", run)
     monkeypatch.setenv("MANAGER_SUITE_ACCEPTANCE_DATA", "previous-owner")
-    assert runner.qualify(tmp_path, "repair", Path(sys.executable)) == int(failed is not None)
+    assert runner.qualify(tmp_path, mode, Path(sys.executable)) == int(failed is not None)
     assert calls == {
         "prepare": ["prepare", "settle"],
         "exercise": ["prepare", "exercise", "settle"],
     }.get(failed, ["prepare", "exercise", "assertions", "settle"])
     assert runner.os.environ["MANAGER_SUITE_ACCEPTANCE_DATA"] == "previous-owner"
-    report = json.loads((tmp_path / "repair-runner.json").read_text(encoding="utf-8"))
+    report = json.loads((tmp_path / f"{mode}-runner.json").read_text(encoding="utf-8"))
     assert report["stages"]["settle"] == 0
 
 
+@pytest.mark.parametrize("mode", ("normal", "fresh"))
 def test_preparation_timeout_still_settles(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str,
 ) -> None:
     calls = []
 
@@ -232,7 +237,7 @@ def test_preparation_timeout_still_settles(
         return 0
 
     monkeypatch.setattr(runner, "_run", run)
-    assert runner.qualify(tmp_path, "normal", Path(sys.executable)) == 1
+    assert runner.qualify(tmp_path, mode, Path(sys.executable)) == 1
     assert calls == ["prepare", "settle"]
 
 
@@ -315,9 +320,9 @@ def test_process_observer_report_is_retained_by_the_actual_native_job() -> None:
         encoding="utf-8",
     ))
     upload = next(step for step in workflow["jobs"]["manager-suite-windows"]["steps"]
-                  if step.get("name") == "Retain synthetic qualification diagnostics")
+                  if step.get("uses") == "actions/upload-artifact@v4")
     paths = upload["with"]["path"].splitlines()
-    for mode in ("normal", "repair"):
+    for mode in ("normal", "repair", "fresh"):
         report = Path(".v") / f"{mode}-process-trace.json"
         assert any(report.match(pattern.strip()) for pattern in paths), str(report)
 

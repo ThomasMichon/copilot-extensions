@@ -31,6 +31,9 @@ def _legacy_owner_prefix():
         path = payload / "scripts" / "versioned_runtime.py"
         if not path.is_file() or path.is_symlink():
             return []
+    from configuration_context.readiness import qualify_resolver
+
+    qualify_resolver(path, "agent-logger", "agent_logger")
     sdk = _peer_launch._load_primitive(path, "_logger_configuration_versioned_runtime")
     return ready_owner_prefix(
         _default_repos_yaml_root().absolute(), "agent_worktrees", resolver=sdk.resolve_python,

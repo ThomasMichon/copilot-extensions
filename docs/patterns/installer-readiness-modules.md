@@ -91,6 +91,52 @@ runnable installer and probe without copying their behavior into the consumer.
 one, while the first payload command requires the canonical command-manifest
 shape and rejects mixed legacy `command` fields with `commands[]`.
 
+Repository-aware probes may run from the selected project, but that directory
+is configuration input, not an executable or Python import search root.
+The native Machines consumer strips relative/empty PATH entries for read-only
+children and disables implicit Windows cwd lookup, without changing installer
+environments. Read-only children also remove `BASH_ENV` to prevent implicit
+project-relative Bash startup execution. Payload module gates use `-I -B -X utf8` for readiness and
+invocation-contract metadata reads to load the selected
+installed package rather than a checkout-local module, including on Python
+3.10 where `PYTHONSAFEPATH` is unavailable. This preserves project-aware
+configuration and explicit UTF-8 output; it neither grants provisioning
+authority nor changes the selected runtime. Normal operational command caching
+and installer behavior are unchanged.
+The same options apply to legacy PowerShell's encoded-argument bootstrap and
+the Machines/Worktrees payload dispatchers, not only direct `-m` branches.
+Worktrees' metadata-only path skips operational cache selection. Inline
+standard-library parsers also exclude the project from their import path.
+Nested configuration-owner reads preserve that isolation through the canonical
+`configuration_context.ready_owner_prefix`, including qualified legacy runtimes.
+
+Read-only dispatch additionally requires the behavioral
+`copilot-extensions.readiness-isolation` version-1 declaration from both the
+selected payload and exact selected runtime. The payload owns
+`readiness-isolation.json`; its ordinary wheel installs a separate declaration
+at `share/copilot-extensions/<module>/readiness-isolation.json` beneath the
+environment prefix, so providers in a shared core do not overwrite each other.
+The [configuration-context contract](../../libs/configuration-layers/README.md#read-only-owner-transport-compatibility)
+owns schema, bootstrap and recursive transport details.
+
+Missing or unsupported declarations return typed exit 126 with
+`copilot-extensions.probe-compatibility` version 1, `status: unknown` and
+`recovery: update-owning-installation`, before the unqualified provider runs.
+Nested callers preserve that outcome rather than misreporting generic failed
+readiness. Neither a newer payload nor a deployment-root stamp qualifies an
+older selected runtime. Ordinary commands and separately authorized installers
+remain available; this requirement neither starts an update nor changes
+replacement, selection or retirement authority.
+
+Providers publish the inert descriptors before read-only consumers require
+them. Older callers continue to ignore them. New callers handle a missing
+declaration, mixed payload/runtime update or provider rollback with the same
+pre-execution unknown outcome, not a weaker probe or replay. No descriptor
+claims support for an older release lacking it, and source fixtures do not
+qualify an admitted upgrade baseline. Receiver release and deployment status
+must be established separately from this source contract; no package-version
+floor or synchronized-rollout assumption substitutes for that evidence.
+
 ### Script-only runtime ownership
 
 Native `agent-machines installation-repair` also needs an attributable runtime

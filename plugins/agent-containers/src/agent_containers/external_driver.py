@@ -91,6 +91,27 @@ def _resolve_executable(value: str) -> str | None:
     path = Path(value).expanduser()
     if path.is_absolute():
         return str(path) if path.is_file() and os.access(path, os.X_OK) else None
+    if os.environ.get("NoDefaultCurrentDirectoryInExePath") == "1":
+        if path.name != value:
+            return None
+        names = [value]
+        if os.name == "nt":
+            extensions = [
+                extension
+                for extension in os.environ.get("PATHEXT", ".COM;.EXE;.BAT;.CMD").split(os.pathsep)
+                if re.fullmatch(r"\.[a-zA-Z0-9]+", extension)
+            ]
+            if not any(value.lower().endswith(extension.lower()) for extension in extensions):
+                names = [value + extension for extension in extensions]
+        for entry in os.get_exec_path():
+            directory = Path(entry)
+            if not directory.is_absolute():
+                continue
+            for name in names:
+                selected = shutil.which(str(directory / name))
+                if selected:
+                    return selected
+        return None
     return shutil.which(value)
 
 
@@ -161,11 +182,11 @@ def find_driver(name: str) -> DriverSpec:
     )
     if name == "podman" and detail:
         raise RuntimeError(f"invalid explicit Podman registration{detail}")
-    on_path = shutil.which(PATH_PREFIX + name)
+    on_path = _resolve_executable(PATH_PREFIX + name)
     if on_path:
         return DriverSpec(name, (on_path,), "PATH")
     if name in BUNDLED_DRIVERS:
-        return DriverSpec(name, (sys.executable, "-m", BUNDLED_DRIVERS[name]),
+        return DriverSpec(name, (sys.executable, "-I", "-B", "-X", "utf8", "-m", BUNDLED_DRIVERS[name]),
                           "bundled")
     raise RuntimeError(
         f"runtime driver '{name}' is not registered: add "
