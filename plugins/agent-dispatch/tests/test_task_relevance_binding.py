@@ -4,9 +4,13 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import subprocess
+import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
+from agent_procutil import no_window_kwargs
 
 from agent_dispatch.assignment_workspace import AssignmentWorkspace
 from agent_dispatch.queue import Task, TaskQueue
@@ -176,3 +180,59 @@ def test_old_closeout_rows_remain_explicitly_uncaptured_after_migration(tmp_path
     with queue._connect() as conn:
         row = conn.execute("SELECT * FROM task_relevance_closeouts WHERE task_id='legacy'").fetchone()
     assert row["resource_binding"] is None
+
+
+_MIGRATE_CHILD = """
+import pathlib, sqlite3, sys, time
+from agent_dispatch.queue_relevance import QueueRelevanceMixin
+
+root = pathlib.Path(sys.argv[2])
+
+class Connection(sqlite3.Connection):
+    def execute(self, sql, parameters=()):
+        cursor = super().execute(sql, parameters)
+        if sql == 'PRAGMA table_info(task_relevance_closeouts)':
+            rows = cursor.fetchall()
+            if not any(row[1] == 'resource_binding' for row in rows):
+                (root / ('ready-' + sys.argv[3])).write_text('ready')
+                deadline = time.monotonic() + 10
+                while not all((root / ('ready-' + name)).exists() for name in ('0', '1')):
+                    if time.monotonic() >= deadline:
+                        raise TimeoutError('other migration did not observe the legacy schema')
+                    time.sleep(0.01)
+            return rows
+        return cursor
+
+with sqlite3.connect(sys.argv[1], isolation_level=None, timeout=15, factory=Connection) as conn:
+    QueueRelevanceMixin._migrate_task_relevance(conn)
+print('migrated')
+"""
+
+
+def test_independent_initializers_can_both_migrate_the_same_legacy_column(tmp_path: Path) -> None:
+    path = tmp_path / "queue.db"
+    with sqlite3.connect(path) as conn:
+        for table in ("task_events", "acquisition_receipts", "execution_send_custody"):
+            conn.execute(f"CREATE TABLE {table} (id INTEGER, task_id TEXT)")
+        conn.execute(
+            "CREATE TABLE task_relevance_closeouts ("
+            "task_id TEXT PRIMARY KEY, request_id TEXT NOT NULL, generation INTEGER NOT NULL,"
+            "owner TEXT, owner_session_id TEXT, steer_id INTEGER NOT NULL, created_at REAL NOT NULL)"
+        )
+
+    def migrate(identity: int) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [sys.executable, "-c", _MIGRATE_CHILD, str(path), str(tmp_path), str(identity)],
+            text=True, capture_output=True, timeout=30, **no_window_kwargs(),
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [executor.submit(migrate, identity) for identity in (0, 1)]
+        results = [future.result(timeout=40) for future in futures]
+    assert all(result.returncode == 0 for result in results), [
+        (result.returncode, result.stdout, result.stderr) for result in results
+    ]
+    assert all(result.stdout.strip() == "migrated" for result in results)
+    with sqlite3.connect(path) as conn:
+        columns = [row[1] for row in conn.execute("PRAGMA table_info(task_relevance_closeouts)")]
+    assert columns.count("resource_binding") == 1

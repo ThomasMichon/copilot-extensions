@@ -117,7 +117,11 @@ class QueueRelevanceMixin:
         )
         columns = {row[1] for row in conn.execute("PRAGMA table_info(task_relevance_closeouts)")}
         if "resource_binding" not in columns:
-            conn.execute("ALTER TABLE task_relevance_closeouts ADD COLUMN resource_binding TEXT")
+            try:
+                conn.execute("ALTER TABLE task_relevance_closeouts ADD COLUMN resource_binding TEXT")
+            except sqlite3.OperationalError as exc:
+                if "duplicate column name" not in str(exc).lower():
+                    raise
 
     def relevance_snapshot(
         self, task_id: str, *, registration: RelevanceRegistration | None = None,
