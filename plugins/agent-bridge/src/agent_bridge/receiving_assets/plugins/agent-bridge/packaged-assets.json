@@ -12,6 +12,7 @@
     "agent-bridge/extensions/agent-bridge/delivery.mjs",
     "agent-bridge/extensions/agent-bridge/delivery-state.mjs",
     "agent-bridge/extensions/agent-bridge/extension.mjs",
+    "agent-bridge/extensions/agent-bridge/machine-context.mjs",
     "agent-bridge/extensions/agent-bridge/metadata.mjs",
     "agent-bridge/extensions/agent-bridge/plugin-readiness.mjs",
     "agent-bridge/extensions/agent-bridge/questions.mjs",

@@ -136,6 +136,56 @@ test("registration waits for ready (the session metadata) and shutdown stops the
   assert.equal(waiting.registered, false);
 });
 
+test("prepared rollover defers its successor when predecessor refresh or naming is unavailable", async () => {
+  const state = { sessionId: "old", registered: false };
+  let mode = "ready";
+  const posts = [];
+  const register = serializedRegister(state, async (id, metadata) => {
+    posts.push({ id, metadata });
+    return mode !== "offline";
+  }, () => {}, { prepare: async () => mode === "unknown"
+    ? { clear_targeting_metadata: true } : { machine: "current" } });
+  await register();
+  adoptSessionId(state, "new");
+  mode = "offline";
+  assert.equal(await register(), false);
+  mode = "unknown";
+  assert.equal(await register(), false);
+  assert.deepEqual(posts.map((entry) => entry.id), ["old", "old", "old"]);
+  mode = "ready";
+  assert.equal(await register(), true);
+  assert.deepEqual(posts.map((entry) => entry.id), ["old", "old", "old", "old", "new"]);
+  assert.equal(posts.at(-2).metadata, posts.at(-1).metadata);
+  await register.close();
+});
+
+test("a predecessor incarnation rejection never rejects the new id or deregisters the foreign row", async () => {
+  const state = { sessionId: "old", registered: false };
+  let replaced = false;
+  const register = serializedRegister(state, async (id) =>
+    id === "old" && replaced ? "rejected" : true,
+  () => {}, { prepare: async () => ({ machine: "current" }) });
+  await register();
+  replaced = true;
+  adoptSessionId(state, "new");
+  assert.equal(await register(), true);
+  assert.equal(state.sessionId, "new");
+  assert.equal(state.rejectedIds.has("old"), true);
+  assert.equal(state.rejectedIds.has("new"), false);
+  assert.deepEqual(await register.close(), ["new"]);
+});
+
+test("shutdown stops an uncompleted metadata preparation without posting", async () => {
+  const state = { sessionId: "s", registered: false };
+  let posted = false;
+  const register = serializedRegister(state, async () => { posted = true; return true; },
+    () => {}, { prepare: () => new Promise(() => {}) });
+  register();
+  await tick();
+  assert.deepEqual(await register.close(), []);
+  assert.equal(posted, false);
+});
+
 test("shutdown drains a pending registration and returns every id to deregister", async () => {
   const state = { sessionId: "placeholder", registered: false };
   const { calls, post } = deferredPoster();

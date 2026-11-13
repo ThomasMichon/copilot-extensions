@@ -77,6 +77,8 @@ def _platform(entry: MachineEntry, observed: str) -> str:
 
 
 def _matches_observation(entry: MachineEntry, observed: str) -> bool:
+    if entry.hostname.strip():
+        return entry.hostname.strip().casefold() == observed.casefold()
     return observed.casefold() in {
         entry.key.strip().casefold(), entry.hostname.strip().casefold(), entry.alias.strip().casefold(),
         _physical(entry, observed).casefold(),
@@ -173,6 +175,8 @@ def resolve_local_execution_context(
     binding, never a requested target or a stored record's machine. File lookup,
     configuration provenance and receiving-project/ledger fences remain with the
     caller. Registry errors propagate; absence is not an error.
+    Without an explicit binding, a declared hostname takes precedence over
+    logical keys, aliases and physical-family selection.
     """
     observed = _clean_name(hostname, "observed hostname")
     platform = normalize_environment(environment)
@@ -246,6 +250,7 @@ def resolve_local_execution_context(
         entry for entry in registry.values()
         if _platform(entry, observed) in ("", platform)
         and _physical(entry, observed).casefold() in folded_families
+        and (not entry.hostname.strip() or entry.hostname.strip().casefold() == folded)
     ]
     scoped = [entry for entry in candidates if _platform(entry, observed) == platform]
     if scoped:

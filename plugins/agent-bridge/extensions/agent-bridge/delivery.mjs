@@ -326,8 +326,11 @@ export function adoptSessionId(state, eventSessionId, now = Date.now()) {
 // without it can't be recognized as the predecessor once a resume renames it,
 // so its handle and history would never follow the resumed session. Only
 // registration waits on it; ``close()`` stops the wait (nothing posted then).
+// ``prepare`` supplies one fresh metadata snapshot for an attempt. A rollover
+// refreshes the owned predecessor with that same snapshot before its successor,
+// so a machine rename cannot strand the predecessor's alias or CLI claim.
 export function serializedRegister(
-  state, post, onRegistered = () => {}, { now = Date.now, ready = null } = {},
+  state, post, onRegistered = () => {}, { now = Date.now, ready = null, prepare = null } = {},
 ) {
   let chain = Promise.resolve();
   let closed = false;
@@ -335,23 +338,37 @@ export function serializedRegister(
   const closing = new Promise((resolve) => { stopWaiting = resolve; });
   let lastOk = null;
   const posted = [];
+  const reject = (id) => {
+    (state.rejectedIds ||= new Map()).set(id, now() + REJECTED_RETRY_MS);
+    if (posted.includes(id)) posted.splice(posted.indexOf(id), 1);
+    if (lastOk === id) lastOk = null;
+  };
   const once = async () => {
     if (ready) await Promise.race([ready, closing]);
     for (;;) {
       const id = state.sessionId;
       if (!id || closed) return false;
-      const result = await post(id);
+      const metadata = prepare ? await Promise.race([prepare(), closing]) : undefined;
+      if (closed) return false;
+      if (state.sessionId !== id) continue;
+      if (prepare && lastOk && lastOk !== id) {
+        const previous = lastOk;
+        const refreshed = await post(previous, metadata);
+        if (refreshed === "rejected") reject(previous);
+        else if (refreshed !== true || metadata?.clear_targeting_metadata) return false;
+        if (closed) return false;
+        if (state.sessionId !== id) continue;
+      }
+      const result = await post(id, metadata);
       if (result === true) {
         lastOk = id;
         if (!posted.includes(id)) posted.push(id);
       } else if (result === "rejected") {
-        (state.rejectedIds ||= new Map()).set(id, now() + REJECTED_RETRY_MS);
         // The id is another incarnation's -- whether or not it is still the
         // current one: this process no longer serves it, and shutdown must not
         // delete that row (even if an earlier, id-only registration of it was
         // accepted).
-        if (posted.includes(id)) posted.splice(posted.indexOf(id), 1);
-        if (lastOk === id) lastOk = null;
+        reject(id);
       }
       if (state.sessionId !== id) continue; // renamed meanwhile
       if (result === "rejected") {

@@ -4,6 +4,8 @@ import importlib.util
 import io
 import json
 from pathlib import Path
+import posixpath
+import re
 import sys
 import zipfile
 
@@ -39,6 +41,12 @@ def test_selected_extensions_and_canonical_pane_shell_survive_materialization(tm
     released_bytes, released_identity = receiving_bundle.build_mux_support()
     assert (released_bytes, released_identity) == (source_bytes, source_identity)
     with zipfile.ZipFile(io.BytesIO(released_bytes)) as archive:
+        for name in archive.namelist():
+            if name.endswith(".mjs"):
+                source = archive.read(name).decode("utf-8")
+                for match in re.finditer(r"""(?:\bfrom\s+|\bimport\s*(?:\(\s*)?)["'](\.[^"']+)["']""", source):
+                    target = posixpath.normpath(posixpath.join(posixpath.dirname(name), match.group(1)))
+                    assert target in archive.namelist(), f"{name} imports missing asset {target}"
         assert archive.read("mux/pane-wrapper.sh") == (root / "worktree-manager/bin/pane-wrapper.sh").read_bytes()
         standalone = root / "plugins" / "agent-remote-driver"
         for name in archive.namelist():
