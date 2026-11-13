@@ -342,6 +342,15 @@ the non-public approval conversation.
 
 ## Plan
 
+The [loader/report study](journal/2026/11.13-loader-report-source-and-accountability-proposal.md)
+retains eighteen whole unions and verifies two finite source completions,
+including the actual named-Maintainer policy rather than an invented extra
+vote. The [five-case accountability receiving proposal](dispatch-accountability-receiving.md)
+preserves #11674's incumbent 26 rows and all original alternatives; review,
+actual amendment/readback and separate source retirement remain pending.
+Explicit owner OPEN conditions and all other gaps remain. One excluded
+arrival leaves 869 whole open, 140 above target.
+
 The [monitor-goals and decline-source study](journal/2026/11.13-monitor-goals-and-decline-source-completions.md)
 retains seventeen whole unions and #11534's unavailable original edit.
 Four finite source requests are completed with exact public readbacks;
@@ -3413,6 +3422,15 @@ sources, transferring owners or turning partial/planning gains into completion.
   normal publication flow.
 
 ## Validation Plan
+
+The [loader/report and receiving audit](journal/2026/11.13-loader-report-source-and-accountability-proposal.md)
+verifies 25 actual source blobs among 29 qualified files, source-owner
+execution grades, current delivery/role/check metadata and exact two
+acknowledgments/terminal states. The proposal's reverse-replay proof preserves
+every incumbent section/checkbox and replaces only eight numeric bytes
+besides one new lane. Planned receiving earns no public amendment, tracking
+retirement or technical credit; historical unknown classifications are not
+silently promoted into current source holds.
 
 The [monitor/decline audit](journal/2026/11.13-monitor-goals-and-decline-source-completions.md)
 verifies four finite completions against whole originals, direct source,
