@@ -63,7 +63,7 @@ def _run(
     tmp_path, *, child_exit=7, missing=False, uncertain=False, absent_end=False,
     stdin=None, child_stderr="", location=None, failed_sink=None,
     native_resume=False,
-    suspended=False, publish=True,
+    suspended=False, publish=True, resume_early=False, cleanup_failure=False,
 ):
     observed = tmp_path / "observed.jsonl"
     payload = tmp_path / "prepared.json"
@@ -119,10 +119,39 @@ def _run(
         "      if ($writer.ExitCode -ne $expected) { throw ('head-writer fence mismatch: '+$err.Result) }\n"
         "    } finally { $writer.Dispose() }\n"
     ) if native_resume else ""
+    invocation = (
+        f"$code = Invoke-AwNativeSeedBackend -Root {_literal(tmp_path)} "
+        f"-Record {_literal(tmp_path / 'wt-a.yaml')} "
+        + ("-AdmissionOnly -NativeResumeSession native-original " if native_resume else "-SeedId fixture ")
+        + ("-BeforeResume $capture " if suspended else "")
+        + "-Command @('copilot')\n"
+    )
+    if cleanup_failure:
+        invocation = (
+            "try {\n" + invocation
+            + "} catch { $code=19; [Console]::WriteLine($_.Exception.GetBaseException().GetType().Name) }\n"
+            "finally {\n"
+            "  $script:FixtureField.SetValue($script:FixtureChild,$script:FixtureOriginal)\n"
+            "  $script:FixtureChild.Dispose()\n"
+            "  $null=[NativeSeedFixture]::CloseHandle($script:FixtureLimited)\n"
+            "}\n"
+        )
     driver = tmp_path / "driver.ps1"
     driver.write_text(
         f". {_literal(SCRIPT)}\n"
+        + (
+            "Add-Type -TypeDefinition @'\n"
+            "using System; using System.Runtime.InteropServices;\n"
+            "public static class NativeSeedFixture {\n"
+            "[DllImport(\"ntdll.dll\")] public static extern int NtResumeProcess(IntPtr process);\n"
+            "[DllImport(\"kernel32.dll\",SetLastError=true)] public static extern bool DuplicateHandle("
+            "IntPtr source,IntPtr handle,IntPtr target,out IntPtr copy,uint access,bool inherit,uint options);\n"
+            "[DllImport(\"kernel32.dll\")] public static extern bool CloseHandle(IntPtr handle);\n"
+            "}\n'@\n"
+            if resume_early or cleanup_failure else ""
+        )
         # Substitute only the finite provider; the actual native child path remains real.
+        +
         "function Invoke-AwNativeSeedPhase {\n"
         "  param([string]$Root, [string[]]$Arguments)\n"
         "  $phase = $Arguments[1]\n"
@@ -151,17 +180,27 @@ def _run(
             f"  [IO.File]::AppendAllText({_literal(observed)}, "
             "(ConvertTo-Json -Compress -InputObject @('--phase','captured','--pid',"
             "[string]$createdPid,'--birth',[string]$birth))+\"`n\")\n"
+            + (
+                "  if ([NativeSeedFixture]::NtResumeProcess($handle) -ne 0) { throw 'fixture resume failed' }\n"
+                if resume_early else ""
+            )
+            + (
+                "  $script:FixtureChild=(Get-Variable nativeChild -Scope 1).Value\n"
+                "  $script:FixtureOriginal=$handle\n"
+                "  $script:FixtureLimited=[IntPtr]::Zero\n"
+                "  if (-not [NativeSeedFixture]::DuplicateHandle([IntPtr]::new(-1),$handle,"
+                "[IntPtr]::new(-1),[ref]$script:FixtureLimited,0x100000,$false,0)) { "
+                "throw 'fixture restriction failed' }\n"
+                "  $script:FixtureField=$script:FixtureChild.GetType().GetField('process',"
+                "[Reflection.BindingFlags]'NonPublic,Instance')\n"
+                "  $script:FixtureField.SetValue($script:FixtureChild,$script:FixtureLimited)\n"
+                if cleanup_failure else ""
+            )
             + ("  return $true\n" if publish else "  return $false\n")
             + "}\n"
             if suspended else ""
         )
-        +
-        f"$code = Invoke-AwNativeSeedBackend -Root {_literal(tmp_path)} "
-        f"-Record {_literal(tmp_path / 'wt-a.yaml')} "
-        + ("-AdmissionOnly -NativeResumeSession native-original " if native_resume else "-SeedId fixture ")
-        + ("-BeforeResume $capture " if suspended else "")
-        + "-Command @('copilot')\n"
-        "exit $code\n",
+        + invocation + "exit $code\n",
         encoding="utf-8",
     )
     executable_script = driver
@@ -236,6 +275,23 @@ def test_native_suspended_publication_refusal_never_admits_or_executes(tmp_path)
     assert not result.stdout
     assert [event[1] for event in events] == ["prepare", "captured", "spawn-failed"]
     assert "no backend executed" in result.stderr
+
+
+def test_native_zero_suspend_count_preserves_wait_exit_and_uncertain_receipt(tmp_path):
+    result, events, argv = _run(tmp_path, suspended=True, resume_early=True)
+    assert result.returncode == 7, result.stdout + result.stderr
+    assert json.loads(result.stdout.strip()) == argv
+    assert [event[1] for event in events] == ["prepare", "captured", "spawned", "returned"]
+    assert "--receipt-uncertain" in events[-1]
+    assert events[-1][events[-1].index("--exit-code") + 1] == "7"
+    assert "retaining the actual child wait" in result.stderr
+
+
+def test_native_unconfirmed_termination_never_restores_the_seed(tmp_path):
+    result, events, _ = _run(tmp_path, suspended=True, publish=False, cleanup_failure=True)
+    assert result.returncode == 19, result.stdout + result.stderr
+    assert result.stdout.strip() == "NativeCleanupException"
+    assert [event[1] for event in events] == ["prepare", "captured"]
 
 
 def test_native_definite_os_spawn_failure_is_the_only_restore_callback(tmp_path):

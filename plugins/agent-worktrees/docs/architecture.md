@@ -1266,8 +1266,16 @@ are inherited; unrelated inheritable handles are excluded. The callback receives
 that creation handle, PID and `windows:` birth and must return exactly boolean
 true before the owner resumes the child. Publication refusal settles only this
 unexecuted creation before recording `spawn-failed`; uncertain native resume is
-not relabeled as a definite spawn failure. The original byte transfers, admission,
+not relabeled as a definite spawn failure. Any resume attempt ends permission
+to terminate the child as an unexecuted creation. A zero suspend count retains
+the existing wait, actual exit and uncertain terminal receipt without retrying
+resume. Unconfirmed termination raises a distinct cleanup error, never the
+definite OS-spawn-failure class that permits seed restoration.
+The original byte transfers, admission,
 head-writer fence, wait and terminal callback remain with the shell.
+The canonical build selector and its trusted admission counterpart include the
+C# companion; wheel and source-distribution round trips retain all three native
+assets, not only the PowerShell loader.
 No production caller currently supplies this callback. It is not MCP capability
 advertisement, an anonymous owner bootstrap or automatic caller enrollment.
 The focused `tests/test_native_seed_process.py` and `tests/test_native_seed_shell.py`

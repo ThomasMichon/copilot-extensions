@@ -1,0 +1,13 @@
+{
+  "comment": "Keep projected application resource builders aligned with canonical C# companion packaging",
+  "changes": [
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

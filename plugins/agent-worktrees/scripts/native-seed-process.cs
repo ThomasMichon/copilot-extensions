@@ -8,6 +8,10 @@ using System.Text;
 using Microsoft.Win32.SafeHandles;
 
 namespace AwNativeSeed {
+    public sealed class NativeCleanupException : InvalidOperationException {
+        public NativeCleanupException(string message) : base(message) {}
+    }
+
     // The existing caller owns publication, resume, stream transfer and waiting.
     public sealed class SuspendedProcess : IDisposable {
         public Process Process { get; private set; }
@@ -182,15 +186,13 @@ namespace AwNativeSeed {
             }
         }
 
-        public void Resume() {
+        public bool Resume() {
             lock (this) {
                 if (disposed || resumed) throw new InvalidOperationException("Native resume already settled");
-                if (ResumeThread(thread) != 1) {
-                    throw new InvalidOperationException("Native suspension state changed");
-                }
+                // Any resume attempt ends proof that this creation never executed.
                 resumed = true;
-                CloseHandle(thread);
-                thread = IntPtr.Zero;
+                try { return ResumeThread(thread) == 1; }
+                finally { CloseHandle(thread); thread = IntPtr.Zero; }
             }
         }
         public void Dispose() {
@@ -199,11 +201,16 @@ namespace AwNativeSeed {
                 if (!resumed && process != IntPtr.Zero) {
                     uint state = WaitForSingleObject(process, 0);
                     if (state == 258) {
-                        Require(TerminateProcess(process, 3));
-                        state = WaitForSingleObject(process, 5000);
+                        bool terminated = TerminateProcess(process, 3);
+                        int error = Marshal.GetLastWin32Error();
+                        state = WaitForSingleObject(process, terminated ? 5000u : 0u);
+                        if (!terminated && state != 0) {
+                            throw new NativeCleanupException(
+                                "Suspended child termination unconfirmed; native error " + error);
+                        }
                     }
                     if (state != 0) {
-                        throw new InvalidOperationException("Suspended child cleanup unconfirmed");
+                        throw new NativeCleanupException("Suspended child cleanup unconfirmed");
                     }
                 }
                 disposed = true;

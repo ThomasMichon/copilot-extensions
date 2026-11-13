@@ -518,7 +518,10 @@ function Invoke-AwNativeSeedBackend {
                         [Console]::Error.WriteLine('Native pre-execution handoff refused; no backend executed.')
                         return 3
                     }
-                    $nativeChild.Resume()
+                    if (-not $nativeChild.Resume()) {
+                        $receiptUncertain = $true
+                        [Console]::Error.WriteLine('Native resume is unconfirmed; retaining the actual child wait and outcome.')
+                    }
                 } elseif (-not $process.Start()) {
                     [Console]::Error.WriteLine('Native backend start is unconfirmed; the handoff is retained.')
                     return 3
@@ -575,7 +578,7 @@ function Invoke-AwNativeSeedBackend {
             $spawned = if ($canRecord) {
                 Invoke-AwNativeSeedPhase $Root $spawnArgs -Runtime $runtime -Environment $callbackEnvironment
             } else { $null }
-            $receiptUncertain = -not ($spawned -and $spawned.recorded -eq $true)
+            $receiptUncertain = $receiptUncertain -or -not ($spawned -and $spawned.recorded -eq $true)
         } catch { $receiptUncertain = $true }
         if ($headFence -and -not $receiptUncertain) {
             $headFence.Dispose()
