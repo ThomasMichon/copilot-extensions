@@ -132,3 +132,35 @@ issue's body is a self-contained, repository-neutral restatement of the
 routed Plan bullet with no reference to this ledger's originating session
 context.)*
 
+## Finite account-execution intake (2026-11-13)
+
+This pass proposes the following disposition. `routed` takes effect only
+when normal review merges the accompanying direct domain Plan amendment;
+publishing this ledger proposal alone is not domain acceptance. Earlier
+passes and all unresolved residuals above remain unchanged.
+
+| Candidate | Source | Disposition | Primary canonical owner | Tracker outcome |
+|-----------|--------|-------------|-------------------------|-----------------|
+| Intended-account execution, including inherited stale-credential and registered-target parity | Public #5791, including its already-transferred #330/#2755 acceptance | routed | [`account-aware-operations`](../account-aware-operations/README.md), **Phase 2 only** | Retain existing #5791 pending separate whole-contract receiving/source judgment; no new issue or umbrella |
+
+Deduplication keeps one original-plus-inherited family, not separate new
+#330/#2755 work or another identity resolver. The current qualified source
+assessment credits #8921's explicit missing-token correction and #3050's
+short-name lookup; named-account actionable stale/rejected-token refusal
+and the complete supported dispatcher compatibility matrix remain
+unqualified acceptance, not declared absent implementation.
+
+The proposed home already owns repository/account selection and scoped
+execution. Its Phase 1 identity contract and Phase 4 recovery are interfaces,
+not additional primary phases or new owners. The direct Phase 2 Plan/local
+AND actual global Validation and Coordination retain the original finite
+contract, alternatives, diagnostic classes, current repair continuation and
+custody. The candidate is general-purpose public tracker work; no originating
+environment or private evidence is published.
+
+The owning effort remains Draft. Reviewed domain-Plan acceptance does not
+activate it, waive its temporary-token implementation restriction, create
+another tracker, satisfy runtime acceptance or authorize authentication,
+provider writes, rollout or source/resource release. Unknown current evidence
+continues to block technical completion; it is not force-published as proof.
+
