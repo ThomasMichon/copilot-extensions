@@ -179,6 +179,38 @@ def test_rename_projects_current_owner_without_rewriting_producer_history(
     assert {path: path.read_bytes() for path in before} == before
 
 
+@pytest.mark.parametrize("rename_again", [False, True])
+def test_transfer_after_rename_reconciles_all_historical_creator_spellings(
+    ledgers: Path, monkeypatch: pytest.MonkeyPatch, rename_again: bool,
+) -> None:
+    from dataclasses import replace
+
+    bound = reserve(ledgers, bound=True)
+    topology = ledgers / "machines.yaml"
+    topology.write_text(
+        "machines:\n  renamed: {hostname: m, execution_platform: linux}\n", encoding="utf-8",
+    )
+    config = replace(cfg.load_config(), machine="renamed")
+    monkeypatch.setattr(cfg, "load_config", lambda *a, **k: config)
+    monkeypatch.setattr(cfg, "load_project_config", lambda *a, **k: config)
+    bundle, _ = claim_handoffs.offer(
+        "renamed/p/owner", "renamed/p/consumer", [bound["ref"]], machine="renamed",
+    )
+    claim_handoffs.accept(bundle.bundle_id, actor="renamed/p/consumer", machine="renamed")
+    current = "renamed"
+    if rename_again:
+        current = "latest"
+        topology.write_text(
+            "machines:\n  latest: {hostname: m, execution_platform: linux}\n", encoding="utf-8",
+        )
+    before = {path: path.read_bytes() for path in ledgers.rglob("*.yaml")}
+    snapshot = scan_ownership()
+    assert snapshot["complete"], snapshot["issues"]
+    assert {row["creator"] for row in snapshot["entries"]} == {"m/p/owner"}
+    assert {row["current_owner"] for row in snapshot["entries"]} == {f"{current}/p/consumer"}
+    assert {path: path.read_bytes() for path in before} == before
+
+
 @pytest.mark.parametrize("damage", ["missing", "marker", "source", "mismatch", "cycle"])
 def test_interrupted_or_invalid_transfer_is_unknown(ledgers: Path, damage: str) -> None:
     bound = reserve(ledgers, bound=True)

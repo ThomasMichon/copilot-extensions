@@ -150,15 +150,23 @@ def settle_parent_obligation(record: Any, config: Any, worktree_id: str, *, outp
                 return
             receiving_config = project_record_config(parent)
             require_record_mutation(parent, receiving_config)
+            from .tracking_lookup import local_pair_subjects
+
+            paired_child = (
+                getattr(record, "pair_role", None) == "knowledge"
+                and getattr(record, "pair_kind", None) == "worktree"
+                and record.worktree_id == worktree_id and record.repo == config.repo_name
+                and owner == record.pair_claim_ref and local_pair_subjects(record, parent)
+            )
             if owner.machine != getattr(parent, "execution_machine", parent.machine):
                 alias = None
                 if getattr(parent, "machine_identity", None) is None:
                     alias = legacy_wsl_record_locality.resolve_legacy_wsl_owner_ref(owner, config)
-                if alias is None or alias.resolve() != parent_path.resolve():
+                if not paired_child and (alias is None or alias.resolve() != parent_path.resolve()):
                     raise ValueError("parent reference conflicts with the record execution owner")
             if not local_child and not require_owner_identity(caller_key, receiving_config):
                 raise ExecutionSpaceError("caller is not local to the parent receiving execution space")
-            child_ref = tracking.format_claim_ref(
+            child_ref = parent.pair_ref if paired_child else tracking.format_claim_ref(
                 getattr(record, "execution_machine", record.machine), config.repo_name, worktree_id,
             )
             if child_ref == paired_claims.paired_ref(parent) and any(

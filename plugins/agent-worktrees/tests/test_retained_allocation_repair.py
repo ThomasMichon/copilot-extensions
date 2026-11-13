@@ -257,3 +257,37 @@ def test_terminal_pair_conclusion_uses_original_receipts_after_rename(
     assert not tracking.load_record(parent.yaml_path).is_paired
     assert not tracking.load_record(child_path).is_paired
     assert terminal_pair_progress.gc_preservation_reason(child_path) is None
+
+
+@pytest.mark.parametrize("removed_checkout", [False, True])
+def test_companion_finalization_settles_original_parent_claim_after_rename(
+    tmp_path, monkeypatch, capsys, removed_checkout,
+):
+    from agent_worktrees import finalize, git_ops
+
+    creation = _creation_fixture(tmp_path, monkeypatch, native_git=True, tuple_identity=True)
+    code, report = _run(creation, capsys, fix=True)
+    assert code == 0, report
+    parent = tracking.load_record(creation.record.yaml_path)
+    original_ref = parent.pair_ref
+    parent.resources.append(tracking.ResourceClaim(kind="task", ref="unrelated-task"))
+    tracking.save_record(parent)
+    child_path = creation.projects["knowledge"] / "worktrees" / f"{parent.worktree_id}-k.yaml"
+    child = tracking.load_record(child_path)
+    child.status = "finalized"
+    tracking.save_record(child)
+    if removed_checkout:
+        git_ops.git("worktree", "remove", child.worktree_path, cwd=creation.anchors["knowledge"])
+    for name in creation.configs:
+        (creation.anchors[name] / "machines.yaml").write_text(yaml.safe_dump({"machines": {
+            "renamed": {"hostname": cfg.socket.gethostname(), "execution_platform": cfg.detect_platform()},
+        }}), encoding="utf-8")
+        creation.configs[name] = replace(creation.configs[name], machine="renamed")
+    child = tracking.load_record(child_path)
+    finalize._settle_parent_obligation(child, creation.configs["knowledge"], child.worktree_id)
+    current = tracking.load_record(parent.yaml_path)
+    claim = next(claim for claim in current.resources if claim.ref == original_ref)
+    assert claim.is_at_rest
+    assert current.pair_ref == original_ref and current.execution_machine == "renamed"
+    assert next(claim for claim in current.resources if claim.ref == "unrelated-task").is_unsettled
+    assert "Cannot confirm" not in capsys.readouterr().err

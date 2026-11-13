@@ -65,16 +65,6 @@ def _resolve_group(
     ):
         issues.append(issue("token-mismatch", subject, "token entries disagree on immutable metadata"))
         return None
-    historical: dict[tuple[str, str], set[str]] = defaultdict(set)
-    for metadata in metadata_by_owner.values():
-        references = [metadata["creator"]]
-        if metadata["phase"] == "transferred":
-            references.extend(metadata["transfer"][field] for field in ("source", "consumer"))
-        for value in references:
-            ref = tracking.parse_claim_ref(value) if qualified_owner(value) else None
-            if ref is not None:
-                historical[(ref.project, ref.worktree_id)].add(value)
-
     def resolve(value: str) -> str | None:
         if value in by_owner:
             return value
@@ -83,7 +73,7 @@ def _resolve_group(
             return None
         key = ref.project, ref.worktree_id
         candidates = [row.owner for row in group if row.receiving_subject == key]
-        if len(candidates) == 1 and historical[key] == {value}:
+        if len(candidates) == 1:
             return candidates[0]
         return None
 
