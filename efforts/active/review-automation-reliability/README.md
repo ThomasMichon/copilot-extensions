@@ -72,6 +72,31 @@ by this parked record.
   (Phase 10 implementation). Slices land as separate PRs referencing the
   issue for their phase.
 
+These two documentary families propose Phase 11/migration-intake tracking
+acceptance ONLY. Preserve the existing lifecycle host as the effort's tracking
+owner and the repository review-policy/author-feedback custodians for #5183
+and Worktrees default PR-output/policy custodians for #5211; no new implementer,
+joint runtime authority or generic registrar/schema is created. The generic
+reviewer runtime must not absorb consumer rubric, ACL, acting identity, merge
+policy, scheduler or telemetry. Keep this existing generic/consumer seam.
+
+The ROOT stays Blocked and execution stays parked. Explicit maintainer
+resumption and reconciliation of current phase/native/ground/provider/source
+ownership remain necessary BEFORE any execution. They are not represented as
+an automatic veto on a normally reviewed, complete, parked tracking addition.
+No status rename, reactivation, claim transfer, source takeover or resource
+release is requested. Preserve #2423's authoritative independent contract and
+every existing owner/hold. #4130 expressly excludes #5183/#5211; #11091 retains
+its distinct parser/count-budget scope.
+
+Normal review through the existing Phase 11/migration-intake domain-acceptance
+gate must first deliver the COMPLETE direct Plan/local AND ROOT-global
+Validation/Coordination/dated-Journal addition, followed by complete current
+receiving/source/history/custody readback. Only then may the coordinator make
+each separate redundant-tracking judgment. Keep #5183/#5211 OPEN now. No
+generic new ACK, implementation completion, all-parent/native gate or new owner
+is added, and no existing explicit condition is waived by this proposal.
+
 ## Context
 
 Review automation crosses asynchronous systems that can delay, duplicate, lose,
@@ -490,6 +515,73 @@ any-boundary resumption, stale-revision blocking, etc.) checkable against
   wrong-remote reconciliation gap surfaced by that flow's own review.
 - [ ] Keep examples synthetic and repository-neutral.
 
+### Proposed parked semantic-finding and visible-round families
+
+These are two distinct finite source contracts. They remain parked for
+execution under the existing maintainer-resumption rule. Documentary intake
+does not resume implementation, appoint an executor or transfer source custody.
+
+- [ ] **R5183-P1:** Preserve the original alternative: EITHER revalidate EACH
+  carried finding against the CURRENT diff before listing it again OR provide
+  an effective cheap author-side process/tool to mark a finding "addressed,
+  awaiting re-validation" so the next pass explicitly checks it. Existing
+  REVIEW directives and CONTRIBUTING exact-fixing-commit/line or same-thread
+  callouts are credited as the original partial mitigation, not proof that
+  actual reviewer/author-feedback behavior now satisfies either alternative.
+- [ ] **R5183-P2:** Retain the reported #4993 25-round incident evidence:
+  findings persisted 10-20+ rounds after fixes, including the descendant that
+  outlived its leader and its named real-subprocess regression. Retain the
+  separately disclosed/tracked #5174 `extends:` per-hop-origin limitation and
+  bounded mitigation without repeatedly re-escalating it to High merely
+  because it remains intentionally scoped out. Preserve independent judgment:
+  actual new regressions or an inadequate mitigation still require findings.
+- [ ] **R5183-P3:** Keep semantic carried-finding acceptance separate from
+  #3638 merge-legibility reporting, runner rescue, completion-controller
+  activation and review-cap counting. An unrelated passing review, an accepted
+  verdict shape, a cap or a disabled controller is not semantic revalidation.
+  Do not repeatedly re-fix already-correct code merely to clear stale prose.
+- [ ] **R5183-LV1:** Through the chosen original EITHER/OR remedy, demonstrate
+  that a genuinely fixed carried finding is not blindly relisted against the
+  current diff, or that the cheap addressed/awaiting-revalidation signal is
+  actually consumed for explicit checking. Retain a true-new-regression
+  control and the deliberately disclosed, tracked bounded-mitigation case.
+  Preserve the named descendant regression and fixing-commit/line incident
+  evidence without treating this intake as a fresh execution of that fixture.
+- [ ] **R5183-LV2:** Attribute actual behavioral evidence, current revision and
+  remaining limitation truthfully. Guidance changes, unrelated green reviews,
+  transport success, round caps and disabled implementations are not behavioral
+  qualification. No shared-reviewer diagnosis, queue/log inspection, review
+  request, service action or administrator bypass follows from a slow PR.
+
+- [ ] **R5211-P1:** Surface the current review ROUND or equivalent cycle count
+  in BOTH default `pr-watch` AND `pr-status` output without manual event
+  counting. Credit the separate delivered `pr rounds` command, but do not
+  equate an optional command with its integration in the named default outputs.
+- [ ] **R5211-P2:** Retain a visible explicit SOFT threshold AND concrete
+  change of tactic: fresh top-to-bottom whole-diff reread rather than another
+  delta-only pass, OR a different approach such as splitting/narrowing the PR
+  or appropriate human checking. The original illustrative five is not a
+  mandatory constant; credit the delivered six-round/three-plateau primitive
+  and documented rethink/lower-level-cause/person tactic at their actual scope.
+- [ ] **R5211-P3:** Compose default count/threshold/tactic with R5183's
+  addressed/awaiting-revalidation alternative without merging the two sources'
+  distinct outcomes. Never lower rigor, waive real findings, CI, approvals,
+  verdict rules, merge authority or `pr bar` because a loop is long.
+  Unmeasured/unknown is not zero; a clean old head is not a clean new head.
+- [ ] **R5211-LV1:** Check BOTH actual default output consumers for a visible
+  current count, not just routing/availability of the optional rounds command.
+  Preserve truthful unknown/unmeasured and old-head/current-head distinctions.
+- [ ] **R5211-LV2:** Verify the explicit soft threshold produces a concrete
+  changed tactic and composes with the selected R5183 remedy while retaining
+  full review/check/approval authority. Do not reject an accepted equivalent
+  merely because its threshold differs from the original illustrative five.
+- [ ] **R5211-LV3:** Keep #11091's separate current-summary parser, counted-round
+  budget, unknown-metric and split-rule defect and #5352's FULL 32-round loop
+  PLUS comparison sample independent. Those issue references, existing policy
+  directives and source-described optional primitive are not newly executed
+  default-output or semantic-revalidation proof. No provider review, product
+  command, test, native interaction or service operation is run by intake.
+
 ### Bug sweep — linked open bugs (2026-09-24)
 
 _Correlated via a facility-driven sweep of open `bug`-labeled issues against active efforts (VEI + direct review). Not yet triaged into a numbered phase — listed here as upcoming work for whoever picks this effort back up._
@@ -522,6 +614,20 @@ _Correlated via a facility-driven sweep of open `bug`-labeled issues against act
   (`plugins/agent-dispatch/tests/test_simulation.py`,
   `test_simulation_revision.py`, `test_simulation_deferred_scenarios.py`).
 
+- [ ] **R5183-G:** Resolve EVERY R5183 Plan/local Validation condition through
+  the original current-diff carried-finding revalidation OR effective cheap
+  addressed/awaiting-revalidation alternative, retaining actual incident,
+  descendant-regression and disclosed tracked mitigation evidence, true
+  independent rigor, partial-guidance credit and separate merge/controller/
+  rescue/cap outcomes. This remains parked planned acceptance, not behavior
+  fulfillment, source/resource release or whole-effort completion.
+- [ ] **R5211-G:** Resolve EVERY R5211 Plan/local Validation condition:
+  visible current count in BOTH default status/watch outputs AND explicit
+  SOFT threshold/concrete tactic, composed with R5183 without lowering rigor
+  or bypassing actual review/CI/approval/merge authority. Preserve optional
+  six/three credit, unknown versus zero, current versus old head and independent
+  #11091/#5352 scope. This is not execution enrollment or native/provider proof.
+
 ## Proposal
 
 Build the provider-neutral durable lifecycle first, then adapt existing review
@@ -529,6 +635,19 @@ drivers and prove reliability with deterministic interruption and duplication
 scenarios.
 
 ## Journal
+
+### 2026-11-13 - Proposed parked tracking of semantic findings and round visibility
+
+Current complete eligible #5183/#5211 original/discussion unions preserve two
+different outcomes: current-diff revalidation OR cheap addressed feedback, and
+visible counts in BOTH default status/watch outputs with a soft threshold and
+concrete changed tactic. Existing directives, exact-line/thread guidance and
+the optional six/three primitive remain credited partials. The 2026-11-02
+maintainer parking constrains execution; this proposal does not resume it.
+All thirteen new technical/validation rows remain unchecked, original
+participants/owners/status/phase/native/provider/resource holds are unchanged,
+and no runtime, review, queue, test or service action occurred. Complete normal
+reviewed intake/readback and separate source judgments remain pending.
 
 ### 2026-11-02 - Reconciled source delivery and parked the ROOT effort
 
