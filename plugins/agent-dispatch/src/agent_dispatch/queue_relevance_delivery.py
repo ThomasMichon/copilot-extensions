@@ -8,7 +8,6 @@ from dataclasses import replace
 from .queue_common import Task, WakeOperation
 from .queue_records import Status
 
-
 CLOSEOUT_STATUSES = frozenset({*Status.OWNED, Status.SUBMITTED})
 
 
@@ -63,10 +62,22 @@ def enqueue_closeout(owner, conn: sqlite3.Connection, task: Task, closeout: sqli
     prompt = (
         f"Task {task.id} no longer needs its original goal. Remain in this original "
         f"conversation at generation {task.generation}; do not start or resume the goal. "
-        f"Read `agent-dispatch show {task.id}` and take the closeout instruction with "
-        f"`agent-dispatch steer take {task.id} --all`. Preserve existing work, open PRs, "
-        "holds and foreign obligations. Close out through the existing task, session "
-        "and managed-worktree owners, including finalization when eligible. "
+        "Use this session's attributable agent-dispatch command from its command catalog, "
+        "not an ambient PATH command or a different installation. First read "
+        "`<agent-dispatch catalog argv[0]> --help` without effects. Only if that executing "
+        "CLI lists `relevance-closeout`, run "
+        f"`<agent-dispatch catalog argv[0]> relevance-closeout {task.id}` from this "
+        "original worker's own checkout. That command discovers the running receiver, "
+        "settles the original claim, finalizes the eligible workspace and then "
+        "acknowledges abandonment; it does not release or terminate the native session. "
+        "Do not require generic show or steer access: captured owners may no longer "
+        "have that authority. If the catalog command, CLI support, receiver support "
+        "or authority is missing, retain custody and report the unsupported boundary "
+        "through this conversation; do not probe effects, fall back to abandon, mint "
+        "credentials or substitute another owner. Preserve existing work, open PRs, "
+        "holds and foreign obligations. A refusal or unknown result remains pending "
+        "under the original closeout request; do not start a replacement task. "
+        "Leave native conclusion to the existing session/conclusion owners. "
         "A wake receipt or terminal task status is not proof of actual cleanup. "
         "If ownership or generation changed, stop and report the mismatch."
     )
