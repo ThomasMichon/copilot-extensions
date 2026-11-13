@@ -8,16 +8,12 @@ import math
 import os
 from pathlib import Path
 import time
-from typing import TYPE_CHECKING
 
 from . import config, service_cache_epochs
-from .cache import cache_enabled
+from .cache import PersistentCache, cache_enabled
 from .cache_dpapi import CacheProtectionError
 from .credential_fields import canonical_field
 from .identity_context import identity_cache_digest
-
-if TYPE_CHECKING:
-    from .cache import PersistentCache
 
 PREFIX = "agent-vault.service-cache.v1:"
 COLLECTION = "service_entries"
@@ -75,10 +71,14 @@ def _field(record: dict) -> str | None:
 def _legacy_records(store: dict, entry: str, field: str) -> list[tuple[str, str, dict]]:
     result = []
     for path, fields in store["entries"].items():
-        if config.normalize_entry(path, "") != entry or not isinstance(fields, dict):
+        if config.normalize_entry(path, "") != entry:
             continue
-        for attribute, record in fields.items():
-            if canonical_field(attribute) == field and isinstance(record, dict):
+        if not isinstance(fields, dict):
+            PersistentCache._field_record(store, path, field, strict=True)
+            continue
+        for attribute in fields:
+            if canonical_field(attribute) == field:
+                record = PersistentCache._field_record(store, path, attribute, strict=True)
                 result.append((path, attribute, record))
     return result
 
@@ -176,6 +176,7 @@ class ServiceCacheStore:
                     raise RevocationChanged("Credential-cache revocation changed during the read")
                 store = self.persistent._read_store(readonly=True, strict=True)
                 records = _records(store)
+                counter = _counter(store)
                 legacy = self.persistent._field_record(store, entry, field, strict=True)
                 pending = legacy.get("rotation") if isinstance(legacy, dict) else None
                 aliases = _legacy_records(store, entry, field)
@@ -199,7 +200,7 @@ class ServiceCacheStore:
                     if isinstance(record, dict) and record.get("database") == self.database
                     and _entry(record) == entry and _field(record) == field
                 ]
-                floors = [_counter(store), *(
+                floors = [counter, *(
                     record["generation"] for record in [*relevant, prior]
                     if isinstance(record, dict) and type(record.get("generation")) is int
                     and record["generation"] >= 0

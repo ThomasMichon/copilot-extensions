@@ -848,3 +848,29 @@ def test_alias_journal_guard_preserves_strict_corruption_failure(
 
     assert persistent._cache_file.read_bytes() == before
     assert persistent.get("Allowed/entry") is None
+
+
+@pytest.mark.parametrize("invalid_field", ["password", "Password"])
+@pytest.mark.parametrize("operation", ["record", "put"])
+def test_service_store_rejects_malformed_journals_without_revoking_or_writing(
+    cached_service, invalid_field: str, operation: str,
+) -> None:
+    _vault, persistent, kpdb, _clock = cached_service
+    selected = _store(persistent, kpdb)
+    assert type(selected.put("entry", "password", "service-value", 1)) is int
+    for field in ("password", "Password"):
+        assert persistent.begin_replace("Allowed/entry", field, "candidate", 2)
+    store = persistent._read_store()
+    store["entries"]["Allowed/entry"][invalid_field] = {"rotation": "invalid"}
+    assert persistent._write_store(store)
+    before = persistent._cache_file.read_bytes()
+    revocation = selected.revocation_state("entry", "password")
+
+    if operation == "record":
+        with pytest.raises(CacheProtectionError, match="record is invalid"):
+            selected.record("entry")
+    else:
+        assert selected.put("entry", "password", "replacement", 3) is None
+
+    assert persistent._cache_file.read_bytes() == before
+    assert selected.revocation_state("entry", "password") == revocation
