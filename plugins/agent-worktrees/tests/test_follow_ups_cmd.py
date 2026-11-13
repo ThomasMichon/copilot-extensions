@@ -9,6 +9,8 @@ import json
 import types
 from contextlib import redirect_stdout
 
+import pytest
+
 from agent_worktrees import __main__ as m
 from agent_worktrees import state_root, tracking
 from agent_worktrees import worktree_identity
@@ -177,6 +179,64 @@ def test_show_human_output_lists_legacy_boolean(tmp_path, monkeypatch, capfd):
     out = buf.getvalue()
     assert "1 open" in out
     assert "legacy boolean" in out
+
+
+@pytest.mark.parametrize("verb,evidence", [
+    ("resolve", {"result_ref": "https://example.com/results/accepted"}),
+    ("dismiss", {"reason": "Continuation transferred to its tracked objective"}),
+])
+def test_settle_legacy_on_terminal_managed_owner(tmp_path, monkeypatch, capfd, verb, evidence):
+    tdir = _seed(tmp_path, monkeypatch)
+    path = tdir / "wt-A.yaml"
+    rec = tracking.load_record(path)
+    rec.kind = "bridge"
+    rec.status = "finalized"
+    rec.summary = "Retained continuation"
+    rec.follow_up = True
+    tracking.save_record(rec, path)
+
+    assert m.cmd_follow_ups(_args([])) == 0
+    assert json.loads(capfd.readouterr().out)["legacy_resolution_supported"] is True
+    option = "--result-ref" if verb == "resolve" else "--reason"
+    parsed = m.build_parser().parse_args([
+        "follow-ups", verb, "legacy", option, next(iter(evidence.values())),
+        "--worktree", "wt-A", "--json",
+    ])
+    assert m.cmd_follow_ups(parsed) == 0
+    settled = json.loads(capfd.readouterr().out)
+    assert settled["state"] == ("resolved" if verb == "resolve" else "dismissed")
+    assert m.cmd_follow_ups(_args([])) == 0
+    listed = json.loads(capfd.readouterr().out)
+    assert listed["legacy_follow_up"] is False
+    assert listed["open_count"] == 0
+    assert listed["follow_ups"] == [
+        {k: v for k, v in settled.items() if k not in {"worktree_id", "version"}}
+    ]
+    saved = tracking.load_record(path)
+    assert (saved.kind, saved.status, saved.summary) == ("bridge", "finalized", rec.summary)
+
+
+def test_resolve_legacy_requires_evidence_before_dispatch(tmp_path, monkeypatch, capfd):
+    from agent_worktrees import follow_ups_cli
+
+    _seed(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        follow_ups_cli, "_dispatch_follow_up",
+        lambda *a, **k: pytest.fail("missing evidence must not dispatch"),
+    )
+    assert m.cmd_follow_ups(_args(["resolve", "legacy"], result_ref=" ")) == 2
+    assert "requires --result-ref" in json.loads(capfd.readouterr().out)["error"]
+
+
+def test_legacy_dispatch_requires_v2_but_itemized_callers_retain_v1(monkeypatch):
+    from agent_worktrees import follow_ups_cli, status_monitor_runtime, tracking_write
+
+    calls = []
+    monkeypatch.setattr(status_monitor_runtime, "_status_monitor_enabled", lambda: False)
+    monkeypatch.setattr(tracking_write, "dispatch", lambda *a, **k: calls.append((a, k)))
+    follow_ups_cli._dispatch_follow_up("follow_up_resolve", {"follow_up_id": "legacy"})
+    follow_ups_cli._dispatch_follow_up("follow_up_resolve", {"follow_up_id": "fu-ordinary"})
+    assert [call[1]["min_version"] for call in calls] == [2, 1]
 
 
 # --- activity.log_event instrumentation (#3113) -----------------------------
