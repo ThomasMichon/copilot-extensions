@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+from dataclasses import replace
 from pathlib import Path
 import shutil
 import subprocess
@@ -29,6 +30,7 @@ def _final_owner_seed(tmp_path_factory):
 
 
 def _copy_final_owner(seed, root, monkeypatch):
+    monkeypatch.setattr(cfg.socket, "gethostname", lambda: MACHINE)
     for name in ("anchor", "origin.git"):
         shutil.copytree(seed / name, root / name, copy_function=shutil.copyfile)
     records = root / f".{PROJECT}" / "worktrees"
@@ -47,8 +49,10 @@ def _copy_final_owner(seed, root, monkeypatch):
     _save_worktree(records, "owner")
     path = records / "owner.yaml"
     record = tracking.load_record(path)
+    config = replace(config, machine=record.execution_machine)
     record.repo = config.repo_name
     record.platform = config.platform
+    record.worktree_path = str(root / "owner")
     tracking.save_record(record, path)
     monkeypatch.setattr(cfg, "load_project_config", lambda *a, **k: config)
     monkeypatch.setattr(cfg, "load_config", lambda *a, **k: config)
@@ -100,7 +104,7 @@ def test_final_owner_copies_keep_git_and_owner_state_private(_final_owner_seed, 
         assert (anchor / "base.txt").read_text() == "base\n"
         record = tracking.load_record(path)
         assert record.status == "active" and record.resources == []
-        assert record.worktree_path == str(root / "gone-owner")
+        assert record.worktree_path == str(root / "owner")
         for relative, data in seed_before.items():
             if relative.parts[0] in {"anchor", "origin.git"}:
                 copied = root / relative
@@ -109,6 +113,7 @@ def test_final_owner_copies_keep_git_and_owner_state_private(_final_owner_seed, 
                 assert not copied.samefile(seed / relative)
                 assert relative.name != "alternates"
     with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(cfg.socket, "gethostname", lambda: MACHINE)
         patch.setattr(cfg, "tracking_dir", lambda: first_path.parent)
         patch.setattr(cfg, "project_dir", lambda name=None: first_path.parent.parent)
         patch.setattr(cfg, "install_dir", lambda: first_root / ".agent-worktrees")
@@ -226,7 +231,7 @@ def test_completed_finalize_retains_agenda_without_an_archive_dependency(
 
     root, path, config = final_owner
     anchor = root / "anchor"
-    checkout = root / "checkout"
+    checkout = root / "owner"
     _git("worktree", "add", "-q", str(checkout), "-b", "worktree/owner", "base", cwd=anchor)
     record = tracking.load_record(path)
     record.worktree_path = str(checkout)
