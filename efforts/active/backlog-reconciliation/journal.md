@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-13 - Finite source and MCP receiving boundaries](journal/2026/11.13-finite-source-and-mcp-receiving.md)
+
 - [2026-11-13 - Source fixtures and independent typing receiving](journal/2026/11.13-source-fixtures-and-typing-receiving.md)
 
 - [2026-11-13 - Finite leaf and guidance completions](journal/2026/11.13-finite-leaf-and-guidance-completions.md)

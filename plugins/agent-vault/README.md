@@ -547,6 +547,33 @@ detach children from their caller or change credential stdin/output handling.
   `--cache-only` still refuses without service access. Explicit authoritative
   refresh still requires successful cache reconciliation. Schema, selection,
   permissions and recovery-policy errors are not decryption fallback triggers.
+- Password TTL is an absolute lifetime from unlock, not inactivity; requests
+  and `--persistent` do not extend it. Idle housekeeping clears expired
+  passwords and their credential caches. `ping` labels daemon lifetime
+  separately from the selected database's remaining password lifetime.
+  Its additive `password_lifetime` object uses contract
+  `agent-vault.password-lifetime`, version `1`, with `state` equal to `bounded`,
+  `locked`, `unbounded` or `unknown`, and `remaining_seconds` (a nonnegative
+  integer only for `bounded`, otherwise null). Missing database/timestamp
+  context remains unknown, not an invented deadline. The legacy `ttl` field
+  retains daemon inactivity semantics; additive `daemon_persistent` identifies
+  disabled daemon inactivity expiry. Older CLIs ignore the added fields;
+  newer CLIs show unknown password lifetime for older or unsupported services.
+  No new request syntax, credential access, unlock or synchronized upgrade is
+  required. Existing inherited handoff deadlines still cap password lifetime.
+  Busy credential operations report unknown lifetime without blocking health
+  probes; expiry waits for the complete operation, including mutation setup.
+  Password mutations and identity/SSH-key requests retain their handler-owned
+  queue deadlines rather than waiting on an unbounded outer dispatch lock.
+  After acquiring that lock, they recheck password expiry before unlocking
+  or performing backend work; a queued request cannot reuse an expired master.
+  Independent GCM/KEK actions do not acquire a KeePass dispatch lock; other
+  credential and extension handlers retain custody. Legacy owner-gated exports
+  refuse busy custody and atomically capture complete, unexpired password/clock
+  pairs; unknown clocks are not exported.
+  Housekeeping uses one owned expiry worker, independent of the credential
+  request executor, so expiry checks and their cancellation do not queue behind
+  credential requests before lifecycle ticks.
 - Credential reads fail fast by default when locked: they return an actionable error instead of hanging on a hidden prompt. Use `agent-vault unlock`, `agent-vault unlock --terminal`, or `agent-vault get --prompt ...` when you want an interactive prompt.
 - Unlock-source extensions run before prompts, so a configured provider can satisfy locked reads without UI.
 - The CLI cold-starts the daemon when needed. Windows scheduling is opt-in via the native [`windows_scheduled_task` policy](docs/configuration.md#windows-scheduling-is-separate-from-activation); clean installs leave tasks absent and existing registrations are preserved by default. Linux/WSL installs retain the systemd user unit named `agent-vault.service` when systemd is available.
