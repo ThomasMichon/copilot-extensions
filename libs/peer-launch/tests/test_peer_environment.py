@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import importlib.util
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
+from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -176,3 +178,50 @@ def test_vault_peer_refuses_unqualified_native_platform_without_owner_fallback(
     monkeypatch.setattr(peer_launch.shutil, "which", lambda _name: pytest.fail("unqualified owner lookup"))
     with pytest.raises(ValueError, match="native Windows and Linux only"):
         peer_launch._vault_service_suffix("/example/Vault")
+
+
+@pytest.mark.parametrize("pinned", [False, True], ids=["dynamic", "pinned"])
+@pytest.mark.parametrize(("selected", "executable"), [
+    (r"C:\runtime\python.exe", r"C:\runtime\python.exe"),
+    ("C:\\" + "x" * 250 + r"\python.exe", "\\\\?\\C:\\" + "x" * 250 + r"\python.exe"),
+    ("\\\\?\\C:\\" + "x" * 250 + r"\python.exe", "\\\\?\\C:\\" + "x" * 250 + r"\python.exe"),
+    ("\\\\server\\share\\" + "x" * 250 + r"\python.exe",
+     "\\\\?\\UNC\\server\\share\\" + "x" * 250 + r"\python.exe"),
+], ids=["short-drive", "long-drive", "extended-drive", "long-unc"])
+def test_windows_peer_launch_binds_executable_without_rewriting_argv(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, pinned: bool, selected: str, executable: str,
+) -> None:
+    python = PureWindowsPath(selected)
+    environment = {"COPILOT_EXTENSIONS_CONTEXT": "validated-peer"}
+    calls: list[tuple[list[str], dict[str, Any]]] = []
+
+    def call(command: list[str], **kwargs: Any) -> int:
+        calls.append((command, kwargs))
+        return 23
+
+    monkeypatch.setattr(peer_launch, "os", SimpleNamespace(name="nt"))
+    monkeypatch.setattr(
+        peer_launch, "subprocess", SimpleNamespace(call=call, CREATE_NO_WINDOW=0x08000000),
+    )
+    monkeypatch.setattr(peer_launch, "_resolve_peer", lambda *a, **k: (
+        {"pluginRoot": str(tmp_path)}, environment, python,
+    ))
+    retained = [str(python), "-I", "-B", "retained-launcher", "--runtime-identity", "original-build"]
+    monkeypatch.setattr(peer_launch, "retained_runtime_prefix", lambda *a, **k: retained)
+    arguments = ["probe", 'quoted " argument', "snowman \u2603"]
+    assert peer_launch.launch(
+        "agent-dispatch", tmp_path, "validated-owner", "agent-worktrees", arguments,
+        pinned_python=python if pinned else None, runtime_identity="original-build" if pinned else None,
+    ) == 23
+    command, kwargs = calls.pop()
+    prefix = retained if pinned else [
+        str(python), "-I", "-B", "-X", "utf8", "-m", "agent_worktrees",
+    ]
+    assert command == [*prefix, *arguments]
+    assert kwargs["executable"] == executable
+    assert kwargs["env"] is environment
+    assert (kwargs["stdin"], kwargs["stdout"], kwargs["stderr"]) == (
+        peer_launch.sys.stdin, peer_launch.sys.stdout, peer_launch.sys.stderr,
+    )
+    assert kwargs["creationflags"] == 0x08000000
+    assert "shell" not in kwargs

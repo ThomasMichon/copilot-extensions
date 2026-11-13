@@ -1,0 +1,53 @@
+{
+  "comment": "Preserve selected Windows peer execution beyond MAX_PATH with explicit executable binding and unchanged argv, streams and caller custody.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-logger",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-ssh",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-vault",
+      "type": "patch"
+    }
+  ]
+}

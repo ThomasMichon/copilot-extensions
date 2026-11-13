@@ -7636,13 +7636,19 @@ Real front-door, missing-socket, installed-hook, SDK-forwarding and JavaScript
 delivery counterparts retain their existing periodic ownership. No Python
 classifier assertion is treated as proof of a native or shell boundary.
 
-`tools/promotion_unit_tests/test_peer_environment.py` re-exports all six exact
-functions from `libs/peer-launch/tests/test_peer_environment.py`. The original
+`tools/promotion_unit_tests/test_peer_environment.py` re-exports the selected
+actor-free functions from `libs/peer-launch/tests/test_peer_environment.py`. The original
 module already loads the canonical flat `libs/peer-launch/peer_launch.py`;
 the adapter does not preload production, rewrite imports or copy assertions.
 Replacing only the original file prefix maps each unit to its packet identity.
 All three files are hash-bound, and each unit must contribute actual
-`peer_environment` call coverage under the unchanged observer and budget.
+peer-boundary call coverage under the unchanged observer and budget.
+The Windows launch units cover short DOS, long DOS/UNC and already-extended
+executable selection for dynamic and pinned calls without creating a process.
+The separate explicit Dispatch `tests/native/test_peer_long_paths.py` uses the
+existing real-venv peer fixtures for both routes. It requires actual Windows
+execution beyond `MAX_PATH` and checks exact argv, inherited streams and exit
+status; it is not part of the actor-free promotion packet.
 The eleven separate packaging tests remain unqualified; this cohort does not
 prove native peer launch, vendor synchronization or the complete library census.
 

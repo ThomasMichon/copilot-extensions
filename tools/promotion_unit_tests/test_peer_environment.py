@@ -49,3 +49,6 @@ test_vault_suffix_refuses_unsupported_posix_checksum_without_a_fallback = (
 test_vault_peer_refuses_unqualified_native_platform_without_owner_fallback = (
     _original.test_vault_peer_refuses_unqualified_native_platform_without_owner_fallback
 )
+test_windows_peer_launch_binds_executable_without_rewriting_argv = (
+    _original.test_windows_peer_launch_binds_executable_without_rewriting_argv
+)
