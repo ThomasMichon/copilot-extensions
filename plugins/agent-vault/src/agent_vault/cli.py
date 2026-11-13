@@ -13,6 +13,7 @@ from pathlib import Path
 from agent_procutil import no_window_kwargs
 
 from . import config, launch, rendezvous
+from .cache_manifests import read_cache_manifest as _read_cache_manifest
 from .cache_recovery import status_command as cmd_cache_status
 from .config import IS_WINDOWS, SOCKET_PATH, ResolvedVault
 from .credential_reads import cmd_get
@@ -1307,21 +1308,6 @@ def cmd_kek_list(args):
         for k in keks:
             print(k)
     return 0
-
-
-def _read_cache_manifest(path: Path) -> list[tuple[str, str]]:
-    """Parse ``entry | field`` lines (``#`` comments) from a manifest file."""
-    pairs: list[tuple[str, str]] = []
-    for raw in path.read_text(encoding="utf-8").splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#"):
-            continue
-        entry, sep, field = line.partition("|")
-        entry = entry.strip()
-        field = field.strip() if sep else "password"
-        if entry:
-            pairs.append((entry, field or "password"))
-    return pairs
 
 
 def cmd_cache_populate(args):
