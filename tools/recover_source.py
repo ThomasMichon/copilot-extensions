@@ -126,9 +126,11 @@ def repository_declaration(repository_root: Path | None, workspace: Path) -> dic
     """Interpret adopter data using only the current toolkit's declared parser."""
     from worktree_manager import runtime_source_repository
 
-    if repository_root is None or not (
-        repository_root / ".copilot-extensions" / "config.yaml"
-    ).exists():
+    if repository_root is None:
+        return runtime_source_repository.read(repository_root, default_repository=UPSTREAM)
+    path = repository_root / ".copilot-extensions" / "config.yaml"
+    runtime_source_repository._ordinary(path)
+    if not path.exists():
         return runtime_source_repository.read(repository_root, default_repository=UPSTREAM)
 
     import tomllib
@@ -144,9 +146,21 @@ def repository_declaration(repository_root: Path | None, workspace: Path) -> dic
     ]
     if not yaml_requirements:
         raise ValueError("Trusted recovery toolkit does not declare its YAML parser")
-    uv = shutil.which("uv")
+    uv = None
+    current_directory = Path.cwd()
+    for location in os.get_exec_path():
+        directory = Path(location.strip('"'))
+        if (
+            not directory.is_absolute() or directory == current_directory
+            or directory.is_relative_to(repository_root)
+            or str(directory).replace("\\", "/").startswith("//")
+        ):
+            continue
+        uv = shutil.which(str(directory / ("uv.exe" if os.name == "nt" else "uv")))
+        if uv is not None:
+            break
     if uv is None:
-        raise ValueError("Repository suite interpretation requires the trusted UV dependency owner")
+        raise ValueError("Repository suite interpretation requires UV on an absolute host tool path")
     parser_root = workspace / "repository-parser"
     parser_root.mkdir(parents=True, exist_ok=False)
     python = Path(getattr(sys, "_base_executable", sys.executable))

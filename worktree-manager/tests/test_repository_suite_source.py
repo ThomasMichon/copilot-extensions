@@ -3,8 +3,10 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import stat
 import subprocess
 import sys
+from types import SimpleNamespace
 
 import pytest
 
@@ -186,3 +188,27 @@ def test_yaml_merge_keys_refuse_before_alias_expansion(tmp_path):
 def test_no_yaml_document_still_reports_absent_selection(tmp_path, text):
     declaration(tmp_path, text)
     assert policy.read(tmp_path, default_repository=UPSTREAM)["fallback_reason"] == "selection-absent"
+
+
+@pytest.mark.parametrize("linked_part", ["ancestor", "directory", "file", "source"])
+def test_linked_components_refuse_before_any_target_metadata_read(tmp_path, monkeypatch, linked_part):
+    root = tmp_path / "adopter"
+    source = tmp_path / "linked" / "suite"
+    path = declaration(root, "current_version: main\nrepository: " + json.dumps(str(source)) + "\n")
+    link = {
+        "ancestor": tmp_path, "directory": path.parent, "file": path, "source": source.parent,
+    }[linked_part]
+    original = Path.stat
+
+    def guarded(candidate, *, follow_symlinks=True):
+        if candidate == link:
+            if follow_symlinks:
+                pytest.fail("linked target metadata was followed")
+            return SimpleNamespace(st_mode=stat.S_IFDIR, st_file_attributes=0x400)
+        if candidate.is_relative_to(link):
+            pytest.fail("linked ancestor was traversed before refusal")
+        return original(candidate, follow_symlinks=follow_symlinks)
+
+    monkeypatch.setattr(Path, "stat", guarded)
+    with pytest.raises(ValueError, match="linked"):
+        policy.read(root, default_repository=UPSTREAM)

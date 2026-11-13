@@ -10,10 +10,12 @@ import sys
 
 
 def _ordinary(path: Path) -> None:
-    for candidate in (path, *path.parents):
-        if candidate.is_symlink() or (
-            candidate.exists() and getattr(candidate.lstat(), "st_file_attributes", 0) & 0x400
-        ):
+    for candidate in reversed((path, *path.parents)):
+        try:
+            metadata = candidate.lstat()
+        except FileNotFoundError:
+            continue
+        if stat.S_ISLNK(metadata.st_mode) or getattr(metadata, "st_file_attributes", 0) & 0x400:
             raise ValueError(f"Repository suite policy must not use linked paths: {candidate}")
 
 
@@ -123,6 +125,8 @@ def read(
         repository = _string(data["repository"], "repository")
         if repository.replace("\\", "/").startswith("//") or repository.lower().startswith("file:"):
             raise ValueError("Repository suite declarations do not admit network filesystem or file: sources")
+        if Path(repository).is_absolute():
+            _ordinary(Path(repository))
         result["repository"] = repository
     if "current_version" in data:
         reference = _string(data["current_version"], "current_version")

@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import stat
 import subprocess
 import sys
 import time
@@ -270,6 +271,67 @@ print(json.dumps(value))
     assert observed["fallback_reason"] is None
     assert policy.read_bytes() == before
     assert (workspace / "repository-parser" / "yaml" / "__init__.py").is_file()
+
+
+def test_cold_declaration_checks_links_before_existence_or_tool_lookup(tmp_path, monkeypatch):
+    root = tmp_path / "adopter"
+    link = root / ".copilot-extensions"
+    link.mkdir(parents=True)
+    original = Path.stat
+
+    def guarded(candidate, *, follow_symlinks=True):
+        if candidate == link:
+            if follow_symlinks:
+                pytest.fail("existence probe followed the linked declaration")
+            return SimpleNamespace(st_mode=stat.S_IFDIR, st_file_attributes=0x400)
+        if candidate.is_relative_to(link):
+            pytest.fail("declaration target was accessed before link refusal")
+        return original(candidate, follow_symlinks=follow_symlinks)
+
+    monkeypatch.setattr(Path, "stat", guarded)
+    monkeypatch.setattr(recovery.shutil, "which", lambda *_a, **_k: pytest.fail("tool lookup before refusal"))
+    with pytest.raises(ValueError, match="linked"):
+        recovery.repository_declaration(root, tmp_path / "work")
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows implicit executable lookup")
+def test_actual_cold_parser_ignores_adopter_uv_executable_and_relative_path(tmp_path):
+    uv = shutil.which("uv")
+    assert uv is not None
+    tools = tmp_path / "trusted-tools"
+    tools.mkdir()
+    shutil.copyfile(uv, tools / "uv.exe")
+    adopter = tmp_path / "adopter"
+    policy = adopter / ".copilot-extensions" / "config.yaml"
+    policy.parent.mkdir(parents=True)
+    policy.write_text("current_version: main\n", encoding="utf-8")
+    (adopter / "uv.exe").write_bytes(b"MZ-not-an-executable")
+    workspace = tmp_path / "work"
+    workspace.mkdir()
+    script = """
+import importlib.util, json, shutil, sys
+from pathlib import Path
+toolkit = Path(sys.argv[1])
+assert Path(shutil.which("uv")).absolute().parent == Path.cwd(), "shadow control is not active"
+spec = importlib.util.spec_from_file_location("cold_recovery", toolkit / "tools/recover_source.py")
+recovery = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(recovery)
+recovery.source_modules(toolkit)
+print(json.dumps(recovery.repository_declaration(Path(sys.argv[2]), Path(sys.argv[3]))))
+"""
+    environment = {
+        key: value for key, value in os.environ.items()
+        if key.upper() != "NODEFAULTCURRENTDIRECTORYINEXEPATH"
+    }
+    environment["PATH"] = os.pathsep.join((".", "", str(tools), os.environ["PATH"]))
+    result = subprocess.run(
+        [getattr(sys, "_base_executable", sys.executable), "-I", "-S", "-B", "-c",
+         script, str(REPOSITORY), str(adopter), str(workspace)],
+        cwd=adopter, env=environment, capture_output=True, text=True, timeout=180,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(result.stdout)["reference"] == "main"
 
 
 def repository_request(root, **changes):
