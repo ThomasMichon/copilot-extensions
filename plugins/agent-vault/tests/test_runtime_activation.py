@@ -88,6 +88,7 @@ def test_native_batch_reads_real_cache_without_service(tmp_path, monkeypatch):
         "COPILOT_PLUGIN_ROOT": str(payload), "COPILOT_EXTENSIONS_CONTEXT": context,
         "AGENT_VAULT_HOME": str(runtime), "AGENT_VAULT_CONFIG": str(home / "native.json"),
         "AGENT_VAULT_CACHE": "1", "AGENT_VAULT_NO_SELFPROVISION": "1",
+        "PYTHONUTF8": "0", "PYTHONIOENCODING": "ascii",
     })
     requests = [
         {"entry": "Example/one", "field": "password"},

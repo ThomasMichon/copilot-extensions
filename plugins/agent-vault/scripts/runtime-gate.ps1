@@ -274,7 +274,7 @@ function Invoke-Runtime {
     $previousEap = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        & $Python -I -m agent_vault @forwardArgs
+        & $Python -I -X utf8 -m agent_vault @forwardArgs
     } finally {
         $ErrorActionPreference = $previousEap
     }
