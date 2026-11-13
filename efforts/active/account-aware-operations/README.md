@@ -95,9 +95,11 @@ the delivered #8921 explicit missing-token correction and #3050 short-name
 lookup; neither is a fresh missing implementation or whole-family proof.
 
 - [ ] **P5791-M:** Retain explicit repository-override OR applicable
-  account-map mint-failure refusal BEFORE arbitrary gh execution, with
-  actionable selected-account identity-unavailable diagnostics and no
-  inherited-token/global-account substitution. Preserve successful
+  account-map mint-failure refusal BEFORE arbitrary gh execution AND before
+  Git or PR/fork entrypoints can substitute ambient authentication, with
+  actionable selected-account identity-unavailable diagnostics. Retain the
+  bounded repair's 60-second account-token lookup and no inherited-token/
+  global-account substitution across those entrypoints. Preserve successful
   process-local injection and ordinary unconfigured/derived-owner ambient
   behavior; an organization-name heuristic is not an explicit account pin.
   Credit #8921's delivered no-launch correction rather than repeating the
@@ -132,8 +134,12 @@ lookup; neither is a fresh missing implementation or whole-family proof.
 
 - [ ] **V5791-M:** Use synthetic explicit override AND account-map mint
   failures with ambient reader credentials present to prove no gh subprocess
-  and an actionable identity-unavailable result. Pair those with successful
-  scoped injection, same-active-account and derived/unconfigured controls.
+  and no Git or PR/fork operation using replacement ambient credentials,
+  with an actionable identity-unavailable result at each entrypoint.
+  Preserve the existing 60-second token-lookup bound and pair the actual
+  scoped-gh, Git and PR/fork controls with successful scoped injection,
+  same-active-account and derived/unconfigured behavior. Credit the
+  delivered repair rather than requesting another implementation.
 - [ ] **V5791-S:** Resolve the actual PR-provider stale/rejected-token/401
   path: SAME intended-identity recovery OR named-account actionable refusal,
   no ambient substitution and no secrets. Preserve missing-token dispatcher
@@ -252,8 +258,11 @@ state.
   umbrella or new issue.
 - Credit #8921's explicit missing-token correction and #3050's lookup while
   retaining named-account stale-401 refusal and the full inherited #330/#2755
-  compatibility matrix. Original owners, every incumbent byte/check state,
-  first unresolved identity-contract gate, Draft status, #810 alternatives
+  compatibility matrix. The bounded repair's gh, Git and PR/fork refusal
+  entrypoints and 60-second token lookup remain explicit synthetic
+  acceptance, not new implementation requests. Original owners, every
+  incumbent byte/check state, first unresolved identity-contract gate,
+  Draft status, #810 alternatives
   and temporary-token implementation restriction remain unchanged.
 - Normal reviewed Plan merge establishes documentary intake; complete current
   receiving readback and separate source judgment remain. No authentication
