@@ -26,6 +26,7 @@ exec(compile(_arguments_path.read_bytes(), str(_arguments_path), "exec"), _argum
 argument_pairs = _arguments.argument_pairs
 balanced = _arguments.balanced
 uv_command = _arguments.uv_command
+captured_environment = _arguments.captured_environment
 
 _WINDOWS = os.name == "nt"
 

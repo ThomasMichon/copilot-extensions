@@ -6,6 +6,16 @@ import os
 from pathlib import Path
 
 
+def captured_environment(env, *, windows, error_type):
+    result = {}
+    for key, value in env.items():
+        key = key.upper() if windows else key
+        if key in result and result[key] != value:
+            raise error_type("dependency installation environment has conflicting variable identities")
+        result[key] = value
+    return result
+
+
 def argument_pairs(arguments, value_options, *, error_type):
     iterator = iter(arguments)
     positional = False

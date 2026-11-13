@@ -269,12 +269,7 @@ def _load_installed(slot: Path) -> None:
 
 
 def _selected(root: Path) -> str | None:
-    python = runtime.resolve_python(root)
-    if python is None or not python.is_absolute() or ".." in python.parts:
-        return None
-    environment = python.parent.parent
-    version = environment.parent.name if environment.name == ".venv" else environment.name
-    return version if runtime.slot_python(root, version) == python else None
+    return install_driver.selected_version(root, runtime)
 
 
 def _selector_snapshot(root: Path) -> dict[str, bytes | None]:
