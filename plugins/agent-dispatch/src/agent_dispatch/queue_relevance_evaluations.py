@@ -15,21 +15,11 @@ from .queue_relevance_registration import (
     RelevanceAdmission, RelevanceRegistration, _held, registration_revision, resolve_registration,
 )
 from .relevance_evaluation import PeriodicRelevancePolicy
+from .queue_producer_receipts import task_producer_receipt
 
 
 def _verified_producer(conn: sqlite3.Connection, task: Task) -> bool:
-    fence = task.producer_fence
-    if not fence or (
-        fence.get("scope") != {"repo": task.repo, "source": task.source}
-        or fence.get("producer_id") != task.origin_ref
-    ):
-        return False
-    return conn.execute(
-        "SELECT 1 FROM producer_create_requests WHERE repo=? AND source=?"
-        " AND generation=? AND request_id=? AND producer_id=? AND task_id=?",
-        (task.repo, task.source, fence.get("generation"), fence.get("request_id"),
-         task.origin_ref, task.id),
-    ).fetchone() is not None
+    return task_producer_receipt(conn, task) is not None
 
 
 class QueueRelevanceEvaluationsMixin:
