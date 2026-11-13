@@ -40,7 +40,7 @@ def _save_record(tracking_dir: Path, wt_id: str, wt_path: str, machine: str = "t
         worktree_path=wt_path,
         repo="test-repo",
         machine=machine,
-        platform="wsl",
+        platform=cfg.detect_platform(),
         started_at="2026-06-01T10:00:00",
         last_resumed_at="2026-06-01T10:00:00",
         resume_count=0,
@@ -56,21 +56,30 @@ def _save_record(tracking_dir: Path, wt_id: str, wt_path: str, machine: str = "t
 
 
 class TestStampSessionStateWorktreeBinding:
-    def test_writes_a_durable_binding_record(self, tmp_path, monkeypatch):
+    @pytest.mark.parametrize("legacy", [False, True])
+    def test_writes_a_machine_free_durable_binding_record(self, legacy: bool) -> None:
         session_dir = sessions._session_state_dir() / "sid-1"
         session_dir.mkdir(parents=True, exist_ok=True)
+        path = handoff_diagnostics.session_state_worktree_binding_path("sid-1")
+        if legacy:
+            path.write_text(json.dumps({
+                "sessionId": "sid-1", "worktreeId": "wt-a",
+                "machine": "old-host", "execution_machine": "old-guest",
+                "environment": "wsl", "platform": "wsl", "machine_identity_version": 1,
+            }), encoding="utf-8")
 
         result = handoff_diagnostics.stamp_session_state_worktree_binding(
-            "sid-1", "wt-a", worktree_dir="/tmp/src/wt-a", machine="book2",
+            "sid-1", "wt-a", worktree_dir="/tmp/src/wt-a",
         )
 
-        path = handoff_diagnostics.session_state_worktree_binding_path("sid-1")
         assert path.exists()
         on_disk = json.loads(path.read_text(encoding="utf-8"))
+        assert not {
+            "machine", "execution_machine", "environment", "platform", "machine_identity_version",
+        } & on_disk.keys()
         assert on_disk["sessionId"] == "sid-1"
         assert on_disk["worktreeId"] == "wt-a"
         assert on_disk["worktreeDir"] == "/tmp/src/wt-a"
-        assert on_disk["machine"] == "book2"
         assert on_disk["registeredAt"]
         assert result == on_disk
 
@@ -272,10 +281,10 @@ def test_trusted_binding_invalid_or_legacy_rewrite_removes_stale_fields(
         snapshot = None
     result = handoff_diagnostics.stamp_session_state_worktree_binding(
         "sid-subject", "wt-subject", worktree_dir="legacy-path",
-        machine="test", worktree_record=snapshot,
+        worktree_record=snapshot,
     )
     assert result["worktreeDir"] == "legacy-path"
-    assert result["machine"] == "test"
+    assert "machine" not in result
     assert "project" not in result and "creationNonce" not in result
     assert "hookFacts" not in result
     assert json.loads(binding_path.read_text()) == result

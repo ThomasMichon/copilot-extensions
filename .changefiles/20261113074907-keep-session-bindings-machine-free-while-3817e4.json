@@ -1,0 +1,9 @@
+{
+  "comment": "Keep session bindings machine-free while preserving association, incarnation and activation fences",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

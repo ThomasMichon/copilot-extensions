@@ -64,6 +64,9 @@ def test_register_session_trusted_stamp_uses_uncached_record_under_guard(
         worktree_id="wt-subject", session_id="sid-subject",
     )) == 0
     result = json.loads((session_dir / "worktree-binding.json").read_text())
+    assert not {
+        "machine", "execution_machine", "environment", "platform", "machine_identity_version",
+    } & result.keys()
     if registration_project == "test-repo":
         assert seen == ["actual-incarnation"]
         assert result["project"] == "test-repo"
@@ -132,7 +135,7 @@ def _save_record(tracking_dir: Path, wt_id: str, wt_path: str) -> None:
         worktree_path=wt_path,
         repo="test-repo",
         machine="test",
-        platform="wsl",
+        platform=cfg.detect_platform(),
         started_at="2026-06-01T10:00:00",
         last_resumed_at="2026-06-01T10:00:00",
         resume_count=0,
@@ -1269,7 +1272,8 @@ class TestDeregisterSessionStdin:
         monkeypatch.setattr(client, "_capture_native_source", lambda: origin)
         monkeypatch.setattr(client, "_probe_terminal", lambda: pytest.fail("End terminal probe"))
         server = HookIpcServer(lambda kind, payload, deadline: m._resident_hook_decision(
-            kind, payload, segment_cache=SimpleNamespace(), policy=SimpleNamespace(),
+            kind, payload, segment_cache=SimpleNamespace(activate_hook_project=lambda *_: None),
+            policy=SimpleNamespace(),
         ))
         server.start()
         try:
@@ -1281,7 +1285,7 @@ class TestDeregisterSessionStdin:
             }, home=tmp_path)
         finally:
             server.close()
-        assert result["lifecycle"] == "ended"
+        assert result.get("lifecycle") == "ended", result
         assert unrelated.read_bytes() == before
         record = tracking.load_record(tmp_tracking_dir / "zzz-bound.yaml")
         assert record.sessions[0].ended_at is not None
