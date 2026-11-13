@@ -164,6 +164,10 @@ def repository(tmp_path):
 def test_checkout_publication_retries_only_unchanged_owned_source(
     tmp_path, monkeypatch, repository, after_denial,
 ):
+    from types import SimpleNamespace
+
+    # Emulate the retry gate without changing pathlib or the native Git platform.
+    monkeypatch.setattr(source, "os", SimpleNamespace(**{**vars(os), "name": "nt"}))
     repo, first, _ = repository
     selection = config.RuntimeSource("main", str(repo))
     original = Path.rename
