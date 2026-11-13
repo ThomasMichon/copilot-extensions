@@ -29,6 +29,7 @@ from .tracking_lookup import (
     load_record_by_id as load_record_by_id,
 )
 from .effort_focus import ActiveEffort, active_effort_from_mapping
+from .dispatch_cohort import DispatchCohort
 from .record_io import load_record_uncached as _load_record_uncached
 from . import record_machine_identity
 from .worktree_machine_identity import WorktreeMachineIdentity, parse_machine_identity
@@ -156,6 +157,7 @@ class DispatchAttempt:
     supervisor: str
     creator_machine: str
     ownership: Literal["created"] = "created"
+    cohort: DispatchCohort | None = None
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -166,6 +168,7 @@ class DispatchAttempt:
             "supervisor": self.supervisor,
             "creator_machine": self.creator_machine,
             "ownership": self.ownership,
+            **({"cohort": self.cohort.to_dict()} if self.cohort is not None else {}),
         }
 
 
@@ -181,7 +184,7 @@ def _dispatch_attempt_from_mapping(value: object) -> DispatchAttempt | None:
         "creator_machine",
         "ownership",
     }
-    if set(value) != required or value.get("ownership") != "created":
+    if not required.issubset(value) or set(value) - required - {"cohort"} or value.get("ownership") != "created":
         return None
     strings: dict[str, str] = {}
     for key in required - {"attempt", "ownership"}:
@@ -200,14 +203,13 @@ def _dispatch_attempt_from_mapping(value: object) -> DispatchAttempt | None:
         return None
     if attempt <= 0:
         return None
-    return DispatchAttempt(
-        task_id=strings["task_id"],
-        reservation_key=strings["reservation_key"],
-        attempt=attempt,
-        driver=strings["driver"],
-        supervisor=strings["supervisor"],
-        creator_machine=strings["creator_machine"],
-    )
+    try:
+        cohort = DispatchCohort.from_fields(
+            value["cohort"], task_id=strings["task_id"], reservation_key=strings["reservation_key"],
+        ) if "cohort" in value else None
+    except ValueError:
+        return None
+    return DispatchAttempt(attempt=attempt, cohort=cohort, **strings)
 
 
 @dataclass
@@ -2340,7 +2342,7 @@ def _save_record_contents_unlocked(
     current code** -- a still-live OLDER-code process has no such field and
     can drop it on an unrelated save (pre-existing/systemic, not per-field).
     """
-    from . import pr_authority, pr_publication_state, receiving_allocation, resource_producer
+    from . import dispatch_cohort, pr_authority, pr_publication_state, receiving_allocation, resource_producer
     if path is None:
         path = record.yaml_path
     capture_before = save_notifications.prepare(current, path)
@@ -2349,6 +2351,7 @@ def _save_record_contents_unlocked(
     preserve_checkout_location(record, current, path)
     receiving_allocation.preserve(record, current, path)
     resource_producer.preserve_incarnation(record, current)
+    dispatch_cohort.preserve(record, current)
     if preserve_handoff_reservations and current is not None:
         if current.effort_revision > record.effort_revision:
             record.active_effort = current.active_effort

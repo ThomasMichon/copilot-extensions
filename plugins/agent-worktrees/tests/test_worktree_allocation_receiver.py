@@ -4,15 +4,143 @@ from __future__ import annotations
 
 import copy
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from pathlib import Path
 from threading import Event
 
 import pytest
+import yaml
 
-from agent_worktrees import creation_requests, tracking
+from agent_worktrees import creation_requests, dispatch_cohort, tracking
 from agent_worktrees import owned_worktree as allocation, receiving_creation_journal as journal
 from agent_worktrees.worktree_allocation_receiver import receive
 from test_receiving_allocation import receiver as receiver
+
+
+def cohort_attempt() -> dict:
+    return {
+        "task_id": "original-task", "reservation_key": "original-reservation",
+        "attempt": 1, "driver": "cli", "supervisor": "original-supervisor",
+        "cohort": {
+            "schema": "dispatch-assignment-cohort", "version": 1,
+            "emitter": {
+                "repo": "source-repo", "source": "emitter", "producer_id": "source-reader",
+                "generation": 2, "request_id": "original-request", "task_id": "original-task",
+            },
+            "pool": {
+                "task_id": "original-task", "registration_id": "registered-workers",
+                "machine": "execution-space", "env": "linux",
+                "reservation_key": "original-reservation", "task_generation": 3,
+                "catalog_revision": 7,
+            },
+        },
+    }
+
+
+def with_attempt(receiver: tuple, attempt: dict) -> tuple:
+    config, admission, records = receiver
+    fields = copy.deepcopy(admission.to_fields())
+    fields["target"]["options"]["dispatch_attempt"] = attempt
+    return config, type(admission).from_fields(fields), records
+
+
+def test_original_cohort_survives_real_creation_replay_stale_save_and_reuse(receiver):
+    receiver = with_attempt(receiver, cohort_attempt())
+    config, admission, records = receiver
+    created = receive("create", request(receiver), config)
+    path = next(records.glob("*.yaml"))
+    record = tracking.load_record(path)
+    original = record.dispatch_attempt.to_dict()
+    assert original["cohort"] == cohort_attempt()["cohort"]
+    assert creation_requests.inspect(config, admission.key)["facts"]["dispatch_cohort"] == original["cohort"]
+    # A later assignment or an older full-record writer cannot rename the allocation.
+    record.dispatch_attempt = replace(record.dispatch_attempt, task_id="later-task", cohort=None)
+    record.summary = "later assignment"
+    tracking.save_record(record, path)
+    current = tracking.load_record(path)
+    assert current.summary == "later assignment" and current.dispatch_attempt.to_dict() == original
+    detached = current.dispatch_attempt.cohort.to_dict()
+    detached["pool"]["registration_id"] = "mutated-return"
+    assert current.dispatch_attempt.to_dict() == original
+    assert receive("create", request(receiver), config) == created
+    result = receive("result", request(receiver), config)
+    assert result["result"]["worktree"]["dispatch_attempt"] == original
+    assert len(list(records.glob("*.yaml"))) == 1
+
+
+def test_changed_cohort_cannot_replay_or_repair_original_journal(receiver):
+    receiver = with_attempt(receiver, cohort_attempt())
+    config, _, records = receiver
+    receive("create", request(receiver), config)
+    changed = cohort_attempt()
+    changed["cohort"]["pool"]["catalog_revision"] += 1
+    with pytest.raises((ValueError, creation_requests.CreationRequestFailure)):
+        receive("create", request(with_attempt(receiver, changed)), config)
+    path = next(records.glob("*.yaml"))
+    # Corrupted on-disk evidence must not be repaired by replaying the old request.
+    fields = yaml.safe_load(path.read_text())
+    fields["dispatch_attempt"]["cohort"]["pool"]["catalog_revision"] += 1
+    path.write_text(yaml.safe_dump(fields))
+    with pytest.raises(ValueError, match="original dispatch cohort"):
+        receive("result", request(receiver), config)
+    assert len(list(records.glob("*.yaml"))) == 1
+
+
+def test_opaque_future_cohort_survives_an_older_full_record_snapshot(receiver):
+    receiver = with_attempt(receiver, cohort_attempt())
+    config, _, records = receiver
+    receive("create", request(receiver), config)
+    path = next(records.glob("*.yaml"))
+    stale = tracking.load_record(path)
+    fields = yaml.safe_load(path.read_text())
+    fields["dispatch_attempt"]["cohort"]["version"] = 2
+    path.write_text(yaml.safe_dump(fields))
+    stale.summary = "unrelated update"
+    tracking.save_record(stale, path)
+    current = tracking.load_record(path)
+    assert current.summary == "unrelated update" and current.dispatch_attempt_opaque
+    assert current.dispatch_attempt_raw == fields["dispatch_attempt"]
+
+
+@pytest.mark.parametrize("damage", ["task", "reservation", "secret", "version", "counter"])
+def test_invalid_or_mismatched_cohort_is_refused_before_allocation(receiver, damage):
+    attempt = cohort_attempt()
+    if damage == "task":
+        attempt["cohort"]["emitter"]["task_id"] = "other-task"
+    elif damage == "reservation":
+        attempt["cohort"]["pool"]["reservation_key"] = "other-reservation"
+    elif damage == "secret":
+        attempt["cohort"]["emitter"]["producer_capability"] = "must-not-be-carried"
+    elif damage == "version":
+        attempt["cohort"]["version"] = True
+    else:
+        attempt["cohort"]["pool"]["catalog_revision"] = False
+    receiver = with_attempt(receiver, attempt)
+    config, _, records = receiver
+    with pytest.raises(ValueError, match="cohort"):
+        receive("create", request(receiver), config)
+    assert not list(records.glob("*.yaml"))
+    assert not (records.parent / "workspace-creation.sqlite3").exists()
+
+
+def test_legacy_or_unattributed_cohort_is_never_backfilled(receiver):
+    config, _, records = receiver
+    created = receive("create", request(receiver), config)
+    path = next(records.glob("*.yaml"))
+    record = tracking.load_record(path)
+    record.dispatch_attempt = tracking._dispatch_attempt_from_mapping({
+        **cohort_attempt(), "creator_machine": "execution-space", "ownership": "created",
+    })
+    with pytest.raises(ValueError, match="cannot be backfilled"):
+        tracking.save_record(record, path)
+    assert tracking.load_record(path).dispatch_attempt is None
+    assert receive("create", request(receiver), config) == created
+    fields = cohort_attempt()
+    fields["cohort"]["emitter"] = fields["cohort"]["pool"] = None
+    parsed = dispatch_cohort.DispatchCohort.from_fields(
+        fields["cohort"], task_id=fields["task_id"], reservation_key=fields["reservation_key"],
+    )
+    assert parsed.to_dict()["emitter"] is None and parsed.to_dict()["pool"] is None
 
 
 def request(receiver: tuple, identity: dict | None = None) -> dict:

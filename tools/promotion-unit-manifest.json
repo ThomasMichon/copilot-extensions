@@ -5744,7 +5744,7 @@
         "tools/verify_promotion_workflows.py": "ca25386904c1337d781fd9b6524701e2278cb6f15be229da8b3252a0faba1990",
         "tools/wheel_input_fixture.py": "ed58b3876bcf48c89e6d327b8d5550246f626f79e68b7b77812eaf0fe606c122",
         "plugins/agent-worktrees/src/agent_worktrees/allocation_run.py": "25ad3b7c3d8c9ba5b2d919d44b213cd0dc089fe234c3a0574b358b053ac3f6e2",
-        "plugins/agent-worktrees/src/agent_worktrees/create_destination.py": "3456c88283cc279f28e3459338cf097a809ea80bc9e0e22f1f69bf58befe4104",
+        "plugins/agent-worktrees/src/agent_worktrees/create_destination.py": "9b47990acb89c37a20d8bb2756f20954a0a08f38c312263cafcd661b6a71f31e",
         "plugins/agent-worktrees/src/agent_worktrees/acquisition_report.py": "a83793221939d9744aa1be72c839bf631d279cee1fc2bb67601ca8fe68c8deed",
         "plugins/agent-worktrees/src/agent_worktrees/config_acquisition.py": "beba884fd416f04f962a527dc15d82e20ac7a985e5a44409e432248a0e8865d9",
         "plugins/agent-worktrees/src/agent_worktrees/machine_config.py": "1956b67878baa8cde2ffc2689847f47b7d3f8cdf5abcd7e56386e80d7b6da801",
@@ -5802,7 +5802,7 @@
         "plugins/agent-worktrees/src/agent_worktrees/record_cache.py": "92027ac4c125b1f86e1e437c6f1f9f01651e8c15a02dc01d1ea72a89a1ce9f7f",
         "plugins/agent-worktrees/src/agent_worktrees/record_io.py": "62aa2abf470a394896dff1d950ae91cfba72153f92273a4c68cb74dddb36d9c2",
         "plugins/agent-worktrees/src/agent_worktrees/record_machine_identity.py": "0cb8b04964f4cfd46502a4ccad50a822d68ce82fda03f99fb3c3af3f63cb0a3a",
-        "plugins/agent-worktrees/src/agent_worktrees/tracking.py": "75eb3220620bbeec9e4be05e039d39de6de58b48e0e4f69ef2ea141dc6343324",
+        "plugins/agent-worktrees/src/agent_worktrees/tracking.py": "ee61722ca6563dee60d278f3948a6e037cf2fb8bf021be6427af07cd4dc3c2c9",
         "plugins/agent-worktrees/src/agent_worktrees/tracking_claims.py": "2cfc23d5d386f16066d4ec42d94efdfa2f1b16a39697ed34e9a69654c6e2d8fa",
         "plugins/agent-worktrees/src/agent_worktrees/tracking_controller_relations.py": "be79cd6eeab409e2f8ac6fed23d079dbb566325da7c799bf014b1e052b1171a8",
         "plugins/agent-worktrees/src/agent_worktrees/tracking_lifecycle.py": "35036d186484622d0a7f4e4902cac17a7d0710c82d5ebe5f076476d06aa7d828",
@@ -5989,6 +5989,7 @@
         "tools/manager_application_provider.json": "2a6bf96931f64ccc67fe6780065d60071dcafb8d6fc2db35958c7910a6783ed3",
         "tools/prepare_manager_application.py": "d50f8d8d6c9cb7bc87586d60cc876280f16fabf6cf0dca7243e06ee214ca6aae",
         "tools/coverage_guided_selection/auditability.py": "7732bc5a9b14a2ab6083f9e73f5d7698888461b387515cb1a17a08174a066ed5",
-        "tools/plugin_test_command_safety.py": "e9c38a3d45053f7cdda54eafd99fe696119e8f59f5b8abb71258d74751eb93e0"
+        "tools/plugin_test_command_safety.py": "e9c38a3d45053f7cdda54eafd99fe696119e8f59f5b8abb71258d74751eb93e0",
+        "plugins/agent-worktrees/src/agent_worktrees/dispatch_cohort.py": "084533aa9fe552932d7a508451e04c276cc533081ad1c2bfe782cb212395463a"
     }
 }
