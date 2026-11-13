@@ -674,6 +674,7 @@ def _match_agents(target: str, agents: list[dict]) -> list[str]:
 
 
 def _cmd_create(args: argparse.Namespace) -> None:
+    dispatch_origin = workspace_creation_cli.validate_origin_arguments(args)
     worktree_writer = workspace_creation_cli.validate_arguments(args)
     if getattr(args, "detach", False) and not getattr(args, "cli", False):
         print("[FAIL] --detach requires --cli", file=sys.stderr)
@@ -714,6 +715,7 @@ def _cmd_create(args: argparse.Namespace) -> None:
     if creation_key is not None:
         workspace_creation_cli.create(
             args, client, caller_id=caller_id, worktree_writer=worktree_writer,
+            **({"dispatch_origin": dispatch_origin} if dispatch_origin is not None else {}),
         )
         return
 

@@ -17,6 +17,18 @@ import test_runtime_serving as serving_controls
 import test_live_inbox_runtime as inbox_controls
 import test_native_send_admission as native_controls
 import test_gc as gc_controls
+from test_dispatch_origin_cli import (
+    test_origin_cli_reaches_actual_keyed_owner_without_acquisition
+    as test_origin_cli_reaches_actual_keyed_owner_without_acquisition,
+    test_origin_creation_client_composes_required_selected_peer_capabilities
+    as test_origin_creation_client_composes_required_selected_peer_capabilities,
+    test_origin_creation_client_rechecks_after_cutover_without_baseline_replay
+    as test_origin_creation_client_rechecks_after_cutover_without_baseline_replay,
+    test_origin_creation_client_invalid_scope_refuses_before_peer_discovery
+    as test_origin_creation_client_invalid_scope_refuses_before_peer_discovery,
+    test_origin_cli_invalid_forms_refuse_before_connect
+    as test_origin_cli_invalid_forms_refuse_before_connect,
+)
 from test_dispatch_cli_origin import (
     test_origin_client_negotiates_mode_capability_before_acquisition
     as test_origin_client_negotiates_mode_capability_before_acquisition,
