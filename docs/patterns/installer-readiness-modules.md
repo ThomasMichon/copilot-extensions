@@ -120,6 +120,12 @@ The declared variable is set to `1` for the read-only probe and removed for
 the explicitly admitted installer. The producer's probe must honor it without
 installing or starting anything. Actual actions remain exclusively in the
 module manifest; this document defines no command, module, service or installer.
+Readiness and installer actions run with the owner's payload root as their
+working directory and receive the selected project root as `COPILOT_PROJECT_DIR`,
+the same variable Copilot sets for plugin commands. Owners whose state is
+repository-scoped (for example an opt-in runtime activation) must resolve it
+from that variable rather than from the working directory, and must keep the
+probe cheap: it shares one bounded admission budget with every other module.
 Its runtime root participates in the same complete ownership census,
 ordinary/core mode checks and duplicate-writer refusal, even without readiness
 metadata. Its parsed content binds the reviewed plan and readiness-only

@@ -1,0 +1,9 @@
+{
+  "comment": "Isolate installed Vault module loading from the selected project during readiness and ordinary commands.",
+  "changes": [
+    {
+      "plugin": "agent-vault",
+      "type": "patch"
+    }
+  ]
+}

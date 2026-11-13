@@ -1,0 +1,9 @@
+{
+  "comment": "Name the selected project root (COPILOT_PROJECT_DIR) to readiness and installer actions so repository-scoped owners such as agent-vault resolve their activation configuration, and bind it into the repair plan digest",
+  "changes": [
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    }
+  ]
+}
