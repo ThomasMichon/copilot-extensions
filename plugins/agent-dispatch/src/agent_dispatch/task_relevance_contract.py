@@ -9,6 +9,7 @@ RELEVANCE_PROTOCOL = "task_relevance/v1"
 RELEVANCE_PATH = "/task-relevance"
 RELEVANCE_SCOPE = "local-direct-command-emitter"
 RELEVANCE_EFFECTIVE_SCOPE = "local-effective-emitter-evaluator"
+CLOSEOUT_PROTOCOL = "task_relevance_closeout/v1"
 
 
 def emitter_spec_revision(spec: dict) -> str:
@@ -24,4 +25,8 @@ def relevance_contract(control_token: str | None) -> dict:
         "bounded_batches": True,
         "periodic_evaluation": True,
         "control_authority_configured": bool(control_token),
+        "owner_closeout": {
+            "protocol": CLOSEOUT_PROTOCOL, "supported_versions": [1],
+            "path": "/tasks/{task_id}/relevance-closeout",
+        },
     }

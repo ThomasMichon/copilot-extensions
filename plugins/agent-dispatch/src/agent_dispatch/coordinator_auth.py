@@ -11,8 +11,9 @@ from fastapi.responses import JSONResponse
 
 from .control_token import scoped_control_token  # noqa: F401 -- compatible public export
 from .task_scope import TASK_SCOPE_HEADER, TaskScopeTokenError, verify_task_scope_token
+from .task_closeout_authority import CLOSEOUT_ROUTES
 
-TASK_SCOPE_ROUTES = frozenset({
+TASK_SCOPE_ROUTES = CLOSEOUT_ROUTES | frozenset({
     ("GET", "/tasks/{task_id}"),
     ("GET", "/tasks/{task_id}/payload"),
     ("GET", "/tasks/{task_id}/pool-start/contract"),
@@ -67,11 +68,18 @@ def _make_auth(token: str | None, control_token: str | None):
                 raise HTTPException(status_code=403, detail="route does not accept task authority")
             request.state.task_scope = scope
             from .task_authority import resolve_task_authority
+            from .task_closeout_authority import resolve_closeout_authority
 
-            resolve_task_authority(
-                request, request.app.state.queue, request.app.state.task_fencing_guard,
-                request.path_params["task_id"], None,
-            )
+            if (request.method, getattr(route, "path", None)) in CLOSEOUT_ROUTES:
+                resolve_closeout_authority(
+                    request, request.app.state.queue, request.app.state.task_fencing_guard,
+                    request.path_params["task_id"],
+                )
+            else:
+                resolve_task_authority(
+                    request, request.app.state.queue, request.app.state.task_fencing_guard,
+                    request.path_params["task_id"], None,
+                )
             return
         data_token_match = bool(
             token and creds is not None and secrets.compare_digest(creds.credentials, token)
