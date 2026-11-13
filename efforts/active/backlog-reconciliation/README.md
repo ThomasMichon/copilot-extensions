@@ -3164,6 +3164,13 @@ sources, transferring owners or turning partial/planning gains into completion.
   receiving objective or a retained gap; investigate actual implementation
   evidence when claiming completion, rather than making that the prerequisite
   for discovering thematic alignment.
+  The [finite recovery/account intake](journal/2026/11.13-finite-recovery-and-account-intake.md)
+  proposes #5675's original guarded recovery/witness family directly under
+  Dispatch Phase 3 and #5791's complete original plus #330/#2755 family
+  under account-aware Phase 2. The actual deduplication/ownership intake
+  preserves exactly one canonical phase, Draft status, implementation gate,
+  delivered source credit and all incumbent custody. Three canonical/whole
+  retentions remain; reviewed delivery is not technical acceptance or closure.
   The [further sixteen-contract register](receiving-recovered-sixteen.md)
   preserves all-nine/four-consumer selection, literal alternatives, finite
   original cohorts and same-canonical retirement. Ten proposed direct families,

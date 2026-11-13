@@ -39,6 +39,18 @@ switch or leaking one operation's credentials into another.
   implementation under the temporary token, appoint an owner, change
   authentication or require a new generic acknowledgement.
 
+- **Finite #5791 intake:** retain the existing identity-contract/scoped-command
+  owners, original bounded-repair continuation, claims and activation gates.
+  Phase 2 below is its single canonical phase; Phases 1 and 4 are interfaces,
+  not competing owners. Its original plus inherited #330/#2755 contract is
+  deduplicated against the existing tracker and recorded in the
+  [dated intake ledger](../migration-intake/ledger.md#finite-account-execution-intake-2026-11-13).
+  Acceptance requires normal reviewed merge of this direct Plan amendment;
+  a ledger proposal alone is not acceptance. Draft status and the
+  temporary-token implementation restriction remain unchanged; no new
+  tracker, provider abstraction, executor appointment or authentication
+  operation is authorized.
+
 ## Context
 
 Repository tools often inherit whichever account happens to be active in a
@@ -73,6 +85,76 @@ degradation without global identity mutation.
 - [ ] Reject mismatched or unavailable identities before mutation.
 - [ ] Preserve interactive fallback only when explicitly requested by a human,
   never as an agent-side success-shaped fallback.
+
+#### Direct retained #5791 intended-account execution
+
+**Agent-recommended tracking amendment.** Phase 2 is the single canonical
+home for this finite original and inherited #330/#2755 family. The Phase 1
+identity contract and Phase 4 recovery work remain interfaces. Preserve
+the delivered #8921 explicit missing-token correction and #3050 short-name
+lookup; neither is a fresh missing implementation or whole-family proof.
+
+- [ ] **P5791-M:** Retain explicit repository-override OR applicable
+  account-map mint-failure refusal BEFORE arbitrary gh execution AND before
+  Git or PR/fork entrypoints can substitute ambient authentication, with
+  actionable selected-account identity-unavailable diagnostics. Retain the
+  bounded repair's 60-second account-token lookup and no inherited-token/
+  global-account substitution across those entrypoints. Preserve successful
+  process-local injection and ordinary unconfigured/derived-owner ambient
+  behavior; an organization-name heuristic is not an explicit account pin.
+  Credit #8921's delivered no-launch correction rather than repeating the
+  obsolete assertion that explicit pins still fall through.
+- [ ] **P5791-S:** Retain EVERY inherited #330 stale/rejected-credential
+  obligation: recover ONLY within the SAME intended identity OR refuse with
+  an actionable error naming the account needing reauthentication, without
+  secret exposure or ambient retry. Exercise stale-token/401 PR-provider
+  execution alongside missing-token dispatcher refusal; preserve the fixed
+  active-account path, successful scoped injection and derived/unconfigured
+  controls. A one-attempt HTTP-401 assertion alone does not establish the
+  named-account diagnostic.
+- [ ] **P5791-R:** Retain EVERY inherited #2755 obligation: registered short
+  name and canonical qualified slug select the SAME exact entry/account
+  with explicit-repository override, applicable account map, then supported
+  derived/unconfigured precedence. Never borrow a sibling override.
+  Distinguish missing/ambiguous canonical binding, unavailable mint and
+  rejected scoped credentials with honest non-secret results and aligned
+  cross-repository guidance; correct lookup is not credential validity.
+- [ ] **P5791-C:** Preserve the complete actual-dispatcher compatibility
+  matrix: short/qualified equality, exact-repository versus sibling override,
+  genuine bare-owner compatibility, non-GitHub registration WITH/WITHOUT its
+  supported explicit override, unknown/ambiguous binding, ambient-present
+  mint failure and successful scoped execution. Keep no-global-auth-switch,
+  operation identity distinct from Copilot inference identity and the
+  separate opt-in idle-machine/explicit-risk inference correction intact.
+  Retain every original/inherited checkbox, marker, comment and existing
+  ownership/activation condition; no real provider write, new provider
+  abstraction or native/all-host programme is required by this contract.
+
+#### Local Validation - #5791
+
+- [ ] **V5791-M:** Use synthetic explicit override AND account-map mint
+  failures with ambient reader credentials present to prove no gh subprocess
+  and no Git or PR/fork operation using replacement ambient credentials,
+  with an actionable identity-unavailable result at each entrypoint.
+  Preserve the existing 60-second token-lookup bound and pair the actual
+  scoped-gh, Git and PR/fork controls with successful scoped injection,
+  same-active-account and derived/unconfigured behavior. Credit the
+  delivered repair rather than requesting another implementation.
+- [ ] **V5791-S:** Resolve the actual PR-provider stale/rejected-token/401
+  path: SAME intended-identity recovery OR named-account actionable refusal,
+  no ambient substitution and no secrets. Preserve missing-token dispatcher
+  controls and distinguish existing one-attempt proof from the remaining
+  diagnostic qualification.
+- [ ] **V5791-R:** Resolve every exact-target, precedence and compatibility
+  case in P5791-R/C through the supported dispatcher, including genuine
+  bare-owner and non-GitHub WITH/WITHOUT override cases. Unknown/ambiguous
+  binding, unavailable mint and rejected credentials remain distinct
+  non-secret diagnostics; no live provider write is needed.
+- [ ] **V5791-C:** Preserve process-local injection, unchanged machine-global
+  authentication, all original/inherited controls and the separate inference
+  identity capability. Keep source/release/installed evidence distinct,
+  credit #8921/#3050 and retain all actual owners, claims, activation and
+  temporary-token gates without weakening #810's separate alternative.
 
 ### Phase 3 - Adopt across repository workflows
 
@@ -151,6 +233,14 @@ _Correlated via a facility-driven sweep of open `bug`-labeled issues against act
   Record source, release and actual native/installed proof separately; no
   unrelated account-provider or every-host completion gate is added.
 
+- [ ] **G5791:** Resolve EVERY P5791-M/S/R/C and V5791-M/S/R/C clause,
+  inherited #330/#2755 obligation and continuing #5791 custody. Preserve
+  same-intended-identity recovery OR actionable refusal, complete exact-target
+  compatibility, delivered source credit, no global switch and operation/
+  inference separation. Reviewed Phase 2 acceptance and the dated intake
+  record do not activate this Draft effort, satisfy technical acceptance,
+  authorize implementation or release source/resource custody.
+
 ## Proposal
 
 Establish repository-scoped identity resolution as a shared primitive, then
@@ -158,6 +248,25 @@ adopt it incrementally across commands that currently inherit ambient account
 state.
 
 ## Journal
+
+### 2026-11-13 - Proposed finite intended-account execution intake
+
+- Added direct Phase 2 M/S/R/C Plan, paired local Validation, actual global
+  Validation and continuing #5791 custody after the Phase 5 intake
+  deduplication/ownership/current-fit assessment. The append-only migration
+  ledger records this one canonical phase and existing tracker, not another
+  umbrella or new issue.
+- Credit #8921's explicit missing-token correction and #3050's lookup while
+  retaining named-account stale-401 refusal and the full inherited #330/#2755
+  compatibility matrix. The bounded repair's gh, Git and PR/fork refusal
+  entrypoints and 60-second token lookup remain explicit synthetic
+  acceptance, not new implementation requests. Original owners, every
+  incumbent byte/check state, first unresolved identity-contract gate,
+  Draft status, #810 alternatives
+  and temporary-token implementation restriction remain unchanged.
+- Normal reviewed Plan merge establishes documentary intake; complete current
+  receiving readback and separate source judgment remain. No authentication
+  query, token operation, provider write, test, implementation or rollout ran.
 
 ### 2026-10-28 - Finite Windows argument-fidelity intake
 
