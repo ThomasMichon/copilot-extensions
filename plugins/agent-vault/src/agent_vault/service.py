@@ -17,6 +17,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from .service_cache import get_cache
+from .cache_warm import CacheWarmQueue, CacheWarmRuntime
 from .credential_fields import canonical_field
 from . import __version__ as _PROCESS_VERSION
 from .config import (
@@ -105,6 +106,7 @@ class VaultService:
         self._last_unlock_error: dict[str, str] = {}
         self._last_dismiss: dict[str, bool] = {}
         self._request_ctx = threading.local()  # per-thread request context
+        self._cache_warm = CacheWarmQueue(self)
 
     def keepalive(self) -> None:
         self.last_activity = time.time()
@@ -370,6 +372,8 @@ class VaultService:
             vault_name = getattr(self._request_ctx, "vault_name", "")
         if self.cli.has_password(kpdb):
             return True
+        if getattr(self._request_ctx, "require_existing_unlock", False):
+            return False
 
         if not kpdb:
             self._record_unlock_error("", "KeePass database path is not configured; set KPDB")
@@ -411,6 +415,9 @@ class VaultService:
                 self._unlock_failed_at.pop(kpdb, None)
                 self._record_unlock_error(kpdb, None)
                 self._last_dismiss[kpdb] = False
+                self._cache_warm.enqueue(
+                    kpdb, getattr(self._request_ctx, "group", None), confirmed=True,
+                )
                 log.info("CLI backend unlocked via provider %r (TTL %ds)%s",
                          provider_name, PASSWORD_TTL, f" [{reason}]" if reason else "")
                 return True
@@ -475,6 +482,9 @@ class VaultService:
                     self._unlock_failed_at.pop(kpdb, None)
                     self._record_unlock_error(kpdb, None)
                     self._last_dismiss[kpdb] = False
+                    self._cache_warm.enqueue(
+                        kpdb, getattr(self._request_ctx, "group", None), confirmed=True,
+                    )
                     log.info("CLI backend unlocked (TTL %ds)%s",
                              PASSWORD_TTL, f" [{reason}]" if reason else "")
                     return True
@@ -573,17 +583,18 @@ class VaultService:
     def _handle_admitted_request(self, request: dict, peer: str = "?",
                                  transport: str = "unknown") -> dict:
         """Dispatch work whose lifecycle admission was decided by the server."""
-        try:
-            if request.get("action") in _DISPATCH_WITHOUT_CREDENTIAL_LOCK:
-                return self._dispatch_request(request, peer, transport)
-            with self._credential_lock, contextlib.ExitStack() as custody:
-                self._check_password_ttl()
-                if request.get("action") in {"add", "set-username", "remove", "rm", "move", "mv"}:
-                    kpdb = request.get("kpdb") or resolve_kpdb(required=False)
-                    custody.enter_context(service_cache.backend_custody(get_cache(), kpdb))
-                return self._dispatch_request(request, peer, transport)
-        except service_cache.ServiceCacheUnavailable:
-            return {"ok": False, "error": service_cache.UNAVAILABLE}
+        with self._cache_warm.foreground():
+            try:
+                if request.get("action") in _DISPATCH_WITHOUT_CREDENTIAL_LOCK:
+                    return self._dispatch_request(request, peer, transport)
+                with self._credential_lock, contextlib.ExitStack() as custody:
+                    self._check_password_ttl()
+                    if request.get("action") in {"add", "set-username", "remove", "rm", "move", "mv"}:
+                        kpdb = request.get("kpdb") or resolve_kpdb(required=False)
+                        custody.enter_context(service_cache.backend_custody(get_cache(), kpdb))
+                    return self._dispatch_request(request, peer, transport)
+            except service_cache.ServiceCacheUnavailable:
+                return {"ok": False, "error": service_cache.UNAVAILABLE}
 
     def _dispatch_request(self, request: dict, peer: str,
                           transport: str) -> dict:
@@ -632,6 +643,7 @@ class VaultService:
                 "ttl": self.ttl,
                 "daemon_persistent": self.ttl_override == 0,
                 "password_lifetime": describe_password_lifetime(self, kpdb),
+                "cache_warm": self._cache_warm.status(kpdb, group),
                 "cached": len(self.cache),
                 "cli": self.cli.status(kpdb or None),
                 "unlocked_vaults": self.cli.unlocked_vaults(),
@@ -727,6 +739,7 @@ class VaultService:
                 # matching the get/has path, instead of forcing a client prompt.
                 want_prompt = bool(request.get("prompt"))
                 if self.ensure_unlocked(kpdb, vault_name, reason, allow_prompt=want_prompt):
+                    self._cache_warm.enqueue(kpdb, group)
                     return {"ok": True}
                 error_msg = self._last_error(kpdb) or self._last_error("") or "Unlock failed"
                 return {"ok": False, "error": error_msg, "needs_unlock": True}
@@ -739,6 +752,7 @@ class VaultService:
                 self._unlock_failed_at.pop(kpdb, None)
                 self._record_unlock_error(kpdb, None)
                 self._last_dismiss[kpdb] = False
+                self._cache_warm.enqueue(kpdb, group, confirmed=True)
                 log.info("CLI backend unlocked (TTL %ds) [%s]", PASSWORD_TTL, reason)
                 return {"ok": True}
             return {"ok": False, "error": "Invalid password"}
@@ -1067,11 +1081,16 @@ async def _serve(service, tcp_port, servers, pipe_servers, connections):
     generation = service._generation = ServiceGeneration(service, connections, servers, pipe_servers)
     await generation.start(tcp_port)
     loop = asyncio.get_running_loop()
+    warmer = CacheWarmRuntime(service, service._cache_warm, connections)
     with ThreadPoolExecutor(max_workers=1, thread_name_prefix="vault-expiry") as expiry:
-        while not service._shutdown and not service.is_expired:
-            await settle_owned(loop.run_in_executor(expiry, service._check_password_ttl))
-            await generation.tick()
-            await asyncio.sleep(0.5)
+        try:
+            while not service._shutdown and not service.is_expired:
+                await settle_owned(loop.run_in_executor(expiry, service._check_password_ttl))
+                await generation.tick()
+                warmer.tick()
+                await asyncio.sleep(0.5)
+        finally:
+            await settle_owned(warmer.close())
 
 
 def cleanup() -> None:
