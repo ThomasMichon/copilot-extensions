@@ -342,6 +342,16 @@ the non-public approval conversation.
 
 ## Plan
 
+The [inherited-allocator and parked-review intake](journal/2026/11.13-inherited-allocator-and-parked-review-intake.md)
+proposes eighteen direct unchecked rows across two existing ROOTs for #4217,
+#5183 and #5211. It retains the allocator's report AND log ownership,
+the semantic-revalidation OR addressed-feedback alternative, BOTH default
+round outputs and concrete soft-threshold tactics. The review ROOT stays
+Blocked; execution/resumption and every incumbent owner/hold remain unchanged.
+All three sources stay OPEN pending actual reviewed receiving, complete current
+readback and separate source judgments. The complete queue is 865 open,
+136 above fixed 729; one eligible arrival is metadata-only.
+
 The [reviewed-receiving readiness unit](journal/2026/11.13-reviewed-receiving-readiness.md)
 screens 46 older mapped originals and verifies actual complete D4214
 receiving in the existing Active Dispatch effort. #4214's separate
@@ -3450,6 +3460,14 @@ sources, transferring owners or turning partial/planning gains into completion.
   normal publication flow.
 
 ## Validation Plan
+
+The [eighteen-row intake](journal/2026/11.13-inherited-allocator-and-parked-review-intake.md#evidence-and-preservation)
+adds only direct Plan/local/global Validation, Coordination and dated-Journal
+text in the two existing receiving ROOTs. Independent byte proof preserves
+every incumbent row/check state: portfolio 270 to 275 unchecked with 13 checked
+unchanged; parked review 50 to 63 unchecked with three checked unchanged.
+Complete current receiving/history readback and separate source-specific
+acceptance remain pending; no source retirement or execution is claimed.
 
 The [existing-receiving audit](journal/2026/11.13-reviewed-receiving-readiness.md)
 verifies eight whole documentary files and full primary histories, actual
