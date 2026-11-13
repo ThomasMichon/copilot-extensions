@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 
 PLUGIN = Path(__file__).resolve().parents[1]
-SKILL = PLUGIN / "skills" / "maintain-agent-fleet"
+SKILL = PLUGIN / "skills" / "maintain-agent-infrastructure"
 
 
 def _read(relative: str) -> str:
@@ -17,7 +17,7 @@ def test_role_is_discoverable_and_worktree_owned() -> None:
     text = _read("SKILL.md")
     frontmatter = re.match(r"---\n(.*?)\n---\n", text, re.S)
     assert frontmatter is not None
-    assert "name: maintain-agent-fleet\n" in frontmatter[1]
+    assert "name: maintain-agent-infrastructure\n" in frontmatter[1]
     description = frontmatter[1].split("description: >-", 1)[1]
     assert len(description) <= 1024
     assert "maintain-and-update-fleet" in description
@@ -109,7 +109,7 @@ def test_continuity_and_topology_do_not_grant_activation() -> None:
     topology = (PLUGIN / "skills/managing-agent-topology/SKILL.md").read_text(
         encoding="utf-8"
     )
-    assert "maintain-agent-fleet" in topology
+    assert "maintain-agent-infrastructure" in topology
     assert "separate maintenance authority" in topology
 
 
@@ -126,6 +126,24 @@ def test_role_links_resolve_and_public_entrypoints_include_it() -> None:
                 assert resolved.is_relative_to(PLUGIN), target
                 assert resolved.is_file(), target
     readme = (PLUGIN / "README.md").read_text(encoding="utf-8")
-    assert "skills/maintain-agent-fleet/SKILL.md" in readme
-    assert "assign a fleet maintainer role" in readme.casefold()
+    assert "skills/maintain-agent-infrastructure/SKILL.md" in readme
+    assert "assign an infrastructure maintainer" in readme.casefold()
     assert "fleet-maintenance" in (PLUGIN / "plugin.json").read_text(encoding="utf-8")
+
+
+def test_infrastructure_and_progress_roles_stay_separate_after_rename() -> None:
+    monitor = PLUGIN / "skills" / "monitor-agent-fleet" / "SKILL.md"
+    readme = (PLUGIN / "README.md").read_text(encoding="utf-8")
+    assert not (PLUGIN / "skills" / "maintain-agent-fleet" / "SKILL.md").exists()
+    for text in (_read("SKILL.md"), monitor.read_text(encoding="utf-8"), readme):
+        assert "Do not merge these roles" in text
+    assert "not agent-progress\n  monitoring" in _read("SKILL.md")
+    assert "host/tooling maintenance" in monitor.read_text(encoding="utf-8")
+    assert "no second skill or invocation alias" in readme
+    assert "preserve the worktree, original grants, holds and pending effects" in readme
+    for path in (monitor, monitor.parent / "references" / "repair-escalation.md"):
+        for target in re.findall(
+            r"\[[^\]]+\]\(([^)]+)\)", path.read_text(encoding="utf-8")
+        ):
+            if "maintain-agent-" in target:
+                assert (path.parent / target).resolve().is_file(), target

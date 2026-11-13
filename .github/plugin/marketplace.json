@@ -6,13 +6,13 @@
   },
   "metadata": {
     "description": "Copilot CLI plugins for worktree isolation, service lifecycle, inter-agent communication, GitHub Codespaces management, local container fleets, MCP bridging, session logging, context-window handoff, effort planning, budget posture, coordinator-first delegation, publication safety, WSL environment setup, and CLI customization",
-    "version": "1.26.47-dev1"
+    "version": "1.26.48-dev1"
   },
   "plugins": [
     {
       "name": "agent-worktrees",
       "description": "Worktree isolation system for concurrent Copilot CLI sessions - lifecycle management, finalization, cleanup, service discovery, and deployment patterns for monorepos",
-      "version": "1.26.47-dev1",
+      "version": "1.26.48-dev1",
       "source": "plugins/agent-worktrees"
     },
     {
@@ -50,7 +50,7 @@
     {
       "name": "agent-mcp",
       "description": "Swiss-army MCP bridge - wrap an upstream MCP server (HTTP or stdio) as a local stdio MCP, inject host credentials, and apply a decorator stack (filter, rename, defer, code-mode, storage, transform, gate, input_gate). Dual-era: speaks modern MCP 2.x (2026-07-28) and the legacy handshake, in both directions.",
-      "version": "0.2.265-dev1",
+      "version": "0.2.266-dev1",
       "source": "plugins/agent-mcp"
     },
     {
@@ -152,7 +152,7 @@
     {
       "name": "agent-roles",
       "description": "Sustained agent role charters over existing owners: a fleet monitor (task master) for progress audits and separately authorized corrective steers, and a pull-request reviewer role with independent lanes. Guidance-only, with no task queue, scheduler, daemon or required companion plugin.",
-      "version": "0.3.0-dev1",
+      "version": "0.3.1-dev1",
       "source": "plugins/agent-roles"
     }
   ]

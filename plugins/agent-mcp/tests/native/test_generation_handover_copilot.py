@@ -126,9 +126,14 @@ finally:
 
 
 @pytest.mark.timeout(180)
+@pytest.mark.parametrize(
+    "controlled_wait", [False, True] if sys.platform == "win32" else [False],
+    ids=["publisher-exit", "existing-wait-owner"] if sys.platform == "win32" else ["exec-client"],
+)
 async def test_actual_native_client_responds_through_replacement_and_rollback(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     record_testsuite_property: Callable[[str, object], None],
+    controlled_wait: bool,
 ) -> None:
     executable = os.environ.get("COPILOT_NATIVE_TEST_EXECUTABLE")
     if not executable:
@@ -308,6 +313,7 @@ async def test_actual_native_client_responds_through_replacement_and_rollback(
                         windows_overlay(configuration, ["physical-fixture"], binding="a" * 64),
                         environment, True, server="physical-fixture",
                         tools=("physical-fixture(fixture_0)",),
+                        controlled_wait=controlled_wait,
                     )
                     command = [shutil.which("pwsh"), "-NoLogo", "-NoProfile", "-File", str(script)]
                 else:
@@ -330,13 +336,31 @@ async def test_actual_native_client_responds_through_replacement_and_rollback(
                 if windows:
                     producer_handle = native.require(native.k.OpenProcess(0x101000, False, client.pid))
                     retained.callback(native.close, producer_handle)
-                    line = await asyncio.wait_for(client.stdout.readline(), 30)
-                    assert line, (await asyncio.wait_for(stderr, 5)).decode(errors="replace")
-                    published = json.loads(line)
+                    if controlled_wait:
+                        publication = tmp_path / "launch-owner.json"
+                        published = None
+                        for _ in range(600):
+                            try:
+                                published = json.loads(publication.read_text(encoding="utf-8"))
+                            except (OSError, ValueError):
+                                pass
+                            if published is not None:
+                                break
+                            assert client.returncode is None, (await stderr).decode(errors="replace")
+                            await asyncio.sleep(.05)
+                        assert published is not None, "Existing wait owner never published its actual child"
+                    else:
+                        line = await asyncio.wait_for(client.stdout.readline(), 30)
+                        assert line, (await asyncio.wait_for(stderr, 5)).decode(errors="replace")
+                        published = json.loads(line)
                     client_pid, client_birth = published["pid"], published["birth"]
                     client_handle = windows_client._pin(native, client_pid, client_birth, 0x101001)
                     retained.callback(native.close, client_handle)
-                    assert await asyncio.to_thread(native.k.WaitForSingleObject, producer_handle, 10000) == 0
+                    if controlled_wait:
+                        assert client_pid != client.pid
+                        assert native.k.WaitForSingleObject(producer_handle, 0) == 258
+                    else:
+                        assert await asyncio.to_thread(native.k.WaitForSingleObject, producer_handle, 10000) == 0
                     assert not caller_context.exists()
                     assert not observations.with_suffix(".owner.json").exists()
                 else:
@@ -377,6 +401,8 @@ async def test_actual_native_client_responds_through_replacement_and_rollback(
                 def retained_identities() -> None:
                     if windows:
                         assert native.k.WaitForSingleObject(client_handle, 0) == 258
+                        if controlled_wait:
+                            assert native.k.WaitForSingleObject(producer_handle, 0) == 258
                     else:
                         assert client.returncode is None
                     assert identity_state(client_pid, client_birth) == "matching"
@@ -521,6 +547,10 @@ async def test_actual_native_client_responds_through_replacement_and_rollback(
                 record_testsuite_property("actual_native_unknown_delivery_calls", 1)
                 record_testsuite_property("unknown_delivery_conduit_exit", "dead")
                 record_testsuite_property("actual_native_client", str(executable.name))
+                record_testsuite_property(
+                    "actual_native_launch_owner",
+                    "existing-wait-owner" if controlled_wait else "publisher-exit" if windows else "exec-client",
+                )
                 record_testsuite_property("physical_generations", json.dumps({
                     label: generation for label, (generation, _) in slots.items()
                 }))
@@ -536,6 +566,9 @@ async def test_actual_native_client_responds_through_replacement_and_rollback(
                         if windows:
                             await windows_client._settle_client(native, client_handle)
                         await asyncio.wait_for(client.wait(), 10)
+                        if controlled_wait:
+                            assert client.returncode == 0
+                            assert native.k.WaitForSingleObject(producer_handle, 0) == 0
                         if not failed:
                             try:
                                 result, text = await asyncio.wait_for(asyncio.shield(pending), 5)

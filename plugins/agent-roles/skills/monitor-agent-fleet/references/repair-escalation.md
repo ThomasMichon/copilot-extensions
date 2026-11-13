@@ -40,7 +40,7 @@ A resume or restart that times out after being accepted is not proven to have
 failed, and a failed readback alone does not establish failure. Before
 resuming, retrying or climbing, reconcile the original operation and the
 target's current head through the owner, as in the maintainer's
-[rollout and recovery](../../maintain-agent-fleet/references/rollout-and-recovery.md)
+[rollout and recovery](../../maintain-agent-infrastructure/references/rollout-and-recovery.md)
 guidance. Keep an unavailable outcome unresolved rather than repeating the
 operation.
 
@@ -61,7 +61,7 @@ evidence.
 Repair is scoped to individual blocked agents and to any host-shared service
 the grant names at R3. When the diagnosis shows a host-wide tooling or runtime
 fault, such as an outdated runtime, a failed update or a release defect, route
-it to the assigned `maintain-agent-fleet` owner, or report it when none is
+it to the assigned `maintain-agent-infrastructure` owner, or report it when none is
 assigned. Recovering a named shared service is the one exception, even when
 every agent on the host depends on it. Do not perform host maintenance,
 updates or rollouts under a repair grant.

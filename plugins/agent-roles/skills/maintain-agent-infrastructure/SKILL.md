@@ -1,16 +1,17 @@
 ---
-name: maintain-agent-fleet
+name: maintain-agent-infrastructure
 description: >-
-  Runs a worktree-owned fleet maintenance role: observes agent-tooling releases,
+  Runs a worktree-owned infrastructure maintenance role, not agent-progress
+  monitoring: observes agent-tooling releases,
   plans authorized per-machine updates through existing owners, verifies runtime
   health and recovers original agent sessions after disruption. Keeps a durable
   charter across handoffs without an always-on anchor chat. Defaults to read-only;
   grants no update, restart, reboot, credential or agent-steering authority.
-  Use for "maintain-and-update-fleet", "maintain the agent fleet",
-  "charter maintain-agent-fleet", or "assign a fleet maintainer role".
+  Use for "maintain agent infrastructure", "maintain-and-update-fleet",
+  "charter maintain-agent-infrastructure", or "assign an infrastructure maintainer".
 ---
 
-# Maintain agent fleet
+# Maintain agent infrastructure
 
 Maintain the machines and tooling that host agents, not the agents' priorities
 or implementation work. Fill [one charter](assets/CHARTER.md) in the assigned
@@ -54,6 +55,8 @@ performs separately authorized maintenance, and owns host-wide tooling or
 runtime faults the monitor routes here.
 Neither role inherits the other's authority. Coordinate findings with the
 retained owner; do not take over a slow reviewer or unrelated worker.
+Do not merge these roles: infrastructure readiness and agent-goal progress
+have different acceptance criteria even when one operator grants both scopes.
 
 ## 2. Inventory and observe releases
 
@@ -173,7 +176,7 @@ are settled or explicitly transferred. A merge, update exit or ended session
 does not complete the fleet's maintenance objective.
 
 For topology dispatch, use `managing-agent-topology` with role ID
-`maintain-agent-fleet`, explicit machine/environment scope and a selected minimum
+`maintain-agent-infrastructure`, explicit machine/environment scope and a selected minimum
 qualified coverage. Materialize the complete filled charter in the existing
 assignment fields; a template link alone is insufficient. Count only a fresh
 native owner that accepted the expected charter and required capabilities,
