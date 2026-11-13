@@ -110,7 +110,8 @@ asks the agent to verify met criteria and finalize through its own flow, or
 asks it to rework its own charter and plan when they have drifted. Follow
 [per-agent charters](agent-charters.md#drive-completion-charters-to-resolution).
 Standing charters get only an on-course nudge, and exploratory agents get
-none. When the blocker is the agent's infrastructure rather than its plan,
+none. A required or productive wait is not a resolution failure; do not steer
+an agent out of it. When the blocker is the agent's infrastructure rather than its plan,
 use [graduated repair](repair-escalation.md) instead of a steer.
 
 ## A bounded nudge
