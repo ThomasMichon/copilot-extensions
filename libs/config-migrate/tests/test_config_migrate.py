@@ -194,6 +194,33 @@ def test_migrate_file_refuses_non_mapping_without_rewrite(tmp_path: Path, origin
     assert not path.with_name("config.yaml.bak").exists()
 
 
+@pytest.mark.parametrize(
+    "original,parent,child",
+    [
+        ("items: &items [*items]\n", "items", 0),
+        ("items: &items {again: *items}\n", "items", "again"),
+        ("&root\nself: *root\n", None, "self"),
+    ],
+    ids=("list-cycle", "map-cycle", "root-cycle"),
+)
+def test_migrate_file_baseline_preserves_recursive_aliases(
+    tmp_path: Path, original: str, parent: str | None, child: str | int,
+) -> None:
+    path = tmp_path / "config.yaml"
+    path.write_text(original, encoding="utf-8")
+    reg = _baseline_reg()
+
+    assert migrate_file(path, "aw/config", reg).changed
+
+    loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
+    assert loaded[SCHEMA_VERSION_KEY] == 1
+    cycle = loaded[parent] if parent is not None else loaded
+    assert cycle[child] is cycle
+    stamped = path.read_bytes()
+    assert not migrate_file(path, "aw/config", reg).changed
+    assert path.read_bytes() == stamped
+
+
 def test_migrate_file_baseline_stamp_summary_wording(tmp_path: Path) -> None:
     reg = _baseline_reg()
     p = tmp_path / "config.yaml"

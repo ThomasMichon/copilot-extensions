@@ -258,17 +258,21 @@ def migrate_file(
     if from_version == spec.current_version:
         candidate = _insert_marker_textually(raw_text, spec.current_version)
         try:
-            if yaml.safe_load(candidate) == new_doc:
+            if yaml.safe_dump(yaml.safe_load(candidate), sort_keys=True) == yaml.safe_dump(
+                new_doc, sort_keys=True
+            ):
                 new_text = candidate
         except yaml.YAMLError:
             pass
     if new_text is None:
-        header = f"{SCHEMA_VERSION_KEY}: {spec.current_version}\n"
-        body = {k: v for k, v in new_doc.items() if k != SCHEMA_VERSION_KEY}
-        dumped = yaml.safe_dump(
-            body, default_flow_style=False, sort_keys=False, allow_unicode=True
+        # Reorder in place so aliases to the root still reference the serialized root.
+        body = tuple(new_doc.items())
+        new_doc.clear()
+        new_doc[SCHEMA_VERSION_KEY] = spec.current_version
+        new_doc.update(body)
+        new_text = yaml.safe_dump(
+            new_doc, default_flow_style=False, sort_keys=False, allow_unicode=True
         )
-        new_text = header + (dumped if body else "")
     _atomic_write(path, new_text, backup=backup)
     return MigrationResult(
         path=path,
