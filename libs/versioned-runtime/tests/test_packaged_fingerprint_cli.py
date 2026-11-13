@@ -74,6 +74,40 @@ def test_fingerprint_cli_preserves_missing_input_refusal(primitive: Path, tmp_pa
     assert str(missing) in result.stderr
 
 
+@pytest.mark.skipif(os.name != "nt", reason="native Windows extended-length I/O")
+@pytest.mark.parametrize("directory", [False, True])
+def test_fingerprint_cli_preserves_deep_ordinary_source_paths(
+    primitive: Path, tmp_path: Path, directory: bool,
+) -> None:
+    native = runtime._runtime_component("versioned_runtime_construction").native_path
+    shallow = tmp_path / "short"
+    deep = tmp_path / "deep"
+    while len(str(deep)) < 290:
+        deep /= "retained-source-" + "x" * 30
+    for root in (shallow, deep):
+        native(root / "nested").mkdir(parents=True)
+        native(root / "module.py").write_bytes(b"VALUE = 7\n")
+        native(root / "nested" / "other.py").write_bytes(b"OTHER = 9\n")
+    short_input = shallow if directory else shallow / "module.py"
+    deep_input = deep if directory else deep / "module.py"
+    expected = runtime.fingerprint_source([short_input])
+    assert len(str(deep_input)) > 260
+    result = invoke(primitive, tmp_path / "runtime", ["fingerprint", str(deep_input)])
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout == expected + "\n"
+    assert result.stderr == ""
+    observed = {}
+    assert runtime.fingerprint_source(
+        [deep_input], on_file=lambda path, content: observed.update({path: content}),
+    ) == expected
+    assert observed == {
+        deep / "module.py": b"VALUE = 7\n",
+        **({deep / "nested" / "other.py": b"OTHER = 9\n"} if directory else {}),
+    }
+    extended = native(deep_input)
+    assert runtime.fingerprint_source([extended]) == expected
+
+
 def test_fingerprint_cli_refuses_missing_shipped_component(primitive: Path, tmp_path: Path) -> None:
     source = tmp_path / "source.py"
     source.write_bytes(b"source\n")

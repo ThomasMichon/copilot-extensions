@@ -33,7 +33,7 @@ _GENERATED = {
 
 def fingerprint_entries(
     entries, *, label, root_label, roots, normalize_link, path_type, file_hashes, on_file,
-    on_progress=None,
+    on_progress=None, io_path=lambda path: path,
 ):
     """Hash validated entries with the unchanged ordered, length-framed format."""
     import hashlib
@@ -48,19 +48,21 @@ def fingerprint_entries(
         for start in range(0, len(ordered), 4):
             batch = ordered[start:start + 4]
             pending = {
-                entry: readers.submit(entry.read_bytes)
+                entry: readers.submit(io_path(entry).read_bytes)
                 for entry in batch if entries[entry] != "symlink"
             } if readers is not None else {}
             for entry in batch:
                 kind = entries[entry]
                 if kind == "symlink":
                     try:
-                        target = normalize_link(os.readlink(entry))
+                        target = normalize_link(os.readlink(io_path(entry)))
                     except OSError as exc:
                         raise OSError(f"fingerprint_source: could not read symlink {entry}: {exc}") from exc
                     if os.path.isabs(target):
                         try:
-                            resolved = path_type(target).resolve()
+                            resolved = path_type(normalize_link(str(
+                                io_path(path_type(target)).resolve(),
+                            )))
                         except OSError:
                             resolved = None
                         if resolved is not None and any(
@@ -70,7 +72,10 @@ def fingerprint_entries(
                     data = path_type(target).as_posix().encode("utf-8")
                 else:
                     try:
-                        data = pending[entry].result() if entry in pending else entry.read_bytes()
+                        data = (
+                            pending[entry].result() if entry in pending
+                            else io_path(entry).read_bytes()
+                        )
                     except OSError as exc:
                         raise OSError(f"fingerprint_source: could not read {entry}: {exc}") from exc
                     if file_hashes is not None:
@@ -694,7 +699,8 @@ if __name__ == "__main__":
 
 
 def fingerprint_source(
-    paths, *, _normalize_windows_extended_path, on_progress=None, file_hashes=None, on_file=None,
+    paths, *, _normalize_windows_extended_path, _native_path,
+    on_progress=None, file_hashes=None, on_file=None,
 ) -> str:
     """Return a stable sha256 fingerprint over a frozen set of source paths.
 
@@ -802,7 +808,7 @@ def fingerprint_source(
         # lstat preserves the final link and propagates unreadable-entry errors;
         # Path.is_* can silently misclassify those failures as absence.
         try:
-            return _os.lstat(p).st_mode
+            return _os.lstat(_native_path(p)).st_mode
         except FileNotFoundError:
             raise
         except OSError as exc:
@@ -817,12 +823,14 @@ def fingerprint_source(
         # it -- so a declared root that is itself a symlink is classified
         # with its own lstat identity below, instead of being silently
         # resolved through to whatever it points at.
-        raw = Path(p)
+        raw = Path(_normalize_windows_extended_path(os.fspath(p)))
         if not raw.is_absolute():
             raw = Path.cwd() / raw
         parent = raw.parent
         if parent not in resolved_parents:
-            resolved_parents[parent] = parent.resolve()
+            resolved_parents[parent] = Path(_normalize_windows_extended_path(str(
+                _native_path(parent).resolve(),
+            )))
         return resolved_parents[parent] / raw.name
 
     roots = [_declared_root_path(p) for p in paths]
@@ -865,7 +873,9 @@ def fingerprint_source(
         # to nothing at all) is allowed through as identity-only: there is
         # no actual content it could be hiding.
         try:
-            target_resolved = candidate.resolve(strict=True)
+            target_resolved = Path(_normalize_windows_extended_path(str(
+                _native_path(candidate).resolve(strict=True),
+            )))
         except FileNotFoundError:
             return  # dangling -- nothing to hide, allow identity-only.
         except OSError as exc:
@@ -917,7 +927,7 @@ def fingerprint_source(
             raise ValueError(
                 f"fingerprint_source: declared root is a symlink, not a "
                 f"resolved content path: {root_path} -> "
-                f"{_os.readlink(root_path)!r} -- declare the real target "
+                f"{_os.readlink(_native_path(root_path))!r} -- declare the real target "
                 f"path so its actual content is covered"
             )
         elif stat.S_ISDIR(mode):
@@ -928,8 +938,9 @@ def fingerprint_source(
             # fingerprint. followlinks=False is explicit: a symlinked
             # directory is never descended into (see docstring).
             for dirpath, dirnames, filenames in _os.walk(
-                root_path, onerror=_raise, followlinks=False
+                _native_path(root_path), onerror=_raise, followlinks=False
             ):
+                dirpath = _normalize_windows_extended_path(dirpath)
                 for dname in dirnames:
                     candidate = Path(dirpath) / dname
                     cmode = _lstat_mode(candidate, "nested directory entry")
@@ -995,5 +1006,6 @@ def fingerprint_source(
     return fingerprint_entries(
         entries, label=_label, root_label=_root_label, roots=roots,
         normalize_link=_normalize_windows_extended_path, path_type=Path,
+        io_path=_native_path,
         file_hashes=file_hashes, on_file=on_file, on_progress=on_progress,
     )

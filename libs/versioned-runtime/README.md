@@ -112,6 +112,13 @@ fail-closed and all in-flight readers settle before return or error. Each call
 reads current bytes again: there is no persistent content-hash cache or
 background reader. Single-entry fingerprints need no worker pool.
 
+On Windows, fingerprint I/O accepts ordinary and extended-length source paths
+through the existing native-path helper, without changing machine-wide settings.
+Relative digest labels and paths reported to file observers retain their logical
+spelling; staging depth and the extended-length prefix do not change the digest.
+Missing or unreadable inputs and the existing symlink restrictions still fail
+closed.
+
 ## Why this is vendored, not a package
 
 Unlike the other `libs/*` entries, this is **not** an installable package and has
