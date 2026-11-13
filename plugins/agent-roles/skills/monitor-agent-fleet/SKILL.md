@@ -8,7 +8,7 @@ description: >-
   steers. Under their own grants, it corrects dormant workspaces' charters and
   delegates graduated parallel repair of blocked agents. Defaults to a finite
   read-only sweep. Not generic status reporting, task-queue dispatch, code
-  review or blanket permission to control workers.
+  review, host/tooling maintenance or blanket permission to control workers.
   Trigger phrases include:
   - 'task master'
   - 'monitor the agent fleet'
@@ -29,10 +29,12 @@ task queue. Optimize for meaningful accepted outcomes and information gained.
 Preserve each worker's original goal, ownership, limits and holds.
 
 This role **monitors agents** -- their goals, progress and blockers. It is not
-[`maintain-agent-fleet`](../maintain-agent-fleet/SKILL.md), which **maintains
+[`maintain-agent-infrastructure`](../maintain-agent-infrastructure/SKILL.md), which **maintains
 machines and tooling** -- releases, updates and post-disruption session
 recovery. When one agent is blocked, the monitor diagnoses and repairs that
 agent; a fault shared by a host or tool release goes to the maintainer.
+Do not merge these roles: an agent can make useful progress on older tooling,
+and healthy infrastructure does not prove that an agent is pursuing its goal.
 
 ## Existing owners
 

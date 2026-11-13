@@ -1,6 +1,6 @@
 # Rollout and agent-plane recovery checks
 
-Use with [maintain-agent-fleet](../SKILL.md). These are evidence questions,
+Use with [maintain-agent-infrastructure](../SKILL.md). These are evidence questions,
 not commands, authority, or proof any particular platform adapter exists.
 Qualify the target's actual installed owner before acting. Reuse its native
 health and recovery workflow; do not build a parallel fleet controller.
