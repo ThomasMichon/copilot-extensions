@@ -13,6 +13,7 @@ from agent_remote_driver.headed.recovery import RecoveryDescriptor, RecoveryReco
 from agent_remote_driver.headed.recovery_codec import encode_recovery_record
 from agent_worktrees import config as cfg, launch_execution, launch_recovery_store as state
 from agent_worktrees import launch_recovery_admission as admission, tracking, tracking_write
+from agent_worktrees import launch_execution_permit as permits
 
 
 _CHILD = """
@@ -65,6 +66,59 @@ first = inspector.inspect(record.descriptor, record.operation_id, "retire_intent
 second = inspector.inspect(record.descriptor, record.operation_id, "retire_intent", 1, observation)
 assert first == second
 print(json.dumps(first))
+"""
+
+_PERMIT_CHILD = """
+import json
+from pathlib import Path
+import sys
+import time
+from agent_worktrees import launch_execution_permit as permits, launch_recovery_store, locks
+locks.read_lock = lambda *_: None
+path, raw, decision_raw, ready, gate = sys.argv[1:]
+binding = permits._binding(json.loads(raw))
+decision = permits.ExecutionDecision(**json.loads(decision_raw))
+journal = permits.WorktreeExecutionPermit(Path(path), binding)
+assert journal.load().revision == 1
+publish = launch_recovery_store._publish
+def delayed_publish(*args):
+    time.sleep(0.25)
+    return publish(*args)
+launch_recovery_store._publish = delayed_publish
+Path(ready).touch()
+deadline = time.monotonic() + 15
+while not Path(gate).exists():
+    if time.monotonic() > deadline:
+        raise TimeoutError("fixture barrier did not open")
+    time.sleep(0.01)
+try:
+    record = journal.record_decision(1, decision)
+except ValueError as exc:
+    if "revision changed" not in str(exc):
+        raise
+    print(json.dumps({"committed": False}))
+else:
+    print(json.dumps({"committed": True, "revision": record.revision}))
+"""
+
+_PERMIT_INSPECT_CHILD = """
+import json
+from pathlib import Path
+import sys
+from agent_worktrees import launch_execution_permit as permits, tracking_write
+path, raw, decision_raw = sys.argv[1:]
+binding = permits._binding(json.loads(raw))
+decision = permits.ExecutionDecision(**json.loads(decision_raw))
+def refuse(*args, **kwargs):
+    raise AssertionError("passive inspector attempted a write")
+tracking_write.dispatch = refuse
+journal = permits.WorktreeExecutionPermit(Path(path), binding)
+result = journal.inspect(
+    decision.action, 2, owned_decision=decision, current_source=binding.source,
+    source_state="approved",
+)
+assert journal.load().revision == 2
+print(json.dumps(result))
 """
 
 
@@ -208,3 +262,111 @@ def test_fresh_inspector_reopens_real_owner_state_without_writes(journal, monkey
         assert result["unknown_effects"] == ["external-work"]
     assert {item: item.read_bytes() for item in directory.rglob("*") if item.is_file()} == before
     assert state.WorktreeRecoveryStore(record.yaml_path).load(descriptor) == retained
+
+
+def _execution_permit(record):
+    correlation = launch_execution.Correlation("a" * 32, "b" * 32)
+    execution = launch_execution.Execution(record.yaml_path, correlation)
+    execution.append("execution-requested")
+    binding = permits.ExecutionBinding(
+        "c" * 32, correlation, execution.subject["operation_id"],
+        admission.OwnerIntent.capture(record.yaml_path),
+        admission.SourceSelection("target", "account", "recipient", "route", "controller-1"),
+        "conversation", "environment", "boot", "scope", "incarnation",
+    )
+    return permits.WorktreeExecutionPermit(record.yaml_path, binding), binding
+
+
+def test_two_fresh_decision_owners_and_reopened_inspector_keep_one_permit(tmp_path, journal, monkeypatch):
+    record, _descriptor = journal
+    monkeypatch.setattr(permits.locks, "read_lock", lambda *_: None)
+    permit, binding = _execution_permit(record)
+    expires = time.time() + 120
+    permit.record_decision(0, permits.ExecutionDecision("owned-start", "start", "approved", expires))
+    candidates = [
+        permits.ExecutionDecision("owned-restore", "restore", "approved", expires),
+        permits.ExecutionDecision("owned-retire", "retire", "approved", expires),
+    ]
+    children = []
+    gate = tmp_path / "decisions-go"
+    try:
+        for index, candidate in enumerate(candidates):
+            children.append(subprocess.Popen(
+                [
+                    sys.executable, "-c", _PERMIT_CHILD, str(record.yaml_path),
+                    json.dumps(asdict(binding)), json.dumps(asdict(candidate)),
+                    str(tmp_path / f"decision-ready-{index}"), str(gate),
+                ],
+                stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                text=True, creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+            ))
+        deadline = time.monotonic() + 15
+        while not all((tmp_path / f"decision-ready-{index}").exists() for index in range(2)):
+            assert all(child.poll() is None for child in children)
+            assert time.monotonic() < deadline, "decision owners did not reach fixture barrier"
+            time.sleep(0.01)
+        gate.touch()
+        outcomes = []
+        for child in children:
+            stdout, stderr = child.communicate(timeout=20)
+            assert child.returncode == 0, stderr
+            outcomes.append(json.loads(stdout)["committed"])
+        assert sorted(outcomes) == [False, True]
+        winner = candidates[outcomes.index(True)]
+        retained = permit.load()
+        assert retained.revision == 2 and retained.decisions[-1] == winner
+        before = {
+            item: item.read_bytes() for item in record.yaml_path.parent.rglob("*") if item.is_file()
+        }
+        completed = subprocess.run(
+            [
+                sys.executable, "-c", _PERMIT_INSPECT_CHILD, str(record.yaml_path),
+                json.dumps(asdict(binding)), json.dumps(asdict(winner)),
+            ],
+            stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=20,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        )
+        assert completed.returncode == 0, completed.stderr
+        result = json.loads(completed.stdout)
+        assert result["classification"] == "candidate" and result["effects_wired"] is False
+        assert result["native_recovery"] == "unqualified" and result["intent_contract"] == "unavailable"
+        assert {
+            item: item.read_bytes() for item in record.yaml_path.parent.rglob("*") if item.is_file()
+        } == before
+        assert permit.record_decision(1, winner) == retained
+    finally:
+        for child in children:
+            if child.poll() is None:
+                child.kill()
+            child.communicate(timeout=10)
+
+
+@pytest.mark.parametrize("prior_owner", [False, True])
+def test_execution_decisions_select_actual_resident_support_or_same_owner_direct(journal, monkeypatch, prior_owner):
+    record, _descriptor = journal
+    monkeypatch.setattr(permits.locks, "read_lock", lambda *_: None)
+    permit, _binding = _execution_permit(record)
+    server = tracking_write.start_server(tracking_write.compute)
+    server.start()
+    try:
+        advertised = tracking_write.rendezvous_fields(server)
+        assert permits._VERB in advertised["tracking_write_verbs"]
+        assert advertised["tracking_write_verb_versions"].get(permits._VERB, 1) == 1
+        if prior_owner:
+            advertised["tracking_write_verbs"].remove(permits._VERB)
+            advertised["tracking_write_verb_versions"].pop(permits._VERB, None)
+            monkeypatch.setattr(
+                tracking_write, "_send_tracking_write_request",
+                lambda *_a, **_k: pytest.fail("unaware resident received new decision syntax"),
+            )
+        else:
+            monkeypatch.setattr(
+                tracking_write, "run_direct",
+                lambda *_a, **_k: pytest.fail("current resident unexpectedly fell back"),
+            )
+        monkeypatch.setattr(permits.locks, "read_lock", lambda *_: advertised)
+        decision = permits.ExecutionDecision("owned-start", "start", "approved", time.time() + 120)
+        retained = permit.record_decision(0, decision)
+        assert retained.revision == 1 and permit.load() == retained
+    finally:
+        server.close()

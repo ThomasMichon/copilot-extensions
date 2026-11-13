@@ -1,0 +1,9 @@
+{
+  "comment": "Retain original-owner action-specific execution decisions without granting native recovery authority",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
