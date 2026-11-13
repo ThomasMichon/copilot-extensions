@@ -164,7 +164,7 @@ def compose(
                if projects is not None else {}),
         )
         preparation._remaining(deadline)
-    output.mkdir(parents=True)
+    preparation._private_output_directory(output)
     archive = output / "source.tar"
     with _source_phase(observer, 1, started):
         preparation._archive(
