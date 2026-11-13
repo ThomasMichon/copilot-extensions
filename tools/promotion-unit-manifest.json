@@ -5378,7 +5378,29 @@
         "tools/promotion_unit_tests/test_typecheck_catalog.py::test_bootstrap_refuses_unreviewed_composition[helper]",
         "tools/promotion_unit_tests/test_typecheck_catalog.py::test_bootstrap_refuses_unreviewed_composition[member]",
         "tools/promotion_unit_tests/test_typecheck_catalog.py::test_bootstrap_refuses_unreviewed_composition[template-slot]",
-        "tools/promotion_unit_tests/test_typecheck_catalog.py::test_bootstrap_custody_is_candidate_local"
+        "tools/promotion_unit_tests/test_typecheck_catalog.py::test_bootstrap_custody_is_candidate_local",
+        "tools/promotion_unit_tests/test_materialized_local_sources.py::test_whole_snapshot_materializes_declared_project_closure[in-place]",
+        "tools/promotion_unit_tests/test_materialized_local_sources.py::test_whole_snapshot_materializes_declared_project_closure[promotion-copy]",
+        "tools/promotion_unit_tests/test_application_sources.py::test_project_declarations_refuse_unsafe_or_aliased_locations[False]",
+        "tools/promotion_unit_tests/test_application_sources.py::test_project_declarations_refuse_unsafe_or_aliased_locations[locations1]",
+        "tools/promotion_unit_tests/test_application_sources.py::test_project_declarations_refuse_unsafe_or_aliased_locations[locations2]",
+        "tools/promotion_unit_tests/test_application_sources.py::test_project_declarations_refuse_unsafe_or_aliased_locations[locations3]",
+        "tools/promotion_unit_tests/test_application_sources.py::test_project_declarations_refuse_unsafe_or_aliased_locations[locations4]",
+        "tools/promotion_unit_tests/test_application_sources.py::test_project_declarations_refuse_unsafe_or_aliased_locations[locations5]",
+        "tools/promotion_unit_tests/test_application_sources.py::test_project_declarations_refuse_unsafe_or_aliased_locations[locations6]",
+        "tools/promotion_unit_tests/test_application_sources.py::test_project_declarations_refuse_unsafe_or_aliased_locations[locations7]",
+        "tools/promotion_unit_tests/test_application_sources.py::test_project_declarations_refuse_unsafe_or_aliased_locations[locations8]",
+        "tools/promotion_unit_tests/test_application_sources.py::test_project_declarations_refuse_unsafe_or_aliased_locations[locations9]",
+        "tools/promotion_unit_tests/test_application_sources.py::test_project_declarations_refuse_unsafe_or_aliased_locations[locations10]",
+        "tools/promotion_unit_tests/test_application_sources.py::test_project_owned_callbacks_use_declared_arguments_without_a_central_app_name[declaration0]",
+        "tools/promotion_unit_tests/test_application_sources.py::test_project_owned_callbacks_use_declared_arguments_without_a_central_app_name[declaration1]",
+        "tools/promotion_unit_tests/test_application_sources.py::test_project_owned_callbacks_refuse_incomplete_or_nonargument_values[False]",
+        "tools/promotion_unit_tests/test_application_sources.py::test_project_owned_callbacks_refuse_incomplete_or_nonargument_values[declaration1]",
+        "tools/promotion_unit_tests/test_application_sources.py::test_project_owned_callbacks_refuse_incomplete_or_nonargument_values[declaration2]",
+        "tools/promotion_unit_tests/test_application_sources.py::test_project_owned_callbacks_refuse_incomplete_or_nonargument_values[declaration3]",
+        "tools/promotion_unit_tests/test_application_sources.py::test_project_owned_callbacks_refuse_incomplete_or_nonargument_values[declaration4]",
+        "tools/promotion_unit_tests/test_application_sources.py::test_project_owned_callbacks_refuse_incomplete_or_nonargument_values[declaration5]",
+        "tools/promotion_unit_tests/test_application_sources.py::test_project_owned_callbacks_refuse_incomplete_or_nonargument_values[declaration6]"
     ],
     "coverage_targets": [
         "plugins/agent-worktrees/src/agent_worktrees/resource_delivery.py",
@@ -6249,7 +6271,7 @@
         "tools/promotion_unit_tests/test_release_dynamic_decisions.py": "961ee6951789981ce9bb975dab62093d548942c5cc1df0762fc9fe74284c40db",
         "tools/promotion_unit_tests/test_release_evidence.py": "f2c4e15201454cc0793555ef0a0efe5411f0c6974b32c5baa8a68fddf8af2393",
         "tools/promotion_unit_tests/test_release_helper_contract.py": "adc8e65daf97d429f07943a0317c2c5ab9cb0ef27961b8e924a4bdccfcc57e31",
-        "tools/promotion_unit_tests/test_release_helper_decisions.py": "95f25cc5dab32a151c2fe6458a8010ced33ffbca657d2a9137eac46828836c0f",
+        "tools/promotion_unit_tests/test_release_helper_decisions.py": "966df7ac12894b2643cc6e06ec50cc0353f6f183e96f09bcd876693ea6f7213f",
         "tools/promotion_unit_tests/test_release_helper_loaders.py": "20b0d0453e193a6ad94a5bd4ab4c8f16db8f5dcb526e52f81113b3f0f16644d6",
         "tools/promotion_unit_tests/test_remote_login_shell.py": "41030272e7d66953e8ce740aac239228d0c75ba7de9a18e48f9a57b9e9f10da0",
         "tools/promotion_unit_tests/test_resume_cli_contract.py": "62fe9245c62c67bc0e084a2a8424ec6afadc461a43708165c2222b8e9fd043bf",
@@ -6611,7 +6633,7 @@
         "tools/promotion_source_history.py": "6d1b02b0466552267bc156fa3077a9dda07d80b9d6df5afd2e83c3c1b282d918",
         "tools/runtime_profile_errors.py": "6e959565fc5ec6527b67346ac67d32d7aaca410e9a56f5f8e48c85b1453f4fce",
         "plugins/agent-worktrees/payload-invocation.json": "9e0dc64604bc87af7c08f6a18bd3d5612a710c3b3be9aa8eaa1885b0c38f9c11",
-        "tools/typecheck-projects.json": "8c062cfc17871bd1abae807e684f809a7a39fe6eb296fc0bb740bc7ca09a3926",
+        "tools/typecheck-projects.json": "38a05de57b269cd654a304fb3eddfbc6c739725de4566cb5c6a4e11d65b2db63",
         "tools/typecheck_bootstrap_views.py": "ffa24829a4d9f638b3f3096e8df11c42f09678bbfa997708844415de5495fa37"
     }
 }
