@@ -342,6 +342,14 @@ the non-public approval conversation.
 
 ## Plan
 
+The [admission-boundary correction](journal/2026/11.12-admission-failure-and-citation-boundary.md)
+records a failed eighteen-primary delegation without contract or closure
+credit, then four separate prospectively qualified parent reads under the
+existing citation-not-a-hold rule. Parent-owned per-unit admission replaces
+handwritten lexical hold reconstruction. Actual source holds remain; the
+next work is a coherent graph-backed receiving frontier, not another leaf
+inventory. The complete dated queue remains 904 open, 175 above target.
+
 The [Dispatch/Bridge eighteen-primary study](journal/2026/11.12-dispatch-and-bridge-retained-contracts.md)
 retains 59 requirement/admission groups: eight complete unfinished unions,
 four whole metadata holds and six inherited-reference contract gaps. Existing
@@ -3270,6 +3278,14 @@ sources, transferring owners or turning partial/planning gains into completion.
   normal publication flow.
 
 ## Validation Plan
+
+The [admission correction audit](journal/2026/11.12-admission-failure-and-citation-boundary.md)
+separates quarantined delegation text from four later complete authorized
+outer contracts. Fresh provenance and stable identities, deny-before-read
+inert controls and lossless bounded rendering supply no target-source access,
+retrospective compliance, implementation, native or closure credit. Original
+scope, actual refusals, every parent check state and source/resource custody
+remain intact.
 
 The [Dispatch/Bridge evidence audit](journal/2026/11.12-dispatch-and-bridge-retained-contracts.md)
 preserves full admitted originals/discussions/edits, complete final metadata
