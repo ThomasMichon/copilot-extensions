@@ -6,6 +6,7 @@ import asyncio
 import json
 import time
 import uuid
+from dataclasses import replace
 from pathlib import Path
 
 from plugin_resolve.preparation import _git
@@ -27,7 +28,9 @@ async def prepare_target(runtime, req, row, *, target_factory, bound_charter, ap
         )
         return await runtime._local_preparation_target(req, row, target), {}
     try:
-        target = await runtime.resolver.resolve_async(req.target)
+        target = await runtime.resolver.resolve_async(
+            req.target, **({"activate": False} if req.dispatch_origin is not None else {}),
+        )
     except KeyError as exc:
         raise AcquisitionRefused(
             "target_unavailable", f"Acquisition target '{req.target}' is not registered",
@@ -44,6 +47,16 @@ async def prepare_target(runtime, req, row, *, target_factory, bound_charter, ap
             SimpleNamespace(bound_agent=bound),
             req.worktree_id,
         )
+    if req.dispatch_origin is not None:
+        from .dispatch_origin import capture
+
+        try:
+            capture(req.dispatch_origin, replace(
+                target, worktree_id=req.worktree_id,
+                project=target.project or req.project or row.get("repo"),
+            ))
+        except ValueError as exc:
+            raise AcquisitionRefused("dispatch_origin_unsupported", str(exc)) from exc
     request_env, _source = apply_preferences(
         StartSessionRequest(model=req.model, effort=req.effort),
         runtime.state,

@@ -17,6 +17,30 @@ import test_runtime_serving as serving_controls
 import test_live_inbox_runtime as inbox_controls
 import test_native_send_admission as native_controls
 import test_gc as gc_controls
+from test_dispatch_session_origin import (
+    boundary as boundary,
+    singleton_boundary as singleton_boundary,
+    test_origin_rejects_malformed_or_cross_assignment_evidence
+    as test_origin_rejects_malformed_or_cross_assignment_evidence,
+    test_origin_detaches_nested_input_and_legacy_request_digest_is_unchanged
+    as test_origin_detaches_nested_input_and_legacy_request_digest_is_unchanged,
+    test_acquisition_refuses_unqualified_modes_and_other_assignments
+    as test_acquisition_refuses_unqualified_modes_and_other_assignments,
+    test_acquisition_first_save_replay_restart_and_reassignment_keep_birth
+    as test_acquisition_first_save_replay_restart_and_reassignment_keep_birth,
+    test_legacy_acquisition_reuse_never_backfills_origin
+    as test_legacy_acquisition_reuse_never_backfills_origin,
+    test_keyed_http_creation_retains_origin_and_rejects_changed_or_dropped_stamp
+    as test_keyed_http_creation_retains_origin_and_rejects_changed_or_dropped_stamp,
+    test_public_origin_requires_keyed_prepared_workspace
+    as test_public_origin_requires_keyed_prepared_workspace,
+    test_unsupported_target_refuses_before_worktree_effects
+    as test_unsupported_target_refuses_before_worktree_effects,
+    test_acquisition_venue_refusal_is_terminal_before_launch_gating
+    as test_acquisition_venue_refusal_is_terminal_before_launch_gating,
+    test_worktree_resume_responses_keep_known_origin
+    as test_worktree_resume_responses_keep_known_origin,
+)
 from fastapi.testclient import TestClient
 
 host_status_api = host_status.api
@@ -478,6 +502,7 @@ def test_http51_capture_actual_observations(
     health = api.get("/health").json()
     observed["live_question_answers"] = health["capabilities"]["live_question_answers"]
     observed["mux_question_answers"] = health["capabilities"]["mux_question_answers"]
+    observed["dispatch_acp_session_origin"] = health["capabilities"]["dispatch_acp_session_origin"]
     observed["portable_capabilities"] = {
         key: health["capabilities"][key] for key in vector["expected"]["portable_capabilities"]
     }

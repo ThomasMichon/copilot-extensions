@@ -67,6 +67,9 @@ AFFECTED = (
         "status_carrier.py", "routes/status.py", "client_status.py",
         "events.py", "live_message_receipts.py", "remote_operations.py",
         "restored_app.py", "app.py", "runtime_transfer.py",
+        "dispatch_origin.py", "persisted_session_views.py", "acquisition_plugins.py",
+        "acquisition_local_launch.py", "creation_local_launch.py",
+        "worktree_native_resume.py", "singleton_resume.py", "routes/dispatch_tasks.py",
     )),
     *("plugins/agent-worktrees/src/agent_worktrees/" + name for name in (
         "retained_record_writer.py", "resource_relationship_cli.py", "tracking_write.py",
@@ -119,6 +122,9 @@ EXTRA_PATHS = (
     "plugins/agent-bridge/tests/retained-extension.test.mjs",
     "plugins/agent-bridge/docs/live-question-answers.md",
     "plugins/agent-bridge/tests/test_workspace_creation.py",
+    "plugins/agent-bridge/tests/test_dispatch_session_origin.py",
+    "plugins/agent-bridge/tests/test_worktree_native_resume.py",
+    "plugins/agent-bridge/docs/dispatch-session-origin.md",
     "plugins/agent-bridge/docs/retained-acquisition-writer.md",
     "plugins/agent-worktrees/tests/fixtures/worktree_record_owner.py",
     "plugins/agent-bridge/tests/fixtures/portable-mux-sdk.mjs",
@@ -138,6 +144,16 @@ EXTRA_PATHS = (
 )
 PROBES = {
     **retained.PROBES,
+    "test_origin_rejects_malformed_or_cross_assignment_evidence": 9,
+    "test_origin_detaches_nested_input_and_legacy_request_digest_is_unchanged": 1,
+    "test_acquisition_refuses_unqualified_modes_and_other_assignments": 3,
+    "test_acquisition_first_save_replay_restart_and_reassignment_keep_birth": 1,
+    "test_legacy_acquisition_reuse_never_backfills_origin": 1,
+    "test_keyed_http_creation_retains_origin_and_rejects_changed_or_dropped_stamp": 1,
+    "test_public_origin_requires_keyed_prepared_workspace": 5,
+    "test_unsupported_target_refuses_before_worktree_effects": 1,
+    "test_acquisition_venue_refusal_is_terminal_before_launch_gating": 3,
+    "test_worktree_resume_responses_keep_known_origin": 4,
     "test_accepted_behind_question_is_explicit_not_failed_and_keyed_retry_is_one_row": 1,
     "test_consumption_releases_wait_without_turn_end_or_reply": 1,
     "test_missing_partial_stale_or_reincarnated_observer_is_unknown": 1,
@@ -280,6 +296,7 @@ PROBES = {
 }
 TEST = retained.TEST
 CAPABILITY_VERSIONS = {
+    "dispatch_acp_session_origin": 1,
     "host_status_feed": 1,
     **retained.CAPABILITY_VERSIONS, "owner_membership": 52,
     "bridge-session-current-requests-v1": 1,

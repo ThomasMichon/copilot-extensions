@@ -22,9 +22,12 @@ from agent_bridge.session_manager import SessionManager
 from agent_bridge import workspace_creation
 from test_acquisition_runtime import req, rig as _rig
 from test_workspace_creation import creation_rig as _creation_rig
+from test_worktree_native_resume import boundary as _boundary, singleton_boundary as _singleton_boundary
 
 rig = _rig
 creation_rig = _creation_rig
+boundary = _boundary
+singleton_boundary = _singleton_boundary
 pytestmark = pytest.mark.contract("agent_bridge.dispatch_session_origin")
 
 
@@ -217,3 +220,83 @@ async def test_unsupported_target_refuses_before_worktree_effects(creation_rig):
     assert not rig.calls
     assert not rig.db.list_sessions()
     assert not rig.db.execute_read("SELECT 1 FROM workspace_embodiments")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("target_fields", [
+    {"elevated": True}, {"spawn_command": ["unsupported-command"]},
+    {"host": "example.com"},
+])
+async def test_acquisition_venue_refusal_is_terminal_before_launch_gating(rig, target_fields):
+    resolve = rig.resolver.resolve_async
+    activations = []
+
+    async def unsupported(name, **kwargs):
+        target = await resolve(name, **kwargs)
+        if name == "task-worker":
+            activations.append(kwargs["activate"])
+            return replace(target, **target_fields)
+        return target
+
+    rig.resolver.resolve_async = unsupported
+    request = req(dispatch_origin=origin())
+    for _ in range(2):
+        with pytest.raises(AcquisitionRefused) as refused:
+            await rig.runtime.acquire(request)
+        assert refused.value.code == "dispatch_origin_unsupported"
+        assert refused.value.effect == "not_started"
+        assert not rig.db.execute_read("SELECT 1 FROM acquisition_launch_gates")
+        assert not rig.db.list_sessions()
+    row = rig.db.execute_read(
+        "SELECT a.state,e.stage FROM acquisition_attempts a "
+        "JOIN acquisition_effects e USING(delivery_id)",
+    )[0]
+    assert row["state"] == "refused" and row["stage"] == "prepared"
+    assert activations and all(value is False for value in activations)
+
+
+@pytest.mark.parametrize("warm", [False, True])
+@pytest.mark.parametrize("singleton", [False, True])
+def test_worktree_resume_responses_keep_known_origin(
+    request, singleton, warm, monkeypatch,
+):
+    from agent_bridge.routes import worktrees as wt
+    from agent_bridge.session_manager import Session
+    from agent_bridge.transport import SpawnTarget
+    from unittest.mock import AsyncMock
+
+    fixture = request.getfixturevalue("singleton_boundary" if singleton else "boundary")
+    worktree_id = fixture.entry.id
+    target = SpawnTarget(
+        type="local", project="example-project", worktree_id=worktree_id,
+        cwd=fixture.entry.path, explicit_cwd=True,
+    )
+    session = Session("origin-owner", "origin-owner", target, agent_name="example")
+    session.acp_session_id = "native-original"
+    session.status = SessionStatus.IDLE if warm else SessionStatus.STOPPED
+    session.client = SimpleNamespace(is_running=True, pid=None) if warm else None
+    fixture.manager._sessions[session.session_id] = session
+    fixture.db.create_session(
+        session_id=session.session_id, name=session.name, agent_name="example",
+        target_dir=target.cwd, target_type="local", status=session.status.value, now=time.time(),
+        target_json=target.to_json(), acp_session_id=session.acp_session_id,
+        config_json=json.dumps({"dispatch_origin": origin()}),
+    )
+    monkeypatch.setattr(wt, "_resolve_already_live", AsyncMock(return_value=warm))
+    if singleton and not warm:
+        async def resume(session_id, **_kwargs):
+            current = fixture.manager.get_session(session_id)
+            current.status = SessionStatus.IDLE
+            return current
+        fixture.manager.resume_session = AsyncMock(side_effect=resume)
+    app = FastAPI()
+    app.include_router(wt.router)
+    app.state.db = fixture.db
+    app.state.session_manager = fixture.manager
+    app.state.resolver = fixture.request.app.state.resolver
+    with TestClient(app) as client:
+        response = client.post(f"/api/v1/worktrees/{worktree_id}/resume")
+        assert response.status_code == 200, response.text
+        assert response.json()["dispatch_origin"] == origin()
+    assert inspect(fixture.db.get_session(session.session_id)) == origin()
+    fixture.manager.start_session.assert_not_called()
