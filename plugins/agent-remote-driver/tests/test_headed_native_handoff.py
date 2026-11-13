@@ -326,3 +326,75 @@ async def test_peer_loss_cannot_turn_cancelled_settlement_into_normal_exit(tmp_p
         if not task.done():
             task.cancel()
         await asyncio.gather(task, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_repeated_cancellation_during_task_drain_still_reaches_owned_job(tmp_path, monkeypatch):
+    _windows(monkeypatch)
+    image = tmp_path / "copilot.exe"
+    image.write_bytes(b"MZfixture")
+    child, job = Mock(pid=os.getpid(), returncode=None), Mock()
+    child.poll.side_effect = lambda: child.returncode
+    child.kill.side_effect = AssertionError("the retained Job owns native retirement")
+    started, draining, backend_closed = (asyncio.Event() for _ in range(3))
+    never = asyncio.Event()
+    original_wait = launcher._PaneChild.wait
+    first_wait = True
+
+    async def delayed_wait(owner):
+        nonlocal first_wait
+        if first_wait:
+            first_wait = False
+            started.set()
+            try:
+                await never.wait()
+            except asyncio.CancelledError:
+                draining.set()
+                await never.wait()
+        return await original_wait(owner)
+
+    def retire(_timeout):
+        child.returncode = 23
+
+    class Backend:
+        def __init__(self, *_args, **_kwargs):
+            self.bound = asyncio.Event()
+
+        async def serve(self):
+            pass
+
+        def declaration(self):
+            return {}
+
+        async def close(self):
+            backend_closed.set()
+
+    job.terminate_and_wait.side_effect = retire
+    monkeypatch.setattr(launcher._PaneChild, "wait", delayed_wait)
+    monkeypatch.setattr(launcher, "HeadedBackend", Backend)
+    monkeypatch.setattr(launcher, "contained_test_mode", lambda: True)
+    monkeypatch.setattr(launcher, "_require_receiving_policy", Mock())
+    monkeypatch.setattr(
+        native_handoff, "spawn_sync_in_kill_on_close_job", Mock(return_value=(child, job)),
+    )
+    task = asyncio.create_task(launcher.run_headed(
+        [str(image), "--session-id", "selected"], session_id="selected",
+        attempt_directory=tmp_path / "attempt", state_file=tmp_path / "state.json",
+        native_handoff=WindowsNativeHandoff(lambda _process: None),
+    ))
+    try:
+        await asyncio.wait_for(started.wait(), 2)
+        task.cancel()
+        await asyncio.wait_for(draining.wait(), 2)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, 2)
+        assert backend_closed.is_set()
+        job.terminate_and_wait.assert_called_once_with(5)
+        child.wait.assert_called_once_with(timeout=5)
+        child.kill.assert_not_called()
+    finally:
+        never.set()
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)

@@ -122,7 +122,7 @@ def test_suspended_handoff_refuses_unsupported_custody_before_creation(
 
 
 @pytest.mark.parametrize("cleanup_fails", [False, True])
-def test_replacement_refusal_never_resumes_and_preserves_uncertain_custody(
+def test_suspended_handoff_replacement_refusal_never_resumes_and_preserves_uncertain_custody(
     monkeypatch, cleanup_fails,
 ):
     from agent_procutil.owned_process import OwnedCleanupError
