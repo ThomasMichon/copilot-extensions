@@ -91,6 +91,13 @@ silently repairing it. Older providers do not supply the CLI-origin contract;
 they are not an equivalent path for metadata-bearing launch or rename. No
 baseline form is retired here.
 
+New POSIX installer constructions retain the same slot-local runtime bootstrap
+as PowerShell builds, before publishing completion. This lets a caller pin that
+actual installed Bridge build for both support discovery and creation. Existing
+completed slots are reused unchanged, including honest absence of that bootstrap;
+they are not repaired or restamped in place. A fresh capable build does not
+upgrade a pending request's already-selected baseline transport.
+
 The existing acquisition request-file client checks the mode-specific named
 capability on the selected daemon before each send attempt, composing with
 retained-writer requirements when supplied. Missing or invalid capability

@@ -493,6 +493,30 @@ reported. Each view retains its own source correspondence. These safeguards do
 not execute the guard, admit its pending consumer, qualify emitted programs or
 extend the adapter to other hyphenated modules.
 
+### Invocation catalogs and binding bootstrap
+
+The pending `lib-payload-invocation` project selects its four complete physical
+source files plus four in-process catalog witnesses and one catalog-binding
+bootstrap view. The catalog declaration binds the real producer, validators
+and templates; its closed data witnesses cover single/multi-command and
+PowerShell/cmd variants. The bootstrap view preserves the actual PowerShell
+single-quote transport, both interpreter launch sites and real helper forwarding.
+Diagnostics map back to the canonical producer and its authored expression range.
+
+Normal Dev checks derive the bootstrap from canonical source without reading
+or refreshing derived consumer mirrors. Explicit materialized-consumer controls
+separately verify the actual emitted block and helper correspondence. Frozen
+checks use their candidate's inputs, with the same byte/membership custody and
+lease-bound cleanup as other source views. Neither path executes the bootstrap.
+
+The production project keeps Python 3.10 plus persistent Python 3.11 analysis
+on both platforms. Python 3.10 checks the bootstrap's early exit guard only;
+Python 3.11 checks its full body. Strict admission refuses a declaration that
+omits that full-body target. These nine analysis targets do not qualify native
+execution, interpreter availability, remaining embedded programs or consumer
+copies. Production remains pending; the independently strict test-source
+project does not activate these views.
+
 ## Exact-candidate release enforcement
 
 The pending Harness project additionally declares its fixed emitted Python
