@@ -31,6 +31,9 @@ oversized lists and prefixes outside that slot's desired routes refuse.
 The selected desired observations are used on a later explicitly owned
 reconnection; requests lost with the old channel are never replayed.
 A failed/uncertain update closes that channel rather than reusing its revision.
+Policy-dependent route validation follows authenticated candidate preparation;
+invalid offers release that candidate without exposing mappings to anonymous
+requests.
 
 Withdrawal immediately removes the offer at the Gateway and cancels its pending
 requests. It does not withdraw another service on the same connection.
@@ -98,7 +101,8 @@ The separately versioned wire identity is `controller-services-v1`; package
 versions do not select support. The running Gateway advertises it through the
 safe read-only `GET /_fleet/controller-challenge`, returning exactly `profile`
 and the existing authority's `nonce`. An explicitly selected Controller checks
-this response **before obtaining credentials or posting admission**. Missing,
+this response, including the bounded URL-safe nonce, **before obtaining
+credentials or posting admission**. Missing,
 invalid or unknown support refuses; it never probes an effectful new form and
 replays a legacy form. Redirects and ordinary TLS/Host checks remain effective.
 

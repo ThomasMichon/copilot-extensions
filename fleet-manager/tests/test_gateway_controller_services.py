@@ -223,6 +223,47 @@ def test_offer_withdrawal_cancels_pending_and_preserves_original_caller(tmp_path
     asyncio.run(scenario())
 
 
+def test_withdraw_readd_while_post_body_waits_never_dispatches_the_cancelled_request(tmp_path):
+    async def scenario():
+        async with controllers(tmp_path) as rig:
+            received = []
+            started, release = asyncio.Event(), asyncio.Event()
+
+            async def handle(request):
+                received.append(request.method)
+                return ServiceResponse(200)
+
+            async def payload():
+                yield b"{"
+                started.set()
+                await release.wait()
+                yield b"}"
+
+            connector = await connect(rig, handle=handle)
+            task = asyncio.create_task(rig.request("/api/token", "POST", data=payload()))
+            try:
+                await asyncio.wait_for(started.wait(), 3)
+                await eventually(lambda: rig.state.pending == 1)
+                channel = rig.state.channels["service-a"]
+                pending = next(iter(channel.pending.values()))
+                assert not pending.dispatched
+                await connector.advertise(())
+                assert pending.phase == "failed" and pending.id in channel.retired
+                await connector.advertise((ControllerService(VAULT, "/api"),))
+                release.set()
+                async with await task as response:
+                    assert response.status == 503
+                async with await rig.request("/api/probe") as response:
+                    assert response.status == 200
+                assert received == ["GET"]
+                assert rig.state.pending == 0
+            finally:
+                release.set()
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+    asyncio.run(scenario())
+
+
 @pytest.mark.parametrize("when", ["admission", "update"])
 def test_controller_cannot_offer_another_slots_namespace(tmp_path, when):
     async def scenario():
@@ -231,12 +272,30 @@ def test_controller_cannot_offer_another_slots_namespace(tmp_path, when):
                 with pytest.raises(TransportError, match="gateway-admission-refused"):
                     await connect(rig, offers=(ControllerService(VAULT, "/assets"),))
                 assert not rig.state.channels and not rig.state.tickets
+                assert not rig.state.authority._candidates
             else:
                 connector = await connect(rig)
                 with pytest.raises(TransportError, match="controller-channel-unavailable"):
                     await connector.advertise((ControllerService(VAULT, "/assets"),))
                 await eventually(lambda: not rig.state.service_offers(VAULT))
             assert rig.backends[0].requests == rig.backends[1].requests == []
+    asyncio.run(scenario())
+
+
+def test_unauthenticated_admission_cannot_enumerate_slot_route_mappings(tmp_path):
+    async def scenario():
+        async with controllers(tmp_path) as rig:
+            results = []
+            for slot, prefix in (("service-a", "/api"), ("service-a", "/assets"),
+                                  ("unknown", "/api")):
+                async with rig.session.post(rig.origin + "/_fleet/service-admit", json={
+                    "profile": "controller-services-v1", "slot": slot,
+                    "services": [{"service": VAULT, "prefix": prefix}],
+                    "access": "invalid", "proof": "invalid",
+                }) as response:
+                    results.append((response.status, await response.json()))
+            assert results == [(401, {"error": "authorization-denied"})] * 3
+            assert not rig.state.tickets and not rig.state.authority._candidates
     asyncio.run(scenario())
 
 
@@ -306,7 +365,10 @@ def test_selected_controller_profile_also_retains_machine_body_and_resource_auth
 
 
 @pytest.mark.parametrize("declaration", [None, {"nonce": "unused"},
-                                       {"nonce": "unused", "profile": "unknown"}])
+                                       {"nonce": "unused", "profile": "unknown"},
+                                       {"nonce": None, "profile": "controller-services-v1"},
+                                       {"nonce": "x" * 42, "profile": "controller-services-v1"},
+                                       {"nonce": "+" * 43, "profile": "controller-services-v1"}])
 def test_legacy_or_unsupported_running_peer_refuses_before_credentials_or_admission(
     tmp_path, declaration,
 ):

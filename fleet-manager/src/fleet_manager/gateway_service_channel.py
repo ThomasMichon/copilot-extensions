@@ -224,6 +224,7 @@ class Pending:
     dispatched: bool = False
     unacknowledged: bool = False
     service_offer: ControllerService | None = None
+    service_epoch: str | None = None
     relay_checkpoint: Callable[[], None] | None = field(default=None, repr=False)
 
     def fail(self, code: str, status: int = 502) -> None:
@@ -291,7 +292,8 @@ class Channel:
                 pending.fail(exc.code, exc.status)
                 return
         check(pending.service_offer is None or (
-            self.services is not None and pending.service_offer in self.services),
+            self.services is not None and pending.service_offer in self.services
+            and self.offer_epochs.get(pending.service_offer) == pending.service_epoch),
             "controller-service-withdrawn", 503)
         if kind == "headers":
             shape(value, {"type", "id", "status", "headers"})

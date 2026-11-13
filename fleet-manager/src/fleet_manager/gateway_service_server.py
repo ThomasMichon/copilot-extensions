@@ -204,6 +204,7 @@ class ServiceRuntime:
         raise TransportError("route-unavailable", 404)
 
     def checkpoint(self, channel: Channel, pending: Pending) -> None:
+        check(pending.phase != "failed", "request-disconnected", 503)
         if pending.relay_checkpoint is not None:
             pending.relay_checkpoint()
             return
@@ -214,7 +215,8 @@ class ServiceRuntime:
               and scope.method == pending.method and scope.target_uri == pending.target_uri,
               "authorization-withdrawn", 403)
         check(pending.service_offer is None or (
-            channel.services is not None and pending.service_offer in channel.services),
+            channel.services is not None and pending.service_offer in channel.services
+            and channel.offer_epochs.get(pending.service_offer) == pending.service_epoch),
             "controller-service-withdrawn", 503)
 
     def service_offers(self, service: str) -> tuple[ConnectedService, ...]:
@@ -297,6 +299,7 @@ class ServiceRuntime:
         pending = Pending(
             local._grant, path, method, local._grant.target_uri,
             service_offer=ControllerService(offer.service, offer.prefix),
+            service_epoch=offer.generation,
             relay_checkpoint=checkpoint)
         check(self.pending < GLOBAL_REQUESTS, "request-limit", 429)
         channel.admit(pending)
@@ -423,9 +426,6 @@ class ServiceRuntime:
         check(all(isinstance(v, str) for k, v in value.items() if k != "services"),
               "invalid-admission")
         offers = services(value["services"]) if controller else None
-        if offers is not None:
-            check(self.context is not None, "not-configured", 503)
-            admitted_services(offers, self.context.slot(value["slot"]))
         self.expire_tickets()
         check(len(self.tickets) < 64, "ticket-limit", 429)
         access, proof = credentials(request, machine=True) if machine else (
@@ -433,9 +433,13 @@ class ServiceRuntime:
         candidate = self.authority.prepare_service(
             access, proof, target_uri=self.origin + request.path, slot=value["slot"],
             content_digest=hashlib.sha256(payload).hexdigest() if machine else None)
-        if value["slot"] in self.local_handlers:
+        try:
+            if offers is not None:
+                admitted_services(offers, self.authority.revalidate_candidate(candidate))
+            check(value["slot"] not in self.local_handlers, "slot-locally-owned", 409)
+        except BaseException:
             self.authority.release_candidate(candidate)
-            raise TransportError("slot-locally-owned", 409)
+            raise
         ticket = secrets.token_hex(32)
         self.tickets[ticket] = Ticket(candidate, time.monotonic() + 30, caller_context, offers)
         return web.json_response({"ticket": ticket}, headers={"Cache-Control": "no-store"})
@@ -552,6 +556,7 @@ class ServiceRuntime:
                 pending.service_offer = next(
                     (item for item in channel.services if item.prefix == route.prefix), None)
                 check(pending.service_offer is not None, "controller-service-unavailable", 503)
+                pending.service_epoch = channel.offer_epochs[pending.service_offer]
             self.checkpoint(channel, pending)
             channel.admit(pending)
             self.pending += 1

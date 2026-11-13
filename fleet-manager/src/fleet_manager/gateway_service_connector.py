@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import logging
+import re
 import ssl
 from collections import deque
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -145,7 +146,9 @@ class ServiceConnector:
             challenge = await self._json(response)
         if controller:
             check(set(challenge) == {"nonce", "profile"}
-                  and challenge["profile"] == CONTROLLER_PROFILE,
+                  and challenge["profile"] == CONTROLLER_PROFILE
+                  and type(challenge["nonce"]) is str
+                  and re.fullmatch(r"[A-Za-z0-9_-]{43}", challenge["nonce"]) is not None,
                   "unsupported-controller-profile", 409)
         else:
             shape(challenge, {"nonce", "profile"} if self._machine else {"nonce"})
