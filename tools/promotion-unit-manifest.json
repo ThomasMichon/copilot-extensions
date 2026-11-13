@@ -5363,7 +5363,22 @@
         "tools/promotion_unit_tests/test_source_objects.py::test_promoted_source_binds_frozen_identity_before_content_read[parent]",
         "tools/promotion_unit_tests/test_source_objects.py::test_promoted_source_binds_frozen_identity_before_content_read[release]",
         "tools/promotion_unit_tests/test_source_objects.py::test_promoted_source_binds_frozen_identity_before_content_read[tag]",
-        "tools/promotion_unit_tests/test_source_objects.py::test_promoted_source_binds_frozen_identity_before_content_read[duplicate]"
+        "tools/promotion_unit_tests/test_source_objects.py::test_promoted_source_binds_frozen_identity_before_content_read[duplicate]",
+        "tools/promotion_unit_tests/test_typecheck_catalog.py::test_bootstrap_view_preserves_real_program_transport_and_floor",
+        "tools/promotion_unit_tests/test_typecheck_catalog.py::test_bootstrap_wrong_assignment_is_actual_mapped_source",
+        "tools/promotion_unit_tests/test_typecheck_catalog.py::test_bootstrap_canonical_source_does_not_read_dev_mirrors[False]",
+        "tools/promotion_unit_tests/test_typecheck_catalog.py::test_bootstrap_canonical_source_does_not_read_dev_mirrors[True]",
+        "tools/promotion_unit_tests/test_typecheck_catalog.py::test_bootstrap_canonical_source_refuses_changed_launch",
+        "tools/promotion_unit_tests/test_typecheck_catalog.py::test_bootstrap_strict_floor_refuses_before_sdk",
+        "tools/promotion_unit_tests/test_typecheck_catalog.py::test_bootstrap_refuses_unreviewed_composition[conversion]",
+        "tools/promotion_unit_tests/test_typecheck_catalog.py::test_bootstrap_refuses_unreviewed_composition[format]",
+        "tools/promotion_unit_tests/test_typecheck_catalog.py::test_bootstrap_refuses_unreviewed_composition[unknown-slot]",
+        "tools/promotion_unit_tests/test_typecheck_catalog.py::test_bootstrap_refuses_unreviewed_composition[quote]",
+        "tools/promotion_unit_tests/test_typecheck_catalog.py::test_bootstrap_refuses_unreviewed_composition[launch]",
+        "tools/promotion_unit_tests/test_typecheck_catalog.py::test_bootstrap_refuses_unreviewed_composition[helper]",
+        "tools/promotion_unit_tests/test_typecheck_catalog.py::test_bootstrap_refuses_unreviewed_composition[member]",
+        "tools/promotion_unit_tests/test_typecheck_catalog.py::test_bootstrap_refuses_unreviewed_composition[template-slot]",
+        "tools/promotion_unit_tests/test_typecheck_catalog.py::test_bootstrap_custody_is_candidate_local"
     ],
     "coverage_targets": [
         "plugins/agent-worktrees/src/agent_worktrees/resource_delivery.py",
@@ -5731,7 +5746,8 @@
         "plugins/agent-bridge/src/agent_bridge/retained_postload_evidence.py",
         "plugins/agent-bridge/src/agent_bridge/retained_load_configuration.py",
         "tools/artifact_bundle_validation.py",
-        "tools/promotion_source_history.py"
+        "tools/promotion_source_history.py",
+        "tools/typecheck_bootstrap_views.py"
     ],
     "sources": {
         "plugins/agent-worktrees/src/agent_worktrees/git_process.py": "6cc675a4d988e7d1fd6b0d76a48fde5909f78f085ef194ec69625c6334b4f80f",
@@ -6593,6 +6609,9 @@
         "tools/promotion_unit_tests/test_bridge_contract_git.py": "03974fea5ac2c52cbda95424116b69626b870c2987bf848e604471533bea205e",
         "tools/artifact_bundle_validation.py": "ff11c185f7cb8fe6cf5eb9d5bb8c2462031f332b69c3b3838d31c47c5130daef",
         "tools/promotion_source_history.py": "6d1b02b0466552267bc156fa3077a9dda07d80b9d6df5afd2e83c3c1b282d918",
-        "tools/runtime_profile_errors.py": "6e959565fc5ec6527b67346ac67d32d7aaca410e9a56f5f8e48c85b1453f4fce"
+        "tools/runtime_profile_errors.py": "6e959565fc5ec6527b67346ac67d32d7aaca410e9a56f5f8e48c85b1453f4fce",
+        "plugins/agent-worktrees/payload-invocation.json": "9e0dc64604bc87af7c08f6a18bd3d5612a710c3b3be9aa8eaa1885b0c38f9c11",
+        "tools/typecheck-projects.json": "8c062cfc17871bd1abae807e684f809a7a39fe6eb296fc0bb740bc7ca09a3926",
+        "tools/typecheck_bootstrap_views.py": "ffa24829a4d9f638b3f3096e8df11c42f09678bbfa997708844415de5495fa37"
     }
 }
