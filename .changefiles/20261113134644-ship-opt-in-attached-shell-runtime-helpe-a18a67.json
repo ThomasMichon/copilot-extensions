@@ -1,0 +1,9 @@
+{
+  "comment": "Ship opt-in attached shell runtime helper retention with the standalone manager",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
