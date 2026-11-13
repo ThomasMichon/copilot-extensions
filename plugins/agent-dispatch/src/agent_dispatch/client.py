@@ -669,6 +669,7 @@ class DispatchClient(RelevanceClientMixin, PoolDeclineClientMixin, PoolStartupCl
         coordinator_launch: bool = False,
         driver: str | None = None,
         allocation_revision: int | None = None,
+        session_origin_transport: str | None = None,
     ) -> dict:
         """Atomically reserve the right to spawn an embody worker for a task.
 
@@ -682,7 +683,10 @@ class DispatchClient(RelevanceClientMixin, PoolDeclineClientMixin, PoolStartupCl
         every other caller leaves this ``False`` (the default, ordinary
         queued-and-unowned gate).
         """
-        return self._unwrap(
+        from .client_spawn_reservations import require_session_origin_support, selected_session_origin
+        if session_origin_transport is not None:
+            require_session_origin_support(self.pool_placement_contract())
+        return selected_session_origin(self._unwrap(
             self._http.post(
                 "/spawn-reservations/revisions" if allocation_revision is not None else "/spawn-reservations",
                 json={
@@ -691,10 +695,11 @@ class DispatchClient(RelevanceClientMixin, PoolDeclineClientMixin, PoolStartupCl
                     "allow_suspended_reembodiment": allow_suspended_reembodiment,
                     **({"driver": driver} if driver is not None else {}),
                     **({"allocation_revision": allocation_revision} if allocation_revision is not None else {}),
+                    **({"session_origin_transport": session_origin_transport} if session_origin_transport is not None else {}),
                 },
                 **({"timeout": 180.0} if coordinator_launch else {}),
             )
-        )
+        ), session_origin_transport)
 
     def record_spawn(
         self,
