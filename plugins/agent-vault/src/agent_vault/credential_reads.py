@@ -10,6 +10,7 @@ import sys
 
 from . import config
 from .cache_dpapi import CacheDecryptionUnavailable
+from .credential_fields import attribute_name, canonical_field
 
 CACHE_DECRYPTION_WARNING = (
     "cache_decryption_unavailable; protected cache retained; service-only read"
@@ -25,12 +26,18 @@ class CredentialRead:
     warning: str | None = None
 
 
+def legacy_cache_entry(entry: str, normalized: str) -> str | None:
+    if config.PINNED_CONTEXT_ENV in os.environ or normalized != config.normalize_entry(entry, ""):
+        return None
+    return entry
+
+
 def read_credential(args) -> CredentialRead:
     from . import cli
     from .cache import get_cache
 
     entry = args.entry
-    field = args.field or "password"
+    field = canonical_field(args.field or "password")
     try:
         cache_entry = config.normalize_entry(entry, config.resolve_context().group)
     except (RuntimeError, ValueError, OSError) as exc:
@@ -45,6 +52,7 @@ def read_credential(args) -> CredentialRead:
     max_cache_age = getattr(args, "max_cache_age", None)
     cache = get_cache()
     pinned = config.PINNED_CONTEXT_ENV in os.environ
+    legacy_entry = legacy_cache_entry(entry, cache_entry)
     strict_cache = getattr(args, "strict_cache", False)
     readonly_cache = pinned or strict_cache or cache_only
     cache_decryption_failed = False
@@ -56,7 +64,8 @@ def read_credential(args) -> CredentialRead:
                 cache_entry,
                 field,
                 max_age_seconds=max_cache_age,
-                legacy_entry=None if pinned else entry,
+                legacy_entry=legacy_entry,
+                legacy_field=attribute_name(field),
                 **({"readonly": True} if readonly_cache else {}),
             )
         except CacheDecryptionUnavailable:
@@ -146,14 +155,14 @@ def read_credential(args) -> CredentialRead:
                         field,
                         value,
                         int(generation) if generation is not None else None,
-                        **({"strict": True, "legacy_entry": None if pinned else entry}
+                        **({"strict": True, "legacy_entry": legacy_entry}
                            if strict_cache else {}),
                     )
                 else:
                     cached_ok = cache.put(
                         cache_entry, field, value,
                         *(() if generation is None else (int(generation),)),
-                        **({"strict": True, "legacy_entry": None if pinned else entry}
+                        **({"strict": True, "legacy_entry": legacy_entry}
                            if strict_cache else {}),
                     )
                     reconciliation_failed = strict_cache and not cached_ok
