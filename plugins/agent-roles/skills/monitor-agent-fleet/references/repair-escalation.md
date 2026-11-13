@@ -79,12 +79,24 @@ decides whether to climb, and owns every resulting steer.
 
 ## After a repair
 
-Recheck the target through the passive readers. Then reconcile each
-outstanding steer or answer through the messaging owner's receipts. When the
-repair proves an earlier message was never consumed (the recipient's history
-lacks it) and the issue still applies, send at most one redelivery. Give it a
-new key that names the original key, so that a late arrival is recognized as
-a duplicate. That proof is materially new evidence. Without it, never resend.
+Recheck the target through the passive readers. A repair grant authorizes no
+message, so recovery never replays one. Keep each earlier steer or answer
+outstanding and reconcile it through its own owner:
+
+- **A steer** follows [steering](steering.md): read its receipt with the
+  pending record's original key, binding and body file. Missing recipient
+  history does not prove non-delivery. An `admitted` or `sdk_accepted` message
+  can still arrive, and a new key creates a separate admission instead of
+  deduplicating it. Any retry is the messaging owner's supported retry with the
+  original key and the identical request. It is sent only while a current
+  steering scope, the target's holds and any revocation still permit it.
+- **An answer** follows [pending input](pending-input.md), never generic
+  message delivery. After recovery the question may already be answered or
+  withdrawn, and its head or the answer grant may have changed. Recheck all
+  of them and reconcile an unknown outcome through that question-specific
+  operation.
+
+Never resend under a new key.
 
 Record the result per target: symptom, rungs climbed, actions and readbacks,
 current state and any remaining operator decision. A repair that does not

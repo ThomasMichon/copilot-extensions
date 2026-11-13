@@ -444,8 +444,11 @@ def test_repair_is_graduated_delegated_and_separately_granted() -> None:
         "A delegate never messages, steers or answers the target",
         "so that two delegates never repair the same shared service",
         "A delegate inherits no more authority than the current rung",
-        "send at most one redelivery",
-        "Without it, never resend",
+        "A repair grant authorizes no message",
+        "Missing recipient history does not prove non-delivery",
+        "the original key and the identical request",
+        "follows [pending input](pending-input.md)",
+        "Never resend under a new key",
     ):
         assert requirement in text, requirement
     for rung in ("R0 Observe", "R1 Diagnose directly", "R2 Doctor records",
