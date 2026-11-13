@@ -36,6 +36,14 @@ action, then read it back. Wait at least one reobservation interval between
 rungs, so that a slow recovery is not mistaken for a failure. Stop climbing as
 soon as the target consumes input or makes a delta.
 
+A resume or restart that times out after being accepted is not proven to have
+failed, and a failed readback alone does not establish failure. Before
+resuming, retrying or climbing, reconcile the original operation and the
+target's current head through the owner, as in the maintainer's
+[rollout and recovery](../../maintain-agent-fleet/references/rollout-and-recovery.md)
+guidance. Keep an unavailable outcome unresolved rather than repeating the
+operation.
+
 | Rung | Purpose | Allowed effects |
 |------|---------|-----------------|
 | R0 Observe | Classify from the passive [fabric readers](fabric-readers.md) | None |
@@ -50,11 +58,13 @@ remove a lock, delete a baton, clear receipts, or hand-edit an owner's private
 database or store to make a symptom disappear. Those records are the
 evidence.
 
-Repair is scoped to individual blocked agents. When the diagnosis shows a
-host-wide tooling or runtime fault, such as an outdated runtime, a failed
-update or a fault affecting every agent on a host, route it to the assigned
-`maintain-agent-fleet` owner, or report it when none is assigned. Do not
-perform host maintenance under a repair grant.
+Repair is scoped to individual blocked agents and to any host-shared service
+the grant names at R3. When the diagnosis shows a host-wide tooling or runtime
+fault, such as an outdated runtime, a failed update or a release defect, route
+it to the assigned `maintain-agent-fleet` owner, or report it when none is
+assigned. Recovering a named shared service is the one exception, even when
+every agent on the host depends on it. Do not perform host maintenance,
+updates or rollouts under a repair grant.
 
 ## Delegate in parallel, own one synthesis
 
@@ -63,7 +73,11 @@ the host's delegation mechanism (for example background task agents). Give
 each delegate one bounded objective:
 
 - Target identity, root pointer and symptom evidence.
-- The current rung ceiling and the exact allowed effects.
+- The original repair grant reference with its validity, holds, rung ceiling
+  and the exact allowed effects. Immediately before each mutation, the
+  delegate rechecks that the grant is still current, that no newer hold or
+  revocation applies and that the owner's stricter gates pass; otherwise it
+  stops and returns.
 - The owning skills to load and the forbidden effects. A delegate never
   messages, steers or answers the target, and never edits the target's plan
   or charter.
