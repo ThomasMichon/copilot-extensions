@@ -140,6 +140,9 @@ merged plan does not establish running adoption.
       The [original assignment audit](../../../plugins/agent-dispatch/docs/task-obligations.md#original-assignment-cohort)
       retains verified creation and exact pool-assignment facts; propagation to
       Worktrees creation and Bridge session state remains open.
+      Worktrees provider expansion retains optional original cohort metadata in
+      first-save records and replay; automatic Dispatch and Bridge callers remain
+      unmodified until actual receiver support is established.
 - [ ] Expose forward and reverse correlation through existing owner APIs.
       Pool identity must identify the actual registration/assignment, not just
       a display name; opaque legacy records remain explicitly unattributed.

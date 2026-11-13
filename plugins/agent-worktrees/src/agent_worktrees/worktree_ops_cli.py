@@ -160,6 +160,10 @@ def add_parsers(sub) -> None:
         help="Exact supervisor process provenance for this allocation",
     )
     p.add_argument(
+        "--dispatch-cohort", default=None,
+        help="Original assignment cohort JSON; requires complete dispatch allocation provenance",
+    )
+    p.add_argument(
         "--owner-ref",
         default=None,
         dest="owner_ref",
@@ -381,8 +385,11 @@ def cmd_create(args: argparse.Namespace) -> int:
         return 1
     if present_dispatch_fields:
         attempt = dispatch_fields["attempt"]
-        if not isinstance(attempt, int) or isinstance(attempt, bool) or attempt <= 0:
-            message = "dispatch attempt must be a positive integer"
+        if (
+            not isinstance(attempt, int) or isinstance(attempt, bool)
+            or not 1 <= attempt <= tracking.MAX_PERSISTED_COUNTER
+        ):
+            message = f"dispatch attempt must be an integer between 1 and {tracking.MAX_PERSISTED_COUNTER}"
             if args.json:
                 return output._json_error(message)
             output.err(message)
@@ -408,6 +415,22 @@ def cmd_create(args: argparse.Namespace) -> int:
             if isinstance(value, str):
                 dispatch_fields[key] = value.strip()
     dispatch_attempt = dispatch_fields if present_dispatch_fields else None
+    raw_cohort = getattr(args, "dispatch_cohort", None)
+    if raw_cohort is not None:
+        from .dispatch_cohort import parse_json
+
+        try:
+            if dispatch_attempt is None:
+                raise ValueError("dispatch cohort requires complete dispatch allocation provenance")
+            dispatch_attempt["cohort"] = parse_json(
+                raw_cohort, task_id=dispatch_attempt["task_id"],
+                reservation_key=dispatch_attempt["reservation_key"],
+            ).to_dict()
+        except ValueError as exc:
+            if args.json:
+                return output._json_error(str(exc))
+            output.err(str(exc))
+            return 1
     with output.stdout_to_stderr():
         try:
             kind = creation_kind(args)

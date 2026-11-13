@@ -18,6 +18,7 @@ from agent_worktrees import owned_worktree as allocation, owned_worktree_remote 
 from agent_worktrees import worktree_allocation_cli, worktree_ops_cli
 from test_owned_worktree_transactions import IDENTITY, call
 from test_resource_producer import owner as owner
+from test_worktree_allocation_receiver import cohort_attempt
 
 
 def args(**values) -> argparse.Namespace:
@@ -415,6 +416,68 @@ def test_destination_parser_keeps_unknown_argument_refusal():
     with pytest.raises(SystemExit) as caught:
         parser.parse_args(["create", "--machine=remote", "--invented-option"])
     assert caught.value.code == 2
+
+
+@pytest.mark.parametrize("support", [None, {"schema": "dispatch-assignment-cohort", "version": True}])
+def test_cohort_receiver_skew_refuses_before_origin_or_receiving_effects(coordinator, monkeypatch, support):
+    path, operations, effects, _ = coordinator
+    advertised = worktree_allocation_cli.capabilities(receiver=True)
+    advertised["dispatch_cohort"] = support
+    monkeypatch.setattr(remote, "capabilities", lambda *a: advertised)
+    with pytest.raises(ValueError, match="cohort support"):
+        destination._remote_create(
+            args(), "m/p/owner", {"machine": "remote", "project": "target"}, cohort_attempt(),
+        )
+    assert operations == [] and effects == {} and tracking.load_record(path).resources == []
+    # The same prior receiver still supports the unchanged baseline.
+    assert create_remote(args())["worktree"]["id"] == "child"
+
+
+def test_cohort_cli_parser_and_pre_effect_validation(monkeypatch):
+    from agent_worktrees import dispatch_cohort
+
+    parser = argparse.ArgumentParser()
+    worktree_ops_cli.add_parsers(parser.add_subparsers(dest="command"))
+    fields = cohort_attempt()
+    argv = ["create", "--json", "--no-owner", "--dispatch-cohort", json.dumps(fields.pop("cohort"))]
+    for key, value in fields.items():
+        argv.extend(["--dispatch-" + key.replace("_", "-"), str(value)])
+    selected = parser.parse_args(argv)
+    seen = []
+    monkeypatch.setattr(worktree_ops_cli.project_state, "namespaced", lambda: False)
+    monkeypatch.setattr(cfg, "load_config", lambda: object())
+    monkeypatch.setattr(worktree_ops_cli, "_create_worktree_core", lambda *a, **k: seen.append(k) or {"worktree": {}})
+    with output.capture_json_output():
+        assert worktree_ops_cli.cmd_create(selected) == 0
+    assert seen[0]["dispatch_attempt"] == cohort_attempt()
+    for invalid in (
+        '{"schema":"dispatch-assignment-cohort","version":1,"version":1,"emitter":null,"pool":null}',
+        "[]" * dispatch_cohort.MAX_JSON_BYTES,
+    ):
+        selected.dispatch_cohort = invalid
+        with output.capture_json_output():
+            assert worktree_ops_cli.cmd_create(selected) == 1
+    assert len(seen) == 1
+
+
+@pytest.mark.parametrize("with_cohort", [False, True])
+def test_oversized_cli_attempt_refuses_before_allocation(monkeypatch, with_cohort):
+    parser = argparse.ArgumentParser()
+    worktree_ops_cli.add_parsers(parser.add_subparsers(dest="command"))
+    fields = cohort_attempt()
+    cohort = fields.pop("cohort")
+    fields["attempt"] = 2**63
+    argv = ["create", "--json", "--no-owner"]
+    for key, value in fields.items():
+        argv.extend(["--dispatch-" + key.replace("_", "-"), str(value)])
+    if with_cohort:
+        argv.extend(["--dispatch-cohort", json.dumps(cohort)])
+    monkeypatch.setattr(
+        worktree_ops_cli, "_create_worktree_core",
+        lambda *a, **k: pytest.fail("oversized provenance reached allocation"),
+    )
+    with output.capture_json_output():
+        assert worktree_ops_cli.cmd_create(parser.parse_args(argv)) == 1
 
 
 @pytest.mark.parametrize("failure", [False, True])
