@@ -89,6 +89,11 @@ install anything, release a claim or authorize runtime operations.
   175.711 seconds elapsed. The two named cases took 100.038409 and 72.827613
   seconds. Obtain comparable hosted before/after timings with **each named
   case under five seconds**, preserving its inventory and assertions.
+  The cases in `plugins/context-handoff/tests/cli-parity.test.mjs` are
+  `CLI handoff commands are never refused for mode=off -- only for unrelated reasons`
+  and `list-sessions degrades honestly (never fabricates a chain) without agent-worktrees`;
+  the [remaining hosted-acceptance refinement](https://github.com/ThomasMichon/copilot-extensions/issues/7075#issuecomment-6335382133)
+  retains this finite condition.
   Do not sum parallel file durations into wall elapsed.
 - [ ] For #7076, retain the complete original selector: the payload-invocation
   suite excluding `test_derived_diagnostic_cli.py`, **plus** the Index
