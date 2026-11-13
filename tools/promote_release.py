@@ -37,6 +37,7 @@ Usage::
 from __future__ import annotations
 
 import argparse
+import inspect
 import importlib.util
 import json
 import os
@@ -259,30 +260,19 @@ def consume_pending_changes(
     scratch: Path, *, last_dev_head: str | None = None, main_head: str, repo: Path = REPO,
     trusted_source: Path | None = None, allocate_versions: bool = True,
 ) -> dict:
-    """Compose candidate data using its tooling, or explicitly trusted tooling
-    for candidate-independent signing validation. Returns a summary used for
-    the tag/commit message and tests. ``allocate_versions=False`` retains Main
-    versions and removes changefiles only from scratch; Dev is unchanged.
+    """Compose candidate data with its own or explicitly trusted signing tooling.
 
-    ``last_dev_head`` is the ``dev`` commit the PREVIOUS promotion actually
-    promoted (persisted as ``last_promotion.dev_head`` in the pipeline state
-    committed on ``main`` -- see ``_read_pipeline_state``), or ``None`` for
-    the very first promotion ever. Bump computation only considers a pending
-    changefile that did NOT already exist in ``dev`` at that commit --
-    verified by sweeping every changefile currently present and checking
-    each one's presence at that exact boundary, never by keeping a
-    persisted "have we ever seen this filename" list. `dev`'s own tree is
-    never mutated by a promotion (see this module's docstring), so an
-    already-consumed changefile can keep sitting on `dev` for a while after
-    landing (the async "clear consumed changefiles on dev" cleanup PR is
-    best-effort/eventual, not synchronous with promotion) -- without this
-    filter, every later promotion would re-read it and recompute the exact
-    same bump target from `dev`'s still-unbumped plugin.json, colliding
-    with whatever real new version actually shipped in between (confirmed
-    live: two consecutive real promotions both computed identical
-    "agent-bridge 0.4.0-dev551 -> 0.4.1-dev1"). Every changefile physically
-    present is still deleted from the scratch tree regardless -- main must
-    never carry any, newly-applied or not."""
+    ``allocate_versions=False`` retains Main versions and omits only scratch
+    changefiles; Dev is unchanged. The result summarizes version/tag inputs.
+
+    ``last_dev_head`` is the previous promotion's Dev commit, persisted as
+    ``last_promotion.dev_head`` on Main, or ``None`` for the first promotion.
+    Bumps consider only pending changefiles absent at that exact commit, not
+    a persisted filename list. Eventual Dev cleanup may leave consumed files
+    present; checking their historical boundary prevents applying the same bump
+    again against stale Dev versions. All changefiles are removed from scratch,
+    newly applied or not, because Main must never carry them.
+    """
     # Bind this accumulator's reader directly; a process-global import alias
     # lets concurrent compositions consume another scratch tree's changefiles.
     tool_root = (trusted_source or scratch) / "tools"
@@ -298,7 +288,12 @@ def consume_pending_changes(
         acc.PLUGINS_DIR = scratch / "plugins"
         acc.MARKETPLACE = scratch / ".github" / "plugin" / "marketplace.json"
 
-    all_changefiles = list(acc.read_changefiles())
+    reader = acc.read_changefiles
+    parallel_reads = getattr(mm, "_parallel_pointer_reads", lambda: False)
+    all_changefiles = list(
+        reader(parallel=parallel_reads())
+        if "parallel" in inspect.signature(reader).parameters else reader()
+    )
     _seed_versions_from_main(scratch, main_head, acc=acc, repo=repo)
     changefile_names = [p.name for p, _data in all_changefiles]
     if not allocate_versions:
@@ -338,7 +333,10 @@ def consume_pending_changes(
         # that drove a bump this round -- an already-consumed changefile
         # left un-deleted here would otherwise leak straight into main's
         # generated tree (main must never carry any .changefiles/*).
-        acc._consume_changefiles()
+        if "pending" in inspect.signature(acc._consume_changefiles).parameters:
+            acc._consume_changefiles(pending=all_changefiles)
+        else:
+            acc._consume_changefiles()
 
     git_timeout_options()
     materialize_log = mm.materialize(scratch, canonical_root=scratch)

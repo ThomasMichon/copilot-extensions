@@ -24,6 +24,7 @@ import re
 import shutil
 from pathlib import Path
 
+import materialize_installer_engine as mie
 import uv_editable_ref as uer
 
 
@@ -41,27 +42,13 @@ def _find_symlinked_ancestor(path: Path, root: Path) -> Path | None:
     identically-purposed helper (kept separate for the same reason those
     two already duplicate small helpers between themselves, rather than
     reaching into another module's private members)."""
-    root_r = root.resolve()
-    current = path
-    while True:
-        if current.is_symlink():
-            return current
-        if current.resolve() == root_r or current.parent == current:
-            return None
-        current = current.parent
+    return mie._find_symlinked_ancestor(path, root)
 
 
 def _find_symlink(tree: Path) -> str | None:
     """Mirrors ``uv_editable_ref.py``'s/``materialize_main.py``'s own
     identically-purposed helper."""
-    if tree.is_symlink():
-        return "."
-    if not tree.is_dir():
-        return None
-    for entry in sorted(tree.rglob("*")):
-        if entry.is_symlink():
-            return str(entry.relative_to(tree))
-    return None
+    return uer._find_symlink(tree, skip_test_runs=False)
 
 
 def _uv_source_entry_pattern(name: str, raw_path: str) -> re.Pattern[str]:
@@ -301,6 +288,13 @@ def _materialize_direct_uv_editable_refs(
                 log.append(f"SKIP {nested_dest}: {where} is a symlink -- refusing")
                 continue
             shutil.copytree(nested_canonical, nested_dest, ignore=_ignore)
+        derived_log = mie.materialize_derived_files(
+            dest_root_r, canonical_root=canonical_root_r,
+            copied_consumer=(nested_canonical, nested_dest),
+        )
+        log.extend(derived_log)
+        if any(line.startswith("SKIP") for line in derived_log):
+            continue
         verified.add(nested_dest.resolve())
         error = rewrite_nested_uv_editable_entry(
             pyproject=dest_pyproject, name=nested_name, raw_path=nested_raw_path,

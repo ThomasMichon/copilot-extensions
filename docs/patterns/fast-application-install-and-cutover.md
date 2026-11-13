@@ -122,6 +122,18 @@ environment: `.venv/bin/python` on POSIX or `.venv\Scripts\python.exe` on
 Windows, with ordinary `pyvenv.cfg` and environment-prefix behavior.
 Installation, configuration/data and cache roots remain separate.
 
+Windows projects select a version/OS/architecture-qualified interpreter through
+their relocatable `.python-version` request, with architecture derived from the
+admitted interpreter ABI tags rather than the host machine label. A synthetic
+UV target-platform override must not rewrite dependency-marker values: the
+profile and lock retain their exact admitted marker environment. Missing or
+ambiguous Windows ABI inputs still refuse preparation.
+
+Stored completion and command bytes do not establish current configuration or
+live service readiness. An application with setup or startup callbacks still
+enters its owner's idempotent configuration/readiness path on repeat; a generic
+publication-only no-op is limited to applications without either callback.
+
 Copy the application inputs, then construct the environment in its addressed
 slot; do not treat an already-created virtual environment as a relocatable
 artifact. Keep source and dependency synchronization with the installation
@@ -318,6 +330,13 @@ final verification explicitly.
 Application setup, startup/readiness and construction-input verification run
 outside selector-update locking. Only launcher/selector writes, the final
 success commit and guarded pre-start recovery use brief atomic updates.
+The admitted application replaces differing existing ordinary files at its
+declared global command names without requiring recognized incumbent launcher
+bytes or old-runtime provenance. Other command names and application data are
+not replacement targets. Linked, non-file or oversized targets remain literal
+publication errors. The transaction snapshots prior bytes, detects a command
+changed during preparation, and restores replaced bytes on pre-start failure;
+it does not replay over a concurrent writer.
 Callbacks may therefore use the existing selector owner without waiting for
 their installer to release a lock. A callback that confirms the same selected
 generation is not a competing winner; the final check accepts the canonical

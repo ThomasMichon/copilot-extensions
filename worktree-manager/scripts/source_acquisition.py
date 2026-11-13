@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib
+from contextlib import contextmanager
 from pathlib import Path
 import shutil
 import sys
@@ -11,19 +12,21 @@ import installer_engine as engine
 import versioned_runtime_source as runtime_source
 
 
-def manager_payload(payload: Path, root: Path) -> Path:
+@contextmanager
+def manager_payload(payload: Path, root: Path):
     from worktree_manager.self_install import manager_ref, manager_repo, payload_version
 
     root = root.resolve()
     if manager_ref(root) != "dev":
-        return payload
+        yield payload, {}
+        return
     receipt = payload / runtime_source.SOURCE_FILE
     if receipt.exists() or receipt.is_symlink():
         if runtime_source.read_source_identity(
             payload, payload_version(payload), plugin="worktree-manager",
         ) is None:
             raise ValueError("Manager prepared source receipt disappeared before validation")
-        return payload
+        raise ValueError("Manager Dev bootstrap requires complete --install-source inputs for attributed source")
     if shutil.which("git") is None:
         raise ValueError("Manager merged-Dev acquisition requires git; no unqualified tarball fallback")
     for package in engine._package_roots(payload):
@@ -43,7 +46,8 @@ def manager_payload(payload: Path, root: Path) -> Path:
             break
     else:
         raise ValueError("Manager bootstrap requires its declared local process helper")
-    from worktree_manager.runtime_source_self_update import fetch
+    from worktree_manager.runtime_source_self_update import prepared
     from worktree_manager.source_config import absolute_local_source
 
-    return fetch(absolute_local_source(manager_repo(root)), root)
+    with prepared(absolute_local_source(manager_repo(root)), root) as (selected, options):
+        yield selected, {name.removeprefix("_"): value for name, value in options.items()}

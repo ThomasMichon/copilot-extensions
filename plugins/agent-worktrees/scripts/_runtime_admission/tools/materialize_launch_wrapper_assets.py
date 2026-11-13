@@ -14,7 +14,7 @@ def _find_symlinked_ancestor(path: Path, root: Path) -> Path | None:
     root_r = root.resolve()
     current = path
     while True:
-        if current.is_symlink():
+        if current.is_symlink() or getattr(current, "is_junction", lambda: False)():
             return current
         if current.resolve() == root_r or current.parent == current:
             return None
@@ -118,17 +118,22 @@ def _materialize_group(
         bad_ancestor = _find_symlinked_ancestor(source, canonical_root_r)
         if bad_ancestor is not None:
             return [f"SKIP {source}: {bad_ancestor} is a symlink -- refusing"]
+        if uer.escapes_root(source.resolve(), canonical_root_r):
+            return [f"SKIP {source}: resolves outside the canonical root -- refusing"]
         if not source.is_file():
             return [
                 f"SKIP {dest_bin / name}: canonical source missing: "
                 f"{manifest.canonical_dir_raw}/{name}"
             ]
-        if source.is_symlink():
-            return [f"SKIP {source}: is a symlink -- refusing"]
         dest_file = dest_bin / name
-        bad_ancestor = _find_symlinked_ancestor(dest_file.parent, dest_root_r)
+        bad_ancestor = _find_symlinked_ancestor(dest_file, dest_root_r)
         if bad_ancestor is not None:
             return [f"SKIP {dest_file}: {bad_ancestor} is a symlink -- refusing"]
+        if uer.escapes_root(dest_file.resolve(), dest_root_r):
+            return [f"SKIP {dest_file}: resolves outside the destination root -- refusing"]
+        if any(parent.exists() and not parent.is_dir()
+               for parent in dest_file.parents if parent.is_relative_to(dest_bin)):
+            return [f"SKIP {dest_file}: destination ancestor is not a directory -- refusing"]
         if dest_file.exists() or dest_file.is_symlink():
             if (
                 reuse_existing and not dest_file.is_symlink() and dest_file.is_file()

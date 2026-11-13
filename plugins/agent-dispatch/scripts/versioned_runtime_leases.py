@@ -16,6 +16,20 @@ from typing import Callable
 _construction_owners = threading.local()
 
 
+def normalize_version(v: str) -> str:
+    """Match recorded PEP 440 versions to directory spelling."""
+    return v.replace("-", ".").replace("_", ".")
+
+
+def normalize_windows_extended_path(target: str) -> str:
+    """Normalize extended drive and UNC prefixes, preserving ordinary target names."""
+    if target.startswith("\\\\?\\UNC\\"):
+        return "\\\\" + target[len("\\\\?\\UNC\\"):]
+    if target.startswith("\\\\?\\"):
+        return target[4:]
+    return target
+
+
 def running_pids(root: Path, *, filename: str, alive: Callable[[int], bool]) -> set[int]:
     """Filter the legacy running record through the caller's native liveness probe."""
     pids: set[int] = set()

@@ -23,7 +23,7 @@ import time
 from agent_procutil import no_window_kwargs
 
 from .runtime_source_config import RuntimeSource
-from .self_install_runtime import running_payload_dir, runtime_scripts
+from .runtime_identity import running_payload_dir, runtime_scripts
 from .source_config import absolute_local_source, default_root
 
 _GIT_ROUTING_ENV = {
@@ -45,13 +45,17 @@ class ResolvedSource:
     commit: str
     tree: str
     branch_tip: str
+    main_head: str | None = None
 
     def document(self) -> dict:
-        return {
+        document = {
             "selection": self.selection.document(), "checkout": str(self.checkout),
             "commit": self.commit, "tree": self.tree, "branch_tip": self.branch_tip,
             "branch": self.selection.branch,
         }
+        if self.main_head is not None:
+            document["main_head"] = self.main_head
+        return document
 
 
 def _ordinary(path: Path) -> None:
@@ -222,12 +226,21 @@ def acquire(
         head = _validate(checkout, owner, deadline=deadline, environment=environment)
         branch = selection.branch
         remote_ref = f"refs/remotes/origin/{branch}"
+        main_ref = "refs/remotes/origin/main"
         if not acquired_authority:
+            refspecs = [f"+refs/heads/{branch}:{remote_ref}"]
+            if authority is None and branch != "main":
+                refspecs.append(f"+refs/heads/main:{main_ref}")
             git_command(
                 checkout, "fetch", "--no-tags", *(["--", authority] if authority else ["origin"]),
-                f"+refs/heads/{branch}:{remote_ref}",
+                *refspecs,
             )
+        if authority is not None and branch != "main":
+            git_command(checkout, "fetch", "--no-tags", "origin", f"+refs/heads/main:{main_ref}")
         tip = git_command(checkout, "rev-parse", "--verify", f"{remote_ref}^{{commit}}")
+        main_head = tip if branch == "main" else git_command(
+            checkout, "rev-parse", "--verify", f"{main_ref}^{{commit}}",
+        )
         if selection.channel == "stable":
             tag = f"refs/tags/{selection.ref}"
             git_command(checkout, "fetch", "--no-tags", "origin", f"+{tag}:{tag}")
@@ -242,6 +255,6 @@ def acquire(
         tree = git_command(checkout, "rev-parse", "--verify", f"{commit}^{{tree}}")
         if _validate(checkout, owner, deadline=deadline, environment=environment) != head:
             raise SourceAcquisitionError("Runtime source checkout moved during acquisition")
-        yield ResolvedSource(selection, checkout, commit, tree, tip)
+        yield ResolvedSource(selection, checkout, commit, tree, tip, main_head)
         if _validate(checkout, owner, deadline=deadline, environment=environment) != head:
             raise SourceAcquisitionError("Runtime source checkout changed while consuming the selection")

@@ -61,6 +61,7 @@ from .model import Model, build_model, coverage, effective_prereqs
 from .relocated_launch import _relocated_launch_script, _run_relocated_mux_launch
 from .self_install import self_install
 from .self_install import status as self_status
+from .self_install_runtime import local_bin_hint
 
 _BANNER = "copilot-extensions Worktree Manager"
 _TAGLINE = "the standalone, out-of-plugin harness control plane"
@@ -1384,17 +1385,20 @@ def _execute_launch(req) -> int:
     )
 
 def _cmd_self_install(rest: list[str]) -> int:
-    if "--apply" in rest and os.name == "nt":
-        from .update_driver_cli import self_install_request
+    from .bootstrap_activation import run_self_install
 
-        return self_install_request(lambda: _render_self_install(rest))
-    return _render_self_install(rest)
+    return run_self_install(rest, lambda: _render_self_install(rest))
 
 
 def _render_self_install(rest: list[str]) -> int:
+    from .bootstrap_activation import activate_installed_slot
+
     do_apply = "--apply" in rest
     st = self_status()
-    res = self_install(dry_run=not do_apply)
+    res = self_install(
+        dry_run=not do_apply, _transactional_activation=True,
+        _after_activate=activate_installed_slot if do_apply else None,
+    )
     print()
     print(f"  {_BANNER} — self-install {'(APPLY)' if do_apply else '(plan / dry-run)'}")
     print()
@@ -1427,11 +1431,6 @@ def _render_self_install(rest: list[str]) -> int:
             print(f"      {c}")
     print()
     return 0
-
-
-def local_bin_hint() -> str:
-    from .self_install import local_bin
-    return str(local_bin())
 
 
 def _flag_value(rest: list[str], flag: str) -> str | None:

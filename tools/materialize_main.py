@@ -42,7 +42,11 @@ Usage::
 from __future__ import annotations
 
 import argparse
+from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 import importlib.util
+from itertools import chain, islice
+import os
 import re
 import shutil
 import subprocess
@@ -79,6 +83,54 @@ def _file_pointer_source(path: Path) -> str | None:
     return m.group(1) if m else None
 
 
+def _parallel_pointer_reads() -> bool:
+    """Worker threads must not replace a Windows caller's impersonation token."""
+    if sys.platform != "win32":
+        return True
+    import ctypes
+    from ctypes import wintypes
+
+    try:
+        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        security = ctypes.WinDLL("advapi32", use_last_error=True)
+        kernel.GetCurrentThread.argtypes = []
+        kernel.GetCurrentThread.restype = wintypes.HANDLE
+        kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel.CloseHandle.restype = wintypes.BOOL
+        security.OpenThreadToken.argtypes = [
+            wintypes.HANDLE, wintypes.DWORD, wintypes.BOOL, ctypes.POINTER(wintypes.HANDLE),
+        ]
+        security.OpenThreadToken.restype = wintypes.BOOL
+        token = wintypes.HANDLE()
+        if security.OpenThreadToken(kernel.GetCurrentThread(), 8, True, ctypes.byref(token)):
+            kernel.CloseHandle(token)
+            return False
+        return ctypes.get_last_error() == 1008  # ERROR_NO_TOKEN
+    except (AttributeError, OSError):
+        return False
+
+
+def _pointer_prefix_candidates(root: Path) -> set[Path] | None:
+    """Use a native byte scan only as a superset for the original parser."""
+    try:
+        result = subprocess.run(
+            ["git", "--no-pager", "grep", "--no-index", "--no-textconv",
+             "--no-exclude-standard", "--threads=8", "-a", "-l", "-z", "-e", "^<", "--", "."],
+            cwd=root, capture_output=True, timeout=30,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        )
+        if result.returncode not in (0, 1):
+            return None
+        paths = {
+            Path(name.decode("utf-8")) for name in result.stdout.split(b"\0") if name
+        }
+        if any(path.is_absolute() or ".." in path.parts for path in paths):
+            return None
+        return {root / path for path in paths}
+    except (OSError, UnicodeDecodeError, subprocess.TimeoutExpired):
+        return None
+
+
 def find_file_pointers(root: Path, *, candidates: list[Path] | None = None) -> list[Path]:
     """Every vendored *file* pointer under ``root``.
 
@@ -98,10 +150,56 @@ def find_file_pointers(root: Path, *, candidates: list[Path] | None = None) -> l
         for path in candidates:
             if not path.is_relative_to(root) or ".." in path.relative_to(root).parts:
                 raise ValueError("file-pointer candidate is outside the extracted root")
-    return sorted(
-        p for p in (root.rglob("*") if candidates is None else candidates)
-        if p.is_file() and p.name != POINTER_NAME and _file_pointer_source(p)
+    ordinary = (
+        not root.is_symlink() and not any(part.casefold() == ".git" for part in root.parts)
+        and not (os.name == "nt" and getattr(root.lstat(), "st_file_attributes", 0) & 0x400)
     )
+
+    def regular_files() -> Iterator[Path]:
+        nonlocal ordinary
+        pending = [root]
+        while pending:
+            with os.scandir(pending.pop()) as entries:
+                for entry in entries:
+                    if entry.name.casefold() == ".git" and (
+                        Path(entry.path).parent != root or entry.is_dir(follow_symlinks=False)
+                    ):
+                        ordinary = False
+                    if entry.is_symlink() or (
+                        os.name == "nt"
+                        and getattr(entry.stat(follow_symlinks=False), "st_file_attributes", 0) & 0x400
+                    ):
+                        ordinary = False
+                    if entry.is_file():
+                        yield Path(entry.path)
+                    elif entry.is_dir(follow_symlinks=False):
+                        pending.append(Path(entry.path))
+
+    scan_candidates = (
+        path for path in (
+            regular_files() if candidates is None else (path for path in candidates if path.is_file())
+        ) if path.name != POINTER_NAME
+    )
+    batch = list(islice(scan_candidates, 64))
+    if len(batch) < 64 or not _parallel_pointer_reads():
+        return sorted(path for path in chain(batch, scan_candidates) if _file_pointer_source(path))
+    if candidates is None:
+        files = list(chain(batch, scan_candidates))
+        prefixes = _pointer_prefix_candidates(root) if ordinary else None
+        scan_candidates = iter(
+            path for path in files if prefixes is None or path in prefixes
+            or any(part.casefold() == ".git" for part in path.relative_to(root).parts)
+        )
+        batch = list(islice(scan_candidates, 64))
+    found: list[Path] = []
+    with ThreadPoolExecutor(max_workers=8) as readers:
+        while batch:
+            found.extend(
+                path for path, source in zip(batch, readers.map(_file_pointer_source, batch))
+                if source
+            )
+            batch = list(islice(scan_candidates, 64))
+    return sorted(found)
 
 
 def find_retired_directory_pointers(root: Path) -> list[Path]:
@@ -476,14 +574,25 @@ def materialize_uv_editable_refs(dest: Path, *, canonical_root: Path) -> list[st
     log: list[str] = []
     dest_plugins = dest / "plugins"
     if dest_plugins.is_dir():
-        for dest_consumer_dir in sorted(p for p in dest_plugins.iterdir() if p.is_dir()):
+        consumers = sorted(p for p in dest_plugins.iterdir() if p.is_dir())
+
+        def materialize_plugin(dest_consumer_dir: Path) -> list[str]:
             source_consumer_dir = canonical_root / "plugins" / dest_consumer_dir.name
-            log.extend(materialize_uv_editable_ref_into(
+            return materialize_uv_editable_ref_into(
                 source_consumer_dir=source_consumer_dir,
                 dest_consumer_dir=dest_consumer_dir,
                 canonical_root=canonical_root,
                 dest_root=dest,
-            ))
+            )
+
+        if len(consumers) > 1 and _parallel_pointer_reads():
+            with ThreadPoolExecutor(max_workers=8) as copies:
+                for entries in copies.map(materialize_plugin, consumers):
+                    log.extend(entries)
+        else:
+            for consumer in consumers:
+                log.extend(materialize_plugin(consumer))
+    # Standalone consumers may embed an already-materialized plugin.
     for extra in _EXTRA_CONSUMER_DIRS:
         dest_extra = dest / extra
         if dest_extra.is_dir():
@@ -621,14 +730,7 @@ def _find_symlinked_ancestor(path: Path, root: Path) -> Path | None:
     symlink itself -- exactly the gap an earlier version of this function
     had (checked live: creates ``root/src`` and removes
     ``root/VENDOR_POINTER.json`` through the link)."""
-    root_r = root.resolve()
-    current = path
-    while True:
-        if current.is_symlink():
-            return current
-        if current.resolve() == root_r or current.parent == current:
-            return None
-        current = current.parent
+    return mie._find_symlinked_ancestor(path, root)
 
 
 def _resolve_within(canonical_root: Path, source_rel: str) -> Path | None:
@@ -656,16 +758,7 @@ def _find_symlink(tree: Path) -> str | None:
     scanned. A legitimate vendored lib has no reason to contain a symlink
     at all, so any symlink here is refused outright -- simpler than
     distinguishing escaping from non-escaping, and fails closed."""
-    if tree.is_symlink():
-        return "."
-    if not tree.is_dir():
-        return None
-    for entry in sorted(tree.rglob("*")):
-        if ".test-runs" in entry.relative_to(tree).parts:
-            continue
-        if entry.is_symlink():
-            return str(entry.relative_to(tree))
-    return None
+    return uer._find_symlink(tree)
 
 
 def _remove_path(p: Path) -> None:

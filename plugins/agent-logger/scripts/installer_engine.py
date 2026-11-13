@@ -392,10 +392,14 @@ def _child(
         for name in ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV"):
             env.pop(name, None)
     procutil = _procutil(inputs)
-    native_argv = (
-        [_native_retained_path(argv[0]), *argv[1:]]
-        if os.name == "nt" and Path(argv[0]).is_absolute() else argv
-    )
+    native_argv = argv
+    if os.name == "nt" and Path(argv[0]).is_absolute():
+        executable = _native_retained_path(argv[0])
+        if Path(argv[0]).name.lower() == "powershell.exe":
+            ordinary = runtime._normalize_windows_extended_path(argv[0])
+            if Path(ordinary).is_absolute() and len(ordinary) < 260:
+                executable = ordinary
+        native_argv = [executable, *argv[1:]]
     for attempt in range(len(delays) + 1):
         decoders = {name: codecs.getincrementaldecoder("utf-8")(errors="replace")
                     for name in ("stdout", "stderr")}

@@ -4,6 +4,8 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import time
+import uuid
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from collections.abc import Iterator
@@ -12,13 +14,11 @@ from pathlib import Path
 from . import engine_client as ec
 from .runtime_source import ResolvedSource, acquire
 from .runtime_source_config import configured_source
-from .runtime_source_prepare import prepare as _prepare, preparer as _preparer
+from .runtime_source_prepare import prepare_applications, preparer as _preparer
 from .self_install import default_root
 
 SCHEMA = "copilot-extensions.prepared-runtime-sources"
-CONTRACT = 1
-TARGET_SCHEMA = "copilot-extensions.runtime-source-target"
-PROVIDER_SCHEMA = "copilot-extensions.runtime-source-target-provider"
+CONTRACT = 2
 
 
 @dataclass(frozen=True)
@@ -87,46 +87,38 @@ def _targets(inventory: dict, arguments: list[str]) -> list[str]:
     return sorted(names)
 
 
-def _unique_object(pairs: list[tuple[str, object]]) -> dict:
+def _application_profiles(inventory: dict, names: list[str]) -> dict[str, dict | None]:
+    profiles = inventory["runtime_sources"].get("application_profiles")
+    if not isinstance(profiles, dict):
+        raise ValueError("Selected engine lacks owned application profile inventory; update its tooling")
     result = {}
-    for key, value in pairs:
-        if key in result:
-            raise ValueError(f"Duplicate source target declaration key: {key}")
-        result[key] = value
-    return result
-
-
-def _check_target_support(inventory: dict, records: dict) -> None:
-    """An old V1 engine may not silently ignore required profile semantics."""
-    for name, record in records.items():
-        path = Path(record["payload"]) / "runtime-source-target.json"
-        if path.is_symlink() or (path.exists() and not path.is_file()):
-            raise ValueError("Source target declaration must be an ordinary file")
-        try:
-            value = json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=_unique_object)
-        except FileNotFoundError:
+    for name in names:
+        row = profiles.get(name)
+        if row is None:
             if name == "agent-containers":
-                raise ValueError(
-                    "Containers requires a source target declaration; upgrade its source tooling "
-                    "before updating this profile-owning runtime"
-                ) from None
+                raise ValueError("Containers application profile selection is unavailable")
+            result[name] = None
             continue
+        value = row.get("selection") if isinstance(row, dict) else None
         if (
-            not isinstance(value, dict) or set(value) != {"schema", "version", "planner"}
-            or value["schema"] != PROVIDER_SCHEMA or type(value["version"]) is not int
-            or value["version"] != 1 or not isinstance(value["planner"], str)
-            or re.fullmatch(r"scripts/[a-z][a-z0-9_]*\.py", value["planner"]) is None
+            not isinstance(value, dict)
+            or value.get("schema") != "copilot-extensions.runtime-application-profile"
+            or type(value.get("version")) is not int or value["version"] != 1
+            or value.get("plugin") != name
+            or set(value) != {"schema", "version", "plugin", "runtime_root", "profile", "extras"}
+            or not isinstance(value["runtime_root"], str) or not Path(value["runtime_root"]).is_absolute()
+            or not isinstance(value["profile"], str)
+            or re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", value["profile"]) is None
+            or not isinstance(value.get("extras"), list)
+            or len(value["extras"]) > 64
+            or any(not isinstance(extra, str)
+                   or re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", extra) is None
+                   for extra in value["extras"])
+            or len(set(value["extras"])) != len(value["extras"])
         ):
-            raise ValueError("Unsupported source target declaration")
-        capability = inventory["runtime_sources"].get("target_contract")
-        if (
-            not isinstance(capability, dict) or capability.get("schema") != TARGET_SCHEMA
-            or type(capability.get("version")) is not int or capability["version"] != 1
-        ):
-            raise ValueError(
-                "Selected engine lacks required source target planning support. No update was run; "
-                "upgrade that engine through its existing marketplace/setup flow first."
-            )
+            raise ValueError(f"Application profile for {name} is unavailable: {row}")
+        result[name] = value
+    return result
 
 
 def prepare_suite(
@@ -156,10 +148,23 @@ def prepare_suite(
             install_hint=error.install_hint,
         ) from error
     names = _targets(inventory, arguments)
+    profiles = _application_profiles(inventory, names)
     tool = _preparer()
-    output = default_root().absolute() / "runtime-sources/prepared"
-    with (nullcontext(runtime_source) if runtime_source is not None else acquire(selection)) as resolved:
-        records = {name: _prepare(tool, resolved, name, output) for name in names}
-    _check_target_support(inventory, records)
-    packet = json.dumps({"schema": SCHEMA, "version": CONTRACT, "sources": records}, sort_keys=True)
+    output = default_root().absolute() / "runtime-sources" / "applications" / uuid.uuid4().hex
+    deadline = time.monotonic() + 600
+    with (nullcontext(runtime_source) if runtime_source is not None else acquire(
+        selection, environment=environment, deadline=deadline,
+    )) as resolved:
+        snapshots = prepare_applications(
+            tool, resolved, tuple(names), output, deadline=deadline,
+            environment=environment,
+            extras={name: tuple(profile["extras"]) for name, profile in profiles.items()
+                    if profile is not None},
+        )
+    records = {name: {"snapshot": str(snapshots[name]), "profile": profiles[name]} for name in names}
+    packet = json.dumps({
+        "schema": SCHEMA, "version": CONTRACT,
+        "source": {"commit": resolved.commit, "tree": resolved.tree, "main_seed": resolved.main_head},
+        "sources": records,
+    }, sort_keys=True)
     return PreparedSuite([*arguments, "--runtime-sources", packet], command)

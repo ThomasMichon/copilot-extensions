@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import builtins
 import hashlib
 import json
 import os
@@ -125,8 +126,9 @@ def test_application_preparation_uses_wheel_assets_without_rewriting_wheel(
 @pytest.mark.parametrize("legacy_paths", [
     False, pytest.param(True, marks=pytest.mark.skipif(os.name != "nt", reason="Windows MAX_PATH")),
 ])
+@pytest.mark.parametrize("frozen_provenance", [False, True])
 def test_application_preparation_retains_its_source_without_a_payload(
-    tmp_path, monkeypatch, legacy_paths,
+    tmp_path, monkeypatch, legacy_paths, frozen_provenance,
 ):
     import agent_worktrees
     from agent_worktrees import runtime_candidate as candidate
@@ -141,7 +143,10 @@ def test_application_preparation_retains_its_source_without_a_payload(
     shutil.copytree(source_scripts / "installation-context", scripts / "installation-context")
     (slot / ".runtime-bootstrap").mkdir()
     (slot / "application.json").write_text("{}", encoding="utf-8")
-    source = {"plugin": "agent-worktrees", "package_version": "1.2.3", "source_commit": "a" * 40}
+    source = {
+        "schema": "copilot-extensions.runtime-source", "version": 1,
+        "plugin": "agent-worktrees", "package_version": "1.2.3", "source_commit": "a" * 40,
+    }
     (slot / "runtime-source.json").write_text(json.dumps(source), encoding="utf-8")
     immutable = package / "_build_info.py"
     immutable.write_bytes(b"immutable wheel\n")
@@ -159,7 +164,17 @@ def test_application_preparation_retains_its_source_without_a_payload(
 
         monkeypatch.setattr(os, "scandir", legacy_scandir)
         assert len(str(scripts / "installation-context")) > 260
-    candidate.prepare_runtime_candidate()
+    provenance = None
+    if frozen_provenance:
+        from agent_worktrees import update_stage
+
+        monkeypatch.setattr(update_stage, "fingerprint", lambda _path: "frozen-payload-fingerprint")
+        provenance = {
+            "version": "1.2.3", "commit": source["source_commit"], "branch": "source",
+            "source": "source:" + source["source_commit"],
+            "deployment_source": json.dumps(source), "frozen_plugin": str(tmp_path / "inputs"),
+        }
+    candidate.prepare_runtime_candidate(provenance)
     record = json.loads((slot / ".runtime-bootstrap" / "build-info.json").read_text())
     assert record["commit"] == source["source_commit"]
     assert json.loads(record["deployment_source"]) == source
@@ -284,6 +299,38 @@ def _frozen_native_runtime_source(plugin: Path, owned: Path) -> Iterator[tuple[P
     assert engine.runtime.fingerprint_source(engine._source_files(frozen.packages)) == frozen.payload_hash
     assert run("rev-parse", "HEAD") == head
     assert run("status", "--porcelain", "--untracked-files=no") == ""
+
+
+@pytest.mark.parametrize("application", [False, True])
+@pytest.mark.parametrize("selection", ["current-version", "last-known-good"])
+def test_selected_runtime_uses_generation_not_nested_environment(
+    driver, tmp_path, monkeypatch, application, selection,
+):
+    tmp_path = Path(driver.engine._native_retained_path(tmp_path))
+    slot = tmp_path / "versions" / "2.0+source.fixture.profile.fixture"
+    environment = slot / ".venv" if application else slot
+    python = environment / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    python.parent.mkdir(parents=True)
+    python.write_bytes(b"fixture interpreter, never executed")
+    driver.runtime.mark_complete(tmp_path, slot.name, payload_hash="fixture")
+    (tmp_path / selection).write_text(slot.name + "\n")
+    importer = builtins.__import__
+    def cold_import(name, *args, **kwargs):
+        if name == "agent_procutil" or name.startswith("agent_procutil."):
+            pytest.fail("raw bootstrap borrowed an installed process-helper package")
+        return importer(name, *args, **kwargs)
+    monkeypatch.setattr(builtins, "__import__", cold_import)
+    assert driver._selected(tmp_path) == slot.name
+
+
+def test_empty_runtime_selection_needs_no_installed_process_helper(driver, tmp_path, monkeypatch):
+    importer = builtins.__import__
+    def cold_import(name, *args, **kwargs):
+        if name == "agent_procutil" or name.startswith("agent_procutil."):
+            pytest.fail("genesis selection imported a not-yet-installed dependency")
+        return importer(name, *args, **kwargs)
+    monkeypatch.setattr(builtins, "__import__", cold_import)
+    assert driver._selected(tmp_path) is None
 
 
 @pytest.mark.parametrize("vendored", [False, True])

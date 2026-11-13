@@ -1,7 +1,7 @@
 """Source and closed-wheel inputs, independent of an installed runtime."""
 from __future__ import annotations
 
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 import argparse
 from dataclasses import dataclass
 import hashlib
@@ -14,7 +14,10 @@ import sys
 import time
 import uuid
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+_SCRIPTS = Path(__file__).resolve().parent
+if _SCRIPTS.name == "installer-engine" and _SCRIPTS.parent.name == "libs":
+    sys.path.insert(0, str(_SCRIPTS.parent / "versioned-runtime"))
+sys.path.insert(0, str(_SCRIPTS))
 import installer_engine as engine
 from installer_wheel_inputs import WheelLimits, inspect_archive
 from installer_wheel_snapshot import WheelReuseInputs, retain_wheel_inputs
@@ -26,6 +29,10 @@ APPLICATION_INSTALL_CONTRACT = {
     "schema": "copilot-extensions.prepared-application-install",
     "version": 1,
 }
+
+
+class _ApplicationDeclarationConflict(engine.ContentRepairRequired):
+    """Different valid contracts require explicit repair, not corruption recovery."""
 
 
 @dataclass(frozen=True)
@@ -51,6 +58,24 @@ class ProjectSource:
         ):
             raise ValueError("installation source has invalid repository provenance")
         return descriptor
+
+    @property
+    def composition(self) -> dict | None:
+        if "composition" not in self.record:
+            return None
+        composition = self.record["composition"]
+        if (
+            self.record.get("kind") != "source"
+            or not isinstance(composition, dict) or set(composition) != {"main_seed", "tree"}
+            or composition.get("main_seed") != self.record.get("main_head")
+            or any(
+                not isinstance(composition.get(key), str)
+                or re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", composition[key]) is None
+                for key in ("main_seed", "tree")
+            )
+        ):
+            raise ValueError("installation source has an invalid Git composition association")
+        return dict(composition)
 
 
 def _read(path: Path) -> dict:
@@ -123,7 +148,9 @@ def select_project(snapshot: Path, component: str) -> ProjectSource:
         or identity.source_tree != record["source_tree"]
     ):
         raise ValueError(f"{component} source differs from its immutable source association")
-    return ProjectSource(payload, identity, record, project_key)
+    selected = ProjectSource(payload, identity, record, project_key)
+    selected.composition
+    return selected
 
 
 def select(snapshot: Path) -> ProjectSource:
@@ -202,6 +229,7 @@ def wheel_inputs(
 def project_inputs(snapshot: Path, component: str, *, deadline: float | None = None):
     """Hold the prepared complete wheel set through canonical installed health."""
     selected = select_project(snapshot, component)
+    composition = selected.composition
     project = selected.project
     if "profile" not in project or "wheel_inputs" not in project:
         raise ValueError("installation source has first-party inputs only; prepare its native wheel profile")
@@ -222,6 +250,8 @@ def project_inputs(snapshot: Path, component: str, *, deadline: float | None = N
             raise ValueError("project source changed during installation")
         if observed.source_descriptor != selected.source_descriptor:
             raise ValueError("project repository provenance changed during installation")
+        if observed.composition != composition:
+            raise ValueError("project Git composition changed during installation")
 
 
 @contextmanager
@@ -427,23 +457,87 @@ def install_application(
         if declaration.get("name") == "worktree-manager":
             raise ValueError("Manager installation requires its existing native lifecycle")
         version = expected_version + (".repair." + uuid.uuid4().hex if repair else "")
-        with engine.numbered_candidate(
-            root, version, plugin=selected.payload, uv=uv, base_python=base_python,
-            health_module=health_module, extras=tuple(selection["extras"]),
-            local_packages=tuple(selection["local_packages"]), wheel_inputs=inputs,
-            application=application, process_retention=True, reuse_generations=False,
-            expected_source_identity=selection["identity"],
-        ) as candidate:
+        if not repair:
+            try:
+                current = engine.runtime.current_version(root)
+            except ValueError:
+                current = None
+            if current and re.fullmatch(re.escape(expected_version) + r"\.repair\.[0-9a-f]{32}", current):
+                version = current
+
+        def validate(slot):
+            try:
+                installed = _read(slot / "application.json")
+            except (FileNotFoundError, ValueError, UnicodeError) as error:
+                raise engine.ContentRepairRequired(
+                    "application declaration is not reusable; select a distinct repair generation"
+                ) from error
+            if installed != declaration:
+                from runtime_application_install import _validate_application
+
+                try:
+                    _validate_application(installed)
+                except ValueError as error:
+                    raise engine.ContentRepairRequired(
+                        "application declaration is not reusable; select a distinct repair generation"
+                    ) from error
+                raise _ApplicationDeclarationConflict(
+                    "application declaration differs from its completed slot; "
+                    "select a distinct repair generation"
+                )
+
+        candidate_options = {"health_module": health_module}
+        if component == "agent-worktrees":
+            identity = selection["identity"]["runtime_source"]
+            candidate_options.update(
+                health_module="agent_worktrees.runtime_candidate",
+                health_callable="verify_runtime_candidate",
+                construction_callable="agent_worktrees.runtime_candidate:prepare_runtime_candidate",
+                construction_data={
+                    "version": identity["package_version"], "commit": identity["source_commit"],
+                    "branch": "source", "source": "source:" + identity["source_commit"],
+                    "deployment_source": json.dumps(identity),
+                },
+            )
+        with ExitStack() as retained:
+            for attempt in range(2):
+                existing = os.path.lexists(root / "versions" / version)
+                try:
+                    candidate = retained.enter_context(engine.numbered_candidate(
+                        root, version, plugin=selected.payload, uv=uv, base_python=base_python,
+                        **candidate_options, extras=tuple(selection["extras"]),
+                        local_packages=tuple(selection["local_packages"]), wheel_inputs=inputs,
+                        application=application, process_retention=True, reuse_generations=False,
+                        expected_source_identity=selection["identity"], validate_candidate=validate,
+                    ))
+                except (engine.ContentRepairRequired, engine.HealthRepairRequired) as error:
+                    if (
+                        isinstance(error, _ApplicationDeclarationConflict)
+                        or repair or attempt or not existing
+                    ):
+                        raise
+                    inputs.verify()
+                    if _read(application / "application.json") != declaration:
+                        raise ValueError("prepared application changed before repair construction")
+                    version = expected_version + ".repair." + uuid.uuid4().hex
+                else:
+                    break
             if candidate.payload_hash != expected_hash:
                 raise ValueError("application candidate differs from its admitted construction inputs")
             inputs.verify()
             if _read(application / "application.json") != declaration:
                 raise ValueError("prepared application declaration changed during construction")
-            if _read(candidate.slot / "application.json") != declaration:
-                raise engine.ContentRepairRequired(
-                    "application declaration differs from its completed slot; "
-                    "select a distinct repair generation"
-                )
+            validate(candidate.slot)
+            if (
+                candidate.reused and not repair and not arguments
+                and not declaration.get("setup") and not declaration.get("start")
+            ):
+                from runtime_application_install import _publication_current
+
+                if _publication_current(candidate.slot, declaration):
+                    inputs.verify()
+                    validate(candidate.slot)
+                    return {"state": "installed", "slot": str(candidate.slot)}
             frozen = engine.FrozenInputs(
                 candidate.frozen_plugin, engine._package_roots(candidate.frozen_plugin),
                 candidate.payload_hash, wheel_inputs=inputs,
@@ -562,6 +656,7 @@ def main(argv: list[str] | None = None) -> int:
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--native-inputs", action="store_true")
     mode.add_argument("--native-session", action="store_true")
+    mode.add_argument("--install-application", action="store_true")
     mode.add_argument("--native-current", action="store_true")
     parser.add_argument("--root", type=Path)
     parser.add_argument("--uv", type=Path)
@@ -571,7 +666,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--expected-payload-hash")
     parser.add_argument("--repair", action="store_true")
     parser.add_argument("--nested-environment", action="store_true")
+    parser.add_argument("arguments", nargs=argparse.REMAINDER)
     args = parser.parse_args(argv)
+    if args.arguments and (
+        not args.install_application or args.arguments[0] != "--"
+    ):
+        parser.error("application arguments require --install-application and a -- separator")
     if args.nested_environment and not (args.wheel_profile is not None and args.native_session):
         parser.error("--nested-environment requires a closed-wheel native construction session")
     if args.native_current:
@@ -613,26 +713,36 @@ def main(argv: list[str] | None = None) -> int:
             )
     if args.wheel_directory is not None:
         parser.error("--wheel-directory requires --wheel-profile")
+    construction = (
+        args.root, args.uv, args.base_python, args.health_module,
+        args.expected_runtime_version, args.expected_payload_hash,
+    )
+    if args.native_session or args.install_application:
+        if args.payload is None or any(value is None for value in construction):
+            parser.error("construction requires payload, root, uv, base Python, module and selection")
+    elif any(value is not None for value in construction) or args.repair:
+        parser.error("construction arguments require --native-session or --install-application")
     selected = select_project(args.install_source, args.component)
     if args.payload is not None and sources.read_source_identity(
         args.payload, selected.identity.package_version, plugin=args.component,
     ) != selected.identity:
         parser.error("invocation payload differs from selected installation source")
-    construction = (
-        args.root, args.uv, args.base_python, args.health_module,
-        args.expected_runtime_version, args.expected_payload_hash,
-    )
+    if args.install_application:
+        result = install_application(
+            args.install_source, args.component, args.payload, args.root,
+            uv=args.uv, base_python=args.base_python, health_module=args.health_module,
+            expected_version=args.expected_runtime_version, expected_hash=args.expected_payload_hash,
+            arguments=tuple(args.arguments[1:]), repair=args.repair,
+        )
+        print(json.dumps(result, sort_keys=True))
+        return 0
     if args.native_session:
-        if args.payload is None or any(value is None for value in construction):
-            parser.error("native construction requires payload, root, uv, base Python, module and selection")
         return native_session(
             args.install_source, args.component, args.payload, args.root,
             uv=args.uv, base_python=args.base_python, health_module=args.health_module,
             expected_version=args.expected_runtime_version, expected_hash=args.expected_payload_hash,
             repair=args.repair,
         )
-    if any(value is not None for value in construction) or args.repair:
-        parser.error("construction arguments require --native-session")
     if args.native_inputs:
         with project_inputs(args.install_source, args.component) as (selected, inputs):
             print(json.dumps(native_selection(selected, inputs), sort_keys=True, separators=(",", ":")))

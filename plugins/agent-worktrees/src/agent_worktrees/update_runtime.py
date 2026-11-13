@@ -567,10 +567,15 @@ def _execute_runtime_step(step: update_runtime_plan.RuntimeUpdateStep) -> str:
     if step.source is not None:
         assert step.runtime_root is not None
         assert step.project_root is not None
-        receipt = functools.partial(
-            step.source.deployed_version, step.runtime_root, step.payload,
-            target=step.source_target,
-        )
+        if step.source.application is not None:
+            receipt = functools.partial(
+                step.source.application.deployed_version, step.runtime_root, step.payload,
+            )
+        else:
+            receipt = functools.partial(
+                step.source.deployed_version, step.runtime_root, step.payload,
+                target=step.source_target,
+            )
 
     def execute(argv: tuple[str, ...]) -> str:
         try:
@@ -579,19 +584,28 @@ def _execute_runtime_step(step: update_runtime_plan.RuntimeUpdateStep) -> str:
                 assert step.runtime_root is not None
                 assert step.project_root is not None
                 step.source.validate(step.name, step.payload, step.environment)
-                from .update_runtime_target import check_target
+                if step.source.application is not None:
+                    step.source.application.validate(step.payload, step.runtime_root, step.environment)
+                elif step.source.install_source is None:
+                    from .update_runtime_target import check_target
 
-                check_target(
-                    step.source_target, step.source, step.name, step.payload,
-                    step.runtime_root, step.environment,
-                )
+                    check_target(
+                        step.source_target, step.source, step.name, step.payload,
+                        step.runtime_root, step.environment,
+                    )
                 command = step.source.lifecycle_argv(
                     step.payload, step.name, step.runtime_root, step.project_root, argv,
                 )
         except (OSError, ValueError, SyntaxError, subprocess.SubprocessError) as error:
             return f"prepared source execution refused: {error}"
         try:
-            return run(command).status
+            status = run(command).status
+            if (
+                status == "OK" and step.source is not None and step.source.application is None
+                and not update_runtime_plan._runtime_footprint_current(step)
+            ):
+                return "source deployment receipt invalid: selected runtime footprint changed"
+            return status
         except (OSError, ValueError) as error:
             if step.source is None:
                 raise
@@ -604,7 +618,7 @@ def _execute_runtime_step(step: update_runtime_plan.RuntimeUpdateStep) -> str:
         receipt=receipt,
     )
     status = execute(step.argv)
-    if step.fallback_argv and status.startswith("installer exited"):
+    if step.source is None and step.fallback_argv and status.startswith("installer exited"):
         output.info(f"Module '{step.name}' update failed (not installed?), trying install...")
         status = execute(step.fallback_argv)
         return "OK (installed)" if status == "OK" else status.replace(

@@ -49,3 +49,42 @@ print(json.dumps({"framework_ready": True, "unit_native_load_refused": True}))
     assert json.loads(result.stdout) == {
         "framework_ready": True, "unit_native_load_refused": True,
     }
+
+
+def test_native_unit_runner_suppresses_only_pytest_convenience_links(tmp_path):
+    code = """
+import os, runpy, sys
+from pathlib import Path
+import _pytest.pathlib, _pytest.tmpdir, coverage, pytest
+root, temporary = map(Path, sys.argv[1:])
+sys.path.insert(0, str(root / "tools"))
+runner = runpy.run_path(str(root / "tools/run-promotion-unit-tests.py"))
+assert "coverage_guided_selection" not in sys.modules
+test = temporary / "test_temporary.py"
+test.write_text("def test_temporary(tmp_path):\\n    assert tmp_path.is_dir()\\n")
+config = temporary / "pytest.ini"
+config.write_text("[pytest]\\n")
+original = _pytest.pathlib._force_symlink, getattr(_pytest.tmpdir, "_force_symlink", None), os.symlink
+base = temporary / "pytest"
+target = root / "tools/coverage_guided_selection/__init__.py"
+cov = coverage.Coverage(data_file=None, config_file=False, include=[str(target)])
+with cov.collect():
+    assert pytest.main([
+        "-q", "-c", str(config), "--noconftest", "-p", "no:cacheprovider",
+        "--rootdir", str(temporary),
+        "--basetemp", str(base), str(test),
+    ], plugins=[runner["FrameworkTemporaryPaths"]()]) == 0
+assert target in map(Path, cov.get_data().measured_files())
+assert not list(base.glob("*current"))
+assert original == (
+    _pytest.pathlib._force_symlink, getattr(_pytest.tmpdir, "_force_symlink", None), os.symlink,
+)
+"""
+    environment = dict(os.environ, PYTEST_DISABLE_PLUGIN_AUTOLOAD="1")
+    environment.pop("PYTEST_ADDOPTS", None)
+    result = subprocess.run(
+        [sys.executable, "-I", "-B", "-c", code, str(ROOT), str(tmp_path)],
+        capture_output=True, text=True, timeout=15, env=environment,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    assert result.returncode == 0, result.stderr + result.stdout

@@ -127,6 +127,37 @@ def test_profile_source_plan_reuses_bound_selected_generation(selection, tmp_pat
     assert _bytes(selection) == before
 
 
+@pytest.mark.parametrize("difference", [None, "profile", "locals"])
+def test_explicit_profile_plan_does_not_reuse_another_selected_profile(selection, tmp_path, difference):
+    payload, identity = _payload(tmp_path / "payload", "a" * 40)
+    slot = _select(selection, payload, identity, profile=True)
+    adapter = si._runtime_installer()
+    incoming, local = adapter._source_profile_reuse(payload, identity, slot)
+    if difference == "profile":
+        receipt = incoming.receipt()
+        receipt["binding"]["acquisition_policy"] = "different-admitted-profile"
+        receipt["lock_id"] = "sha256:" + hashlib.sha256(json.dumps(
+            receipt["binding"], sort_keys=True, separators=(",", ":"),
+        ).encode()).hexdigest()
+        incoming = adapter.engine.WheelReuseInputs(
+            identity.runtime_version + ".profile." + receipt["lock_id"][7:23],
+            json.dumps(receipt, sort_keys=True, separators=(",", ":")), time.monotonic() + 30,
+        )
+    before = _bytes(selection)
+    result = si.self_install(
+        payload, root=selection, dry_run=True,
+        _wheel_inputs=incoming, _local_packages=() if difference == "locals" else local,
+    )
+    if difference is None:
+        assert result.action == "already-current" and result.slot == str(slot)
+    else:
+        assert result.action == "planned"
+        expected = identity.runtime_version + ".profile." + incoming.receipt()["lock_id"][7:23]
+        assert result.slot == str(si.version_slot(expected, selection))
+        assert result.marker is None
+    assert _bytes(selection) == before
+
+
 @pytest.mark.parametrize("separator", [".", "+"])
 @pytest.mark.parametrize("same_profile", [False, True])
 def test_native_wheel_candidate_reuses_selected_repair_without_skipping_health(
@@ -184,8 +215,8 @@ def test_native_wheel_candidate_reuses_selected_repair_without_skipping_health(
                 pytest.fail("candidate admission was bypassed")
 
 
-@pytest.mark.parametrize("fault", ["binding", "locals", "completion-hash"])
-def test_profile_source_plan_refuses_changed_constructor_binding(selection, tmp_path, fault):
+@pytest.mark.parametrize("fault", ["binding", "locals", "completion-hash", "encoding", "record"])
+def test_profile_source_plan_ignores_unusable_old_constructor_binding(selection, tmp_path, fault):
     payload, identity = _payload(tmp_path / "payload", "a" * 40)
     slot = _select(selection, payload, identity, profile=True)
     if fault == "completion-hash":
@@ -193,6 +224,10 @@ def test_profile_source_plan_refuses_changed_constructor_binding(selection, tmp_
         data = json.loads(marker.read_text())
         data["payload_hash"] = "b" * 64
         marker.write_text(json.dumps(data))
+    elif fault in {"encoding", "record"}:
+        (slot / ".runtime-input-origins.json").write_bytes(
+            b"\xff\n" if fault == "encoding" else b'{"schema":"unsupported"}\n',
+        )
     else:
         path = slot / ".runtime-input-origins.json"
         data = json.loads(path.read_text())
@@ -203,8 +238,29 @@ def test_profile_source_plan_refuses_changed_constructor_binding(selection, tmp_
         path.write_text(json.dumps(data))
     before = _bytes(selection)
     result = si.self_install(payload, root=selection, dry_run=True)
-    assert result.action == "error", result
-    assert "source-profile evidence is invalid" in result.reason
+    assert result.action == "planned", result
+    assert result.slot == str(si.version_slot(identity.runtime_version, selection))
+    assert result.marker is None
+    assert _bytes(selection) == before
+
+
+@pytest.mark.parametrize("operation", ["_package_roots", "_construction_hash"])
+def test_old_profile_fallback_does_not_swallow_incoming_input_io(
+    selection, tmp_path, monkeypatch, operation,
+):
+    payload, identity = _payload(tmp_path / "payload", "a" * 40)
+    slot = _select(selection, payload, identity, profile=True)
+    adapter = si._runtime_installer()
+    before = _bytes(selection)
+    io_error = PermissionError("incoming source read denied")
+
+    def failed_input(*args, **kwargs):
+        raise io_error
+
+    monkeypatch.setattr(adapter.engine, operation, failed_input)
+    with pytest.raises(PermissionError, match="incoming source") as caught:
+        adapter._source_profile_reuse(payload, identity, slot)
+    assert caught.value is io_error
     assert _bytes(selection) == before
 
 
@@ -235,16 +291,21 @@ def test_source_selection_requires_valid_completion(selection, tmp_path, field):
     assert _bytes(selection) == before
 
 
-@pytest.mark.parametrize("selected", [False, True])
-def test_invalid_source_bytes_are_explicit_errors_without_publication(selection, tmp_path, selected):
+@pytest.mark.parametrize("selected,profile", [(False, False), (True, False), (True, True)])
+def test_incoming_source_bytes_remain_strict_while_old_bytes_cannot_veto(
+    selection, tmp_path, selected, profile,
+):
     payload, identity = _payload(tmp_path / "payload", "a" * 40)
-    slot = _select(selection, payload, identity)
+    slot = _select(selection, payload, identity, profile=profile)
     damaged = slot / "payload" if selected else payload
     (damaged / "src" / "worktree_manager" / "__main__.py").write_text("changed bytes\n")
     before = _bytes(selection)
     result = si.self_install(payload, root=selection, dry_run=True)
-    assert result.action == "error", result
-    assert "bytes do not match" in result.reason
+    assert result.action == ("planned" if selected else "error"), result
+    if selected:
+        assert result.slot == str(si.version_slot(identity.runtime_version, selection))
+    else:
+        assert "bytes do not match" in result.reason
     assert _bytes(selection) == before
 
 

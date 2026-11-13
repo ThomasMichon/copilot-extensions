@@ -66,7 +66,9 @@ def prepare_runtime_candidate(provenance: dict[str, str] | None = None) -> None:
         raise RuntimeError("Frozen package version differs from the requested runtime")
 
     source = json.loads(provenance["deployment_source"])
-    if "frozen_plugin" in provenance:
+    if "frozen_plugin" in provenance and not (
+        application and source.get("schema") == "copilot-extensions.runtime-source"
+    ):
         from .update_stage import fingerprint
 
         source["payload_fingerprint"] = fingerprint(Path(provenance["frozen_plugin"]))
@@ -119,8 +121,13 @@ def verify_runtime_candidate() -> None:
     from ._build_info import BUILD_INFO
 
     core._load_full_command_surface()
-    if Version(BUILD_INFO.get("version", "")) != Version(distribution_version("agent-worktrees")):
-        raise RuntimeError("Installed build provenance has the wrong package version")
+    installed_version = distribution_version("agent-worktrees")
+    if Version(BUILD_INFO.get("version", "")) != Version(installed_version):
+        raise RuntimeError(
+            "Installed build provenance has the wrong package version "
+            f"(provenance={BUILD_INFO.get('version')!r}, distribution={installed_version!r}, "
+            f"prefix={sys.prefix!r})"
+        )
     for field in ("commit", "branch", "source", "build_timestamp", "runtime_generation"):
         if not isinstance(BUILD_INFO.get(field), str) or not BUILD_INFO[field]:
             raise RuntimeError(f"Installed build provenance has no {field}")

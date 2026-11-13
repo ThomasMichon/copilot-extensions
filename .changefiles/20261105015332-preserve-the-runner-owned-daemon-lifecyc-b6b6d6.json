@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve the runner-owned daemon lifecycle in the isolated native global-owner fixture",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

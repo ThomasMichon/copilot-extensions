@@ -175,7 +175,7 @@ def current_version(root: Path | None = None) -> str | None:
     marker = (root or default_root()) / MARKER
     try:
         return marker.read_text("utf-8").strip() or None
-    except OSError:
+    except (OSError, UnicodeError):
         return None
 
 
@@ -520,19 +520,11 @@ def _deploy_binstubs(*, application_slot: Path | None = None, _published=None) -
     written: list[Path] = []
     contents = _expected_binstub_contents(application_slot=application_slot)
     if application_slot is not None:
-        previous = _selected_runtime_slot(application_slot.parent.parent)
-        owned = _expected_binstub_contents(
-            application_slot=previous
-            if previous is not None and (previous / "application.json").is_file() else None,
-        )
-        for name, body in contents.items():
+        for name in contents:
             path = lb / name
             if path.is_symlink() or (path.exists() and not path.is_file()):
                 raise RuntimeError(f"Foreign Manager command preserved: {path}")
-            if path.exists() and path.read_bytes() not in (
-                body.encode("utf-8"), owned.get(name, "").encode("utf-8"),
-            ):
-                raise RuntimeError(f"Foreign Manager command preserved: {path}")
+    # Explicit installation owns these named outputs, not their historical byte template.
     for name, body in contents.items():
         p = lb / name
         if application_slot is None:
@@ -619,6 +611,7 @@ def _acquire_install_cutover_lease(root: Path):
 
 
 from .self_install_recovery import reap_stranded_cutover_passive as _reap_stranded_cutover_passive  # noqa: F401 -- compatibility test seam
+from .self_install_recovery import recover_frontdoors
 
 
 # ── legacy artifact recognition + cleanup ────────────────────────────────
@@ -805,62 +798,60 @@ def _complete_slot(
     baseline = {}
     contents = {}
     published = {}
+    started, leased, interrupted = False, False, None
 
     def publish_frontdoors() -> None:
-        nonlocal stubs
+        nonlocal stubs, started, leased, interrupted
         publication = installer.runtime._runtime_component("versioned_runtime_publication")
         targets = [*(local_bin() / name for name in (
             _expected_binstub_contents(application_slot=application_slot)
             if application_slot is not None else _binstub_files()
         )),
                    _control_plane_provider_manifest_path(payload, root=root)]
-        with publication.target_leases(root, targets):
+        if not leased:
+            publication_custody.enter_context(publication.target_leases(root, targets))
+            leased = True
+        if application_slot is not None and not baseline:
+            for path in targets:
+                baseline[path] = publication.state_path(path)
+                contents[path] = (
+                    publication.CopyPublication._bytes(path, baseline[path])
+                    if baseline[path] is not None else None
+                )
+        if not started:
             if before_publish is not None:
                 before_publish()
-            if application_slot is not None:
-                for path in targets:
-                    baseline[path] = publication.state_path(path)
-                    contents[path] = (
-                        publication.CopyPublication._bytes(path, baseline[path])
-                        if baseline[path] is not None else None
-                    )
-            stubs = (
-                _deploy_binstubs(application_slot=application_slot, _published=published)
-                if application_slot is not None else _deploy_binstubs()
-            )
-            provider = _write_control_plane_provider_manifest(payload, root=root)
-            if application_slot is not None:
-                published[provider] = publication.state_path(provider)
+            if transactional_activation and after_activate is not None:
+                try:
+                    after_activate(slot)
+                except installer.ActivationStarted as committed:
+                    interrupted = committed.interruption
+                started = True
+        stubs = (
+            _deploy_binstubs(application_slot=application_slot, _published=published)
+            if application_slot is not None else _deploy_binstubs()
+        )
+        provider = _write_control_plane_provider_manifest(payload, root=root)
+        if application_slot is not None:
+            published[provider] = publication.state_path(provider)
 
     installer = _runtime_installer()
     if before_publish is not None:
         before_publish()
     try:
-        installer.activate(
-            root, slot.name, expected=previous, before_publish=publish_frontdoors,
-            after_publish=(lambda: after_activate(slot))
-            if transactional_activation and after_activate is not None else None,
-        )
+        with ExitStack() as publication_custody:
+            installer.activate(
+                root, slot.name, expected=previous, before_publish=publish_frontdoors,
+                forward_only=lambda: started,
+            )
+        if interrupted is not None:
+            raise interrupted
         if after_activate is not None and not transactional_activation:
             after_activate(slot)
     except BaseException:
-        if application_slot is not None and published:
+        if application_slot is not None and published and not started:
             publication = installer.runtime._runtime_component("versioned_runtime_publication")
-            with publication.target_leases(root, list(published)):
-                for path, created in published.items():
-                    if publication.state_path(path) != created:
-                        raise RuntimeError(f"Manager publication changed during recovery: {path}")
-                for path in published:
-                    if baseline[path] is None:
-                        path.unlink()
-                    else:
-                        temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.recover")
-                        try:
-                            temporary.write_bytes(contents[path])
-                            temporary.chmod(baseline[path].mode & 0o7777)
-                            _replace_with_retry(temporary, path)
-                        finally:
-                            temporary.unlink(missing_ok=True)
+            recover_frontdoors(publication, root, baseline, contents, published, _replace_with_retry)
         raise
     return SelfInstallResult(
         version=version, action="already-current"
@@ -875,13 +866,14 @@ def self_install(
     *,
     root: Path | None = None,
     dry_run: bool = True,
+    stage_only: bool = False,
     _after_activate=None, _before_publish=None,
     _transactional_activation: bool = False, _reconcile_instances: bool = True,
     _wheel_inputs=None, _local_packages: tuple[str, ...] | None = None, _validate_candidate=None,
     _raise_candidate_errors: bool = False, _base_python: Path | None = None, _uv: Path | None = None,
     _application: Path | None = None, _native_wheel_inputs=None,
 ) -> SelfInstallResult:
-    """Construct and health-gate with the canonical engine before selection."""
+    """Construct and health-gate; stage-only proves readiness without selection."""
     from .runtime_identity import running_application_slot
     from ._installation_context import path_is_within, paths_equal
 
@@ -908,7 +900,11 @@ def self_install(
                     root=str(r), slot=str(slot), marker=slot.name, reason="dry-run",
                 )
             selected = _selected_runtime_slot(r)
-            generation, source_matches = installer.source_install_selection(pd, version, selected)
+            generation, source_matches = installer.source_install_selection(
+                pd, version, selected,
+                **({"wheel_inputs": _wheel_inputs, "local_packages": _local_packages}
+                   if _wheel_inputs is not None else {}),
+            )
             slot = version_slot(generation, r)
             if source_matches and selected is not None and not needs_install(version, r):
                 return SelfInstallResult(version=version, action="already-current", root=str(r),
@@ -917,7 +913,7 @@ def self_install(
                                      slot=str(slot), reason="dry-run")
         previous = current_version(r)
         was_current = not needs_install(version, r)
-        if _reconcile_instances and not (
+        if _reconcile_instances and not stage_only and not (
             os.environ.get("COPILOT_EXTENSIONS_TEST_CONTAINED") == "1"
             or os.environ.get("PYTEST_CURRENT_TEST")
         ):
@@ -945,6 +941,8 @@ def self_install(
                     raise RuntimeError("Running application is not Manager")
                 reused = installer.runtime.is_complete(r, slot.name)
                 _, unchanged = custody.enter_context(application._qualified(slot, record))
+                if stage_only:
+                    return installer.stage_application(r, slot, version, unchanged)
 
                 def before_publish():
                     unchanged()
@@ -963,6 +961,11 @@ def self_install(
                 )
             ready = custody.enter_context(installer.candidate(pd, r, assemble=_copy_payload, **candidate_options))
             slot = ready.slot
+            if stage_only:
+                installer.verify_stage_readiness(r, ready, wheel_inputs=_wheel_inputs)
+                return SelfInstallResult(
+                    version=version, action="staged", root=str(r), slot=str(slot), marker=slot.name,
+                )
             return _complete_candidate(
                 ready, pd, r, previous=previous,
                 was_current=was_current or ((_wheel_inputs is not None or _native_wheel_inputs is not None) and previous == slot.name),
@@ -996,116 +999,7 @@ def self_update(
     root: Path | None = None,
     dry_run: bool = False,
 ) -> SelfUpdateResult:
-    """Fetch and version-install the Manager through its existing source authority.
+    """Fetch the independent Manager source through its canonical update owner."""
+    from .runtime_source_self_update import run_update
 
-    Dev uses clean, merged Git acquisition and the running Manager's preparer.
-    Other refs use Git or GitHub codeload; non-GitHub sources without Git are skipped.
-    Prepared source payloads select their exact immutable generation, not merely
-    an equal package version. A healthy matching selection can be reused.
-
-    Deliberately **best-effort and non-fatal**: git/uv missing, offline, or a
-    fetch error return an ``error``/``skipped`` result rather than raising, so a
-    transient network problem never blocks the harness ``update`` this feeds. The
-    currently-running process keeps running its existing code; the freshly
-    installed slot takes effect on the *next* ``worktree-manager`` invocation
-    (normal versioned-install semantics -- no in-process hot-swap).
-    """
-    r = (root or default_root()).resolve()
-    ref = ref or manager_ref(r)
-    repo = manager_repo(r)
-    previous = current_version(r)
-
-    staging = r / STAGING_DIR
-    payload = staging / "worktree-manager"
-    use_git = shutil.which("git") is not None
-    try:
-        from . import engine_client, source_config, update_auth
-
-        repo = source_config.absolute_local_source(repo)
-        if ref == "dev" and not use_git:
-            return SelfUpdateResult(
-                action="skipped", previous=previous,
-                reason="Manager merged-Dev acquisition requires git; no unqualified tarball fallback",
-            )
-        fetch_root = r / "manager-source" if ref == "dev" else staging
-        fetch_root.mkdir(parents=True, exist_ok=True)
-        auth_env = update_auth.environment(repo, cwd=fetch_root) if use_git else None
-        environment = {"env": auth_env} if auth_env is not None else {}
-        if ref == "dev":
-            from .runtime_source_self_update import fetch
-
-            payload = fetch(repo, r, environment=auth_env)
-        elif use_git:
-            git = ["git", "-c", "core.longpaths=true"]
-            existing = (staging / ".git").is_dir()
-            if existing:
-                subprocess.run([*git, "-C", str(staging), "fetch", "--depth", "1",
-                                repo, ref], check=True, capture_output=True,
-                               text=True, timeout=180, **environment)
-            else:
-                # staging may hold a prior tarball payload (no .git); clear so the
-                # clone lands in an empty dir.
-                _clear_dir(staging)
-                subprocess.run([*git, "clone", "--no-checkout", "--depth", "1", "--branch", ref,
-                                repo, str(staging)], check=True,
-                               capture_output=True, text=True, timeout=300, cwd=staging, **environment)
-            sparse = staging / ".git" / "info" / "sparse-checkout"
-            sparse.parent.mkdir(parents=True, exist_ok=True)
-            sparse.write_text("/worktree-manager/\n/libs/\n/.gitattributes\n", encoding="utf-8")
-            subprocess.run([*git, "-c", "core.sparseCheckout=true",
-                            "-c", "core.sparseCheckoutCone=false", "-C", str(staging),
-                            "checkout", "-q", "FETCH_HEAD" if existing else "HEAD"], check=True,
-                           capture_output=True, text=True, timeout=60, **environment)
-        else:
-            url = manager_tarball_url(r, ref)
-            if url is None:
-                return SelfUpdateResult(
-                    action="skipped", previous=previous,
-                    reason="git not found and source is not a GitHub repo "
-                           "(cannot fetch a tarball) -- install git to update")
-            _fetch_via_tarball(staging, url)
-    except update_auth.AuthRequired as e:
-        return SelfUpdateResult(action="auth_required", previous=previous, reason=str(e))
-    except (OSError, ValueError, subprocess.SubprocessError, engine_client.EngineError) as e:
-        detail = f"\n{e.stderr.strip()}" if isinstance(e, subprocess.CalledProcessError) and e.stderr else ""
-        return SelfUpdateResult(action="error", previous=previous,
-                                reason=f"fetch failed: {e}{detail}")
-
-    if not (payload / "pyproject.toml").is_file():
-        return SelfUpdateResult(action="error", previous=previous,
-                                reason=f"fetched payload not found at {payload}")
-
-    cutover = None
-
-    def after_activate(slot: Path) -> None:
-        nonlocal cutover
-        try:
-            from . import mux_daemon_cutover
-
-            cutover = mux_daemon_cutover.activate_after_update(
-                root=r, slot=slot, version=slot.name,
-            )
-        except Exception as error:  # noqa: BLE001 -- existing best-effort cutover boundary
-            cutover = {"action": "error", "reason": f"mux cutover failed: {error}"}
-
-    res = self_install(
-        payload_dir=payload, root=r, dry_run=dry_run,
-        _after_activate=after_activate if not dry_run else None,
-    )
-    if res.action == "error":
-        return SelfUpdateResult(action="error", version=res.version,
-                                previous=previous, reason=res.reason)
-    if res.action == "already-current":
-        return SelfUpdateResult(
-            action="already-current",
-            version=res.version,
-            previous=previous,
-            cutover=cutover,
-        )
-    # installed | planned (dry-run)
-    return SelfUpdateResult(
-        action="updated",
-        version=res.version,
-        previous=previous,
-        cutover=cutover,
-    )
+    return run_update(ref=ref, root=root, dry_run=dry_run)

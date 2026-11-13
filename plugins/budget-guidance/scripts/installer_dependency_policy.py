@@ -908,7 +908,7 @@ def run_uv_install(
     retained_resource_roots: tuple[Path, ...] = (),
     excluded_local_packages: tuple[str, ...] = (),
     non_editable: bool = False,
-    _operation: str = "install", **run_options,
+    _operation: str = "install", deadline: float | None = None, **run_options,
 ) -> subprocess.CompletedProcess:
     """Audit and execute the same private source, requirements and configuration."""
     result = None
@@ -921,7 +921,12 @@ def run_uv_install(
             **({"excluded_local_packages": excluded_local_packages}
                if excluded_local_packages != () else {}),
             **({"_operation": _operation} if _operation != "install" else {}),
+            **({"deadline": deadline} if deadline is not None else {}),
         ) as transaction:
+            if deadline is not None:
+                run_options["timeout"] = _configuration.remaining_timeout(
+                    deadline, error_type=DependencyPolicyError, cap=run_options.get("timeout"),
+                )
             run_options.setdefault("creationflags", _HEADLESS)
             result = subprocess.run(
                 list(transaction.argv), env=transaction.environment,

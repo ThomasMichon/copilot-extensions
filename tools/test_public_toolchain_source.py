@@ -32,11 +32,23 @@ HASHES = {name: ("a" * 64,) for name in PINS}
 
 
 @pytest.mark.parametrize("deadline", [135.0, 180.0])
-def test_public_toolchain_metadata_shares_the_caller_deadline(monkeypatch, deadline):
+@pytest.mark.parametrize("transport", ["response", "worker"])
+def test_public_toolchain_metadata_shares_the_caller_deadline(monkeypatch, deadline, transport):
+    import io
+    from types import SimpleNamespace
     import seasoned_public_feed as feed
 
     now, timeouts = [100.0], []
     monkeypatch.setattr(feed.time, "monotonic", lambda: now[0])
+
+    def open_url(request, *, timeout):
+        timeouts.append(timeout)
+        now[0] += 20
+        response = io.BytesIO(b"metadata fixture")
+        response.fp = SimpleNamespace(raw=SimpleNamespace(
+            _sock=SimpleNamespace(shutdown=lambda how: pytest.fail("fixture read exceeded its deadline")),
+        ))
+        return response
 
     def run(command, *, timeout, **options):
         assert command[-3:] == [
@@ -50,15 +62,18 @@ def test_public_toolchain_metadata_shares_the_caller_deadline(monkeypatch, deadl
         assert options["fetch"]("https://example.invalid/" + name) == b"metadata fixture"
         return SeasonedPublicRelease(PINS[name], HASHES[name])
 
+    monkeypatch.setattr(feed, "_deadline_opener", lambda deadline: SimpleNamespace(open=open_url))
     monkeypatch.setattr(feed.subprocess, "run", run)
+    if transport == "response":
+        monkeypatch.setattr(public, "_default_fetch", feed._fetch_response)
     monkeypatch.setattr(public, "resolve_seasoned_public_release", resolve)
     if deadline == 135:
         with pytest.raises(btl.ArtifactBuildError, match="deadline"):
             public.resolve_public_source(tuple(PINS), 7, deadline=deadline)
-        assert timeouts == [35, 15]
+        assert timeouts == ([30, 15] if transport == "response" else [35, 15])
     else:
         assert public.resolve_public_source(tuple(PINS), 7, deadline=deadline).packages == PINS
-        assert timeouts == [80, 60, 40]
+        assert timeouts == ([30, 30, 30] if transport == "response" else [80, 60, 40])
 
 
 def test_toolchain_lock_forwards_public_metadata_deadline(tmp_path, monkeypatch):

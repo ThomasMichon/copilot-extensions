@@ -110,6 +110,25 @@ def test_pending_bumps_groups_by_plugin(isolated: Path):
     }
 
 
+@pytest.mark.parametrize("retained", [False, True])
+def test_consumption_reuses_an_explicit_pending_list_without_reading_again(
+    isolated: Path, monkeypatch: pytest.MonkeyPatch, retained: bool,
+) -> None:
+    path = changefile.write_changefile([{"plugin": "example", "type": "patch"}], "fixture")
+    pending = acc.read_changefiles()
+    reader = acc.read_changefiles
+    reads = []
+
+    def read():
+        reads.append(True)
+        return reader()
+
+    monkeypatch.setattr(acc, "read_changefiles", read)
+    acc._consume_changefiles(pending if retained else None)
+    assert reads == ([] if retained else [True])
+    assert not path.exists()
+
+
 def test_compute_and_apply_writes_all_three_files(isolated: Path):
     _plugin(isolated, "agent-worktrees", "1.5.5-dev253")
     _marketplace(isolated, {"agent-worktrees": "1.5.5-dev253"}, metadata_version="1.7.7-dev214")

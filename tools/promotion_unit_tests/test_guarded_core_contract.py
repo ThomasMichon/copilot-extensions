@@ -575,6 +575,7 @@ def test_guarded_final_recheck_uses_the_validated_native_candidate_set(monkeypat
 )
 def test_guarded_final_index_recheck_refuses_changed_evidence(monkeypatch, old, current):
     index = _guarded_index([])
+    monkeypatch.setattr(guard, "sys_tags", lambda: iter(index.compatible_tags))
     request = {
         "feed": {"identity": "sha256:" + "a" * 64, "index_url": "https://example.invalid/simple", "headers": []},
         "limits": asdict(_limits()), "deadline": time.monotonic() + 30, "control_bytes": 0,
@@ -597,6 +598,7 @@ def test_guarded_final_index_recheck_refuses_changed_evidence(monkeypatch, old, 
 
 def test_guarded_final_recheck_refuses_a_different_native_target(monkeypatch):
     index = _guarded_index([])
+    monkeypatch.setattr(guard, "sys_tags", lambda: iter(index.compatible_tags))
     request = {
         "feed": {"identity": "sha256:" + DIGEST, "index_url": "https://example.invalid/simple", "headers": []},
         "limits": asdict(index.limits), "wheel_limits": asdict(index.wheel_limits),

@@ -195,8 +195,6 @@ print(json.dumps({"completed":True}))
 
 
 def _update_from_payload(payload, root, env, *, activation=None):
-    from worktree_manager import mux_daemon_cutover
-
     cutovers = []
     which = shutil.which
     with pytest.MonkeyPatch.context() as patch:
@@ -215,24 +213,48 @@ def _update_from_payload(payload, root, env, *, activation=None):
             if activation is not None:
                 return activation(**kwargs)
             return {"action": "cutover", "result": {"ok": True}}
-        patch.setattr(mux_daemon_cutover, "activate_after_update", cutover)
+        patch.setattr(
+            si._runtime_installer(), "_activate_after_bootstrap_update",
+            lambda actual_root, slot: cutover(root=actual_root, slot=slot, version=slot.name),
+        )
         return si.self_update(root=root, dry_run=False), cutovers
 
 
-def _prepare_materialized_source(payload):
-    with pytest.MonkeyPatch.context() as patch:
-        patch.syspath_prepend(str(SOURCE.parent / "tools"))
-        import prepare_runtime_source
+def _promoted_payload(directory):
+    sys.path.insert(0, str(SOURCE.parent / "tools"))
+    from local_runtime_promotion import compose, promotion
 
-        prepare_runtime_source._materialize(SOURCE.parent, "worktree-manager", payload)
+    source_commit = promotion._rev_parse("HEAD", cwd=SOURCE.parent)
+    main_seed = os.environ.get("MANAGER_RUNTIME_ACCEPTANCE_MAIN_SEED") or promotion._rev_parse(
+        "refs/remotes/origin/main", cwd=SOURCE.parent,
+    )
+    assert source_commit and main_seed, "Native Manager preparation requires source HEAD and fetched Main"
+    composed = compose(SOURCE.parent, source_commit=source_commit, main_seed=main_seed)
+    archive = directory / "promoted-manager.tar"
+    promotion._git([
+        "archive", "--format=tar", "--output", str(archive), composed.tree, "worktree-manager",
+    ], cwd=SOURCE.parent)
+    snapshot = directory / "promoted"
+    snapshot.mkdir()
+    with tarfile.open(archive) as bundle:
+        si._safe_extract(bundle, snapshot)
+    return snapshot / "worktree-manager", {
+        "source_commit": source_commit, "main_seed": main_seed, "tree": composed.tree,
+    }
 
 
 def _prepare_initial_construction(directory, *, default_data_root=False):
+    started = time.monotonic()
+    def phase(name: str) -> None:
+        print(f"Manager construction {name}: {time.monotonic() - started:.2f}s", flush=True)
+
     directory.mkdir()
     env = _environment(directory)
     root = Path(env["USERPROFILE"]) / ".worktree-manager" if default_data_root else directory / "root"
+    promoted, promotion = _promoted_payload(directory)
+    phase("promoted-inputs")
     payload = directory / "input"
-    si._copy_payload(SOURCE, payload)
+    si._copy_payload(promoted, payload)
     metadata = payload / "pyproject.toml"
     text = metadata.read_text(encoding="utf-8")
     group = '[dependency-groups]\n'
@@ -248,18 +270,24 @@ def _prepare_initial_construction(directory, *, default_data_root=False):
         "--root", root, "--payload", payload, "--", "--version",
     ], env, directory)
     assert process.returncode == 0, process.stdout + process.stderr
+    phase("first-installed")
     slot = si.version_slot(si.current_version(root), root)
     return {
         "directory": str(directory), "root": str(root), "slot": str(slot),
         "stdout": process.stdout, "returncode": process.returncode,
+        "input_payload": str(promoted), "promotion": promotion,
     }
 
 
 def _prepare_qualified_construction(constructed):
+    started = time.monotonic()
+    def phase(name: str) -> None:
+        print(f"Manager construction {name}: {time.monotonic() - started:.2f}s", flush=True)
+
     directory, root, slot = (Path(constructed[key]) for key in ("directory", "root", "slot"))
     env = _environment(directory)
     qualified = directory / "qualified"
-    _prepare_materialized_source(qualified)
+    si._copy_payload(Path(constructed["input_payload"]), qualified, mark_complete=False)
     source = si._runtime_installer().runtime_source
     package_version = si.payload_version(qualified)
     (qualified / "plugin.json").write_text(json.dumps({
@@ -290,12 +318,32 @@ def _prepare_qualified_construction(constructed):
         "package_version": package_version, "source_commit": commit,
         "source_tree": tree, "assembly_hash": digest, "runtime_version": generation,
     }), encoding="utf-8")
+    phase("qualified-inputs")
     repaired = _prepare_command([
         getattr(sys, "_base_executable", sys.executable), "-I", "-S", "-B",
         qualified / "scripts" / "runtime_install.py",
         "--root", root, "--payload", qualified, "--", "--version",
     ], env, directory)
+    if repaired.returncode:
+        returned = root / "versions" / generation / "payload"
+        if returned.is_dir():
+            engine = si._runtime_installer().engine
+
+            def contents(project):
+                return {
+                    path.relative_to(project).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
+                    for path in engine._source_files(engine._package_roots(project))
+                }
+
+            before, after = contents(qualified), contents(returned)
+            print("Manager prepared-source difference: " + json.dumps({
+                "added": sorted(after.keys() - before.keys()),
+                "removed": sorted(before.keys() - after.keys()),
+                "changed": sorted(name for name in before.keys() & after.keys()
+                                  if before[name] != after[name]),
+            }), flush=True)
     assert repaired.returncode == 0, repaired.stdout + repaired.stderr
+    phase("qualified-installed")
     target = si.version_slot(si.current_version(root), root)
     assert target != slot and target.name == generation
     si._runtime_installer().activate(root, slot.name, expected=target.name)
@@ -324,10 +372,10 @@ def test_first_bootstrap_selects_only_installed_healthy_runtime(constructed):
     assert (slot / ".install-complete.json").is_file()
     assert (slot / ".runtime-input-origins.json").is_file()
     assert si._slot_is_complete(slot)
-    assert process.stdout.strip().endswith(f"worktree-manager {si.payload_version(SOURCE)}")
+    assert process.stdout.strip().endswith(f"worktree-manager {si.payload_version(slot / 'payload')}")
     python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     imported = _run([
-        python, "-I", "-c",
+        python, "-I", "-B", "-c",
         "import json,sys,worktree_manager; "
         "from worktree_manager.relocated_launch import _relocated_launch_script; "
         "print(json.dumps([sys.prefix,worktree_manager.__file__,str(_relocated_launch_script())]))",
@@ -338,9 +386,18 @@ def test_first_bootstrap_selects_only_installed_healthy_runtime(constructed):
     assert Path(module).resolve().is_relative_to(slot.resolve())
     assert Path(launcher).is_file()
     assert Path(launcher).is_relative_to(Path(module).parent / "_runtime_assets" / "bin")
+    asset = Path(module).parent / "_runtime_assets" / "bin" / (
+        "launch-session.ps1" if os.name == "nt" else "launch-session.sh"
+    )
+    assert Path(launcher).resolve() == asset.resolve()
+    assert asset.read_bytes() == (slot / "payload" / "bin" / asset.name).read_bytes()
 
 
-def _prepare_legacy_repair(directory):
+def _prepare_legacy_repair(directory, promoted):
+    started = time.monotonic()
+    def phase(name: str) -> None:
+        print(f"Manager legacy preparation {name}: {time.monotonic() - started:.2f}s", flush=True)
+
     directory.mkdir()
     env = _environment(directory)
     root = directory / "root"
@@ -356,16 +413,18 @@ def _prepare_legacy_repair(directory):
         si._safe_extract(bundle, extracted)
     legacy = extracted / "worktree-manager"
     assert si.payload_version(legacy) == LEGACY_VERSION
+    phase("release-extracted")
     original = root / "versions" / LEGACY_VERSION
     original.parent.mkdir(parents=True)
     si._copy_payload(legacy, original)
     (root / "current-version").write_text(LEGACY_VERSION + "\n", encoding="utf-8")
     payload = directory / "input"
-    si._copy_payload(SOURCE, payload)
+    si._copy_payload(promoted, payload)
     controlled = _run([
         sys.executable, "-I", "-c", _LEGACY_CONTROLLER, legacy, payload, root,
     ], dict(env, WORKTREE_MANAGER_ROOT=str(root)), directory)
     assert controlled.returncode == 0, controlled.stdout + controlled.stderr
+    phase("legacy-controller-installed")
     record = json.loads(controlled.stdout.strip().splitlines()[-1])
     assert record["controller_version"] == LEGACY_VERSION
     previous = Path(record["slot"])
@@ -388,6 +447,7 @@ def _prepare_legacy_repair(directory):
     ]
     old_launch = _run(argv, dict(env, WORKTREE_MANAGER_ROOT=str(root), UV_OFFLINE="1"), directory)
     assert old_launch.returncode != 0, old_launch.stdout
+    phase("broken-installed-launch")
     before = (root / "current-version").read_bytes()
     process = _prepare_command([
         getattr(sys, "_base_executable", sys.executable), "-I", "-S", "-B",
@@ -395,6 +455,7 @@ def _prepare_legacy_repair(directory):
         "--root", root, "--payload", payload, "--", "--version",
     ], env, directory)
     assert process.returncode == 0, process.stdout + process.stderr
+    phase("replacement-installed")
     selected = si.version_slot(si.current_version(root), root)
     assert (root / "current-version").read_bytes() != before
     migrated = _run(argv, dict(
@@ -406,12 +467,14 @@ def _prepare_legacy_repair(directory):
     updated, cutovers = _update_from_payload(payload, root, env)
     assert updated.action == "already-current", updated.reason
     assert cutovers == [str(selected)]
+    phase("selected-reused")
     process = _run([
-        sys.executable, "-I", "-B", SOURCE / "scripts" / "runtime_install.py",
-        "--root", root, "--payload", SOURCE, "--", "--version",
+        sys.executable, "-I", "-B", payload / "scripts" / "runtime_install.py",
+        "--root", root, "--payload", payload, "--", "--version",
     ], env, directory)
     assert process.returncode == 0, process.stdout + process.stderr
     assert si.version_slot(si.current_version(root), root) == selected
+    phase("retained-launch")
     return {
         "root": str(root), "previous": str(previous), "old_python": str(old_python),
         "old_hash": old_hash, "slot": str(selected),
@@ -490,7 +553,7 @@ def test_retained_installed_launch_never_resolves_dependencies(constructed, shel
 def _prepare_failed_construction(tmp_path, constructed):
     tmp_path.mkdir()
     payload = tmp_path / "payload"
-    si._copy_payload(SOURCE, payload)
+    si._copy_payload(Path(constructed["input_payload"]), payload)
     project = payload / "pyproject.toml"
     original = tomllib.loads(project.read_text(encoding="utf-8"))["project"]["version"]
     project.write_text(project.read_text(encoding="utf-8").replace(
@@ -556,7 +619,7 @@ def test_mux_passive_uses_target_retained_interpreter_without_pythonpath(constru
 
 
 @pytest.mark.parametrize("after_replace", [False, True])
-def test_partial_publication_restores_native_selection_without_cutover(
+def test_acknowledged_start_publication_fault_never_restores_native_selection(
     replacement_ready, monkeypatch, after_replace,
 ):
     directory, env, root, previous, _ = replacement_ready
@@ -572,6 +635,7 @@ def test_partial_publication_restores_native_selection_without_cutover(
     publication = si._runtime_installer().runtime._runtime_component("versioned_runtime_publication")
     replace = publication.replace_selector
     faults = []
+    evidence_before = set((root / ".installer-inputs").glob("manager-selection-*"))
 
     def fail_second(source, destination):
         if Path(destination) == markers[1] and not faults:
@@ -582,12 +646,90 @@ def test_partial_publication_restores_native_selection_without_cutover(
             raise PermissionError("native second-selector fault")
         return replace(source, destination)
 
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(publication, "replace_selector", fail_second)
+            result, cutovers = _update_from_payload(Path(prepared["qualified"]), root, env)
+        assert faults == [True], result
+        assert result.action == "error" and "second-selector fault" in result.reason
+        assert cutovers == [str(target)]
+        assert markers[0].read_text().strip() == target.name
+        assert markers[1].read_bytes() == (
+            (target.name + "\n").encode() if after_replace else before[markers[1]]
+        )
+        evidence = set((root / ".installer-inputs").glob("manager-selection-*")) - evidence_before
+        assert len(evidence) == 1
+        assert (evidence.pop() / "context.json").is_file()
+        assert all(path.read_bytes() == content for path, content in receipts.items())
+    finally:
+        # Restore only this shared test fixture after observing forward-only failure.
+        for path, content in before.items():
+            path.write_bytes(content)
+
+
+@pytest.mark.parametrize("after_replace", [False, True])
+def test_partial_publication_restores_native_selection_without_cutover(
+    replacement_ready, monkeypatch, after_replace,
+):
+    _, _, root, previous, _ = replacement_ready
+    prepared = json.loads(Path(os.environ["MANAGER_RUNTIME_ACCEPTANCE_DATA"]).read_text())["constructed"]
+    target = Path(prepared["target"])
+    markers = [root / "current-version", root / "last-known-good"]
+    before = {path: path.read_bytes() for path in markers}
+    receipts = {
+        path: path.read_bytes() for slot in (previous, target) for path in (
+            slot / ".install-complete.json", slot / ".runtime-input-origins.json",
+        )
+    }
+    installer = si._runtime_installer()
+    publication = installer.runtime._runtime_component("versioned_runtime_publication")
+    replace = publication.replace_selector
+    faults, cutovers = [], []
+
+    def fail_second(source, destination):
+        if Path(destination) == markers[1] and not faults:
+            assert markers[0].read_text().strip() == target.name
+            faults.append(True)
+            if after_replace:
+                replace(source, destination)
+            raise PermissionError("native second-selector fault")
+        return replace(source, destination)
+
+    # No incoming startup has been acknowledged on this publication-only path.
     with monkeypatch.context() as patch:
         patch.setattr(publication, "replace_selector", fail_second)
-        result, cutovers = _update_from_payload(Path(prepared["qualified"]), root, env)
-    assert faults == [True], result
-    assert result.action == "error" and "second-selector fault" in result.reason
+        with pytest.raises(PermissionError, match="native second-selector fault"):
+            installer.activate(
+                root, target.name, expected=previous.name,
+                after_publish=lambda: cutovers.append(str(target)),
+            )
+    assert faults == [True]
     assert cutovers == []
+    assert all(path.read_bytes() == content for path, content in before.items())
+    assert all(path.read_bytes() == content for path, content in receipts.items())
+
+
+def test_failed_incoming_start_preserves_native_selection(replacement_ready):
+    _, env, root, previous, _ = replacement_ready
+    prepared = json.loads(Path(os.environ["MANAGER_RUNTIME_ACCEPTANCE_DATA"]).read_text())["constructed"]
+    target = Path(prepared["target"])
+    markers = [root / "current-version", root / "last-known-good"]
+    before = {path: path.read_bytes() for path in markers}
+    receipts = {
+        path: path.read_bytes() for slot in (previous, target) for path in (
+            slot / ".install-complete.json", slot / ".runtime-input-origins.json",
+        )
+    }
+
+    def fail_start(**_options):
+        assert all(path.read_bytes() == content for path, content in before.items())
+        raise RuntimeError("native incoming startup failed before acknowledgement")
+
+    result, attempts = _update_from_payload(
+        Path(prepared["qualified"]), root, env, activation=fail_start,
+    )
+    assert result.action == "error" and "startup failed before acknowledgement" in result.reason
+    assert attempts == [str(target)]
     assert all(path.read_bytes() == content for path, content in before.items())
     assert all(path.read_bytes() == content for path, content in receipts.items())
 
@@ -618,7 +760,7 @@ def test_same_package_generation_update_replaces_and_verifies_live_fixture_mux(r
     for slot in (previous, target):
         python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
         probe = _run([
-            python, "-I", "-c",
+            python, "-I", "-B", "-c",
             "import json,sys,worktree_manager; "
             "from worktree_manager.runtime_identity import running_generation; "
             "print(json.dumps([sys.prefix,worktree_manager.__file__,running_generation()]))",
@@ -674,6 +816,7 @@ def test_same_package_generation_update_replaces_and_verifies_live_fixture_mux(r
                 healthy = await_health(*args, **kwargs)
                 if healthy and kwargs.get("generation") == target.name:
                     assert old.poll() is None, "Incumbent exited before incoming readiness"
+                    assert si.current_version(root) == previous.name
                     overlap.append(True)
                 return healthy
 
@@ -740,7 +883,10 @@ def _prepare(destination, step=None):
         (destination / "constructed.json").write_text(json.dumps(constructed), encoding="utf-8")
     if step in (None, "legacy"):
         print("Manager acceptance: selected legacy repair", flush=True)
-        legacy = _prepare_legacy_repair(destination / "legacy")
+        constructed = json.loads((destination / "constructed.json").read_text(encoding="utf-8"))
+        legacy = _prepare_legacy_repair(
+            destination / "legacy", Path(constructed["input_payload"]),
+        )
         (destination / "legacy.json").write_text(json.dumps(legacy), encoding="utf-8")
     if step not in (None, "finish"):
         return

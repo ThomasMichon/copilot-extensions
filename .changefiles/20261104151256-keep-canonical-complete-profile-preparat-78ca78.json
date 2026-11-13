@@ -1,0 +1,9 @@
+{
+  "comment": "Keep canonical complete-profile preparation inside the held build toolchain without ambient parent dependencies",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

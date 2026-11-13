@@ -1,0 +1,9 @@
+{
+  "comment": "Keep canonical prepared application installation compatible with native wheel inputs",
+  "changes": [
+    {
+      "plugin": "budget-guidance",
+      "type": "patch"
+    }
+  ]
+}
