@@ -132,6 +132,12 @@ nonterminal cleanup. #2793 retains its WHOLE configuration outcome and exact
 configuration-owner mapping condition; this reliability root does not accept
 that separate whole mapping.
 
+### Continuing proposed #6184/#6185/#6187/#6189 custody
+
+Retain existing evaluator/override/status and supervisor/publication custodians; detailed-effort/inner-conclusion/ground-cleanup and emitter/declaration/materialization custodians; effort-driver creation/evaluator/source-policy custodians; and task/reservation/source-coordinator/reassigned-role custodians. Appoint no implementer and transfer no source, claim, resource or independent pause. All four sources stay OPEN at this proposal stage. Preserve #6184's actual correction OR complete accepted-owner condition, #6187/#6189's explicit WHOLE independently-OPEN conditions and #6185's subordinate OPEN-parent readback duty without generalizing one source's condition to another. Review/merge/readback establishes planned coverage, not automatic retirement.
+
+Preserve every incumbent byte, status, checked credit, first unresolved Plan AND global Validation gate, Participant and Journal entry. Retain every owner-fenced and registry/deferral annex duty, including #3179's specific current-owner transfer acceptance without generalizing it into an ACK requirement for these families. Retain ordinary-startup admission and startup-clock matrices at their own scope; startup clocks are not new conclusion/recovery defaults. The separate #6189 design family does not expand Phase 6's checked source-safety reservation. No execution, cleanup, replay, restart, policy selection, source closure or release authority follows.
+
 ## Context
 
 Recurring maintenance occurrences are ordinary tasks today. Newer rows can fill
@@ -328,6 +334,62 @@ contract within Phase 3, not as another supervisor or automatic failover.
   source-fixture OR owner receipt is sufficient; do not mandate a new
   native/all-host benchmark. Preserve the original recovery claimant,
   pinned-producer custody, #5301 separation and all incumbent Phase 3 gates.
+
+#### Proposed finite evaluator-status authority from #6184
+
+- [ ] **P6184-A:** Establish CURRENT override-derived versus independently intentional registration-pause representation with existing evaluator/override/status custodians. Policy remains undecided by this amendment; never silently reactivate an independent pause.
+- [ ] **P6184-B:** Suitable current-authority evaluator status-sync OR supported explicit CLI resync/status; preserve the finite OR, inert coordinator-owned evaluators and existing consumer authority. Require neither both alternatives nor a fake managed process.
+- [ ] **P6184-C:** Distinguish override clear, status-preserving existing-row upsert, publication readback and evaluator filtering. Raw HTTP workaround, ordinary republication, coordinator-kind handling and #6487 publication safety are not this correction. Preserve independently OPEN source and original owners/claims.
+
+##### Local Validation - #6184
+
+- [ ] **V6184-A:** Paused evaluator then override clear: qualify the chosen supported sync OR CLI operation, actual registration-status readback and evaluator consumer/filtering.
+- [ ] **V6184-B:** Cover existing preserved row/republication and intended paused-to-active correction while independently intentional pause stays paused. Unknown authority grants no reactivation permission.
+- [ ] **V6184-C:** Read back every original/refined clause and finite OR. Retain the WHOLE source OPEN until actual authority/policy/consumer correction OR complete accepted owner; plan presence alone establishes neither.
+
+#### Proposed finite conclusion and emitter recovery from #6185
+
+- [ ] **P6185-A:** Establish actual attempt timeout, inter-attempt schedule, lock wait and attributable ownership. Retain long-cycle/direct-call observations as history, not current lock-age causality or unconditional infinite-retry proof. Changed embody.py makes the old 30-second helper assertion historical, not freshly current proof.
+- [ ] **P6185-B:** Substantiate sufficient longer inter-attempt backoff AND/OR off-affected-path retries AND/OR justified configurable attempt bounds. Require neither all three nor merely a global deadline increase.
+- [ ] **P6185-C:** Preserve exact worktree/session/reservation/generation, due/backoff/held outcomes, original budgets, sibling progress and cleanup authority. Historical bounded-retry/held-cleanup/identity-recovery credit is not completed removal. Age/timeout/held state authorizes no lock break, checkout deletion or business replay; retain safe unknown outcomes.
+- [ ] **P6185-D:** Diagnose accepted declaration -> publication -> launch/materialization -> actual emitter consumer. Distinguish changed declaration, independent persisted-file drift and live missing/unusable-spec report; retain embedded #6186's fresh-restart/frozen-file/old-health observations and uncertainty without claiming reproduction.
+- [ ] **P6185-E:** Confirmed materialized-content mismatch correction against authoritative current declaration OR ownership-safe deliberate erroring-emitter recovery. Preserve the OR; no requirement for both or unconditional healthy-poll rewriting.
+- [ ] **P6185-F:** Preserve admitted actual-start unconditional-writer, fingerprint-restart and bounded-crash-revival credit at its original tier. Do not invent an existing-file skip, equate PID liveness with healthy consumption, or delete a live file/kill a process as tracker maintenance.
+- [ ] **P6185-G:** Keep conclusion progress AND emitter convergence independently accountable under existing OPEN parent. Preserve observations, alternatives, detailed-effort/implementation owners, assignments, claims, reservations, budgets, generation identity, cleanup and source/release/consumer boundaries; neither lane closes the other.
+
+##### Local Validation - #6185
+
+- [ ] **V6185-A:** Actual inner caller, slow/contended attempt and observable unrelated progress qualify the chosen conclusion alternative. Account for exact identity, due/backoff/held transitions and demonstrated timeout/lock mechanism rather than historical assumption.
+- [ ] **V6185-B:** Qualify changed declaration, pre-existing divergent materialized spec and live missing/unusable spec through actual launch/reconcile/consumer chain. Cover chosen mismatch-correction OR safe recovery, unchanged healthy declarations and indeterminate publication/ownership.
+- [ ] **V6185-C:** Bounded sibling progress and attributable recovery retain denied/unknown ownership, held cleanup, removed/changed registration and restart-limit controls: no duplicate consumers, unsafe removal, business replay or silent declaration loss.
+- [ ] **V6185-D:** Separate inspected source/regression definitions, actual results, incident reproduction, release and installed acceptance. Preserve both lanes' original tiers; add no universal fleet rollout or unrelated native certification.
+- [ ] **V6185-E:** Before subordinate tracker retirement, read back complete OPEN parent and original/refined requirements: SR1-SR7, SRV1-SRV5 and embedded #6186. All technical rows remain unchecked. Intake executes no product/test/live lock/spec probe, retry, restart, kill, deletion, recovery, installation or deployment.
+
+#### Proposed finite mixed-effort producer policy from #6187
+
+- [ ] **P6187-A:** Visibly warn and exclude ONLY known stale/missing NAMED effort entries while unrelated actually eligible occurrences may proceed. Preserve warning lists, per-entry exclusion and correct eligible/created outputs; stale input is not wholesale discovery success.
+- [ ] **P6187-B:** Preserve dry-run nonmutation, source/config authority/validation, active-effort admission, occurrence/exclusive deduplication, verification/evaluator requirements and every effort's completion gate.
+- [ ] **P6187-C:** Distinguish archived/completed/stale names from malformed, ambiguous or unauthorized configuration. Preserve visible fail-closed invalid/unauthorized-input controls; no broad catch, success fallback or silent suppression.
+- [ ] **P6187-D:** Separately reviewed future implementation deliberately revises BOTH all-named all-or-nothing behavior AND existing contrary test with explicit source rationale. Earlier recipe/nested-layout delivery retains scope credit, not this repair. Preserve WHOLE source independence and effort-driver/evaluator/source-policy custody; #1043 hygiene acquires no producer/evaluation authority.
+
+##### Local Validation - #6187
+
+- [ ] **V6187-A:** Actual producer consumer covers mixed archived/stale/missing named and active eligible inputs, visible warnings, exact per-entry exclusions and correct eligible/created outputs.
+- [ ] **V6187-B:** Cover dry-run, duplicate occurrence/exclusive, noneligible effort and genuine lifecycle controls; no task effects occur during intake.
+- [ ] **V6187-C:** Malformed/ambiguous/unauthorized discovery stays visible/nonmutating as required while known stale input cannot suppress independent eligible work. Retain focused consumer regression, deliberate old-test revision and independently OPEN source; add no whole archived-programme/native-rollout gate.
+
+#### Proposed finite transfer and emitter-narrowing designs from #6189
+
+- [ ] **P6189-A:** Design UNCLAIMED queued/proposed cross-coordinator transfer: equivalent target creation/acceptance, source outcome/transferred-to provenance, partial/unknown outcomes, retry/idempotence and concurrent claim races. Semantics remain unresolved designs, not selected task effects.
+- [ ] **P6189-B:** Design concrete machine-reassignment trigger stopping NEW production AND continuing updates/evaluation of already-created locally active work. Keep both obligations independently visible; whole-declaration cutoff is not that split policy.
+- [ ] **P6189-C:** Preserve corrected mutating precedent remote_dispatch.dispatch_to_remote, not force_stop.py's Bridge transport. Approximately 90 quiet stale rows were NOT proof of uncovered business work; delivered verdicts may correctly become quiet.
+- [ ] **P6189-D:** Preserve task/reservation/source-coordinator and reassigned role/emitter custody, original alternatives and evidence tiers. No automatic recreation/abandonment, claimed-task movement, foreign-work transfer, claim release or federation execution. Federation is a future alternative, not prerequisite. This separate planned design family changes neither Phase 6's checked source-safety non-goal nor its implementation reservation.
+
+##### Local Validation - #6189
+
+- [ ] **V6189-A:** Review transaction cases: target acceptance, source outcome/provenance, failure before/after target creation, uncertain/lost response, retry/idempotence, duplicate submission and concurrent claim. Documentation must not manufacture acceptance or choose unresolved semantics.
+- [ ] **V6189-B:** Qualify chosen narrowing trigger's NEW-production stop AND continued local updates/evaluation, including terminal/legitimately quiet work and changed/unknown ownership; retain existing confirmation/claim authority.
+- [ ] **V6189-C:** Read back both complete designs, corrected transport/motivation and all contributor, assignment, reservation, literal-condition and source/release/isolated/native/installed boundaries. Preserve WHOLE source OPEN; reviewed design/receiving text is not execution, custody transfer or automatic disposition.
 
 ### Phase 3a - Startup progress and timeout adoption
 
@@ -841,6 +903,13 @@ _(Agent-recommended direct Phase3/Phase7 consumer case; all rows unchecked.)_
   every-host programme, recipe-taxonomy appointment, polling loop, ownership
   reset or replay authority is introduced; incumbent parent/annex gates remain.
 
+### Global validation of proposed #6184/#6185/#6187/#6189 families
+
+- [ ] **G6184:** Resolve EVERY P6184-A through C AND V6184-A through C with continuing custody: undecided pause-authority representation, suitable status-sync OR supported CLI, inert evaluator, independent-pause preservation and distinct clear/upsert/publication/filtering consumers. Preserve source's actual correction OR complete accepted-owner condition and independently OPEN state; add no blanket native or generic ACK gate.
+- [ ] **G6185:** Resolve EVERY P6185-A through G AND V6185-A through E: full SR1-SR7/SRV1-SRV5/embedded #6186, measured caller/lock relationship, sufficient backoff AND/OR off-path AND/OR justified bounds, exact due/held/cleanup custody and authoritative declaration-to-consumer mismatch correction OR safe emitter recovery. Score BOTH lanes independently; preserve historical credits, changed-helper uncertainty, OPEN-parent readback and original tiers without whole-fleet/native-programme bar.
+- [ ] **G6187:** Resolve EVERY P6187-A through D AND V6187-A through C: visible per-entry stale-name isolation with eligible progress; all dry-run/authority/admission/dedup/verification/evaluator/completion controls; invalid-input refusal; deliberate future revision of BOTH old behavior AND test. Preserve independently OPEN source and producer/evaluation custody; no hygiene-owner transfer or whole-programme gate.
+- [ ] **G6189:** Resolve EVERY P6189-A through D AND V6189-A through C for BOTH unfinished designs: UNCLAIMED transaction/acceptance/provenance/unknown/retry/claim races AND NEW-production stop with continued existing-work updates/evaluation. Retain corrected transport/motivation, Phase 6's checked non-goal/reservation, existing claims and independently OPEN source. Receiving/design acceptance is not execution, foreign-work transfer, federation prerequisite or source/resource release.
+
 ## Proposal
 
 The initial proposal changes no runtime or deployment configuration. Category is
@@ -854,6 +923,12 @@ named-resource resolution so an older peer cannot silently accept but ignore a
 requested contract.
 
 ## Journal
+
+### 2026-11-13 - Proposed four-family status, recovery and reassignment intake
+
+Proposed direct Phase 3 Plan/local Validation and ACTUAL global Validation retain #6184/#6185/#6187/#6189's complete original/refined/inherited unions: evaluator sync OR CLI and undecided pause policy; independently scored conclusion AND emitter lanes with original AND/OR choices; deliberate mixed-effort producer behavior AND test revision; and two unfinished transfer/narrowing designs. Every new technical row stays unchecked. All incumbent bytes, checked source credit, first gates, owners and strict-annex duties remain.
+
+Whole-current documentary qualification is not technical fulfillment. Changed embody.py makes the old helper-timeout assertion historical, not current proof; no product body was reread for this proposal. Normal reviewed delivery and complete current ROOT/strict-annex/source readback precede separate source-specific judgment; #3179's owner-transfer condition remains specific to its annex. All four sources remain OPEN. No implementation, incident reproduction, test, native operation, policy selection, task effect, cleanup, claim/resource release, source closure, installation or rollout occurred.
 
 ### 2026-11-13 - Proposed finite #5675 recovery-proof intake
 
