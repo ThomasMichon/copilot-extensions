@@ -1,0 +1,9 @@
+{
+  "comment": "Refresh controlled HTTP-52 evidence for additive original-owner execution decision registration",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}
