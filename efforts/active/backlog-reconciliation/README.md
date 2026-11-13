@@ -345,6 +345,8 @@ the non-public approval conversation.
 The [type-candidate and fragment receiving plan](type-candidate-and-fragment-receiving.md)
 proposes complete direct intake of #9862/#9916 into existing #9807, preserving
 the P4a narrowing, separately pending copies and strict-all terminal gate.
+The existing owner's recorded P3/Main/candidate-regression and P4a completion
+remain credited; campaign delivery verification does not reopen those slices.
 The [seventeen-source study](journal/2026/11.12-type-receiving-and-lifecycle-boundaries.md)
 rejects interface-only task/installer folds and retains exact claim,
 uncertainty and source-versus-installed conditions. No receiving acceptance,

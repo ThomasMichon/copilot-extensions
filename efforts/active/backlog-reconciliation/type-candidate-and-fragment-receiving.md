@@ -25,7 +25,25 @@ not complete the parent's strict-every-first-party-path goal.
 This is below-altitude requirement-preserving tracking, not a new type policy,
 implementation assignment, CI activation or alteration of another effort.
 
-## Direct additive Plan and Validation
+## Recorded delivery versus this study's verification
+
+The [owning effort](../python-static-type-safety/README.md) already marks
+Main-controller adoption and live candidate regression rejection complete,
+and records #9914's reviewed Main adoption followed by candidate qualification.
+Its November 2 journal records #9922's merged P4a canonical source view and
+explicitly declares P3 and bounded P4a complete. Copy correspondence, other
+fragment families and the full strict portfolio remain open.
+
+Those are existing-owner recorded completions, not unfinished work merely
+because this study did not independently verify them. The clauses below
+preserve the exact child contracts for campaign crosswalk/verification;
+unchecked campaign rows do not reopen source-owner milestones, request repeat
+implementation or negate their completed checkboxes. Before any child
+disposition, assess this newly identified delivery evidence under the child's
+finite source-only bar; demonstrated fulfillment takes the completed route
+rather than describing delivered work as newly planned.
+
+## Direct receiving crosswalk and campaign verification
 
 - [ ] T1 (#9862) - Require the SAME admitted MyPy contracts on the exact frozen
   immutable release candidate, not merely Dev. Preserve candidate identity,
