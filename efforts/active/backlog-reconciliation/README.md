@@ -3164,6 +3164,12 @@ sources, transferring owners or turning partial/planning gains into completion.
   receiving objective or a retained gap; investigate actual implementation
   evidence when claiming completion, rather than making that the prerequisite
   for discovering thematic alignment.
+  The [distinct decision/consumer/transfer intake](journal/2026/11.13-distinct-decisions-and-transfer-intake.md)
+  proposes #5956's separately owned architecture decision, #5960's complete
+  Phase 2 consumer promises and #6028's inherited custom-force family in
+  existing ROOTs. Twenty-three unchecked rows preserve literal alternatives,
+  original native credit and all custodians; three canonical keepers remain.
+  No source disposition is claimed; 857 whole open is still 128 above target.
   The [named scheduled-configuration intake](journal/2026/11.13-named-scheduled-configuration-intake.md)
   proposes #5941's complete finite execution-time NAME lookup, authorized
   refusal and explicit-file compatibility family in existing Logger planning.
