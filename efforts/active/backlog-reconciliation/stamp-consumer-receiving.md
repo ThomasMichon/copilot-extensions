@@ -7,8 +7,8 @@ Method: [Weighted Semantic Consolidation](semantic-density-consolidation.md).
 
 ## Receiving decision
 
-Propose existing [#7433](https://github.com/ThomasMichon/copilot-extensions/issues/7433)
-as a two-lane planned receiver for
+The existing [#7433](https://github.com/ThomasMichon/copilot-extensions/issues/7433)
+is the accepted two-lane planned receiver for
 [#7247](https://github.com/ThomasMichon/copilot-extensions/issues/7247).
 Both exercise real Windows stamp/publication operations and retain actual
 command/payload publication or concurrent untorn-write assertions within the
@@ -16,12 +16,15 @@ original process/test bounds. This is not a shared-cause finding: Dispatch's
 snapshot/materialize/hash path differs from Machines' init/governance/
 publication path.
 
-The current issue does not yet accept the complete incoming lane. Review
-this plan before appending the full direct contract to the existing issue.
-Preserve its entire incumbent body, discussion, unchecked acceptance and
-non-expiring implementation claim. Verify whole current receiving content
-and actual source-specific custody before separately deciding any #7247
-tracking retirement. Neither issue closes from this proposal alone.
+After [plan review and merge in #12366](https://github.com/ThomasMichon/copilot-extensions/pull/12366),
+the complete direct contract was appended to the existing issue. Whole
+current provider readback verified all 12,118 characters, preserving its
+2,085-character incumbent prefix, title, labels, assignments, four comments,
+unchecked acceptance and non-expiring implementation claim. A separate
+[source explanation](https://github.com/ThomasMichon/copilot-extensions/issues/7247#issuecomment-6843773859)
+and provider readback verified #7247's `NOT_PLANNED` tracking retirement.
+The receiver remains open with both unfinished diagnostic lanes; no cause,
+technical fix, claim release or resource transfer is inferred.
 
 Retain #7256's detached-launch **recording** fixture independently. Its
 substituted process-creation functions establish no shared stamp/publication
@@ -135,12 +138,12 @@ implementation before planned receiving can be accepted.
 
 ### ST6 - Receiving and separate tracking judgment
 
-- [ ] After review, append all direct clauses above to the existing #7433
+- [x] After review, append all direct clauses above to the existing #7433
   issue while preserving its incumbent content, discussion, unchecked
   acceptance, title, labels, assignments and claim. Read back the complete
   current receiver and recheck source/receiver eligibility and actual
   source-specific custody; a link or publication receipt is insufficient.
-- [ ] Only after a separate whole-source judgment, retire redundant #7247
+- [x] Only after a separate whole-source judgment, retire redundant #7247
   tracking as `NOT_PLANNED` with a clear explanation that both diagnostic
   lanes remain planned in the open receiver. Do not mark it `COMPLETED`,
   close the incumbent parent, release a claim or imply a demonstrated fix.
@@ -173,7 +176,7 @@ owned outcomes.
 
 ## Next bounded action
 
-Land the reviewed two-lane plan, materialize and verify the actual additive
-issue contract, then judge #7247 tracking separately. All technical work and
-the incumbent claim remain unfinished. Return to the parent campaign after
-that finite receiving result; its fixed whole-queue and roadmap gates remain.
+The reviewed direct issue materialization, whole readback and separate
+tracking retirement are verified. All technical work and the incumbent claim
+remain unfinished. Continue the parent campaign; its fixed whole-queue and
+roadmap gates are not satisfied by this finite receiving result.
