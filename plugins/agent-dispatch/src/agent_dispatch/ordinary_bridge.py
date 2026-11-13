@@ -43,6 +43,11 @@ def reserve_for_backend(
                                     coordinator_launch=task.get("source") == "ci-repair")
     if task.get("source") == "ci-repair":
         return client.reserve_spawn(task["id"], reserved_by=supervisor_id, coordinator_launch=True)
+    if pool_driver == "cli":
+        from .session_origin import reservation_options
+        return client.reserve_spawn(
+            task["id"], reserved_by=supervisor_id, **reservation_options(client),
+        )
     return client.reserve_spawn(task["id"], reserved_by=supervisor_id)
 
 
