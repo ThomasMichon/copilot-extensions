@@ -2966,8 +2966,9 @@ threads remain unwaived; no current native success or parent completion is
 inferred from this capture.
 
 Publishing that evidence encounters newer Dev MCP owner-entry work, not a
-Bridge source overlap. The retained backup precedes rebase onto
-`8e0352bb07b637232b55c3547d4566101ec2dcd2`. All 47 owned patches survive;
+Bridge source overlap. The retained backup precedes rebase onto Dev containing
+`8e0352bb07b637232b55c3547d4566101ec2dcd2`; the resulting branch's actual
+common ancestor is `03531e2f905d01bbd1c419d8fbe2634e952162d9`. All 47 owned patches survive;
 only two generated MCP producer-digest hunks need canonical regeneration,
 still at revision 36. None of the 2,238 captured execution-closure paths is
 among the upstream changes, and the actual contract guard passes without
@@ -2976,3 +2977,14 @@ check preserves the original `37662d62d2` capture attribution; it is not a new
 execution claim. The combined actual MCP owner-entry, Windows fallback and
 flat/nested bootstrap packet passes 65 cases with 14 platform skips. Current
 required CI and exact-head installed Windows qualification remain separate.
+
+The subsequent #12319 publication creates the same concrete producer-field
+collision before CI can run. Comment 6839645338 coordinates only that observed
+MCP input window with the existing owner; it requests no blanket approval or
+whole-Main-PR dependency. Rebase onto
+`f84f0ed50599db4534f3809406f9a9781e72e459` preserves all 48 owned patches:
+46 compare equal, and only the two producer-digest patches differ. The canonical
+current capture owner independently recomputes the complete execution closure:
+all 2,238 entries equal the original capture, with no changed, added or removed
+input. Both contract validation and all 701 canonical unit bindings pass.
+No new capture or native success is claimed from this equivalence check.
