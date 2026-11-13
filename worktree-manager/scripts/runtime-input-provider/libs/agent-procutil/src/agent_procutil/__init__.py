@@ -13,7 +13,7 @@ import subprocess
 import sys
 import time
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any, BinaryIO
 
 if TYPE_CHECKING:
@@ -516,6 +516,7 @@ def spawn_sync_in_kill_on_close_job(
     *,
     require_job: bool = False,
     allow_breakaway: bool = True,
+    on_suspended: Callable[[subprocess.Popen], None] | None = None,
     **kwargs: Any,
 ) -> tuple[subprocess.Popen, JobHandle | None]:
     """Create a suspended Windows child, bind its Job and scopes, then resume.
@@ -523,6 +524,7 @@ def spawn_sync_in_kill_on_close_job(
     Required assignment fails before resume; disabling breakaway forbids escape.
     Failed optional assignment resumes with unknown custody and unresolved scopes.
     POSIX returns plain Popen; creation OS errors retain SyncProcessLaunchError.
+    Explicit on_suspended publication requires strict Windows Job custody.
     README.md owns the full compatibility and lifetime contract.
     """
     if type(allow_breakaway) is not bool:
@@ -532,6 +534,10 @@ def spawn_sync_in_kill_on_close_job(
         and int(kwargs.get("creationflags", 0)) & _CREATE_BREAKAWAY_FROM_JOB
     ):
         raise ValueError("CREATE_BREAKAWAY_FROM_JOB conflicts with allow_breakaway=False")
+    if on_suspended is not None:
+        from ._suspended_handoff import spawn
+
+        return spawn(argv, require_job, allow_breakaway, on_suspended, **kwargs)
     if not _is_windows():
         try:
             return subprocess.Popen(argv, **kwargs), None  # noqa: S603 - argv list, no shell

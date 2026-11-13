@@ -4,6 +4,16 @@ Shared **Windows-headless / detached / bounded-owned** process primitives for
 Copilot CLI plugins. One vendored helper keeps launch flags and finite child
 containment consistent instead of reimplementing them in each consumer.
 
+`spawn_sync_in_kill_on_close_job(..., require_job=True, allow_breakaway=False,
+on_suspended=callback)` optionally calls an in-process creation owner with the
+original Windows `Popen`, after required Job assignment and before resume.
+The finite callback returns `None`; it may use the retained creation handle
+but must not resume, replace or launch a child. This is separate from scoped
+observer admission. Refusal confirms owned Job/child settlement before raising;
+uncertain cleanup retains both on `OwnedCleanupError`. Unsupported custody
+refuses before creation. Omission preserves existing behavior and does not
+enable caller enrollment or an additional supervisor.
+
 On Linux, `spawn_daemon` also separates a durable resident from its launching
 systemd unit's cleanup cgroup. It uses an independently named transient user
 scope, without a new restart policy or persistent service definition.

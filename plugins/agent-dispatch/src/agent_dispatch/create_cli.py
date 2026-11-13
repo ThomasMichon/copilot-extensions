@@ -280,8 +280,14 @@ def _spawn_worker_for(args: argparse.Namespace, task: dict) -> None:
     route = _core()._spawn_route(args)
     try:
         with _core()._client(args) as c:
+            from .session_origin import reservation_options
+            origin_options = (
+                reservation_options(c) if getattr(args, "spawn_backend", "bridge") == "embody"
+                and task.get("source") != "ci-repair" else {}
+            )
             resp = c.reserve_spawn(
                 task_id, reserved_by=reserved_by,
+                **origin_options,
                 **({"driver": "ordinary-bridge"} if getattr(args, "spawn_backend", "bridge") == "bridge" else {}),
                 **({"allocation_revision": args.allocation_revision}
                    if getattr(args, "allocation_revision", None) is not None else {}),

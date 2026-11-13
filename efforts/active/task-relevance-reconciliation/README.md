@@ -152,10 +152,11 @@ merged plan does not establish running adoption.
       CLI/client carrier and executing-CLI declarations merged in #12396.
       The reservation owner now captures session-origin candidates separately
       from reusable allocation evidence and seals optional wire selection in its
-      existing reservation/placement transaction.
+      existing reservation/placement transaction; source merged in #12398.
       Ordinary keyed retries retain their original session request; acquisition
-      deliveries retain their own attempt. Automatic callers remain unmodified.
-      Dispatch session-origin caller migration and running qualification remain open.
+      deliveries retain their own attempt. Conditional CLI acquisition migration
+      is in the current source slice; ordinary keyed callers and running
+      qualification remain open.
 - [ ] Expose forward and reverse correlation through existing owner APIs.
       Pool identity must identify the actual registration/assignment, not just
       a display name; opaque legacy records remain explicitly unattributed.

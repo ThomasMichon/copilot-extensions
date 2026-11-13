@@ -74,8 +74,9 @@ owners remain authoritative for actual obligations and disposition.
 Old callers preserve their request/replay meaning: absent acquisition metadata
 is omitted from serialization, and absent creation metadata adds no option to
 the keyed facts. Old receivers may ignore additive JSON; that is not successful
-retention. No automatic Dispatch caller sends this field yet. Such a
-caller must negotiate support before migration, retain its original wire
+retention. Dispatch's [CLI acquisition caller](../../agent-dispatch/docs/task-obligations.md#conditional-cli-native-acquisition-caller)
+now conditionally selects this field before reservation; ordinary keyed creation
+remains unmodified. Callers must negotiate support before migration, retain their original wire
 choice for pending attempts and never replay an unknown outcome in another form.
 Provider rollback leaves baseline unstamped operations available, not an
 equivalent metadata-enforcing fallback. Schema 46 adds nullable CLI storage
@@ -107,8 +108,8 @@ The executing CLI's existing `version --contracts-json` declares
 `agent-bridge.acquire` capabilities `dispatch-acp-session-origin` and
 `dispatch-cli-session-origin`. A future caller must observe the corresponding
 CLI declaration before invoking the new carrier, as well as running-daemon
-support. This does not enable automatic Dispatch enrollment or retrofit
-metadata into existing pending invocations.
+support. Provider declarations do not establish installed cohort qualification
+or retrofit metadata into existing pending invocations.
 
 `tests/test_dispatch_session_origin.py` exercises strict nested input,
 original request persistence, HTTP keyed creation, changed/dropped replay facts,

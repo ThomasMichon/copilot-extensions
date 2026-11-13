@@ -10,8 +10,11 @@ from .procutil import agent_bridge_launch_prefix, no_window_kwargs
 
 
 def spawn_snapshot(task: dict, reservation: dict, worktree: str, prepared: dict, ownership: str, replaced: bool) -> dict:
+    from .session_origin import snapshot
+
     return {
         **task, "spawn_worktree": worktree, "spawn_reservation_key": reservation["key"],
+        **snapshot(reservation),
         "spawn_startup_revision": reservation.get("startup_revision"),
         "spawn_worktree_path": prepared["path"], "spawn_worktree_ownership": ownership,
         "spawn_allocation_project": prepared.get("project"),
@@ -31,7 +34,10 @@ def acquire(
 ) -> subprocess.CompletedProcess[str]:
     from .bridge import BridgeUnavailable, BridgeCarriedSessionBusy
 
-    prefix = agent_bridge_launch_prefix()
+    from .session_origin import acquisition
+
+    prefix, origin = acquisition(task, mode)
+    prefix = prefix if prefix is not None else agent_bridge_launch_prefix()
     if prefix is None:
         raise BridgeUnavailable("agent-bridge acquisition capability is unavailable")
     key = task.get("spawn_reservation_key")
@@ -62,6 +68,8 @@ def acquire(
         "reservation_key": key, "driver": driver,
         "verify_timeout": verify_timeout,
     }
+    if origin is not None:
+        payload["dispatch_origin"] = origin
     try:
         result = subprocess.run(
             [*prefix, "acquire", "--request-file", "-"], input=json.dumps(payload),

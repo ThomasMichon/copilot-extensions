@@ -426,14 +426,23 @@ handover. Preserve held sessions and the separate pre-feature adoption hold.
       This does not qualify retained-wait composition with the production
       physical receiver, enroll a headed or default caller or close installed
       acceptance.
-    - [ ] **Retained-wait physical receiver composition:** independently run the
+    - [x] **Retained-wait physical receiver composition:** independently run the
       complete native-client physical receiver/custody handover packet through
       the existing native creation/wait owner and after publisher exit. Keep
       finite preparation/admission/execution receipt substitutions explicit;
       require original streams, actual client attribution, accepted in-flight
       and unknown outcomes, retained native lifetimes and exact settlement.
-      Review and hosted qualification remain required; headed/default caller
-      adoption, release and installed acceptance remain separate.
+      #12380 merged at `eb1468ff95703cc68214e297906079eaac94746e` after
+      current-head approval, required CI and hosted Windows/Linux qualification.
+      Headed/default caller adoption, release and installed acceptance remain
+      separate.
+    - [ ] **Headed native-child creation seam:** qualify an explicitly selected
+      in-process publisher at the existing headed client's actual suspended
+      creation, retaining its original native handle, streams, wait and cleanup.
+      Keep default and auth-wait paths unchanged. Refuse forwarding/coordinator
+      images and unsupported custody before publication; preserve uncertain
+      cleanup without replay. Retained-executable caller selection and the
+      productive MCP overlay remain separate integration work.
   - [x] **Explicit Linux exec caller:** capture the exec owner's native pair
     and pass a sealed, session-only overlay for explicitly named configured
     entries, with actual-start discovery bound to a physical optional receiver.

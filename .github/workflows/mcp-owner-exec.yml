@@ -6,6 +6,16 @@ on:
     branches: ["pr/**"]
     paths:
       - ".github/workflows/mcp-owner-exec.yml"
+      - "libs/agent-procutil/src/agent_procutil/__init__.py"
+      - "libs/agent-procutil/src/agent_procutil/_suspended_handoff.py"
+      - "libs/agent-procutil/tests/test_strict_job_spawn.py"
+      - "libs/copilot-driver-core/src/agent_remote_driver/headed/launcher.py"
+      - "libs/copilot-driver-core/src/agent_remote_driver/headed/native_handoff.py"
+      - "libs/copilot-driver-core/src/agent_remote_driver/session_host/bundle.py"
+      - "plugins/agent-remote-driver/tests/test_headed_native_handoff.py"
+      - "plugins/agent-remote-driver/tests/test_headed_launcher.py"
+      - "plugins/agent-remote-driver/tests/test_session_host_core.py"
+      - "plugins/agent-remote-driver/tests/native/test_headed_extension.py"
       - "plugins/agent-mcp/src/agent_mcp/owner_exec.py"
       - "plugins/agent-mcp/src/agent_mcp/owner_bootstrap.py"
       - "plugins/agent-mcp/src/agent_mcp/owner_entry.py"
@@ -70,6 +80,17 @@ jobs:
         with:
           python-version: "3.12"
       - uses: astral-sh/setup-uv@v9.0.0
+      - name: Preserve headed defaults, auth custody and receiving closure
+        run: >-
+          python tools/run-plugin-tests.py agent-remote-driver
+          --test-file tests/test_headed_native_handoff.py
+          --test-file tests/test_headed_launcher.py
+          --test-file tests/test_headed_auth_child.py
+          --test-file tests/test_session_host_core.py
+      - name: Refuse unsupported suspended-publication custody
+        run: >-
+          python tools/run-plugin-tests.py agent-procutil
+          --test-file tests/test_strict_job_spawn.py -k suspended_handoff
       - name: Exercise actual exec identity and anonymous overlay in containment
         run: >-
           python tools/run-plugin-tests.py agent-mcp
@@ -173,6 +194,17 @@ jobs:
         with:
           python-version: "3.13"
       - uses: astral-sh/setup-uv@v9.0.0
+      - name: Preserve headed defaults, auth custody and receiving closure
+        run: >-
+          python tools/run-plugin-tests.py agent-remote-driver
+          --test-file tests/test_headed_native_handoff.py
+          --test-file tests/test_headed_launcher.py
+          --test-file tests/test_headed_auth_child.py
+          --test-file tests/test_session_host_core.py
+      - name: Qualify suspended publication and original native streams
+        run: >-
+          python tools/run-plugin-tests.py agent-procutil
+          --test-file tests/test_strict_job_spawn.py -k suspended_handoff
       - name: Exercise native publication, snapshots and pre-effect Windows entry
         run: >-
           python tools/run-plugin-tests.py agent-mcp
@@ -230,6 +262,11 @@ jobs:
                   shutil.copyfileobj(source, output)
           with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as output:
               output.write("COPILOT_NATIVE_TEST_EXECUTABLE=" + str(target) + "\n")
+      - name: Qualify the actual headed child owner, original wait and publication refusal
+        run: >-
+          python tools/run-plugin-tests.py agent-remote-driver
+          --test-file tests/native/test_headed_extension.py
+          -k actual_headed_child_creation_handoff --allow-explicit-tiers
       - name: Exercise actual Windows client after publisher exit and through its existing wait owner
         run: >-
           python tools/run-plugin-tests.py agent-mcp
