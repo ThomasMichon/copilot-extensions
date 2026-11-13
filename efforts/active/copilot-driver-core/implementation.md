@@ -367,13 +367,15 @@ effect-bearing provider call, it must:
    Retain the credential-bearing client/lease privately; do not put tokens,
    capability files or credential responses in the descriptor or journal.
    An unavailable current selection is held, not the last successful selection.
-3. Check the source owner's monotonic authority revision separately from the
-   acquired lease's opaque ID. Observation restoration needs a revision newer
-   than the old descriptor lease and the exact revision recorded in
-   `resume_intent`. Use the retained lease's conservative
-   `remaining_seconds()` at the action boundary; token expiry, wall time alone
-   or source-file presence is insufficient. Changed, revoked, expired or
-   unconfirmed authority refuses before restoration. Ordinary provider-owned
+3. Check current execution permission through the original execution-admission
+   owner, separately from current account/source authorization. The
+   [permit-producer proposal](#original-execution-permit-producer-proposal)
+   below separates these authorities and requires an explicit contract evolution;
+   it does not reinterpret existing version-one revision fields. Use the
+   retained source lease's conservative `remaining_seconds()` at the action
+   boundary too; token expiry, a counter, wall time or source-file presence alone
+   is insufficient. Changed, revoked, expired or unconfirmed permission or
+   source authorization refuses before restoration. Ordinary provider-owned
    expiry cleanup remains independent of this recovery operation.
 4. Require the exact retained provider and its original conversation,
    incarnation, environment, boot and scope binding. For restoration, require
@@ -447,6 +449,85 @@ candidate without the same provider's passive completed-cleanup confirmation.
 Older or unconfirmed providers remain unknown. This does not publish the
 complete original launch descriptor, verify current source/controller authority,
 reacquire a lost owner or qualify native recovery.
+
+### Original-execution permit producer proposal
+
+This agent-recommended refinement addresses an actual missing contract, not
+implemented support or new effect authority. The reviewed Gateway/account-source
+path supplies credential-source authorization, not an original execution permit
+or monotonic execution-authority revision. Authentication, application tokens,
+request proofs, policy revisions and channel generations do not supply that
+missing decision. Do not make Gateway a mandatory Driver dependency or ask its
+credential helper to invent execution authority.
+
+This refinement serves the Driver vision's
+`prompt-and-permission-honesty` and `preserved-native-restoration` behaviors.
+It preserves the pattern invariants for existing ownership, optional composition
+and selected-runtime contract evolution. The standing intent is unchanged.
+
+**Two independent decisions.** The existing source/account owner supplies
+current approved source-selection evidence and bounded authorization lifetime.
+The original lifecycle owner separately supplies permission for the exact
+execution/recovery action. A valid credential does not permit retirement or
+restoration. An execution permit does not approve another account, source,
+recipient, route or controller, or authorize obtaining new credentials.
+
+The original lifecycle owner records only an already-authorized decision
+through its existing guarded launch/admission writer. It does not create a new
+issuer, transferable bearer token, global policy store or Core-owned worktree
+authority. Neither a launch receipt nor an initial start permission silently
+authorizes a later stop, restored execution or changed resource. Missing
+action-specific authority remains unavailable; a recovery request, matching
+record, generated counter or saved approval reference cannot create it.
+
+**Retained permit and current decision.** Bind the owner decision to the original
+launch operation/correlation, worktree creation nonce or equivalent lifecycle
+incarnation, durable conversation, exact enrolled native scope, approved source
+selection and allowed action. The existing owner retains the original approval
+evidence and all limits privately; the recovery journal stores bounded owner
+references, not credentials or copied approvals.
+
+The execution-admission owner advances a monotonic permit revision only as part
+of a real, durably committed authorization change, including revocation. A
+revision orders that owner's decisions; it is not permission by itself.
+Restoration requires a current action-specific decision newer than the original
+execution decision, at exactly the permit revision bound to the durable
+`resume_intent`. A larger counter without that authorized decision is insufficient.
+Reconciliation preserves the original operation and permit identity after a
+lost acknowledgement. Observer restart cannot mint a replacement permit or
+reset the revision. Current action admission rechecks the actual decision and
+its limits, current source evidence and the exact native binding through the
+provider's final callback. Do not hold a tracking lock across network calls.
+Unknown work, legacy holds and unconfirmed effects remain independently held.
+
+**Explicit contract evolution.** The existing version-one
+`RecoveryDescriptor.lease_revision` and `RecoveryStep.authority_revision` are
+not silently redefined as this permit revision. Source-lease identity,
+receiver renewal ordering and execution-permit ordering are distinct domains.
+Review and introduce a descriptor/intent contract that represents the distinction
+before a consumer uses it. Select support from the executing owner/provider,
+not package equality. Existing version-one passive records remain readable and
+unqualified; an older provider refuses unsupported permit semantics before
+effects. No automatic rewriting, resealing or authority upgrade of retained
+records is proposed.
+
+**First source outcome and acceptance.** After this proposal clears review,
+implement an actor-free original-owner permit producer and passive inspection
+over the existing guarded owner store. Its positive control must start from
+independently retained, action-specific owned authorization, not from an incoming
+recovery descriptor or a credential lease. Cover missing permission, start-only
+permission versus restoration, source/controller mismatch, revoked or expired
+decisions, competing revisions, lost commit acknowledgements and reopen without
+revision reset or effect replay. Exercise current/prior contract selection
+without weakening existing version-one refusal or unknown-state controls.
+
+Complete historical descriptor publication still requires actual original
+environment, boot, conversation and scope producers. The live-only native token
+does not provide them or post-owner-loss reacquisition. Missing platform or
+source support remains unavailable. The first implementation adds no ordinary
+caller wiring, grant acquisition, credential write, observer, native effect,
+automatic recovery or rollout. Effectful integration and qualification remain
+separately reviewed and admitted through their existing owners.
 
 ## Evidence before each functional promotion
 
