@@ -1,12 +1,12 @@
-# Fleet maintenance charter
+# Agent infrastructure maintenance charter
 
-Fill one canonical instance for [maintain-agent-fleet](../SKILL.md) in the
+Fill one canonical instance for [maintain-agent-infrastructure](../SKILL.md) in the
 assigned worktree's authorized effort/state home. Keep its pointer in the
 current-owner checkpoint. This template records authority; it grants none.
 
 ## Objective and durable owner
 
-- Role: `maintain-agent-fleet` (maintain-and-update-fleet).
+- Role: `maintain-agent-infrastructure`.
 - Canonical objective/effort, charter location and revision: `<references>`.
 - Native owner worktree, current head and accepted charter revision:
   `<owner results; not a permanent anchor chat>`.
