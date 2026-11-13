@@ -296,7 +296,7 @@ jobs:
           python tools/run-plugin-tests.py agent-mcp
           --test-file tests/native/test_owner_headed_windows.py
           --allow-explicit-tiers --test-timeout 120
-          --junit-dir "${{ runner.temp }}/mcp-owner-windows-client-${{ github.run_id }}"
+          --junit-dir "${{ runner.temp }}/mcp-owner-windows-headed-${{ github.run_id }}"
       - name: Exercise actual Windows client after publisher exit and through its existing wait owner
         run: >-
           python tools/run-plugin-tests.py agent-mcp
@@ -315,6 +315,14 @@ jobs:
         with:
           name: mcp-owner-windows-client
           path: ${{ runner.temp }}/mcp-owner-windows-client-${{ github.run_id }}
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Retain copied headed Windows receiver qualification
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mcp-owner-windows-headed
+          path: ${{ runner.temp }}/mcp-owner-windows-headed-${{ github.run_id }}
           if-no-files-found: warn
           retention-days: 7
       - name: Retain Windows physical handover qualification
