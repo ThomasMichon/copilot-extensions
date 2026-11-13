@@ -19,6 +19,7 @@
         "tools/typecheck.py",
         "tools/typecheck_source_views.py",
         "tools/typecheck_catalog_views.py",
+        "tools/typecheck_bootstrap_views.py",
         "tools/cache_directory_paths.py",
         "tools/test_typecheck.py",
         "tools/promotion_unit_tests/test_typecheck_catalog.py"
@@ -649,6 +650,7 @@
         "tools/typecheck.py",
         "tools/typecheck_source_views.py",
         "tools/typecheck_catalog_views.py",
+        "tools/typecheck_bootstrap_views.py",
         "tools/cache_directory_paths.py",
         "tools/test_typecheck.py",
         "tools/promotion_unit_tests/test_typecheck_catalog.py"

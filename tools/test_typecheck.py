@@ -1,6 +1,7 @@
 """Focused inventory and actual-checker controls for the local typecheck front door."""
 from __future__ import annotations
 
+import ast
 from dataclasses import replace
 import importlib.machinery
 import json
@@ -654,10 +655,33 @@ def test_real_catalog_source_and_frozen_frontdoors(
     tmp_path: Path, platform: str, python_version: str, bad_template: bool, frontdoor: str,
     record_property: Callable[[str, object], None],
 ) -> None:
+    _real_catalog_frontdoors(
+        tmp_path, platform, python_version, bad_template, frontdoor, record_property,
+    )
+
+
+@pytest.mark.timeout(30)
+@pytest.mark.parametrize("platform", ["linux", "win32"])
+@pytest.mark.parametrize("frontdoor", ["source", "frozen"])
+def test_real_bootstrap_source_and_frozen_frontdoors(
+    tmp_path: Path, platform: str, frontdoor: str,
+    record_property: Callable[[str, object], None],
+) -> None:
+    _real_catalog_frontdoors(
+        tmp_path, platform, "3.11", False, frontdoor, record_property, bad_bootstrap=True,
+    )
+
+
+def _real_catalog_frontdoors(
+    tmp_path: Path, platform: str, python_version: str, bad_template: bool, frontdoor: str,
+    record_property: Callable[[str, object], None], *, bad_bootstrap: bool = False,
+) -> None:
     """Reuse the test SDK, but exercise real Git transport, checker and MyPy."""
     from tools import promote_release as promotion
     from tools import promotion_frozen_candidate as frozen
     from tools import typecheck_catalog_views as catalog
+    from tools import typecheck_bootstrap_views as bootstrap_views
+    from tools.typecheck_source_views import _shape
 
     root = tmp_path / "source"
     root.mkdir()
@@ -665,8 +689,9 @@ def test_real_catalog_source_and_frozen_frontdoors(
         "tools/typecheck.py", "tools/_admission_protocol.py", "tools/cache_directory_paths.py",
         "tools/plugin_test_resources.py",
         "tools/typecheck_source_views.py", "tools/typecheck_catalog_views.py",
+        "tools/typecheck_bootstrap_views.py",
         "tools/native_test_paths.py", "tools/typecheck-requirements.txt",
-        catalog.DECLARATION, *catalog.MEMBERS,
+        catalog.DECLARATION, *catalog.MEMBERS, *bootstrap_views.INPUTS,
         *(
             "libs/installer-engine/" + name for name in (
                 "installer_dependency_policy.py", "installer_dependency_config.py",
@@ -697,6 +722,22 @@ def test_real_catalog_source_and_frozen_frontdoors(
         assert lines[59].startswith("    return context +")
         lines[59] = "    return 0\n"
         template.write_text("".join(lines), encoding="utf-8")
+    if bad_bootstrap:
+        producer = root / catalog.PRODUCER
+        original = producer.read_text(encoding="utf-8")
+        changed = original.replace(
+            "print(sys.executable,flush=True); ",
+            "probe: int = ''wrong''; print(sys.executable,flush=True); ", 1,
+        )
+        assert changed != original
+        producer.write_text(changed, encoding="utf-8")
+        producer_tree = ast.parse(producer.read_bytes())
+        (root / catalog.DECLARATION).write_text(json.dumps({
+            "kind": "in-process-catalog-v1", "module": _shape(producer_tree),
+            "functions": {n.name: _shape(n) for n in producer_tree.body
+                          if isinstance(n, ast.FunctionDef)
+                          and n.name in {"_load_command", "load_manifest", "render", "expected_files"}},
+        }), encoding="utf-8")
     expected_template = template.read_bytes()
     expected_declaration = (root / catalog.DECLARATION).read_bytes()
     policy = next(p for p in typecheck.load_projects() if p.name == "lib-payload-invocation")
@@ -791,11 +832,15 @@ def test_real_catalog_source_and_frozen_frontdoors(
     label_prefix = "[pending] lib-payload-invocation (Python "
     assert result.stdout.count(label_prefix) == 1, result.stdout + result.stderr
     for version in (python_version,):
-        label = f"{label_prefix}{version}, {platform}, 4 physical files, 8 targets)"
+        label = f"{label_prefix}{version}, {platform}, 4 physical files, 9 targets)"
         assert label in result.stdout, result.stdout + result.stderr
         segment = result.stdout.split(label, 1)[1].split(label_prefix, 1)[0]
         errors = [line for line in segment.splitlines() if ": error:" in line]
-        if bad_template:
+        if bad_bootstrap:
+            assert len(errors) == 1, segment
+            assert errors[0].startswith(catalog.PRODUCER + ":") and "[assignment]" in errors[0], segment
+            assert "bootstrap canonical source" in errors[0] and "full body requires Python 3.11" in errors[0]
+        elif bad_template:
             assert len(errors) == 4, segment
             assert all(
                 line.startswith(catalog.TEMPLATE + ":60:") and "[return-value]" in line
