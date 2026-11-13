@@ -20,6 +20,7 @@ from .observation_credentials import (
     MAX_SNAPSHOT_REQUESTS, CredentialSource, ObservationCredentialError, ObservationCredentials,
     github_endpoint, github_request,
 )
+from .observation_http import github_environment, github_reader
 
 
 # HTTP statuses worth retrying (network / 5xx / 429 / 408); 4xx (auth / not-found
@@ -317,14 +318,10 @@ class GitHubProvider:
             )
 
         def read_env() -> dict[str, str]:
-            if credentials is None:
-                return self._env(token)
-            # Both gh token aliases must override inherited credentials.
-            value = credentials.acquire().token
-            return {"GH_TOKEN": value, "GITHUB_TOKEN": value,
-                    "GH_ENTERPRISE_TOKEN": value, "GITHUB_ENTERPRISE_TOKEN": value}
+            return self._env(token) if credentials is None else github_environment(credentials)
 
-        proc = run_cli(
+        native_read = github_reader(run_cli, credentials)
+        proc = native_read(
             [
                 "gh", "api", "--hostname", host,
                 f"{credentials.api_base if credentials is not None else ''}/repos/{repo}/pulls/{number}",
@@ -379,6 +376,7 @@ class GitHubProvider:
             repo, head_sha, token, host=host,
             credential_env=read_env if credentials is not None else None,
             api_base=credentials.api_base if credentials is not None else "",
+            native_read=native_read,
         )
         # REST ``state`` is only open|closed; ``merged`` is a separate bool (a
         # merged PR is closed+merged).
@@ -392,6 +390,7 @@ class GitHubProvider:
                 repo, number, token, host=host,
                 credential_env=read_env if credentials is not None else None,
                 api_base=credentials.api_base if credentials is not None else "",
+                native_read=native_read,
             ),
             author=str((pr.get("user") or {}).get("login", "")),
             mergeable=mergeable_raw if isinstance(mergeable_raw, bool) else None,
@@ -408,13 +407,13 @@ class GitHubProvider:
         self, repo: str, number: int, token: str | None, *,
         host: str = "github.com",
         credential_env: Callable[[], dict[str, str]] | None = None,
-        api_base: str = "",
+        api_base: str = "", native_read: Callable | None = None,
     ) -> tuple[Review, ...]:
         from .github_review_pages import read_reviews
         return read_reviews(
             repo, number, host=host, is_transient=_gh_detail_is_transient,
             sanitized_errors=credential_env is not None,
-            invoke=lambda argv: run_cli(
+            invoke=lambda argv: (native_read or run_cli)(
                 github_request(argv, api_base),
                 env=credential_env() if credential_env is not None else self._env(token),
                 **({"max_stdout_bytes": 1_048_576} if credential_env is not None else {}),
@@ -431,12 +430,12 @@ class GitHubProvider:
     def _checks_report(
         self, repo: str, sha: str, token: str | None, *, host: str = "github.com",
         credential_env: Callable[[], dict[str, str]] | None = None,
-        api_base: str = "",
+        api_base: str = "", native_read: Callable | None = None,
     ) -> ChecksReport:
         from .github_checks import read_checks
 
         def read(argv):
-            proc = run_cli(
+            proc = (native_read or run_cli)(
                 github_request(argv, api_base),
                 env=credential_env() if credential_env is not None else self._env(token),
                 **({"max_stdout_bytes": 1_048_576} if credential_env is not None else {}),

@@ -20,6 +20,7 @@ from agent_worktrees.providers.azure_devops import AzureDevOpsProvider
 from agent_worktrees.providers.azure_observation_reads import AdoReader, NoRedirect
 from agent_worktrees.providers.base import ProviderError, run_cli
 from agent_worktrees.providers.observation_credentials import ObservationCredentialError
+from agent_worktrees.providers.observation_http import read_get
 from test_pr_observation_credentials import Binding, Source
 
 
@@ -231,6 +232,80 @@ def test_actual_ado_tls_pages_renew_and_disconnect_without_another_request(tmp_p
                 scheme, material = value.split(" ", 1)
                 assert scheme == "Bear" + "er"
                 assert material == "synthetic-" + str(index)
+        finally:
+            server.shutdown()
+            thread.join(timeout=5)
+            assert not thread.is_alive()
+
+
+@pytest.mark.parametrize("response", [200, 302, 503, "disconnect"])
+def test_actual_direct_curl_is_one_http11_send_without_config_proxy_or_globbing(
+    tmp_path, monkeypatch, response,
+):
+    executable = shutil.which("curl")
+    if executable is None:
+        pytest.skip("native curl is unavailable")
+    observed = []
+    cert, key = certificate(tmp_path)
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.load_cert_chain(cert, key)
+
+    class Handler(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def log_message(self, *_):
+            pass
+
+        def do_GET(self):
+            observed.append((self.path, self.request_version, self.headers.get("Authorization"),
+                             self.headers.get("X-Forbidden-Config")))
+            if response == "disconnect":
+                self.close_connection = True
+                return
+            body = b'{"ok":true}'
+            self.send_response(response)
+            self.send_header("Content-Length", str(len(body)))
+            if response == 302:
+                self.send_header("Location", "/redirect-target")
+            self.end_headers()
+            self.wfile.write(body)
+
+    # These options would multiply requests or change routing if curl loaded them.
+    (tmp_path / ".curlrc").write_text(
+        'location\nretry = 2\nheader = "X-Forbidden-Config: loaded"\n', encoding="utf-8",
+    )
+    (tmp_path / "_curlrc").write_text(
+        'location\nretry = 2\nheader = "X-Forbidden-Config: loaded"\n', encoding="utf-8",
+    )
+    environment = {
+        "CURL_HOME": str(tmp_path), "CURL_CA_BUNDLE": str(cert),
+        "HTTPS_PROXY": "http://127.0.0.1:1", "https_proxy": "http://127.0.0.1:1",
+        "ALL_PROXY": "http://127.0.0.1:1", "all_proxy": "http://127.0.0.1:1",
+        "NO_PROXY": "", "no_proxy": "",
+    }
+    for name, value in environment.items():
+        monkeypatch.setenv(name, value)
+    scheme = "Bear" + "er "
+    authorization = scheme + "synthetic-direct"
+    with HTTPServer(("127.0.0.1", 0), Handler) as server:
+        server.socket = context.wrap_socket(server.socket, server_side=True)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            url = f"https://127.0.0.1:{server.server_port}/items/[1-2]"
+
+            def invoke(argv, **kwargs):
+                assert argv[:2] == ["curl", "-q"]
+                assert "synthetic-" not in " ".join(argv)
+                return run_cli([executable, *argv[1:]], **kwargs)
+
+            if response == "disconnect":
+                with pytest.raises(ObservationCredentialError):
+                    read_get(url, authorization, invoke=invoke)
+            else:
+                status, body = read_get(url, authorization, invoke=invoke)
+                assert status == response and json.loads(body) == {"ok": True}
+            assert observed == [("/items/[1-2]", "HTTP/1.1", authorization, None)]
         finally:
             server.shutdown()
             thread.join(timeout=5)
