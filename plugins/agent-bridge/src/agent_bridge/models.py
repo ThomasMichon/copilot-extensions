@@ -148,6 +148,7 @@ class SessionInfo(BaseModel):
     liveness: str | None = None
     at_rest: bool = False
     remote_relationship: dict[str, Any] | None = None
+    dispatch_origin: dict[str, Any] | None = None
 
 
 class WorktreeHandoffRequest(BaseModel):

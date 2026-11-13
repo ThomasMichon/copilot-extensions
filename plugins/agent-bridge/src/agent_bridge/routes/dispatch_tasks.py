@@ -130,7 +130,7 @@ async def get_dispatch_task_session(task_id: str, request: Request) -> SessionIn
     for session_id in candidate_session_ids(task, attachments):
         session = mgr.get_session(session_id)
         if session is not None:
-            return _session_info(session)
+            return _session_info(session, mgr)
         cold = await mgr.fetch_cold_store_session(session_id)
         if cold is not None:
             return cold_store_session_info(cold)
@@ -149,7 +149,7 @@ async def get_dispatch_task_session(task_id: str, request: Request) -> SessionIn
     if worktree_id:
         fallback = _latest_session_for_worktree(mgr, worktree_id)
         if fallback is not None:
-            return _session_info(fallback)
+            return _session_info(fallback, mgr)
         # Live-only tier above is bridge-owned sessions; a worktree whose
         # *interactive* CLI session is current (e.g. an `embody`-spawned
         # task) has no bridge-owned session at all -- check the

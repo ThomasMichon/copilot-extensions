@@ -287,7 +287,7 @@ class AgentResolver(_ProviderDiscoveryMixin, _LocalTransportMixin):
 
     async def resolve_async(
         self, agent_name: str, sender_repo: str | None = None,
-        *, activate: bool = False,
+        *, activate: bool = False, allow_elevation: bool = True,
     ) -> SpawnTarget:
         """Resolve an agent name to a SpawnTarget (async path)."""
         from . import agent_registry as compat
@@ -298,6 +298,8 @@ class AgentResolver(_ProviderDiscoveryMixin, _LocalTransportMixin):
         ns = self._parse_namespaced_agent(agent_name)
         if ns:
             prefix, name = ns
+            if prefix == "admin" and not allow_elevation:
+                raise ValueError("This request does not support elevated targets")
             resolver = self._namespace_resolvers[prefix]
             log.info(
                 "Resolving namespaced agent %s:%s via %s resolver",
@@ -315,8 +317,10 @@ class AgentResolver(_ProviderDiscoveryMixin, _LocalTransportMixin):
         if repo is not None:
             static_name = self.canonical_agent_name(agent_name)
             if static_name:
-                return await self._resolve_bare(static_name)
-            return await self._resolve_venue_bound(repo, venue, activate=activate)
+                return await self._resolve_bare(static_name, allow_elevation=allow_elevation)
+            return await self._resolve_venue_bound(
+                repo, venue, activate=activate, allow_elevation=allow_elevation,
+            )
 
         candidates = await self._gather_bare_candidates(agent_name)
         if len(candidates) > 1:
@@ -341,8 +345,10 @@ class AgentResolver(_ProviderDiscoveryMixin, _LocalTransportMixin):
                         resolve_name,
                         sender_repo,
                     )
-                    return await self._resolve_venue_bound(sender_repo, resolve_name, activate=activate)
-                return await self._resolve_bare(agent_name)
+                    return await self._resolve_venue_bound(
+                        sender_repo, resolve_name, activate=activate, allow_elevation=allow_elevation,
+                    )
+                return await self._resolve_bare(agent_name, allow_elevation=allow_elevation)
             reference = await self._require_namespace_hosting(
                 resolver.prefix, resolve_name, activate=activate,
             )
@@ -369,7 +375,7 @@ class AgentResolver(_ProviderDiscoveryMixin, _LocalTransportMixin):
 
     async def _resolve_venue_bound(
         self, repo: str, venue: str,
-        *, activate: bool = False,
+        *, activate: bool = False, allow_elevation: bool = True,
     ) -> SpawnTarget:
         """Resolve ``<repo>@<venue>``: the venue, bound to run ``<repo>``."""
         from . import agent_registry as compat
@@ -378,6 +384,8 @@ class AgentResolver(_ProviderDiscoveryMixin, _LocalTransportMixin):
         ns = self._parse_namespaced_agent(venue)
         if ns:
             prefix, name = ns
+            if prefix == "admin" and not allow_elevation:
+                raise ValueError("This request does not support elevated targets")
             resolver = self._namespace_resolvers[prefix]
             reference = await self._require_namespace_hosting(
                 prefix, name, repo=repo, repo_remote=repo_remote, activate=activate,
@@ -398,7 +406,7 @@ class AgentResolver(_ProviderDiscoveryMixin, _LocalTransportMixin):
         if len(candidates) == 1:
             _, resolver, resolve_name = candidates[0]
             if resolver is None:
-                target = await self._resolve_bare(venue)
+                target = await self._resolve_bare(venue, allow_elevation=allow_elevation)
                 return self._bind_repo(target, repo, venue)
             reference = await self._require_namespace_hosting(
                 resolver.prefix, resolve_name, repo=repo, repo_remote=repo_remote, activate=activate,
@@ -551,14 +559,18 @@ class AgentResolver(_ProviderDiscoveryMixin, _LocalTransportMixin):
             result = await result
         return result if isinstance(result, str) and result.strip() else None
 
-    async def _resolve_bare(self, agent_name: str) -> SpawnTarget:
+    async def _resolve_bare(
+        self, agent_name: str, *, allow_elevation: bool = True,
+    ) -> SpawnTarget:
         """Resolve a bare static/provider agent, routing elevated ones."""
         canonical = self.canonical_agent_name(agent_name) or agent_name
+        config = self._agents.get(canonical)
+        if config is not None and config.requires_admin and not allow_elevation:
+            raise ValueError("This request does not support elevated targets")
         relay = await self._maybe_elevated_relay(canonical)
         if relay is not None:
             return relay
         target = self._resolve_static(canonical)
-        config = self._agents.get(canonical)
         if config is not None and config.requires_admin:
             from . import elevated
 
