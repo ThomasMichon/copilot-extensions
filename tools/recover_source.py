@@ -162,15 +162,12 @@ def repository_declaration(repository_root: Path | None, workspace: Path) -> dic
                 parent.samefile(repository_root) for parent in (directory, *directory.parents)
             ):
                 continue
+            candidate = directory / ("uv.exe" if os.name == "nt" else "uv")
+            runtime_source_repository._ordinary(candidate)
         except (OSError, ValueError):
             continue
-        uv = shutil.which(str(directory / ("uv.exe" if os.name == "nt" else "uv")))
-        if uv is not None:
-            try:
-                runtime_source_repository._ordinary(Path(uv))
-            except (OSError, ValueError):
-                uv = None
-                continue
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            uv = str(candidate)
             break
     if uv is None:
         raise ValueError("Repository suite interpretation requires UV on an absolute host tool path")
@@ -216,16 +213,22 @@ def selection(request: dict, manager_root: Path, *, declaration: dict | None = N
         reference = declaration["reference"]
         repository = declaration["repository"]
         if reference in ("main", "refs/heads/main"):
-            selected = RuntimeSource("main", repo=repository)
+            channel, native_ref = "main", ""
         elif re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", reference):
-            selected = RuntimeSource("exact", repo=repository, ref=reference)
+            channel, native_ref = "exact", reference
         elif reference.startswith("refs/tags/"):
-            selected = RuntimeSource("stable", repo=repository, ref=reference[len("refs/tags/"):])
+            channel, native_ref = "stable", reference[len("refs/tags/"):]
         else:
             raise ValueError(
                 "Repository suite recovery supports Main, full commit IDs and refs/tags/<tag>; "
                 "other symbolic selections require native source support"
             )
+        try:
+            selected = RuntimeSource(channel, repo=repository, ref=native_ref)
+        except ValueError:
+            raise ValueError(
+                "Repository suite source requires a credential-free locator and valid native reference"
+            ) from None
         if policy.channel != "marketplace" and policy != selected:
             raise ValueError("Repository suite recovery would override an independent runtime source policy")
     elif choice["mode"] == "configured-main-pin":
@@ -651,9 +654,10 @@ def recover(request: dict, workspace: Path, report: dict) -> int:
         declaration = repository_declaration(
             Path(repository_root) if repository_root is not None else None, workspace,
         )
-        report["repository_policy"] = declaration
     report["stage"] = "source-selection"
     selected, repository = selection(request, manager_root, declaration=declaration)
+    if declaration is not None:
+        report["repository_policy"] = declaration
     report["repository"] = repository
     report["stage"] = "source-acquisition"
     with acquire(selected, root=workspace / "acquisition", branch_repository=repository) as resolved:

@@ -48,7 +48,9 @@ def _yaml(text: str, parser_root: Path | None) -> dict:
             for key_node, value_node in node.value:
                 key = self.construct_object(key_node, deep=deep)
                 if key in result:
-                    raise ValueError(f"Duplicate repository suite configuration key: {key}")
+                    raise ValueError(
+                        f"Duplicate repository suite configuration key at line {key_node.start_mark.line + 1}"
+                    )
                 result[key] = self.construct_object(value_node, deep=deep)
             return result
 
@@ -64,7 +66,9 @@ def _yaml(text: str, parser_root: Path | None) -> dict:
         finally:
             loader.dispose()
     except (yaml.YAMLError, TypeError, RecursionError) as error:
-        raise ValueError(f"Invalid repository suite YAML: {error}") from error
+        mark = getattr(error, "problem_mark", None)
+        position = f" at line {mark.line + 1}, column {mark.column + 1}" if mark is not None else ""
+        raise ValueError("Invalid repository suite YAML" + position) from None
     if not isinstance(value, dict):
         raise ValueError("Repository suite configuration must be a mapping")
     return value

@@ -289,9 +289,34 @@ def test_cold_declaration_checks_links_before_existence_or_tool_lookup(tmp_path,
         return original(candidate, follow_symlinks=follow_symlinks)
 
     monkeypatch.setattr(Path, "stat", guarded)
-    monkeypatch.setattr(recovery.shutil, "which", lambda *_a, **_k: pytest.fail("tool lookup before refusal"))
+    monkeypatch.setattr(recovery.os, "get_exec_path", lambda *_a, **_k: pytest.fail("tool lookup before refusal"))
     with pytest.raises(ValueError, match="linked"):
         recovery.repository_declaration(root, tmp_path / "work")
+
+
+def test_uv_candidate_link_refuses_before_executable_discovery(tmp_path, monkeypatch):
+    root = tmp_path / "adopter"
+    policy = root / ".copilot-extensions" / "config.yaml"
+    policy.parent.mkdir(parents=True)
+    policy.write_text("current_version: main\n", encoding="utf-8")
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    candidate = tools / ("uv.exe" if os.name == "nt" else "uv")
+    candidate.write_bytes(b"fixture")
+    original = os.stat
+
+    def guarded(path, *args, follow_symlinks=True, **kwargs):
+        if isinstance(path, (str, os.PathLike)) and Path(path) == candidate:
+            if follow_symlinks:
+                pytest.fail("executable discovery followed the linked UV target")
+            return SimpleNamespace(st_mode=stat.S_IFREG, st_file_attributes=0x400)
+        return original(path, *args, follow_symlinks=follow_symlinks, **kwargs)
+
+    monkeypatch.setenv("PATH", str(tools))
+    monkeypatch.setattr(os, "stat", guarded)
+    with pytest.raises(ValueError, match="absolute host tool path"):
+        recovery.repository_declaration(root, tmp_path / "work")
+    assert not (tmp_path / "work").exists()
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Native Windows implicit executable lookup")
@@ -428,6 +453,46 @@ def test_actual_cold_repository_preview_selects_adopter_not_cwd_or_object_source
     assert report["available_targets"]["future-app"] == "legacy-install-flow"
     assert all(path.read_bytes() == content for path, content in before.items())
     assert {item.name for item in manager.iterdir()} == {"config.toml"}
+
+
+@pytest.mark.parametrize("kind", ["locator", "invalid-locator", "malformed-yaml", "duplicate-key"])
+def test_rejected_repository_credentials_are_not_serialized_in_preview_result(tmp_path, kind):
+    from urllib.parse import urlsplit
+
+    scheme = "ht" + "tps"
+    password = "sample-password"
+    credentials = "u" + ":" + password
+    repository = scheme + "://" + credentials + "@example.invalid/suite.git"
+    assert urlsplit(repository).password == password
+    if kind == "invalid-locator":
+        repository = repository.replace("@", "\uff0f@")
+    adopter = tmp_path / "adopter"
+    policy = adopter / ".copilot-extensions" / "config.yaml"
+    policy.parent.mkdir(parents=True)
+    text = "repository: " + json.dumps(repository) + "\n"
+    if kind == "malformed-yaml":
+        text = 'repository: "' + repository + "\n"
+    elif kind == "duplicate-key":
+        text = (json.dumps(repository) + ": one\n") + (json.dumps(repository) + ": two\n")
+    policy.write_text(text, encoding="utf-8")
+    assert password.encode() in policy.read_bytes()
+    manager = tmp_path / "untouched-manager"
+    path = tmp_path / "request.json"
+    path.write_text(json.dumps(repository_request(adopter, manager_root=str(manager))), encoding="utf-8")
+    result = subprocess.run(
+        [getattr(sys, "_base_executable", sys.executable), "-I", "-S", "-B",
+         str(REPOSITORY / "tools/recover_source.py"), "--request", str(path)],
+        capture_output=True, text=True, timeout=180,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert result.returncode == 1, result.stdout + result.stderr
+    report = json.loads(result.stdout)
+    locator = kind in {"locator", "invalid-locator"}
+    assert report["stage"] == ("source-selection" if locator else "repository-interpretation")
+    assert ("credential-free" if locator else "repository suite") in report["error"]
+    assert password not in result.stdout + result.stderr
+    assert "repository_policy" not in report and report["effects"] == []
+    assert not manager.exists()
 
 
 @pytest.mark.parametrize("layout", ["unresolved", "missing", "no-declaration"])

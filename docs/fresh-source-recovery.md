@@ -173,8 +173,9 @@ This path needs an existing UV executable on an ordinary absolute host PATH entr
 outside the addressed adopter. Current/adopter directories are excluded by
 filesystem identity after non-following component validation, rather than lexical
 spelling. Empty/relative/parent entries, implicit current-directory lookup,
-linked components and network path entries do not select a tool. It never
-installs into the base
+linked components and network path entries do not select a tool. The exact
+`uv.exe`/`uv` candidate is checked with non-following metadata before file/access
+probes; implicit executable discovery is not used. It never installs into the base
 interpreter or uses installed startup hooks. The parser runs in a separate
 physical `-I -S` child restricted to that prepared parser root. Missing UV,
 parser preparation failure or invalid policy is a failure, not an absent pin.
@@ -182,6 +183,9 @@ Absent repository/declaration paths need no parser preparation.
 
 The result's `repository_policy` records the addressed root, declaration path,
 source repository, requested reference, effective reference and fallback reason.
+Only admitted selections attach that document. Rejected declaration locators use
+value-free diagnostics; malformed YAML and duplicate-key diagnostics report
+positions rather than source snippets or key values.
 The existing `selection` records the one materialized immutable commit/tree.
 A conflicting independent runtime-source policy refuses; a matching one is
 preserved. Preview never creates an installation association or changes Manager
