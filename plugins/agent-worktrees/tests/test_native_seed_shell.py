@@ -11,6 +11,7 @@ import venv
 
 import pytest
 
+from agent_procutil._interpreter import physical_executable
 from agent_procutil.owned_process import run_caller_owned
 
 pytestmark = [
@@ -62,13 +63,15 @@ def _run(
     tmp_path, *, child_exit=7, missing=False, uncertain=False, absent_end=False,
     stdin=None, child_stderr="", location=None, failed_sink=None,
     native_resume=False,
+    suspended=False, publish=True,
 ):
     observed = tmp_path / "observed.jsonl"
     payload = tmp_path / "prepared.json"
     admitted = tmp_path / "admitted"
     argv = ["", "single ' quote", 'double " quote', "; $literal", "\u03a9", "--", "--allow-all"]
     command = [
-        sys.executable, "-I", "-X", "utf8", "-c",
+        physical_executable(sys._base_executable) if suspended else sys.executable,
+        "-I", "-X", "utf8", "-c",
         "import json,sys,time,pathlib,os\n"
         f"while not pathlib.Path({str(admitted)!r}).exists(): time.sleep(0.01)\n"
         + (f"sys.{failed_sink}.write('x' * (2 * 1024 * 1024))\n" if failed_sink else "")
@@ -141,10 +144,22 @@ def _run(
         + (f"Set-Location -LiteralPath {_literal(location)}\n" if location is not None else "")
         + f"[Environment]::CurrentDirectory = {_literal(origin)}\n"
         + ("$env:AGENT_WORKTREES_RETAINED_NATIVE_RESUME='fixture-original-owner'\n" if native_resume else "")
+        + (
+            "$capture={ param($handle,$createdPid,$birth)\n"
+            "  if ($handle -eq [IntPtr]::Zero) { throw 'missing creation handle' }\n"
+            f"  if (Test-Path -LiteralPath {_literal(admitted)}) {{ throw 'child already admitted' }}\n"
+            f"  [IO.File]::AppendAllText({_literal(observed)}, "
+            "(ConvertTo-Json -Compress -InputObject @('--phase','captured','--pid',"
+            "[string]$createdPid,'--birth',[string]$birth))+\"`n\")\n"
+            + ("  return $true\n" if publish else "  return $false\n")
+            + "}\n"
+            if suspended else ""
+        )
         +
         f"$code = Invoke-AwNativeSeedBackend -Root {_literal(tmp_path)} "
         f"-Record {_literal(tmp_path / 'wt-a.yaml')} "
         + ("-AdmissionOnly -NativeResumeSession native-original " if native_resume else "-SeedId fixture ")
+        + ("-BeforeResume $capture " if suspended else "")
         + "-Command @('copilot')\n"
         "exit $code\n",
         encoding="utf-8",
@@ -197,6 +212,30 @@ def test_native_resume_fences_actual_powershell_creation_and_consumes_marker(tmp
     assert json.loads(lines[0]) == argv
     assert json.loads(lines[1]) is False
     assert [event[1] for event in events] == ["prepare", "admit", "spawned", "returned"]
+
+
+@pytest.mark.parametrize("native_resume", [False, True])
+def test_native_suspended_boundary_reuses_existing_admission_and_wait(tmp_path, native_resume):
+    result, events, argv = _run(tmp_path, suspended=True, native_resume=native_resume, stdin="frame\n")
+    assert result.returncode == 7, result.stdout + result.stderr
+    lines = result.stdout.splitlines()
+    assert json.loads(lines[0]) == argv
+    assert json.loads(lines[-1]) == "frame\n"
+    assert [event[1] for event in events] == (
+        ["prepare", "admit", "captured", "spawned", "returned"]
+        if native_resume else ["prepare", "captured", "spawned", "returned"]
+    )
+    captured, spawned = next(event for event in events if event[1] == "captured"), events[-2]
+    assert captured[3] == spawned[3]
+    assert captured[5] == "windows:" + spawned[5]
+
+
+def test_native_suspended_publication_refusal_never_admits_or_executes(tmp_path):
+    result, events, _ = _run(tmp_path, suspended=True, publish=False)
+    assert result.returncode == 3, result.stdout + result.stderr
+    assert not result.stdout
+    assert [event[1] for event in events] == ["prepare", "captured", "spawn-failed"]
+    assert "no backend executed" in result.stderr
 
 
 def test_native_definite_os_spawn_failure_is_the_only_restore_callback(tmp_path):

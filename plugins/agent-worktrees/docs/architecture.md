@@ -1256,6 +1256,25 @@ owners.
 
 The Windows `scripts/native-seed-boundary.ps1` adapter is dot-sourced
 into that existing setup owner. It retains the actual child handle and wait.
+An internal, opt-in `BeforeResume` callback can instead request suspended native
+creation inside that same owner. `native-seed-process.ps1` loads its sibling C#
+helper in-process; it starts no compiler process, launcher or additional waiter.
+The helper uses `CreateProcessW` with `CREATE_SUSPENDED` and an explicit inherited
+handle list, retaining the actual creation handle and birth before any child code
+runs. Only duplicated standard handles and explicitly supplied additional handles
+are inherited; unrelated inheritable handles are excluded. The callback receives
+that creation handle, PID and `windows:` birth and must return exactly boolean
+true before the owner resumes the child. Publication refusal settles only this
+unexecuted creation before recording `spawn-failed`; uncertain native resume is
+not relabeled as a definite spawn failure. The original byte transfers, admission,
+head-writer fence, wait and terminal callback remain with the shell.
+No production caller currently supplies this callback. It is not MCP capability
+advertisement, an anonymous owner bootstrap or automatic caller enrollment.
+The focused `tests/test_native_seed_process.py` and `tests/test_native_seed_shell.py`
+controls exercise actual birth, pre-execution refusal, literal arguments,
+environment/cwd/stdin/output/exit preservation, exclusive section inheritance,
+final-handle cleanup and the existing admission/wait path. An actual native
+Copilot consumer and installed adoption remain separate qualification gates.
 The headed path discovers preparation/receipt support against one captured,
 completed immutable runtime slot for preparation, admission and spawn; each
 finite call independently refuses a changed current selection before effects.

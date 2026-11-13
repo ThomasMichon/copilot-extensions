@@ -1,5 +1,6 @@
 #Requires -Version 7.0
 # agent-worktrees:native-seed-boundary-v1
+# agent-worktrees:native-suspended-creation-v1
 # Dot-sourced into an existing lifetime owner, never launched as another waiter.
 
 function Get-AwNativeSeedRuntime {
@@ -382,8 +383,13 @@ function Invoke-AwNativeSeedBackend {
         [string]$LaunchParentId,
         [switch]$AdmissionOnly,
         [string]$PreserveSeedId,
-        [string]$NativeResumeSession
+        [string]$NativeResumeSession,
+        [scriptblock]$BeforeResume,
+        [IntPtr[]]$InheritedHandles = @()
     )
+    if ($InheritedHandles.Count -and -not $BeforeResume) {
+        throw 'Explicit inherited handles require the pre-execution creation owner.'
+    }
     $runtime = Get-AwNativeSeedRuntime $Root
     $prepareArgs = @('--phase', 'prepare', '--record', $Record)
     $admissionArgs = @()
@@ -471,6 +477,7 @@ function Invoke-AwNativeSeedBackend {
     }
     $process = [Diagnostics.Process]::new()
     $process.StartInfo = $info
+    $nativeChild = $null
     $receiptUncertain = $false
     $outputCopies = [Collections.Generic.List[object]]::new()
     $consoleControl = $null
@@ -494,7 +501,25 @@ function Invoke-AwNativeSeedBackend {
                 $null = $info.Environment.Remove('AGENT_WORKTREES_RETAINED_NATIVE_RESUME')
             }
             try {
-                if (-not $process.Start()) {
+                if ($BeforeResume) {
+                    . (Join-Path $PSScriptRoot 'native-seed-process.ps1')
+                    $nativeChild = New-AwNativeSeedSuspendedProcess $info -InheritedHandles $InheritedHandles
+                    $process.Dispose()
+                    $process = $nativeChild.Process
+                    try {
+                        $published = & $BeforeResume $nativeChild.CreationHandle $process.Id $nativeChild.Birth
+                        if ($published -isnot [bool] -or -not $published) {
+                            throw 'Native pre-execution publication was not confirmed.'
+                        }
+                    } catch {
+                        # Only the actual, still-uncommitted creation is settled.
+                        $nativeChild.Dispose()
+                        $null = Invoke-AwNativeSeedPhase $Root (@('--phase', 'spawn-failed') + $callbackArgs) -Runtime $runtime
+                        [Console]::Error.WriteLine('Native pre-execution handoff refused; no backend executed.')
+                        return 3
+                    }
+                    $nativeChild.Resume()
+                } elseif (-not $process.Start()) {
                     [Console]::Error.WriteLine('Native backend start is unconfirmed; the handoff is retained.')
                     return 3
                 }
@@ -512,14 +537,14 @@ function Invoke-AwNativeSeedBackend {
         # Explicit output handles also preserve the original stdin handle in
         # consoleless children. Never pipe a real terminal's interactive streams.
         if ($info.RedirectStandardOutput) {
-            $source = $process.StandardOutput.BaseStream
+            $source = if ($nativeChild) { $nativeChild.StandardOutput } else { $process.StandardOutput.BaseStream }
             $outputCopies.Add([pscustomobject]@{
                 Source = $source; Task = $source.CopyToAsync([Console]::OpenStandardOutput())
                 Draining = $false; Complete = $false
             })
         }
         if ($info.RedirectStandardError) {
-            $source = $process.StandardError.BaseStream
+            $source = if ($nativeChild) { $nativeChild.StandardError } else { $process.StandardError.BaseStream }
             $outputCopies.Add([pscustomobject]@{
                 Source = $source; Task = $source.CopyToAsync([Console]::OpenStandardError())
                 Draining = $false; Complete = $false
@@ -572,6 +597,6 @@ function Invoke-AwNativeSeedBackend {
             $null = [AwNativeSeed.ConsoleControl]::SetConsoleCtrlHandler($consoleControl.Pointer, $false)
             [GC]::KeepAlive($consoleControl.Callback)
         }
-        $process.Dispose()
+        if ($nativeChild) { $nativeChild.Dispose() } else { $process.Dispose() }
     }
 }
