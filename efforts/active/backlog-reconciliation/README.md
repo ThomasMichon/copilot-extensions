@@ -342,6 +342,15 @@ the non-public approval conversation.
 
 ## Plan
 
+The [adoption-source and original-history study](journal/2026/11.13-adoption-source-and-original-history.md)
+retains seventeen complete histories plus #11065's exact unavailable revision.
+Five finite source completions are verified with exact public readbacks;
+#10951's source is fulfilled while its actual canonical-owner OPEN condition
+remains. Explicit claims, Draft audits, current code gaps and #11118's whole
+installer-provenance boundary remain. Inflow stays counted: five completions
+and one arrival leave 877 whole open, 148 above target. No native, installed,
+carrier, resource or parent completion is inferred.
+
 The [finite-source and MCP receiving study](journal/2026/11.13-finite-source-and-mcp-receiving.md)
 retains thirteen whole contracts and verifies four finite source completions
 with exact public acknowledgments and unchanged originals. Reviewed #12418
