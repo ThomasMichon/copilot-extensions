@@ -111,6 +111,24 @@ Supported original-native receipt reconciliation can settle acceptance without
 another send; a missing receipt is not proof of absence. A delivered wake may
 still be awaiting the agent's work.
 
+At first acceptance the existing closeout row also freezes `resource_binding`
+in the same queue transaction. A captured binding identifies the queue, original
+relationship audit event/request, managed workspace and, for a placed task,
+the exact execution reservation and startup revision. The current pool pointer,
+retained native identity and original relationship must agree; selection never
+falls back to the newest reservation or a matching workspace in history.
+An admitted same-workspace continuation keeps its original relationship event
+while the closeout retains the current generation/native.
+
+Missing or inconsistent ownership records produce an `unconfirmed` binding with
+a reason; notification still proceeds without authorizing resource release.
+Pre-existing closeouts have a null binding, not a reconstruction from newer
+task state. Receipt and snapshot reads decode this additive observation field.
+Requeue, restart and subsequent reports never replace the first capture.
+This is retained selection evidence only: a captured binding is neither
+owner acknowledgement nor readiness, terminal disposition, session retirement
+or worktree finalization.
+
 `closeout_pending` means **intent retained**, not resources finalized.
 `pending_owner_closeout` means no wake was linked to an available original
 owner/native. `relevance_receipt` separates immutable acceptance, current wake
