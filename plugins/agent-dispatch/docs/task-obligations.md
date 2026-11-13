@@ -207,7 +207,7 @@ origin-v1 confirmation. An unchanged supervisor that omits it is refused before
 the new reservation/claim commits, rather than receiving permission to send a
 baseline creation. Existing baseline lineages remain compatible.
 
-The running coordinator advertises `session_origin_reservation_versions: [1]`
+The running coordinator advertises `session_origin_reservation_versions: [1, 2]`
 through its existing pool-placement contract. The explicit client checks that
 selected peer before sending the optional property and confirms the returned
 selection before permitting startup. Older callers retain unchanged request
@@ -215,8 +215,18 @@ bodies; an older, invalid or rolled-back provider receives no new syntax.
 Historical rows migrate to baseline with null evidence and remain unattributed.
 The old form has no scheduled retirement. No separate selection endpoint or
 preparation marker is introduced. The CLI acquisition caller below migrates
-conditionally; ordinary keyed creation, running qualification and cleanup
-authority remain separate.
+conditionally; managed ordinary creation has its separate capability selection
+below. Running qualification and cleanup authority remain separate.
+
+Version `2` adds `session_origin_transport: "prefer-origin-v1"` on the same
+reservation/placement operations. For a new session-creation key it selects
+origin-v1; an existing ordinary creation lineage instead retains its original
+baseline or origin-v1 selection and candidate. The preference is resolved inside
+the original transaction and is never stored as a pending wire choice. It also
+explicitly confirms an original origin-v1 retry. Explicit version-1 baseline
+and origin-v1 requirements retain their conflict/refusal semantics.
+The client requires version `2` before sending the preference and verifies the
+returned resolved transport; older providers receive no new enum value.
 
 Receiver capture adds indexed reservation/creation-key reads plus the existing
 producer and exact-assignment point reads, once per newly committed reservation.
@@ -234,7 +244,8 @@ only when the selected executing Bridge CLI declares
 `agent-bridge.acquire` version `1` capability `dispatch-cli-session-origin` and
 the running daemon advertises integer `dispatch_cli_session_origin: 1`.
 Missing/unsupported declarations keep a new request on the unchanged, unattributed
-baseline. Restricted, CI-repair and ordinary keyed-create paths are not enrolled.
+baseline. Restricted and CI-repair paths are not enrolled. Managed ordinary
+creation is described separately below.
 
 Preparation copies the sealed reservation's three session-origin fields into
 the acquisition snapshot independently of mutable task and allocation metadata.
@@ -261,6 +272,32 @@ ordering, reused workspaces, snapshot detachment, baseline peers and rollback
 refusal. It also executes disposable cell/legacy Bridge processes across runtime
 selection changes and ownership revocation. These synthetic source controls do
 not qualify installed Bridge, actual native birth/closeout or production adoption.
+
+### Conditional managed ordinary creation caller
+
+The configured ordinary Bridge pool caller additionally requires reservation
+version `2`, executing CLI `agent-bridge.create` capability
+`keyed-dispatch-origin` and integer running `dispatch_acp_session_origin: 1`
+before requesting the atomic preference. Historical baseline creation keys stay
+baseline, including lost-response history and later task episodes. A new
+session key can retain origin-v1 independently of an older workspace.
+Legacy/unconfigured ordinary callers, restricted delivery and CI-repair do
+not acquire new optional syntax.
+
+Only the fresh keyed-create branch forwards the sealed candidate. It rechecks
+the selected pinned Bridge runtime and live daemon before invoking the existing
+`--dispatch-origin-file` carrier, with the prepared worktree and creation key.
+A private per-invocation temporary directory holds the JSON file so a retained
+writer requirement can continue using stdin. Success, refusal and transport
+exceptions all clean up that input; unknown create results retain their
+original reservation/request for reconciliation, never baseline replay.
+Existing agent-info, receipt and resume branches never restamp a conversation.
+
+The focused caller and ordinary-pool startup controls exercise current HTTP
+selection, retained baseline/origin retries, pre-effect refusal on version-1
+providers, composed writer stdin plus origin file, unknown response cleanup
+and daemon rollback. Source controls remain distinct from actual native
+session birth, production adoption and accountable owner closeout.
 
 ## Original assignment cohort
 

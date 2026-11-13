@@ -144,7 +144,7 @@ class PoolPlacementClientMixin:
         extra: dict[str, object] = {}
         if session_origin_transport is not None:
             from .client_spawn_reservations import require_session_origin_support
-            require_session_origin_support(contract)
+            require_session_origin_support(contract, session_origin_transport)
             extra["session_origin_transport"] = session_origin_transport
         if expected_instance is not None or startup_timeout is not None:
             versions = contract.get("instance_bound_placement_versions")

@@ -127,7 +127,7 @@ def reserve(
     placed = client.place_pool_task(
         task["id"], reserved_by=supervisor_id, catalog_revision=revision,
         driver=driver, expected_instance=instance, startup_timeout=startup_timeout,
-        **(reservation_options(client) if driver == "cli" else {}),
+        **reservation_options(client, ordinary=ordinary),
     )
     return {
         **placed, "reservation": {

@@ -16,6 +16,7 @@ import httpx
 import pytest
 
 from agent_dispatch import bridge, bridge_owner_launch, session_acquisition, session_origin
+from agent_dispatch.client import DispatchError
 from agent_dispatch.ordinary_bridge import reserve_for_backend
 from tests import test_pool_placement_client as controls
 from tests.test_pool_placement import pool, publish, task
@@ -42,13 +43,19 @@ def peer(monkeypatch):
                 "contracts": {"agent-bridge.acquire": {
                     "version": 1,
                     "capabilities": ["dispatch-cli-session-origin"] if supported["cli"] else [],
+                }, "agent-bridge.create": {
+                    "version": 1,
+                    "capabilities": ["keyed-dispatch-origin"] if supported["cli"] else [],
                 }},
             }
         else:
             assert argv[3:] == ["status"]
             value = {
                 "service": "agent-bridge", "status": "ok", "ready": True, "draining": False,
-                "capabilities": {"dispatch_cli_session_origin": supported["daemon"]},
+                "capabilities": {
+                    "dispatch_cli_session_origin": supported["daemon"],
+                    "dispatch_acp_session_origin": supported["daemon"],
+                },
             }
         return subprocess.CompletedProcess(argv, 0, json.dumps(value), "")
 
@@ -211,6 +218,122 @@ def test_ordinary_and_restricted_paths_do_not_enroll(q, api, peer):
         placed = reserve_for_backend(client, asdict(requested), "worker", ordinary=True)
     assert placed["reservation"]["session_origin_transport"] == "baseline"
     assert not peer[0]
+
+
+@pytest.mark.parametrize("original", [None, "baseline", "origin-v1"])
+def test_ordinary_preference_preserves_original_keyed_wire_choice(q, api, original):
+    requested = task(q)
+    first, _ = q.reserve_spawn(
+        requested.id, driver="ordinary-bridge", session_origin_transport=original,
+    )
+    q.defer_spawn(first.key, detail="original keyed result unknown")
+    with controls.connected(api, []) as client:
+        retry = client.reserve_spawn(
+            requested.id, driver="ordinary-bridge", session_origin_transport="prefer-origin-v1",
+        )["reservation"]
+        replay = client.reserve_spawn(
+            requested.id, driver="ordinary-bridge", session_origin_transport="prefer-origin-v1",
+        )["reservation"]
+    assert replay["key"] == retry["key"]
+    assert retry["session_origin_transport"] == (original or "baseline")
+    assert retry["session_origin"] == first.session_origin
+    assert retry["session_origin_reservation_key"] == first.key
+    assert retry["creation_key"] == first.creation_key
+
+
+def test_managed_ordinary_selects_preference_before_claim(q, api, peer):
+    publish(q, pool())
+    requested = task(q)
+    requests = []
+    with controls.connected(api, requests) as client:
+        placed = reserve_for_backend(
+            client, asdict(requested), "worker", ordinary=True,
+            instance=("worker", "host-a", "linux"),
+        )
+    reservation = placed["reservation"]
+    assert reservation["session_origin_transport"] == "origin-v1"
+    assert reservation["session_origin"]["cohort"]["pool"]["reservation_key"] == reservation["key"]
+    assert not reservation["worktree"]
+    posted = next(request for request in requests if request.url.path == "/pool-placements")
+    assert json.loads(posted.content)["session_origin_transport"] == "prefer-origin-v1"
+    assert len(peer[0]) == 2
+
+
+def test_preference_refuses_version_one_provider_before_post(q, api, peer):
+    requested = task(q)
+    requests = []
+
+    def rewrite(request, response):
+        if request.url.path == "/pool-placements/contract":
+            value = response.json()
+            value["session_origin_reservation_versions"] = [1]
+            return httpx.Response(200, json=value)
+        return response
+
+    with controls.connected(api, requests, rewrite=rewrite) as client:
+        assert session_origin.reservation_options(client, ordinary=True) == {}
+        with pytest.raises(DispatchError, match="version 2"):
+            client.reserve_spawn(requested.id, session_origin_transport="prefer-origin-v1")
+    assert all(request.method == "GET" for request in requests)
+    assert not peer[0]
+    assert q.list_reservations(task_id=requested.id) == []
+
+
+def test_ordinary_lost_reply_and_rollback_preserve_origin_form_and_cleanup(q, peer):
+    requested = task(q)
+    original, _ = q.reserve_spawn(
+        requested.id, driver="ordinary-bridge", session_origin_transport="prefer-origin-v1",
+    )
+    reservation = {**asdict(original), "worktree": "workspace"}
+    calls = []
+
+    def run(arguments, **kwargs):
+        path = Path(arguments[arguments.index("--dispatch-origin-file") + 1])
+        assert json.loads(path.read_text(encoding="utf-8")) == original.session_origin
+        assert kwargs["execution_prefix"] == list(peer[2])
+        assert kwargs["prompt_input"] == "writer-input"
+        calls.append(path)
+        raise subprocess.TimeoutExpired(arguments, 1)
+
+    with pytest.raises(subprocess.TimeoutExpired):
+        session_origin.create(run, reservation, ["--json", "create", "local"], prompt_input="writer-input")
+    assert len(calls) == 1 and not calls[0].exists()
+    peer[1]["daemon"] = 0
+    with pytest.raises(bridge.BridgeCarriedSessionBusy, match="cannot be replayed"):
+        session_origin.create(run, reservation, ["--json", "create", "local"], prompt_input="writer-input")
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("operation", ["reserve", "placement"])
+@pytest.mark.parametrize("malformed", [[], {}])
+def test_unhashable_transport_response_retains_committed_unknown_outcome(q, api, operation, malformed):
+    revision = publish(q, pool()) if operation == "placement" else None
+    requested = task(q)
+    requests = []
+
+    def rewrite(request, response):
+        if request.method == "POST":
+            assert response.is_success, response.json()
+            value = response.json()
+            value["reservation"]["session_origin_transport"] = malformed
+            return httpx.Response(200, json=value)
+        return response
+
+    with controls.connected(api, requests, rewrite=rewrite) as client:
+        with pytest.raises(DispatchError, match="outcome is unknown"):
+            if operation == "reserve":
+                client.reserve_spawn(
+                    requested.id, driver="ordinary-bridge", session_origin_transport="prefer-origin-v1",
+                )
+            else:
+                client.place_pool_task(
+                    requested.id, reserved_by="worker", catalog_revision=revision,
+                    driver="ordinary-bridge", session_origin_transport="prefer-origin-v1",
+                )
+    assert sum(request.method == "POST" for request in requests) == 1
+    reservations = q.list_reservations(task_id=requested.id)
+    assert len(reservations) == 1 and reservations[0].session_origin_transport == "origin-v1"
+    assert q.get(requested.id).status == ("claimed" if operation == "placement" else "queued")
 
 
 @pytest.mark.parametrize("caller", ["create", "interactive"])

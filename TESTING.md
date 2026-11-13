@@ -1021,9 +1021,9 @@ The focused endpoint regression extension also selects
 `tests/test_providers.py` for actual provider construction over synthetic native
 responses. Duplicate-key private YAML/registry, whitespace-normalized bindings,
 fetch-captured host selection and actual emitted stdout budgets are covered.
-The four publication-fixture gaps tracked in #10408 remain separately scoped;
-their explicit exclusion does not establish an unfiltered provider-suite pass
-or weaken required CI.
+That historical packet excluded four publication-fixture controls tracked in
+#10408. Their later source correction does not retroactively establish an
+unfiltered provider-suite pass or weaken required CI.
 
 Manager's opt-in `--test-file tests/test_companion_head_observation.py
 --test-file tests/test_mux_companion.py --test-file tests/test_engine_client.py
