@@ -164,3 +164,22 @@ another tracker, satisfy runtime acceptance or authorize authentication,
 provider writes, rollout or source/resource release. Unknown current evidence
 continues to block technical completion; it is not force-published as proof.
 
+## Finite unmeasured-source accounting intake (2026-11-13)
+
+This proposes `routed`; it takes effect only when normal review merges
+the accompanying complete domain Plan amendment. Ledger publication alone
+is not acceptance.
+
+| Candidate | Source | Disposition | Primary canonical owner | Tracker outcome |
+|-----------|--------|-------------|-------------------------|-----------------|
+| Attributable failed/unmeasured context-source accounting, complete coverage and honest partial totals | Public #5896, complete original/refinement | routed | [progressive-context-disclosure](../progressive-context-disclosure/README.md), Phase 6 only | Retain #5896 pending actual reviewed receiving, full-current readback and separate source judgment; no new issue or umbrella |
+
+The existing reviewing-customizations measurement lane fits this finite
+portable outcome. Direct B5896/local BV5896/actual global G5896 and
+continuing Coordination preserve all four requirement groups. Existing
+source-resolution and static/dynamic-delivery efforts remain separate;
+the repair is not another disclosure standard, scanner owner or native
+activation programme. Independent capture/measurement is not retroactively
+gated on behavioral calibration. Prior ledger rows, custody and all
+incumbent acceptance remain unchanged.
+
