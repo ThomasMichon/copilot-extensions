@@ -1519,9 +1519,8 @@ ADMIT_HEALTH_REPAIR_REQUIRED = "health-repair-required"
 def fingerprint_source(paths, *, on_progress=None, file_hashes=None, on_file=None) -> str:
     """Fingerprint complete source inputs through the shipped stdlib component."""
     return _runtime_component("versioned_runtime_source").fingerprint_source(
-        paths, _normalize_windows_extended_path=_normalize_windows_extended_path,
-        _native_path=_leases._native_path,
-        on_progress=on_progress, file_hashes=file_hashes, on_file=on_file,
+        paths, _normalize_windows_extended_path=_normalize_windows_extended_path, on_file=on_file,
+        on_progress=on_progress, file_hashes=file_hashes, _native_path=_leases._native_path,
     )
 
 

@@ -704,41 +704,24 @@ def fingerprint_source(
 ) -> str:
     """Return a stable sha256 fingerprint over a frozen set of source paths.
 
-    Covers the FULL attributable runtime install input, not just one
-    manifest file -- an adopter must pass every path whose content changing
-    should be treated as "this version's payload changed" (e.g. a plugin's
-    whole ``src/`` tree plus its ``pyproject.toml``, not ``pyproject.toml``
-    alone -- a prior audit on this effort found exactly that narrower scope
-    on one adopter, #5472). Hashes each regular file's path (relative to
-    whichever declared root most specifically contains it, labeled by that
-    root's own path relative to the common ancestor of every declared root
-    -- never the root's bare basename, which is not unique across declared
-    roots, and never its absolute filesystem path, which would make the
-    digest depend on WHERE the checkout happens to live) and content, sorted
-    by label for determinism; a directory is walked recursively. Relocating
-    an entire checkout to a different absolute path -- a fresh clone, a
-    different OS, a renamed parent directory -- does not change the
-    fingerprint of logically-identical content, so long as the declared
-    roots' positions relative to EACH OTHER are unchanged.
+    Callers must declare the FULL attributable install input, not just one
+    manifest: e.g. both ``src/`` and ``pyproject.toml`` (#5472). Directories
+    are walked recursively. Regular files contribute their label and content
+    in label order. Each label is relative to the most specific declared root,
+    prefixed by that root's path relative to all roots' common ancestor.
+    Neither bare basenames (ambiguous across roots) nor absolute paths are
+    labels. Relocating a checkout, including across OSes, preserves its digest
+    when content and the roots' positions relative to EACH OTHER are unchanged.
 
-    Each ``(label, content)`` pair is framed with an explicit 8-byte
-    big-endian length prefix before hashing, so two different payloads can
-    never serialize to the same byte stream (a bare separator byte, even a
-    NUL, does not unambiguously frame arbitrary file content -- a label or
-    file ending in that same byte could make two distinct inputs collide).
+    Every label and content record has an explicit 8-byte big-endian length
+    prefix. Distinct inputs cannot serialize identically, even when labels or
+    content contain arbitrary separator bytes, including NUL.
 
-    Root matching is independent of the ORDER ``paths`` is passed in: roots
-    are tried longest-path-first (the most specific containing root always
-    wins over a shallower, overlapping one), and the same file reached
-    through more than one overlapping root is only ever hashed once
-    (deduplicated by its resolved absolute path). Swapping the order of
-    overlapping roots cannot change the result. Note this is strictly about
-    ORDER: declaring an additional, redundant child root that is already
-    covered by a passed parent root is a DIFFERENT, more specific
-    declaration (that child's own files are now labeled relative to it
-    instead of the parent) and is expected to change the result -- this
-    function does not treat "this subtree was separately named" as
-    equivalent to "this subtree was already covered".
+    Roots are matched longest-path-first, independently of input ORDER; the
+    most specific containing root wins. Files reached through overlapping roots
+    are hashed once, deduplicated by resolved absolute path. Adding a separately
+    declared child root DOES change the declaration: its files are now labeled
+    relative to that child rather than its parent, so the digest may change.
 
     Fails closed: a missing declared root, any unreadable file, or any
     directory that cannot be scanned/stat'd during the walk (e.g. a
