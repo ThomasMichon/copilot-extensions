@@ -342,6 +342,12 @@ the non-public approval conversation.
 
 ## Plan
 
+The [approved-source and eighteen-contract checkpoint](journal/2026/11.12-approved-source-retirement-and-contract-study.md)
+records 94 requirement groups, thirteen retained whole outcomes, four
+whole-source qualification gaps and #5910's independently verified
+tracking-only retirement into the existing Active Manager effort. The complete
+904-open census is 175 above target; no technical acceptance or custody changes.
+
 The [current account and custody study](journal/2026/11.12-account-source-credit-and-retained-custody.md)
 retains eighteen source-specific outcomes and eighty requirement groups,
 including two independently verified current-source corrections and one
@@ -3243,6 +3249,13 @@ sources, transferring owners or turning partial/planning gains into completion.
   normal publication flow.
 
 ## Validation Plan
+
+The [approved-source receiving audit](journal/2026/11.12-approved-source-retirement-and-contract-study.md)
+distinguishes actual reviewed #10370 delivery and complete current ROOT
+readback from still-unchecked P5910/V5910/G5910 implementation and validation.
+Fresh provenance, exact acknowledgment and CLOSED/NOT_PLANNED readback support
+the tracking fold; selected-path correspondence and native-source partials
+do not establish whole-request completion.
 
 The [account-source credit checkpoint](journal/2026/11.12-account-source-credit-and-retained-custody.md)
 separates #5763/#5791's actual finite helper repairs from their whole

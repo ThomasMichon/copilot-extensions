@@ -125,6 +125,7 @@ from .queue_standing_recovery import QueueStandingRecoveryMixin
 from .queue_standing_sources import QueueStandingSourcesMixin
 from .queue_task_recovery import TaskRecoveryMixin
 from .queue_relevance import QueueRelevanceMixin
+from .queue_relevance_evaluations import QueueRelevanceEvaluationsMixin
 from .queue_task_relationships import QueueTaskRelationshipsMixin
 from .assignment_workspace import RelationshipWriter
 from .queue_steering import QueueSteeringMixin
@@ -177,6 +178,7 @@ class TaskQueue(
     PoolDeclineMixin,
     TaskRecoveryMixin,
     QueueRelevanceMixin,
+    QueueRelevanceEvaluationsMixin,
     QueuePoolCatalogMixin,
     QueueExecutionWakesMixin,
     QueueExecutionRuntimesMixin,
@@ -311,6 +313,7 @@ class TaskQueue(
             self._migrate_execution_wakes(conn)
             self._migrate_task_recovery(conn)
             self._migrate_task_relevance(conn)
+            self._migrate_relevance_evaluations(conn)
             self._migrate_pool_catalog(conn)
             from .queue_relationship_schema import migrate_relationships
             migrate_relationships(conn)

@@ -361,9 +361,10 @@ handover. Preserve held sessions and the separate pre-feature adoption hold.
       replacement/rollback and exact cleanup. Capability advertisement,
       bootstrap, section transfer and controlled caller capture remain open;
       see the [source qualification](journal/2026/11.10-explicit-owner-cli.md#windows-provider-only-receiver-qualification-and-merge).
-     - [ ] **Windows section provider:** bounded versioned native-owner
-      section, actual creation-handle identity, protected principal boundary,
-      read-only retention, strict binding and owner-death refusal; see the
+    - [x] **Windows section provider:** #12319 qualifies bounded versioned
+      native-owner transfer, actual creation-handle identity, protected
+      principal boundary, read-only retention, strict binding and owner-death
+      refusal; see the
       [provider controls](journal/2026/11.10-explicit-owner-cli.md#windows-native-owner-section-provider).
       Production creation-owner integration and actual-client acceptance
       remain separate.

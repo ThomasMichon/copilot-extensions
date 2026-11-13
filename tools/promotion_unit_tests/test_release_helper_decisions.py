@@ -471,6 +471,28 @@ def test_standalone_packaged_sources_charge_the_declared_consumer(
     assert module._plugins_needing_bump(["tools/unrelated.py"], {}) == {}
 
 
+def test_application_resource_projection_retains_companions_and_metadata_not_directories(tmp_path):
+    from plugin_runtime_resources import application_resources
+
+    spec = importlib.util.spec_from_file_location(
+        "application_resource_builder", ROOT / "libs/versioned-runtime/standalone_build.py",
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    prefix = "scripts/runtime-source-tools/fixture/"
+    expected = {
+        "_runtime_assets/" + prefix + name
+        for name in ("native.cs", "pyproject.toml", "requirements.txt", "uv.lock")
+    }
+    for name in ("native.cs", "pyproject.toml", "requirements.txt", "uv.lock"):
+        _write(tmp_path / prefix / name, "fixture")
+    (tmp_path / prefix / "not-a-file.cs").mkdir()
+    assert set(module.application_resources(tmp_path, "worktree_manager")) == expected
+    assert set(application_resources(tmp_path, "worktree_manager")) == {
+        "worktree_manager/" + name for name in expected
+    }
+
+
 def test_packaged_manager_provider_loads_its_declared_canonical_owners(tmp_path, monkeypatch):
     source = ROOT / "worktree-manager"
     manifests = assets.load_manifest_groups(source, manifest_name=assets.PACKAGED_MANIFEST_NAME)

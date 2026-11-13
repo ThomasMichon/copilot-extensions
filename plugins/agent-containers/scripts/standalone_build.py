@@ -49,7 +49,7 @@ def application_resources(project, package):
         path.relative_to(project).as_posix(): path
         for pattern in patterns for path in project.glob(pattern)
         if path.is_file()
-        and path.suffix in {".py", ".ps1", ".sh", ".cmd", ".conf", ".pyz", ".json", ".yaml", ".awk"}
+        and path.suffix in {".py", ".ps1", ".sh", ".cmd", ".conf", ".pyz", ".json", ".yaml", ".awk", ".cs"}
     }
     sources.update({
         path.relative_to(project).as_posix(): path
