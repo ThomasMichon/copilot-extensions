@@ -20,12 +20,19 @@ PLUGIN = Path(__file__).resolve().parents[1]
 
 
 @pytest.mark.parametrize("package", [False, True])
-def test_native_readiness_ignores_project_local_shadow_module(tmp_path, package):
+@pytest.mark.parametrize("command", ["installer-readiness", "--help"])
+def test_native_readiness_ignores_project_local_shadow_module(tmp_path, package, command):
     home, payload, runtime, _identity, _context = prepare_payload(tmp_path, "legacy")
     project = tmp_path / "selected repository"
     project.mkdir()
     (project / ".agent-vault.json").write_text('{"enabled": true}', encoding="utf-8")
     prepare_runtime(runtime, payload)
+    for directory in (
+        payload,
+        runtime / "versions" / "fixture" / "share" / "copilot-extensions" / "agent_vault",
+    ):
+        directory.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(PLUGIN / "readiness-isolation.json", directory / "readiness-isolation.json")
     marker = tmp_path / "shadow-executed"
     target = project / "agent_vault.py"
     if package:
@@ -43,11 +50,14 @@ def test_native_readiness_ignores_project_local_shadow_module(tmp_path, package)
         "AGENT_VAULT_NO_SELFPROVISION": "1",
     })
 
-    result = invoke(payload, env, project, "installer-readiness")
+    result = invoke(payload, env, project, command)
 
     assert not marker.exists(), result.stdout + result.stderr
     assert result.returncode != 73
-    assert json.loads(result.stdout)["module"] == "agent-vault/runtime"
+    if command == "installer-readiness":
+        assert json.loads(result.stdout)["module"] == "agent-vault/runtime"
+    else:
+        assert result.returncode == 0, result.stdout + result.stderr
     assert not (runtime / "run").exists()
 
 

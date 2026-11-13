@@ -293,7 +293,7 @@ function Invoke-Runtime {
             $probeEntry = Join-Path $scriptDir 'versioned_runtime_probe.py'
             & $Python @pythonOptions $probeEntry --plugin agent-vault --module agent_vault -- @forwardArgs
         } else {
-            & $Python -m agent_vault @forwardArgs
+            & $Python @pythonOptions -m agent_vault @forwardArgs
         }
     } finally {
         $ErrorActionPreference = $previousEap

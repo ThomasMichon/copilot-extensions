@@ -3060,3 +3060,30 @@ speculative matrix. No local whole-suite execution occurs. The next acceptance
 attempt must use a published exact-source revision, required green CI and the
 same existing disposable Windows owner. Unit/control success is not a native
 pass, and the previous timeout failures remain unwaived.
+
+The published query revision `56cb8b4b18` encounters newer Dev changes before
+required CI can run. Backup precedes rebase onto `3b3d15ad5e`; all 50 owned
+patches survive. Vault dispatcher conflicts preserve the newly merged ordinary
+`-I -X utf8` module isolation alongside readiness-only `-B` and typed probe
+qualification. A later replayed hunk initially undoes the ordinary PowerShell
+prefix; the actual project-shadow controls reproduce that regression before
+the combined dispatcher is corrected.
+
+All 11 combined Vault controls pass in 108.82 seconds: ordinary/help and
+readiness shadow-module/package refusal, real cache access without a service,
+and six native/PowerShell qualification cases. The qualified shadow fixture
+carries the real payload and runtime descriptors. Initial adjacent failures
+also reveal a 271-character fixture executable path; a shorter canonical
+TestSandbox prefix resolves that measured Windows launch failure without
+changing the product, fixture semantics, per-test or aggregate bounds. Earlier
+explicit-tier skips are not counted as passes.
+
+Contract validation passes both contracts and 1,096 fixtures, but independent
+complete-input comparison correctly prevents reuse of the old HTTP-52 capture.
+All 2,238 paths remain present; six upstream inputs differ: Config Migrate core,
+Worktrees installer and session shell, runtime resource discovery, standalone
+artifact tests and typecheck tests. No old result is relabeled onto those
+inputs. The existing bounded Ubuntu capture owner must earn current evidence
+before the next required-CI/native acceptance sequence. Module-size,
+installation/version contracts, documentation consistency and touched-source
+lint pass; the parent and both blocking review threads remain open.

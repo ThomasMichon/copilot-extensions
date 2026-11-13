@@ -187,6 +187,7 @@ def test_installed_readiness_does_not_import_checkout_module(tmp_path, host, qua
         capture_output=True, text=True, timeout=30, **no_window_kwargs(),
     )
     assert not marker.exists(), result.stdout + result.stderr
+    assert result.stdout, (result.returncode, result.stderr)
     observed = json.loads(result.stdout)
     if qualification != "qualified":
         assert observed["schema"] == "copilot-extensions.probe-compatibility"
