@@ -165,9 +165,9 @@ The receipt is not a transferable readiness permission.
 Preparation changes neither task status nor native, placement or reservation
 release flags. In particular it does not yield/requeue or abandon the task:
 those transitions could let the supervisor end the original conversation before
-its agent finalizes. The agent's actual own-workspace finalization, independent
-finalized observation, terminal task disposition and native conclusion remain
-unimplemented integration gates. This provider never deletes a checkout.
+its agent finalizes. The agent's actual own-workspace finalization and native
+conclusion remain separate integration gates. This provider never deletes a
+checkout.
 
 Existing detail and `claim-status` syntax carry the additive
 `relevance_closeout_ready` evidence described in
@@ -177,6 +177,40 @@ it as ordinary completion. A prior queue without retained readiness cannot
 produce this proof; no fallback to abandonment exists. Baseline operations remain
 unchanged, with no old surface retirement. Upgrade the receiver and callback
 before enabling any caller; source qualification is not running adoption.
+
+## Finalized-workspace acknowledgement
+
+The internal `finish_relevance_closeout` receiver requires the retained
+readiness and a closed original assignment claim. It independently reads the
+selected local Worktrees owner's existing `observe-finalized` result, using
+the original allocation key rather than a later execution reservation. The
+captured workspace creation nonce must still match. No worker-supplied receipt
+can substitute for this observation.
+
+The existing task lifecycle owns abandonment. A queue-local transaction guard
+revalidates the captured task, closeout, relationship, placement and reservation
+after observation and stores `acknowledgement` on the existing closeout row in
+that same terminal transaction. A hold, changed incarnation or failed task
+write cannot leave an acknowledgement committed separately. IPC never runs
+under the SQLite write lock.
+
+Exact retries after restart or a lost response return the committed terminal
+outcome without reobserving, repeating the transition audit or reemitting its
+terminal event. Conflicting arguments or a changed task episode refuse.
+The receipt retains the task's current attachment separately from the original
+closeout native: a same-generation yield without resource release may clear
+the task's native field without losing the original closeout conversation.
+Transition and replay both validate that retained task attachment.
+The nullable additive field remains absent for earlier closeouts; no historical
+acknowledgement is reconstructed. Acceptance receipts remain original intent,
+while the existing current-closeout view exposes this later observation.
+
+This receiver does not finalize a workspace, retire a native, release a
+reservation or delete a checkout. Those effects remain with the actual worker
+and existing conclusion owners. It has no new HTTP/CLI route or automatic caller.
+Unsupported Worktrees observation retains custody, not an abandon fallback;
+baseline operations and prior readers remain unchanged. Caller migration,
+session conclusion and running qualification remain open.
 
 ## Registered receiver and compatibility
 

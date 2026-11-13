@@ -173,8 +173,10 @@ merged plan does not establish running adoption.
       Acceptance-time resource selection now retains the original relationship
       and exact execution reservation; acknowledgement and lifecycle effects
       remain open. The internal independent-readiness provider can settle only
-      that original claim without releasing the native or reservation; actual
-      own-workspace finalization, terminal disposition and conclusion remain open.
+      that original claim without releasing the native or reservation.
+      Internal acknowledgement now reuses independent finalized-workspace
+      observation and the existing terminal transition; actual own-worker
+      caller adoption, native conclusion and running qualification remain open.
 - [ ] Publish receiver support before enabling new callers; document baseline,
       upgrade and rollback behavior against the executing runtime.
 

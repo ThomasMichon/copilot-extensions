@@ -116,7 +116,7 @@ class QueueRelevanceMixin:
             "owner TEXT, owner_session_id TEXT, steer_id INTEGER NOT NULL, created_at REAL NOT NULL)"
         )
         columns = {row[1] for row in conn.execute("PRAGMA table_info(task_relevance_closeouts)")}
-        for column in ("resource_binding", "readiness"):
+        for column in ("resource_binding", "readiness", "acknowledgement"):
             if column in columns:
                 continue
             try:
@@ -131,6 +131,16 @@ class QueueRelevanceMixin:
     ) -> dict:
         from .queue_relevance_readiness import prepare
         return prepare(
+            self, task_id, request_id=request_id, worker_id=worker_id, native_id=native_id,
+            expected_generation=expected_generation,
+        )
+
+    def finish_relevance_closeout(
+        self, task_id: str, *, request_id: str, worker_id: str, native_id: str,
+        expected_generation: int,
+    ) -> CompletionOutcome:
+        from .queue_relevance_acknowledgement import finish
+        return finish(
             self, task_id, request_id=request_id, worker_id=worker_id, native_id=native_id,
             expected_generation=expected_generation,
         )
