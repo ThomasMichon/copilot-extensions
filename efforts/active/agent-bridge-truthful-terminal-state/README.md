@@ -221,6 +221,17 @@ _Correlated via a facility-driven sweep of open `bug`-labeled issues against act
 
 ## Journal
 
+### 2026-11-12 - Direct child-diagnostic tracking received
+
+The RD4231 retention actually merged in #12317 as
+`489f990945c01d9ad3a194c40baf35e441909a14` after current-head approval,
+successful required checks and zero findings/threads. Complete D4231
+Plan/local/global Validation/Coordination and the full #4223 original are
+now directly in OPEN #2464. Whole issue/ROOT/custody readback preceded the
+separate #4231 NOT_PLANNED tracking retirement. All diagnostic product rows
+remain unchecked, status stays Draft and every incumbent phase, claim and
+resource duty remains. No diagnostic fix, native result or activation follows.
+
 ### 2026-11-12 - Proposed finite Host-child diagnostic receiving
 
 Added direct RD4231 Plan/local/global Validation and continuing custody
