@@ -465,6 +465,7 @@ async def _run_headed_once(
                         await backend.close()
                     finally:
                         if owner.proc is not None and (
-                            auth_receiver is not None or owner.returncode is None
+                            native_handoff is not None
+                            or auth_receiver is not None or owner.returncode is None
                         ):
                             await owner.terminate()

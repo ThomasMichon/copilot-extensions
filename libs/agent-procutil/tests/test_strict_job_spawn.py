@@ -180,6 +180,43 @@ def test_real_suspended_handoff_preserves_creation_handle_and_original_streams(t
         process.wait(timeout=5)
 
 
+@pytest.mark.parametrize("resume_mode,cleanup_failure", [
+    ("false", None), ("false", "job"), ("false", "wait"), ("exception", "job"),
+])
+def test_suspended_handoff_resume_failure_settles_or_retains_original_custody(
+    monkeypatch, resume_mode, cleanup_failure,
+):
+    from agent_procutil.owned_process import OwnedCleanupError
+
+    process, job = Mock(pid=123), Mock()
+    process.stdin = process.stdout = process.stderr = None
+    process.kill.side_effect = AssertionError("retire the retained Job, not only its root")
+    if cleanup_failure == "job":
+        job.terminate_and_wait.side_effect = OSError("fixture Job settlement uncertain")
+    elif cleanup_failure == "wait":
+        process.wait.side_effect = OSError("fixture native exit uncertain")
+    monkeypatch.setattr(pu, "_is_windows", lambda: True)
+    monkeypatch.setattr(subprocess, "Popen", Mock(return_value=process))
+    monkeypatch.setattr(pu, "_assign_suspended_to_kill_on_close_job", Mock(return_value=job))
+    resume = Mock(return_value=False)
+    if resume_mode == "exception":
+        resume.side_effect = OSError("fixture resume uncertain")
+    monkeypatch.setattr(pu, "_resume_suspended_process", resume)
+    published = Mock(return_value=None)
+    with pytest.raises(OwnedCleanupError if cleanup_failure else RuntimeError) as caught:
+        pu.spawn_sync_in_kill_on_close_job(
+            ["fixture"], require_job=True, allow_breakaway=False, on_suspended=published,
+        )
+    published.assert_called_once_with(process)
+    job.terminate_and_wait.assert_called_once_with(5)
+    job.close.assert_not_called()
+    if cleanup_failure:
+        assert caught.value.process is process and caught.value.job is job
+        assert caught.value.operation_error is not None
+    else:
+        process.wait.assert_called_once_with(timeout=5)
+
+
 @pytest.mark.skipif(os.name != "nt", reason="real Windows suspended failure proof")
 def test_real_assignment_failure_runs_no_child_code(tmp_path, monkeypatch):
     receipt = tmp_path / "must-not-run"

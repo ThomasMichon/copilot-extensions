@@ -1,5 +1,6 @@
 """Actual-child handoff wiring, without default enrollment or auth scope changes."""
 
+import asyncio
 import json
 import os
 import subprocess
@@ -95,3 +96,59 @@ async def test_headed_owner_passes_actual_creation_and_retains_original_wait(tmp
 def test_handoff_does_not_accept_ambiguous_handle_custody(handles):
     with pytest.raises(ValueError, match="unique positive"):
         WindowsNativeHandoff(lambda _process: None, handles)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cleanup_fails", [False, True])
+async def test_cancellation_after_root_exit_still_settles_or_retains_handoff_job(
+    tmp_path, monkeypatch, cleanup_fails,
+):
+    from agent_procutil.owned_process import OwnedCleanupError
+
+    _windows(monkeypatch)
+    image = tmp_path / "copilot.exe"
+    image.write_bytes(b"MZfixture")
+    child = Mock(pid=os.getpid(), returncode=None)
+    child.poll.side_effect = lambda: child.returncode
+    job = Mock()
+    if cleanup_fails:
+        job.terminate_and_wait.side_effect = OSError("fixture descendants unsettled")
+    created = asyncio.Event()
+
+    class Backend:
+        def __init__(self, *_args, **_kwargs):
+            self.bound = asyncio.Event()
+
+        async def serve(self):
+            pass
+
+        def declaration(self):
+            return {}
+
+        async def close(self):
+            # The root exits after waiter cancellation, before final native cleanup.
+            child.returncode = 23
+
+    def create(*_args, **_kwargs):
+        created.set()
+        return child, job
+
+    monkeypatch.setattr(launcher, "HeadedBackend", Backend)
+    monkeypatch.setattr(launcher, "contained_test_mode", lambda: True)
+    monkeypatch.setattr(launcher, "_require_receiving_policy", Mock())
+    monkeypatch.setattr(native_handoff, "spawn_sync_in_kill_on_close_job", create)
+    task = asyncio.create_task(launcher.run_headed(
+        [str(image), "--session-id", "selected"], session_id="selected",
+        attempt_directory=tmp_path / "attempt", state_file=tmp_path / "state.json",
+        native_handoff=WindowsNativeHandoff(lambda _process: None),
+    ))
+    await asyncio.wait_for(created.wait(), 2)
+    task.cancel()
+    with pytest.raises(OwnedCleanupError if cleanup_fails else asyncio.CancelledError) as caught:
+        await task
+    job.terminate_and_wait.assert_called_once_with(5)
+    job.close.assert_not_called()
+    if cleanup_fails:
+        assert caught.value.process is child and caught.value.job is job
+    else:
+        child.wait.assert_called_once_with(timeout=5)

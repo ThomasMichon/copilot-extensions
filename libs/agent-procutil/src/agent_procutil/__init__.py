@@ -529,15 +529,15 @@ def spawn_sync_in_kill_on_close_job(
     """
     if type(allow_breakaway) is not bool:
         raise ValueError("allow_breakaway must be a boolean")
-    if on_suspended is not None and (
-        not callable(on_suspended) or not _is_windows() or not require_job or allow_breakaway
-    ):
-        raise ValueError("Suspended handoff requires Windows, required custody and no breakaway")
     if (
         not allow_breakaway
         and int(kwargs.get("creationflags", 0)) & _CREATE_BREAKAWAY_FROM_JOB
     ):
         raise ValueError("CREATE_BREAKAWAY_FROM_JOB conflicts with allow_breakaway=False")
+    if on_suspended is not None:
+        from ._suspended_handoff import spawn
+
+        return spawn(argv, require_job, allow_breakaway, on_suspended, **kwargs)
     if not _is_windows():
         try:
             return subprocess.Popen(argv, **kwargs), None  # noqa: S603 - argv list, no shell
@@ -577,10 +577,6 @@ def spawn_sync_in_kill_on_close_job(
             process.kill()
             process.wait(timeout=5)
             raise RuntimeError("Windows descendant Job assignment failed before child resume")
-        if on_suspended is not None:
-            from ._suspended_handoff import notify
-
-            notify(process, job_handle, on_suspended)
         if not _resume_suspended_process(pid):
             if require_job or not allow_breakaway:
                 process.kill()
@@ -594,12 +590,7 @@ def spawn_sync_in_kill_on_close_job(
             if job_handle is not None:
                 job_handle.close()
             raise RuntimeError(f"failed to resume suspended process {pid}")
-    except BaseException as error:
-        if on_suspended is not None:
-            from .owned_process import OwnedCleanupError
-
-            if isinstance(error, OwnedCleanupError):
-                raise
+    except BaseException:
         if job_handle is not None:
             job_handle.close()
         raise
