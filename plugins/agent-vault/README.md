@@ -549,7 +549,8 @@ detach children from their caller or change credential stdin/output handling.
   permissions and recovery-policy errors are not decryption fallback triggers.
 - Password TTL is an absolute lifetime from unlock, not inactivity; requests
   and `--persistent` do not extend it. Idle housekeeping clears expired
-  passwords and their credential caches. `ping` labels daemon lifetime
+  passwords and their in-memory credential caches. Opt-in protected credential
+  records have a separate lifetime, as described below. `ping` labels daemon lifetime
   separately from the selected database's remaining password lifetime.
   Its additive `password_lifetime` object uses contract
   `agent-vault.password-lifetime`, version `1`, with `state` equal to `bounded`,
@@ -589,6 +590,27 @@ export AGENT_VAULT_CACHE=1
 agent-vault cache-populate --entry API/OpenAI
 agent-vault cache-verify --entry API/OpenAI
 ```
+
+An enabled service reads and writes this same protected store in its own OS
+protection context. Fresh backend reads attribute records to the canonical
+database, runtime home, installation and group; entry, field and generation
+remain bound to that record. A matching record can satisfy the existing `get`
+request after the master password expires, without another unlock. Unattributed
+legacy records and records for another context are never adopted by a read.
+Authoritative refresh bypasses cached values; explicit service locking revokes
+its attributed records, and mutations invalidate affected entries before backend
+work. Pending password-replacement journals remain pending, including when
+revocation removes a previous value's service attribution.
+
+Value/generation snapshots are read together. A client's exact writeback of a
+service-attributed result retains its original age and attribution rather than
+renewing freshness. Other/older writers may remove attribution; the service then
+needs a fresh backend read, not a guessed binding. Existing callers, cache
+formats, DPAPI/key protection and direct `--cache-only` behavior are unchanged;
+old services simply lack locked-service cache access. A backend read whose
+cache write fails reports additive `cache_warning: "service_cache_write_failed"`,
+not successful cache population. Unlock-triggered warming is separate from
+these read-through semantics.
 
 Fernet caches and `seal`/`unseal` use the optional `pycryptodomex` dependency
 (`cache` / `kek` extras), also supplied by the native `ssh` profile above.
