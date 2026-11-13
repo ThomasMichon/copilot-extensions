@@ -1233,8 +1233,12 @@ def test_complete_application_reuse_revalidates_outputs_without_constructing(
     snapshots = {"demo": str(snapshot)}
     with native.source_inputs.project_inputs(snapshot, "demo", deadline=deadline) as (observed, inputs):
         construction = native.source_inputs.application_inputs(observed, inputs)
-    application = snapshot / "applications" / "demo"
-    application.mkdir(parents=True)
+        application = snapshot / "applications" / "demo"
+        application.mkdir(parents=True)
+        wheels = application / "wheels"
+        wheels.mkdir()
+        for _name, _version, filename, _digest in inputs.distributions:
+            shutil.copyfile(inputs.snapshot.paths[filename], wheels / filename)
     (application / "application.json").write_text(json.dumps({"construction": construction}))
     (application / "uv.lock").write_text("version = 1\n")
     snapshot_record = native.source_inputs._read(snapshot / local.MANIFEST)
@@ -1302,7 +1306,9 @@ def test_complete_output_reuse_uses_one_provider_without_replaying_worker_failur
     repository = tmp_path / "checkout"
     repository.mkdir()
     root = tmp_path / "applications"
+    local.preparation_process.procutil_module("_daemon_instance_owner").mkdir_private(root)
     previous, output = root / "previous", root / "incoming"
+    local.preparation_process.procutil_module("_daemon_instance_owner").mkdir_private(previous)
     toolchain_dir = previous / "inputs" / "build-tools"
     toolchain_dir.mkdir(parents=True)
     record = {
@@ -2622,6 +2628,10 @@ def test_complete_application_preparation_uses_existing_owners(
     application.mkdir(parents=True)
     with source.project_inputs(snapshot, "demo-app") as (observed, inputs):
         construction = source.application_inputs(observed, inputs)
+        wheels = application / "wheels"
+        wheels.mkdir()
+        for _name, _version, filename, _digest in inputs.distributions:
+            shutil.copyfile(inputs.snapshot.paths[filename], wheels / filename)
     (application / "application.json").write_text(json.dumps({"construction": construction}))
     (application / "uv.lock").write_text("version = 1\n")
     (snapshot / source.MANIFEST).write_text(json.dumps(selected.record))
@@ -2641,6 +2651,7 @@ def test_complete_application_preparation_uses_existing_owners(
         assert repository == repo and commit == "a" * 40 and main == "c" * 40
         assert options == {
             "deadline": deadline, "finalized_main": False, "source_descriptor": None,
+            "projects": ("demo-app",),
         }
         calls.append("compose")
         shutil.copytree(snapshot, destination)
@@ -2782,7 +2793,7 @@ def test_complete_application_preparation_uses_existing_owners(
 ])
 def test_complete_application_preparation_refuses_before_source_effects(tmp_path, monkeypatch, case):
     repo = tmp_path / "checkout"
-    repo.mkdir()
+    local.preparation_process.procutil_module("_daemon_instance_owner").mkdir_private(repo)
     monkeypatch.setattr(local.preparation, "_admit", lambda *args, **kwargs: pytest.fail(
         "invalid application options reached source admission",
     ))
@@ -2822,13 +2833,14 @@ def test_single_profile_cli_keeps_selected_component_and_budget(tmp_path, monkey
         return {"phase": "registry-locked", "install_ready": False, "files": []}
 
     monkeypatch.setattr(native, "prepare_registry_lock", profile)
+    deadline = time.monotonic() + 30
     assert native.main([
         "--install-source", str(tmp_path / "source"), "--output", str(tmp_path / "output"),
-        "--uv", "selected-uv", "--deadline", "123", "--component", "demo-app",
+        "--uv", "selected-uv", "--deadline", str(deadline), "--component", "demo-app",
         "--extra", "one",
     ]) == 0
     assert calls == [(tmp_path / "source", tmp_path / "output", {
-        "uv": "selected-uv", "deadline": 123.0, "prepare_profile": False,
+        "uv": "selected-uv", "deadline": deadline, "prepare_profile": False,
         "download_origins": (), "component": "demo-app", "extras": ("one",),
     })]
     assert json.loads(capsys.readouterr().out)["install_ready"] is False
@@ -3309,23 +3321,30 @@ def test_application_adapter_runs_real_install_repeat_and_retains_failed_start(
     assert Path((root / "callback-cwd").read_text()).samefile(slot)
     record.update(setup=["--setup", "--new-setup"], start=["--start", "--new-start"])
     path.write_text(json.dumps(record))
-    automatic = source.install_application(snapshot, "demo-app", selected.payload, root, **options)
-    automatic_slot = Path(automatic["slot"])
-    assert automatic_slot != slot and ".repair." in automatic_slot.name
+    with pytest.raises(source.engine.ContentRepairRequired, match="declaration differs"):
+        source.install_application(snapshot, "demo-app", selected.payload, root, **options)
+    assert {name: (root / name).read_bytes() for name in before} == before
+    assert (slot / "application.json").read_bytes() == installed_declaration
+    assert len(activation_calls) == 2
+    replacement = source.install_application(
+        snapshot, "demo-app", selected.payload, root, repair=True, **options,
+    )
+    replacement_slot = Path(replacement["slot"])
+    assert replacement_slot != slot and ".repair." in replacement_slot.name
     assert json.loads((root / "setup.json").read_text()) == ["--setup", "--new-setup"]
     assert json.loads((root / "started.json").read_text()) == ["--start", "--new-start"]
-    automatic_selectors = {name: (root / name).read_bytes() for name in before}
-    automatic_declaration = (automatic_slot / "application.json").read_bytes()
-    automatic_marker = source.engine.runtime.marker_path(root, automatic_slot.name).read_bytes()
+    replacement_selectors = {name: (root / name).read_bytes() for name in before}
+    replacement_declaration = (replacement_slot / "application.json").read_bytes()
+    replacement_marker = source.engine.runtime.marker_path(root, replacement_slot.name).read_bytes()
     assert source.install_application(
         snapshot, "demo-app", selected.payload, root, **options,
-    ) == automatic
-    assert {name: (root / name).read_bytes() for name in before} == automatic_selectors
-    assert (automatic_slot / "application.json").read_bytes() == automatic_declaration
-    assert source.engine.runtime.marker_path(root, automatic_slot.name).read_bytes() == automatic_marker
+    ) == replacement
+    assert {name: (root / name).read_bytes() for name in before} == replacement_selectors
+    assert (replacement_slot / "application.json").read_bytes() == replacement_declaration
+    assert source.engine.runtime.marker_path(root, replacement_slot.name).read_bytes() == replacement_marker
     assert json.loads((root / "setup.json").read_text()) == ["--setup", "--new-setup"]
     assert json.loads((root / "started.json").read_text()) == ["--start", "--new-start"]
-    assert Path((root / "callback-cwd").read_text()).samefile(automatic_slot)
+    assert Path((root / "callback-cwd").read_text()).samefile(replacement_slot)
     before = {name: (root / name).read_bytes() for name in before}
     assert (slot / "application.json").read_bytes() == installed_declaration
     with pytest.raises(subprocess.CalledProcessError):
@@ -3333,7 +3352,7 @@ def test_application_adapter_runs_real_install_repeat_and_retains_failed_start(
             snapshot, "demo-app", selected.payload, root,
             arguments=("--fail-start",), repair=True, **options,
         )
-    failed = [path for path in (root / "versions").iterdir() if path not in (slot, automatic_slot)]
+    failed = [path for path in (root / "versions").iterdir() if path not in (slot, replacement_slot)]
     assert len(failed) == 1 and not (failed[0] / "install-success.json").exists()
     assert (root / "current-version").read_text().strip() == failed[0].name
     assert (root / "last-known-good").read_bytes() == before["last-known-good"]
@@ -3376,7 +3395,7 @@ def test_application_adapter_runs_real_install_repeat_and_retains_failed_start(
     )
     assert sequence == [
         (slot.name, ("--",)), (slot.name, ("--",)),
-        (automatic_slot.name, ("--",)), (automatic_slot.name, ("--",)),
+        (replacement_slot.name, ("--",)), (replacement_slot.name, ("--",)),
         (failed[0].name, ("--", "--fail-start")), (repaired_slot.name, ("--",)),
     ], diagnostic
     assert len(activation_calls) == 6, diagnostic
