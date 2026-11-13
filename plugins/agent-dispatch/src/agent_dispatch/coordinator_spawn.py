@@ -25,7 +25,7 @@ class ReserveSpawnBody(BaseModel):
     reserved_by: str | None = None
     allow_suspended_reembodiment: bool = False
     driver: str | None = None
-    session_origin_transport: Literal["baseline", "origin-v1"] | None = None
+    session_origin_transport: Literal["baseline", "origin-v1", "prefer-origin-v1"] | None = None
     allocation_revision: int | None = Field(default=None, ge=1, le=2**63 - 1, strict=True)
 
 
@@ -44,7 +44,7 @@ class PoolPlacementBody(BaseModel):
     reserved_by: str = Field(min_length=1)
     catalog_revision: int = Field(ge=0, strict=True)
     driver: Literal["cli", "ordinary-bridge"] = "cli"
-    session_origin_transport: Literal["baseline", "origin-v1"] | None = None
+    session_origin_transport: Literal["baseline", "origin-v1", "prefer-origin-v1"] | None = None
     expected_instance: PoolInstanceBody | None = None
     startup_timeout: FiniteFloat = Field(default=600, gt=0)
 
