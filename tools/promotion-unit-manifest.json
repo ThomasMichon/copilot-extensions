@@ -5977,6 +5977,8 @@
         "libs/agent-procutil/src/agent_procutil/wsl.py": "4ff4cff1b1549736e09a1c18a2c2ba66ac72e2d4ab1a95cd218e449c8a85d8bf",
         "libs/versioned-runtime/versioned_runtime_native.ps1": "2c982fb2647ca2c02a2692311787b5852d5883d2e98cb531cc22175c2d845d97",
         "tools/manager_application_provider.json": "2a6bf96931f64ccc67fe6780065d60071dcafb8d6fc2db35958c7910a6783ed3",
-        "tools/prepare_manager_application.py": "d50f8d8d6c9cb7bc87586d60cc876280f16fabf6cf0dca7243e06ee214ca6aae"
+        "tools/prepare_manager_application.py": "d50f8d8d6c9cb7bc87586d60cc876280f16fabf6cf0dca7243e06ee214ca6aae",
+        "tools/coverage_guided_selection/auditability.py": "7732bc5a9b14a2ab6083f9e73f5d7698888461b387515cb1a17a08174a066ed5",
+        "tools/plugin_test_command_safety.py": "e9c38a3d45053f7cdda54eafd99fe696119e8f59f5b8abb71258d74751eb93e0"
     }
 }
