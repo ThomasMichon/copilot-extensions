@@ -345,11 +345,12 @@ the non-public approval conversation.
 The [loader/report study](journal/2026/11.13-loader-report-source-and-accountability-proposal.md)
 retains eighteen whole unions and verifies two finite source completions,
 including the actual named-Maintainer policy rather than an invented extra
-vote. The [five-case accountability receiving proposal](dispatch-accountability-receiving.md)
-preserves #11674's incumbent 26 rows and all original alternatives; review,
-actual amendment/readback and separate source retirement remain pending.
-Explicit owner OPEN conditions and all other gaps remain. One excluded
-arrival leaves 869 whole open, 140 above target.
+vote. The [five-case accountability receiving](dispatch-accountability-receiving.md)
+landed after reviewed proposal #12443: actual #11674 preserves its incumbent
+26 rows and all original alternatives, adding five unchecked rows. The
+separate #11745 retirement is verified `NOT_PLANNED`, not technical completion.
+Explicit owner OPEN conditions and all other gaps remain. The subsequent
+complete census is 868 whole open, 139 above target.
 
 The [monitor-goals and decline-source study](journal/2026/11.13-monitor-goals-and-decline-source-completions.md)
 retains seventeen whole unions and #11534's unavailable original edit.
@@ -3426,11 +3427,13 @@ sources, transferring owners or turning partial/planning gains into completion.
 The [loader/report and receiving audit](journal/2026/11.13-loader-report-source-and-accountability-proposal.md)
 verifies 25 actual source blobs among 29 qualified files, source-owner
 execution grades, current delivery/role/check metadata and exact two
-acknowledgments/terminal states. The proposal's reverse-replay proof preserves
-every incumbent section/checkbox and replaces only eight numeric bytes
-besides one new lane. Planned receiving earns no public amendment, tracking
-retirement or technical credit; historical unknown classifications are not
-silently promoted into current source holds.
+acknowledgments/terminal states. After #12443 merged, complete actual receiving
+readback matched the reviewed addition: every incumbent section/checkbox is
+preserved, with only eight numeric bytes replaced besides one new lane.
+#11674 remains OPEN with 31 unchecked rows, 35 cases and eight lanes; #11745's
+separate public explanation and `CLOSED` / `NOT_PLANNED` readback establish
+tracking retirement, not technical credit or resource release. Historical
+unknown classifications are not silently promoted into current source holds.
 
 The [monitor/decline audit](journal/2026/11.13-monitor-goals-and-decline-source-completions.md)
 verifies four finite completions against whole originals, direct source,

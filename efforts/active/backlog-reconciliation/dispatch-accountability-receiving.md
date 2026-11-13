@@ -2,6 +2,27 @@
 
 Back to [Backlog Reconciliation](README.md).
 
+## Accepted tracking effect
+
+The proposal below cleared review and merged in #12443 as `01d644b248`.
+Fresh complete source/receiver metadata, originals/discussions and collaborator
+qualification preceded publication. The actual #11674 body was read in full
+and matched the reviewed addition: all seven incumbent sections and 26
+checkbox rows/states remain unchanged, with the five-row section below and
+eight replaced numeric bytes. The actual receiver remains OPEN with
+**eight lanes, 31 unchecked rows and 35 cases**.
+
+Only after that direct acceptance, the
+[source-specific explanation](https://github.com/ThomasMichon/copilot-extensions/issues/11745#issuecomment-6855517334)
+was published and #11745 was separately verified `CLOSED` / `NOT_PLANNED`,
+with its original unchanged. This retires redundant tracking, not any of
+the five technical obligations. No passing result, implementer appointment,
+claim/resource release or installed/live acceptance is asserted.
+
+The following proposal and publication sequence are retained as the reviewed
+historical contract; they are no longer pending issue effects. See the
+[completion journal](journal/2026/11.13-loader-report-source-and-accountability-proposal.md#actual-receiving-and-separate-tracking-retirement).
+
 ## Proposed route and effect boundary
 
 Add #11745's complete five-case contract to the existing OPEN #11674

@@ -220,6 +220,13 @@ merged plan does not establish running adoption.
       reassignment, session exit and a later task episode without guessed stamps.
 - [ ] Actual session conclusion and workspace disposition are verified
       separately from task abandonment. Live use and genuine obligations hold.
+      The [isolated original-owner composition](journal/2026/11.12-receiver-delivery.md#isolated-original-owner-composition)
+      proves the positive native/workspace path with real component processes
+      and a synthetic source/ACP actor. Its
+      [dirty-work companion](journal/2026/11.12-receiver-delivery.md#isolated-dirty-work-preservation)
+      proves actual readiness refusal while the original bound claim, checkout
+      bytes and open native hold survive. Foreign/live-use obligations, other
+      owner states and production qualification remain open.
 - [ ] Exercise current/prior receiver compatibility and declared rollback;
       unsupported peers refuse new effects without breaking existing operations.
 
