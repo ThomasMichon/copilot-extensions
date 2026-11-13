@@ -5,7 +5,6 @@ from __future__ import annotations
 import ctypes as c
 import json
 import os
-import re
 import struct
 import subprocess
 import sys
@@ -14,6 +13,7 @@ import pytest
 from agent_procutil import no_window_kwargs
 from agent_procutil._daemon_instance_identity import birth_identity
 from zdd.private_protocol import PrivateIPCError
+from .owner_section_security import assert_private_section
 
 from agent_mcp import owner_section as section
 from agent_mcp.owner_section_native import SECTION_BYTES, SectionNative
@@ -77,29 +77,9 @@ native_windows = pytest.mark.skipif(sys.platform != "win32", reason="native Wind
 
 @native_windows
 def test_section_has_a_protected_current_user_only_dacl() -> None:
-    from zdd.private_windows_native import DWORD, HANDLE, PTR
-
     api = SectionNative()
-    query = api.a.GetSecurityInfo
-    query.argtypes = [HANDLE, DWORD, DWORD] + [c.POINTER(PTR)] * 5
-    query.restype = DWORD
-    convert = api.a.ConvertSecurityDescriptorToStringSecurityDescriptorW
-    convert.argtypes = [PTR, DWORD, DWORD, c.POINTER(PTR), c.POINTER(DWORD)]
-    convert.restype = c.c_int32
     with section.OwnerSection() as writer:
-        descriptor, text = PTR(), PTR()
-        assert query(writer._mapping, 6, 5, None, None, None, None, c.byref(descriptor)) == 0
-        try:
-            api.require(convert(descriptor, 1, 5, c.byref(text), None))
-            sid = api.current_sid()
-            assert re.fullmatch(
-                re.escape("O:" + sid + "D:P(A;;") + r"[^;]+" + re.escape(";;;" + sid + ")"),
-                c.wstring_at(text),
-            ) is not None
-        finally:
-            if text:
-                api.free(text)
-            api.free(descriptor)
+        assert_private_section(api, writer._mapping)
 
 
 @native_windows

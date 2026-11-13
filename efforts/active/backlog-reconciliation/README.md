@@ -342,6 +342,13 @@ the non-public approval conversation.
 
 ## Plan
 
+The [lifetime and receiving-boundary study](journal/2026/11.12-lifetime-and-current-receiving-boundaries.md)
+retains 82 requirement/admission groups, fourteen whole unfinished outcomes
+and four whole-source provenance gaps. Changed Fleet V2 ROOT and Dispatch
+manifest blobs do not qualify current receiving or Main equivalence. Actual
+excluded-source rendering is recorded as a failure, not retroactive admission.
+The dated complete queue remains 904 open, with no closure credit.
+
 The [claim-kind and eighteen-contract study](journal/2026/11.12-claim-kind-credit-and-current-contracts.md)
 retains 83 requirement/admission groups, fourteen whole unfinished outcomes
 and four whole-source provenance gaps. #5963's fixed `derived` admission is
@@ -3256,6 +3263,13 @@ sources, transferring owners or turning partial/planning gains into completion.
   normal publication flow.
 
 ## Validation Plan
+
+The [lifetime and receiving audit](journal/2026/11.12-lifetime-and-current-receiving-boundaries.md)
+preserves complete original unions, literal alternatives, source-specific
+global Validation and existing custodians. Four whole-original holds and the
+scaffold-source hold remain; inadvertently rendered excluded fragments supply
+no map, credit or disposition. Selected-blob differences and partial source
+delivery are not whole receiving, native/installed or completion evidence.
 
 The [current-contract audit](journal/2026/11.12-claim-kind-credit-and-current-contracts.md)
 records whole originals/discussions, source-range versus whole-ROOT coverage,
