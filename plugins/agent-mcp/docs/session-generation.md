@@ -657,8 +657,10 @@ and constructs only the explicitly selected literal local entries. Every
 selected entry must be eligible; partial selection refuses. The core retains
 its argument, repository-policy, original child, Job, streams, wait and cleanup
 owners. Publication uses the actual suspended native child's creation handle,
-PID and birth, never the receiving coordinator. Only the section's read handle
-is explicitly inherited. Authentication-wait execution, existing additional
+PID and birth, never the receiving coordinator. The explicit inherited list
+contains the section's read handle and one synchronization-only namespace
+reservation handle; neither grants configuration-write authority.
+Authentication-wait execution, existing additional
 MCP overlays, literal delimiters, scripts and forwarding client launchers are
 not admitted by this opt-in path. Ordinary headed and MCP callers are unchanged.
 
@@ -667,10 +669,31 @@ named pipe, not argv, environment or a newly persisted plaintext overlay.
 Its protected DACL admits the current user, remote clients are rejected, and
 the connected reader must match the pinned original native creation identity
 before any JSON bytes are sent. A different same-user process receives no
-configuration. The existing overlapped-I/O owner supplies one 15-second
+configuration. Before native creation, an occupied protected instance reserves
+the name and a second instance supplies the actual configuration stream.
+The native client explicitly inherits a synchronization-only reference to the
+occupied reservation. The publisher closes all its reservation handles after
+the actual suspended creation inherits that reference. Closing the separate
+writer therefore supplies EOF without releasing the name; even failed or
+cancelled transfer and parent cleanup cannot free it while the native owner
+retains its reference. The OS releases that final reservation on native exit.
+No configuration passes through the reservation, and no second listener worker
+or new lifetime supervisor is introduced.
+
+The shared native listener keeps its existing one-instance, first-instance
+defaults; this explicit owner alone selects two bounded instances and an
+additional instance of its already-protected name. Invalid/unlimited counts
+and non-boolean selection refuse before native effects. Its focused controls
+run with `python tools/run-plugin-tests.py zdd --test-file
+tests/test_private_windows.py -k "explicit_dacl_and_native_listener_flags or
+invalid_listener_reservation"`.
+
+The existing overlapped-I/O owner supplies one 15-second
 cancellable transfer deadline and a 1 MiB maximum. The one-use worker closes
-its own pipe and duplicated process reference; no listener or supervisor is
-left running. A failed transfer immediately emits one fixed, redacted diagnostic
+its own connected pipe and duplicated process reference, retaining its channel
+if either native release fails so the outer typed receipt can retry those exact
+handles. No worker survives the transfer. A failed transfer immediately emits
+one fixed, redacted diagnostic
 without cancelling the original native wait or taking over Job cleanup.
 Both resource finalizers are attempted. An already-active native cleanup or
 cancellation exception remains the primary exception; its optional
@@ -686,7 +709,11 @@ MCP provider. It requires the same native child PID/birth at physical MCP
 startup, one initialization, preserved provider context, original Host
 attachment/termination and exact fixture settlement. Separate native controls
 check raw file consumption and a wrong-reader refusal with zero transferred
-bytes. These are source tests, not installed reattachment, package replacement,
+bytes. Two native lifetime controls keep the protected name unavailable for
+replacement both before a delayed open and after successful consumption, then
+require its release only after original-owner settlement, with every publisher
+reservation handle already closed. These are source tests, not installed
+reattachment, package replacement,
 seed-prompt completion, default caller adoption or full Windows handover.
 They require explicit `COPILOT_NATIVE_TEST_EXECUTABLE`,
 `COPILOT_DRIVER_HEADED_MUX_E2E=1` and `PSMUX_TEST_BIN` selection through the

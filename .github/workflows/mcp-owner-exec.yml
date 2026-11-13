@@ -13,6 +13,9 @@ on:
       - "libs/copilot-driver-core/src/agent_remote_driver/headed/native_handoff.py"
       - "libs/copilot-driver-core/src/agent_remote_driver/session_host/bundle.py"
       - "libs/copilot-driver-core/src/agent_remote_driver/session_host/launcher.py"
+      - "libs/zdd/src/zdd/private_windows_native.py"
+      - "libs/zdd/tests/test_private_windows.py"
+      - "tools/plugin_test_selection.py"
       - "plugins/agent-remote-driver/tests/test_headed_native_handoff.py"
       - "plugins/agent-remote-driver/tests/test_headed_launcher.py"
       - "plugins/agent-remote-driver/tests/test_session_host_core.py"
@@ -97,6 +100,11 @@ jobs:
         run: >-
           python tools/run-plugin-tests.py agent-procutil
           --test-file tests/test_strict_job_spawn.py -k suspended_handoff
+      - name: Preserve default private listener and bounded reservation flags
+        run: >-
+          python tools/run-plugin-tests.py zdd
+          --test-file tests/test_private_windows.py
+          -k "explicit_dacl_and_native_listener_flags or invalid_listener_reservation"
       - name: Exercise actual exec identity and anonymous overlay in containment
         run: >-
           python tools/run-plugin-tests.py agent-mcp
@@ -212,6 +220,11 @@ jobs:
         run: >-
           python tools/run-plugin-tests.py agent-procutil
           --test-file tests/test_strict_job_spawn.py -k suspended_handoff
+      - name: Preserve default private listener and bounded reservation flags
+        run: >-
+          python tools/run-plugin-tests.py zdd
+          --test-file tests/test_private_windows.py
+          -k "explicit_dacl_and_native_listener_flags or invalid_listener_reservation"
       - name: Exercise native publication, snapshots and pre-effect Windows entry
         run: >-
           python tools/run-plugin-tests.py agent-mcp

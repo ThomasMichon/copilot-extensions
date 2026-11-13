@@ -19,6 +19,14 @@ _DIGEST = re.compile(r"[0-9a-f]{64}")
 _SHA = re.compile(r"[0-9a-f]{40}")
 _PACKET = "tools/promotion_unit_tests/"
 BUILD_SOURCE_DATA: frozenset[str] = frozenset({
+    "libs/agent-procutil/src/agent_procutil/daemon_instance_runtime.pyz",
+    "libs/agent-procutil/src/agent_procutil/daemon_instances.ps1",
+    "libs/agent-procutil/src/agent_procutil/daemon_instances.sh",
+    "libs/agent-procutil/src/agent_procutil/native_daemon.ps1",
+    "libs/agent-procutil/src/agent_procutil/native_daemon.sh",
+    "libs/agent-procutil/src/agent_procutil/native_owned.ps1",
+    "libs/agent-procutil/src/agent_procutil/native_owned.sh",
+    "libs/agent-procutil/src/agent_procutil/windows_broker_task.ps1",
     "libs/payload-invocation/python-catalog-inputs.json",
     "libs/payload-invocation/templates/catalog-multi-posix.tmpl",
     "libs/payload-invocation/templates/catalog-multi-powershell.tmpl",
@@ -31,6 +39,8 @@ BUILD_SOURCE_DATA: frozenset[str] = frozenset({
     "libs/payload-invocation/templates/dispatcher-powershell.tmpl",
     "libs/payload-invocation/templates/posix-shim.tmpl",
     "libs/payload-invocation/templates/powershell-shim.tmpl",
+    "libs/versioned-runtime/versioned_runtime_native.ps1",
+    "tools/manager_application_provider.json",
 })
 
 

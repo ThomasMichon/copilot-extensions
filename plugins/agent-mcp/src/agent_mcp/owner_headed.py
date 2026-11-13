@@ -101,7 +101,9 @@ async def run_headed(child_argv: list[str], *, configuration: dict, names: list[
 
         result = await run_native(
             [*child_argv, "--additional-mcp-config", "@" + transfer.path],
-            native_handoff=WindowsNativeHandoff(publish, (section.inherited_handle,)),
+            native_handoff=WindowsNativeHandoff(
+                publish, (section.inherited_handle, transfer.inherited_handle),
+            ),
             **kwargs,
         )
         if worker is not None:

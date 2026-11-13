@@ -2,6 +2,7 @@
 
 import asyncio
 import copy
+import ctypes
 import json
 import os
 from pathlib import Path
@@ -18,6 +19,7 @@ from agent_procutil import no_window_kwargs
 from agent_mcp import owner_headed, owner_headed_bundle, owner_overlay_pipe
 from agent_remote_driver.headed import launcher
 from agent_remote_driver.session_host.launcher import main as host_main
+from zdd.private_protocol import PrivateIPCError, Refusal
 
 
 def _entry():
@@ -42,7 +44,7 @@ async def test_selected_producer_publishes_actual_child_and_preserves_original_w
 
     monkeypatch.setattr(sections, "OwnerSection", lambda: section)
     transferred = []
-    transfer = Mock(path=r"\\.\pipe\fixture")
+    transfer = Mock(path=r"\\.\pipe\fixture", inherited_handle=88)
     def send():
         transferred.append(True)
         if outcome != "success":
@@ -63,7 +65,7 @@ async def test_selected_producer_publishes_actual_child_and_preserves_original_w
         assert not transferred
         assert "not-in-the-client-command" not in repr(argv)
         assert argv[-2:] == ["--additional-mcp-config", "@" + transfer.path]
-        assert native_handoff.inherited_handles == (77,)
+        assert native_handoff.inherited_handles == (77, 88)
         native_handoff.on_suspended(child)
         section.publish.assert_called_once_with(900, 1234)
         transfer.bind.assert_called_once_with(900, 1234)
@@ -107,7 +109,7 @@ async def test_transfer_failure_is_redacted_before_original_native_wait_finishes
     monkeypatch.setattr(owner_headed, "os", SimpleNamespace(name="nt"))
     section = Mock(binding="a" * 64, inherited_handle=77)
     monkeypatch.setattr(sections, "OwnerSection", lambda: section)
-    transfer = Mock(path=r"\\.\pipe\fixture")
+    transfer = Mock(path=r"\\.\pipe\fixture", inherited_handle=88)
     transfer.send.side_effect = OSError("sensitive-fixture-error")
     monkeypatch.setattr(owner_overlay_pipe, "OverlayPipe", lambda overlay: transfer)
     reported, release = asyncio.Event(), asyncio.Event()
@@ -253,3 +255,70 @@ async def test_native_mux_cleanup_requires_identity_or_confirmed_absence(monkeyp
         with pytest.raises(AssertionError):
             await _settle_mux(mux, "original")
     assert not any(call.args[0] == "kill-session" for call in query.call_args_list)
+
+
+@pytest.mark.parametrize("failed_handle", [11, 22], ids=["pipe-close", "process-close"])
+def test_transferred_channel_retains_each_failed_handle_for_exact_retry(monkeypatch, failed_handle):
+    closed = []
+    listeners = iter([13, 11])
+    failed = False
+
+    def close(handle):
+        nonlocal failed
+        if handle is None:
+            return
+        closed.append(handle)
+        if handle == failed_handle and not failed:
+            failed = True
+            raise PrivateIPCError(Refusal.IO)
+
+    def duplicate(_current, handle, _target, result, access, inherit, options):
+        assert (handle, access, inherit, options) == (13, 0x100000, True, 0)
+        ctypes.cast(result, ctypes.POINTER(ctypes.c_void_p)).contents.value = 12
+        return True
+
+    api = SimpleNamespace(
+        listener=lambda *args, **kwargs: next(listeners),
+        duplicate_process=lambda *args: 22,
+        identity=lambda handle, pid: SimpleNamespace(pid=pid, principal="fixture"),
+        current_sid=lambda: "fixture", alive=lambda handle: None,
+        peer_pid=lambda *args, **kwargs: 42, close=close,
+        k=SimpleNamespace(
+            GetCurrentProcess=lambda: 1, DuplicateHandle=duplicate,
+            CreateFileW=lambda *args: 14,
+        ),
+    )
+    monkeypatch.setattr(owner_overlay_pipe, "Native", lambda: api)
+    monkeypatch.setattr(
+        owner_overlay_pipe.WindowsChannel, "_io",
+        lambda self, kind, buffer, count, deadline: count,
+    )
+    transfer = owner_overlay_pipe.OverlayPipe({"synthetic": "configuration"})
+    transfer.bind(900, 42)
+    with pytest.raises(PrivateIPCError):
+        transfer.send()
+    assert transfer._channel is not None
+    assert failed_handle in (transfer._channel._pipe, transfer._channel._process)
+    transfer.close()
+    assert closed.count(failed_handle) == 2
+    assert set(closed) == {11, 12, 13, 14, 22}
+    assert transfer._channel is None and transfer._process is None
+
+
+def test_partial_reservation_preparation_retains_failed_release_for_retry(monkeypatch):
+    from agent_procutil.owned_process import OwnedCleanupError
+
+    api = SimpleNamespace(
+        listener=Mock(side_effect=[13, PrivateIPCError(Refusal.IO)]),
+        k=SimpleNamespace(CreateFileW=lambda *args: 14),
+        close=Mock(side_effect=[PrivateIPCError(Refusal.IO), None, None]),
+    )
+    monkeypatch.setattr(owner_overlay_pipe, "Native", lambda: api)
+    with pytest.raises(OwnedCleanupError) as failed:
+        owner_overlay_pipe.OverlayPipe({"synthetic": "not-published"})
+    name, transfer = failed.value.cleanup_resources[0]
+    assert name == "configuration-transfer" and transfer._fence == 13
+    assert [call.args[0] for call in api.close.call_args_list] == [13, 14]
+    failed.value.retry_cleanup(deadline=time.monotonic() + 1)
+    assert transfer._fence is None
+    assert [call.args[0] for call in api.close.call_args_list] == [13, 14, 13]

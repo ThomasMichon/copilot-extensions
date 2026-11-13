@@ -15,6 +15,7 @@ from agent_procutil import no_window_kwargs, spawn_sync_in_kill_on_close_job
 from agent_mcp.owner_overlay_pipe import OverlayPipe
 from agent_mcp.owner_headed_bundle import prepare_headed_command
 from zdd.private_protocol import PrivateIPCError, Refusal
+from zdd.private_windows_native import Native
 
 pytestmark = [
     pytest.mark.portfolio_tier("T3"),
@@ -42,6 +43,12 @@ async def _settle_mux(mux, identity):
     pytest.fail("Exact fixture mux settlement remains unconfirmed")
 
 
+def _inherit(transfer):
+    startup = subprocess.STARTUPINFO()
+    startup.lpAttributeList = {"handle_list": [transfer.inherited_handle]}
+    return startup
+
+
 def test_native_file_reader_receives_private_overlay_and_exact_creation_identity(tmp_path):
     configuration = {"mcpServers": {"chosen": {"env": {"SYNTHETIC": "private-fixture"}}}}
     transfer = OverlayPipe(configuration)
@@ -53,6 +60,7 @@ def test_native_file_reader_receives_private_overlay_and_exact_creation_identity
              "Path(sys.argv[1]).read_bytes())),flush=True)", transfer.path],
             require_job=True, allow_breakaway=False,
             on_suspended=lambda process: transfer.bind(int(process._handle), process.pid),
+            startupinfo=_inherit(transfer), close_fds=True,
             stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             **no_window_kwargs(),
         )
@@ -61,13 +69,13 @@ def test_native_file_reader_receives_private_overlay_and_exact_creation_identity
         assert child.returncode == 0, error
         assert json.loads(output) == configuration
     finally:
-        transfer.close()
         if job is not None:
             job.terminate_and_wait(5)
         if child is not None:
             child.wait(timeout=5)
             child.stdout.close()
             child.stderr.close()
+        transfer.close()
 
 
 def test_wrong_native_reader_cannot_receive_overlay_bytes():
@@ -78,6 +86,7 @@ def test_wrong_native_reader_cannot_receive_overlay_bytes():
             [sys._base_executable, "-I", "-S", "-c", "import sys;sys.stdin.buffer.read()"],
             require_job=True, allow_breakaway=False,
             on_suspended=lambda process: transfer.bind(int(process._handle), process.pid),
+            startupinfo=_inherit(transfer), close_fds=True,
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             **no_window_kwargs(),
         )
@@ -94,18 +103,74 @@ def test_wrong_native_reader_cannot_receive_overlay_bytes():
         with pytest.raises(PrivateIPCError) as refused:
             transfer.send()
         assert refused.value.reason == Refusal.IDENTITY
-        output, _error = other.communicate(timeout=10)
-        assert output == b""
         expected.communicate(timeout=10)
         assert expected.returncode == 0
-    finally:
         transfer.close()
+        output, _error = other.communicate(timeout=10)
+        assert output == b""
+    finally:
         for process, job in owners:
             job.terminate_and_wait(5)
             process.wait(timeout=5)
             for stream in (process.stdin, process.stdout, process.stderr):
                 if stream is not None:
                     stream.close()
+        transfer.close()
+
+
+@pytest.mark.parametrize("delivered", [False, True], ids=["cancel-before-open", "consumed-overlay"])
+def test_pipe_name_is_reserved_until_original_native_owner_settles(delivered):
+    transfer = OverlayPipe({"synthetic": "private-configuration"})
+    child, job = None, None
+    api = Native()
+    replacement = None
+    try:
+        script = (
+            "import sys;from pathlib import Path;"
+            + (
+                "print(Path(sys.argv[1]).read_text(),flush=True);"
+                if delivered else "print('waiting',flush=True);"
+            )
+            + "sys.stdin.buffer.read()"
+        )
+        child, job = spawn_sync_in_kill_on_close_job(
+            [sys._base_executable, "-I", "-S", "-c", script, transfer.path],
+            require_job=True, allow_breakaway=False,
+            on_suspended=lambda process: transfer.bind(int(process._handle), process.pid),
+            startupinfo=_inherit(transfer), close_fds=True,
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            **no_window_kwargs(),
+        )
+        if delivered:
+            transfer.send()
+            assert json.loads(child.stdout.readline()) == {"synthetic": "private-configuration"}
+        else:
+            transfer.cancel()
+            with pytest.raises(PrivateIPCError) as refused:
+                transfer.send()
+            assert refused.value.reason == Refusal.CANCELLED
+            assert child.stdout.readline().strip() == b"waiting"
+        assert child.poll() is None
+        with pytest.raises(PrivateIPCError):
+            replacement = api.listener(transfer.path)
+        transfer.close()
+        with pytest.raises(PrivateIPCError):
+            replacement = api.listener(transfer.path)
+        child.communicate(timeout=10)
+        assert child.returncode == 0
+        transfer.close()
+        replacement = api.listener(transfer.path)
+    finally:
+        if job is not None:
+            job.terminate_and_wait(5)
+        if child is not None:
+            child.wait(timeout=5)
+            for stream in (child.stdin, child.stdout, child.stderr):
+                if stream is not None:
+                    stream.close()
+        transfer.close()
+        if replacement is not None:
+            api.close(replacement)
 
 
 @pytest.mark.asyncio
