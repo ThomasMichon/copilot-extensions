@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import ctypes as c
 import json
-import re
 from pathlib import Path
 import shutil
 import sys
@@ -13,6 +12,7 @@ import sys
 import pytest
 from agent_procutil import no_window_kwargs
 from agent_procutil._interpreter import physical_executable
+from .owner_section_security import assert_private_section
 
 from agent_mcp import owner_snapshot
 from agent_mcp.owner_section_native import SectionNative
@@ -27,29 +27,6 @@ SCRIPTS = SOURCE.resolve().parents[3] / "agent-worktrees" / "scripts"
 
 def _literal(value):
     return "'" + str(value).replace("'", "''") + "'"
-
-
-def _protected_dacl(native, mapping):
-    pointer, integer = c.c_void_p, c.c_uint32
-    query = native.a.GetSecurityInfo
-    query.argtypes = [pointer, integer, integer] + [c.POINTER(pointer)] * 5
-    query.restype = integer
-    convert = native.a.ConvertSecurityDescriptorToStringSecurityDescriptorW
-    convert.argtypes = [pointer, integer, integer, c.POINTER(pointer), c.POINTER(integer)]
-    convert.restype = c.c_int32
-    descriptor, text = pointer(), pointer()
-    assert query(mapping, 6, 5, None, None, None, None, c.byref(descriptor)) == 0
-    try:
-        native.require(convert(descriptor, 1, 5, c.byref(text), None))
-        sid = native.current_sid()
-        assert re.fullmatch(
-            re.escape("O:" + sid + "D:P(A;;") + r"[^;]+" + re.escape(";;;" + sid + ")"),
-            c.wstring_at(text),
-        ) is not None
-    finally:
-        if text:
-            native.free(text)
-        native.free(descriptor)
 
 
 def test_snapshot_decodes_without_an_installed_runtime(tmp_path):
@@ -161,7 +138,7 @@ async def test_native_publisher_exit_then_anonymous_snapshot(tmp_path, retained)
                 0x20004, False, owner_snapshot.section_name(receipt["binding"]),
             ))
             try:
-                _protected_dacl(native, mapping)
+                assert_private_section(native, mapping)
             finally:
                 native.close(mapping)
         # The publisher process is gone before the child can inspect the bytes.

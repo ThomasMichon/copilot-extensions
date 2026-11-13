@@ -32,6 +32,7 @@ on:
       - "plugins/agent-mcp/tests/test_owner_entry.py"
       - "plugins/agent-mcp/tests/test_owner_section.py"
       - "plugins/agent-mcp/tests/test_owner_snapshot.py"
+      - "plugins/agent-mcp/tests/owner_section_security.py"
       - "plugins/agent-mcp/tests/test_custody_host.py"
       - "plugins/agent-mcp/tests/test_custody_conduit.py"
       - "plugins/agent-mcp/tests/test_custody_launch.py"
