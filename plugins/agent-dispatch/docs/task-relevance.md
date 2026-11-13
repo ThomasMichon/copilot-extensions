@@ -139,9 +139,10 @@ does not release reservations or delete files.
 
 ## Original-claim readiness
 
-The internal queue provider `prepare_relevance_closeout` prepares settlement
-of the captured original task relationship. It has no HTTP/CLI route or automatic
-caller yet. A caller identifies the accepted closeout request, worker, native
+The queue provider `prepare_relevance_closeout` prepares settlement
+of the captured original task relationship. The conditional HTTP provider below
+exposes it; no CLI or automatic caller adopts it yet.
+A caller identifies the accepted closeout request, worker, native
 and generation; it cannot supply a readiness observation.
 
 The provider reads the captured relationship and exact execution reservation,
@@ -207,10 +208,65 @@ while the existing current-closeout view exposes this later observation.
 
 This receiver does not finalize a workspace, retire a native, release a
 reservation or delete a checkout. Those effects remain with the actual worker
-and existing conclusion owners. It has no new HTTP/CLI route or automatic caller.
+and existing conclusion owners. Its HTTP provider does not enable an automatic caller.
 Unsupported Worktrees observation retains custody, not an abandon fallback;
 baseline operations and prior readers remain unchanged. Caller migration,
 session conclusion and running qualification remain open.
+
+## Original-owner HTTP provider
+
+The serving coordinator advertises additive
+`/health.task_relevance.owner_closeout` metadata:
+`protocol: task_relevance_closeout/v1`, `supported_versions: [1]`, and
+`path: /tasks/{task_id}/relevance-closeout`. This is receiver support, not
+proof that any worker, Worktrees runtime or native conclusion owner adopted it.
+
+The existing coordinator authentication boundary protects three operations:
+
+| Method and suffix | Result |
+|---|---|
+| `GET` with no suffix | Current validated captured closeout, including readiness and acknowledgement |
+| `POST /prepare` | Independent readiness and exact original-claim settlement; task/native stay retained |
+| `POST /finish` | Independent finalized observation and existing terminal transition |
+
+Both POST bodies strictly require `version: 1`, `request_id`, `worker_id`,
+`native_id` and `expected_generation`. They accept no caller-supplied proof.
+Responses use `{protocol, version: 1, result}`; prepare returns the queue's
+readiness/relationship result and finish returns its task view. Both writes
+participate in the existing drain gate; the shared terminal hook releases a
+handoff claim and emits the event only for a new transition, not an exact replay.
+The existing active-route middleware still applies.
+
+A task-scoped token must match the accepted closeout's original task, worker,
+native and generation and remain unexpired under the current coordinator fence.
+The provider also validates current resource custody, or the exact committed
+acknowledgement for a terminal retry. An accepted owner may therefore inspect
+and finish its same-generation unassigned or submitted closeout without gaining
+generic task authority. Other task reads, grant minting and lifecycle mutations
+retain their existing held/current-owner rules. A scoped header never falls
+back to a supplied shared bearer when it is invalid. The existing trusted
+data/control bearer policy is unchanged; those callers must still supply the
+captured tuple and satisfy the queue's conditional checks.
+
+Read the closeout before preparation: a committed acknowledgement means finish
+can be retried without another observation or terminal event; do not prepare
+or finalize again. Otherwise prepare and confirm the original claim is closed,
+then the original worker must finalize its own workspace before finish.
+Preparation alone is not finalization. An expired token after unassignment or
+terminal acknowledgement needs recovery through the existing trusted owner;
+this provider does not mint a new grant or revive old authority.
+
+This is the provider-expansion phase. Existing callers, source-control relevance
+routes and generic administrative abandon retain their semantics. A future
+caller must discover support from the running coordinator before effects.
+Trusted callers can use the health descriptor. A task-only caller can read its
+own closeout and validate the response's protocol/version; this read does not
+grant global health access and a legacy receiver returns unsupported/not found.
+Missing, malformed or unsupported metadata, including provider
+rollback, means closeout is unsupported before effects; no effectful probe or
+fallback to generic abandonment is equivalent. No old surface is retired.
+Worker finalization integration, native conclusion and running qualification
+remain tracked by the [active effort](../../../efforts/active/task-relevance-reconciliation/README.md).
 
 ## Registered receiver and compatibility
 
