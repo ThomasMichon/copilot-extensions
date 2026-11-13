@@ -262,7 +262,7 @@ def test_installer_runtime_optional_owner_preserves_required_census(repair_fixtu
 
 
 def test_readiness_probe_names_selected_project_outside_payload(repair_fixture, monkeypatch):
-    home, project, payload, _, _ = repair_fixture
+    home, project, _, _, _ = repair_fixture
     calls = []
 
     def capture(argv, *, cwd, environment, **_):
@@ -280,7 +280,7 @@ def test_readiness_probe_names_selected_project_outside_payload(repair_fixture, 
     assert plan["requiredSatisfied"]
     assert calls
     for cwd, environment in calls:
-        assert Path(cwd) == payload
+        assert Path(cwd) == project.resolve()
         assert Path(environment["COPILOT_PROJECT_DIR"]) == project.resolve()
 
 

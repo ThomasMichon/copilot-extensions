@@ -884,8 +884,8 @@
       "sha256": "b5ea92049705890fe244b494af00955592e56337a71d981a24d419f25a34f0dc"
     },
     "libs/config-migrate/src/config_migrate/core.py": {
-      "blob": "71a1eebeab44e07803d22b53b0ec51e70b8dec47",
-      "sha256": "21be8af84f1f29de6afef1d31a9170217519391a9c5f1230f1c7d407881dda49"
+      "blob": "cb4139667c0db1c04f6b33f7bd32182ce5fefb42",
+      "sha256": "8a5508349841ca74c0ec5d94c182539c9ca80c23f02dde0ed8bc1ffe773570e7"
     },
     "libs/config-migrate/src/config_migrate/registry.py": {
       "blob": "dc7fc9072e33842cc66e3018b6b8cb4d8d10499b",
@@ -5596,8 +5596,8 @@
       "sha256": "dce2487402992fb567391523d5c30e1e4a86fd22a9f28e71282404c47d01a0bb"
     },
     "plugins/agent-worktrees/src/agent_worktrees/installer.py": {
-      "blob": "63567de7c5fbda1fb7021ff8d5db6cc371841584",
-      "sha256": "9af3f3604add906dec5e13a4aded7d1389e3b50bf73d6302fd306774fca787a0"
+      "blob": "f08afea0220e5fe197023dbc0230ac5f3d167231",
+      "sha256": "966024b2cf8f70daaee7f63c4a3d8e6f7f0f2fb27a38661e4e086865a40aa473"
     },
     "plugins/agent-worktrees/src/agent_worktrees/installer_binstub_io.py": {
       "blob": "07f891262e276763d93e6f06ee3c595133c2f857",
@@ -7144,8 +7144,8 @@
       "sha256": "bd937cf1b4c6f2826fadb623b9fe05e7d30ece5f8e1f4f982910fc01ea108bf0"
     },
     "plugins/agent-worktrees/src/agent_worktrees/session_shell.py": {
-      "blob": "419d1e787cdd90b902b115f9a964a5b70391ac68",
-      "sha256": "4771bd04f31241421027e9f8fd373bab7d04e0143e3d2226287c5f1922eb5bc2"
+      "blob": "62bc79d7f77d3811bd5d9f0be8b48e65d5816ff8",
+      "sha256": "6f2ae40442e964e38e2c27b6a2beafae11f59e584f0a19bceecfddc3872aab01"
     },
     "plugins/agent-worktrees/src/agent_worktrees/session_tail.py": {
       "blob": "679d85fd4807b8a590d5af0291d043c56af28bd3",
@@ -8160,8 +8160,8 @@
       "sha256": "c597e52611ce61126d73189c758ed350c46f87d32c129a3d7d1d2e7afc9f943f"
     },
     "tools/plugin_runtime_resources.py": {
-      "blob": "8f12ffd52f2f3e42713b61d92f23ce336c02a0c4",
-      "sha256": "b2bd74e55727acc2ed14189e804eca3e11781ed0a35abc96bcbfb61015d35ed6"
+      "blob": "a92a4a69c6aba9956085332ccd7fc28abc4341fe",
+      "sha256": "d482aac96d322de7529a2d3585bcbc47edc3da3ce3ff72e399529dc91a17c773"
     },
     "tools/plugin_test_cache.py": {
       "blob": "2e5089a7bfeb1111a9f370b61ae1ca44e6823719",
@@ -9384,8 +9384,8 @@
       "sha256": "471c670a77d933f4e4cc4de0b4aafb1193c7be5ca1b8fdc3991a5e70a6b6dbdd"
     },
     "tools/test_standalone_python_artifacts.py": {
-      "blob": "7d940e259accec8e86d168e4d433e3e0410a87a7",
-      "sha256": "bc28aecace7ecb440f278012e635d4f827c580bf2bb52200c1bed3f782cf87f8"
+      "blob": "1f4b008958160757a2a8196fc0a8197a9e0f6b46",
+      "sha256": "4331ff63f30c58c7a08b3de67634fec0ab8af35be89381877432f832790872b8"
     },
     "tools/test_standalone_qualification.py": {
       "blob": "6a52e8731f00304bcaf0f4d4ac2597eed4f8a1f7",
@@ -9424,8 +9424,8 @@
       "sha256": "3ddcb70a302608db431152d682d6354f8042f2bf0ed37ab86ec9d1bc1294d73e"
     },
     "tools/test_typecheck.py": {
-      "blob": "16836628df8c368b8a9cc9cb9189b3ec666ac623",
-      "sha256": "80cae4dfdabc0f96ddd580aa7b371426e58b0ada6f68aef2f5362f339b8b348f"
+      "blob": "b9de6274f68c0142c0ddb90262da389e05df83be",
+      "sha256": "c0d102646bfb5e626dc4d564e2eaf5b9779e91c48899757fa3fcf7ea779b3a41"
     },
     "tools/test_uninstall_path_candidates.py": {
       "blob": "105c1ca6c48826e655610adfc0b8cb3415a9bb9e",
@@ -9584,7 +9584,7 @@
       "sha256": "a9925c3f74fe1e6a3adf3450d58af86260ccfa52eb63ccd88b98316c02409bf9"
     }
   },
-  "execution_closure_sha256": "bb542568c6474960c5e0e892d54a34f00559a73e8404224785827031674e1d8b",
+  "execution_closure_sha256": "2fa37b5d4edf1bc1dc6cd01bc201fdc7acdb0b705a5510ddc0a34590cf2f9447",
   "runtime_binding_policy": "every-owned-interpreter-source-and-entrypoint-v1",
   "runtime_roles": [
     "observer"
@@ -9766,7 +9766,7 @@
   },
   "scope": "model-free native-send and known-session observation ASGI/journal evidence; not SDK/native qualification; membership transcripts use a virtual reader clock; separate deadline-expiry and actual SQLite VM-cutoff probes; not wall-clock read qualification; portable launch joins actual archive/policy readers, ASGI/SQLite and driver HTTP with controlled SDK, native mux, provider process, SSH, Owner, claims, forwards and POSIX-to-private-scratch namespace fixtures; not native Copilot, mux, remote authentication or installed qualification",
   "captured_from": {
-    "commit": "37662d62d2370eff7bf5e45be8e6384c55a57d27",
+    "commit": "ecd9c4520f991d1ea9b90c931a75598086c42158",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 52,
     "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",

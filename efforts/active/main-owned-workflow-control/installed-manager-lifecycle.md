@@ -3087,3 +3087,32 @@ inputs. The existing bounded Ubuntu capture owner must earn current evidence
 before the next required-CI/native acceptance sequence. Module-size,
 installation/version contracts, documentation consistency and touched-source
 lint pass; the parent and both blocking review threads remain open.
+
+Run 43348968003, attempt 1, succeeds at exact `ecd9c4520f` through the
+existing Ubuntu owner: actual writer, independent no-write replay, historical
+publication guards, canonical validator and controlled export all pass.
+The export records 403 cases and 184 outputs. Artifact 14003945919 has provider
+archive digest
+`4a628c6bc58122b4b53e7f1335cb0b479c904b074e1fd4263bf79af5fb1b5b1d`;
+the downloaded manifest independently matches the trusted export digest
+`62b046c40e775a2454e6b1f46c06c050407ff755404e980ca83063865f825514`.
+The existing adapter validates all output/source preimages and materializes
+all 184 outputs through its locked publication owner at the same frozen HEAD.
+This is refreshed compatibility evidence, not installed Windows acceptance.
+
+Current-head CI 43348842272 passes eligible units with coverage but fails
+Ruff on a duplicate Machines `projectRoot` evidence key introduced by automatic
+reconciliation. Removing the older environment-derived duplicate preserves the
+merged authoritative selected-project field. The merged project's new test
+also expects the older payload cwd; it now verifies the established isolated
+readiness project cwd and explicit `COPILOT_PROJECT_DIR`, while the separate
+installer-cwd assertions remain unchanged. All ten selected-project, digest,
+installer-preservation and compatibility controls pass in 11.83 seconds.
+Full repository F/E9 passes after the duplicate-key removal.
+
+Actual Copilot review at `ecd9c4520f` still retains both threads and requires
+native validation of the query-budget and cross-provider isolation changes.
+No current passing review, thread waiver or Windows qualification is inferred
+from the capture or unit/control results. Publish the coherent evidence and
+reconciliation fixes, then obtain actual required green CI before the one
+changed-query Windows attempt.

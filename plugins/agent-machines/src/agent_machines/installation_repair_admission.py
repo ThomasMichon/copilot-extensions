@@ -129,7 +129,6 @@ class OwnerBinding:
             ("readinessDeclarationDigest" if self.readiness_only else "payloadDigest"): self.content_digest,
             "modeDigest": self.mode_binding,
             "refusal": self.refusal,
-            "projectRoot": self.environment.get("COPILOT_PROJECT_DIR"),
         }
 
 
