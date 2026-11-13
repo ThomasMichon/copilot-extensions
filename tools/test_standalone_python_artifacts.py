@@ -62,6 +62,9 @@ def test_manager_embedded_metadata_covers_the_canonical_third_party_projection(t
             text = re.sub(r"(?m)^dbus-next = .*\n", "", text)
         target.write_text(text, encoding="utf-8")
     data = tomllib.loads((manager / "pyproject.toml").read_text(encoding="utf-8"))
+    assert not selected.keys() & {
+        canonicalize_name(Requirement(text).name) for text in data["project"]["dependencies"]
+    }, "embedded first-party packages must not also be installed into the Manager environment"
     projected, ranges = bundle_lock.collect_inputs(
         tmp_path, root_names=(data["project"]["name"],),
     )

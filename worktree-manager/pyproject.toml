@@ -17,7 +17,6 @@ authors = [{ name = "Thomas Michon" }]
 # now so the packaging/venv is validated against the real dependency, even
 # though the Phase 0 skeleton does not yet import it.
 dependencies = [
-    "agent-process-telemetry",
     "packaging>=25",
     "textual>=8.2.8",
     # Read the installer-owned catalog (data/plugins.toml). tomllib is stdlib on
