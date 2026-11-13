@@ -11,8 +11,14 @@
         "materialize_installer_engine.py",
         "installer_engine_ref.py", "materialize_launch_wrapper_assets.py",
         "launch_wrapper_assets_ref.py", "uv_editable_ref.py", "nested_uv_editable_ref.py",
-        "standalone_consumers.py"
+        "standalone_consumers.py", "application_sources.py", "python_project_inventory.py",
+        "standalone_python_artifacts.py"
       ]
+    },
+    {
+      "canonicalDir": "libs/versioned-runtime",
+      "payloadDir": "scripts/libs/versioned-runtime",
+      "files": ["standalone_build.py"]
     },
     {
       "canonicalDir": "tools",
@@ -178,6 +184,7 @@
         "agent-procutil/src/agent_procutil/owned_process.py",
         "agent-procutil/src/agent_procutil/process_retirement.py",
         "agent-procutil/src/agent_procutil/python_cache.py",
+        "agent-procutil/src/agent_procutil/python_cache_permissions.py",
         "agent-procutil/src/agent_procutil/retirement_custody.py",
         "agent-procutil/src/agent_procutil/startup.py",
         "agent-procutil/src/agent_procutil/streaming.py",

@@ -35,7 +35,27 @@ def root_binding(name: str) -> tuple[str, str]:
     return _ROOTS.get(name, (name.upper().replace("-", "_") + "_HOME", "." + name))
 
 
-def install_callbacks(name: str, *, extras=()) -> tuple[list[str] | None, list[str] | None]:
+def install_callbacks(
+    name: str, *, extras=(), metadata: dict | None = None,
+) -> tuple[list[str] | None, list[str] | None]:
+    tool = (metadata or {}).get("tool", {})
+    if not isinstance(tool, dict):
+        raise ValueError("application tool settings must be a table")
+    settings = tool.get("copilot-extensions", {})
+    if not isinstance(settings, dict):
+        raise ValueError("application settings must be a table")
+    if "application" in settings:
+        declaration = settings["application"]
+        if (
+            not isinstance(declaration, dict) or set(declaration) != {"setup", "start"}
+            or any(
+                not isinstance(declaration[key], list)
+                or any(not isinstance(argument, str) or "\0" in argument for argument in declaration[key])
+                for key in ("setup", "start")
+            )
+        ):
+            raise ValueError("application declaration requires setup and start argument lists")
+        return list(declaration["setup"]), list(declaration["start"])
     if name == "worktree-manager":
         return [], []
     if name in {"agent-mcp", "agent-worktrees", "agent-pull-requests-service"} or (

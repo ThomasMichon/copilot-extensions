@@ -10,13 +10,20 @@ OPTIONAL_CORE = {"agent-dispatch": ("mcp",), "agent-containers": ("provider-exec
 PORTABLE_EXTRA = 'sys_platform != "win32" or platform_machine != "ARM64"'
 
 
-def manifests(root: Path) -> list[Path]:
+def manifests(root: Path, *, include_declared: bool = False) -> list[Path]:
     paths = set(root.glob("*/pyproject.toml"))
     paths.update(root.glob("libs/*/pyproject.toml"))
     for directory in ("plugins", "services"):
         paths.update(
             p for p in (root / directory).rglob("pyproject.toml")
             if not {"libs", ".venv", "node_modules", "__pycache__"} & set(p.relative_to(root).parts)
+        )
+    if include_declared:
+        from application_sources import declared_projects
+
+        paths.update(
+            contained_path(directory / "pyproject.toml", root)
+            for directory in declared_projects(root).values()
         )
     return sorted(paths)
 
