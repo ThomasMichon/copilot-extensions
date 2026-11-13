@@ -225,6 +225,255 @@ def test_actual_fresh_toolkit_preview_without_installed_python_packages(tmp_path
     assert (manager / "config.toml").read_bytes() == config
 
 
+def test_positive_cold_repository_reader_uses_toolkit_declared_parser(tmp_path):
+    adopter = tmp_path / "adopter"
+    policy = adopter / ".copilot-extensions" / "config.yaml"
+    policy.parent.mkdir(parents=True)
+    policy.write_text(
+        "current_version: " + "a" * 40 + "\nlast_known_good: ['previous']\n",
+        encoding="utf-8",
+    )
+    (adopter / "setup.py").write_text("raise AssertionError('adopter code ran')", encoding="utf-8")
+    before = policy.read_bytes()
+    workspace = tmp_path / "cold"
+    workspace.mkdir()
+    script = """
+import importlib.util, json, sys
+from pathlib import Path
+toolkit = Path(sys.argv[1])
+spec = importlib.util.spec_from_file_location("cold_recovery", toolkit / "tools/recover_source.py")
+recovery = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(recovery)
+recovery.source_modules(toolkit)
+assert "yaml" not in sys.modules
+try:
+    import yaml
+except ImportError:
+    pass
+else:
+    raise AssertionError("cold interpreter unexpectedly has a YAML parser")
+value = recovery.repository_declaration(Path(sys.argv[2]), Path(sys.argv[3]))
+assert "yaml" not in sys.modules, "parser must run in its isolated child"
+print(json.dumps(value))
+"""
+    result = subprocess.run(
+        [getattr(sys, "_base_executable", sys.executable), "-I", "-S", "-B", "-c",
+         script, str(REPOSITORY), str(adopter), str(workspace)],
+        capture_output=True, text=True, timeout=150,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    observed = json.loads(result.stdout)
+    assert observed["repository_root"] == str(adopter)
+    assert observed["requested_reference"] == "a" * 40
+    assert observed["reference"] == "a" * 40
+    assert observed["fallback_reason"] is None
+    assert policy.read_bytes() == before
+    assert (workspace / "repository-parser" / "yaml" / "__init__.py").is_file()
+
+
+def repository_request(root, **changes):
+    return request(
+        version=2, repository_root=str(root) if root is not None else None,
+        selection={"mode": "repository", "commit": None, "checkout": None}, **changes,
+    )
+
+
+@pytest.mark.parametrize("changes", [
+    {"version": 1}, {"version": 3}, {"repository_root": "relative"},
+    {"operation": "install"}, {"extra": True},
+    {"selection": {"mode": "main", "commit": None, "checkout": None}},
+    {"selection": {"mode": "repository", "commit": "a" * 40, "checkout": None}},
+])
+def test_repository_request_keeps_revision_and_operation_boundaries(tmp_path, changes):
+    value = repository_request(tmp_path)
+    value.update(changes)
+    path = tmp_path / "request.json"
+    path.write_text(json.dumps(value), encoding="utf-8")
+    with pytest.raises(ValueError):
+        recovery.read_request(path)
+
+
+def test_actual_cold_repository_preview_selects_adopter_not_cwd_or_object_source(tmp_path, upstream):
+    root, older, _ = upstream
+    adopter = tmp_path / "unregistered-adopter"
+    policy = adopter / ".copilot-extensions" / "config.yaml"
+    policy.parent.mkdir(parents=True)
+    policy.write_text(
+        f"current_version: {older}\nrepository: {json.dumps(str(root))}\n"
+        "last_known_good: ['previous']\n",
+        encoding="utf-8",
+    )
+    (adopter / "setup.py").write_text("raise AssertionError('adopter code ran')", encoding="utf-8")
+    objects = tmp_path / "object-source"
+    git(tmp_path, "clone", "--quiet", str(root), str(objects))
+    git(objects, "branch", "-m", "main", "object-only")
+    foreign_policy = objects / ".copilot-extensions" / "config.yaml"
+    foreign_policy.parent.mkdir()
+    foreign_policy.write_text("current_version: must-not-select\n", encoding="utf-8")
+    manager = tmp_path / "manager"
+    manager.mkdir()
+    config = manager / "config.toml"
+    config.write_text('[source]\nrepo = "https://example.invalid/independent.git"\n', encoding="utf-8")
+    before = {path: path.read_bytes() for path in (policy, config, foreign_policy, objects / ".git/config")}
+    value = repository_request(adopter, manager_root=str(manager))
+    value["selection"]["checkout"] = str(objects)
+    path = tmp_path / "request.json"
+    path.write_text(json.dumps(value), encoding="utf-8")
+    result = subprocess.run(
+        [getattr(sys, "_base_executable", sys.executable), "-I", "-S", "-B",
+         str(REPOSITORY / "tools/recover_source.py"), "--request", str(path)],
+        cwd=objects, capture_output=True, text=True, timeout=180,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    report = json.loads(result.stdout)
+    assert report["selection"]["source_commit"] == older
+    assert report["selection"]["source_tree"] == git(root, "rev-parse", older + "^{tree}")
+    assert report["repository"] == str(root)
+    assert report["repository_policy"]["repository_root"] == str(adopter)
+    assert report["repository_policy"]["declaration"] == str(policy)
+    assert report["repository_policy"]["requested_reference"] == older
+    assert report["repository_policy"]["fallback_reason"] is None
+    assert report["stage"] == "preview" and report["effects"] == []
+    assert report["available_targets"]["future-app"] == "legacy-install-flow"
+    assert all(path.read_bytes() == content for path, content in before.items())
+    assert {item.name for item in manager.iterdir()} == {"config.toml"}
+
+
+@pytest.mark.parametrize("layout", ["unresolved", "missing", "no-declaration"])
+def test_repository_preview_reports_foundation_fallback_without_qualification(
+    tmp_path, monkeypatch, upstream, layout,
+):
+    root, _, current = upstream
+    adopter = tmp_path / "adopter"
+    if layout == "no-declaration":
+        adopter.mkdir()
+    monkeypatch.setattr(recovery, "UPSTREAM", str(root))
+    report = {}
+    value = repository_request(None if layout == "unresolved" else adopter)
+    assert recovery.recover(value, tmp_path / "work", report) == 0
+    assert report["selection"]["source_commit"] == current
+    assert report["repository_policy"]["fallback_reason"] == (
+        "selection-absent" if layout == "no-declaration" else "repository-unavailable"
+    )
+    assert report["repository_policy"]["requested_reference"] is None
+    assert not (tmp_path / "default-manager").exists()
+
+
+@pytest.mark.parametrize("reference,channel,ref", [
+    ("main", "main", ""), ("refs/heads/main", "main", ""),
+    ("a" * 40, "exact", "a" * 40), ("refs/tags/v1.0", "stable", "v1.0"),
+])
+def test_repository_selection_uses_native_source_types(tmp_path, reference, channel, ref):
+    selected, repository = recovery.selection(
+        repository_request(tmp_path), tmp_path / "manager",
+        declaration={"repository": str(tmp_path), "reference": reference},
+    )
+    assert (selected.channel, selected.ref, repository) == (channel, ref, str(tmp_path))
+
+
+@pytest.mark.parametrize("reference,repository", [
+    ("dev", "https://example.invalid/suite.git"),
+    ("main~2", "https://example.invalid/suite.git"),
+    ("refs/heads/feature", "https://example.invalid/suite.git"),
+    ("main", "https://user:secret@example.invalid/suite.git"),
+])
+def test_unsupported_repository_sources_are_not_main_fallback(tmp_path, reference, repository):
+    with pytest.raises(ValueError):
+        recovery.selection(
+            repository_request(tmp_path), tmp_path / "manager",
+            declaration={"repository": repository, "reference": reference},
+        )
+    assert not (tmp_path / "manager").exists()
+
+
+def test_repository_selection_preserves_independent_runtime_policy(tmp_path):
+    from worktree_manager.runtime_source_config import RuntimeSource, set_source
+
+    manager = tmp_path / "manager"
+    configured = RuntimeSource("exact", repo=str(tmp_path), ref="a" * 40)
+    set_source(configured, root=manager)
+    config = manager / "config.toml"
+    before = config.read_bytes()
+    value = repository_request(tmp_path)
+    with pytest.raises(ValueError, match="independent runtime source policy"):
+        recovery.selection(value, manager, declaration={"repository": str(tmp_path), "reference": "main"})
+    selected, _ = recovery.selection(
+        value, manager, declaration={"repository": str(tmp_path), "reference": "a" * 40},
+    )
+    assert selected == configured
+    assert config.read_bytes() == before
+
+
+def test_cold_repository_preview_does_not_retry_main_after_admitted_source_failure(tmp_path, upstream):
+    root, _, _ = upstream
+    git(root, "checkout", "-qb", "unmerged")
+    (root / "unmerged.txt").write_text("not on main", encoding="utf-8")
+    git(root, "add", ".")
+    git(root, "commit", "-qm", "unmerged candidate")
+    candidate = git(root, "rev-parse", "HEAD")
+    git(root, "checkout", "-q", "main")
+    adopter = tmp_path / "adopter"
+    policy = adopter / ".copilot-extensions" / "config.yaml"
+    policy.parent.mkdir(parents=True)
+    policy.write_text(
+        f"current_version: {candidate}\nrepository: {json.dumps(str(root))}\n", encoding="utf-8",
+    )
+    before = policy.read_bytes()
+    manager = tmp_path / "untouched-manager"
+    path = tmp_path / "request.json"
+    path.write_text(json.dumps(repository_request(adopter, manager_root=str(manager))), encoding="utf-8")
+    result = subprocess.run(
+        [getattr(sys, "_base_executable", sys.executable), "-I", "-S", "-B",
+         str(REPOSITORY / "tools/recover_source.py"), "--request", str(path)],
+        capture_output=True, text=True, timeout=180,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert result.returncode == 1, result.stdout + result.stderr
+    report = json.loads(result.stdout)
+    assert report["stage"] == "source-acquisition"
+    assert "not merged into fetched main" in report["error"]
+    assert report["repository_policy"]["requested_reference"] == candidate
+    assert "selection" not in report and report["effects"] == []
+    assert policy.read_bytes() == before
+    assert not manager.exists()
+
+
+def test_repository_tag_preview_keeps_one_resolved_identity(tmp_path, monkeypatch, upstream):
+    from worktree_manager import runtime_source_repository
+
+    root, older, current = upstream
+    git(root, "tag", "selected", older)
+    adopter = tmp_path / "adopter"
+    policy = adopter / ".copilot-extensions" / "config.yaml"
+    policy.parent.mkdir(parents=True)
+    policy.write_text(
+        f"current_version: refs/tags/selected\nrepository: {json.dumps(str(root))}\n", encoding="utf-8",
+    )
+    reads = []
+
+    def observe(addressed, workspace):
+        reads.append(addressed)
+        return runtime_source_repository.read(addressed, default_repository=recovery.UPSTREAM)
+
+    monkeypatch.setattr(recovery, "repository_declaration", observe)
+    portfolio = recovery.portfolio
+
+    def move_after_materialization(source):
+        git(root, "tag", "-f", "selected", current)
+        policy.write_text("current_version: main\n", encoding="utf-8")
+        return portfolio(source)
+
+    monkeypatch.setattr(recovery, "portfolio", move_after_materialization)
+    report = {}
+    assert recovery.recover(repository_request(adopter), tmp_path / "work", report) == 0
+    assert reads == [adopter]
+    assert report["repository_policy"]["requested_reference"] == "refs/tags/selected"
+    assert report["selection"]["source_commit"] == older
+    assert report["selection"]["source_tree"] == git(root, "rev-parse", older + "^{tree}")
+
+
 def test_main_does_not_override_existing_exact_policy(tmp_path):
     from worktree_manager.runtime_source_config import RuntimeSource, set_source
 
@@ -266,6 +515,8 @@ def test_bootstrap_discovery_is_pure_even_with_broken_transport(tmp_path):
     capability = json.loads(result.stdout)
     assert capability["schema"] == "copilot-extensions.recovery-source-capability"
     assert "prepared-install-source" in capability["capabilities"]
+    assert capability["request_versions"] == [1, 2]
+    assert "repository-preview" in capability["capabilities"]
     assert not (tmp_path / "untouched").exists()
     assert (REPOSITORY / "worktree-manager/bootstrap.ps1").read_text(
         encoding="utf-8",
