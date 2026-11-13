@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-12 - Finite source completion and receiver corrections](journal/2026/11.12-finite-source-completion-and-receiver-corrections.md)
+
 - [2026-11-12 - Producer, recovery and snapshot boundaries](journal/2026/11.12-producer-recovery-and-snapshot-boundaries.md)
 
 - [2026-11-12 - Stamp acceptance and protected receiving direction](journal/2026/11.12-stamp-acceptance-and-protected-receiving-direction.md)
