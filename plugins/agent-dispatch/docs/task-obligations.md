@@ -94,6 +94,33 @@ spawn queries use existing task indexes.
 This is bounded source/transport qualification, not an installed/native latency
 measurement or a complete assignment/finalization qualification.
 
+## Original allocation cohort
+
+New spawn reservations retain an optional `allocation_cohort` snapshot using
+`dispatch-assignment-cohort` version `1`, with the public emitter receipt and
+exact-reservation pool assignment described below. Capture follows the actual
+pool claim inside the same reservation transaction and precedes workspace or
+native preparation. Failure to capture rolls back that claim and reservation.
+Existing reservation create/read/list responses expose the additive field;
+no separate endpoint, registry or cleanup authority is introduced.
+
+`allocation_reservation_key` identifies the original allocation request.
+Retries and later deduplicated task episodes copy that original snapshot,
+including its original task and pool, rather than recapturing current source or
+placement. A separately admitted replacement allocation revision captures its
+own new request. An existing targeted/reused workspace is not stamped by this
+queue evidence: the snapshot describes the request, not proof of its creation.
+The later assignment audit remains a distinct record of that assignment.
+
+Retained non-null snapshots and their allocation keys cannot be rewritten.
+Historical reservations, missing original evidence and reservations created by
+a rolled-back provider remain null; migration and later retries do not backfill
+them from current state. Null is unknown, not an empty or disposable cohort.
+Older readers may ignore the additive field. No request syntax changes, and
+the field's schema/version describes support independently of package versions.
+Automatic Worktrees or Bridge callers are not enabled by this source change;
+they must select capable receivers before propagating the original snapshot.
+
 ## Original assignment cohort
 
 New protected assignment requests retain an additive `cohort` object with

@@ -143,6 +143,8 @@ merged plan does not establish running adoption.
       Worktrees provider expansion retains optional original cohort metadata in
       first-save records and replay; automatic Dispatch and Bridge callers remain
       unmodified until actual receiver support is established.
+      The reservation owner retains allocation-cohort evidence before body
+      preparation, separately from later assignment audit evidence.
 - [ ] Expose forward and reverse correlation through existing owner APIs.
       Pool identity must identify the actual registration/assignment, not just
       a display name; opaque legacy records remain explicitly unattributed.

@@ -317,6 +317,8 @@ class TaskQueue(
             self._migrate_pool_catalog(conn)
             from .queue_relationship_schema import migrate_relationships
             migrate_relationships(conn)
+            from .queue_assignment_cohort import migrate_allocation_cohorts
+            migrate_allocation_cohorts(conn)
             from .queue_submission_preparation import migrate_submission_preparation
             migrate_submission_preparation(conn)
             from .queue_standing_schema import migrate_standing_charters
