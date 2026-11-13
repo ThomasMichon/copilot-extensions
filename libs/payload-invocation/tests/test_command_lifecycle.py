@@ -83,7 +83,7 @@ def test_legacy_lifecycle_refuses_invalid_lock_budget(binding_fixture: dict[str,
 
 @pytest.mark.parametrize("change", [None, "root", "plugin", "managed", "revoked"])
 def test_profile_publication_scope_keeps_live_owner_and_resets(
-    binding_fixture: dict, monkeypatch: pytest.MonkeyPatch, change: str | None,
+    binding_fixture: dict[str, Any], monkeypatch: pytest.MonkeyPatch, change: str | None,
 ) -> None:
     binding, primitive = binding_fixture["binding"], binding_fixture["primitive"]
     lifecycle = binding._load_lifecycle()
@@ -96,9 +96,10 @@ def test_profile_publication_scope_keeps_live_owner_and_resets(
     monkeypatch.setattr(primitive, "resolve_runtime_deployment", lambda **_arguments: {
         "runtimeRoot": str(root), "deployment": deployment,
     })
-    checks, revoked = [], []
+    checks: list[bool] = []
+    revoked: list[bool] = []
 
-    def authorize():
+    def authorize() -> None:
         checks.append(True)
         if revoked:
             raise ValueError("fixture profile inputs revoked")
