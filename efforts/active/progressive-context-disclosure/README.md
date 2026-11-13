@@ -82,6 +82,26 @@ upfront context and unnecessary exploration.
   valid bounded refactor. Existing authority and genuinely applicable
   prerequisites remain; no implementation or resource custody changes.
 
+The #5896 measurement-accounting intake uses the existing Phase 8
+migration-intake deduplication/domain-acceptance gate and exactly one
+primary placement in Phase 6. Normal review of the complete direct
+Plan/local Validation/actual global Validation addition supplies domain
+acceptance; the intake-ledger proposal alone does not. Retain the same
+architecture, evaluation and authoring/review lanes, all incumbent rows,
+historical evidence, claims and source/native/archival holds.
+
+This finite repair does not standardize deferral, reference syntax,
+structured assembly or reviewer severity. Existing independent
+measurement/dynamic capture remains independent of unfinished behavioral
+calibration and native activation, as already recorded in this ROOT.
+Preserve genuinely applicable source/ownership safeguards without adding
+unrelated programme completion or native proof as documentary gates.
+
+Retain #5896 until actual reviewed merge and full current ROOT/intake
+readback establish complete receiving, followed by separate source
+judgment. Implementation still uses the normal eligible bounded-source
+claim process; this intake grants none and releases no custody.
+
 ## Context
 
 The current session-scoped dynamic-guidance pattern already requires a concise
@@ -433,6 +453,41 @@ standard. It creates no new programme or implementation/resource owner.
   deferred-reference bytes, potential deferred guide bytes, and unknown dynamic
   output without reading guide contents into the report.
 
+#### Direct unmeasured-source accounting acceptance from #5896
+
+This finite measurement-correctness family has one primary placement:
+Phase 6's existing reviewing-customizations lane. It uses Phase 8 and
+migration-intake's normal reviewed domain-Plan acceptance. The architecture
+driver remains the host and the existing authoring/review lane retains its
+domain; no implementation claimant or new owner is appointed.
+
+- [ ] **B5896-1:** Preserve an attributable sanitized unmeasured/failed-source
+  record when a declared source cannot be read or malformed metadata
+  prevents measurement. Unknown content size is not zero, and the declared
+  source must not silently disappear.
+- [ ] **B5896-2:** Preserve readable-source metrics and the documented token
+  heuristic while exposing partial totals and source coverage explicitly
+  to BOTH JSON and human consumers.
+- [ ] **B5896-3:** Cover every category using the shared measurement helper:
+  repository, personal, custom-instruction, metadata and captured-session
+  sources, including measurement failure after successful dynamic-hook
+  execution. Preserve separate dynamic-execution errors.
+- [ ] **B5896-4:** Keep records content-free and sanitized: no guidance
+  contents or secrets, no session-start blocking, host-permission changes
+  or live hooks as repair-validation shortcuts. Retain deterministic
+  injected read-refusal/race coverage and a real CLI/report-shape check.
+
+##### Local Validation for #5896
+
+- [ ] **BV5896:** Verify every B5896-1 through B5896-4 outcome with
+  deterministic read-refusal/race, malformed-metadata, readable-plus-
+  unmeasured coverage, every helper-backed category and successful-capture/
+  failed-measurement cases. Check actual JSON AND human CLI/report shape,
+  preserved readable metrics/heuristic, explicit partial/unknown totals
+  and separate dynamic-execution errors without exposing contents/secrets
+  or changing host permissions/invoking live hooks. No test is executed
+  or declared passed by documentary intake.
+
 ### Phase 7 - Complete-stack validation and migration
 
 - [ ] Run the selected clean-room matrix against the representative pilots and
@@ -617,6 +672,13 @@ and creates no replacement umbrella or competing effort.
 
 ## Validation Plan
 
+- [ ] **G5896:** Resolve every B5896-1 through B5896-4 and BV5896 clause at
+  the finite measurement-correctness boundary. Preserve attributable
+  declared-source coverage, unknown-not-zero accounting, BOTH output
+  consumers, all shared-helper categories and separate execution errors.
+  This receipt neither selects a disclosure/calibration standard nor
+  proves model admission, native activation or programme completion.
+
 - [ ] Global Validation C (#4197): resolve EVERY direct two-family Plan/local
   Validation clause above at its original finite documentation tier: concise
   Bridge AND Codespaces entries, complete substantive discoverable end-to-end
@@ -693,6 +755,19 @@ reviewed decision record. Then update authoring guidance and reviewer
 enforcement before migrating the complete contributor stack.
 
 ## Journal
+
+### 2026-11-13 - Unmeasured-source accounting receiving proposed
+
+Proposed #5896's complete finite contract in Phase 6: four direct Plan
+rows, local BV5896 and actual global G5896, with unchanged lane custody.
+The append-only migration-intake proposal records one canonical owner and
+no new tracker. Domain acceptance requires normal review and actual merge
+of the complete addition, then full-current receiving readback before
+separate source judgment.
+
+All measurement, report-shape and implementation acceptance remains
+unchecked. No disclosure standard, calibration/native result, test pass,
+source/resource transfer or operational effect is claimed.
 
 ### 2026-10-24 - Two-family task-skill reference acceptance proposed
 

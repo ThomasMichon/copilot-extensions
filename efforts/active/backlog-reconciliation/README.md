@@ -3164,6 +3164,12 @@ sources, transferring owners or turning partial/planning gains into completion.
   receiving objective or a retained gap; investigate actual implementation
   evidence when claiming completion, rather than making that the prerequisite
   for discovering thematic alignment.
+  The [recurrence/source-accounting intake](journal/2026/11.13-recurrence-and-source-accounting-intake.md)
+  proposes two complete finite families in promotion Phase 3 and progressive
+  Phase 6, preserving undecided policy and normal reviewed domain acceptance.
+  Four canonical keepers, all thirteen unchecked Plan/local/global rows and
+  separate receiving/source/resource judgments remain; no new disposition
+  or closure credit is claimed.
   Complete current ROOT/strict-annex receiving readback after #12478 supports
   #5675's separate redundant-tracking retirement, not technical completion.
   All original D/R/W witness rows and custodians remain; #5791's complete
