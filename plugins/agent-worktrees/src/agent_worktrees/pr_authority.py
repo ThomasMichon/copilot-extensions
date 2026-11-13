@@ -146,8 +146,7 @@ def write_record(record: tracking.WorktreeRecord, path: Path, content: str) -> N
     else:
         with guard(timeout=0):
             tracking._atomic_write(path, content)
-    record._loaded_machine = record.machine
-    record._loaded_machine_identity = record_machine_identity.identity_fence(record)
+    record_machine_identity.remember_loaded_identity(record, path)
 
 
 def write_registry(path: Path, content: str) -> None:
