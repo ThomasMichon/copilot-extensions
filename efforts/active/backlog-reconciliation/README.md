@@ -342,6 +342,16 @@ the non-public approval conversation.
 
 ## Plan
 
+The [retained-foundation receiving plan](retained-foundation-receiving.md)
+proposes three complete additions to existing #9448: the five-module
+qualification partition, canonical frozen-source fanout, and fixed Manager
+bootstrap repair classification. The
+[sixteen-contract study](journal/2026/11.12-foundation-and-task-configuration-receiving.md)
+also retains #9325's concrete claim condition and eleven distinct acceptance
+gaps. Reviewed direct receiving and separate source tracking judgment precede
+retirement; no technical completion, native result or custody transfer is
+claimed.
+
 The [Companion/admission study and finite source judgment](companion-admission-and-source-completion.md)
 retains fifteen qualified unions, corrects unsupported receiver/ROOT inferences
 and independently verifies #9097's finite source completion. Actual source,
@@ -3329,6 +3339,15 @@ sources, transferring owners or turning partial/planning gains into completion.
   normal publication flow.
 
 ## Validation Plan
+
+The [foundation receiving audit](retained-foundation-receiving.md)
+preserves every existing #9448 row and owner, all original caps and literal
+alternatives, and current authoritative replacement intent. Whole direct
+receiving readback and source-specific judgment remain separate gates.
+The [study audit](journal/2026/11.12-foundation-and-task-configuration-receiving.md)
+retains complete qualified histories, attribution versus independent evidence,
+the correctively reopened installed-read requirement and actual provenance
+holds. All product acceptance remains unchecked; the campaign remains Active.
 
 The [admission correction audit](journal/2026/11.12-admission-failure-and-citation-boundary.md)
 separates quarantined delegation text from four later complete authorized
