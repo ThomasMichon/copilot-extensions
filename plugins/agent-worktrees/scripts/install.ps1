@@ -3270,6 +3270,8 @@ function Deploy-Wrappers {
     foreach ($setup in @(
         'default-setup.ps1',
         'native-seed-boundary.ps1',
+        'native-seed-process.ps1',
+        'native-seed-process.cs',
         'native-seed-reply.sh',
         'native-seed-boundary.sh',
         'native-seed-setup.sh',

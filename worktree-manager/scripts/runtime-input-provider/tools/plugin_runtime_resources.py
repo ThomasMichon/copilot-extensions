@@ -27,7 +27,7 @@ def application_resources(source: Path, package: str) -> dict[str, Path]:
         package + "/_runtime_assets/" + path.relative_to(source).as_posix(): path
         for pattern in patterns for path in source.glob(pattern)
         if path.is_file() and path.suffix in {
-            ".py", ".ps1", ".sh", ".cmd", ".conf", ".pyz", ".json", ".yaml", ".awk",
+            ".py", ".ps1", ".sh", ".cmd", ".conf", ".pyz", ".json", ".yaml", ".awk", ".cs",
         }
     }
 

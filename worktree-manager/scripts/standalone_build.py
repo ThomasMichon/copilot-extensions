@@ -41,7 +41,7 @@ def application_resources(project, package):
     sources = {
         path.relative_to(project).as_posix(): path
         for pattern in patterns for path in project.glob(pattern)
-        if path.suffix in {".py", ".ps1", ".sh", ".cmd", ".conf", ".pyz", ".json", ".yaml", ".awk"}
+        if path.suffix in {".py", ".ps1", ".sh", ".cmd", ".conf", ".pyz", ".json", ".yaml", ".awk", ".cs"}
     }
     if sources:
         return {"_runtime_assets/" + name: path for name, path in sources.items()}

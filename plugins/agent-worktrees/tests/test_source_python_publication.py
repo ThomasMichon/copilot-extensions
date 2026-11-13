@@ -264,7 +264,9 @@ def test_publication_governance_uses_current_fixture(publication_case):
 
 @contextmanager
 def admitted(driver, root, owner, content, monkeypatch, *, hold=True):
-    governance = driver.Governance(root, owner)
+    governance = driver.Governance(
+        root, owner, source_descriptor={"source": "github", "repo": "example/runtime"},
+    )
     if governance.context:
         (root / "deploy-manifest.json").write_text('{"previous":"manifest"}', encoding="utf-8")
         with (governance.held(timeout=2) if hold else nullcontext()):
@@ -275,6 +277,7 @@ def admitted(driver, root, owner, content, monkeypatch, *, hold=True):
     with lifecycle.legacy_lifecycle(
         binding._rules(), governance.helper, payload_root=owner, plugin_id="agent-worktrees",
         legacy_root=root, source_payload_root=owner,
+        mode_arguments={"source_descriptor": {"source": "github", "repo": "example/runtime"}},
     ) as lease:
         monkeypatch.setenv(lifecycle.TICKET_ENV, json.dumps(lease.ticket))
         with governance.held(timeout=2):
