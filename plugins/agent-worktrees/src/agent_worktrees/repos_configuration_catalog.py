@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import os
 from pathlib import Path
 from typing import NoReturn
 
+from dropin_registry import ScanAuthority
 import yaml
 
 from . import config as cfg, installer, related, repos, state_root
@@ -77,8 +79,20 @@ def inspect_project(project: str, workspace: str) -> Inspection:
         if workspace and not Path(workspace).is_absolute():
             raise ConfigurationError("invalid-workspace", "The workspace must be an explicit absolute path.")
         sources = state_root.config_source_anchors(config, base_anchor=anchor, cwd=checkout)
+        if os.environ.get(related.INSTALLED_PLUGINS_ENV):
+            plugin_anchors = related.installed_plugin_related_anchors()
+        else:
+            contributions = related.installed_plugin_related_anchors_report()
+            if contributions.authority is ScanAuthority.INDETERMINATE:
+                plugin_anchors = []
+                result.findings.append({
+                    "code": "plugin-contributions-unavailable", "severity": "error",
+                    "message": "Plugin contribution discovery is indeterminate; inspect plugin activation sources.",
+                })
+            else:
+                plugin_anchors = contributions.value
         anchors = [
-            *related.installed_plugin_related_anchors(),
+            *plugin_anchors,
             *[
                 related.config_contribution_anchor(
                     s.anchor, s.origin,
@@ -229,9 +243,12 @@ def catalog(project: str, *, workspace: str = "") -> dict:
                 available_here=resolved.available_here,
                 delegate=resolved.delegate_via, source=route_entry.origin_layer,
             )
+        participation = (
+            "related" if route_entry else "unknown" if inspection.findings else "not-declared"
+        )
         state.update(
             registration={"status": registration, "class": entry.repo_class if entry else None},
-            participation="related" if route_entry else "not-declared",
+            participation=participation,
             same_machine_agent="enabled" if entry and entry.agent else "disabled",
             plugin_enablement="unsupported: owned by the plugin activation provider",
             route=route, binding=inspection.binding, pair=inspection.pair, findings=findings,
