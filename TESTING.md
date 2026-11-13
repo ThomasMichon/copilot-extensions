@@ -2497,10 +2497,14 @@ services, desktop observation or a production-lifetime claim. It is not part
 of required unit-only CI and does not activate the ordinary forwarder.
 
 The actual offline native-client packet is
-`python tools/run-plugin-tests.py agent-mcp --test-file tests/native/test_generation_handover_copilot.py --allow-explicit-tiers --timeout 240 --plugin-timeout 260 --test-timeout 180`.
+`python tools/run-plugin-tests.py agent-mcp --test-file tests/native/test_generation_handover_copilot.py --allow-explicit-tiers --timeout 420 --plugin-timeout 450 --test-timeout 180`.
 Set `COPILOT_NATIVE_TEST_EXECUTABLE` to an explicitly selected native executable.
-Linux uses the existing exec caller; Windows uses PowerShell and the existing
-suspended-creation publisher, which exits before ACP and delayed MCP startup.
+Linux uses the existing exec caller. Windows independently exercises both the
+suspended-creation publisher exiting before ACP/delayed MCP startup and the
+existing native seed creation/wait owner remaining alive throughout handover.
+Preparation, admission and execution receipt responses remain substituted in
+the retained-wait fixture; native creation/publication, original byte streams,
+wait and the physical MCP receiver/custody path are real in that composition.
 The private runtime uses the provider's actual optional-receiver declaration
 without a fixture capability override. Production caller enrollment stays off.
 The same native client, conduit, keeper and upstream must survive replacement,
@@ -2508,7 +2512,10 @@ rollback and same-slot replacement, including three accepted in-flight tool
 calls, real client ping replies and withheld/unknown delivery without replay.
 Backend identity comes from its actual physical interpreter, not a Windows
 venv launcher's PID. Client exit, upstream EOF, exact process settlement and
-lease cleanup remain required. The path-gated workflow downloads digest-pinned
+lease cleanup remain required, including natural wait-owner exit after its
+actual client settles. Each case retains its 180-second execution limit; the
+aggregate boundary allows both independent Windows cases. The path-gated
+workflow downloads digest-pinned
 clients on disposable Linux and Windows runners and retains separate source
 results. These are not installed-client or productive caller acceptance.
 
