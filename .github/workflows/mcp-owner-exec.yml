@@ -12,11 +12,15 @@ on:
       - "libs/copilot-driver-core/src/agent_remote_driver/headed/launcher.py"
       - "libs/copilot-driver-core/src/agent_remote_driver/headed/native_handoff.py"
       - "libs/copilot-driver-core/src/agent_remote_driver/session_host/bundle.py"
+      - "libs/copilot-driver-core/src/agent_remote_driver/session_host/launcher.py"
       - "plugins/agent-remote-driver/tests/test_headed_native_handoff.py"
       - "plugins/agent-remote-driver/tests/test_headed_launcher.py"
       - "plugins/agent-remote-driver/tests/test_session_host_core.py"
       - "plugins/agent-remote-driver/tests/native/test_headed_extension.py"
       - "plugins/agent-mcp/src/agent_mcp/owner_exec.py"
+      - "plugins/agent-mcp/src/agent_mcp/owner_headed.py"
+      - "plugins/agent-mcp/src/agent_mcp/owner_headed_bundle.py"
+      - "plugins/agent-mcp/src/agent_mcp/owner_overlay_pipe.py"
       - "plugins/agent-mcp/src/agent_mcp/owner_bootstrap.py"
       - "plugins/agent-mcp/src/agent_mcp/owner_entry.py"
       - "plugins/agent-mcp/src/agent_mcp/owner_section.py"
@@ -42,6 +46,8 @@ on:
       - "plugins/agent-mcp/src/agent_mcp/custody_conduit.py"
       - "plugins/agent-mcp/src/agent_mcp/custody_launch.py"
       - "plugins/agent-mcp/tests/test_owner_exec.py"
+      - "plugins/agent-mcp/tests/test_owner_headed.py"
+      - "plugins/agent-mcp/tests/native/test_owner_headed_windows.py"
       - "plugins/agent-mcp/tests/test_owner_entry.py"
       - "plugins/agent-mcp/tests/test_owner_bootstrap_windows.py"
       - "plugins/agent-mcp/tests/test_owner_entry_windows.py"
@@ -95,6 +101,7 @@ jobs:
         run: >-
           python tools/run-plugin-tests.py agent-mcp
           --test-file tests/test_owner_exec.py
+          --test-file tests/test_owner_headed.py
           --test-file tests/test_owner_handoff.py
           --test-file tests/test_owner_entry.py
           --test-file tests/test_owner_section.py
@@ -210,6 +217,7 @@ jobs:
           python tools/run-plugin-tests.py agent-mcp
           --test-file tests/test_owner_section.py
           --test-file tests/test_owner_snapshot.py
+          --test-file tests/test_owner_headed.py
           --test-file tests/test_owner_bootstrap_windows.py
           --test-file tests/test_owner_entry_windows.py
           --test-file tests/test_owner_entry.py
@@ -267,6 +275,28 @@ jobs:
           python tools/run-plugin-tests.py agent-remote-driver
           --test-file tests/native/test_headed_extension.py
           -k actual_headed_child_creation_handoff --allow-explicit-tiers
+      - name: Prepare pinned private native mux in disposable runner storage
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = Join-Path $env:RUNNER_TEMP "mcp-headed-mux-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          $null = New-Item -ItemType Directory -Path $root
+          $archive = Join-Path $root 'psmux.zip'
+          & ".\tools\download_pinned_native.ps1" -Uri 'https://github.com/psmux/psmux/releases/download/v3.3.8/psmux-v3.3.8-windows-x64.zip' -OutFile "$archive" -TimeoutSeconds 120
+          if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash -ne '1ad127ba937194a890b933a73d9b023e297bd73dc742abd841bf159984c2effe') {
+            throw 'Pinned native mux archive digest mismatch'
+          }
+          Expand-Archive -LiteralPath $archive -DestinationPath (Join-Path $root 'psmux')
+          $binaries = @(Get-ChildItem -LiteralPath (Join-Path $root 'psmux') -Filter 'psmux.exe' -Recurse -File)
+          if ($binaries.Count -ne 1) { throw 'Expected exactly one pinned native mux executable' }
+          "PSMUX_TEST_BIN=$($binaries[0].FullName)" >> $env:GITHUB_ENV
+          "COPILOT_DRIVER_HEADED_MUX_E2E=1" >> $env:GITHUB_ENV
+      - name: Qualify copied headed MCP receiver and private native-reader transfer
+        run: >-
+          python tools/run-plugin-tests.py agent-mcp
+          --test-file tests/native/test_owner_headed_windows.py
+          --allow-explicit-tiers --test-timeout 120
+          --junit-dir "${{ runner.temp }}/mcp-owner-windows-client-${{ github.run_id }}"
       - name: Exercise actual Windows client after publisher exit and through its existing wait owner
         run: >-
           python tools/run-plugin-tests.py agent-mcp

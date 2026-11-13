@@ -632,6 +632,61 @@ remain alive through the physical transitions and exit naturally after its
 actual client settles. The pinned Windows and Linux source lanes remain
 separate from installed acceptance and productive caller enrollment.
 
+### Opt-in retained Windows headed receiver
+
+The explicit Python construction API
+`agent_mcp.owner_headed_bundle.prepare_headed_command` composes the section
+producer with the existing Driver headed creation owner. It accepts the
+original native command, session, attempt directory, Host state file and cwd,
+plus an existing absolute `configuration_path` and exact `names` selection.
+The optional `agent-mcp[headed]` dependency supplies the independent Driver core;
+ordinary MCP installation does not require or enable it.
+
+The constructor requires the selected core's additive
+`headed_receivers: ["explicit-inprocess-v1"]` support before writing the
+receiver. It retains a fixed, content-addressed executable containing that
+core, the MCP producer and its native bindings. There is no serialized callback,
+caller-supplied module or configuration in the archive. The copied executable
+runs with a physical base Python under `-I -S`, without its original source
+checkout or virtual environment. Its `--support-json` additively declares
+`mcp_origin: ["windows-headed-native-v1"]`. An older undeclared core refuses;
+package versions do not imply support.
+
+At receiving time, the fixed MCP entrypoint reads the existing configuration
+and constructs only the explicitly selected literal local entries. Every
+selected entry must be eligible; partial selection refuses. The core retains
+its argument, repository-policy, original child, Job, streams, wait and cleanup
+owners. Publication uses the actual suspended native child's creation handle,
+PID and birth, never the receiving coordinator. Only the section's read handle
+is explicitly inherited. Authentication-wait execution, existing additional
+MCP overlays, literal delimiters, scripts and forwarding client launchers are
+not admitted by this opt-in path. Ordinary headed and MCP callers are unchanged.
+
+Configuration crosses to native Copilot through one private, local, first-instance
+named pipe, not argv, environment or a newly persisted plaintext overlay.
+Its protected DACL admits the current user, remote clients are rejected, and
+the connected reader must match the pinned original native creation identity
+before any JSON bytes are sent. A different same-user process receives no
+configuration. The existing overlapped-I/O owner supplies one 15-second
+cancellable transfer deadline and a 1 MiB maximum. The one-use worker closes
+its own pipe and duplicated process reference; no listener or supervisor is
+left running. Native cleanup errors retain their original process/Job custody
+even when transfer cancellation also fails. The pre-existing input
+configuration retains its existing storage and permissions.
+
+The explicit `tests/native/test_owner_headed_windows.py` packet checks the
+actual copied receiver, native interactive Copilot, private mux and controlled
+MCP provider. It requires the same native child PID/birth at physical MCP
+startup, one initialization, preserved provider context, original Host
+attachment/termination and exact fixture settlement. Separate native controls
+check raw file consumption and a wrong-reader refusal with zero transferred
+bytes. These are source tests, not installed reattachment, package replacement,
+seed-prompt completion, default caller adoption or full Windows handover.
+They require explicit `COPILOT_NATIVE_TEST_EXECUTABLE`,
+`COPILOT_DRIVER_HEADED_MUX_E2E=1` and `PSMUX_TEST_BIN` selection through the
+bounded runner; skips supply no native qualification. Required unit-only CI
+is unchanged.
+
 ### Hosted originating-owner qualification
 
 The explicit `mcp-caller-lifetime` hosted Windows qualification packet uses the

@@ -55,6 +55,7 @@ agent-single-instance-lease = { path = "../../libs/single-instance-lease", edita
 # Drives the `serve --passive` / `cutover` control-plane handoff so a version
 # update never leaves callers with no live daemon to reach.
 agent-zdd = { path = "../../libs/zdd", editable = true }
+agent-copilot-driver-core = { path = "../../libs/copilot-driver-core", editable = true }
 
 [project.scripts]
 agent-mcp = "agent_mcp.__main__:console_entry"
@@ -72,7 +73,9 @@ target-version = "py310"
 line-length = 99
 
 [project.optional-dependencies]
+headed = ["agent-copilot-driver-core"]
 dev = [
+    "agent-copilot-driver-core",
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
     # tomllib is stdlib on 3.11+; tomli backports it for 3.10 (this plugin's
