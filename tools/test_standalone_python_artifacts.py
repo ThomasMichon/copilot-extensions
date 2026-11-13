@@ -675,6 +675,46 @@ def test_worktrees_wheel_preserves_resources_in_deep_windows_build(tmp_path):
         assert {name: archive.read(name) for name in expected} == expected
 
 
+def test_mcp_native_owner_companion_survives_wheel_and_source_distribution(tmp_path):
+    project = tmp_path / "project"
+    shutil.copytree(
+        ROOT / "plugins" / "agent-mcp", project,
+        ignore=shutil.ignore_patterns(
+            "__pycache__", "*.egg-info", ".venv", ".test-runs", "build", "dist", "tests", "docs",
+        ),
+    )
+    expected = {
+        "agent_mcp/" + name: (project / "src" / "agent_mcp" / name).read_bytes()
+        for name in ("owner_section.cs", "owner_snapshot.py")
+    }
+    archives = tmp_path / "archives"
+    archives.mkdir()
+    options = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+    result = subprocess.run(
+        [sys.executable, "-I", "-c",
+         "import setuptools.build_meta as backend; out=__import__('sys').argv[1]; "
+         "backend.build_wheel(out); backend.build_sdist(out)", str(archives)],
+        cwd=project, capture_output=True, text=True, encoding="utf-8", timeout=90, **options,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    with zipfile.ZipFile(next(archives.glob("*.whl"))) as archive:
+        assert {name: archive.read(name) for name in expected} == expected
+    unpacked = tmp_path / "unpacked"
+    shutil.unpack_archive(next(archives.glob("*.tar.gz")), unpacked)
+    rebuilt = tmp_path / "rebuilt"
+    rebuilt.mkdir()
+    result = subprocess.run(
+        [sys.executable, "-I", "-c",
+         "import setuptools.build_meta as backend; backend.build_wheel(__import__('sys').argv[1])",
+         str(rebuilt)],
+        cwd=next(unpacked.iterdir()), capture_output=True, text=True,
+        encoding="utf-8", timeout=90, **options,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    with zipfile.ZipFile(next(rebuilt.glob("*.whl"))) as archive:
+        assert {name: archive.read(name) for name in expected} == expected
+
+
 @pytest.mark.parametrize("relative,package", [
     ("worktree-manager", "worktree_manager"),
     ("plugins/agent-worktrees", "agent_worktrees"),
