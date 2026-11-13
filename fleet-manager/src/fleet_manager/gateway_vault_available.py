@@ -170,8 +170,13 @@ class AvailableTokenCoordinator:
         self, key: TokenKey, source: AvailableSource, deadline: float,
     ) -> SourceAvailability:
         try:
+            loop = asyncio.get_running_loop()
+            if self._closed or loop.time() >= deadline:
+                return SourceAvailability("uncertain")
             if not self._current(key, source):
                 return SourceAvailability("unavailable")
+            if self._closed or loop.time() >= deadline:
+                return SourceAvailability("uncertain")
             return await source.provider.get_available(key, deadline=deadline)
         except asyncio.CancelledError:
             raise

@@ -25,7 +25,10 @@ connected, policy-admitted `AvailableSource` objects. Permission failures
 propagate; a withdrawn/disconnected source cannot win. A `SourceIdentity` binds
 Controller, connection incarnation and the selected source. A changed provider
 object also invalidates an outstanding result. An advertisement alone is not
-an admitted source.
+an admitted source. This synchronous policy callback must be cheap and avoid
+blocking I/O. The phase deadline is rechecked after policy validation and
+immediately before provider dispatch; delayed work never starts a refresh after
+its budget has expired.
 
 Each explicitly code-registered provider implements
 `fleet-manager.vault-available/v1`: `get_available(key, deadline=...)` returns

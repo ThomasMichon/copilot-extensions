@@ -243,6 +243,39 @@ def test_source_withdrawal_during_loser_cancellation_cannot_release_a_token():
     asyncio.run(run())
 
 
+@pytest.mark.parametrize("delay", ["queued", "policy"])
+def test_expired_phase_never_starts_queued_or_policy_delayed_provider_work(monkeypatch, delay):
+    async def run():
+        loop = asyncio.get_running_loop()
+        original_time = loop.time
+        offset, calls = [0.0], 0
+        provider = Provider(lambda key: asyncio.sleep(0, result=hit(key)))
+        selected = source("one", provider)
+
+        def expire():
+            offset[0] = 31.0
+
+        def snapshot(key):
+            nonlocal calls
+            calls += 1
+            if delay == "queued" and calls == 1:
+                loop.call_soon(expire)
+            elif delay == "policy" and calls == 2:
+                expire()
+            return (selected,)
+
+        with monkeypatch.context() as clock:
+            clock.setattr(loop, "time", lambda: original_time() + offset[0])
+            coordinator = AvailableTokenCoordinator(snapshot, budget=1)
+            result = await coordinator.lookup(KEY)
+            assert result.state == "uncertain"
+            assert provider.calls == []
+            assert await coordinator.drain()
+            assert coordinator.pending_count == 0
+
+    asyncio.run(run())
+
+
 def test_one_phase_deadline_retains_cancellation_resistant_probe_custody():
     async def run():
         release = asyncio.Event()
