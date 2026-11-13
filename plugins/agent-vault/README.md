@@ -611,6 +611,10 @@ field. Ordinary client
 writeback and entry migration do not rewrite service records or renew their age.
 Pending equivalent entry/field journals are checked even when a canonical value
 is present, rather than only when trying an alias fallback.
+Direct clients do not reuse an unqualified legacy entry as a group-relative
+credential: a root `token` cannot satisfy `Allowed/token`. Such an ambiguous
+legacy record is a miss until the selected grouped entry is populated
+authoritatively; cache-only requests still never contact the service.
 
 Authoritative refresh never returns a cached value or deletes the caller's
 existing recovery record before trying the backend. A successful read updates

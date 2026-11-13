@@ -46,6 +46,9 @@ def read_credential(args) -> CredentialRead:
     max_cache_age = getattr(args, "max_cache_age", None)
     cache = get_cache()
     pinned = config.PINNED_CONTEXT_ENV in os.environ
+    legacy_entry = (
+        None if pinned or cache_entry != config.normalize_entry(entry, "") else entry
+    )
     strict_cache = getattr(args, "strict_cache", False)
     readonly_cache = pinned or strict_cache or cache_only
     cache_decryption_failed = False
@@ -57,7 +60,7 @@ def read_credential(args) -> CredentialRead:
                 cache_entry,
                 field,
                 max_age_seconds=max_cache_age,
-                legacy_entry=None if pinned else entry,
+                legacy_entry=legacy_entry,
                 legacy_field=attribute_name(field),
                 **({"readonly": True} if readonly_cache else {}),
             )
@@ -148,14 +151,14 @@ def read_credential(args) -> CredentialRead:
                         field,
                         value,
                         int(generation) if generation is not None else None,
-                        **({"strict": True, "legacy_entry": None if pinned else entry}
+                        **({"strict": True, "legacy_entry": legacy_entry}
                            if strict_cache else {}),
                     )
                 else:
                     cached_ok = cache.put(
                         cache_entry, field, value,
                         *(() if generation is None else (int(generation),)),
-                        **({"strict": True, "legacy_entry": None if pinned else entry}
+                        **({"strict": True, "legacy_entry": legacy_entry}
                            if strict_cache else {}),
                     )
                     reconciliation_failed = strict_cache and not cached_ok

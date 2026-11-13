@@ -874,3 +874,30 @@ def test_service_store_rejects_malformed_journals_without_revoking_or_writing(
 
     assert persistent._cache_file.read_bytes() == before
     assert selected.revocation_state("entry", "password") == revocation
+
+
+def test_direct_client_cannot_reuse_a_root_credential_for_a_group_relative_lookup(
+    cached_service, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    vault, persistent, _kpdb, _clock = cached_service
+    monkeypatch.setattr(cache, "get_cache", lambda: persistent)
+    monkeypatch.setattr(vault.cli, "get_entry", lambda _db, entry, _field: "value-" + entry)
+    monkeypatch.setattr(cli, "ensure_service", lambda: True)
+    monkeypatch.setattr(
+        cli, "send_command",
+        lambda request, **_kw: vault.handle_request({**request, "group": "Allowed"}),
+    )
+    root = credential_reads.read_credential(SimpleNamespace(entry="/token", field="password"))
+    assert root.code == 0 and root.value == "value-token"
+    grouped = SimpleNamespace(entry="token", field="password", cache_only=True)
+    with monkeypatch.context() as context:
+        context.setattr(cli, "ensure_service", lambda: pytest.fail("cache-only contacted service"))
+        refused = credential_reads.read_credential(grouped)
+    assert refused.code == 1 and refused.value is None
+
+    relative = credential_reads.read_credential(SimpleNamespace(entry="token", field="password"))
+    assert relative.code == 0 and relative.value == "value-Allowed/token"
+    assert credential_reads.read_credential(grouped).value == "value-Allowed/token"
+    assert credential_reads.read_credential(
+        SimpleNamespace(entry="/token", field="password", cache_only=True),
+    ).value == "value-token"
