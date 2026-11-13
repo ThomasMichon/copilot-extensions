@@ -5,7 +5,9 @@ from __future__ import annotations
 import copy
 import json
 import os
+from pathlib import Path
 import subprocess
+import tempfile
 
 from .bridge_owner_launch import retained_selection
 from .procutil import OutputLimitExceeded, run_background_capture
@@ -29,32 +31,35 @@ def _read(prefix: tuple[str, ...], *arguments: str) -> dict:
     return value
 
 
-def require_support(prefix: tuple[str, ...]) -> None:
+def require_support(prefix: tuple[str, ...], *, ordinary: bool = False) -> None:
     support = _read(prefix, "version", "--contracts-json")
     contracts = support.get("contracts")
-    acquire = contracts.get("agent-bridge.acquire") if isinstance(contracts, dict) else None
+    contract = "agent-bridge.create" if ordinary else "agent-bridge.acquire"
+    capability = "keyed-dispatch-origin" if ordinary else "dispatch-cli-session-origin"
+    acquire = contracts.get(contract) if isinstance(contracts, dict) else None
     if not (
         support.get("schema") == "agent-bridge.cli-contracts"
         and type(support.get("version")) is int and support["version"] == 1
         and isinstance(acquire, dict)
         and type(acquire.get("version")) is int and acquire["version"] == 1
         and isinstance(acquire.get("capabilities"), list)
-        and "dispatch-cli-session-origin" in acquire["capabilities"]
+        and capability in acquire["capabilities"]
     ):
-        raise ValueError("executing Bridge CLI lacks CLI session-origin support")
+        raise ValueError("executing Bridge CLI lacks selected session-origin support")
     health = _read(prefix, "status")
     capabilities = health.get("capabilities")
+    capability = "dispatch_acp_session_origin" if ordinary else "dispatch_cli_session_origin"
     if not (
         health.get("service") == "agent-bridge" and health.get("status") == "ok"
         and health.get("ready") is True and health.get("draining") is False
         and isinstance(capabilities, dict)
-        and type(capabilities.get("dispatch_cli_session_origin")) is int
-        and capabilities["dispatch_cli_session_origin"] == 1
+        and type(capabilities.get(capability)) is int
+        and capabilities[capability] == 1
     ):
-        raise ValueError("executing Bridge daemon lacks CLI session-origin support")
+        raise ValueError("executing Bridge daemon lacks selected session-origin support")
 
 
-def reservation_options(client) -> dict:
+def reservation_options(client, *, ordinary: bool = False) -> dict:
     """Old or unavailable providers retain the unchanged baseline before effects."""
     from .client_errors import DispatchError
 
@@ -63,13 +68,14 @@ def reservation_options(client) -> dict:
         return {}
     try:
         versions = observe().get("session_origin_reservation_versions")
-        if not isinstance(versions, list) or not any(type(v) is int and v == 1 for v in versions):
+        version = 2 if ordinary else 1
+        if not isinstance(versions, list) or not any(type(v) is int and v == version for v in versions):
             return {}
-        require_support(retained_selection())
+        require_support(retained_selection(), ordinary=ordinary)
     except (DispatchError, OSError, subprocess.SubprocessError, OutputLimitExceeded,
             ValueError, TypeError, ImportError):
         return {}
-    return {"session_origin_transport": "origin-v1"}
+    return {"session_origin_transport": "prefer-origin-v1" if ordinary else "origin-v1"}
 
 
 def acquisition(task: dict, mode: str) -> tuple[list[str] | None, dict | None]:
@@ -100,3 +106,40 @@ def acquisition(task: dict, mode: str) -> tuple[list[str] | None, dict | None]:
     except (OSError, subprocess.SubprocessError, OutputLimitExceeded, ValueError, TypeError, ImportError) as exc:
         raise BridgeCarriedSessionBusy(f"sealed CLI session origin cannot be replayed: {exc}") from exc
     return list(prefix), copy.deepcopy(origin)
+
+
+def create(run, reservation: dict, arguments: list[str], *, prompt_input: str | None):
+    """Keep origin input independent of the writer's existing stdin carrier."""
+    from .bridge import BridgeCarriedSessionBusy
+
+    transport = reservation.get("session_origin_transport")
+    if transport in (None, "baseline"):
+        return run(arguments, prompt_input=prompt_input)
+    origin = reservation.get("session_origin")
+    key = reservation.get("session_origin_reservation_key")
+    if not (
+        transport == "origin-v1"
+        and isinstance(key, str) and key
+        and isinstance(origin, dict) and set(origin) == {"task_id", "reservation_key", "cohort"}
+        and isinstance(origin["task_id"], str) and origin["task_id"]
+        and origin["reservation_key"] == key and _carrier_json(origin["cohort"]) is not None
+        and (origin["cohort"]["emitter"] is None or origin["cohort"]["emitter"]["task_id"] == origin["task_id"])
+        and (origin["cohort"]["pool"] is None or (
+            origin["cohort"]["pool"]["task_id"] == origin["task_id"]
+            and origin["cohort"]["pool"]["reservation_key"] == key
+        ))
+        and reservation.get("worktree") and reservation.get("creation_key")
+    ):
+        raise BridgeCarriedSessionBusy("sealed ordinary session origin is unconfirmed; preserve the reservation")
+    try:
+        prefix = retained_selection()
+        require_support(prefix, ordinary=True)
+    except (OSError, subprocess.SubprocessError, OutputLimitExceeded, ValueError, TypeError, ImportError) as exc:
+        raise BridgeCarriedSessionBusy(f"sealed ordinary session origin cannot be replayed: {exc}") from exc
+    with tempfile.TemporaryDirectory(prefix="dispatch-session-origin-") as directory:
+        path = Path(directory) / "origin.json"
+        path.write_text(json.dumps(origin, sort_keys=True), encoding="utf-8")
+        return run(
+            [*arguments, "--dispatch-origin-file", str(path)],
+            prompt_input=prompt_input, execution_prefix=list(prefix),
+        )

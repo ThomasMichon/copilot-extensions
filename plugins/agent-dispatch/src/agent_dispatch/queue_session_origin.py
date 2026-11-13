@@ -62,7 +62,7 @@ def retain(conn: sqlite3.Connection, task: Task, *, key: str, requested: str | N
             "cohort": capture_cohort(conn, task, reservation_key=key),
         }, sort_keys=True)
         original = row
-        transport = requested or "baseline"
+        transport = "origin-v1" if requested == "prefer-origin-v1" else requested or "baseline"
     else:
         original_key = prior["session_origin_reservation_key"] or prior["key"]
         original = conn.execute(
@@ -71,11 +71,11 @@ def retain(conn: sqlite3.Connection, task: Task, *, key: str, requested: str | N
         if original is None:
             raise TaskError("original session reservation is unavailable")
         encoded, transport = original["session_origin"], _known_transport(conn, row)
-    if requested not in {None, "baseline", "origin-v1"}:
+    if requested not in {None, "baseline", "origin-v1", "prefer-origin-v1"}:
         raise TaskError("unsupported session origin transport")
-    if requested is not None and requested != transport:
+    if requested not in {None, "prefer-origin-v1", transport}:
         raise TaskError("original session origin transport cannot change")
-    if transport == "origin-v1" and requested != "origin-v1":
+    if transport == "origin-v1" and requested not in {"origin-v1", "prefer-origin-v1"}:
         raise TaskError("origin-v1 retry requires explicit session origin confirmation")
     if transport == "origin-v1" and not _representable(encoded, original):
         raise TaskError("session origin transport requires representable original evidence")
@@ -119,8 +119,10 @@ def _representable(encoded: str | None, row: sqlite3.Row) -> bool:
 
 def reservation_record(row: sqlite3.Row, requested: str | None) -> SpawnReservation:
     """An active reservation replay cannot revise a previously sealed request."""
-    if requested not in {None, "baseline", "origin-v1"}:
+    if requested not in {None, "baseline", "origin-v1", "prefer-origin-v1"}:
         raise TaskError("unsupported session origin transport")
-    if requested is not None and (row["session_origin_transport"] or "baseline") != requested:
+    if requested not in {None, "prefer-origin-v1", row["session_origin_transport"] or "baseline"}:
         raise TaskError("original session origin transport cannot change")
+    if (row["session_origin_transport"] or "baseline") not in {"baseline", "origin-v1"}:
+        raise TaskError("unsupported retained session origin transport")
     return SpawnReservation._from_row(row)

@@ -325,7 +325,7 @@ def test_current_http_reservation_selects_origin_atomically_and_rejects_rebindin
     task = queue.create("work", repo="example")
     with TestClient(create_app(queue, enable_mcp=False, verification_interval=0)) as api:
         support = api.get(f"/tasks/{task.id}/pool-start/contract").json()["pool_placement"]
-        assert support["session_origin_reservation_versions"] == [1]
+        assert support["session_origin_reservation_versions"] == [1, 2]
         url = "/spawn-reservations"
         body = {"task_id": task.id, "session_origin_transport": "origin-v1"}
         response = api.post(url, json=body)
