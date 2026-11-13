@@ -162,7 +162,7 @@ def _requirements(path: Path, root: Path, seen: set[Path]) -> list[Declaration]:
 def inventory(root: Path) -> tuple[list[Declaration], dict[Path, dict]]:
     """Collect every declared category without platform/extra filtering."""
     root = root.resolve()
-    paths = [contained_path(p, root) for p in manifests(root)]
+    paths = [contained_path(p, root) for p in manifests(root, include_declared=True)]
     projects = {p: _toml(p) for p in paths}
     declarations = [
         declaration for path, data in projects.items()

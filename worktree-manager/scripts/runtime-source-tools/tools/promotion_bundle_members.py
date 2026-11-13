@@ -1,4 +1,4 @@
-"""Canonical members of the existing first-party promotion bundle."""
+"""Canonical project roster and members of the existing first-party promotion bundle."""
 from __future__ import annotations
 
 import json
@@ -7,6 +7,37 @@ import zipfile
 from pathlib import Path
 
 from artifact_source_build import PromotionArtifactError
+
+
+def candidate_projects(root: Path) -> dict[str, str]:
+    from application_sources import declared_projects, tomllib
+    from standalone_python_artifacts import COMPONENTS
+    from core_python_artifacts import enabled, release_version
+
+    try:
+        locations = {
+            path.parent.name: path.parent for path in (root / "plugins").glob("*/pyproject.toml")
+        }
+        locations.update(declared_projects(root))
+        locations = dict(sorted(locations.items()))
+        locations.update({
+            "standalone:" + component: root / relative
+            for component, relative in COMPONENTS.items() if (root / relative).exists()
+        })
+        result = {}
+        for name, directory in locations.items():
+            project = directory / "pyproject.toml"
+            try:
+                data = tomllib.loads(project.read_text(encoding="utf-8"))
+                result[name] = data["project"]["version"]
+            except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError, KeyError, TypeError) as exc:
+                kind = "standalone Python project" if name.startswith("standalone:") else "Python project"
+                raise ValueError(f"{project}: invalid {kind}") from exc
+        if enabled(root):
+            result["composition:core"] = release_version(root)
+        return result
+    except (OSError, ValueError) as exc:
+        raise PromotionArtifactError(f"invalid repository Python project declarations: {exc}") from exc
 
 
 def _bundle_manifest(manifest: dict) -> bytes:

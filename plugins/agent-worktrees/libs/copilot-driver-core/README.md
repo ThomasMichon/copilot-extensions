@@ -370,7 +370,42 @@ the operation, exact binding, complete ordered history, holds and unknown effect
 or any effects. Missing records remain unknown, not settled or absent sessions.
 Neither codec availability nor successful decoding establishes store/native
 admission. The compact receiving archive includes these pure modules but adds
-no recovery command, provider or capability advertisement.
+no recovery command or native provider.
+
+`PermitRecoveryIntent` is a separate, effect-free data contract, not version 2
+of that record. `encode_permit_recovery_intent` and
+`decode_permit_recovery_intent` use exactly `contract`
+(`copilot-driver.headed-permit-recovery-intent`), integer `version` (1) and
+`intent`, with the same strict encoding rules and byte limit. The intent carries
+the unchanged original v1 descriptor, operation ID, intent phase and record
+revision (1 for retirement, 3 for restoration), an opaque `source_lease_ref`,
+independent `receiver_ref`/`receiver_revision`, original `permit_id` and
+`original_permit_revision`, and the action-specific `permit_revision` and
+`decision_ref`. Only the two execution-permit revisions are compared: the
+recovery decision must be later than original execution. Neither source-lease
+identity nor receiver ordering is converted into execution permission.
+The receiver revision belongs only to its exact retained `receiver_ref`;
+it cannot order a different receiver incarnation.
+
+The descriptor's `lease_revision` and existing `RecoveryStep.authority_revision`
+retain their v1 meanings. These codecs do not convert, reseal or rewrite old
+records, infer an action decision from a counter, or validate current authority.
+The owner must independently bind the intent to its exact committed recovery
+record, original permit and current action-specific decision, source and native
+scope before any future effect. Unknown work and legacy holds stay in that
+original record; an intent cannot replace it or clear them.
+
+The selected non-legacy entrypoint's existing `--support-json` response adds
+`headed_recovery_intents`, naming this contract and supported versions with
+`scope: data-only`, `owner_store: unqualified` and `effects_wired: false`.
+The legacy front door returns an empty list. Missing metadata from an older
+runtime means this optional data contract is unsupported, not that v1 records
+have changed or all legacy operations must stop. Read the actual selected
+executable's declaration, never a package version or a newer payload's metadata.
+No ordinary caller emits these intents. Worktrees' store and passive permit
+inspector remain unchanged and do not support this intent contract; their
+own provider expansion and support/refusal declaration must clear review before
+consumer use. No compatibility retirement or effectful integration is enabled.
 
 See the [ACP WS boundary](../../plugins/agent-remote-driver/docs/session-host-websocket.md).
 The compact dependency-free receiving archive supports TCP only. Tests stay

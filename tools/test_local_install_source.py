@@ -377,13 +377,133 @@ def test_cli_prepares_only_the_selected_core_projects(tmp_path, monkeypatch, cap
     assert composed[-1] == seen[-1][1] == ("standalone:worktree-manager",)
 
 
+def test_selected_project_uses_committed_repository_declaration(repository, tmp_path):
+    repo, _ = repository
+    directory = repo / ".marketplace" / "example"
+    directory.mkdir(parents=True)
+    declaration = repo / "pyproject.toml"
+    declaration.write_text(
+        '[tool.copilot-extensions.python-projects]\nexample = ".marketplace/example"\n',
+    )
+    (directory / "pyproject.toml").write_text(
+        '[project]\nname = "example"\nversion = "1.0"\n',
+    )
+    local.preparation._git(repo, "add", ".")
+    local.preparation._git(
+        repo, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+        "commit", "--quiet", "-m", "Declare independent application",
+    )
+    commit = local.preparation._git(repo, "rev-parse", "HEAD")
+    declaration.write_text(
+        '[tool.copilot-extensions.python-projects]\nexample = "../outside"\n',
+    )
+    (directory / "pyproject.toml").write_text("dirty application bytes\n")
+    output = tmp_path / "selected"
+    record = local.compose(repo, commit, None, output, projects=("example",))
+    assert record["source_commit"] == commit
+    assert (output / "source/.marketplace/example/pyproject.toml").read_text().endswith('version = "1.0"\n')
+    assert "../outside" not in (output / "source/pyproject.toml").read_text()
+    from promotion_python_artifacts import candidate_projects
+    assert candidate_projects(output / "source") == {"example": "1.0"}
+
+
+def test_native_build_workspace_binds_repository_declaration_even_without_compaction(tmp_path, monkeypatch):
+    source = tmp_path / "source"
+    source.mkdir()
+    declaration = source / "pyproject.toml"
+    declaration.write_text('[tool.copilot-extensions.python-projects]\nexample="apps/example"\n')
+    monkeypatch.setattr(local, "os", SimpleNamespace(name="posix"))
+    with pytest.raises(ValueError, match="project declaration changed"):
+        with local._build_workspace(source, tmp_path / "output", ("example",), None):
+            declaration.write_text('[tool.copilot-extensions.python-projects]\nexample="apps/other"\n')
+
+
+@pytest.mark.parametrize("projects", [None, ("example",)], ids=["suite", "selected"])
+@pytest.mark.parametrize("attribute", ["export-ignore", "export-subst"])
+def test_source_refuses_archived_project_declaration_changes(
+    repository, tmp_path, monkeypatch, projects, attribute,
+):
+    repo, _ = repository
+    (repo / "pyproject.toml").write_text(
+        '# $Format:%H$\n[tool.copilot-extensions.python-projects]\nexample = "apps/example"\n',
+    )
+    for relative in ("apps/example", "plugins/example"):
+        directory = repo / relative
+        directory.mkdir(parents=True)
+        (directory / "pyproject.toml").write_text(
+            '[project]\nname = "example"\nversion = "1.0"\n',
+        )
+    (repo / ".gitattributes").write_text(f"pyproject.toml {attribute}\n")
+    local.preparation._git(repo, "add", ".")
+    local.preparation._git(
+        repo, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+        "commit", "--quiet", "-m", "Archive declaration transformation",
+    )
+    commit = local.preparation._git(repo, "rev-parse", "HEAD")
+    for owner, name in (
+        (local.materialization, "materialize"),
+        (local.preparation, "materialize_consumer"),
+    ):
+        monkeypatch.setattr(owner, name, lambda *args, **kwargs: pytest.fail(
+            "changed project selection must refuse before materialization",
+        ))
+    with pytest.raises(ValueError, match="project declaration differs from the source commit"):
+        local.compose(repo, commit, None, tmp_path / "refused", projects=projects)
+
+
+@pytest.mark.parametrize("projects", [None, ("example",)], ids=["suite", "selected"])
+def test_source_materializes_declared_project_assets_and_libraries(repository, tmp_path, projects):
+    repo, _ = repository
+    directory = repo / "apps" / "example"
+    directory.mkdir(parents=True)
+    (repo / "pyproject.toml").write_text(
+        '[tool.copilot-extensions.python-projects]\nexample = "apps/example"\n',
+    )
+    (directory / "pyproject.toml").write_text(
+        '[project]\nname = "example"\nversion = "1.0"\n'
+        '[tool.uv.sources]\nshared = {path = "../../libs/shared", editable = true}\n',
+    )
+    shared = repo / "libs" / "shared"
+    (shared / "src" / "shared").mkdir(parents=True)
+    (shared / "pyproject.toml").write_text(
+        '[project]\nname = "shared"\nversion = "1.0"\n',
+    )
+    (shared / "src" / "shared" / "__init__.py").write_text('VALUE = "shared"\n')
+    (repo / "resources").mkdir()
+    (repo / "resources" / "example.txt").write_text("packaged application data\n")
+    (directory / "packaged-assets.json").write_text(json.dumps({
+        "schema": "copilot-extensions.packaged-assets", "version": 2,
+        "groups": [{
+            "canonicalDir": "resources", "payloadDir": "data", "files": ["example.txt"],
+        }],
+    }))
+    local.preparation._git(repo, "add", ".")
+    local.preparation._git(
+        repo, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+        "commit", "--quiet", "-m", "Independent project resource closure",
+    )
+    commit = local.preparation._git(repo, "rev-parse", "HEAD")
+    output = tmp_path / "prepared"
+    local.compose(repo, commit, None, output, projects=projects)
+    payload = output / "source" / "apps" / "example"
+    assert (payload / "data" / "example.txt").read_bytes() == (
+        repo / "resources" / "example.txt"
+    ).read_bytes()
+    assert (payload / "libs" / "shared" / "src" / "shared" / "__init__.py").read_bytes() == (
+        shared / "src" / "shared" / "__init__.py"
+    ).read_bytes()
+    metadata = tomllib.loads((payload / "pyproject.toml").read_text())
+    assert metadata["tool"]["uv"]["sources"]["shared"] == {"path": "libs/shared"}
+    assert local.materialization.uer.materialized_local_source_problems(payload) == []
+
+
 @pytest.fixture
 def repository(tmp_path):
     repository = tmp_path / "repository"
     repository.mkdir()
     flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
     subprocess.run(["git", "init", "--quiet", str(repository)], check=True, creationflags=flags)
-    (repository / "version.txt").write_text("released-version\n", encoding="utf-8")
+    (repository / "version.txt").write_bytes(b"released-version\n")
     local.preparation._git(repository, "add", "version.txt")
     local.preparation._git(
         repository, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
@@ -534,6 +654,40 @@ def test_native_archive_refuses_existing_destination_before_launch(tmp_path, mon
     with pytest.raises(FileExistsError):
         local.preparation._archive(tmp_path, "unused", archive)
     assert archive.read_bytes() == b"retained artifact"
+
+
+def test_source_staging_uses_private_creation_and_cleans_failed_preparation(
+    repository, tmp_path, monkeypatch,
+):
+    repo, commit = repository
+    local.preparation._git(repo, "update-ref", "refs/remotes/origin/main", commit)
+    owner = local.preparation_process.procutil_module("_daemon_instance_owner")
+    permissions = local.preparation_process.procutil_module("python_cache_permissions")
+    create = owner.mkdir_private
+    created = []
+
+    def private(path, **options):
+        create(path, **options)
+        created.append(path)
+
+    class ArchiveBoundary(Exception):
+        pass
+
+    def archive(_source, _commit, path, **_options):
+        assert path.parent in created
+        permissions.check(path.parent, private=True)
+        raise ArchiveBoundary
+
+    monkeypatch.setattr(owner, "mkdir_private", private)
+    monkeypatch.setattr(local.preparation, "_archive", archive)
+    output = tmp_path / "prepared"
+    with pytest.raises(ArchiveBoundary):
+        local.preparation.prepare(
+            repo, commit, "worktree-manager", output,
+            branch="main", deadline=time.monotonic() + 30,
+        )
+    assert output.is_dir() and not list(output.iterdir())
+    assert (repo / "version.txt").read_bytes() == b"released-version\n"
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX group permissions; Windows uses native DACL checks")
@@ -791,10 +945,17 @@ def test_suite_build_preserves_roster_versions_and_uses_one_toolchain(
         "standalone:fleet-manager": "3.0.0",
         "agent-index": "4.0.0",
         "standalone:index-engine": "5.0.0",
+        "example-worker": "6.0.0",
     }
+    (source / "pyproject.toml").write_text(
+        '[tool.copilot-extensions.python-projects]\nexample-worker = ".marketplace/example-worker"\n',
+    )
     for key, version in projects.items():
         component = key.split(":")[-1]
-        relative = standalone_python_artifacts.COMPONENTS[component] if ":" in key else "plugins/" + component
+        relative = (
+            standalone_python_artifacts.COMPONENTS[component] if ":" in key
+            else ".marketplace/example-worker" if key == "example-worker" else "plugins/" + component
+        )
         payload = source / relative
         payload.mkdir(parents=True)
         name = (
@@ -846,7 +1007,13 @@ def test_suite_build_preserves_roster_versions_and_uses_one_toolchain(
         else:
             assert builder.REPO == source
         key = "standalone:" + component if "standalone:" + component in projects else component
-        relative = standalone_python_artifacts.COMPONENTS[component] if ":" in key else "plugins/" + component
+        relative = (
+            standalone_python_artifacts.COMPONENTS[component] if ":" in key
+            else ".marketplace/example-worker" if key == "example-worker" else "plugins/" + component
+        )
+        if key == "example-worker":
+            from application_sources import canonical_application
+            assert canonical_application(builder.REPO, key) == builder.REPO / relative
         assert (builder.REPO / relative / "pyproject.toml").read_bytes() == (
             source / relative / "pyproject.toml"
         ).read_bytes()
@@ -2157,7 +2324,8 @@ def prepare_native_source_inputs(tmp_path, request):
         '[project.scripts]\ndemo-app="demo_app:main"\n'
         '[project.optional-dependencies]\nbootstrap=["agent-procutil"]\n'
         '[tool.uv.sources]\nagent-procutil={path="' +
-        ("../libs/agent-procutil" if sibling else "libs/agent-procutil") + '"}\n',
+        ("../libs/agent-procutil" if sibling else "libs/agent-procutil") + '"}\n' +
+        ('[tool.copilot-extensions.application]\nsetup=["--setup"]\nstart=["--start"]\n' if entry else ""),
     )
     callback = {}
     if isinstance(options, dict) and options.get("callback"):
@@ -3276,8 +3444,7 @@ def test_application_adapter_runs_real_install_repeat_and_retains_failed_start(
     application = snapshot / selected.project["application"]
     path = application / "application.json"
     record = json.loads(path.read_text())
-    record.update(setup=["--setup"], start=["--start"])
-    path.write_text(json.dumps(record))
+    assert record["setup"] == ["--setup"] and record["start"] == ["--start"]
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("HOME", str(home))
@@ -3301,11 +3468,15 @@ def test_application_adapter_runs_real_install_repeat_and_retains_failed_start(
     result = source.install_application(snapshot, "demo-app", selected.payload, root, **options)
     slot = root / "versions" / selection["runtime_version"]
     assert result == {"state": "installed", "slot": str(slot)}
-    for helper in (slot / ".runtime-bootstrap").iterdir():
-        if helper.name == "runtime-generation":
-            assert re.fullmatch(rb"[0-9a-f]{32}\n", helper.read_bytes())
-        else:
-            assert helper.read_bytes() == (slot / "runtime" / helper.name).read_bytes()
+    assert re.fullmatch(rb"[0-9a-f]{32}\n", (slot / ".runtime-bootstrap/runtime-generation").read_bytes())
+    helpers = list((slot / ".runtime-bootstrap").glob("*.py"))
+    assert {helper.name for helper in helpers} == {
+        "runtime_launcher.py", "versioned_runtime.py", "versioned_runtime_leases.py",
+        "versioned_runtime_source.py", "versioned_runtime_construction.py",
+        "versioned_runtime_publication.py",
+    }
+    for helper in helpers:
+        assert helper.read_bytes() == (slot / "runtime" / helper.name).read_bytes()
     before = {name: (root / name).read_bytes() for name in ("current-version", "last-known-good")}
     assert json.loads((root / "setup.json").read_text()) == ["--setup"]
     assert json.loads((root / "started.json").read_text()) == ["--start"]

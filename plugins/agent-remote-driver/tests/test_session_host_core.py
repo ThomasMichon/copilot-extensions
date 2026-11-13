@@ -81,8 +81,13 @@ def test_relocated_compact_recovery_codec_roundtrips_complete_record(tmp_path, l
     script = """
 import sys
 sys.path.insert(0, sys.argv[1])
-from agent_remote_driver.headed.recovery import RecoveryDescriptor, RecoveryRecord, RecoveryStep
-from agent_remote_driver.headed.recovery_codec import encode_recovery_record, decode_recovery_record
+from agent_remote_driver.headed.recovery import (
+    PermitRecoveryIntent, RecoveryDescriptor, RecoveryRecord, RecoveryStep,
+)
+from agent_remote_driver.headed.recovery_codec import (
+    encode_recovery_record, decode_recovery_record,
+    encode_permit_recovery_intent, decode_permit_recovery_intent,
+)
 descriptor = RecoveryDescriptor(
     "owner", "worktree", "revision", "source", "source-revision", "same-conversation",
     "environment", "boot", "scope", "incarnation", 1,
@@ -96,12 +101,31 @@ restored = decode_recovery_record(encode_recovery_record(record))
 assert restored == record
 assert restored.unknown_effects == ("unknown-action",)
 assert restored.status()["effects_wired"] is False
+intent = PermitRecoveryIntent(
+    descriptor, "operation", "retire_intent", 1, "opaque-lease", "receiver", 97,
+    "original-permit", 1, 2, "retirement-decision",
+)
+assert decode_permit_recovery_intent(encode_permit_recovery_intent(intent)) == intent
+assert intent.status()["owner_store"] == "unqualified"
 """
     result = subprocess.run(
         [sys.executable, "-I", "-c", script, str(archive)], cwd=archive.parent,
         capture_output=True, timeout=15, **no_window_kwargs(),
     )
     assert result.returncode == 0, result.stderr.decode(errors="replace")
+    support = subprocess.run(
+        [sys.executable, "-I", "-S", str(archive), "--support-json"],
+        cwd=archive.parent, capture_output=True, text=True, timeout=15, **no_window_kwargs(),
+    )
+    assert support.returncode == 0, support.stderr
+    contracts = json.loads(support.stdout)["headed_recovery_intents"]
+    if legacy:
+        assert contracts == []
+    else:
+        assert contracts == [{
+            "contract": "copilot-driver.headed-permit-recovery-intent", "versions": [1],
+            "scope": "data-only", "owner_store": "unqualified", "effects_wired": False,
+        }]
 
 
 def test_relocated_private_mux_operation_uses_the_copied_core_and_literal_child(tmp_path):

@@ -5,7 +5,10 @@ from __future__ import annotations
 from dataclasses import asdict, fields
 import json
 
-from .recovery import RecoveryDescriptor, RecoveryRecord, RecoveryStep, RecoveryStore
+from .recovery import (
+    PERMIT_INTENT_CONTRACT, PERMIT_INTENT_VERSION, PermitRecoveryIntent,
+    RecoveryDescriptor, RecoveryRecord, RecoveryStep, RecoveryStore,
+)
 
 CONTRACT = "copilot-driver.headed-recovery-record"
 VERSION = 1
@@ -110,6 +113,56 @@ def encode_recovery_record(record: RecoveryRecord) -> bytes:
         raise ValueError("Invalid recovery record encoding") from error
     if len(payload) > MAX_RECORD_BYTES:
         raise ValueError("Recovery record exceeds the supported size")
+    return payload
+
+
+def _permit_intent(value: object) -> PermitRecoveryIntent:
+    intent = dict(_object(value, {field.name for field in fields(PermitRecoveryIntent)}))
+    descriptor = _object(
+        intent["descriptor"], {field.name for field in fields(RecoveryDescriptor)},
+    )
+    if (
+        any(type(item) is not str for key, item in descriptor.items() if key != "lease_revision")
+        or type(descriptor["lease_revision"]) is not int
+    ):
+        raise ValueError("Recovery descriptor types must be exact")
+    intent["descriptor"] = RecoveryDescriptor(**descriptor)
+    return PermitRecoveryIntent(**intent)
+
+
+def decode_permit_recovery_intent(payload: bytes) -> PermitRecoveryIntent:
+    """Decode only the explicit data contract; never reinterpret a v1 record."""
+    if type(payload) is not bytes or not 0 < len(payload) <= MAX_RECORD_BYTES:
+        raise ValueError("A bounded UTF-8 recovery intent is required")
+    try:
+        value = _object(json.loads(
+            payload.decode("utf-8"), object_pairs_hook=_pairs,
+            parse_float=_unsupported_number, parse_constant=_unsupported_number,
+        ), {"contract", "version", "intent"})
+        if (
+            value["contract"] != PERMIT_INTENT_CONTRACT
+            or type(value["version"]) is not int or value["version"] != PERMIT_INTENT_VERSION
+        ):
+            raise ValueError("Unsupported permit recovery intent contract or version")
+        return _permit_intent(value["intent"])
+    except (UnicodeError, RecursionError, TypeError) as error:
+        raise ValueError("Invalid recovery intent encoding") from error
+
+
+def encode_permit_recovery_intent(intent: PermitRecoveryIntent) -> bytes:
+    if type(intent) is not PermitRecoveryIntent:
+        raise ValueError("An explicit typed permit recovery intent is required")
+    value = asdict(intent)
+    _permit_intent(value)
+    try:
+        payload = json.dumps(
+            {"contract": PERMIT_INTENT_CONTRACT, "version": PERMIT_INTENT_VERSION, "intent": value},
+            ensure_ascii=False, allow_nan=False, separators=(",", ":"), sort_keys=True,
+        ).encode("utf-8")
+    except (UnicodeError, TypeError) as error:
+        raise ValueError("Invalid recovery intent encoding") from error
+    if len(payload) > MAX_RECORD_BYTES:
+        raise ValueError("Recovery intent exceeds the supported size")
     return payload
 
 

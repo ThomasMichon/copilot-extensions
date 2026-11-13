@@ -5,9 +5,12 @@ import json
 
 import pytest
 
-from agent_remote_driver.headed.recovery import RecoveryDescriptor, RecoveryRecord, RecoveryStep
+from agent_remote_driver.headed.recovery import (
+    PermitRecoveryIntent, RecoveryDescriptor, RecoveryRecord, RecoveryStep,
+)
 from agent_remote_driver.headed.recovery_codec import (
-    MAX_RECORD_BYTES, decode_recovery_record, encode_recovery_record, load_recovery_status,
+    MAX_RECORD_BYTES, decode_permit_recovery_intent, decode_recovery_record,
+    encode_permit_recovery_intent, encode_recovery_record, load_recovery_status,
 )
 
 
@@ -155,3 +158,98 @@ def test_unicode_references_and_reference_bounds_are_lossless(record):
     envelope["record"]["descriptor"]["owner_ref"] = "x" * 257
     with pytest.raises(ValueError):
         decode_recovery_record(json.dumps(envelope).encode())
+
+
+@pytest.fixture
+def permit_intent(record):
+    return PermitRecoveryIntent(
+        descriptor=replace(record.descriptor, lease_revision=71),
+        operation_id=record.operation_id, phase="resume_intent", record_revision=3,
+        source_lease_ref="opaque-source-lease", receiver_ref="original-receiver", receiver_revision=900,
+        permit_id="original-permit", original_permit_revision=1, permit_revision=4,
+        decision_ref="owner-retained-restore-decision",
+    )
+
+
+@pytest.mark.parametrize("phase,revision,action", [
+    ("retire_intent", 1, "retire"), ("resume_intent", 3, "restore"),
+])
+def test_permit_intent_keeps_three_domains_independent_without_upgrading_v1(
+    record, permit_intent, phase, revision, action,
+):
+    before = encode_recovery_record(record)
+    intent = replace(permit_intent, phase=phase, record_revision=revision)
+    encoded = encode_permit_recovery_intent(intent)
+    restored = decode_permit_recovery_intent(encoded)
+    assert restored == intent
+    assert encode_permit_recovery_intent(restored) == encoded
+    assert restored.descriptor.lease_revision == 71
+    assert restored.source_lease_ref == "opaque-source-lease"
+    assert restored.receiver_ref == "original-receiver"
+    assert restored.receiver_revision == 900
+    assert restored.permit_revision == 4
+    status = restored.status()
+    assert status["action"] == action
+    assert status["owner_store"] == status["native_recovery"] == "unqualified"
+    assert not status["effects_wired"] and status["reconciliation_required"]
+    assert status["replay"] == "never"
+    with pytest.raises(ValueError):
+        decode_recovery_record(encoded)
+    with pytest.raises(ValueError):
+        decode_permit_recovery_intent(before)
+    with pytest.raises(ValueError):
+        encode_permit_recovery_intent(record)
+    assert encode_recovery_record(decode_recovery_record(before)) == before
+
+
+@pytest.mark.parametrize("field,value", [
+    ("phase", "settled"), ("phase", []), ("record_revision", True), ("record_revision", 2),
+    ("source_lease_ref", 5), ("source_lease_ref", ""), ("receiver_ref", ""),
+    ("receiver_revision", True),
+    ("receiver_revision", 0), ("permit_id", ""), ("permit_id", "x" * 257),
+    ("original_permit_revision", True), ("original_permit_revision", 0),
+    ("permit_revision", True), ("permit_revision", 1), ("permit_revision", "4"),
+    ("decision_ref", ""), ("decision_ref", "decision\nother"),
+])
+def test_invalid_or_start_only_permit_intents_refuse(permit_intent, field, value):
+    envelope = json.loads(encode_permit_recovery_intent(permit_intent))
+    envelope["intent"][field] = value
+    with pytest.raises(ValueError):
+        decode_permit_recovery_intent(json.dumps(envelope).encode())
+    with pytest.raises(ValueError):
+        replace(permit_intent, **{field: value})
+
+
+@pytest.mark.parametrize("path", [(), ("intent",), ("intent", "descriptor")])
+def test_permit_intent_strict_fields_and_versions_cannot_claim_extra_authority(permit_intent, path):
+    envelope = json.loads(encode_permit_recovery_intent(permit_intent))
+    target = envelope
+    for key in path:
+        target = target[key]
+    target["retirement_authorized"] = True
+    with pytest.raises(ValueError):
+        decode_permit_recovery_intent(json.dumps(envelope).encode())
+    del target["retirement_authorized"]
+    key = next(iter(target))
+    marker = json.dumps(key) + ":"
+    duplicate = json.dumps(envelope).replace(
+        marker, marker + json.dumps(target[key]) + "," + marker, 1,
+    )
+    with pytest.raises(ValueError):
+        decode_permit_recovery_intent(duplicate.encode())
+    del target[key]
+    with pytest.raises(ValueError):
+        decode_permit_recovery_intent(json.dumps(envelope).encode())
+    envelope = json.loads(encode_permit_recovery_intent(permit_intent))
+    envelope["version"] = 2
+    with pytest.raises(ValueError):
+        decode_permit_recovery_intent(json.dumps(envelope).encode())
+
+
+@pytest.mark.parametrize("payload", [
+    b"", b"\xff", b'{"value":NaN}', b'{"value":1.5}',
+    b"[" * 2000 + b"]" * 2000, b" " * (MAX_RECORD_BYTES + 1),
+])
+def test_permit_intent_malformed_encoding_refuses(payload):
+    with pytest.raises(ValueError):
+        decode_permit_recovery_intent(payload)

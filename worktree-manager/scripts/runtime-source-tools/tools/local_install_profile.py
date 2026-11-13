@@ -291,7 +291,8 @@ def _write_snapshot(
     if uv is not None:
         from runtime_application_project import emit, install_callbacks
 
-        metadata = dependencies._toml(frozen.plugin / "pyproject.toml")["project"]
+        project_metadata = dependencies._toml(frozen.plugin / "pyproject.toml")
+        metadata = project_metadata["project"]
         profile_record = profile.record()
         environment = profile_record["target"]["environment"]
         major, minor = environment["python_full_version"].split(".")[:2]
@@ -304,7 +305,9 @@ def _write_snapshot(
         }
         with source_inputs.project_inputs(prepared, component, deadline=deadline) as (observed, inputs):
             construction = source_inputs.application_inputs(observed, inputs)
-        setup, start = install_callbacks(primary, extras=tuple(construction["extras"]))
+        setup, start = install_callbacks(
+            primary, extras=tuple(construction["extras"]), metadata=project_metadata,
+        )
         emit(
             application, distribution=metadata["name"], version=metadata["version"],
             requires_python=f">={environment['python_full_version']},<{major}.{int(minor) + 1}",
