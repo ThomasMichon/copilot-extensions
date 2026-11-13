@@ -8,6 +8,8 @@ import shutil
 import subprocess
 import time
 
+from agent_procutil import no_window_kwargs
+
 
 class PasswordMutationAmbiguous(RuntimeError):
     """The password subprocess failed after its commit state became unknown."""
@@ -74,6 +76,7 @@ class KeePassXCBackend:
                 capture_output=True,
                 text=True,
                 timeout=10,
+                **no_window_kwargs(),
             )
             return r.returncode == 0
         except Exception:
@@ -96,6 +99,7 @@ class KeePassXCBackend:
                 capture_output=True,
                 text=True,
                 timeout=timeout,
+                **no_window_kwargs(),
             )
         except Exception:
             return None
@@ -208,6 +212,7 @@ class KeePassXCBackend:
                 capture_output=True,
                 text=True,
                 timeout=min(10, remaining),
+                **no_window_kwargs(),
             )
         except (OSError, subprocess.SubprocessError):
             # Completion is unknown. The caller must reread, never retry add.
@@ -243,6 +248,7 @@ class KeePassXCBackend:
                     capture_output=True,
                     text=True,
                     timeout=10,
+                    **no_window_kwargs(),
                 )
             except Exception:
                 pass
@@ -279,6 +285,7 @@ class KeePassXCBackend:
                 capture_output=True,
                 text=True,
                 timeout=10,
+                **no_window_kwargs(),
             )
             if r.returncode == 0:
                 return True, "Entry created"
@@ -307,6 +314,7 @@ class KeePassXCBackend:
                 capture_output=True,
                 text=True,
                 timeout=10,
+                **no_window_kwargs(),
             )
             if r.returncode == 0:
                 return True, "Password updated"
@@ -346,6 +354,7 @@ class KeePassXCBackend:
                 capture_output=True,
                 text=True,
                 timeout=10,
+                **no_window_kwargs(),
             )
             if r.returncode == 0:
                 return True, f"Imported {attachment_name}"
@@ -386,6 +395,7 @@ class KeePassXCBackend:
                 capture_output=True,
                 text=True,
                 timeout=10,
+                **no_window_kwargs(),
             )
             if r.returncode == 0:
                 with open(tmp_path, "rb") as f:
