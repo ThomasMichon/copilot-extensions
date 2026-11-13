@@ -33,6 +33,8 @@ import time
 from pathlib import Path
 
 from .config import IS_WINDOWS, default_config_path, home_dir
+from .config import normalize_entry
+from .credential_fields import canonical_field
 
 # Enablement / location env vars.
 CACHE_ENABLE_ENV = "AGENT_VAULT_CACHE"
@@ -476,6 +478,32 @@ class PersistentCache:
             entries[entry] = fields
         return entries, fields
 
+    @classmethod
+    def _matching_aliases(
+        cls, store: dict, entry: str, field: str, *, strict: bool,
+    ) -> list[tuple[str, str, dict]]:
+        identity = normalize_entry(entry, "")
+        matches = []
+        for path, fields in store["entries"].items():
+            if normalize_entry(path, "") != identity:
+                continue
+            if not isinstance(fields, dict):
+                cls._field_record(store, path, field, strict=strict)
+                continue
+            for attribute in fields:
+                if canonical_field(attribute) == canonical_field(field):
+                    record = cls._field_record(store, path, attribute, strict=strict)
+                    if isinstance(record, dict):
+                        matches.append((path, attribute, record))
+        return matches
+
+    @classmethod
+    def _pending_alias(cls, store: dict, entry: str, field: str, *, strict: bool) -> bool:
+        return any(
+            "rotation" in record
+            for _path, _attribute, record in cls._matching_aliases(store, entry, field, strict=strict)
+        )
+
     def get(
         self,
         entry: str,
@@ -483,6 +511,7 @@ class PersistentCache:
         max_age_seconds: int | None = None,
         *,
         legacy_entry: str | None = None,
+        legacy_field: str | None = None,
         readonly: bool = False,
     ) -> str | None:
         """Read a cached value; readonly mode refuses migration and corrupt data."""
@@ -498,16 +527,19 @@ class PersistentCache:
             ):
                 require_coordinated(self._root_dir, self._recovery)
                 return self._get_value(
-                    entry, field, max_age_seconds, legacy_entry=legacy_entry, readonly=readonly,
+                    entry, field, max_age_seconds, legacy_entry=legacy_entry,
+                    legacy_field=legacy_field, readonly=readonly,
                 )
 
     def _get_value(
-        self, entry, field, max_age_seconds, *, legacy_entry, readonly,
+        self, entry, field, max_age_seconds, *, legacy_entry, legacy_field, readonly,
     ) -> str | None:
         store = (
             self._read_store(readonly=True, strict=True)
             if readonly else self._read_store()
         )
+        if self._pending_alias(store, entry, field, strict=readonly):
+            return None
         if not readonly and _path_exists(self._key_file):
             from . import kek
 
@@ -522,12 +554,22 @@ class PersistentCache:
                                 self._write_key(blob.strip())
         rec = self._field_record(store, entry, field, strict=readonly)
         if rec is None and legacy_entry and legacy_entry != entry:
+            if self._pending_alias(store, legacy_entry, field, strict=readonly):
+                return None
             rec = self._field_record(store, legacy_entry, field, strict=readonly)
             if rec is not None and not readonly:
                 self.migrate_entry(legacy_entry, entry, field)
                 migrated = self._field_record(self._read_store(), entry, field)
                 if migrated is not None:
                     rec = migrated
+        canonical_exists = any(
+            isinstance(fields, dict) and field in fields
+            for fields in (store["entries"].get(entry), store["entries"].get(legacy_entry))
+        )
+        if rec is None and not canonical_exists and legacy_field and legacy_field != field:
+            rec = self._field_record(store, entry, legacy_field, strict=readonly)
+            if rec is None and legacy_entry and legacy_entry != entry:
+                rec = self._field_record(store, legacy_entry, legacy_field, strict=readonly)
         if not isinstance(rec, dict) or "rotation" in rec:
             return None
         if max_age_seconds is not None:
@@ -738,13 +780,24 @@ class PersistentCache:
                             entry = legacy_entry
                 _, fields = self._fields_for_write(store, entry)
                 current = fields.get(field)
+                aliases = self._matching_aliases(store, entry, field, strict=True)
                 if (
                     generation is not None
-                    and isinstance(current, dict)
-                    and "rotation" not in current
-                    and int(current.get("generation", 0)) > generation
+                    and any(
+                        "rotation" not in record and int(record.get("generation", 0)) > generation
+                        for _path, _attribute, record in aliases
+                    )
                 ):
-                    return True
+                    return (
+                        isinstance(current, dict) and "rotation" not in current
+                        and int(current.get("generation", 0)) > generation
+                        and not any("rotation" in record for _p, _f, record in aliases)
+                    )
+                for path, attribute, _record in aliases:
+                    if (path, attribute) != (entry, field):
+                        del store["entries"][path][attribute]
+                        if path != entry and not store["entries"][path]:
+                            del store["entries"][path]
                 fields[field] = {
                     "value": value,
                     "cached_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
@@ -772,6 +825,8 @@ class PersistentCache:
             with self.replacement_lock(), self._store_lock():
                 require_source(self._root_dir, record)
                 store = self._read_store(readonly=True, strict=True)
+                if self._pending_alias(store, entry, field, strict=True):
+                    return False
                 entries = store["entries"]
                 if entry in entries:
                     fields = entries[entry]
@@ -852,10 +907,16 @@ class PersistentCache:
         """Wipe the entire cache file. Safe when the file is absent."""
         try:
             self._refresh_selection()
-            if self._cache_file.exists():
-                self._cache_file.unlink()
+            if not self._base_dir.exists():
+                return True
+            from . import service_cache_epochs
+
+            with service_cache_epochs.guard(self):
+                service_cache_epochs.revoke(self._root_dir, None, reset=True)
+                if self._cache_file.exists():
+                    self._cache_file.unlink()
             return True
-        except OSError:
+        except (OSError, RuntimeError, ValueError):
             return False
 
     def status(self) -> dict:
@@ -897,6 +958,10 @@ class PersistentCache:
             "key_exists": self._key_file.exists(),
             "entry_count": len(entries),
             "field_count": total_fields,
+            "service_field_count": (
+                len(store.get("service_entries", {}))
+                if isinstance(store.get("service_entries", {}), dict) else 0
+            ),
             "oldest": oldest,
             "newest": newest,
             "readable": readable,

@@ -9,6 +9,7 @@ import subprocess
 import time
 
 from agent_procutil import no_window_kwargs
+from .credential_fields import attribute_name
 
 
 class PasswordMutationAmbiguous(RuntimeError):
@@ -105,14 +106,7 @@ class KeePassXCBackend:
             return None
 
     def get_entry(self, kpdb: str, entry_path: str, field: str = "password") -> str | None:
-        attr_map = {
-            "password": "Password",
-            "username": "UserName",
-            "url": "URL",
-            "title": "Title",
-            "notes": "Notes",
-        }
-        attr = attr_map.get(field, field)
+        attr = attribute_name(field)
         r = self._run(kpdb, ["show", "-q", "-s", kpdb, entry_path, "-a", attr])
         if r and r.returncode == 0:
             return r.stdout.strip()

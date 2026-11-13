@@ -549,7 +549,8 @@ detach children from their caller or change credential stdin/output handling.
   permissions and recovery-policy errors are not decryption fallback triggers.
 - Password TTL is an absolute lifetime from unlock, not inactivity; requests
   and `--persistent` do not extend it. Idle housekeeping clears expired
-  passwords and their credential caches. `ping` labels daemon lifetime
+  passwords and their in-memory credential caches. Opt-in protected credential
+  records have a separate lifetime, as described below. `ping` labels daemon lifetime
   separately from the selected database's remaining password lifetime.
   Its additive `password_lifetime` object uses contract
   `agent-vault.password-lifetime`, version `1`, with `state` equal to `bounded`,
@@ -589,6 +590,89 @@ export AGENT_VAULT_CACHE=1
 agent-vault cache-populate --entry API/OpenAI
 agent-vault cache-verify --entry API/OpenAI
 ```
+
+An enabled service uses its own OS protection context and a separate
+`service_entries` collection inside this same encrypted store. Fresh backend
+reads bind records to the canonical database, runtime home, installation, group,
+entry and field. They never populate the ordinary `(entry, field)` slots that
+older direct readers use, so reading another database through the service
+cannot poison those slots. Unattributed legacy values are not adopted.
+
+A matching service record can satisfy the existing `get` request after the
+master password expires. Value/generation snapshots are read together.
+Backend-equivalent leading-slash paths use one entry identity without
+re-prefixing an explicitly absolute root entry. Unknown journals under an older
+spelling are preserved, not bypassed by starting another mutation.
+Standard field aliases such as `Password` and `password` share one cache and
+journal identity, including population and verification; custom field names
+remain case-sensitive. Existing alias-keyed direct records remain readable
+without migration only when no canonical record or pending journal owns the
+field. Ordinary client
+writeback and entry migration do not rewrite service records or renew their age.
+Pending equivalent entry/field journals are checked even when a canonical value
+is present, rather than only when trying an alias fallback.
+Direct clients do not reuse an unqualified legacy entry as a group-relative
+credential: a root `token` cannot satisfy `Allowed/token`. Such an ambiguous
+legacy record is a miss until the selected grouped entry is populated
+authoritatively; cache-only requests still never contact the service.
+`cache-verify` uses the same subject selection, so its readiness result cannot
+count an ambiguous root credential as a grouped cache hit.
+Password-rotation and population migrations apply the same guard, preserving
+root records and their pending journals during grouped writes.
+After a confirmed authoritative read, ordinary client reconciliation replaces
+equivalent alias journals atomically with the canonical value. Ordinary cache
+reads and missing-only recovery never clear those journals; a newer retained
+value prevents an older response from claiming successful journal reconciliation.
+Service generation floors include equivalent legacy field/path records, so clock
+rollback cannot make confirmed authority appear older than those retained values.
+
+Authoritative refresh never returns a cached value or deletes the caller's
+existing recovery record before trying the backend. A successful read updates
+only the service-owned collection; the caller still owns missing-only recovery
+insertion into its ordinary collection. Explicit locking and mutations revoke
+the relevant service records. Pending password journals remain intact, but
+observing a pending replacement revokes earlier service values so rolling it
+back cannot resurrect a revoked value.
+A backend read captures the revocation state before fetching its value.
+Publication through a later clear/revocation is refused, so an in-flight read
+cannot recreate a valid service record after `cache-clear` has completed.
+
+A root-metadata lock and the selected store lock protect a small non-secret
+revocation-epoch file at the original cache root.
+It contains only hashed subjects and random fences, never credentials. Recording
+revocation before attempting credential decoding prevents a replacement service
+from reviving old records after a temporarily unavailable crypto backend returns.
+An opted-in but unavailable protected cache is not cache opt-out: dependent
+mutations fail before backend writes, and locking still clears the master while
+reporting failed protected-cache revocation. Malformed metadata fails closed.
+Read bindings remain installation-specific, but revocation follows the physical
+database across installations sharing a cache root, including separately selected
+recovery compartments. Short root-metadata locking coordinates those fences;
+cache-miss backend reads and cache-affecting mutations share per-database custody
+without recursing into caller-held replacement locks. Health probes remain
+independent, and mutation deadlines still apply after cache journalling.
+Cache-construction/selection failures return `service_cache_unavailable` rather
+than dropping the service response.
+Encompassing revocations compact narrower fences only after rotating the wider
+fence. Capacity pressure rotates a global fence rather than permanently disabling
+mutations, and explicit `cache-clear` starts a fresh global fence before removing
+credential data. Uncached reads validate this metadata too.
+
+Fresh service generations advance beyond persisted generations under the
+protected-store lock, not just wall-clock time, so backward clock adjustments
+cannot make an older value outrank an authoritative refresh. Owned password
+journal completion, service publication and its generation are committed in the
+same protected write.
+
+The encrypted format, DPAPI/key protection, existing request syntax and direct
+`--cache-only` behavior remain unchanged; `cache-status` reports service records
+separately as `service_field_count`. Old services lack locked-service cache access
+and do not maintain its invalidation protocol. Resuming this feature after older
+providers mutate the backend requires explicit cache invalidation/repopulation;
+retained service-cache state across that downgrade is not supported.
+A live read whose service-cache write fails reports additive
+`cache_warning: "service_cache_write_failed"`. Unlock-triggered warming remains
+separate work.
 
 Fernet caches and `seal`/`unseal` use the optional `pycryptodomex` dependency
 (`cache` / `kek` extras), also supplied by the native `ssh` profile above.

@@ -2,6 +2,27 @@
 
 Back to [Backlog Reconciliation](README.md).
 
+## Accepted tracking effect
+
+The proposal below cleared review and merged in #12455 as `27cc5028b0`.
+Fresh complete source/receiver metadata, originals/discussions and collaborator
+qualification preceded publication. The complete actual #12315 body was read
+back and matched the reviewed append; its exact original body and complete
+discussion/edit history remain preserved. The receiver stays OPEN with
+**seven unchecked rows**.
+
+Only after direct receiving acceptance, the
+[source-specific explanation](https://github.com/ThomasMichon/copilot-extensions/issues/12415#issuecomment-6858099645)
+was published and #12415 separately verified `CLOSED` / `NOT_PLANNED`,
+with its exact original unchanged. Both incidents, unknown loss cause,
+readiness boundaries and literal repair-OR-refusal choices remain planned.
+No static-analysis pass, environment repair, implementer appointment,
+lease/resource transfer or productive-runtime acceptance is claimed.
+
+The proposal and sequence below remain the reviewed historical contract,
+not pending issue effects. See the
+[actual-effect journal](journal/2026/11.13-finite-source-and-existing-receivers.md#actual-receiving-and-separate-tracking-retirements).
+
 ## Proposed route and effect boundary
 
 Receive #12415's marker-survives-missing-resources recurrence in existing OPEN

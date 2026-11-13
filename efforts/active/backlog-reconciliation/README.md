@@ -344,11 +344,12 @@ the non-public approval conversation.
 
 The [23-contract study](journal/2026/11.13-finite-source-and-existing-receivers.md)
 verifies two finite source completions, retains nineteen positive gaps and
-proposes complete [Bridge](bridge-reregistration-receiving.md) and
-[checker-resource](checker-resources-receiving.md) lanes in existing OPEN
-receivers. No receiving amendment or redundant-source retirement is yet
-claimed. Three full-file provenance gaps and existing claim/source/native
-holds remain. The complete queue is 866 open, 137 above fixed 729.
+records accepted [Bridge](bridge-reregistration-receiving.md) and
+[checker-resource](checker-resources-receiving.md) lanes after reviewed
+proposal #12455. Two separate `NOT_PLANNED` retirements preserve OPEN
+receivers with sixteen and seven unchecked rows. Three full-file provenance
+gaps and existing claim/source/native holds remain. The subsequent complete
+queue is 864 open, 135 above fixed 729.
 
 The [current-contract study](journal/2026/11.13-current-contracts-and-dedup-proposal.md)
 retains sixteen whole unions and two positive whole-source qualification
@@ -3445,10 +3446,11 @@ sources, transferring owners or turning partial/planning gains into completion.
 The [finite-source/receiving audit](journal/2026/11.13-finite-source-and-existing-receivers.md)
 verifies 23 whole unions, all 29 admitted materialized blobs, three unread
 full-file gaps, literal review/execution grades and two exact completed-state
-acknowledgments. The proposed receiver additions preserve all incumbent
-content/checks and direct original alternatives; fourteen to sixteen Bridge
-rows and zero to seven checker rows are planned, not passing results or
-accepted receiving. The caller's executable/live and existing resource
+acknowledgments. Actual receiver readbacks after #12455 preserve all incumbent
+bytes/checks, discussion/history and direct original alternatives: sixteen
+Bridge rows and seven checker rows stay unchecked. Separate source explanations
+and `CLOSED` / `NOT_PLANNED` readbacks establish tracking retirement, not
+passing results. The caller's executable/live and existing resource
 qualification remain independent.
 
 The [current-contract audit](journal/2026/11.13-current-contracts-and-dedup-proposal.md)

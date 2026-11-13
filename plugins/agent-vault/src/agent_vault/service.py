@@ -16,7 +16,8 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from .cache import get_cache
+from .service_cache import get_cache
+from .credential_fields import canonical_field
 from . import __version__ as _PROCESS_VERSION
 from .config import (
     DEFAULT_TCP_PORT as DEFAULT_TCP_PORT,
@@ -49,6 +50,7 @@ from .rendezvous import (
 from .rendezvous import write_endpoint as write_endpoint
 from .service_endpoints import advertised_endpoint as advertised_endpoint
 from .service_connections import VaultConnections, settle_owned
+from . import service_cache
 from .service_generation import PROCESS_GENERATION, PROTOCOL, ServiceGeneration
 from .service_handoff import supported_versions
 from .winpipe import pipe_send
@@ -89,6 +91,7 @@ class VaultService:
         self.cli = KeePassXCBackend()
         self.cache: dict[tuple[str, str, str], str] = {}
         self._credential_generations: dict[tuple[str, str, str], int] = {}
+        self._blocked_service_cache: set[str] = set()
         self.last_activity = time.time()
         self._password_set_at: dict[str, float] = {}
         self._password_handoff_deadlines: dict[str, float] = {}
@@ -144,22 +147,11 @@ class VaultService:
         password: str,
         persistent,
         generation: int,
-    ) -> None:
-        keys_to_remove = [
-            key for key in self.cache
-            if key[0] == kpdb and key[1] == entry
-        ]
-        for key in keys_to_remove:
-            del self.cache[key]
-            self._credential_generations.pop(key, None)
-        cache_key = (kpdb, entry, "password")
-        self.cache[cache_key] = password
-        self._credential_generations[cache_key] = generation
-        if (
-            persistent.enabled
-            and not persistent.replace(entry, "password", password, generation)
-        ):
-            raise RuntimeError("Password updated, but the offline cache update failed")
+        operation: int | None = None,
+    ) -> int:
+        return service_cache.update_password_cache(
+            self, kpdb, entry, password, persistent, generation, operation,
+        )
 
     def _set_password(
         self,
@@ -176,6 +168,7 @@ class VaultService:
                 "ok": False,
                 "error": "Password mutation expired before the backend write",
             }
+        custody = contextlib.ExitStack()
         try:
             if time.monotonic() > deadline:
                 return {
@@ -186,12 +179,22 @@ class VaultService:
             if not self.ensure_unlocked(kpdb, vault_name, reason):
                 error_msg = self._last_error(kpdb) or self._last_error("") or "Vault locked"
                 return {"ok": False, "error": error_msg, "needs_unlock": True}
+            custody.enter_context(service_cache.backend_custody(get_cache(), kpdb))
+            self._check_password_ttl()
+            if not self.ensure_unlocked(kpdb, vault_name, reason):
+                error_msg = self._last_error(kpdb) or self._last_error("") or "Vault locked"
+                return {"ok": False, "error": error_msg, "needs_unlock": True}
             if time.monotonic() > deadline:
                 return {
                     "ok": False,
                     "error": "Password mutation expired before the backend write",
                 }
             operation = time.time_ns()
+            if not service_cache.invalidate_entry(
+                get_cache(), kpdb, entry, getattr(self._request_ctx, "group", None),
+                "password", legacy=False,
+            ):
+                return {"ok": False, "error": service_cache.UNAVAILABLE}
             try:
                 persistent, operation = self._prepare_password_cache(
                     kpdb,
@@ -201,6 +204,12 @@ class VaultService:
                 )
             except RuntimeError as exc:
                 return {"ok": False, "error": str(exc)}
+            if time.monotonic() > deadline:
+                pending = persistent.enabled and not persistent.rollback_replace(entry, "password", operation)
+                return {
+                    "ok": False, "cache_pending": bool(pending),
+                    "error": "Password mutation expired before the backend write",
+                }
             try:
                 ok, msg = self.cli.edit_password(kpdb, entry, password)
             except PasswordMutationAmbiguous as exc:
@@ -256,12 +265,13 @@ class VaultService:
                 return {"ok": False, "error": msg}
             generation = time.time_ns()
             try:
-                self._cache_updated_password(
+                generation = self._cache_updated_password(
                     kpdb,
                     entry,
                     password,
                     persistent,
                     generation,
+                    operation=operation,
                 )
             except RuntimeError as exc:
                 return {
@@ -273,6 +283,7 @@ class VaultService:
                 }
             return {"ok": True, "message": msg, "generation": generation}
         finally:
+            custody.close()
             self._credential_lock.release()
 
     @property
@@ -309,14 +320,20 @@ class VaultService:
         elif not os.path.isfile(kpdb):
             log.error("KeePass database not found at %s - set KPDB to your .kdbx path", kpdb)
 
-    def invalidate_cache(self, kpdb: str | None = None) -> None:
+    def invalidate_cache(self, kpdb: str | None = None, *, persistent: bool = False) -> None:
         if kpdb is None:
             self.cache.clear()
             self._credential_generations.clear()
-            return
-        for key in [key for key in self.cache if key[0] == kpdb]:
-            del self.cache[key]
-            self._credential_generations.pop(key, None)
+        else:
+            for key in [key for key in self.cache if key[0] == kpdb]:
+                del self.cache[key]
+                self._credential_generations.pop(key, None)
+        if persistent:
+            self._blocked_service_cache.add(
+                service_cache.database_binding(kpdb) if kpdb else service_cache.PREFIX,
+            )
+            if not service_cache.revoke(self, get_cache(), kpdb):
+                raise service_cache.ServiceCacheUnavailable(service_cache.UNAVAILABLE)
 
     def _effective_cooldown(self, kpdb: str) -> float:
         """Return cooldown duration based on last failure mode."""
@@ -491,20 +508,7 @@ class VaultService:
         group: str | None = None,
         refresh: bool = False,
     ) -> str | None:
-        with self._credential_lock:
-            entry = normalize_entry(entry, group)
-            cache_key = (kpdb, entry, field)
-            if not refresh and cache_key in self.cache:
-                return self.cache[cache_key]
-
-            if not self.ensure_unlocked(kpdb):
-                return None
-
-            value = self.cli.get_entry(kpdb, entry, field)
-            if value is not None:
-                self.cache[cache_key] = value
-                self._credential_generations[cache_key] = time.time_ns()
-            return value
+        return service_cache.read(self, get_cache(), kpdb, entry, field, group, refresh)
 
     def get_with_generation(
         self,
@@ -519,7 +523,7 @@ class VaultService:
             normalized = normalize_entry(entry, group)
             return (
                 value,
-                self._credential_generations.get((kpdb, normalized, field), 0),
+                self._credential_generations.get((kpdb, normalized, canonical_field(field)), 0),
             )
 
     def has(self, kpdb: str, entry: str, group: str | None = None) -> bool | None:
@@ -569,10 +573,17 @@ class VaultService:
     def _handle_admitted_request(self, request: dict, peer: str = "?",
                                  transport: str = "unknown") -> dict:
         """Dispatch work whose lifecycle admission was decided by the server."""
-        if request.get("action") in _DISPATCH_WITHOUT_CREDENTIAL_LOCK:
-            return self._dispatch_request(request, peer, transport)
-        with self._credential_lock:
-            return self._dispatch_request(request, peer, transport)
+        try:
+            if request.get("action") in _DISPATCH_WITHOUT_CREDENTIAL_LOCK:
+                return self._dispatch_request(request, peer, transport)
+            with self._credential_lock, contextlib.ExitStack() as custody:
+                self._check_password_ttl()
+                if request.get("action") in {"add", "set-username", "remove", "rm", "move", "mv"}:
+                    kpdb = request.get("kpdb") or resolve_kpdb(required=False)
+                    custody.enter_context(service_cache.backend_custody(get_cache(), kpdb))
+                return self._dispatch_request(request, peer, transport)
+        except service_cache.ServiceCacheUnavailable:
+            return {"ok": False, "error": service_cache.UNAVAILABLE}
 
     def _dispatch_request(self, request: dict, peer: str,
                           transport: str) -> dict:
@@ -654,15 +665,18 @@ class VaultService:
         if action == "get":
             entry = request.get("entry", "")
             field = request.get("field", "password")
-            value, generation = self.get_with_generation(
-                kpdb,
-                entry,
-                field,
-                group,
-                refresh=bool(request.get("refresh", False)),
-            )
+            try:
+                value, generation = self.get_with_generation(
+                    kpdb, entry, field, group, refresh=bool(request.get("refresh", False)),
+                )
+            except service_cache.ServiceCacheUnavailable:
+                return {"ok": False, "error": service_cache.UNAVAILABLE}
             if value is not None:
-                return {"ok": True, "value": value, "generation": generation}
+                response = {"ok": True, "value": value, "generation": generation}
+                warning = getattr(self._request_ctx, "cache_warning", None)
+                if warning:
+                    response["cache_warning"] = warning
+                return response
             if not self.cli.has_password(kpdb):
                 error_msg = self._last_error(kpdb) or self._last_error("") or "Vault locked"
                 return {"ok": False, "error": error_msg, "needs_unlock": True}
@@ -695,6 +709,10 @@ class VaultService:
                 self._unlock_failed_at.clear()
                 self._last_unlock_error.clear()
                 self._last_dismiss.clear()
+            try:
+                self.invalidate_cache(lock_kpdb, persistent=True)
+            except service_cache.ServiceCacheUnavailable:
+                return {"ok": False, "error": service_cache.UNAVAILABLE}
             log.info("CLI backend locked by client request [%s]", reason)
             return {"ok": True, "was_unlocked": was_unlocked}
 
@@ -739,6 +757,8 @@ class VaultService:
             if not self.ensure_unlocked(kpdb, vault_name, reason):
                 error_msg = self._last_error(kpdb) or self._last_error("") or "Vault locked"
                 return {"ok": False, "error": error_msg, "needs_unlock": True}
+            if not service_cache.invalidate_entry(get_cache(), kpdb, entry, group):
+                return {"ok": False, "error": service_cache.UNAVAILABLE}
             ok, msg = self.cli.add_entry(
                 kpdb,
                 entry,
@@ -747,6 +767,8 @@ class VaultService:
                 password=request.get("password"),
                 generate=request.get("generate", False),
             )
+            if ok:
+                service_cache.clear_memory(self, kpdb, entry)
             return {"ok": ok, "message": msg} if ok else {"ok": False, "error": msg}
 
         if action == "set-password":
@@ -848,13 +870,13 @@ class VaultService:
             if not self.ensure_unlocked(kpdb, vault_name, reason):
                 error_msg = self._last_error(kpdb) or self._last_error("") or "Vault locked"
                 return {"ok": False, "error": error_msg, "needs_unlock": True}
+            if not service_cache.invalidate_entry(get_cache(), kpdb, entry, group):
+                return {"ok": False, "error": service_cache.UNAVAILABLE}
             ok, msg = self.cli.edit_username(kpdb, entry, username)
             if ok:
-                keys_to_remove = [k for k in self.cache if k[0] == kpdb and k[1] == entry]
-                for key in keys_to_remove:
-                    del self.cache[key]
+                invalidated = service_cache.clear_memory(self, kpdb, entry)
                 log.info("Username updated for %s, %d cache entries invalidated",
-                         entry, len(keys_to_remove))
+                         entry, invalidated)
             return {"ok": ok, "message": msg} if ok else {"ok": False, "error": msg}
 
         if action in ("remove", "rm"):
@@ -870,13 +892,13 @@ class VaultService:
             if not self.ensure_unlocked(kpdb, vault_name, reason):
                 error_msg = self._last_error(kpdb) or self._last_error("") or "Vault locked"
                 return {"ok": False, "error": error_msg, "needs_unlock": True}
+            if not service_cache.invalidate_entry(get_cache(), kpdb, entry, group):
+                return {"ok": False, "error": service_cache.UNAVAILABLE}
             ok, msg = self.cli.remove_entry(kpdb, entry)
             if ok:
-                keys_to_remove = [k for k in self.cache if k[0] == kpdb and k[1] == entry]
-                for key in keys_to_remove:
-                    del self.cache[key]
+                invalidated = service_cache.clear_memory(self, kpdb, entry)
                 log.info("Removed entry %s, %d cache entries invalidated",
-                         entry, len(keys_to_remove))
+                         entry, invalidated)
             return {"ok": ok, "message": msg} if ok else {"ok": False, "error": msg}
 
         if action in ("move", "mv"):
@@ -895,17 +917,16 @@ class VaultService:
             if not self.ensure_unlocked(kpdb, vault_name, reason):
                 error_msg = self._last_error(kpdb) or self._last_error("") or "Vault locked"
                 return {"ok": False, "error": error_msg, "needs_unlock": True}
+            new_path = dest_group.rstrip("/") + "/" + entry.rsplit("/", 1)[-1]
+            persistent = get_cache()
+            if not all(
+                service_cache.invalidate_entry(persistent, kpdb, path, group)
+                for path in (entry, new_path)
+            ):
+                return {"ok": False, "error": service_cache.UNAVAILABLE}
             ok, msg = self.cli.move_entry(kpdb, entry, dest_group)
             if ok:
-                # Invalidate cache for the old path and any stale cache at the new path.
-                entry_name = entry.rsplit("/", 1)[-1]
-                new_path = dest_group.rstrip("/") + "/" + entry_name
-                keys_to_remove = [
-                    k for k in self.cache
-                    if k[0] == kpdb and k[1] in (entry, new_path)
-                ]
-                for key in keys_to_remove:
-                    del self.cache[key]
+                service_cache.clear_memory(self, kpdb, entry, new_path)
                 log.info("Moved entry %s -> %s", entry, dest_group)
             return {"ok": ok, "message": msg} if ok else {"ok": False, "error": msg}
 
