@@ -1,0 +1,9 @@
+{
+  "comment": "Add coordinator-owned periodic source relevance evaluation with durable retry and original-owner closeout",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

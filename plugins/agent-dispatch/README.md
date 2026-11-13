@@ -1300,6 +1300,8 @@ For election-versus-production diagnostics and explicit renewal-fenced
 migration recovery, see [Emitter recovery](docs/emitter-recovery.md).
 Task-authoring command emitters can opt into
 [retained-receipt relevance checks](docs/emitter-relevance.md) without a new daemon.
+Companion evaluators can opt into
+[coordinator-owned periodic reconsideration](docs/periodic-relevance.md).
 
 A domain producer that exposes an idempotent one-shot command can be declared as
 an **emitter** and run on a cadence by the singleton supervisor. The supervisor

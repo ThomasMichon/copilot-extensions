@@ -156,6 +156,7 @@ class QueueRelevanceMixin:
         disabled_ids: frozenset[str] = frozenset(),
         on_transition: Callable[[CompletionOutcome], None] | None = None,
         registration_admission: RelevanceAdmission | None = None,
+        evaluation_token: str | None = None,
     ) -> dict:
         """Accept a source judgment and ownership decision in one write.
 
@@ -202,6 +203,14 @@ class QueueRelevanceMixin:
                 if previous["request_json"] != encoded:
                     raise TaskError("relevance request key conflicts with its original request")
                 return json.loads(previous["result_json"])
+            if evaluation_token is not None:
+                if not isinstance(scope, RelevanceRegistration) or not conn.execute(
+                    "SELECT 1 FROM task_relevance_evaluations WHERE task_id=?"
+                    " AND registration_id=? AND token=? AND expires_at>?"
+                    " AND status='pending'",
+                    (task_id, scope.registration_id, evaluation_token, ts),
+                ).fetchone():
+                    raise TaskError("periodic relevance delivery ownership changed")
             task = self._fetch(conn, task_id)
             if task is None:
                 raise TaskError(f"no such task {task_id!r}")
