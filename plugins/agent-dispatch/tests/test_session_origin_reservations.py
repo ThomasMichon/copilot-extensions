@@ -106,16 +106,17 @@ def test_keyed_ordinary_retry_lost_reply_and_later_episode_keep_original_choice(
     assert later.session_origin["task_id"] != later_task.id
 
 
-def test_unselected_ordinary_retry_seals_original_and_current_rows(tmp_path):
+def test_unselected_ordinary_retry_retains_baseline_for_unknown_earlier_send(tmp_path):
     queue = TaskQueue(tmp_path / "queue.db")
     task = queue.create("work", repo="example")
     first, _ = queue.reserve_spawn(task.id, driver="ordinary-bridge")
     queue.defer_spawn(first.key, detail="before selection")
     retry, _ = queue.reserve_spawn(task.id, driver="ordinary-bridge")
-    assert retry.session_origin_transport is None
-    bind(queue, retry.key, startup_revision=1, transport="origin-v1")
-    assert queue.get_reservation(first.key).session_origin_transport == "origin-v1"
-    assert queue.get_reservation(retry.key).session_origin_transport == "origin-v1"
+    assert retry.session_origin_transport == "baseline"
+    with pytest.raises(TaskError, match="cannot change"):
+        bind(queue, retry.key, startup_revision=1, transport="origin-v1")
+    assert queue.get_reservation(first.key).session_origin_transport == "baseline"
+    assert queue.get_reservation(retry.key).session_origin_transport == "baseline"
 
 
 def test_switch_from_acquisition_to_keyed_creation_does_not_inherit_its_session_origin(tmp_path):
@@ -179,6 +180,87 @@ def test_capture_failure_rolls_back_original_pool_claim_and_reservation(tmp_path
     assert queue.get(task.id) == task
     assert queue.task_pool_assignment(task.id) is None
     assert queue.list_reservations(task_id=task.id) == []
+
+
+@pytest.mark.parametrize("initial", [None, "origin-v1"])
+def test_rollback_attempt_cannot_be_ignored_when_selecting_keyed_creation_transport(tmp_path, monkeypatch, initial):
+    from agent_dispatch import queue_session_origin
+
+    queue = TaskQueue(tmp_path / "queue.db")
+    task = queue.create("work", repo="example")
+    first, _ = queue.reserve_spawn(task.id, driver="ordinary-bridge")
+    if initial:
+        bind(queue, first.key, startup_revision=1, transport=initial)
+    queue.defer_spawn(first.key, detail="preparation response unknown")
+
+    def old_provider(conn, task, *, key):
+        conn.execute(
+            "UPDATE spawn_reservations SET session_origin_transport='baseline' WHERE key=?", (key,),
+        )
+
+    with monkeypatch.context() as rollback:
+        rollback.setattr(queue_session_origin, "retain", old_provider)
+        old, _ = queue.reserve_spawn(task.id, driver="ordinary-bridge")
+    assert old.creation_key == first.creation_key and old.session_origin is None
+    restarted = TaskQueue(queue.db_path)
+    if initial:
+        with pytest.raises(TaskError, match="conflicting.*history"):
+            bind(restarted, old.key, startup_revision=1, transport="baseline")
+    else:
+        with pytest.raises(TaskError, match="cannot change"):
+            bind(restarted, old.key, startup_revision=1, transport="origin-v1")
+    restarted.defer_spawn(old.key, detail="rolled-back sender result unknown")
+    if initial:
+        with pytest.raises(TaskError, match="conflicting.*history"):
+            restarted.reserve_spawn(task.id, driver="ordinary-bridge")
+        assert len(restarted.list_reservations(task_id=task.id)) == 2
+        assert restarted.get_reservation(first.key).session_origin_transport == "origin-v1"
+    else:
+        current, _ = restarted.reserve_spawn(task.id, driver="ordinary-bridge")
+        assert current.session_origin == first.session_origin
+        assert current.session_origin_transport == "baseline"
+        assert restarted.get_reservation(first.key).session_origin_transport == "baseline"
+
+
+@pytest.mark.parametrize("driver", ["cli", "ordinary-bridge"])
+@pytest.mark.parametrize("preparation", ["allocation", "workspace"])
+def test_legacy_preparation_seals_baseline_but_keeps_an_explicit_origin_choice(tmp_path, driver, preparation):
+    queue = TaskQueue(tmp_path / "queue.db")
+    for selected in (None, "origin-v1"):
+        task = queue.create("work", repo="example")
+        reservation, _ = queue.reserve_spawn(task.id, driver=driver)
+        if selected:
+            bind(queue, reservation.key, startup_revision=1, transport=selected)
+        if preparation == "allocation":
+            result = queue.record_spawn_allocation(reservation.key, "example")
+        else:
+            result = queue.record_spawn_worktree(
+                reservation.key, f"workspace-{task.id}", ownership="created", driver=driver,
+            )
+        assert result.session_origin_transport == (selected or "baseline")
+        assert result.session_origin == reservation.session_origin
+        if not selected:
+            with pytest.raises(TaskError, match="cannot change"):
+                bind(queue, reservation.key, startup_revision=1, transport="origin-v1")
+
+
+@pytest.mark.parametrize("driver", ["cli", "ordinary-bridge"])
+def test_same_attempt_prepared_by_rolled_back_owner_cannot_gain_origin(tmp_path, monkeypatch, driver):
+    from agent_dispatch import queue_session_origin
+
+    queue = TaskQueue(tmp_path / "queue.db")
+    task = queue.create("work", repo="example")
+    reservation, _ = queue.reserve_spawn(task.id, driver=driver)
+    with monkeypatch.context() as rollback:
+        rollback.setattr(queue_session_origin, "seal_preparation", lambda *a: None)
+        queue.record_spawn_allocation(reservation.key, "example")
+    assert queue.get_reservation(reservation.key).session_origin_transport is None
+    restarted = TaskQueue(queue.db_path)
+    with pytest.raises(TaskError, match="cannot change"):
+        bind(restarted, reservation.key, startup_revision=1, transport="origin-v1")
+    assert bind(
+        restarted, reservation.key, startup_revision=1, transport="baseline",
+    ).session_origin == reservation.session_origin
 
 
 def test_concurrent_wire_choices_have_one_transactional_winner(tmp_path):

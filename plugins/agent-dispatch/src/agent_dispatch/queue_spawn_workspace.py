@@ -91,6 +91,8 @@ class SpawnWorkspaceMixin:
                 dict(row), worktree=worktree, project=allocation_project, path=worktree_path,
                 creation_nonce=creation_nonce, value=worktree_writer_requirement,
             )
+            from .queue_session_origin import seal_preparation
+            seal_preparation(conn, row)
             conn.execute(
                 "UPDATE spawn_reservations SET "
                 "session_handle = CASE "

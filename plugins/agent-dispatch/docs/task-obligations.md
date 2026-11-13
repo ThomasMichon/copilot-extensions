@@ -198,6 +198,16 @@ origin metadata after upgrade, and an origin-v1 retry cannot silently downgrade.
 Lost responses are reconciled by reading/repeating that same binding, not by
 sending another native creation form.
 
+Existing allocation and workspace-preparation operations also seal baseline
+when the caller omitted origin selection, before it can send a native request.
+An explicit origin choice must precede preparation; later preparation preserves
+that choice. All ordinary attempts for a creation key participate in transport
+reconciliation, not just its first reservation. An earlier unselected attempt,
+or recorded preparation/native history without selection, may already have sent
+a baseline request and cannot later gain origin-v1. An intervening rolled-back
+provider's baseline is retained; conflicting sealed history refuses visibly
+rather than guessing which request won.
+
 The running coordinator advertises `session_origin_binding_versions: [1]`
 through its existing pool-placement contract. The explicit client checks that
 selected peer before sending the new request. An older caller still uses its
@@ -207,8 +217,10 @@ remain unattributed on restart/retry. The old form has no scheduled retirement.
 This expansion does not yet migrate automatic session callers, qualify Bridge
 adoption, change startup admission or confer cleanup authority.
 
-Capture adds bounded indexed reservation/creation-key reads plus the existing
+Capture adds indexed reservation/creation-key reads plus the existing
 producer and exact-assignment point reads, once per newly committed reservation.
+Ordinary transport reconciliation examines that creation key's indexed attempt
+lineage and returns grouped choices; it does not scan unrelated reservations.
 Reads do not enrich or recapture it. No process, network request, registrar scan,
 background flow or additional ownership registry is introduced. Binding uses one
 existing coordinator transaction and updates at most two reservation rows.

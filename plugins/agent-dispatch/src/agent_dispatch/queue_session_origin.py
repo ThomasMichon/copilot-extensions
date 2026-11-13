@@ -85,11 +85,71 @@ def retain(conn: sqlite3.Connection, task: Task, *, key: str) -> None:
         ).fetchone()
         if original is None:
             raise TaskError("original session reservation is unavailable")
-        encoded, transport = original["session_origin"], original["session_origin_transport"]
+        encoded, transport = original["session_origin"], _known_transport(conn, row, original)
+        if transport is not None:
+            conn.execute(
+                "UPDATE spawn_reservations SET session_origin_transport=? WHERE key=?",
+                (transport, original_key),
+            )
     conn.execute(
         "UPDATE spawn_reservations SET session_origin=?, session_origin_reservation_key=?,"
         " session_origin_transport=? WHERE key=?", (encoded, original_key, transport, key),
     )
+
+
+def _original(conn: sqlite3.Connection, row: sqlite3.Row) -> sqlite3.Row:
+    key = row["session_origin_reservation_key"] or row["key"]
+    original = conn.execute("SELECT * FROM spawn_reservations WHERE key=?", (key,)).fetchone()
+    if original is None or (
+        key != row["key"] and (
+            row["driver"] != "ordinary-bridge" or original["driver"] != row["driver"]
+            or original["creation_key"] != row["creation_key"]
+        )
+    ):
+        raise TaskError("session origin binding has no original creation owner")
+    return original
+
+
+def _known_transport(
+    conn: sqlite3.Connection, row: sqlite3.Row, original: sqlite3.Row,
+) -> str | None:
+    if row["driver"] == "ordinary-bridge":
+        history = conn.execute(
+            "SELECT session_origin_transport, MAX(CASE WHEN session_origin_transport IS NULL"
+            " AND (key<>? OR key=? AND (allocation_project IS NOT NULL"
+            " OR agent_info IS NOT NULL OR session_handle IS NOT NULL)) THEN 1 ELSE 0 END)"
+            " AS uncertain_send FROM spawn_reservations"
+            " WHERE creation_key=? AND driver='ordinary-bridge' GROUP BY session_origin_transport",
+            (row["key"], original["key"], row["creation_key"]),
+        ).fetchall()
+        choices = {item["session_origin_transport"] for item in history if item["session_origin_transport"] is not None}
+        if any(item["uncertain_send"] for item in history):
+            choices.add("baseline")
+    else:
+        choices = {original["session_origin_transport"]} - {None}
+        if not choices and (
+            original["allocation_project"] or original["agent_info"] or original["session_handle"]
+        ):
+            choices.add("baseline")
+    if choices - {"baseline", "origin-v1"} or len(choices) > 1:
+        raise TaskError("conflicting session origin transport history requires reconciliation")
+    return next(iter(choices), None)
+
+
+def _seal(
+    conn: sqlite3.Connection, row: sqlite3.Row, original: sqlite3.Row, transport: str,
+) -> None:
+    for selected in {original["key"], row["key"]}:
+        conn.execute(
+            "UPDATE spawn_reservations SET session_origin_transport=? WHERE key=?",
+            (transport, selected),
+        )
+
+
+def seal_preparation(conn: sqlite3.Connection, row: sqlite3.Row) -> None:
+    """Old callers cross these existing owner operations before native creation."""
+    original = _original(conn, row)
+    _seal(conn, row, original, _known_transport(conn, row, original) or "baseline")
 
 
 def _representable(row: sqlite3.Row) -> bool:
@@ -130,27 +190,13 @@ def bind(
             or row["startup_fenced"] or row["startup_revision"] != startup_revision
         ):
             raise TaskError("session origin binding requires the current reserving startup")
-        original_key = row["session_origin_reservation_key"] or key
-        original = conn.execute(
-            "SELECT * FROM spawn_reservations WHERE key=?", (original_key,),
-        ).fetchone()
-        if original is None or (
-            original_key != key and (
-                row["driver"] != "ordinary-bridge" or original["driver"] != row["driver"]
-                or original["creation_key"] != row["creation_key"]
-            )
-        ):
-            raise TaskError("session origin binding has no original creation owner")
-        retained = original["session_origin_transport"]
+        original = _original(conn, row)
+        retained = _known_transport(conn, row, original)
         if retained is not None and retained != transport:
             raise TaskError("original session origin transport cannot change")
         if transport == "origin-v1" and not _representable(original):
             raise TaskError("session origin transport requires representable original evidence")
-        for selected in {original_key, key}:
-            conn.execute(
-                "UPDATE spawn_reservations SET session_origin_transport=? WHERE key=?",
-                (transport, selected),
-            )
+        _seal(conn, row, original, transport)
         updated = conn.execute("SELECT * FROM spawn_reservations WHERE key=?", (key,)).fetchone()
         conn.commit()
     return SpawnReservation._from_row(updated)

@@ -121,6 +121,37 @@ def test_create_store_send_order_and_readable_identity(startup):
     assert queue.get(task["id"]).status == "queued"
 
 
+def test_lost_baseline_create_reply_cannot_gain_origin_on_retry(startup, monkeypatch):
+    from agent_dispatch.queue_session_origin import bind
+
+    queue, task, client, calls = startup
+    original = ordinary_bridge.subprocess.run
+
+    def lose_reply(argv, **kwargs):
+        result = original(argv, **kwargs)
+        if argv[2] == "create":
+            assert queue.get_reservation(task["spawn_reservation_key"]).session_origin_transport == "baseline"
+            raise subprocess.TimeoutExpired(argv, 180)
+        return result
+
+    monkeypatch.setattr(ordinary_bridge.subprocess, "run", lose_reply)
+    with pytest.raises(ordinary_bridge.CreatedAgentUnrecorded):
+        ordinary_bridge.start(
+            task, client=client, agent="local", project="example",
+            charter="reviewer", prompt="assigned task",
+        )
+    assert [call[0] for call in calls] == ["create"]
+    first = queue.get_reservation(task["spawn_reservation_key"])
+    queue.defer_spawn(first.key, detail="keyed create reply lost")
+    restarted = TaskQueue(queue.db_path)
+    retry, _ = restarted.reserve_spawn(task["id"], driver="ordinary-bridge")
+    assert retry.creation_key == first.creation_key
+    assert retry.session_origin_transport == "baseline"
+    with pytest.raises(TaskError, match="cannot change"):
+        bind(restarted, retry.key, startup_revision=1, transport="origin-v1")
+    assert len(calls) == 1
+
+
 @pytest.mark.parametrize("mode", ["off", "on", "invalid", "sink-error"])
 def test_launch_debug_preserves_real_boundary_contract(startup, monkeypatch, tmp_path, mode):
     queue, task, client, calls = startup

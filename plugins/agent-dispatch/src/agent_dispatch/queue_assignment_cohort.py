@@ -96,6 +96,8 @@ def bind_allocation_facts(
 
     retained = allocation_requirement(dict(row), project, worktree_writer_requirement)
     bind_transport(conn, row, cohort_transport)
+    from .queue_session_origin import seal_preparation
+    seal_preparation(conn, row)
     conn.execute(
         "UPDATE spawn_reservations SET allocation_project=?, worktree_writer_requirement=?, updated_at=? WHERE key=?",
         (project, retained, now, row["key"]),
