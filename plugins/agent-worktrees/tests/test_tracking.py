@@ -49,6 +49,11 @@ from agent_worktrees.tracking import (
 )
 
 
+@pytest.fixture(autouse=True)
+def observed_reporter(monkeypatch):
+    monkeypatch.setattr(cfg.socket, "gethostname", lambda: "test")
+
+
 def test_session_entry_round_trips_pane_id(tmp_path: Path) -> None:
     rec = WorktreeRecord(
         worktree_id="wt-pane",
@@ -1599,12 +1604,16 @@ completed_at: null
 class TestSessionRegistration:
     """Test hook-invoked session registration."""
 
+    @pytest.fixture(autouse=True)
+    def receiving_ledger(self, monkeypatch, tmp_tracking_dir, monkeypatch_config):
+        monkeypatch.setattr(cfg, "project_dir", lambda name=None: tmp_tracking_dir.parent)
+
     @staticmethod
     def _new_record(tracking_dir: Path, wt_id: str) -> None:
         rec = WorktreeRecord(
             worktree_id=wt_id,
             branch=f"worktree/{wt_id}",
-            worktree_path=f"/tmp/{wt_id}",
+            worktree_path=str(tracking_dir / wt_id),
             repo="test-repo",
             machine="test",
             platform=cfg.detect_platform(),
@@ -1622,7 +1631,7 @@ class TestSessionRegistration:
         rec = WorktreeRecord(
             worktree_id="reg-wt",
             branch="worktree/reg-wt",
-            worktree_path="/tmp/reg",
+            worktree_path=str(tmp_tracking_dir / "reg-wt"),
             repo="test-repo",
             machine="test",
             platform=cfg.detect_platform(),
@@ -1647,7 +1656,7 @@ class TestSessionRegistration:
         rec = WorktreeRecord(
             worktree_id="dup-wt",
             branch="worktree/dup-wt",
-            worktree_path="/tmp/dup",
+            worktree_path=str(tmp_tracking_dir / "dup-wt"),
             repo="test-repo",
             machine="test",
             platform=cfg.detect_platform(),
@@ -1672,7 +1681,7 @@ class TestSessionRegistration:
         rec = WorktreeRecord(
             worktree_id="pre-reg",
             branch="worktree/pre-reg",
-            worktree_path="/tmp/pre",
+            worktree_path=str(tmp_tracking_dir / "pre-reg"),
             repo="test-repo",
             machine="test",
             platform=cfg.detect_platform(),
@@ -1696,7 +1705,7 @@ class TestSessionRegistration:
         rec = WorktreeRecord(
             worktree_id="end-wt",
             branch="worktree/end-wt",
-            worktree_path="/tmp/end",
+            worktree_path=str(tmp_tracking_dir / "end-wt"),
             repo="test-repo",
             machine="test",
             platform=cfg.detect_platform(),
@@ -1776,7 +1785,7 @@ class TestSessionRegistration:
         The daemon otherwise leaks forever: nothing else reaps it, including
         `finalize` (which deliberately leaves worktree state alone). See #2265.
         """
-        worktree_dir = tmp_path / "live-wt"
+        worktree_dir = tmp_tracking_dir / "fsmon-wt"
         worktree_dir.mkdir()
         rec = WorktreeRecord(
             worktree_id="fsmon-wt",
@@ -1818,7 +1827,7 @@ class TestSessionRegistration:
         self, tmp_tracking_dir: Path, monkeypatch_config, tmp_path, monkeypatch,
     ):
         """A still-open sibling session on the same worktree vetoes the stop."""
-        worktree_dir = tmp_path / "shared-wt"
+        worktree_dir = tmp_tracking_dir / "fsmon-shared"
         worktree_dir.mkdir()
         rec = WorktreeRecord(
             worktree_id="fsmon-shared",
@@ -1854,7 +1863,7 @@ class TestSessionRegistration:
         rec = WorktreeRecord(
             worktree_id="noop-wt",
             branch="worktree/noop-wt",
-            worktree_path="/tmp/noop",
+            worktree_path=str(tmp_tracking_dir / "noop-wt"),
             repo="test-repo",
             machine="test",
             platform=cfg.detect_platform(),
@@ -1990,9 +1999,10 @@ class TestListRecords:
             self._make("wsl-1", platform="wsl"),
             self._make("win-1", platform="windows"),
         ])
-        wsl = list_records(tmp_tracking_dir, platform_filter="wsl")
-        assert len(wsl) == 1
-        assert wsl[0].worktree_id == "wsl-1"
+        current = list_records(tmp_tracking_dir, platform_filter=cfg.detect_platform())
+        assert {record.worktree_id for record in current} == {"wsl-1", "win-1"}
+        other = "linux" if cfg.detect_platform() != "linux" else "windows"
+        assert list_records(tmp_tracking_dir, platform_filter=other) == []
 
     def test_empty_dir(self, tmp_tracking_dir: Path):
         records = list_records(tmp_tracking_dir)
@@ -2582,7 +2592,7 @@ class TestOwningTrackingDirResolution:
         base = dict(
             worktree_id=wt_id,
             branch=f"worktree/{wt_id}",
-            worktree_path=f"/tmp/src/{wt_id}",
+            worktree_path=str(cfg.project_dir(repo) / "worktrees" / wt_id),
             repo=repo,
             machine="test",
             platform=cfg.detect_platform(),
@@ -3391,10 +3401,8 @@ class TestSystemWorktreeKind:
         """picker-performance-and-responsiveness Phase 3: the resident
         status-monitor's hot path (``find_worktree_id_by_cwd``, called once
         per live session per sweep) opts out of ``list_records``'s normal
-        per-record ``copy.deepcopy`` via ``copy_records=False`` -- verify
-        the records returned really are the cache's own objects (so the
-        CPU cost this phase removes is actually gone), while the default
-        call every other caller uses is unaffected."""
+        per-record ``copy.deepcopy`` via ``copy_records=False``. Only the
+        top-level reporter view is detached; nested data stays shared."""
         record_cache.clear()
         save_record(self._base(worktree_id="s1", kind="session"), tmp_path / "s1.yaml")
 
@@ -3404,7 +3412,8 @@ class TestSystemWorktreeKind:
 
         shared_a = list_records(tmp_path, copy_records=False)[0]
         shared_b = list_records(tmp_path, copy_records=False)[0]
-        assert shared_a is shared_b, "copy_records=False must hand back the cache's own object"
+        assert shared_a is not shared_b
+        assert shared_a.sessions is shared_b.sessions
         assert shared_a.worktree_id == default_a.worktree_id == "s1"
 
     def test_find_worktree_id_by_cwd_unaffected_by_the_copy_skip(self, tmp_path: Path, monkeypatch):

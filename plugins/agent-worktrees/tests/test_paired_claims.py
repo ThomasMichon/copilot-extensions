@@ -14,6 +14,8 @@ from agent_worktrees import obligations, tracking, worktree_creation
 def pair(tmp_path, monkeypatch):
     from agent_worktrees import config as cfg
 
+    monkeypatch.setattr(cfg.socket, "gethostname", lambda: "host")
+    monkeypatch.setattr(cfg, "detect_platform", lambda: "windows")
     monkeypatch.setattr(cfg, "project_dir", lambda name=None: tmp_path / str(name))
     records = []
     for name in ("harness", "knowledge"):
@@ -124,8 +126,6 @@ def test_only_a_finalized_sibling_can_settle_the_pair(pair, state):
     ("pair_kind", "anchor"),
     ("repo", "other"),
     ("worktree_id", "other"),
-    ("machine", "other"),
-    ("platform", "linux"),
 ])
 def test_a_foreign_or_nonreciprocal_finalized_record_is_not_completion(pair, field, value):
     sibling = pair.knowledge
@@ -318,7 +318,7 @@ def test_legacy_pair_without_claim_cannot_drop_responsibility(pair, mutation):
 @pytest.mark.parametrize("field,value", [
     ("pair_id", "foreign"), ("pair_ref", "host/other/other"),
     ("pair_role", "other"), ("pair_kind", "anchor"), ("repo", "other"),
-    ("worktree_id", "other"), ("machine", "other"), ("platform", "linux"),
+    ("worktree_id", "other"),
 ])
 def test_prune_requires_reciprocal_finalized_identity_in_both_directions(
     pair, role, field, value,
@@ -334,6 +334,29 @@ def test_prune_requires_reciprocal_finalized_identity_in_both_directions(
     document[field] = value
     sibling.yaml_path.write_text(yaml.safe_dump(document), encoding="utf-8")
     assert prune.default_paired_sibling_final(record) is None
+
+
+@pytest.mark.parametrize("role", ["harness", "knowledge"])
+@pytest.mark.parametrize("remote_platform", ["windows", "linux"])
+def test_foreign_reporter_cannot_finalize_a_coincident_pair(pair, monkeypatch, role, remote_platform):
+    from machine_transport import LocalExecutionContext
+    from agent_worktrees import prune, record_reporting
+
+    record = getattr(pair, role)
+    sibling = pair.knowledge if role == "harness" else pair.harness
+    document = yaml.safe_load(sibling.yaml_path.read_text(encoding="utf-8"))
+    document["status"] = "finalized"
+    sibling.yaml_path.write_text(yaml.safe_dump(document), encoding="utf-8")
+    original = record_reporting.local_context
+    monkeypatch.setattr(
+        record_reporting, "local_context",
+        lambda path, repo: LocalExecutionContext("remote", "other", remote_platform, "other")
+        if path == sibling.yaml_path else original(path, repo),
+    )
+    assert prune.default_paired_sibling_final(record) is None
+    if role == "harness":
+        with pytest.raises(ValueError, match="paired.*finaliz"):
+            tracking.release_resource_claim(record, record.pair_ref)
 
 
 @pytest.mark.parametrize("state", ["active", "complete", "finalizing"])

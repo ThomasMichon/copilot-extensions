@@ -27,7 +27,7 @@ def ensure_record_trusted(record: tracking.WorktreeRecord, config: Config | None
     try:
         local = require_owner_identity(record.execution_machine, config)
     except ExecutionSpaceError:
-        if record.machine_identity is not None:
+        if record.machine_identity is not None and record._reporting_context is None:
             raise
         local = False
     if not local:

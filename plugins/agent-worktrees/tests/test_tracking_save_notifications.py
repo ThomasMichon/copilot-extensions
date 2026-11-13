@@ -243,7 +243,7 @@ def test_canonical_error_in_outer_batch_still_delivers_prior_real_commit(saved):
             with tracking._RecordLock(path):
                 record.title = "first committed"
                 tracking.save_record(record, path)
-                record._loaded_machine = "wrong"
+                record._loaded_record_subject = ("different-ledger",)
                 tracking.save_record(record, path)
     finally:
         unsubscribe()

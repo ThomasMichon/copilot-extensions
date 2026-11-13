@@ -111,10 +111,10 @@ def require_idle(ledger: Path) -> None:
     if data is None:
         if not ledger.exists():
             return
-        from . import tracking
+        from . import record_cache, tracking
 
         try:
-            current = tracking.load_record(ledger, copy_result=False)
+            current = record_cache.cached_load(ledger, tracking._load_record_uncached, copy_result=False)
         except FileNotFoundError:
             return
         _require_original_location_without_journal(current)

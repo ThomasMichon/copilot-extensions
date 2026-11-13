@@ -129,7 +129,7 @@ def test_local_owner_and_doctor_do_not_require_historical_machine_mapping(
 
 
 @pytest.mark.parametrize("topology", ["mis-mapped", "malformed", "invalid-types"])
-@pytest.mark.parametrize("selector", [None, "old-execution", "new-host"])
+@pytest.mark.parametrize("selector", [None, "new-host"])
 def test_real_resolve_resume_and_original_owner_settlement(
     local_worktree, monkeypatch, capfd, topology, selector,
 ):
@@ -177,12 +177,14 @@ def test_real_resolve_resume_and_original_owner_settlement(
     assert settled.machine_identity == original_identity
 
 
-def test_local_proof_rejects_a_changed_snapshot_and_an_unrelated_owner(local_worktree):
+def test_local_proof_ignores_names_but_rejects_a_changed_subject_and_unrelated_owner(local_worktree):
     fixture = local_worktree
     _topology(fixture, "missing")
     config = fixture.load()
     record = tracking.load_record(fixture.ledger)
     record.machine_identity = WorktreeMachineIdentity("changed-host", record.platform, "changed-owner")
+    assert retained_checkout.is_local(record, config)
+    record.creation_nonce = "replacement-incarnation"
     assert not retained_checkout.is_local(record, config)
     ref = tracking.parse_claim_ref(f"foreign/example/{record.worktree_id}")
     assert retained_checkout.resolve_owner(ref, config) is None
@@ -252,7 +254,7 @@ def test_local_checkout_cannot_cross_the_actual_execution_platform(local_worktre
             fixture.data.pop(field)
     fixture.ledger.write_text(yaml.safe_dump(fixture.data), encoding="utf-8")
     record = tracking.load_record(fixture.ledger)
-    config = fixture.load()
+    config = replace(fixture.load(), platform=other)
     assert not retained_checkout.is_local(record, config)
     with pytest.raises(execution_spaces.ExecutionSpaceError, match="platform"):
         execution_spaces.require_record_mutation(record, config)
@@ -365,13 +367,13 @@ def test_cross_project_local_probe_uses_receiving_config_without_rebinding_remot
         monkeypatch.setattr(cfg, "load_machines_yaml", lambda anchor, *, config=None: (
             {entry.key: entry} if config is not None and config.repo_name == "other" else {}
         ))
-    assert resolve_target.retained_target_is_local(ambient, fixture.checkout.name, "old-execution")
+    assert resolve_target.retained_target_is_local(ambient, fixture.checkout.name, "new-host")
     assert cfg.active_project() == "other"
     assert not resolve_target.retained_target_is_local(ambient, fixture.checkout.name, "foreign-host")
     assert cfg.active_project() == "other"
     monkeypatch.setattr(local_cache_refresh, "prepare_tool_roster", lambda *a, **k: None)
     assert resolve_cli.cmd_resolve(_args(
-        worktree_id=fixture.checkout.name, machine=ambient.machine if declared_local else "old-execution",
+        worktree_id=fixture.checkout.name, machine=ambient.machine if declared_local else "new-host",
         no_resume=True, defer_projections=True,
     )) == 0
     plan = json.loads(capfd.readouterr().out)
@@ -465,7 +467,7 @@ def test_actual_retained_local_parent_needs_no_foreign_receipt(local_worktree, t
         **fixture.data, "worktree_id": "parent", "worktree_path": str(parent),
         "branch": "worktree/parent", "creation_nonce": "parent-incarnation",
     }), encoding="utf-8")
-    fixture.data["owner_ref"] = "old-execution/example/parent"
+    fixture.data["owner_ref"] = "new-host/example/parent"
     fixture.ledger.write_text(yaml.safe_dump(fixture.data), encoding="utf-8")
     execution_spaces.require_record_mutation(tracking.load_record(fixture.ledger), config)
 
@@ -686,7 +688,7 @@ def test_retained_local_claimant_survives_invalid_topology(local_worktree):
 
     fixture = local_worktree
     _topology(fixture, "malformed")
-    ref = f"old-execution/example/{fixture.checkout.name}"
+    ref = f"new-host/example/{fixture.checkout.name}"
     assert claimant.local_claimant_alive(ref) is True
     assert claimant.resolve_claimant_alive(ref, allow_remote=False) is True
 
@@ -705,7 +707,7 @@ def test_cross_project_owner_death_uses_receiving_branch_proof(
         fixture.data["branch"] = "worktree/replacement"
     fixture.ledger.write_text(yaml.safe_dump(fixture.data), encoding="utf-8")
     receiving = fixture.load()
-    ambient = replace(receiving, repo_name="other", machine="old-execution", repos={
+    ambient = replace(receiving, repo_name="other", machine="new-host", repos={
         "other": replace(receiving.default_repo, anchor=str(tmp_path / "other-anchor")),
     })
     monkeypatch.setattr(cfg, "_ACTIVE_PROJECT", "other")
@@ -719,7 +721,7 @@ def test_cross_project_owner_death_uses_receiving_branch_proof(
 
     monkeypatch.setattr(cfg, "load_project_config", load_project)
     monkeypatch.setattr(claimant, "_owner_looks_dead", lambda record: True)
-    ref = f"old-execution/example/{fixture.checkout.name}"
+    ref = f"new-host/example/{fixture.checkout.name}"
     before = fixture.ledger.read_bytes()
     expected = False if proof == "matching" else None
     assert claimant.local_claimant_alive(ref) is expected
@@ -736,6 +738,7 @@ def test_native_owner_cannot_select_coincident_versioned_guest(
     from agent_worktrees import claimant, prune
 
     fixture = local_worktree
+    monkeypatch.setattr(cfg.socket, "gethostname", lambda: "desk")
     execution = "guest-space" if topology == "scoped" else "desk-wsl"
     if topology == "scoped":
         fixture.topology.write_text(yaml.safe_dump({"machines": {
@@ -925,7 +928,7 @@ def test_anchor_entry_never_relocates_to_another_project(
     })
     monkeypatch.setattr(local_cache_refresh, "prepare_tool_roster", lambda *a, **k: None)
     code = resolve_cli.cmd_resolve(_args(
-        worktree_id=worktree_id, machine="old-execution" if selected_present else None,
+        worktree_id=worktree_id, machine="new-host" if selected_present else None,
         no_resume=True, defer_projections=True,
     ))
     plan = json.loads(capfd.readouterr().out)
