@@ -374,13 +374,14 @@ All detailed slices are **agent-recommended** and remain subject to review.
   [Windows/Entra application adapter](runtime-authentication.md#selected-windowsentra-application-adapter)
   with the retained auth owner: actual broker/API proof compatibility,
   provider renewal and scoped enrollment, without changing management/SSH.
-- [ ] Review and deliver the bounded
+- [x] Review and deliver the bounded
   [RS256 application-token plus enrolled-proof service prerequisite](rs256-enrolled-service-profile.md),
   preserving existing profiles and caller-only bearer semantics. Common source
   acceptance is not actual provider interoperability or live enrollment.
-  Contract review merged in #12327. The explicit version `6` implementation
-  and synthetic crypto/TLS service-path qualification are prepared; implementation
-  review/publication and adopter return remain pending.
+  Contract review merged in #12327; implementation, exact version `6`
+  support and synthetic crypto/TLS service-path qualification merged in #12335.
+  The resulting source contract was returned to #6804 for the retained
+  provider/enrollment work and Gateway/adopter integration.
 - [ ] Supply the resident role-selected Gateway and fixed-service index route
   using the existing release, offer/request and operation/receipt contracts.
   Source implementation and signed-grant index ingress landed in #6809.
@@ -490,7 +491,7 @@ All entries are **agent-recommended implementation gates**, not completed tests.
   Prove long-lived provider/OS sessions renew without Gateway-added presence
   prompts, with real challenge, explicit revocation and optional dead-man
   outcomes distinct from token/lease churn or temporary unavailability.
-- [ ] Complete the bounded [RS256 enrolled-service source controls](rs256-enrolled-service-profile.md#validation-and-stopping-boundary)
+- [x] Complete the bounded [RS256 enrolled-service source controls](rs256-enrolled-service-profile.md#validation-and-stopping-boundary)
   with real synthetic-token/proof verification and contained TLS service-path
   tests; retain actual provider/protected-key/enrollment and live-adoption gates.
 - [ ] Real first-touch Windows/Linux install with no Copilot/plugin/runtime cache;
@@ -532,6 +533,20 @@ All entries are **agent-recommended implementation gates**, not completed tests.
 [Architecture and migration contract](architecture.md).
 
 ## Journal
+
+### 2026-11-12 - Explicit RS256 enrolled-service source accepted
+
+- #12335 merged as `c6e5d0f098137a211bd9ed12a91a91dac88c2290`
+  after final-head Copilot approval with no issues and required green CI.
+  The exact source leaf and its validation gate are complete; the parent
+  Fleet/auth/Gateway aggregates remain open.
+- 446 focused source cases and the contained TLS connector/channel/source
+  path passed. Two bounded request-cost diagnostics passed separately.
+  Actual provider/protected-key/enrollment, same-owner hosting, installed
+  selection and rollout remain unqualified by these synthetic results.
+- Returned the exact callable/profile/configuration and provider-first
+  support boundary to #6804. No owner, credential, service, policy or
+  execution authority was transferred or activated.
 
 ### 2026-11-12 - Explicit RS256 enrolled-service contract reviewed
 

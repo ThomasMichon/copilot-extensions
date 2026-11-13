@@ -104,9 +104,9 @@ with their existing owners. No additional human-presence timer is introduced.
 - [x] Prove the existing actual service-admission/channel/finite-consumer path
   with original synthetic RS256 tokens and real request proofs over contained
   TLS. Verify source-handler bindings without adding credential acquisition.
-- [ ] Publish exact callable/configuration support, performance and validation
+- [x] Publish exact callable/configuration support, performance and validation
   limits; pass normal review and required CI before merging implementation.
-- [ ] Return the resulting contract to Gateway/adopter integration. Actual
+- [x] Return the resulting contract to Gateway/adopter integration. Actual
   provider interoperability, protected enrollment, same-owner listener hosting,
   installed selection and rollout remain separate, not completed by this leaf.
 
@@ -114,8 +114,19 @@ The source implementation is `enrolled_identity.EnrolledRS256IdentityVerifier`
 and service-policy version `6`, selected as `enrolled-rs256-pop-v1`.
 The [exact SDK/configuration contract](../../../fleet-manager/docs/gateway-enrolled-identity.md#explicit-rs256-application-token-profile)
 documents signed-claim selection, required scalar/list constraints and executing
-SDK support discovery. Publication/review, adopter return and all live gates
-remain separate. No new registry or CLI was added.
+SDK support discovery. Implementation merged in #12335 after current-head
+Copilot approval and required green CI; its source contract was returned to
+#6804. This bounded source prerequisite is complete. All provider, enrollment,
+hosting and live-adoption gates remain separate; no new registry or CLI was
+added.
+
+The canonical contained Fleet runner passed 446 focused cryptographic,
+policy, downstream-admission and real TLS cases. Two additional bounded
+request-cost cases retained all 25 samples per profile as diagnostics, not
+production latency budgets. Python lint, install contract and documentation
+checks passed. The PR records the exact test selection, measurements and
+explicit reasons for not running installer clean-room or real-provider/live
+adoption lanes. No installer/provisioning or installed runtime was changed.
 
 ## Validation and stopping boundary
 
