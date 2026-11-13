@@ -142,6 +142,10 @@ and authorized installed-consumer acceptance. No global validation rule is waive
   the coordinator. Lopsided-gasket's MCP handover implementation and retained
   source changes remain independently owned; this correction does not replace
   that writer or settle its remaining work.
+- The [direct receiving annex](direct-receiving.md) retains #10652, #10653
+  and #10742 under their existing independent owners. Tracking consolidation
+  cannot release the affected installation's mutation hold or claim technical
+  completion; full reattachment is not an incoming-publication prerequisite.
 
 ## Context
 
@@ -596,6 +600,13 @@ Git and the append-only journal preserve the earlier proposal as history, not
 as an active MCP contract. The unused calibration approval remains held; this
 withdrawal authorizes no GUI effect or change to the SDK's own admission rules.
 
+### Direct retained qualification lanes
+
+- [ ] Resolve the independent incoming-publication, protected-retirement and
+  authentic-input prepared/mixed requirements in the
+  [direct receiving annex](direct-receiving.md#plan), preserving every existing
+  milestone, unchecked item, owner and actual hold.
+
 ## Validation Plan
 
 - [ ] First-slice incoming publication succeeds with a live old keeper,
@@ -708,6 +719,12 @@ withdrawal authorizes no GUI effect or change to the SDK's own admission rules.
   focus/window calibration, foreground restoration, Terminal-host attribution
   and debugger conditions. The actual generated-CMD functional two-cycle and
   owned-cleanup controls remain required without those conditions.
+
+- [ ] Qualify the independent MRV-I/MRV-R/MRV-A lanes in the
+  [direct receiving Validation Plan](direct-receiving.md#validation-plan).
+  MRV-T requires reviewed whole receiving readback before separate tracking
+  judgments; neither tracking state nor a planned clause is runtime acceptance
+  or source/resource release.
 
 ## Proposal
 

@@ -727,17 +727,15 @@ _TRANSPORT_LABELS = {
 
 
 def cmd_ping(args):
+    from .service_status import format_service_status
+
     resp = send_command({"action": "ping"})
     if resp and resp.get("ok"):
         status = _vault_status_label(resp["cli"])
         transport = _TRANSPORT_LABELS.get(
             resp.get("_transport", ""), resp.get("_transport", "unknown")
         )
-        print(
-            f"Vault service running - PID {resp['pid']}, "
-            f"TTL {resp['ttl']}s, {resp['cached']} cached, "
-            f"status={status}, via {transport}"
-        )
+        print(format_service_status(resp, status=status, transport=transport))
         return 0
     print("Vault service not running")
     return 1
