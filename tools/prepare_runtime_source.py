@@ -112,7 +112,12 @@ def _git(
 
 
 def _archive(source: Path, commit: str, archive: Path, *, deadline: float | None = None) -> None:
+    from source_preparation_process import procutil_module
+
     archive = archive.absolute()
+    permissions = procutil_module("python_cache_permissions")
+    permissions.check(archive.parent)
+    permissions.check_ancestors(archive.parent)
     with archive.open("xb"):
         _git(
             source, "-c", "tar.umask=0022", "-c", "core.eol=lf",

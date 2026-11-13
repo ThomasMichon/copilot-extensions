@@ -45,7 +45,11 @@ spelling. No checkout configuration is changed.
 Git writes archive bytes directly to the exclusively created artifact file;
 the process owner captures diagnostics, not the complete archive in memory.
 Relative artifact paths are bound to the caller's directory before Git's
-source-directory selection. Existing deadlines and cleanup ownership remain.
+source-directory selection. The existing native permission owner checks the
+artifact directory and its ancestors against foreign modification before Git
+can reopen that path. Local composition creates missing output directories
+with private permissions at creation, independent of umask; it never repairs
+an existing shared directory. Existing deadlines and cleanup ownership remain.
 Configured source acquisition and preparation explicitly disable Git's ambient
 automatic line-ending conversion, so their clean-checkout checks observe the
 same literal source bytes on Windows and POSIX. Repository-owned attributes

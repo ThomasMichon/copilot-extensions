@@ -536,6 +536,45 @@ def test_native_archive_refuses_existing_destination_before_launch(tmp_path, mon
     assert archive.read_bytes() == b"retained artifact"
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX group permissions; Windows uses native DACL checks")
+@pytest.mark.parametrize("shared", ["parent", "ancestor"])
+def test_native_archive_refuses_replacement_capable_directories(tmp_path, monkeypatch, shared):
+    root = tmp_path / "shared"
+    root.mkdir(mode=0o700)
+    parent = root / "output"
+    parent.mkdir(mode=0o700)
+    victim = tmp_path / "retained"
+    victim.write_bytes(b"untouched")
+    archive = parent / "source.tar"
+    archive.symlink_to(victim)
+    (parent if shared == "parent" else root).chmod(0o770)
+    monkeypatch.setattr(local.preparation, "_git",
+                        lambda *_a, **_kw: pytest.fail("replacement-capable path reached Git"))
+    with pytest.raises(PermissionError, match="another user's writes"):
+        local.preparation._archive(tmp_path, "unused", archive)
+    assert victim.read_bytes() == b"untouched" and archive.is_symlink()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX umask; Windows uses private directory creation")
+def test_compose_directories_are_created_private_under_group_writable_umask(tmp_path):
+    from agent_procutil.owned_process import run_caller_owned
+
+    root = tmp_path / "new" / "output"
+    code = (
+        "import os,stat,sys\nfrom pathlib import Path\n"
+        "sys.path.insert(0,sys.argv[1])\nimport local_install_source as local\n"
+        "os.umask(0o002)\n"
+        "root=Path(sys.argv[2])\nlocal._private_output_directory(root)\n"
+        "assert stat.S_IMODE(root.stat().st_mode)==0o700\n"
+        "assert stat.S_IMODE(root.parent.stat().st_mode)==0o700\n"
+    )
+    result = run_caller_owned(
+        [sys.executable, "-c", code, str(Path(local.__file__).parent), str(root)],
+        timeout=15, max_stdout_bytes=8192, max_stderr_bytes=8192,
+    )
+    assert result.returncode == 0, result.stderr
+
+
 @pytest.mark.skipif(os.name != "nt", reason="Windows extended-length paths")
 @pytest.mark.parametrize(
     ("reference", "problem"),

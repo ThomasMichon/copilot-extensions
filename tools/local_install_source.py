@@ -118,6 +118,20 @@ def repository_source(repository: Path, descriptor: dict | None, *, deadline: fl
     return {"kind": normalized.kind, "canonical": normalized.canonical, "ref": normalized.ref}
 
 
+def _private_output_directory(path: Path) -> None:
+    permissions = preparation_process.procutil_module("python_cache_permissions")
+    owner = preparation_process.procutil_module("_daemon_instance_owner")
+    missing = []
+    current = path
+    while not current.exists():
+        missing.append(current)
+        current = current.parent
+    permissions.check(current, ancestor=True)
+    permissions.check_ancestors(current)
+    for directory in reversed(missing):
+        owner.mkdir_private(directory)
+
+
 def compose(
     repository: Path, commit: str, main_head: str | None, output: Path, *,
     finalized_main: bool = False, deadline: float | None = None,
@@ -164,7 +178,7 @@ def compose(
                if projects is not None else {}),
         )
         preparation._remaining(deadline)
-    output.mkdir(parents=True)
+    _private_output_directory(output)
     archive = output / "source.tar"
     with _source_phase(observer, 1, started):
         preparation._archive(
