@@ -21,6 +21,14 @@ Keep Copilot content delivery independent and establish one consented, bounded
 source-maintenance flow. Source merges do not qualify native lifecycle, release
 or installed adoption.
 
+Fresh installation and update share the same incoming bootstrap, Manager-first
+application construction and repository-derived required closure. The
+[installation convergence map](installation-convergence.md) connects existing
+efforts and owners to that outcome. Complete the required set's staging before
+activation; existing generations affect compatibility/state transfer, not a
+separate legacy construction route. This alignment changes no completed credit,
+source custody, operational hold or deployment authority.
+
 **Finite-scope amendment: reviewed in #11708.** The consolidated
 Plan and global Validation Plan below replace duplicated acceptance inventories,
 not the operator's original request or later refinements. The
@@ -520,9 +528,18 @@ preserves the complete pre-amendment record.
   enabling unselected roles. Document the supported public recovery invocation
   without depending on healthy legacy tooling or introducing another
   constructor/cache/publisher.
+  Fresh and update entries use that same path, retaining the bootstrap
+  environment override, explicit source/ref and repository context, and
+  Manager-owned dependency/downstream-installable discovery.
 - [ ] W2: Integrate stage/readiness and activation through existing app adapters
   for the declared installed inventory. Retain the selected activation strategy;
   qualify coordinated toolset selection only where that strategy is used.
+  Stage the complete required set before activation begins, without live
+  initialization, live service activation, handoff or data migration. Private
+  candidate readiness retains its existing passive contract, with live work
+  admission closed and no live publication or shared-data migration. Use the same
+  construction for absent and existing installations; activation owns
+  compatibility and supported state transfer.
 
 ### Phase 0 - Review the intent and plan
 
@@ -665,6 +682,10 @@ independent objectives, not recursively imported completion gates.
   command/serving identity, current footprint coverage and representative
   existing configuration/data.
   Qualify coordinated atomic selection only if the selected strategy uses it.
+  Inventory complete copied projects/locks/wheels/resources/local commands and
+  environments, not just package receipts. Compare fresh/existing entry
+  construction and prove a failed required stage prevents activation of the
+  addressed set, while no live data initialization or migration runs in staging.
 - [ ] V6: Qualify the selected ordinary-update and repair routes with independent
   incoming startup and truthful manual/automatic classification. Old recovery,
   unknown provenance, stale fences and predecessor cleanup cannot veto explicit
