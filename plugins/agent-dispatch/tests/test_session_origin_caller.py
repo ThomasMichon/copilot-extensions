@@ -304,6 +304,38 @@ def test_ordinary_lost_reply_and_rollback_preserve_origin_form_and_cleanup(q, pe
     assert len(calls) == 1
 
 
+@pytest.mark.parametrize("operation", ["reserve", "placement"])
+@pytest.mark.parametrize("malformed", [[], {}])
+def test_unhashable_transport_response_retains_committed_unknown_outcome(q, api, operation, malformed):
+    revision = publish(q, pool()) if operation == "placement" else None
+    requested = task(q)
+    requests = []
+
+    def rewrite(request, response):
+        if request.method == "POST":
+            assert response.is_success, response.json()
+            value = response.json()
+            value["reservation"]["session_origin_transport"] = malformed
+            return httpx.Response(200, json=value)
+        return response
+
+    with controls.connected(api, requests, rewrite=rewrite) as client:
+        with pytest.raises(DispatchError, match="outcome is unknown"):
+            if operation == "reserve":
+                client.reserve_spawn(
+                    requested.id, driver="ordinary-bridge", session_origin_transport="prefer-origin-v1",
+                )
+            else:
+                client.place_pool_task(
+                    requested.id, reserved_by="worker", catalog_revision=revision,
+                    driver="ordinary-bridge", session_origin_transport="prefer-origin-v1",
+                )
+    assert sum(request.method == "POST" for request in requests) == 1
+    reservations = q.list_reservations(task_id=requested.id)
+    assert len(reservations) == 1 and reservations[0].session_origin_transport == "origin-v1"
+    assert q.get(requested.id).status == ("claimed" if operation == "placement" else "queued")
+
+
 @pytest.mark.parametrize("caller", ["create", "interactive"])
 def test_direct_callers_select_before_the_first_workspace_effect(q, api, monkeypatch, peer, caller):
     from agent_dispatch import create_cli, embody, interactive_embody

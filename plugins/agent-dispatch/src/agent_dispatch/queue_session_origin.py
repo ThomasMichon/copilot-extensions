@@ -71,9 +71,9 @@ def retain(conn: sqlite3.Connection, task: Task, *, key: str, requested: str | N
         if original is None:
             raise TaskError("original session reservation is unavailable")
         encoded, transport = original["session_origin"], _known_transport(conn, row)
-    if requested not in {None, "baseline", "origin-v1", "prefer-origin-v1"}:
+    if requested not in (None, "baseline", "origin-v1", "prefer-origin-v1"):
         raise TaskError("unsupported session origin transport")
-    if requested not in {None, "prefer-origin-v1", transport}:
+    if requested not in (None, "prefer-origin-v1", transport):
         raise TaskError("original session origin transport cannot change")
     if transport == "origin-v1" and requested not in {"origin-v1", "prefer-origin-v1"}:
         raise TaskError("origin-v1 retry requires explicit session origin confirmation")
@@ -119,9 +119,9 @@ def _representable(encoded: str | None, row: sqlite3.Row) -> bool:
 
 def reservation_record(row: sqlite3.Row, requested: str | None) -> SpawnReservation:
     """An active reservation replay cannot revise a previously sealed request."""
-    if requested not in {None, "baseline", "origin-v1", "prefer-origin-v1"}:
+    if requested not in (None, "baseline", "origin-v1", "prefer-origin-v1"):
         raise TaskError("unsupported session origin transport")
-    if requested not in {None, "prefer-origin-v1", row["session_origin_transport"] or "baseline"}:
+    if requested not in (None, "prefer-origin-v1", row["session_origin_transport"] or "baseline"):
         raise TaskError("original session origin transport cannot change")
     if (row["session_origin_transport"] or "baseline") not in {"baseline", "origin-v1"}:
         raise TaskError("unsupported retained session origin transport")

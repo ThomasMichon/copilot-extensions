@@ -30,7 +30,7 @@ def selected_session_origin(result: dict, requested: str | None) -> dict:
     if requested is not None and (
         not isinstance(result, dict) or not isinstance(result.get("reservation"), dict)
         or result["reservation"].get("session_origin_transport") not in (
-            {"baseline", "origin-v1"} if requested == "prefer-origin-v1" else {requested}
+            ("baseline", "origin-v1") if requested == "prefer-origin-v1" else (requested,)
         )
         or result["reservation"].get("session_origin_transport") == "origin-v1"
         and not isinstance(result["reservation"].get("session_origin"), dict)
