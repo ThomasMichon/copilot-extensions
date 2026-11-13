@@ -148,16 +148,29 @@ def repository_declaration(repository_root: Path | None, workspace: Path) -> dic
         raise ValueError("Trusted recovery toolkit does not declare its YAML parser")
     uv = None
     current_directory = Path.cwd()
+    runtime_source_repository._ordinary(current_directory)
     for location in os.get_exec_path():
         directory = Path(location.strip('"'))
         if (
-            not directory.is_absolute() or directory == current_directory
-            or directory.is_relative_to(repository_root)
+            not directory.is_absolute() or ".." in directory.parts
             or str(directory).replace("\\", "/").startswith("//")
         ):
             continue
+        try:
+            runtime_source_repository._ordinary(directory)
+            if directory.samefile(current_directory) or any(
+                parent.samefile(repository_root) for parent in (directory, *directory.parents)
+            ):
+                continue
+        except (OSError, ValueError):
+            continue
         uv = shutil.which(str(directory / ("uv.exe" if os.name == "nt" else "uv")))
         if uv is not None:
+            try:
+                runtime_source_repository._ordinary(Path(uv))
+            except (OSError, ValueError):
+                uv = None
+                continue
             break
     if uv is None:
         raise ValueError("Repository suite interpretation requires UV on an absolute host tool path")

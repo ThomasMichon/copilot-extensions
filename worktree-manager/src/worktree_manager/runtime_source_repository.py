@@ -10,6 +10,8 @@ import sys
 
 
 def _ordinary(path: Path) -> None:
+    if ".." in path.parts:
+        raise ValueError("Repository suite paths must not contain parent components")
     for candidate in reversed((path, *path.parents)):
         try:
             metadata = candidate.lstat()

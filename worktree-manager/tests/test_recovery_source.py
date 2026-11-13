@@ -295,7 +295,8 @@ def test_cold_declaration_checks_links_before_existence_or_tool_lookup(tmp_path,
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Native Windows implicit executable lookup")
-def test_actual_cold_parser_ignores_adopter_uv_executable_and_relative_path(tmp_path):
+@pytest.mark.parametrize("layout", ["current-directory", "root-parent", "path-parent", "root-namespace"])
+def test_actual_cold_parser_ignores_adopter_uv_executable_and_relative_path(tmp_path, layout):
     uv = shutil.which("uv")
     assert uv is not None
     tools = tmp_path / "trusted-tools"
@@ -306,6 +307,18 @@ def test_actual_cold_parser_ignores_adopter_uv_executable_and_relative_path(tmp_
     policy.parent.mkdir(parents=True)
     policy.write_text("current_version: main\n", encoding="utf-8")
     (adopter / "uv.exe").write_bytes(b"MZ-not-an-executable")
+    adopter_tools = adopter / "tool-bin"
+    adopter_tools.mkdir()
+    (adopter_tools / "uv.exe").write_bytes(b"MZ-not-an-executable")
+    host_tools = tmp_path / "host-tools"
+    host_tools.mkdir()
+    addressed = adopter / ".." / adopter.name if layout == "root-parent" else adopter
+    if layout == "root-namespace":
+        addressed = Path("\\\\?\\" + str(adopter))
+    unsafe_path = (
+        host_tools / ".." / adopter.name / "tool-bin"
+        if layout == "path-parent" else adopter_tools
+    )
     workspace = tmp_path / "work"
     workspace.mkdir()
     script = """
@@ -317,21 +330,35 @@ spec = importlib.util.spec_from_file_location("cold_recovery", toolkit / "tools/
 recovery = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(recovery)
 recovery.source_modules(toolkit)
-print(json.dumps(recovery.repository_declaration(Path(sys.argv[2]), Path(sys.argv[3]))))
+if sys.argv[4] == "root-parent":
+    try:
+        recovery.repository_declaration(Path(sys.argv[2]), Path(sys.argv[3]))
+    except ValueError as error:
+        assert "parent" in str(error), error
+        print(json.dumps({"refused": True}))
+    else:
+        raise AssertionError("parent-component repository was accepted")
+else:
+    print(json.dumps(recovery.repository_declaration(Path(sys.argv[2]), Path(sys.argv[3]))))
 """
     environment = {
         key: value for key, value in os.environ.items()
         if key.upper() != "NODEFAULTCURRENTDIRECTORYINEXEPATH"
     }
-    environment["PATH"] = os.pathsep.join((".", "", str(tools), os.environ["PATH"]))
+    environment["PATH"] = os.pathsep.join((".", "", str(unsafe_path), str(tools), os.environ["PATH"]))
     result = subprocess.run(
         [getattr(sys, "_base_executable", sys.executable), "-I", "-S", "-B", "-c",
-         script, str(REPOSITORY), str(adopter), str(workspace)],
+         script, str(REPOSITORY), str(addressed), str(workspace), layout],
         cwd=adopter, env=environment, capture_output=True, text=True, timeout=180,
         creationflags=subprocess.CREATE_NO_WINDOW,
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    assert json.loads(result.stdout)["reference"] == "main"
+    observed = json.loads(result.stdout)
+    if layout == "root-parent":
+        assert observed == {"refused": True}
+        assert not (workspace / "repository-parser").exists()
+    else:
+        assert observed["reference"] == "main"
 
 
 def repository_request(root, **changes):

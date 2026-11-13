@@ -163,14 +163,18 @@ checkout supplies objects only: selected tags are fetched from the declared
 repository, not from potentially different or missing local tags.
 Declaration and local-source path components are checked root-first with
 non-following metadata before existence probes or native normalization.
-Symlink/reparse components refuse before their targets are accessed.
+Parent components are invalid; symlink/reparse components refuse before their
+targets are accessed.
 
 When a declaration exists, the physical `-I -S` toolkit prepares the Manager
 manifest's existing PyYAML requirements into the request workspace through
 the retained UV dependency owner, including its feed and seasoning policy.
-This path needs an existing UV executable on an absolute host PATH entry outside
-the addressed adopter. Empty/relative entries, implicit current-directory lookup
-and network path entries do not select a tool. It never installs into the base
+This path needs an existing UV executable on an ordinary absolute host PATH entry
+outside the addressed adopter. Current/adopter directories are excluded by
+filesystem identity after non-following component validation, rather than lexical
+spelling. Empty/relative/parent entries, implicit current-directory lookup,
+linked components and network path entries do not select a tool. It never
+installs into the base
 interpreter or uses installed startup hooks. The parser runs in a separate
 physical `-I -S` child restricted to that prepared parser root. Missing UV,
 parser preparation failure or invalid policy is a failure, not an absent pin.
