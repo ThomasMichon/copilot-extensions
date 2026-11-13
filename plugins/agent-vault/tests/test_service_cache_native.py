@@ -15,7 +15,10 @@ from agent_vault import cache
 
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows protection")
-def test_native_windows_protected_cache_supports_synthetic_unreadable_caller(tmp_path: Path) -> None:
+@pytest.mark.parametrize("population", ["get", "unlock-warm"])
+def test_native_windows_protected_cache_supports_synthetic_unreadable_caller(
+    tmp_path: Path, population: str,
+) -> None:
     receipt = "native-cache-qualified:" + uuid.uuid4().hex
     env = dict(os.environ)
     env.update(
@@ -27,11 +30,12 @@ def test_native_windows_protected_cache_supports_synthetic_unreadable_caller(tmp
     env.pop("AGENT_VAULT_PINNED_CONTEXT", None)
     result = subprocess.run(
         [sys.executable, "-c", """
+import asyncio
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
-from agent_vault import cache, cli, config, credential_reads, extensions, kek, service
+from agent_vault import cache, cache_warm, cli, config, credential_reads, extensions, kek, service
 from agent_vault.cache_dpapi import CacheDecryptionUnavailable
 from agent_vault.extensions import ExtensionRegistry
 
@@ -53,6 +57,26 @@ vault = service.VaultService()
 vault.cli.set_password(kpdb, "synthetic-master")
 vault._password_set_at[kpdb] = clock[0]
 vault.cli.get_entry = lambda *_args: "synthetic-native-value"
+if sys.argv[3] == "unlock-warm":
+    registry.register_cache_source(lambda _machine: ["entry"])
+    vault.cli.verify_password = lambda *_args: True
+    assert vault.handle_request({
+        "action": "unlock", "kpdb": kpdb, "group": "", "password": "synthetic-master",
+    })["ok"]
+    async def warm() -> None:
+        runtime = cache_warm.CacheWarmRuntime(vault, vault._cache_warm, None)
+        try:
+            runtime.tick()
+            assert runtime.future is not None
+            await asyncio.wait_for(asyncio.shield(runtime.future), 5)
+        finally:
+            await runtime.close()
+    asyncio.run(warm())
+    status = vault._cache_warm.status(kpdb, "")
+    assert status["state"] == "complete" and status["cached"] == 1, status
+    def no_backend(*_args: object) -> str:
+        raise AssertionError("warmed native hit reached the backend")
+    vault.cli.get_entry = no_backend
 first = vault.handle_request({"action": "get", "entry": "entry", "group": ""})
 assert first["ok"] and "cache_warning" not in first, first
 blob = (Path(sys.argv[1]) / "cache" / "credential-cache.enc").read_bytes()
@@ -75,7 +99,7 @@ with ThreadPoolExecutor(max_workers=1) as owner:
 assert response.code == 0 and response.value == first["value"], response
 assert not vault.cli.has_password(kpdb)
 print(sys.argv[2])
-""", str(tmp_path), receipt],
+""", str(tmp_path), receipt, population],
         env=env, capture_output=True, text=True, timeout=20, **no_window_kwargs(),
     )
     if result.returncode == 77:
