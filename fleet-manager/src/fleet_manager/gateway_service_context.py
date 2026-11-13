@@ -1,7 +1,7 @@
 """Immutable service-profile validation; selected source custody is external.
 
 This is the auth adapter's schema boundary, not provider/key discovery. The
-common crypto engine owns both explicitly selected authentication profiles.
+common crypto engine owns the explicitly selected authentication profiles.
 """
 
 from __future__ import annotations
@@ -14,10 +14,13 @@ from dataclasses import dataclass
 from . import planning
 from .enrolled_identity import (
     EnrolledBinding, EnrolledIdentityVerifier, KINDS, MAX_AUDIENCES, MAX_ENROLLMENTS,
-    PROFILE as ENROLLED_PROFILE,
+    EnrolledRS256IdentityVerifier, PROFILE as ENROLLED_PROFILE, RS256_PROFILE,
 )
+from .bearer_identity import ClaimRequirement, MAX_CLAIMS, MAX_VALUES
 from .gateway_contract import GatewayError, public_key
-from .gateway_identity_provider import IdentityProvider, IdentityProviderError, prepare_identity
+from .gateway_identity_provider import (
+    IdentityProvider, IdentityProviderError, prepare_identity, prepare_trust,
+)
 from .gateway_manifest import GatewayManifest, ManifestError, ServiceSlot
 from .runtime_identity import IdentityError, IdentityVerifier, _text, _time
 from .machine_identity import MachineBinding, MachineIdentityVerifier, PROFILE as MACHINE_PROFILE
@@ -28,6 +31,9 @@ SCHEMA = "fleet-manager.gateway-service-policy"
 MAX_BINDINGS = 128
 MAX_CALLERS = 128
 METHODS = frozenset({"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"})
+SERVICE_IDENTITY_PROFILES = frozenset({
+    "jwt-pop-v1", ENROLLED_PROFILE, MACHINE_PROFILE, RS256_PROFILE,
+})
 
 
 class ServicePolicyError(ValueError):
@@ -230,11 +236,14 @@ def parse_context(raw: bytes, clock: Callable[[], int], *,
             "schema", "version", "manifest", "identity", "bindings", "callers",
         }
         if isinstance(decoded, dict) and type(decoded.get("version")) is int \
-                and decoded["version"] in (3, 4):
+                and decoded["version"] in (3, 4, 6):
             names.add("enrollment")
+        if isinstance(decoded, dict) and type(decoded.get("version")) is int \
+                and decoded["version"] == 6:
+            names.add("token_claims")
         root = fields(decoded, names)
         require(root["schema"] == SCHEMA and type(root["version"]) is int
-                and root["version"] in (1, 2, 3, 4), "unsupported-schema")
+                and root["version"] in (1, 2, 3, 4, 6), "unsupported-schema")
         manifest = GatewayManifest.load(root["manifest"])
         require(manifest.version == 1, "unsupported-schema")
         if root["version"] == 4:
@@ -256,6 +265,11 @@ def parse_context(raw: bytes, clock: Callable[[], int], *,
             verifier = IdentityVerifier(**normalized_identity, clock=clock)
             trust_valid_until = identity["trust_valid_until"]
             assert type(trust_valid_until) is int
+        elif root["version"] == 6:
+            normalized_identity = prepare_trust(
+                root["identity"], identity_provider, profile=RS256_PROFILE)
+            trust_valid_until = normalized_identity["trust"]["trust_valid_until"]
+            require(type(trust_valid_until) is int, "invalid-trust")
         else:
             normalized_identity, verifier, trust_valid_until = prepare_identity(
                 root["identity"], identity_provider, clock,
@@ -337,21 +351,48 @@ def parse_context(raw: bytes, clock: Callable[[], int], *,
                 "identity": normalized_identity, "enrollment": normalized["enrollment"],
                 "bindings": normalized["bindings"],
             }
-        if root["version"] == 3:
+        if root["version"] in (3, 6):
             trust = normalized_identity["trust"]
             assert isinstance(trust, dict)
             issuer, audience, expires = trust["issuer"], trust["audience"], trust["trust_valid_until"]
-            assert isinstance(issuer, str) and isinstance(audience, str) and type(expires) is int
+            require(isinstance(issuer, str) and isinstance(audience, str) and type(expires) is int,
+                    "invalid-trust")
             enrollment, enrollments = _enrollment(
                 root["enrollment"], keys, manifest, callers, audience)
             normalized["enrollment"] = enrollment
             audiences = enrollment["allowed_audiences"]
             assert isinstance(audiences, list)
-            verifier = EnrolledIdentityVerifier(
+            options = {}
+            if root["version"] == 6:
+                claims = fields(root["token_claims"], {
+                    "subject_claim", "client_claim", "required_claims"})
+                required = []
+                for value in items(claims["required_claims"], MAX_CLAIMS):
+                    entry = fields(value, {"claim", "values", "shape"})
+                    required.append(ClaimRequirement(
+                        entry["claim"], tuple(items(entry["values"], MAX_VALUES, minimum=1)),
+                        entry["shape"]))
+                    require(type(entry["shape"]) is str
+                            and entry["shape"] in ("scalar", "list"), "invalid-claim-shape")
+                options = {
+                    "subject_claim": claims["subject_claim"],
+                    "client_claim": claims["client_claim"], "required_claims": tuple(required),
+                }
+            verifier_type = (EnrolledRS256IdentityVerifier if root["version"] == 6
+                             else EnrolledIdentityVerifier)
+            verifier = verifier_type(
                 issuer=issuer, audience=audience, jwks=trust["jwks"],
                 trust_valid_until=expires, clock=clock, allowed_audiences=tuple(audiences),
-                enrollments=enrollments)
+                enrollments=enrollments, **options)
             trust_epoch = {"identity": normalized_identity, "enrollment": enrollment}
+            if root["version"] == 6:
+                normalized["token_claims"] = {
+                    "subject_claim": claims["subject_claim"], "client_claim": claims["client_claim"],
+                    "required_claims": sorted([
+                        {"claim": item.claim, "values": sorted(item.values), "shape": item.shape}
+                        for item in required], key=planning.canonical),
+                }
+                trust_epoch["token_claims"] = normalized["token_claims"]
         key_by_name = {key.name: key for key in keys}
 
         def key_content(name: str) -> dict[str, str]:

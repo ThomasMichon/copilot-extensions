@@ -202,6 +202,7 @@ class IdentityVerifier(ProofFence):
 
     _issuer: str
     _audience: str
+    _signing_key = staticmethod(_public_key)
 
     def __init__(self, *, issuer, audience, jwks, trust_valid_until, clock,
                  replay_capacity=MAX_REPLAYS):
@@ -223,7 +224,7 @@ class IdentityVerifier(ProofFence):
             raise IdentityError("invalid-trust")
         keys = {}
         for value in snapshot["keys"]:
-            key = _public_key(value)
+            key = self._signing_key(value)
             kid = value.get("kid")
             if not _text(kid, 128) or kid in keys:
                 raise IdentityError("invalid-trust")
@@ -236,6 +237,20 @@ class IdentityVerifier(ProofFence):
 
     def _audience_matches(self, audience: object) -> bool:
         return audience == self._audience
+
+    def _subject(self, claims: Mapping[str, object]) -> object:
+        return claims.get("sub")
+
+    def _access_claims(self, access_token: str) -> dict[str, object]:
+        header, claims = _parts(access_token, MAX_ACCESS_BYTES)
+        if (set(header) != {"alg", "typ", "kid"} or header["alg"] != "ES256"
+                or header["typ"] != "at+jwt" or not _text(header["kid"], 128)):
+            raise IdentityError("invalid-credential")
+        key = self._keys.get(header["kid"])
+        if key is None:
+            raise IdentityError("unknown-key")
+        _verify(access_token, key)
+        return claims
 
     def _access_binding(self, claims: Mapping[str, object],
                         kind: str | None) -> _AccessBinding:
@@ -273,15 +288,8 @@ class IdentityVerifier(ProofFence):
             raise IdentityError("invalid-request-context")
         with self._lock:
             self._now_locked()
-        header, claims = _parts(access_token, MAX_ACCESS_BYTES)
-        if (set(header) != {"alg", "typ", "kid"} or header["alg"] != "ES256"
-                or header["typ"] != "at+jwt" or not _text(header["kid"], 128)):
-            raise IdentityError("invalid-credential")
-        key = self._keys.get(header["kid"])
-        if key is None:
-            raise IdentityError("unknown-key")
-        _verify(access_token, key)
-        if (claims.get("iss") != self._issuer or not _text(claims.get("sub"))
+        claims = self._access_claims(access_token)
+        if (claims.get("iss") != self._issuer or not _text(self._subject(claims))
                 or not self._audience_matches(claims.get("aud"))
                 or not _time(claims.get("iat")) or not _time(claims.get("exp"))
                 or claims["exp"] <= claims["iat"]):

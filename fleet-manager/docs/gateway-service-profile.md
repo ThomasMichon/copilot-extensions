@@ -23,6 +23,11 @@ adds opt-in RS256 caller authentication and local-only handlers without a
 service identity or proof-key enrollment. It preserves the remote connector
 profiles below; bearer replay semantics are explicitly different from PoP.
 
+The opt-in [enrolled RS256 application-token profile](gateway-enrolled-identity.md#explicit-rs256-application-token-profile)
+adds service-policy version `6`: original RSA token verification plus an
+independently approved P-256 request-proof enrollment. It does not broaden
+the existing ES256 or caller-only bearer profiles.
+
 ## In-process deployment owners
 
 An SDK embedding may explicitly supply `local_handlers=(LocalHandlerBinding(...),)`
