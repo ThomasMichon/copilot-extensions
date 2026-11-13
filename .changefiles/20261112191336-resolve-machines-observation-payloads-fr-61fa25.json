@@ -1,0 +1,9 @@
+{
+  "comment": "Resolve Machines observation payloads from the addressed checkout directory marketplace without a copied payload or stale-source fallback.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

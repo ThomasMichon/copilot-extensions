@@ -124,7 +124,8 @@ def test_selection_observation_and_settlement_share_one_deadline(
     monkeypatch.setattr(admission.time, "monotonic", lambda: clock[0])
     budgets = []
 
-    def select(*, budget):
+    def select(*, project_root, budget):
+        assert project_root == Path(config.default_repo.anchor)
         budgets.append(budget)
         clock[0] += selection_seconds
         return ["selected-owner"], {}
@@ -288,11 +289,25 @@ def test_missing_support_or_refused_context_never_runs_the_read_or_falls_back(
     assert admission.new_application_error(config, source=config.default_repo.anchor)
 
 
-def test_legacy_observation_keeps_the_owners_exact_completed_interpreter(tmp_path, monkeypatch):
+@pytest.mark.parametrize("project_source", [None, "undeclared", "remote"])
+def test_legacy_observation_keeps_the_owners_exact_completed_interpreter(
+    tmp_path, monkeypatch, project_source,
+):
     from agent_worktrees import _peer_launch, reconcile
     from types import SimpleNamespace
 
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    project = tmp_path / "project"
+    project.mkdir()
+    monkeypatch.setattr(reconcile, "_home", lambda: tmp_path / "home")
+    if project_source == "remote":
+        settings = project / ".github" / "copilot" / "settings.json"
+        settings.parent.mkdir(parents=True)
+        settings.write_text(json.dumps({
+            "extraKnownMarketplaces": {"copilot-extensions": {
+                "source": {"source": "github", "repo": "ThomasMichon/copilot-extensions"},
+            }},
+        }), encoding="utf-8")
     payload, root = tmp_path / "payload", tmp_path / "runtime"
     python = root / "versions" / "selected" / ".venv" / "Scripts" / "python.exe"
     monkeypatch.setattr(reconcile, "core_installed_payload_dir", lambda name: payload)
@@ -315,12 +330,126 @@ def test_legacy_observation_keeps_the_owners_exact_completed_interpreter(tmp_pat
     monkeypatch.setattr(_peer_launch, "retained_runtime_identity", lambda *a: pytest.fail("unavailable legacy bootstrap"))
     monkeypatch.setattr(admission, "_supports_required_read", lambda actual: actual == python)
     budget = admission.OwnedExecutionBudget(160, 5)
-    command, environment = admission._selected_runtime(budget=budget)
+    command, environment = admission._selected_runtime(
+        project_root=project if project_source is not None else None, budget=budget,
+    )
     assert command == [str(python), "-I", "-B", "-X", "utf8", "-m", "agent_machines"]
     assert selected[0]["payloadRoot"] == str(payload)
     assert selected[0]["versionsRoot"] == str(root / "versions")
     assert seen_budgets == [budget]
     assert "COPILOT_PLUGIN_ROOT" not in environment
+
+
+def _directory_machines_source(tmp_path, *, enabled=True, copied=False):
+    config = _required(_config(tmp_path))
+    project = Path(config.default_repo.anchor)
+    home = tmp_path / "home"
+    marketplace = tmp_path / "marketplace"
+    payload = marketplace / "machines"
+    payload.mkdir(parents=True)
+    (payload / "plugin.json").write_text(json.dumps({
+        "name": "agent-machines", "version": "1.0.0", "runtimeScope": "universal",
+    }), encoding="utf-8")
+    catalog = marketplace / ".github" / "plugin" / "marketplace.json"
+    catalog.parent.mkdir(parents=True)
+    catalog.write_text(json.dumps({
+        "name": "copilot-extensions",
+        "plugins": [{"name": "agent-machines", "source": "./machines"}],
+    }), encoding="utf-8")
+    settings = project / ".github" / "copilot" / "settings.json"
+    settings.parent.mkdir(parents=True)
+    settings.write_text(json.dumps({
+        "enabledPlugins": {"agent-machines@copilot-extensions": enabled},
+        "extraKnownMarketplaces": {"copilot-extensions": {
+            "source": {"source": "github", "repo": "ThomasMichon/copilot-extensions"},
+        }},
+    }), encoding="utf-8")
+    local = settings.with_name("settings.local.json")
+    local.write_text(json.dumps({
+        "extraKnownMarketplaces": {"copilot-extensions": {
+            "source": {"source": "directory", "path": "../marketplace"},
+        }},
+    }), encoding="utf-8")
+    if copied:
+        installed = home / ".copilot" / "installed-plugins" / "copilot-extensions" / "agent-machines"
+        installed.mkdir(parents=True)
+        (installed / "plugin.json").write_bytes((payload / "plugin.json").read_bytes())
+    return config, home, payload, settings, local
+
+
+@pytest.mark.parametrize("copied", [False, True])
+@pytest.mark.parametrize("enabled", [False, True])
+def test_directory_source_observation_uses_the_addressed_checkout(
+    tmp_path, monkeypatch, copied, enabled,
+):
+    from agent_worktrees import _peer_launch, copilot_plugin_profile as tool, reconcile
+
+    config, home, payload, settings, local = _directory_machines_source(
+        tmp_path, enabled=enabled, copied=copied,
+    )
+    project = Path(config.default_repo.anchor)
+    before = settings.read_bytes(), local.read_bytes()
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.setattr(reconcile, "_home", lambda: home)
+    selected = home / ".agent-machines" / "versions" / "selected" / ".venv" / "Scripts" / "python.exe"
+    contexts = []
+
+    def select(context):
+        contexts.append(context)
+        assert Path(context["payloadRoot"]) == payload
+        assert Path(context["pluginRoot"]) == home / ".agent-machines"
+        return selected
+
+    monkeypatch.setattr(_peer_launch, "_peer_python_inprocess", select)
+    monkeypatch.setattr(admission, "_supports_required_read", lambda python: python == selected)
+    monkeypatch.setattr(tool, "observe_for_admission", lambda *a, **k: "profile")
+    calls = []
+
+    def observe(argv, **kwargs):
+        calls.append((argv, kwargs))
+        return subprocess.CompletedProcess(argv, 0, json.dumps(_observation(project)), "")
+
+    monkeypatch.setattr(admission, "run_caller_owned", observe)
+    assert admission.new_application_error(config, source=str(project)) is None
+    assert contexts and calls[0][0][0] == str(selected)
+    assert calls[0][1]["cwd"] == str(project)
+    assert (settings.read_bytes(), local.read_bytes()) == before
+
+
+@pytest.mark.parametrize("change", [
+    "missing-source", "missing-plugin", "plugin-identity", "catalog-identity",
+    "invalid-settings", "invalid-source",
+])
+def test_invalid_directory_source_never_falls_back_to_a_copied_payload(tmp_path, monkeypatch, change):
+    from agent_worktrees import _peer_launch, copilot_plugin_profile as tool, reconcile
+
+    config, home, payload, _settings, local = _directory_machines_source(tmp_path, copied=True)
+    if change in {"missing-source", "invalid-source"}:
+        local.write_text(json.dumps({
+            "extraKnownMarketplaces": {"copilot-extensions": {"source": {
+                "source": "directory" if change == "missing-source" else "unsupported",
+                "path": "../missing",
+            }}},
+        }), encoding="utf-8")
+    elif change == "missing-plugin":
+        (payload / "plugin.json").unlink()
+    elif change == "plugin-identity":
+        (payload / "plugin.json").write_text('{"name":"another-plugin"}', encoding="utf-8")
+    elif change == "catalog-identity":
+        catalog = payload.parent / ".github" / "plugin" / "marketplace.json"
+        catalog.write_text('{"name":"another-marketplace","plugins":[]}', encoding="utf-8")
+    else:
+        local.write_text("{", encoding="utf-8")
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.setattr(reconcile, "_home", lambda: home)
+    monkeypatch.setattr(tool, "observe_for_admission", lambda *a, **k: "profile")
+    monkeypatch.setattr(_peer_launch, "_peer_python_inprocess", lambda *a: pytest.fail("stale copied source"))
+    monkeypatch.setattr(admission, "run_caller_owned", lambda *a, **k: pytest.fail("unqualified observation"))
+    error = admission.new_application_error(config, source=config.default_repo.anchor)
+    assert error and "runtime selection" in error
 
 
 def test_direct_new_refuses_before_create_mutations(tmp_path, monkeypatch, capfd):
