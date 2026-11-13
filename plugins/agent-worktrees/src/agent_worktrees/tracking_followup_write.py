@@ -153,23 +153,30 @@ def _settle_legacy_follow_up(
         if item is not None and not item.is_effective_open:
             return {"ok": True, "follow_up": _follow_up_to_dict(item)}
         return {"error": "not_found"}
+    if item is not None:
+        return {
+            "error": "legacy_refused",
+            "message": "legacy follow-up was already settled; a reasserted flag "
+            "requires its own owner reconciliation, not reuse of earlier evidence",
+        }
     now = tracking._now_iso()
-    if item is None:
-        item = tracking.FollowUpRecord(
-            id="legacy",
-            summary="Legacy boolean follow-up",
-            state="open",
-            revision=0,
-            created_at=now,
-            updated_at=now,
-        )
-        record.follow_ups.append(item)
+    item = tracking.FollowUpRecord(
+        id="legacy",
+        summary="Legacy boolean follow-up",
+        state="open",
+        revision=0,
+        created_at=now,
+        updated_at=now,
+    )
+    record.follow_ups.append(item)
     item.state = "dismissed" if dismissed else "resolved"
     item.result_ref = None if dismissed else evidence.strip()
     item.reason = evidence.strip() if dismissed else ""
     item.updated_at = now
     item.revision += 1
     record.follow_up = False
+    # Full-record writers preserve the boolean with this existing revision.
+    record.effort_revision += 1
     tracking.save_record(record, yaml_path)
     activity.log_event(
         "follow_up_dismissed" if dismissed else "follow_up_resolved",

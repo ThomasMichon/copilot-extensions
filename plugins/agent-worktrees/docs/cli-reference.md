@@ -698,8 +698,12 @@ completion or a tracked transfer of the old boolean-only follow-up.
 `follow-ups dismiss legacy --reason <text> --worktree <id>` records an explicit
 decision that it needs no further action. Both clear only `follow_up`, retain a
 terminal `legacy` ledger entry with the supplied evidence, and leave the worktree
-status, summary, sessions, claims and other follow-ups unchanged. A retry after
-successful settlement returns the retained entry without another mutation.
+status, summary, sessions, claims and other follow-ups unchanged. Settlement
+advances the existing record revision that protects the boolean from stale
+full-record saves. A retry after successful settlement returns the retained
+entry without another mutation while the flag remains cleared. If an owner
+subsequently reasserts the flag, reuse of `legacy` is refused: the new obligation
+requires its own owner reconciliation, not settlement with the old evidence.
 
 An active effort binding or a frozen (`finalizing`/`orphaned`) owner refuses this
 operation. Reconcile those through their own lifecycle first. Terminal managed

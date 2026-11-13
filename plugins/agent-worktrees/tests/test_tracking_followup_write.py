@@ -218,6 +218,46 @@ def test_legacy_refusal_does_not_mutate_record(record_path, blocker):
     assert record_path.read_bytes() == before
 
 
+@pytest.mark.parametrize("apply,evidence", [
+    (tracking_followup_write.apply_follow_up_resolve,
+     {"result_ref": "https://example.com/results/accepted"}),
+    (tracking_followup_write.apply_follow_up_dismiss,
+     {"reason": "Transferred to a tracked objective"}),
+])
+def test_legacy_settlement_fences_stale_saves_and_reasserted_flags(
+    record_path, apply, evidence,
+):
+    record = tracking.load_record(record_path)
+    record.follow_up = True
+    tracking.save_record(record, record_path)
+    stale = tracking.load_record(record_path)
+    args = {
+        "worktree_id": record.worktree_id, "yaml_path": str(record_path),
+        "follow_up_id": "legacy", **evidence,
+    }
+    settled = apply(args)
+    assert settled["ok"] is True
+    stale.activity = "Unrelated session backfill"
+    tracking.save_record(stale, record_path)
+    current = tracking.load_record(record_path)
+    assert current.follow_up is False
+    assert tracking.effective_open_follow_up_count(current) == 0
+    assert current.effort_revision > record.effort_revision
+
+    tracking.set_disposition(current, follow_up=True, save=False)
+    tracking.save_record(current, record_path)
+    before_retry = record_path.read_bytes()
+    retry = apply(args)
+    assert retry["error"] == "legacy_refused"
+    assert "reasserted" in retry["message"]
+    assert record_path.read_bytes() == before_retry
+    retained = tracking.load_record(record_path)
+    assert retained.follow_up is True
+    assert retained.follow_ups[0].to_dict() == {
+        k: v for k, v in settled["follow_up"].items() if v and k != "refs"
+    }
+
+
 @pytest.mark.parametrize("provider_version", [1, 2])
 def test_legacy_dispatch_negotiates_running_provider_before_writing(
     record_path, provider_version,
