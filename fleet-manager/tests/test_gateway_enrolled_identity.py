@@ -13,7 +13,7 @@ from fleet_manager import enrolled_identity, planning
 from fleet_manager.gateway_service_context import parse_context
 from fleet_manager.gateway_service_policy import ServicePolicyError
 from gateway_service_transport_fixtures import Rig, eventually
-from test_enrolled_identity import application_pair
+from test_enrolled_identity import application_pair, rsa_pair
 from test_gateway_identity_provider import selected
 from test_gateway_service_policy import Harness, TARGET
 from test_runtime_identity import AUDIENCE, NOW
@@ -340,9 +340,9 @@ def test_real_key_rotation_requires_new_key_and_fresh_challenge():
 
 
 class EnrolledRig(Rig):
-    def __init__(self, root):
+    def __init__(self, root, harness_type=EnrolledHarness):
         super().__init__(root)
-        self.h = EnrolledHarness()
+        self.h = harness_type()
         self.h.clock.value = int(time.time())
         self.h.trust["trust_valid_until"] = self.h.clock.value + 1000
         self.h.document["callers"][0]["slots"].append("service-b")
@@ -351,15 +351,177 @@ class EnrolledRig(Rig):
         self.token_overrides = {}
 
     def access(self, subject, key):
-        return application_pair(
-            (self.h.keys[0], self.h.keys[key]), "unused", now=self.h.clock.value,
-            access={"sub": "issuer-" + subject, "client_id": "client-" + subject,
-                    "aud": [AUDIENCE, "another-resource"], **self.token_overrides})[0]
+        return self.h.credentials(
+            subject=subject, key=key, nonce="unused",
+            access={"aud": [AUDIENCE, "another-resource"], **self.token_overrides})[0]
 
 
-def test_real_tls_atomic_key_replacement_withdraws_old_channel_and_admits_new_key(tmp_path):
+class RS256Harness(EnrolledHarness):
+    def __init__(self):
+        from joserfc.jwk import RSAKey
+
+        super().__init__()
+        self.keys = (RSAKey.generate_key(2048), *self.keys[1:])
+        self.trust["jwks"] = {
+            "keys": [{**self.keys[0].as_dict(private=False), "kid": "issuer-1"}]}
+        self.document["version"] = 6
+        self.document["identity"]["profile"] = "enrolled-rs256-pop-v1"
+        self.document["token_claims"] = {
+            "subject_claim": "object_id", "client_claim": "app_id",
+            "required_claims": [{"claim": "roles", "values": ["gateway-client"], "shape": "list"}],
+        }
+
+    def credentials(self, *, subject="service-a", key=1, method="POST", nonce=None,
+                    target=TARGET, access=None, proof=None, signer=None):
+        self.serial += 1
+        return rsa_pair(
+            (self.keys[0], self.keys[key]), nonce or self.owner.challenge(), now=self.clock.value,
+            access={"object_id": "issuer-" + subject, "app_id": "client-" + subject,
+                    **(access or {})},
+            proof={"htm": method, "htu": target, "jti": str(self.serial), **(proof or {})},
+            signer=signer)
+
+
+def test_rs256_policy_explicit_selection_real_crypto_and_preserved_replay_epoch():
+    h = RS256Harness()
+    h.owner.reload()
+    grant, caller = h.service(), h.caller()
+    assert h.owner.revalidate_service(grant).principal == "service-a"
+    assert h.owner.revalidate_caller(caller).principal == "caller-a"
+    nonce, credentials = h.owner.challenge(), h.credentials()
+    h.owner.authenticate_service(*credentials, target_uri=TARGET, slot="service-a")
+    h.document["enrollment"]["mappings"].reverse()
+    h.update()
+    assert h.owner.challenge() == nonce
+    with pytest.raises(ServicePolicyError, match="^proof-replayed$"):
+        h.owner.authenticate_service(*credentials, target_uri=TARGET, slot="service-a")
+    h.document["enrollment"]["mappings"] = []
+    h.update()
+    with pytest.raises(ServicePolicyError):
+        h.owner.revalidate_service(grant)
+    with pytest.raises(ServicePolicyError):
+        h.owner.revalidate_caller(caller)
+
+
+@pytest.mark.parametrize("change", [
+    "profile", "legacy", "subject", "client", "shape", "extra", "claim-name",
+    "mixed-values", "empty-values", "missing-shape", "duplicate-claim",
+])
+def test_rs256_policy_cannot_be_implicitly_selected_or_weaken_claim_selection(change):
+    h = RS256Harness()
+    if change == "profile":
+        h.document["identity"]["profile"] = "user-bearer-v1"
+    elif change == "legacy":
+        h.document["version"] = 3
+        del h.document["token_claims"]
+    elif change in ("subject", "client"):
+        h.document["token_claims"][change + "_claim"] = []
+    elif change == "shape":
+        h.document["token_claims"]["required_claims"][0]["shape"] = "any"
+    elif change == "claim-name":
+        h.document["token_claims"]["required_claims"][0]["claim"] = []
+    elif change == "mixed-values":
+        h.document["token_claims"]["required_claims"][0]["values"] = ["gateway-client", {}]
+    elif change == "empty-values":
+        h.document["token_claims"]["required_claims"][0]["values"] = []
+    elif change == "missing-shape":
+        del h.document["token_claims"]["required_claims"][0]["shape"]
+    elif change == "duplicate-claim":
+        h.document["token_claims"]["required_claims"] *= 2
+    else:
+        h.document["token_claims"]["allow_missing_proof"] = True
+    with pytest.raises(ServicePolicyError):
+        h.owner.reload()
+    assert h.owner.status().revision is None
+
+
+def test_rs256_equivalent_claim_order_preserves_current_authority():
+    h = RS256Harness()
+    required = h.document["token_claims"]["required_claims"]
+    required[0]["values"].append("another-role")
+    required.append({"claim": "realm", "values": ["realm-a"], "shape": "scalar"})
+    h.owner.reload()
+    grant, nonce = h.service(), h.owner.challenge()
+    required.reverse()
+    next(item for item in required if item["claim"] == "roles")["values"].reverse()
+    h.update()
+    assert h.owner.challenge() == nonce
+    assert h.owner.revalidate_service(grant).principal == "service-a"
+
+
+@pytest.mark.parametrize("field,value", [
+    ("issuer", []), ("issuer", "http://issuer.example"),
+    ("audience", []), ("audience", ""),
+    ("trust_valid_until", True), ("trust_valid_until", -1),
+    ("jwks", {"keys": [{"kty": "EC", "kid": "issuer-1"}]}),
+])
+def test_rs256_invalid_provider_snapshot_preserves_only_prior_bounded_authority(field, value):
+    h = RS256Harness()
+    h.owner.reload()
+    grant, nonce = h.service(), h.owner.challenge()
+    h.trust[field] = value
+    with pytest.raises(ServicePolicyError):
+        h.update()
+    assert h.owner.challenge() == nonce
+    assert h.owner.status().revision == 1
+    assert h.owner.revalidate_service(grant).principal == "service-a"
+
+
+@pytest.mark.parametrize("change", ["claims", "expiry", "key"])
+def test_rs256_material_policy_change_fences_prior_handles(change):
+    h = RS256Harness()
+    h.owner.reload()
+    grant, nonce = h.service(), h.owner.challenge()
+    if change == "claims":
+        h.document["token_claims"]["required_claims"][0]["values"] = ["other-role"]
+    elif change == "expiry":
+        h.document["enrollment"]["mappings"][0]["expires_at"] = NOW
+    else:
+        h.document["bindings"][0]["jwk"] = ECKey.generate_key("P-256").as_dict(private=False)
+    h.update()
+    assert h.owner.challenge() != nonce
+    with pytest.raises(ServicePolicyError):
+        h.owner.revalidate_service(grant)
+    with pytest.raises(ServicePolicyError):
+        h.service()
+
+
+@pytest.mark.parametrize("harness_type", [EnrolledHarness, RS256Harness])
+def test_real_tls_profile_request_cost(tmp_path, harness_type, record_property):
     async def scenario():
-        rig = EnrolledRig(tmp_path)
+        rig = EnrolledRig(tmp_path, harness_type)
+        try:
+            await rig.start(identity_provider=rig.h.provider)
+            await rig.connect()
+            elapsed = []
+            for _ in range(25):
+                before = time.perf_counter()
+                async with await rig.request() as response:
+                    assert response.status == 200
+                    assert (await response.json())["service"] == "a"
+                elapsed.append((time.perf_counter() - before) * 1000)
+            result = {
+                "profile": rig.h.document["identity"]["profile"],
+                "requests": len(elapsed), "mean_ms": round(sum(elapsed) / len(elapsed), 3),
+                "p50_ms": round(sorted(elapsed)[12], 3),
+                "p95_ms": round(sorted(elapsed)[23], 3), "p99_ms": round(max(elapsed), 3),
+                "max_ms": round(max(elapsed), 3),
+                "samples_ms": [round(value, 3) for value in elapsed],
+            }
+            record_property("synthetic_tls_roundtrip", result)
+            print(result)
+            assert len(rig.backends[0].requests) == 25
+        finally:
+            await rig.close()
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("harness_type", [EnrolledHarness, RS256Harness])
+def test_real_tls_atomic_key_replacement_withdraws_old_channel_and_admits_new_key(
+        tmp_path, harness_type):
+    async def scenario():
+        rig = EnrolledRig(tmp_path, harness_type)
         try:
             await rig.start(identity_provider=rig.h.provider)
             await rig.connect()
@@ -397,9 +559,11 @@ def test_real_tls_atomic_key_replacement_withdraws_old_channel_and_admits_new_ke
     asyncio.run(scenario())
 
 
-def test_registered_profile_reaches_real_tls_admission_routing_and_withdrawal(tmp_path):
+@pytest.mark.parametrize("harness_type", [EnrolledHarness, RS256Harness])
+def test_registered_profile_reaches_real_tls_admission_routing_and_withdrawal(
+        tmp_path, harness_type):
     async def scenario():
-        rig = EnrolledRig(tmp_path)
+        rig = EnrolledRig(tmp_path, harness_type)
         try:
             await rig.start(identity_provider=rig.h.provider)
             await rig.connect()
@@ -412,8 +576,9 @@ def test_registered_profile_reaches_real_tls_admission_routing_and_withdrawal(tm
             await rig.update()
             assert rig.state.channels["service-a"] is old
             assert rig.state.authority.challenge() == nonce
+            client_claim = "app_id" if harness_type is RS256Harness else "client_id"
             for changes in (
-                {"client_id": "unapproved"}, {"aud": [AUDIENCE, "unapproved"]},
+                {client_claim: "unapproved"}, {"aud": [AUDIENCE, "unapproved"]},
                 {"cnf": {"jkt": rig.h.keys[1].thumbprint()}},
             ):
                 rig.token_overrides = changes
@@ -443,10 +608,11 @@ def test_registered_profile_reaches_real_tls_admission_routing_and_withdrawal(tm
 
 
 @pytest.mark.parametrize("change", ["withdrawal", "expiry"])
+@pytest.mark.parametrize("harness_type", [EnrolledHarness, RS256Harness])
 def test_live_caller_revocation_bounds_pending_response_without_service_reenrollment(
-        tmp_path, change):
+        tmp_path, change, harness_type):
     async def scenario():
-        rig = EnrolledRig(tmp_path)
+        rig = EnrolledRig(tmp_path, harness_type)
         pending = None
         try:
             now = rig.h.clock.value
@@ -477,9 +643,10 @@ def test_live_caller_revocation_bounds_pending_response_without_service_reenroll
     asyncio.run(scenario())
 
 
-def test_invalid_live_refresh_preserves_channel_without_extending_enrollment(tmp_path):
+@pytest.mark.parametrize("harness_type", [EnrolledHarness, RS256Harness])
+def test_invalid_live_refresh_preserves_channel_without_extending_enrollment(tmp_path, harness_type):
     async def scenario():
-        rig = EnrolledRig(tmp_path)
+        rig = EnrolledRig(tmp_path, harness_type)
         try:
             now = rig.h.clock.value
             rig.h.document["enrollment"]["mappings"][0]["expires_at"] = now + 3

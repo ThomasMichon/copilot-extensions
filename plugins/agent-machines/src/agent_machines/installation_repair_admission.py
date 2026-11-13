@@ -127,6 +127,7 @@ class OwnerBinding:
             ("readinessDeclarationDigest" if self.readiness_only else "payloadDigest"): self.content_digest,
             "modeDigest": self.mode_binding,
             "refusal": self.refusal,
+            "projectRoot": self.environment.get("COPILOT_PROJECT_DIR"),
         }
 
 
@@ -259,6 +260,9 @@ def _binding(
             refusal = "ordinary-owner-mutation-not-admitted"
         else:
             refusal = None
+    # Owner actions run from their payload root; name the selected project the
+    # way Copilot does for plugin commands so project-scoped owners resolve it.
+    clean["COPILOT_PROJECT_DIR"] = str(project_root)
     if readiness_only:
         content_digest = digest({"manifest": manifest, "invocation": invocation})
     else:

@@ -120,6 +120,7 @@ def build_app(cfg: Config | None = None, *, replay_consumer_factory=None):
         replay_consumer_factory=replay_consumer_factory,
         cohort_sources=RegistrarSources(),
         pool_publication_enabled=cfg.pool_publication_enabled,
+        periodic_relevance_interval=60.0 if cfg.control_token else 0.0,
     )
     from .source_start import behavior_identity, config_identity
 

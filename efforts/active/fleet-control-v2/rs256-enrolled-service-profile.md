@@ -1,8 +1,8 @@
 # Explicit RS256 application-token and enrolled-proof service profile
 
 Back to [Fleet Control V2](README.md#phase-2a---gatewayindex-vertical-slice).
-Related: #5789, #6443 and #6804. This is an **agent-recommended source
-prerequisite**, proposed for review before implementation. It does not complete
+Related: #5789, #6443 and #6804. This **agent-recommended source
+prerequisite** was reviewed in #12327 before implementation. It does not complete
 the selected provider adapter, protected enrollment or the parent fleet.
 
 This realizes a source prerequisite of the Gateway vision's
@@ -27,7 +27,7 @@ The existing connector already treats its supplied access token as opaque
 bytes when constructing the request proof. That is a useful composition seam,
 not evidence that the current server accepts a different issuer token.
 
-The proposed profile is distinct and opt-in, provisionally
+The implemented profile is distinct and opt-in,
 `enrolled-rs256-pop-v1`. A name and successful parser are not runtime support
 or actual provider interoperability. Existing profiles, configuration versions
 and unselected callers retain their behavior.
@@ -96,23 +96,37 @@ with their existing owners. No additional human-presence timer is introduced.
 
 ## Implementation sequence
 
-- [ ] Review this source contract and reconcile it to the common authentication,
+- [x] Review this source contract and reconcile it to the common authentication,
   service-profile and Gateway vision/pattern boundaries.
-- [ ] Add the explicitly selected verifier and policy integration, reusing the
+- [x] Add the explicitly selected verifier and policy integration, reusing the
   existing RS256 parsing/validation and common proof engine. Keep current
   profile refusal tests and compatibility behavior intact.
-- [ ] Prove the existing actual service-admission/channel/finite-consumer path
+- [x] Prove the existing actual service-admission/channel/finite-consumer path
   with original synthetic RS256 tokens and real request proofs over contained
   TLS. Verify source-handler bindings without adding credential acquisition.
-- [ ] Publish exact callable/configuration support, performance and validation
+- [x] Publish exact callable/configuration support, performance and validation
   limits; pass normal review and required CI before merging implementation.
-- [ ] Return the resulting contract to Gateway/adopter integration. Actual
+- [x] Return the resulting contract to Gateway/adopter integration. Actual
   provider interoperability, protected enrollment, same-owner listener hosting,
   installed selection and rollout remain separate, not completed by this leaf.
 
-No public claim of a concrete new callable or accepted policy schema is made
-before implementation. Name the final source paths and exact support form in
-that PR. The plan selects requirements, not a mandatory new registry or CLI.
+The source implementation is `enrolled_identity.EnrolledRS256IdentityVerifier`
+and service-policy version `6`, selected as `enrolled-rs256-pop-v1`.
+The [exact SDK/configuration contract](../../../fleet-manager/docs/gateway-enrolled-identity.md#explicit-rs256-application-token-profile)
+documents signed-claim selection, required scalar/list constraints and executing
+SDK support discovery. Implementation merged in #12335 after current-head
+Copilot approval and required green CI; its source contract was returned to
+#6804. This bounded source prerequisite is complete. All provider, enrollment,
+hosting and live-adoption gates remain separate; no new registry or CLI was
+added.
+
+The canonical contained Fleet runner passed 446 focused cryptographic,
+policy, downstream-admission and real TLS cases. Two additional bounded
+request-cost cases retained all 25 samples per profile as diagnostics, not
+production latency budgets. Python lint, install contract and documentation
+checks passed. The PR records the exact test selection, measurements and
+explicit reasons for not running installer clean-room or real-provider/live
+adoption lanes. No installer/provisioning or installed runtime was changed.
 
 ## Validation and stopping boundary
 
