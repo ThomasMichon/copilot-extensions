@@ -75,6 +75,10 @@ UNLOCK_REQUIRED_ACTIONS = frozenset({
     "import-key", "export-key", "list", "ls", "show", "remove", "rm",
     "move", "mv", "identity-key-setup", "ssh-key-prepare", "ssh-key-read",
 })
+_DISPATCH_WITHOUT_CREDENTIAL_LOCK = frozenset({
+    "ping", "stop", "handoff-export", "git-credential", "seal", "unseal", "kek-list",
+    "set-password", "identity-key-setup", "ssh-key-prepare", "ssh-key-read",
+})
 
 log = logging.getLogger("agent-vault.service")  # marketplace-isolation: allow logger-namespace
 
@@ -564,11 +568,7 @@ class VaultService:
     def _handle_admitted_request(self, request: dict, peer: str = "?",
                                  transport: str = "unknown") -> dict:
         """Dispatch work whose lifecycle admission was decided by the server."""
-        # Control paths stay responsive; timed handlers own their queue deadline.
-        if request.get("action") in {
-            "ping", "stop", "handoff-export", "set-password",
-            "identity-key-setup", "ssh-key-prepare", "ssh-key-read",
-        }:
+        if request.get("action") in _DISPATCH_WITHOUT_CREDENTIAL_LOCK:
             return self._dispatch_request(request, peer, transport)
         with self._credential_lock:
             return self._dispatch_request(request, peer, transport)

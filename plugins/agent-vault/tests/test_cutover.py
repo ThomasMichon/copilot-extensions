@@ -9,12 +9,17 @@ daemon action (the master password is never served over loopback TCP).
 from __future__ import annotations
 
 import io
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 import pytest
 
-from agent_vault import cutover
+from agent_vault import cutover, service
 from agent_vault.service import VaultService
+
+ExpiringVault = tuple[VaultService, str, list[float]]
 
 
 def _unlocked_service(kpdb: str, password: str) -> VaultService:
@@ -22,6 +27,19 @@ def _unlocked_service(kpdb: str, password: str) -> VaultService:
     svc.cli.set_password(kpdb, password)
     svc._password_set_at[kpdb] = time.time()
     return svc
+
+
+@pytest.fixture
+def expiring(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> ExpiringVault:
+    clock = [1000.0]
+    monkeypatch.setattr(time, "time", lambda: clock[0])
+    monkeypatch.setattr(service, "PASSWORD_TTL", 600)
+    kpdb = str(tmp_path / "fixture.kdbx")
+    vault = _unlocked_service(kpdb, "fixture-master")
+    vault._default_kpdb = kpdb
+    return vault, kpdb, clock
 
 
 def test_build_payload_carries_unlocked_masters(tmp_path):
@@ -177,6 +195,116 @@ def test_handle_request_gates_handoff_export(tmp_path):
     # Default transport (unknown) is refused -- fail closed.
     unknown = svc.handle_request({"action": "handoff-export"})
     assert unknown["ok"] is False and unknown.get("refused") is True
+
+
+def test_legacy_export_refuses_busy_custody_without_copying_a_master(
+    expiring: ExpiringVault,
+) -> None:
+    vault, kpdb, clock = expiring
+    held, release = threading.Event(), threading.Event()
+
+    def hold() -> None:
+        with vault._credential_lock:
+            held.set()
+            assert release.wait(5)
+
+    with ThreadPoolExecutor(max_workers=2) as workers:
+        holder = workers.submit(hold)
+        try:
+            assert held.wait(2)
+            clock[0] += 600
+            response = workers.submit(
+                vault._handle_admitted_request,
+                {"action": "handoff-export", "kpdb": kpdb}, transport="unix",
+            ).result(timeout=1)
+            assert response == {"ok": False, "retryable": True, "error": "service_busy"}
+            assert "handoff" not in response
+        finally:
+            release.set()
+        holder.result(timeout=2)
+    vault._check_password_ttl()
+    assert not vault.cli.has_password(kpdb)
+
+
+@pytest.mark.parametrize("protocol", ["legacy", "versioned"])
+def test_snapshot_expiry_cannot_export_partial_or_expired_state(
+    expiring: ExpiringVault, monkeypatch: pytest.MonkeyPatch, protocol: str,
+) -> None:
+    vault, kpdb, clock = expiring
+    entered, release = threading.Event(), threading.Event()
+    original = vault.cli.get_password
+
+    def read(database: str) -> str | None:
+        password = original(database)
+        entered.set()
+        assert release.wait(5)
+        return password
+
+    monkeypatch.setattr(vault.cli, "get_password", read)
+    with ThreadPoolExecutor(max_workers=2) as workers:
+        if protocol == "legacy":
+            pending = workers.submit(
+                vault._handle_admitted_request,
+                {"action": "handoff-export", "kpdb": kpdb}, transport="unix",
+            )
+        else:
+            pending = workers.submit(cutover.build_auth_state, vault)
+        try:
+            assert entered.wait(2)
+            clock[0] += 600
+            workers.submit(vault._check_password_ttl).result(timeout=1)
+            assert vault.cli.has_password(kpdb)
+            assert vault._password_set_at[kpdb] == 1000.0
+        finally:
+            release.set()
+        response = pending.result(timeout=2)
+    if protocol == "legacy":
+        payload = response["handoff"]
+        assert payload["master_passwords"] == {} and payload["password_set_at"] == {}
+        assert cutover.apply_handoff_payload(VaultService(), payload) == 0
+    else:
+        assert response["passwords"] == {}
+
+
+def test_legacy_export_does_not_invent_an_unknown_password_clock(
+    expiring: ExpiringVault,
+) -> None:
+    vault, _kpdb, _clock = expiring
+    vault._password_set_at.clear()
+    payload = cutover.build_handoff_payload(vault)
+    assert payload["master_passwords"] == {} and payload["password_set_at"] == {}
+    assert cutover.apply_handoff_payload(VaultService(), payload) == 0
+
+
+def test_legacy_adoption_is_atomic_against_housekeeping(
+    expiring: ExpiringVault, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    vault, kpdb, clock = expiring
+    entered, release = threading.Event(), threading.Event()
+    clock[0] += 600
+    original = vault.cli.set_password
+
+    def install(database: str, password: str) -> None:
+        original(database, password)
+        entered.set()
+        assert release.wait(5)
+
+    monkeypatch.setattr(vault.cli, "set_password", install)
+    payload = {
+        "master_passwords": {kpdb: "fixture-new-master"},
+        "password_set_at": {kpdb: clock[0]},
+    }
+    with ThreadPoolExecutor(max_workers=2) as workers:
+        pending = workers.submit(cutover.apply_handoff_payload, vault, payload)
+        try:
+            assert entered.wait(2)
+            workers.submit(vault._check_password_ttl).result(timeout=1)
+            assert vault.cli.get_password(kpdb) == "fixture-new-master"
+        finally:
+            release.set()
+        assert pending.result(timeout=2) == 1
+    vault._check_password_ttl()
+    assert vault.cli.has_password(kpdb) and vault._password_set_at[kpdb] == clock[0]
 
 
 # -- Client-side export (installer -> outgoing daemon) -----------------------

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import subprocess
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -10,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from agent_vault import cli, extensions, service, ssh_key
+from agent_vault import cli, extensions, kek, service, ssh_key
 from agent_vault.extensions import ExtensionRegistry
 from agent_vault.password_lifetime import CONTRACT
 
@@ -302,6 +303,95 @@ def test_timed_handler_rechecks_expiry_after_successful_contended_acquisition(
     assert not vault.cli.has_password(kpdb)
     assert kpdb not in vault._password_set_at
     assert vault.cache == {} and vault._credential_generations == {}
+
+
+@pytest.mark.parametrize(
+    "action", ["git-credential", "seal", "unseal", "kek-list"],
+)
+def test_independent_actions_do_not_wait_for_keepass_custody(
+    unlocked: Unlocked, monkeypatch: pytest.MonkeyPatch, action: str,
+) -> None:
+    vault, kpdb, _clock = unlocked
+    held, release = threading.Event(), threading.Event()
+    monkeypatch.setattr(service, "git_credential_action", lambda _request: {"ok": True})
+    monkeypatch.setattr(kek, "seal", lambda _name, _data: "fixture-envelope")
+    monkeypatch.setattr(kek, "unseal", lambda _name, _data: b"fixture-data")
+    monkeypatch.setattr(kek, "list_keks", lambda: ["fixture-key"])
+
+    def hold() -> None:
+        with vault._credential_lock:
+            held.set()
+            assert release.wait(5)
+
+    with ThreadPoolExecutor(max_workers=2) as workers:
+        holder = workers.submit(hold)
+        try:
+            assert held.wait(2)
+            response = workers.submit(vault._handle_admitted_request, {
+                "action": action, "kpdb": kpdb, "name": "fixture-key",
+                "data": base64.b64encode(b"fixture-data").decode(),
+                "sealed": "fixture-envelope",
+            }).result(timeout=1)
+            assert response["ok"] is True
+        finally:
+            release.set()
+        holder.result(timeout=2)
+
+
+def test_gcm_wait_does_not_hold_keepass_custody(
+    unlocked: Unlocked, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    vault, kpdb, _clock = unlocked
+    entered, release = threading.Event(), threading.Event()
+    vault.cache[(kpdb, "fixture", "password")] = "fixture-value"
+
+    def gcm(_request: dict) -> dict:
+        entered.set()
+        assert release.wait(5)
+        return {"ok": True}
+
+    monkeypatch.setattr(service, "git_credential_action", gcm)
+    with ThreadPoolExecutor(max_workers=2) as workers:
+        pending = workers.submit(
+            vault._handle_admitted_request, {"action": "git-credential", "kpdb": kpdb},
+        )
+        try:
+            assert entered.wait(2)
+            response = workers.submit(vault._handle_admitted_request, {
+                "action": "get", "kpdb": kpdb, "entry": "fixture",
+            }).result(timeout=1)
+            assert response["value"] == "fixture-value"
+        finally:
+            release.set()
+        assert pending.result(timeout=2)["ok"] is True
+
+
+def test_extension_credential_action_retains_complete_custody(
+    unlocked: Unlocked,
+) -> None:
+    vault, kpdb, clock = unlocked
+    entered, release = threading.Event(), threading.Event()
+
+    def operation(*_args: object) -> dict:
+        entered.set()
+        assert release.wait(5)
+        return {"ok": vault.cli.has_password(kpdb)}
+
+    extensions.get_registry().register_action("fixture-extension", operation)
+    with ThreadPoolExecutor(max_workers=2) as workers:
+        pending = workers.submit(vault._handle_admitted_request, {
+            "action": "fixture-extension", "kpdb": kpdb,
+        })
+        try:
+            assert entered.wait(2)
+            clock[0] += 600
+            workers.submit(vault._check_password_ttl).result(timeout=1)
+            assert vault.cli.has_password(kpdb)
+        finally:
+            release.set()
+        assert pending.result(timeout=2)["ok"] is True
+    vault._check_password_ttl()
+    assert not vault.cli.has_password(kpdb)
 
 
 @pytest.mark.parametrize(
