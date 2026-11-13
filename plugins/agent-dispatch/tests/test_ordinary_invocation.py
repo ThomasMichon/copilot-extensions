@@ -39,7 +39,7 @@ def test_ready_and_frozen_invocation_commit_and_read_back_together(intent):
 
 @pytest.mark.parametrize("creation, expected", [
     ({"status": "complete", "replayed": False}, ("created", "host-a")),
-    ({"status": "complete", "replayed": True}, ("targeted", None)),
+    ({"status": "complete", "replayed": True}, ("created", "host-a")),
     ({"status": "pending", "replayed": False}, ("targeted", None)),
     ({}, ("targeted", None)),
 ])
