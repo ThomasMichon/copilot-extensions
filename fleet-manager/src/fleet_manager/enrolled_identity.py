@@ -11,11 +11,15 @@ from dataclasses import dataclass
 import hmac
 
 from . import planning
+from .bearer_identity import (
+    ClaimRequirement, _check_requirements, _claim, _key, _requirements_valid, _rs256_claims,
+)
 from .runtime_identity import (
     IdentityError, IdentityVerifier, MAX_REPLAYS, VerifiedIdentity, _AccessBinding, _text, _time,
 )
 
 PROFILE = "enrolled-pop-v1"
+RS256_PROFILE = "enrolled-rs256-pop-v1"
 MAX_AUDIENCES = 16
 MAX_ENROLLMENTS = 128
 KINDS = frozenset({"service", "caller"})
@@ -45,6 +49,8 @@ class EnrolledIdentity(VerifiedIdentity):
 
 class EnrolledIdentityVerifier(IdentityVerifier):
     """The common crypto/replay engine with an explicit enrollment snapshot."""
+
+    _profile = PROFILE
 
     def __init__(self, *, issuer: str, audience: str, jwks: object,
                  trust_valid_until: int, clock: Callable[[], int],
@@ -106,11 +112,14 @@ class EnrolledIdentityVerifier(IdentityVerifier):
             and set(audiences) <= self._allowed_audiences
         )
 
+    def _client(self, claims: Mapping[str, object]) -> object:
+        return claims.get("client_id")
+
     def _access_binding(self, claims: Mapping[str, object],
                         kind: str | None) -> _AccessBinding:
         if not isinstance(kind, str) or kind not in KINDS:
             raise IdentityError("invalid-request-context")
-        subject, client, expires = claims.get("sub"), claims.get("client_id"), claims.get("exp")
+        subject, client, expires = self._subject(claims), self._client(claims), claims.get("exp")
         if (not isinstance(subject, str) or not isinstance(client, str)
                 or not _text(client) or type(expires) is not int):
             raise IdentityError("invalid-credential")
@@ -135,5 +144,42 @@ class EnrolledIdentityVerifier(IdentityVerifier):
             issuer=identity.issuer, subject=identity.subject, audience=identity.audience,
             proof_key=identity.proof_key, issued_at=identity.issued_at,
             expires_at=identity.expires_at, verified_at=identity.verified_at,
-            evidence=identity.evidence, kind=kind,
+            evidence=identity.evidence, kind=kind, profile=self._profile,
         )
+
+
+class EnrolledRS256IdentityVerifier(EnrolledIdentityVerifier):
+    """Original RSA token plus independently approved P-256 request enrollment."""
+
+    _profile = RS256_PROFILE
+    _signing_key = staticmethod(_key)
+
+    def __init__(self, *, issuer: str, audience: str, jwks: object,
+                 trust_valid_until: int, clock: Callable[[], int],
+                 allowed_audiences: tuple[str, ...], enrollments: tuple[EnrolledBinding, ...],
+                 subject_claim: str, client_claim: str,
+                 required_claims: tuple[ClaimRequirement, ...],
+                 replay_capacity: int = MAX_REPLAYS) -> None:
+        if (not _claim(subject_claim) or not _claim(client_claim)
+                or not _requirements_valid(required_claims)):
+            raise IdentityError("invalid-trust")
+        self._subject_claim, self._client_claim = subject_claim, client_claim
+        self._required = required_claims
+        super().__init__(
+            issuer=issuer, audience=audience, jwks=jwks, trust_valid_until=trust_valid_until,
+            clock=clock, allowed_audiences=allowed_audiences, enrollments=enrollments,
+            replay_capacity=replay_capacity)
+
+    def _access_claims(self, access_token: str) -> dict[str, object]:
+        return _rs256_claims(access_token, self._keys)
+
+    def _subject(self, claims: Mapping[str, object]) -> object:
+        return claims.get(self._subject_claim)
+
+    def _client(self, claims: Mapping[str, object]) -> object:
+        return claims.get(self._client_claim)
+
+    def _access_binding(self, claims: Mapping[str, object],
+                        kind: str | None) -> _AccessBinding:
+        _check_requirements(claims, self._required)
+        return super()._access_binding(claims, kind)

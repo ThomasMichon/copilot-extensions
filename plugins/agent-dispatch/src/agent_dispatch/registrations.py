@@ -705,12 +705,19 @@ def validate_registration(kind: str, spec: dict) -> None:
                 "evaluator registration needs a non-empty 'evaluator_ref'"
             )
         try:
+            from .relevance_evaluation import PeriodicRelevancePolicy
+
+            periodic = PeriodicRelevancePolicy.from_spec(spec)
+            if periodic is not None and (
+                eval_spec is None or "scripts" not in eval_spec
+            ):
+                raise EvaluatorError("periodic relevance requires an inline trusted script evaluator")
             reviewer_loop_lifecycle_config(spec)
             if eval_spec is not None and "scripts" in eval_spec:
                 from .producers.evaluator import ScriptEvaluatorRegistry
 
                 ScriptEvaluatorRegistry.from_spec(eval_spec)
-        except EvaluatorError as exc:
+        except ValueError as exc:
             raise RegistrationError(str(exc)) from exc
         _validate_disposable_cli_labels(spec)
         _validate_idle_nudge_exempt_labels(spec)

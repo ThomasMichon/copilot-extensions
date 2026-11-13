@@ -119,6 +119,7 @@ merged plan does not establish running adoption.
       The opt-in [receipt caller](../../../plugins/agent-dispatch/docs/emitter-relevance.md)
       supplies the source-check contract and registered transaction; domain
       adapter migration and installed-runtime qualification remain separate.
+      Source caller merged in #12311.
 - [ ] Extend the existing registrar/evaluator execution path with optional,
       bounded reconsideration of its own eligible unbound tasks. Persist due
       work and retry/backoff through the existing owner, without a second daemon.

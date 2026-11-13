@@ -4,7 +4,8 @@ The queue has a **receiver-first** relevance operation:
 `reconcile_task_relevance`, with control-authorized HTTP admission for effective
 local command emitters and their registrar-selected evaluators. Command emitters
 can opt into [retained-receipt source checks](emitter-relevance.md); existing
-emitters are unchanged without that configuration. Domain source adapters, periodic selection
+emitters are unchanged without that configuration. Registered evaluators can opt
+into [periodic reconsideration](periodic-relevance.md). Domain source adapters
 and actual session/workspace closeout remain tracked by
 the [active effort](../../../efforts/active/task-relevance-reconciliation/README.md).
 There is no default automatic task scrubber.
@@ -112,9 +113,9 @@ does not release reservations or delete files.
 The actual coordinator's `/health.task_relevance` advertises
 `task_relevance/v1`, supported version `1`, registration scopes
 `local-direct-command-emitter` and `local-effective-emitter-evaluator`,
-`bounded_batches: true`, and whether control authority is configured.
+`bounded_batches: true`, `periodic_evaluation: true`, and whether control authority is configured.
 This is additive health metadata; older clients keep their existing behavior.
-Receiver capability alone enables no source adapter or periodic evaluation.
+Receiver capability alone enables no source adapter or periodic registration.
 
 The control-authorized HTTP surface is:
 
