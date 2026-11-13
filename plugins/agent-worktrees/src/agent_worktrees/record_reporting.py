@@ -111,10 +111,10 @@ def refresh_for_save(record: WorktreeRecord, path: Path, current: WorktreeRecord
     apply_context(record, context or local_context(path, record.repo))
 
 
-def require_receiving_subject(record: WorktreeRecord, config: cfg.Config) -> None:
-    """Reporter naming cannot substitute for receiving-ledger/checkout proof."""
+def require_current_subject(record: WorktreeRecord, config: cfg.Config) -> None:
+    """Verify the actual receiving ledger, incarnation and execution namespace."""
     from . import execution_spaces, record_cache, record_machine_identity, tracking
-    from .legacy_wsl_record_locality import record_namespace_matches, resolve_legacy_wsl_owner_ref
+    from .legacy_wsl_record_locality import record_namespace_matches
 
     error = execution_spaces.ExecutionSpaceError
     if record.repo != config.repo_name:
@@ -142,6 +142,51 @@ def require_receiving_subject(record: WorktreeRecord, config: cfg.Config) -> Non
         raise error("receiving configuration belongs to a different execution platform")
     if record.checkout_managed and not record_namespace_matches(record, config):
         raise error("record conflicts with the receiving worktree namespace")
+
+
+def locally_proven_subject(record: WorktreeRecord) -> bool:
+    """Historical naming alone cannot qualify an allocation or self-session ref."""
+    from . import execution_spaces, retained_checkout
+
+    context = getattr(record, "_reporting_context", None)
+    if context is None or getattr(context, "unavailable", False):
+        return False
+    try:
+        receiving = execution_spaces.project_record_config(record)
+        require_receiving_subject(record, receiving)
+        if Path(record.worktree_path).exists():
+            return retained_checkout.is_local(record, receiving)
+        return bool(record.creation_nonce)
+    except (OSError, ValueError, RuntimeError, TypeError, yaml.YAMLError):
+        return False
+
+
+def historical_owner_is_local(record: WorktreeRecord, machine: str) -> bool:
+    """A retained alias cannot override an explicitly foreign configured selector."""
+    from machine_transport import find_machine_entry
+    from . import execution_spaces
+
+    if machine.casefold() == record.execution_machine.casefold():
+        return True
+    if not locally_proven_subject(record):
+        return False
+    try:
+        receiving = execution_spaces.project_record_config(record)
+        entries = execution_spaces.registry_for_config(receiving)
+        if find_machine_entry(entries, machine, reject_ambiguous=True) is not None:
+            return execution_spaces.require_owner_identity(machine, receiving, canonical_ref=False)
+        return True
+    except (OSError, ValueError, RuntimeError, TypeError, yaml.YAMLError):
+        return False
+
+
+def require_receiving_subject(record: WorktreeRecord, config: cfg.Config) -> None:
+    """Reporter naming cannot substitute for receiving-ledger/checkout proof."""
+    from . import execution_spaces, tracking
+    from .legacy_wsl_record_locality import resolve_legacy_wsl_owner_ref
+
+    require_current_subject(record, config)
+    error = execution_spaces.ExecutionSpaceError
     if record.owner_ref:
         owner = tracking.parse_claim_ref(record.owner_ref)
         if owner is None or not owner.is_qualified:

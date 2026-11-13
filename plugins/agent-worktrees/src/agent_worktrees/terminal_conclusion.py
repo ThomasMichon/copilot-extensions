@@ -133,18 +133,10 @@ def _release_dispatch_session_claims(
     """
     if not session_id:
         return []
-    # Keep exact qualified refs, including an independently verified original
-    # dispatch creator after a rename; a session-id substring is never enough.
-    owners = {record.execution_machine}
-    if record.dispatch_attempt is not None and dispatch_creator_matches(record):
-        owners.add(record.dispatch_attempt.creator_machine)
-    expected_refs = {
-        tracking.format_claim_ref(machine, record.repo, record.worktree_id, session=session_id)
-        for machine in owners
-    }
+    from .session_self_claims import self_claims
+
     released = [
-        claim for claim in record.resources
-        if claim.is_live and claim.kind == "session" and claim.ref in expected_refs
+        claim for claim in self_claims(record, session_id) if claim.is_live
     ]
     for claim in released:
         tracking.release_resource_claim(record, claim.ref, save=False)

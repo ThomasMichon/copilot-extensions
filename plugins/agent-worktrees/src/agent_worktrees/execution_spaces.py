@@ -150,7 +150,7 @@ def settle_parent_obligation(record: Any, config: Any, worktree_id: str, *, outp
                 return
             receiving_config = project_record_config(parent)
             require_record_mutation(parent, receiving_config)
-            from .tracking_lookup import local_pair_subjects
+            from .tracking_lookup import local_pair_subjects, original_owned_claim
 
             paired_child = (
                 getattr(record, "pair_role", None) == "knowledge"
@@ -158,17 +158,29 @@ def settle_parent_obligation(record: Any, config: Any, worktree_id: str, *, outp
                 and record.worktree_id == worktree_id and record.repo == config.repo_name
                 and owner == record.pair_claim_ref and local_pair_subjects(record, parent)
             )
+            ordinary_claim = original_owned_claim(record, parent)
+            ordinary_child = (
+                ordinary_claim is not None and record.worktree_id == worktree_id
+                and record.repo == config.repo_name and record.status == "finalized"
+            )
             if owner.machine != getattr(parent, "execution_machine", parent.machine):
                 alias = None
                 if getattr(parent, "machine_identity", None) is None:
                     alias = legacy_wsl_record_locality.resolve_legacy_wsl_owner_ref(owner, config)
-                if not paired_child and (alias is None or alias.resolve() != parent_path.resolve()):
+                if not (paired_child or ordinary_child) and (
+                    alias is None or alias.resolve() != parent_path.resolve()
+                ):
                     raise ValueError("parent reference conflicts with the record execution owner")
             if not local_child and not require_owner_identity(caller_key, receiving_config):
                 raise ExecutionSpaceError("caller is not local to the parent receiving execution space")
-            child_ref = parent.pair_ref if paired_child else tracking.format_claim_ref(
-                getattr(record, "execution_machine", record.machine), config.repo_name, worktree_id,
+            child_ref = (
+                parent.pair_ref if paired_child else ordinary_claim.ref if ordinary_child
+                else tracking.format_claim_ref(
+                    getattr(record, "execution_machine", record.machine), config.repo_name, worktree_id,
+                )
             )
+            if ordinary_child and not ordinary_claim.is_live:
+                return
             if child_ref == paired_claims.paired_ref(parent) and any(
                 c.ref == child_ref and c.kind == "worktree" and c.state == obligations.RELEASED
                 for c in parent.resources

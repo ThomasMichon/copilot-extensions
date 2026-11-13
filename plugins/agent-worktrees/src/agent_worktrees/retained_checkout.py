@@ -197,12 +197,17 @@ def resolve_owner(ref, config, *, child=None) -> Path | None:
             return None
         record = tracking.load_record(path)
         if ref.machine != record.execution_machine:
-            from .tracking_lookup import local_pair_subjects
+            from .tracking_lookup import local_pair_subjects, original_owned_claim
 
-            if (
-                child is None or child.owner_ref != child.pair_ref
-                or child.pair_claim_ref != ref or not local_pair_subjects(child, record)
-            ):
+            paired = (
+                child is not None and child.owner_ref == child.pair_ref
+                and child.pair_claim_ref == ref and local_pair_subjects(child, record)
+            )
+            ordinary = (
+                child is not None and child.owner_claim_ref == ref
+                and original_owned_claim(child, record) is not None
+            )
+            if not (paired or ordinary):
                 return None
         receiving = config if config.repo_name == ref.project else execution_spaces.project_record_config(record)
         if is_local(record, receiving):

@@ -181,6 +181,9 @@ alias for that execution owner. An unrelated native or remote owner does not
 select a coincident local ID. An original reciprocal companion reference can
 also resolve through both receiving ledgers, namespaces, pair subjects and
 matching actual reporter observations, without retaining its old custom key.
+Ordinary owned children instead prove the original parent's exact back-claim
+against both receiving subjects and the child's current ownership/incarnation.
+Missing or substituted reciprocal evidence remains unproven.
 Receipt-backed ownership continues to require its original receiving creation
 journal, incarnation, relationships and finality. Locality neither releases a
 claim nor waives live process, launch, handoff or lifecycle ownership.
@@ -220,6 +223,13 @@ behind a malformed tuple or an owner filter. Producer scans reconcile an
 unchanged creator/transfer chain against its exact local receiving subjects
 before projecting current owner names; they preserve historical metadata and
 report ambiguous chains as unknown.
+Session reactivation and End retain the original qualified self-session claim
+for the tracked session and proven receiving project/worktree, rather than
+reconstructing it from a renamed reporter. Other projects, worktrees, sessions
+and opaque/producer claims remain independent. Creator-scoped terminal cleanup
+uses the original reservation/driver or creation nonce and actual receiving
+proof even without a companion; an explicitly foreign creator selection still
+refuses.
 Publication privacy guards check both physical and execution names. New terminal
 pair receipts and move-journal subjects omit reporter names; old receipts and
 journals compare their remaining allocation and reciprocal evidence without
