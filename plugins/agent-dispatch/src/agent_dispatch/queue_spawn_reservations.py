@@ -161,10 +161,8 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
         embody, so a crash / re-poll / lease-expiry between observing a
         spawn-eligible task and actually spawning it can never double-spawn.
 
-        Explicit pool placement also binds the allocator-owned claim and
-        captures its matching assignment in this transaction. Legacy callers
-        require an unprojected cohort for fresh queued work; active/suspended
-        custody and independently admitted CI-repair keep their own contracts.
+        Explicit placement binds the allocator claim and original allocation
+        cohort here. Legacy, active/suspended and CI-repair admission is unchanged.
 
         Semantics (all under one write lock):
 
@@ -630,6 +628,8 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
                     conn, task.id, ts=ts, from_status=Status.QUEUED, to_status=Status.CLAIMED,
                     worker=reserved_by, note="pool placement: " + json.dumps(selected_pool.identity),
                 )
+            from .queue_assignment_cohort import retain_allocation_cohort
+            retain_allocation_cohort(conn, task, key=key, original_key=allocation_reservation_key)
             row = conn.execute("SELECT * FROM spawn_reservations WHERE key = ?", (key,)).fetchone()
             assigned_pool = pool_assignment(conn, task_id)
             conn.execute("COMMIT")
