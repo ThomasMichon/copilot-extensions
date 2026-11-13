@@ -497,6 +497,45 @@ def test_main_snapshot_uses_portable_archive_eol_and_keeps_explicit_crlf(reposit
     assert (output / "source" / "binary.bin").read_bytes() == bytes(range(256))
 
 
+@pytest.mark.parametrize("relative", [False, True])
+def test_native_archive_writes_owned_file_without_captured_binary(
+    repository, tmp_path, monkeypatch, relative,
+):
+    repo, commit = repository
+    monkeypatch.chdir(tmp_path)
+    archive = Path("native.tar") if relative else tmp_path / "native.tar"
+    original = local.preparation_process.run
+    observed = []
+    deadline = time.monotonic() + 30
+
+    def run(argv, **options):
+        assert "--output=" + str(archive.absolute()) in argv
+        assert "stdout" not in options and options["capture_output"] is True
+        assert options["deadline"] == deadline
+        result = original(argv, **options)
+        assert not result.stdout
+        observed.append(result.returncode)
+        return result
+
+    monkeypatch.setattr(local.preparation_process, "run", run)
+    local.preparation._archive(repo, commit, archive, deadline=deadline)
+    assert observed == [0]
+    with tarfile.open(archive) as content:
+        stream = content.extractfile("version.txt")
+        assert stream is not None and stream.read() == b"released-version\n"
+    assert not (repo / "native.tar").exists()
+
+
+def test_native_archive_refuses_existing_destination_before_launch(tmp_path, monkeypatch):
+    archive = tmp_path / "existing.tar"
+    archive.write_bytes(b"retained artifact")
+    monkeypatch.setattr(local.preparation, "_git",
+                        lambda *_a, **_kw: pytest.fail("existing archive was overwritten"))
+    with pytest.raises(FileExistsError):
+        local.preparation._archive(tmp_path, "unused", archive)
+    assert archive.read_bytes() == b"retained artifact"
+
+
 @pytest.mark.skipif(os.name != "nt", reason="Windows extended-length paths")
 @pytest.mark.parametrize(
     ("reference", "problem"),

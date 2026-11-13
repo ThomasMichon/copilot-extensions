@@ -42,6 +42,10 @@ and fail its runtime custody checks. Automatic text conversion uses LF while
 explicit repository EOL attributes remain authoritative. Windows preparation
 uses native filesystem paths; the returned payload may use extended-length
 spelling. No checkout configuration is changed.
+Git writes archive bytes directly to the exclusively created artifact file;
+the process owner captures diagnostics, not the complete archive in memory.
+Relative artifact paths are bound to the caller's directory before Git's
+source-directory selection. Existing deadlines and cleanup ownership remain.
 Configured source acquisition and preparation explicitly disable Git's ambient
 automatic line-ending conversion, so their clean-checkout checks observe the
 same literal source bytes on Windows and POSIX. Repository-owned attributes

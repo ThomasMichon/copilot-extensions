@@ -112,10 +112,11 @@ def _git(
 
 
 def _archive(source: Path, commit: str, archive: Path, *, deadline: float | None = None) -> None:
-    with archive.open("xb") as output:
+    archive = archive.absolute()
+    with archive.open("xb"):
         _git(
             source, "-c", "tar.umask=0022", "-c", "core.eol=lf",
-            "archive", "--format=tar", commit, deadline=deadline, output=output,
+            "archive", "--format=tar", "--output=" + str(archive), commit, deadline=deadline,
         )
 
 
