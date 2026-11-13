@@ -120,11 +120,15 @@ merged plan does not establish running adoption.
       supplies the source-check contract and registered transaction; domain
       adapter migration and installed-runtime qualification remain separate.
       Source caller merged in #12311.
-- [ ] Extend the existing registrar/evaluator execution path with optional,
+- [x] Extend the existing registrar/evaluator execution path with optional,
       bounded reconsideration of its own eligible unbound tasks. Persist due
       work and retry/backoff through the existing owner, without a second daemon.
-- [ ] Treat elapsed time as evaluation eligibility only. Define keep,
+      Source merged in #12325; verified managed creation provenance is required,
+      and production registration/domain-adapter adoption remains separate.
+- [x] Treat elapsed time as evaluation eligibility only. Define keep,
       no-longer-needed and unknown outcomes; a failed check never implies abandon.
+      The same receiver handles explicit needed/obsolete/unknown judgments;
+      final-attempt report recovery remains distinct from source-check budgets.
 - [ ] Fence stale source observations and source reopen against newer task
       episodes. Manual tasks and other emitters remain outside the scope.
 
@@ -133,6 +137,9 @@ merged plan does not establish running adoption.
 - [ ] Preserve immutable original task/emitter and allocation/pool references
       through the owning Worktrees creation and Bridge session-state paths.
       Distinguish original allocation from later assignment or reuse.
+      The [original assignment audit](../../../plugins/agent-dispatch/docs/task-obligations.md#original-assignment-cohort)
+      retains verified creation and exact pool-assignment facts; propagation to
+      Worktrees creation and Bridge session state remains open.
 - [ ] Expose forward and reverse correlation through existing owner APIs.
       Pool identity must identify the actual registration/assignment, not just
       a display name; opaque legacy records remain explicitly unattributed.
@@ -159,8 +166,11 @@ merged plan does not establish running adoption.
       request, steer and closeout outcome; pending effects remain inspectable.
 - [ ] A stale report, reopened source, changed task episode, foreign emitter
       or incomplete source read cannot abandon unrelated/current work.
-- [ ] Periodic selection respects registration scope, eligibility, batch bounds,
+- [x] Periodic selection respects registration scope, eligibility, batch bounds,
       retry policy and disabled registrations; age alone never retires work.
+      Scoped isolated controls merged in #12325 include query-cost bounds,
+      original-request recovery and verified producer enrollment. This does not
+      qualify production registration adoption or native owner closeout.
 - [ ] Task, pool, emitter, native and workspace joins survive allocation,
       reassignment, session exit and a later task episode without guessed stamps.
 - [ ] Actual session conclusion and workspace disposition are verified
