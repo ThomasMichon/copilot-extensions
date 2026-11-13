@@ -9,7 +9,7 @@ from pathlib import Path
 import secrets
 import subprocess
 import sys
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
 
 from agent_procutil import contained_test_mode, no_window_kwargs
 
@@ -25,6 +25,9 @@ from ..session_host.launcher import (
 from ..session_host.osutil import process_start_time
 from ..session_host.startup_admission import StartupAdmissionClient
 from ..session_host import protocol
+
+if TYPE_CHECKING:
+    from .native_handoff import WindowsNativeHandoff
 
 BINDING_ENV = "COPILOT_DRIVER_HEADED_BINDING"
 CLIENT_ENV = "COPILOT_DRIVER_HEADED_CLIENT"
@@ -127,6 +130,28 @@ class _PaneChild:
     def __init__(self) -> None:
         self.proc: subprocess.Popen | None = None
         self.started = asyncio.Event()
+        self.job = None
+        self._cleanup_task: asyncio.Task | None = None
+
+    def launch(self, argv: list[str], *, native_handoff=None, **kwargs) -> None:
+        if self.proc is not None:
+            raise RuntimeError("A native incarnation cannot be launched twice")
+        if native_handoff is None:
+            # headless-guard: allow: the interactive child inherits the caller's existing pane console
+            self.proc = subprocess.Popen(argv, **kwargs)
+        else:
+            self.proc, self.job = native_handoff.launch(argv, **kwargs)
+        self.started.set()
+
+    def _settle_handoff(self) -> None:
+        from agent_procutil.owned_process import OwnedCleanupError
+
+        try:
+            self.job.terminate_and_wait(5)
+            self.proc.wait(timeout=5)
+        except BaseException as error:
+            raise OwnedCleanupError(self.proc, self.job) from error
+        self.job = None
 
     @property
     def pid(self) -> int | None:
@@ -140,6 +165,10 @@ class _PaneChild:
         await self.started.wait()
         while (result := self.returncode) is None:
             await asyncio.sleep(0.05)
+        if self.job is not None or self._cleanup_task is not None:
+            if self._cleanup_task is None:
+                self._cleanup_task = asyncio.create_task(asyncio.to_thread(self._settle_handoff))
+            await asyncio.shield(self._cleanup_task)
         return result
 
     async def terminate(self) -> None:
@@ -166,12 +195,22 @@ async def run_headed(
     nonce: str = "", policy_context: str | None = None,
     before_exec: Callable[[], None] | None = None,
     auth_wait: dict | None = None,
+    native_handoff: WindowsNativeHandoff | None = None,
 ) -> int:
     """Run legacy headed execution, or an explicitly source-authorized receiver."""
+    if native_handoff is not None:
+        from .native_handoff import WindowsNativeHandoff
+
+        if (
+            type(native_handoff) is not WindowsNativeHandoff
+            or os.name != "nt" or auth_wait is not None
+        ):
+            raise ValueError("Native handoff requires the Windows non-auth headed creation owner")
     arguments = dict(
         session_id=session_id, attempt_directory=attempt_directory, state_file=state_file,
         cwd=cwd, env=env, port=port, ws_port=ws_port, nonce=nonce,
         policy_context=policy_context, before_exec=before_exec,
+        native_handoff=native_handoff,
     )
     if auth_wait is None:
         return await _run_headed_once(child_argv, **arguments)
@@ -236,6 +275,7 @@ async def _run_headed_once(
     nonce: str = "", policy_context: str | None = None,
     before_exec: Callable[[], None] | None = None, auth_receiver=None,
     auth_resume: bool = False,
+    native_handoff: WindowsNativeHandoff | None = None,
 ) -> int:
     startup_prompt = _native_request(child_argv, session_id)
     cwd = str(Path(cwd or os.getcwd()).resolve())
@@ -308,8 +348,7 @@ async def _run_headed_once(
             cwd=cwd, env=child_env, **({} if _interactive_console() else no_window_kwargs()),
         )
         if auth_receiver is None:
-            owner.proc = subprocess.Popen(argv, **native_kwargs)
-            owner.started.set()
+            owner.launch(argv, native_handoff=native_handoff, **native_kwargs)
         else:
             if not auth_receiver.authorized():
                 raise RuntimeError("Source authorization expired before native launch")

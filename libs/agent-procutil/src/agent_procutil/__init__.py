@@ -13,7 +13,7 @@ import subprocess
 import sys
 import time
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any, BinaryIO
 
 if TYPE_CHECKING:
@@ -516,6 +516,7 @@ def spawn_sync_in_kill_on_close_job(
     *,
     require_job: bool = False,
     allow_breakaway: bool = True,
+    on_suspended: Callable[[subprocess.Popen], None] | None = None,
     **kwargs: Any,
 ) -> tuple[subprocess.Popen, JobHandle | None]:
     """Create a suspended Windows child, bind its Job and scopes, then resume.
@@ -523,10 +524,15 @@ def spawn_sync_in_kill_on_close_job(
     Required assignment fails before resume; disabling breakaway forbids escape.
     Failed optional assignment resumes with unknown custody and unresolved scopes.
     POSIX returns plain Popen; creation OS errors retain SyncProcessLaunchError.
+    Explicit on_suspended publication requires strict Windows Job custody.
     README.md owns the full compatibility and lifetime contract.
     """
     if type(allow_breakaway) is not bool:
         raise ValueError("allow_breakaway must be a boolean")
+    if on_suspended is not None and (
+        not callable(on_suspended) or not _is_windows() or not require_job or allow_breakaway
+    ):
+        raise ValueError("Suspended handoff requires Windows, required custody and no breakaway")
     if (
         not allow_breakaway
         and int(kwargs.get("creationflags", 0)) & _CREATE_BREAKAWAY_FROM_JOB
@@ -571,6 +577,10 @@ def spawn_sync_in_kill_on_close_job(
             process.kill()
             process.wait(timeout=5)
             raise RuntimeError("Windows descendant Job assignment failed before child resume")
+        if on_suspended is not None:
+            from ._suspended_handoff import notify
+
+            notify(process, job_handle, on_suspended)
         if not _resume_suspended_process(pid):
             if require_job or not allow_breakaway:
                 process.kill()
@@ -584,7 +594,12 @@ def spawn_sync_in_kill_on_close_job(
             if job_handle is not None:
                 job_handle.close()
             raise RuntimeError(f"failed to resume suspended process {pid}")
-    except BaseException:
+    except BaseException as error:
+        if on_suspended is not None:
+            from .owned_process import OwnedCleanupError
+
+            if isinstance(error, OwnedCleanupError):
+                raise
         if job_handle is not None:
             job_handle.close()
         raise
