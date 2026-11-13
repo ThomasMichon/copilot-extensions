@@ -545,8 +545,31 @@ inheritance, protected DACL, read-only handle rights, mismatched and dead
 creation identities, one-shot publication and exact final-handle cleanup.
 These are source provider controls, not actual-client or installed-launcher
 qualification.
-Windows advertisement, bootstrap adoption and production caller integration
-remain disabled. The section requires no new process, network request,
+The internal `owner_exec.windows_overlay` builder embeds that stdlib snapshot
+before the anonymous actual-start bootstrap and carries only its section
+binding, not a parent-guessed PID/birth. The bootstrap opens and pins the
+published native owner before querying any installed provider. Missing or dead
+owners refuse without running the query or ordinary command. An eligible
+provider supplies the physical interpreter used by the existing optional
+receiver; the bootstrap does not reconstruct `sys.prefix` or import the selected
+generation into its own interpreter.
+
+Windows has no POSIX exec. This MCP-connection shim creates one headless
+receiver child with the original inherited stdin/stdout/stderr, environment
+and cwd, then returns its actual exit code. An unsupported provider retains
+the ordinary command. Only failure to create the receiver permits fallback,
+after another native-owner liveness check; wait errors and nonzero exits after
+creation never replay the ordinary application. This is not a new native-client
+supervisor, lifetime daemon or owner-discovery process.
+`tests/test_owner_bootstrap_windows.py` qualifies this source boundary with
+independent physical interpreter prefixes, actual-start selection, small
+binary frames, EOF, context, native owner refusal and nonzero exits.
+`tests/test_owner_entry.py` also checks failed creation versus accepted-child
+wait failure without replay. These controlled packages do not qualify actual
+Copilot consumption or an installed handover.
+
+Windows advertisement, automatic bootstrap adoption and production caller
+integration remain disabled. The section requires no new process, network request,
 filesystem scan or steady-state message work; installed launch/update latency
 remains unqualified until caller adoption.
 

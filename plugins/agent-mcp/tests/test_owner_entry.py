@@ -130,6 +130,53 @@ def test_bootstrap_failed_physical_exec_rechecks_owner_before_ordinary_fallback(
     ordinary.assert_not_called()
 
 
+@pytest.mark.parametrize("outcome", ["exit", "spawn-failure", "wait-failure", "owner-loss"])
+def test_windows_bootstrap_never_replays_a_created_receiver(monkeypatch, outcome):
+    request, report = _request(), _report()
+    request["binding"] = "a" * 64
+    owner = Mock(pid=73, birth="windows:123")
+    monkeypatch.setattr(owner_bootstrap.sys, "platform", "win32")
+    monkeypatch.setattr(owner_bootstrap, "WINDOWS_ORIGIN", lambda _binding: nullcontext(owner))
+    monkeypatch.setattr(owner_bootstrap.subprocess, "CREATE_NO_WINDOW", 0x08000000, raising=False)
+    monkeypatch.setattr(owner_bootstrap.subprocess, "run", Mock(
+        return_value=subprocess.CompletedProcess([], 0, json.dumps(report), ""),
+    ))
+    child = Mock()
+    child.wait.return_value = 27
+    if outcome == "wait-failure":
+        child.wait.side_effect = OSError("accepted child wait failed")
+    spawn = Mock(return_value=child)
+    if outcome in {"spawn-failure", "owner-loss"}:
+        spawn.side_effect = FileNotFoundError("receiver removed before creation")
+    if outcome == "owner-loss":
+        owner.require_alive.side_effect = [None, ProcessLookupError("owner lost")]
+    ordinary = Mock(return_value=31)
+    monkeypatch.setattr(owner_bootstrap, "_windows_start", spawn)
+    monkeypatch.setattr(owner_bootstrap, "_ordinary", ordinary)
+    if outcome in {"wait-failure", "owner-loss"}:
+        with pytest.raises(OSError):
+            owner_bootstrap.start(request)
+    else:
+        assert owner_bootstrap.start(request) == (31 if outcome == "spawn-failure" else 27)
+    assert spawn.call_count == 1
+    physical = json.loads(spawn.call_args.args[0][-1])
+    assert (physical["pid"], physical["birth"]) == (73, "windows:123")
+    assert ordinary.call_count == int(outcome == "spawn-failure")
+    assert child.wait.call_count == int(outcome in {"exit", "wait-failure"})
+
+
+def test_windows_snapshot_refusal_precedes_provider_discovery(monkeypatch):
+    monkeypatch.setattr(owner_bootstrap.sys, "platform", "win32")
+    monkeypatch.setattr(owner_bootstrap, "WINDOWS_ORIGIN", Mock(
+        side_effect=ProcessLookupError("dead native owner"),
+    ))
+    query = Mock()
+    monkeypatch.setattr(owner_bootstrap.subprocess, "run", query)
+    with pytest.raises(ProcessLookupError):
+        owner_bootstrap.start({"binding": "a" * 64})
+    query.assert_not_called()
+
+
 @pytest.fixture
 def admitted(monkeypatch, tmp_path):
     request = _request()

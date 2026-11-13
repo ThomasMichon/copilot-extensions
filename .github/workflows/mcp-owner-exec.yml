@@ -30,6 +30,8 @@ on:
       - "plugins/agent-mcp/src/agent_mcp/custody_launch.py"
       - "plugins/agent-mcp/tests/test_owner_exec.py"
       - "plugins/agent-mcp/tests/test_owner_entry.py"
+      - "plugins/agent-mcp/tests/test_owner_bootstrap_windows.py"
+      - "plugins/agent-mcp/tests/test_owner_entry_windows.py"
       - "plugins/agent-mcp/tests/test_owner_section.py"
       - "plugins/agent-mcp/tests/test_owner_snapshot.py"
       - "plugins/agent-mcp/tests/owner_section_security.py"
@@ -167,11 +169,15 @@ jobs:
         with:
           python-version: "3.13"
       - uses: astral-sh/setup-uv@v9.0.0
-      - name: Exercise native publication and independent delayed snapshots
+      - name: Exercise native publication, snapshots and pre-effect Windows entry
         run: >-
           python tools/run-plugin-tests.py agent-mcp
           --test-file tests/test_owner_section.py
           --test-file tests/test_owner_snapshot.py
+          --test-file tests/test_owner_bootstrap_windows.py
+          --test-file tests/test_owner_entry_windows.py
+          --test-file tests/test_owner_entry.py
+          --test-file tests/test_owner_capabilities.py
           --junit-dir "${{ runner.temp }}/mcp-owner-publication-${{ github.run_id }}"
       - name: Retain native publication source controls
         if: always()
