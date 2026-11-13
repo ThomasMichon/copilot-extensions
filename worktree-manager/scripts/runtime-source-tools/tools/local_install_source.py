@@ -31,6 +31,35 @@ MANIFEST = "install-source.json"
 SCHEMA = "copilot-extensions.install-source"
 
 
+def _verify_project_declaration(
+    repository: Path, commit: str, source: Path, deadline: float,
+) -> None:
+    entry = preparation._git(
+        repository, "ls-tree", commit, "--", "pyproject.toml", deadline=deadline,
+    )
+    declaration = source / "pyproject.toml"
+    if not entry:
+        if declaration.exists() or declaration.is_symlink():
+            raise ValueError("repository project declaration differs from the source commit")
+        return
+    fields = entry.split()
+    if (
+        fields[0] not in {"100644", "100755"}
+        or declaration.is_symlink() or not declaration.is_file()
+    ):
+        raise ValueError("repository project declaration differs from the source commit")
+    content = declaration.read_bytes()
+    digest = hashlib.new("sha1" if len(fields[2]) == 40 else "sha256")
+    digest.update(f"blob {len(content)}\0".encode("ascii"))
+    digest.update(content)
+    if digest.hexdigest() != fields[2]:
+        raise ValueError("repository project declaration differs from the source commit")
+    preparation._remaining(deadline)
+    from application_sources import declared_projects
+
+    declared_projects(source)
+
+
 def _selected_project_paths(
     repository: Path, commit: str, projects: tuple[str, ...] | None, deadline: float,
 ) -> tuple[str, ...] | None:
@@ -38,6 +67,7 @@ def _selected_project_paths(
         return None
     from promotion_python_artifacts import _PLUGIN
     from standalone_python_artifacts import COMPONENTS
+    from application_sources import project_locations, tomllib
 
     if (
         not isinstance(projects, tuple) or not projects
@@ -45,12 +75,22 @@ def _selected_project_paths(
         or len(set(projects)) != len(projects)
     ):
         raise ValueError("source selection requires unique declared Python project keys")
+    root_manifest = preparation._git(
+        repository, "ls-tree", commit, "--", "pyproject.toml", deadline=deadline,
+    )
+    locations = {}
+    if root_manifest:
+        if root_manifest.split()[0] not in {"100644", "100755"}:
+            raise ValueError("repository project declaration is not ordinary at the source commit")
+        locations = project_locations(tomllib.loads(preparation._git(
+            repository, "show", f"{commit}:pyproject.toml", deadline=deadline,
+        )))
     paths = []
     for key in projects:
         if key.startswith("standalone:") and key[11:] in COMPONENTS:
             relative = COMPONENTS[key[11:]]
         elif _PLUGIN.fullmatch(key):
-            relative = "plugins/" + key
+            relative = locations.get(key, "plugins/" + key)
         else:
             raise ValueError("unsupported selected source project")
         entry = preparation._git(
@@ -181,6 +221,7 @@ def compose(
             **({"include_paths": composition.export_paths}
                if composition is not None and composition.export_paths is not None else {}),
         )
+    _verify_project_declaration(repository, commit, source, deadline)
     archive.unlink()
     source_tree = preparation._git(repository, "rev-parse", f"{commit}^{{tree}}", deadline=deadline)
     if not finalized_main and composition is None:
@@ -230,6 +271,7 @@ def _build_input_roots(source: Path, selected: tuple[str, ...], builder) -> tupl
     if "composition:core" in selected:
         return (source,)
     from standalone_python_artifacts import source_closure
+    from application_sources import canonical_application
 
     roots = set()
     for key in selected:
@@ -237,7 +279,7 @@ def _build_input_roots(source: Path, selected: tuple[str, ...], builder) -> tupl
             project, dependencies, resources = source_closure(key.split(":", 1)[1], source, builder)
             roots.update((project, *resources, *(path for _name, path in dependencies)))
         else:
-            project = source / "plugins" / key
+            project = canonical_application(source, key)
             roots.add(project)
             roots.update(path for _name, path in builder.resolve_vendored_libs(project))
             if (project / "setup.py").is_file():
@@ -269,6 +311,7 @@ def _build_input_fingerprint(roots: tuple[Path, ...]) -> tuple:
 
 def _application_export_paths(source: Path, projects: tuple[str, ...]) -> tuple[str, ...]:
     import build_python_artifacts as builder
+    from application_sources import canonical_application, declared_projects
     from standalone_python_artifacts import COMPONENTS
 
     if not projects or len(set(projects)) != len(projects):
@@ -276,22 +319,20 @@ def _application_export_paths(source: Path, projects: tuple[str, ...]) -> tuple[
     for key in projects:
         if key == "composition:core":
             continue
-        if key.startswith("standalone:"):
-            relative = COMPONENTS.get(key.split(":", 1)[1])
-        else:
-            relative = "plugins/" + key if builder.uer.is_safe_lib_name(key) else None
-        if relative is None or not (source / relative / "pyproject.toml").is_file():
+        if not (canonical_application(source, key) / "pyproject.toml").is_file():
             raise ValueError("local source requires unique declared Python projects")
     builder = _load_module(Path(builder.__file__), "_local_install_export_builder")
     builder.REPO, builder.PLUGINS_DIR, builder.LIBS_DIR = source, source / "plugins", source / "libs"
     roots = set(_build_input_roots(source, projects, builder))
     roots.update((source / "plugins").glob("*/pyproject.toml"))
+    roots.update(directory / "pyproject.toml" for directory in declared_projects(source).values())
     roots.update(
         source / relative / "pyproject.toml"
         for relative in COMPONENTS.values() if (source / relative).exists()
     )
     roots.update(
-        source / relative for relative in ("bundle/core.json", ".github/plugin/marketplace.json")
+        source / relative
+        for relative in ("pyproject.toml", "bundle/core.json", ".github/plugin/marketplace.json")
         if (source / relative).exists() or (source / relative).is_symlink()
     )
     selected = []
@@ -309,8 +350,12 @@ def _build_workspace(
     retain_toolchain: bool = False,
 ):
     """Keep Windows backend and interpreter paths short while binding their inputs."""
+    declaration = source / "pyproject.toml"
+    original_declaration = declaration.read_bytes() if declaration.exists() else None
     if os.name != "nt":
         yield source, output / "build-tools", lambda: None
+        if (declaration.read_bytes() if declaration.exists() else None) != original_declaration:
+            raise ValueError("repository project declaration changed during artifact construction")
         return
 
     with tempfile.TemporaryDirectory(
@@ -324,6 +369,8 @@ def _build_workspace(
             destination = staged / root.relative_to(source)
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copytree(root, destination, symlinks=True)
+        if original_declaration is not None:
+            (staged / "pyproject.toml").write_bytes(original_declaration)
         staged_roots = tuple(staged / root.relative_to(source) for root in roots)
         if _build_input_fingerprint(staged_roots) != original_hash:
             raise ValueError("compact build source differs from the retained installation source")
@@ -332,6 +379,12 @@ def _build_workspace(
                 raise ValueError("compact build source changed during artifact construction")
             if _build_input_fingerprint(roots) != original_hash:
                 raise ValueError("retained installation source changed during artifact construction")
+            staged_declaration = staged / "pyproject.toml"
+            if (
+                (staged_declaration.read_bytes() if staged_declaration.exists() else None) != original_declaration
+                or (declaration.read_bytes() if declaration.exists() else None) != original_declaration
+            ):
+                raise ValueError("repository project declaration changed during artifact construction")
 
         yield staged, output / "build-tools" if retain_toolchain else workspace / "build-tools", verify
         verify()
@@ -440,7 +493,7 @@ def _reuse_projects(
 
 def _source_projects(source: Path, record: dict, projects: tuple[str, ...] | None):
     from promotion_python_artifacts import candidate_projects
-    from standalone_python_artifacts import COMPONENTS
+    from application_sources import canonical_application
     from versioned_runtime_source import (
         SOURCE_FILE, SourceIdentity, assembly_hash, payload_package_version, runtime_version,
     )
@@ -451,8 +504,7 @@ def _source_projects(source: Path, record: dict, projects: tuple[str, ...] | Non
         raise ValueError("local source requires unique declared Python projects")
     identities = {}
     payloads = {
-        key: source / (COMPONENTS[key.split(":", 1)[1]]
-                       if key.startswith("standalone:") else "plugins/" + key)
+        key: canonical_application(source, key)
         for key in selected if key != "composition:core"
     }
     for key in sorted(payloads, key=lambda key: len(payloads[key].parts), reverse=True):
@@ -485,7 +537,7 @@ def _built_projects(
     import build_python_artifacts as builder
     from build_toolchain_lock import resolve_toolchain_lock
     from promotion_python_artifacts import project_key
-    from standalone_python_artifacts import COMPONENTS, build_standalone_artifacts
+    from standalone_python_artifacts import build_standalone_artifacts
     from versioned_runtime_source import assembly_hash
 
     preparation._remaining(deadline)
@@ -544,7 +596,7 @@ def _built_projects(
             else:
                 standalone = key.startswith("standalone:")
                 component = key.split(":", 1)[1] if standalone else key
-                relative = COMPONENTS[component] if standalone else "plugins/" + component
+                relative = payloads[key].relative_to(source).as_posix()
                 identity = identities[key]
                 wheel_dir = output / "wheels" / component
                 manifest = reused[key] if reused is not None else (

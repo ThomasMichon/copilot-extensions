@@ -112,6 +112,51 @@ Neither mode is a new release-approval token or installation-completion claim.
 | Plugin connector | Loading a plugin may discover/report the installed backend and emit bounded guidance. It must not build, install, repair, stamp, register providers or start services merely on session start. Exact selected commands remain attributable. | Owning plugin hook and command declarations |
 | Timing and diagnostics | Measure the real cold, repeat and update front doors, including required preparation. Respect the actual caller deadline; the bounded core ordinary-install lane uses its existing 300-second budget. Report phase/child failure and elapsed time. Do not fix timeouts by lengthening waits or timing only an already-built inner step. | Existing installer and test runners |
 
+### Repository-declared project locations
+
+The existing producer also accepts explicit independent Python projects outside
+the built-in `plugins/` and standalone locations. Declare their locations in
+the selected repository's root `pyproject.toml`:
+
+```toml
+[tool.copilot-extensions.python-projects]
+example-worker = ".marketplace/example-worker"
+example-client = "applications/example-client"
+```
+
+Each key selects one project through the existing `--project` option. Its
+directory contains the normal authoritative `pyproject.toml`, source, resources
+and first-party dependency declarations. Merely sharing a marketplace directory
+does not group projects into one application or select undeclared neighbors.
+The existing builder, profile preparation, project emitter and installer retain
+their normal responsibilities and produce separate application outputs.
+
+Declarations are read from the selected Git commit, not dirty checkout edits,
+and must survive archive extraction unchanged. Both suite and explicit project
+selection materialize their declared dependencies and packaged assets.
+Locations must be contained ordinary directories outside `libs/` trees;
+applications cannot also be vendored libraries. Aliases, built-in identity
+collisions, traversal and linked paths refuse. Existing built-in selection and
+the governed feed, toolchain, seasoning and source/wheel association checks are
+unchanged. This declaration is source discovery, not installation authority or
+an app-specific setup/start callback.
+
+An application that supplies its own setup/start implementation declares literal
+argument lists in its project metadata instead of adding its name to the
+producer's built-in callback map:
+
+```toml
+[tool.copilot-extensions.application]
+setup = ["prepare"]
+start = ["serve"]
+```
+
+Both lists are required when the table is present; an empty list explicitly
+means no action. These arguments invoke the existing primary application entry
+point through the shared installer's normal setup/start boundaries. Stage still
+does not execute them. Missing declarations retain existing built-in behavior
+or an unsupported callback result for an unknown application.
+
 ### Common forward environment contract
 
 The [standard-environment intent](../../visions/plugin-services/runtime-assembly/README.md#standard-python-environments)

@@ -101,6 +101,24 @@ def test_core_closure_retains_foreign_target_edges_and_hashes_its_selection(
     assert core.payload_hash(builder, closure) != core.payload_hash(
         builder, closure, changed
     )
+    plugin = tmp_path / "plugins" / "sample" / "pyproject.toml"
+    plugin.write_text(plugin.read_text().replace(
+        'dependencies = [', 'dependencies = ["independent>=1", ',
+    ))
+    original = core.source_closure(tmp_path, builder)
+    application = tmp_path / "applications" / "independent"
+    application.mkdir(parents=True)
+    (application / "pyproject.toml").write_text(
+        '[build-system]\nrequires = ["setuptools>=68"]\nbuild-backend = "setuptools.build_meta"\n'
+        '[project]\nname = "independent"\nversion = "1.0"\n'
+        '[tool.setuptools.packages.find]\nwhere = ["src"]\n',
+    )
+    (application / "src" / "independent").mkdir(parents=True)
+    (application / "src" / "independent" / "__init__.py").write_text("VALUE = 1\n")
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.copilot-extensions.python-projects]\nindependent = "applications/independent"\n',
+    )
+    assert core.source_closure(tmp_path, builder) == original
 
 
 def test_core_parallel_hash_preserves_serial_identity_without_actors(tmp_path, monkeypatch):

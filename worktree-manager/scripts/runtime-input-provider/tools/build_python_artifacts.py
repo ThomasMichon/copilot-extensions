@@ -793,14 +793,13 @@ def build_plugin_artifacts(
     interpreter) -- still a real, pinned, ``--no-build-isolation`` build,
     just not shared with any other call."""
     if not uer.is_safe_lib_name(plugin):
-        # `plugin` becomes a path component twice over (`PLUGINS_DIR /
-        # plugin` and the manifest filename `{plugin}-{version}-manifest
-        # .json`) -- an absolute value or a `../` traversal must be
-        # rejected before either, the same way a vendored-lib name already
-        # is (`is_safe_lib_name` applies identically: a single path
-        # component, never empty, `.`/`..`, or containing a separator).
         raise ArtifactBuildError(f"{plugin!r} is not a safe plugin name")
-    plugin_dir = PLUGINS_DIR / plugin
+    from application_sources import artifact_project
+
+    try:
+        plugin_dir, identity = artifact_project(REPO, plugin)
+    except (OSError, ValueError) as exc:
+        raise ArtifactBuildError("invalid repository Python project declaration") from exc
     if not (plugin_dir / "pyproject.toml").is_file():
         raise ArtifactBuildError(f"{plugin_dir}: no pyproject.toml -- not a plugin")
     plugin_nested_symlink = uer._find_symlink(plugin_dir, skip_test_runs=False)
@@ -821,7 +820,7 @@ def build_plugin_artifacts(
             raise ArtifactBuildError(f"invalid Containers runtime build inputs: {exc}") from exc
 
     return build_source_artifacts(
-        identity={"plugin": plugin}, source_dir=plugin_dir, dependencies=vendored_libs,
+        identity=identity, source_dir=plugin_dir, dependencies=vendored_libs,
         out_dir=out_dir, python=python, toolchain=toolchain,
         **({"uv": uv, "deadline": deadline} if uv != "uv" or deadline is not None else {}),
     )

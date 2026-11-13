@@ -209,6 +209,9 @@ after observation and stores `acknowledgement` on the existing closeout row in
 that same terminal transaction. A hold, changed incarnation or failed task
 write cannot leave an acknowledgement committed separately. Worktrees
 observation IPC never runs under the SQLite write lock.
+Ordinary heartbeat, activity and progress updates may advance during that read;
+their liveness fields are excluded from snapshot equality. Ownership, task
+status and generation, holds, task content and resource bindings remain guarded.
 
 Exact retries after restart or a lost response return the committed terminal
 outcome without reobserving, repeating the transition audit or reemitting its

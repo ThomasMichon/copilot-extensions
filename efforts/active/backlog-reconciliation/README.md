@@ -3164,11 +3164,23 @@ sources, transferring owners or turning partial/planning gains into completion.
   receiving objective or a retained gap; investigate actual implementation
   evidence when claiming completion, rather than making that the prerequisite
   for discovering thematic alignment.
+  The [link-capability/portable-timeout intake](journal/2026/11.13-link-capability-and-portable-timeout-intake.md)
+  proposes twelve unchecked portfolio Phase 4 rows through the actual
+  Phase 7 domain-review route. Three canonical keepers remain; #6082's
+  five-row installer proposal is withheld at its copied-source boundary.
+  The earlier whole installer-ROOT qualification is explicitly withdrawn,
+  not made retroactively compliant. No new source disposition is claimed.
   The [onboarding/conclusion/key-consumer intake](journal/2026/11.13-onboarding-conclusion-and-key-intake.md)
   proposes eighteen unchecked rows in existing Fleet, Draft tidier and
   attribution plans, preserving strict annexes, pilot/credential/custody
   gates and two canonical keepers. No new operational action or source
   disposition follows from this five-source proposal.
+  Complete current receiving readback after #12503 now supports #6060/#6068's
+  separate redundant-tracking retirements, while #6030 retains its canonical
+  OPEN-parent role. All eighteen technical rows remain unchecked; the
+  [post-merge judgment](journal/2026/11.13-onboarding-conclusion-and-key-intake.md#separate-post-merge-receiving-and-tracking-judgments)
+  records 854 whole open, still 125 above target, without pilot or credential
+  authority, operational actions or resource release.
   The [distinct decision/consumer/transfer intake](journal/2026/11.13-distinct-decisions-and-transfer-intake.md)
   proposes #5956's separately owned architecture decision, #5960's complete
   Phase 2 consumer promises and #6028's inherited custom-force family in

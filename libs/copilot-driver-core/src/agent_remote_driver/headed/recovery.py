@@ -6,6 +6,8 @@ from dataclasses import asdict, dataclass
 from typing import Protocol
 
 _PHASES = ("retire_intent", "settled", "resume_intent", "observation_restored")
+PERMIT_INTENT_CONTRACT = "copilot-driver.headed-permit-recovery-intent"
+PERMIT_INTENT_VERSION = 1
 
 
 class RecoveryConflict(ValueError):
@@ -124,6 +126,64 @@ class RecoveryRecord:
             "legacy_holds": list(self.legacy_holds), "unknown_effects": list(self.unknown_effects),
             "reconciliation_required": True, "effects_wired": False,
             "native_recovery": "unqualified", "replay": "never",
+        }
+
+
+@dataclass(frozen=True)
+class PermitRecoveryIntent:
+    """Data for one original-owner intent, never an admission or a v1 upgrade.
+
+    The descriptor retains its v1 meaning. The three new revision/identity
+    domains are independent; only execution-permit revisions are compared.
+    Current decisions, source evidence and native scope still need their owners.
+    """
+
+    descriptor: RecoveryDescriptor
+    operation_id: str
+    phase: str
+    record_revision: int
+    source_lease_ref: str
+    receiver_ref: str
+    receiver_revision: int
+    permit_id: str
+    original_permit_revision: int
+    permit_revision: int
+    decision_ref: str
+
+    def __post_init__(self) -> None:
+        if type(self.descriptor) is not RecoveryDescriptor:
+            raise ValueError("An exact original recovery descriptor is required")
+        for value in (
+            self.operation_id, self.source_lease_ref, self.receiver_ref,
+            self.permit_id, self.decision_ref,
+        ):
+            _reference(value)
+        if (
+            type(self.phase) is not str
+            or self.phase not in {"retire_intent", "resume_intent"}
+            or type(self.record_revision) is not int
+            or self.record_revision != (1 if self.phase == "retire_intent" else 3)
+        ):
+            raise ValueError("An exact original recovery intent phase and revision are required")
+        if any(
+            type(value) is not int or value < 1 for value in (
+                self.receiver_revision, self.original_permit_revision, self.permit_revision,
+            )
+        ):
+            raise ValueError("Exact positive receiver and execution-permit revisions are required")
+        if self.permit_revision <= self.original_permit_revision:
+            raise ValueError("Recovery requires a later action-specific execution decision")
+
+    @property
+    def action(self) -> str:
+        return "retire" if self.phase == "retire_intent" else "restore"
+
+    def status(self) -> dict:
+        return {
+            "contract": PERMIT_INTENT_CONTRACT, "version": PERMIT_INTENT_VERSION,
+            "intent": asdict(self), "action": self.action,
+            "effects_wired": False, "native_recovery": "unqualified",
+            "owner_store": "unqualified", "reconciliation_required": True, "replay": "never",
         }
 
 
