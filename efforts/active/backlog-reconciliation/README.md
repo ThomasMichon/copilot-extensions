@@ -342,12 +342,25 @@ the non-public approval conversation.
 
 ## Plan
 
-The [real stamp-consumer receiving proposal](stamp-consumer-receiving.md)
-selects existing #7433 for #7247's two real Windows stamp cases, with distinct
-diagnostic lanes, original bounds and retained claim/source-hunk ownership.
-#7256's recording fixture and #7251's resolver remain independent. Review and
-whole direct receiving readback precede any separate tracking retirement;
-no cause, native pass, new writer or resource release is inferred.
+The [protected launch/content receiver proposal](launch-content-runtime-receiving.md)
+keeps #7943's explicit Windows/token condition and proposes retaining whole
+#7694 there, without moving runtime or guidance ownership. The
+[terminal-reservation sublane](terminal-reservation-receiving.md) proposes
+complete #7805 receiving under #7116's actual AS-A9 authority, preserving
+unverified source acceptance and all resource protections. Review and whole
+direct issue readback precede separate source adjudication. The
+[stamp-acceptance checkpoint](journal/2026/11.12-stamp-acceptance-and-protected-receiving-direction.md)
+records verified #7247 tracking retirement, fourteen qualified source unions
+and a current Git-object discriminator retaining #7606; no native result,
+claim release or source/resource transfer is inferred.
+
+The [real stamp-consumer receiving contract](stamp-consumer-receiving.md)
+retains #7247's two real Windows stamp cases directly in existing #7433, with
+distinct diagnostic lanes, original bounds and retained claim/source-hunk ownership.
+#7256's recording fixture and #7251's resolver remain independent. Reviewed
+plan #12366, whole direct receiving readback and separate source adjudication
+verify #7247's `NOT_PLANNED` tracking retirement; no cause, native pass,
+new writer or resource release is inferred.
 
 The [faithful-fixture receiving contract](fixture-isolation-receiving.md)
 retains the complete #7076 fixture-validity lane directly in existing #7075,
