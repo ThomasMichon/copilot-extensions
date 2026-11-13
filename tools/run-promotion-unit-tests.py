@@ -203,7 +203,11 @@ def main() -> int:
             == set(manifest["composition"]["required_coverage_origins"])
         )
     if not complete:
-        raise UnitEvidenceError("coverage did not observe every admitted production target")
+        raise UnitEvidenceError(
+            "coverage did not observe every admitted production target; missing: "
+            + ", ".join(sorted(set(manifest["coverage_targets"]) - measured))
+            + "; unexpected: " + ", ".join(sorted(measured - set(manifest["coverage_targets"])))
+        )
     elapsed = time.monotonic() - started
     verify_observations(
         manifest["nodes"], run.collected, run.reports, run.effects,
