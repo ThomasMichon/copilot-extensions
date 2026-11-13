@@ -258,7 +258,8 @@ In repair mode, the intervention is an owner-mediated repair on the lowest
 sufficient rung, with evidence captured first and a readback after. Diagnose
 independent blocked targets in parallel through bounded sub-agent delegates,
 one per target or shared service. The monitor keeps the escalation record and
-the only steering voice.
+is the only voice toward the target. A steer that follows a repair still
+needs a steering scope; without one, report the recommended steer.
 For each proposed steer give the evidence, root criterion, changed strategy,
 expected result and preserved constraints. A useful steer asks for the next
 discriminating experiment or return to the parent, not "try harder" or

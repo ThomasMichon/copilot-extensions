@@ -89,7 +89,9 @@ under a single delegate, so that two delegates never repair the same shared
 service. Keep at most one repair delegate per target or shared service.
 Bound concurrency to what the hosts can absorb. A delegate inherits no more
 authority than the current rung. The monitor keeps the escalation record,
-decides whether to climb, and owns every resulting steer.
+decides whether to climb, and is the only voice toward the target. A steer
+that follows a repair still needs its own steering scope; without one, the
+monitor reports the recommended steer instead of sending it.
 
 ## After a repair
 
