@@ -28,7 +28,7 @@ import shlex
 import shutil
 import subprocess
 
-from . import bridge_remote, worktree_attribution, worktree_record
+from . import bridge_remote, worktree_attribution, worktree_cohort, worktree_record
 from .embody_prompts import autopilot_worker_prompt, fleet_autopilot_worker_prompt
 from .procutil import (
     agent_worktrees_environment,
@@ -109,12 +109,12 @@ def create_worktree(
     agent: str | None = None,
     no_pair: bool = False,
     creation_key: str | None = None,
+    allocation_cohort: dict | None = None,
 ) -> dict[str, str | None]:
     """Create a worktree without launching Copilot and return its id/path.
 
-    This is the first half of create -> record -> spawn -> bind. Capturing the
-    worktree id before any Copilot/ACP setup means a failed or hung launch still
-    leaves the host with a durable worktree binding to retry or inspect.
+    Create -> record -> spawn -> bind retains workspace identity before launch,
+    including optional original cohort evidence for a capable selected runtime.
 
     ``no_pair`` opts THIS worker out of the paired-knowledge carve regardless
     of origin -- for a registrar/pool declaration (``body.no_pair``) whose
@@ -154,6 +154,7 @@ def create_worktree(
         cmd.append("--no-pair")
     if creation_key is not None:
         cmd += ["--creation-key", creation_key]
+    cmd += worktree_cohort.creation_arguments(exe_prefix, allocation_cohort)
     result = subprocess.run(  # noqa: S603 -- fixed argv, launcher resolved locally
         cmd,
         check=False,
@@ -269,6 +270,7 @@ def prepare_reusable_worktree(
         agent=agent,
         no_pair=no_pair,
         creation_key=reservation.get("creation_key"),
+        allocation_cohort=reservation.get("allocation_cohort"),
     )
     return prepared_result(created, project=project, ownership="created", created=True)
 

@@ -118,8 +118,29 @@ a rolled-back provider remain null; migration and later retries do not backfill
 them from current state. Null is unknown, not an empty or disposable cohort.
 Older readers may ignore the additive field. No request syntax changes, and
 the field's schema/version describes support independently of package versions.
-Automatic Worktrees or Bridge callers are not enabled by this source change;
-they must select capable receivers before propagating the original snapshot.
+New Worktrees creation conditionally forwards this retained snapshot as
+`--dispatch-cohort`. Dispatch observes `dispatch_cohort` schema
+`dispatch-assignment-cohort`, version `1`, through the selected direct
+Worktrees runtime's existing `worktree-allocation capabilities --json` response
+(allocation schema/version `1`, origin role). It uses the same resolved
+interpreter for creation, not the marketplace payload or package version.
+The read is bounded to five seconds and cached for up to 32 selected runtime
+prefixes per process; changing the selected runtime triggers fresh discovery.
+An unavailable observation remains unknown for that process/runtime selection.
+
+Prior providers without the declaration, invalid/unsupported declarations,
+mutable-shim launchers and provider rollback use the existing five-field
+Dispatch attempt without a cohort flag, with an explicit unattributed warning.
+Legacy reservations without a snapshot need no discovery. This optional audit
+carrier grants no new lifecycle authority and does not gate baseline creation.
+An effectful creation failure is never replayed using a second syntax; ordinary
+creation-key recovery remains with the original owner. Prior callers still work
+with upgraded receivers. The old form has no scheduled retirement.
+
+Only the new-allocation path sends the snapshot, using its original
+`allocation_reservation_key` task/attempt, never the current task's labels or
+assignment audit. Carried/targeted worktrees are resolved without discovery or
+restamping. Bridge session-state propagation remains separate and open.
 
 ## Original assignment cohort
 
@@ -155,10 +176,11 @@ readers may ignore the addition. A provider rollback still reads previously
 retained cohort facts without creating them for new assignments. Consumers
 requiring this evidence must retain an explicit unattributed state when it is
 absent; they must not infer support from package versions.
-Worktrees' original `dispatch_attempt` creation stamp and Bridge session-state
-propagation are not supplied by this slice. The selected in-process
-request-admission callback receives the cohort with the rest of the original
-request; the existing Worktrees reserve/bind wire payload remains unchanged.
+Worktrees' original `dispatch_attempt` creation stamp uses the earlier
+[allocation snapshot](#original-allocation-cohort), not this later audit.
+Bridge session-state propagation remains separate. The selected in-process
+request-admission callback receives the assignment cohort with the rest of the
+original request; the existing Worktrees reserve/bind wire payload remains unchanged.
 
 Each new protected assignment adds two indexed point reads at most: its task
 pool assignment and its managed producer creation receipt. No new process,
