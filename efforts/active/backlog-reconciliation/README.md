@@ -342,6 +342,13 @@ the non-public approval conversation.
 
 ## Plan
 
+The [faithful-fixture receiving proposal](fixture-isolation-receiving.md)
+selects existing #7075 for the complete #7076 fixture-validity lane, preserving
+separate inventories, actual owners and comparable hosted acceptance. The
+fifteen-source study also rejects forced managed-runner, runtime and protocol
+folds. Review and complete direct issue readback precede any separate tracking
+retirement; no technical completion, new executor or resource release follows.
+
 The [admission-boundary correction](journal/2026/11.12-admission-failure-and-citation-boundary.md)
 records a failed eighteen-primary delegation without contract or closure
 credit, then four separate prospectively qualified parent reads under the

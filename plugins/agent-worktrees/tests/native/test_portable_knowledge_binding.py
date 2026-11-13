@@ -68,8 +68,8 @@ if change == 'changed':
     repos_knowledge_default.revalidate = revalidate
 elif change == 'config-changed':
     original = repos_knowledge_default._read
-    def read(*args):
-        result = original(*args)
+    def read(*args, **kwargs):
+        result = original(*args, **kwargs)
         path = Path(state).parent / ('.' + arguments[0]) / 'config.yaml'
         path.write_bytes(path.read_bytes() + b'headless: true\\n')
         return result
@@ -169,7 +169,7 @@ runpy.run_module('agent_worktrees.repos_knowledge_configuration', run_name='__ma
             from agent_worktrees.repos_configuration_catalog import catalog
 
             listing = catalog(project)
-            row = next(row for row in listing["entries"] if row["repository"] == "example-knowledge")
+            row = next(row for row in listing["entries"] if row.get("repository") == "example-knowledge")
             assert row["preferred_knowledge_bindable"] == "true", listing["summary"]
             assert row["harness_repository_id"] == args[3] and row["knowledge_repository_id"] == args[5]
             decoder_source = (
