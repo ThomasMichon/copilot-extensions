@@ -1,0 +1,9 @@
+{
+  "comment": "Prestage source-loss renewal controls and the disabled native recovery acceptance boundary",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}
