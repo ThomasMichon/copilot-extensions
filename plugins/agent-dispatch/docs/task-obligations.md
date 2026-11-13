@@ -214,16 +214,53 @@ selection before permitting startup. Older callers retain unchanged request
 bodies; an older, invalid or rolled-back provider receives no new syntax.
 Historical rows migrate to baseline with null evidence and remain unattributed.
 The old form has no scheduled retirement. No separate selection endpoint or
-preparation marker is introduced. This expansion does not yet migrate automatic
-session callers, qualify Bridge adoption or confer cleanup authority.
+preparation marker is introduced. The CLI acquisition caller below migrates
+conditionally; ordinary keyed creation, running qualification and cleanup
+authority remain separate.
 
-Capture adds indexed reservation/creation-key reads plus the existing
+Receiver capture adds indexed reservation/creation-key reads plus the existing
 producer and exact-assignment point reads, once per newly committed reservation.
 Ordinary transport reconciliation examines that creation key's indexed attempt
 lineage and returns grouped choices; it does not scan unrelated reservations.
 Reads do not enrich or recapture it. No process, network request, registrar scan,
 background flow or additional ownership registry is introduced. Selection stays
 inside the existing reservation transaction.
+
+### Conditional CLI-native acquisition caller
+
+The CLI-native supervisor, `create --spawn --spawn-backend embody` and interactive
+embodiment observe coordinator support before reserving. They select origin-v1
+only when the selected executing Bridge CLI declares
+`agent-bridge.acquire` version `1` capability `dispatch-cli-session-origin` and
+the running daemon advertises integer `dispatch_cli_session_origin: 1`.
+Missing/unsupported declarations keep a new request on the unchanged, unattributed
+baseline. Restricted, CI-repair and ordinary keyed-create paths are not enrolled.
+
+Preparation copies the sealed reservation's three session-origin fields into
+the acquisition snapshot independently of mutable task and allocation metadata.
+Origin-v1 acquisition validates that snapshot, requalifies its executing peer and
+sends it as `dispatch_origin`. A capable CLI also checks the selected daemon at
+its existing effect boundary. Rollback or unknown transport outcomes never cause
+replay of that reservation in baseline form. A resumed conversation retains its
+original stamp or legacy absence; only a newly registered session gets the
+candidate origin.
+
+Negotiation and metadata-bearing sends use the existing pinned peer launcher:
+installation cells retain their selected Bridge runtime, while legacy selection
+retains its immutable build and rechecks the owning installation before launch.
+Neither path discovers an alternative on ambient PATH. Baseline calls retain
+their prior launch resolver. Read-only probes disable Bridge auto-ensure, bound
+each command to five seconds and 64 KiB, and create no launch-debug record.
+There are at most two probe commands before reservation and two before an
+origin-bearing send, without polling, per-task history scans or a new resident.
+These declarations are not cached across daemon cutovers.
+
+`tests/test_session_origin_caller.py`, selected with the existing contained runner,
+checks real coordinator transport, original pool-claim capture, direct caller
+ordering, reused workspaces, snapshot detachment, baseline peers and rollback
+refusal. It also executes disposable cell/legacy Bridge processes across runtime
+selection changes and ownership revocation. These synthetic source controls do
+not qualify installed Bridge, actual native birth/closeout or production adoption.
 
 ## Original assignment cohort
 
