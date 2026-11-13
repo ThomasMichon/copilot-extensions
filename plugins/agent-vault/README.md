@@ -671,8 +671,12 @@ and do not maintain its invalidation protocol. Resuming this feature after older
 providers mutate the backend requires explicit cache invalidation/repopulation;
 retained service-cache state across that downgrade is not supported.
 A live read whose service-cache write fails reports additive
-`cache_warning: "service_cache_write_failed"`. Unlock-triggered warming remains
-separate work.
+`cache_warning: "service_cache_write_failed"`.
+
+Successful unlocks also enqueue bounded service-owned warming of configured
+cache-source targets, without another unlock or a database scan. Existing `ping`
+status reports credential-free outcomes. See [unlock-triggered cache warming](docs/cache-warming.md)
+for opt-in prerequisites, coalescing, limits and shutdown/cutover custody.
 
 Fernet caches and `seal`/`unseal` use the optional `pycryptodomex` dependency
 (`cache` / `kek` extras), also supplied by the native `ssh` profile above.

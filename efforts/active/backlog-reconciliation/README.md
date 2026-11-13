@@ -3206,6 +3206,12 @@ sources, transferring owners or turning partial/planning gains into completion.
   #5665 handoff remains separate from documentary publication.
 - [ ] Verify and publish supported dispositions, preserving source versus
   release versus rollout distinctions and all active ownership.
+  The [canonical-keeper and finite-intake checkpoint](journal/2026/11.13-canonical-keepers-and-finite-intake.md)
+  records twelve current receiving judgments: three proposed direct finite
+  families, seven retained canonical/whole-transfer conditions and two
+  whole-source provenance holds. All 25 new direct Plan/local/global rows
+  remain unchecked. Reviewed receiving/readback and separate source judgments
+  still precede retirement; the 863-open census remains 134 above fixed 729.
   The [ordered reliability map](reliability-ordered-tracking.md) preserves
   #4231's accepted five-area TRACK map and actual named diagnostic receiving
   under unchanged custodians. The [complete-ROOT checkpoint](journal/2026/11.12-complete-root-receiving-and-required-source-scope.md)
