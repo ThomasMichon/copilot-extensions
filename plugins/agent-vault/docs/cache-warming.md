@@ -83,7 +83,8 @@ independent of credential work. Ordinary client `--cache-only` still never uses
 IPC or an unlock.
 
 Focused source coverage lives in `tests/test_cache_sources.py`,
-`tests/test_cache_warm.py` and `tests/test_cache_warm_status.py`.
+`tests/test_cache_warm.py`, `tests/test_cache_warm_contention.py` and
+`tests/test_cache_warm_status.py`.
 The fresh-process native-protection fixture also
 covers unlock-triggered warming before expiry and a synthetic unreadable
 caller. See the repository [testing guide](../../../TESTING.md) for execution
