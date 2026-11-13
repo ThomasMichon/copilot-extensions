@@ -95,6 +95,107 @@ def test_legacy_explicit_owner_label_repair_still_uses_loaded_fence(tmp_path: Pa
     assert tracking.load_record(path).machine_identity is None
 
 
+@pytest.mark.parametrize("field,value", [
+    ("repo", "other-project"),
+    ("worktree_id", "other-worktree"),
+    ("worktree_path", "other-checkout"),
+    ("branch", "worktree/replacement"),
+    ("started_at", "2026-02-01T00:00:00"),
+])
+def test_same_machine_cannot_hide_replaced_record_subject(
+    tmp_path: Path, field: str, value: str,
+) -> None:
+    path = tmp_path / "owned.yaml"
+    tracking.save_record(_record(path), path)
+    stale = tracking.load_record(path)
+    data = yaml.safe_load(path.read_text())
+    data[field] = value
+    path.write_text(yaml.safe_dump(data))
+    before = path.read_bytes()
+    stale.title = "stale writer"
+    with pytest.raises(ValueError, match="record subject changed"):
+        tracking.save_record(stale, path)
+    assert path.read_bytes() == before
+
+
+def test_loaded_subject_cannot_overwrite_another_receiving_ledger(tmp_path: Path) -> None:
+    path = tmp_path / "owned.yaml"
+    tracking.save_record(_record(path), path)
+    loaded = tracking.load_record(path)
+    destination = tmp_path / "other-project" / path.name
+    destination.parent.mkdir()
+    destination.write_bytes(path.read_bytes())
+    before = destination.read_bytes()
+    with pytest.raises(ValueError, match="record subject changed"):
+        tracking.save_record(loaded, destination)
+    assert destination.read_bytes() == before
+
+
+def test_subject_fence_allows_deliberate_updates_and_refreshes_after_save(tmp_path: Path) -> None:
+    path = tmp_path / "owned.yaml"
+    tracking.save_record(_record(path), path)
+    loaded = tracking.load_record(path)
+    loaded.branch = "pr/updated"
+    loaded.worktree_path = str(tmp_path / "updated-checkout")
+    tracking.save_record(loaded, path)
+    loaded.title = "same writer after commit"
+    tracking.save_record(loaded, path)
+    persisted = tracking.load_record(path)
+    assert (persisted.branch, persisted.worktree_path, persisted.title) == (
+        loaded.branch, loaded.worktree_path, loaded.title,
+    )
+    assert "_loaded_record_subject" not in path.read_text()
+
+
+def test_subject_fence_preserves_empty_legacy_start_across_cold_reads(tmp_path: Path) -> None:
+    from agent_worktrees import record_cache
+
+    path = tmp_path / "owned.yaml"
+    tracking.save_record(_record(path), path)
+    loaded = tracking.load_record(path)
+    assert loaded.started_at == ""
+    record_cache.clear()
+    assert tracking.load_record(path).started_at == ""
+    loaded.title = "ordinary update"
+    tracking.save_record(loaded, path)
+    assert tracking.load_record(path).title == loaded.title
+
+
+@pytest.mark.parametrize("relative_load", [False, True])
+def test_subject_fence_accepts_equivalent_ledger_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, relative_load: bool,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    absolute = tmp_path / "owned.yaml"
+    relative = Path("owned.yaml")
+    tracking.save_record(_record(absolute), absolute)
+    loaded = tracking.load_record(relative if relative_load else absolute)
+    loaded.title = "same receiving ledger"
+    tracking.save_record(loaded, absolute if relative_load else relative)
+    assert tracking.load_record(absolute).title == loaded.title
+
+
+@pytest.mark.parametrize("timestamp", [
+    "2026-11-02T00:00:00Z",
+    "2026-11-02T00:00:00+00:00",
+    "2026-11-02T00:00:00.123456789Z",
+])
+def test_subject_fence_preserves_timestamp_spelling_after_cache_eviction(
+    tmp_path: Path, timestamp: str,
+) -> None:
+    from agent_worktrees import record_cache
+
+    path = tmp_path / "owned.yaml"
+    record = _record(path)
+    record.started_at = timestamp
+    tracking.save_record(record, path)
+    record_cache.clear()
+    assert tracking.load_record(path).started_at == timestamp
+    record.title = "same writer after cache eviction"
+    tracking.save_record(record, path)
+    assert tracking.load_record(path).title == record.title
+
+
 @pytest.mark.parametrize("defect", [
     "physical", "environment", "execution", "config-platform", "native", "snapshot",
 ])

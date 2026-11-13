@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from agent_worktrees import record_cache, tracking
+from agent_worktrees import config as cfg, record_cache, tracking
 from agent_worktrees.effort_focus import ActiveEffort
 from agent_worktrees.tracking import (
     ClaimRef,
@@ -1607,7 +1607,7 @@ class TestSessionRegistration:
             worktree_path=f"/tmp/{wt_id}",
             repo="test-repo",
             machine="test",
-            platform="wsl",
+            platform=cfg.detect_platform(),
             started_at="2026-06-01T10:00:00",
             last_resumed_at="2026-06-01T10:00:00",
             resume_count=0,
@@ -1625,7 +1625,7 @@ class TestSessionRegistration:
             worktree_path="/tmp/reg",
             repo="test-repo",
             machine="test",
-            platform="wsl",
+            platform=cfg.detect_platform(),
             started_at="2026-06-01T10:00:00",
             last_resumed_at="2026-06-01T10:00:00",
             resume_count=0,
@@ -1650,7 +1650,7 @@ class TestSessionRegistration:
             worktree_path="/tmp/dup",
             repo="test-repo",
             machine="test",
-            platform="wsl",
+            platform=cfg.detect_platform(),
             started_at="2026-06-01T10:00:00",
             last_resumed_at="2026-06-01T10:00:00",
             resume_count=0,
@@ -1675,7 +1675,7 @@ class TestSessionRegistration:
             worktree_path="/tmp/pre",
             repo="test-repo",
             machine="test",
-            platform="wsl",
+            platform=cfg.detect_platform(),
             started_at="2026-06-01T10:00:00",
             last_resumed_at="2026-06-01T10:00:00",
             resume_count=0,
@@ -1699,7 +1699,7 @@ class TestSessionRegistration:
             worktree_path="/tmp/end",
             repo="test-repo",
             machine="test",
-            platform="wsl",
+            platform=cfg.detect_platform(),
             started_at="2026-06-01T10:00:00",
             last_resumed_at="2026-06-01T10:00:00",
             resume_count=0,
@@ -1784,7 +1784,7 @@ class TestSessionRegistration:
             worktree_path=str(worktree_dir),
             repo="test-repo",
             machine="test",
-            platform="wsl",
+            platform=cfg.detect_platform(),
             started_at="2026-06-01T10:00:00",
             last_resumed_at="2026-06-01T10:00:00",
             resume_count=0,
@@ -1826,7 +1826,7 @@ class TestSessionRegistration:
             worktree_path=str(worktree_dir),
             repo="test-repo",
             machine="test",
-            platform="wsl",
+            platform=cfg.detect_platform(),
             started_at="2026-06-01T10:00:00",
             last_resumed_at="2026-06-01T10:00:00",
             resume_count=0,
@@ -1857,7 +1857,7 @@ class TestSessionRegistration:
             worktree_path="/tmp/noop",
             repo="test-repo",
             machine="test",
-            platform="wsl",
+            platform=cfg.detect_platform(),
             started_at="2026-06-01T10:00:00",
             last_resumed_at="2026-06-01T10:00:00",
             resume_count=0,
@@ -2585,7 +2585,7 @@ class TestOwningTrackingDirResolution:
             worktree_path=f"/tmp/src/{wt_id}",
             repo=repo,
             machine="test",
-            platform="wsl",
+            platform=cfg.detect_platform(),
             started_at="2026-06-01T10:00:00",
             last_resumed_at="2026-06-01T10:00:00",
             resume_count=0,
@@ -2644,7 +2644,7 @@ class TestOwningTrackingDirResolution:
                 requested_name, anchors["harness-proj"],
             )
             return _cfg.Config(
-                srcroot=str(tmp_path), machine="test", platform="wsl",
+                srcroot=str(tmp_path), machine="test", platform=_cfg.detect_platform(),
                 repo_name=requested_name,
                 repos={requested_name: _cfg.RepoConfig(
                     anchor=str(anchor), worktree_root=str(tracking_dir),

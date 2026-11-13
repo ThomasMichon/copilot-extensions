@@ -379,6 +379,19 @@ verb), so the round-trip preserves every overlay. A forward-compat guard test
 by a writer that touches only one field leaves all other overlays intact; if you
 add a field, extend that test.
 
+Full-record saves also compare the loaded receiving ledger, repository,
+worktree ID, checkout path, branch and start time with the current record before
+replacement. A stale snapshot cannot overwrite a different subject merely
+because its machine labels still match. This evidence is transient, refreshes
+after a successful save, and permits deliberate edits to a freshly loaded
+subject. The existing creation-nonce, receiving-allocation, relocation and
+machine-identity fences remain independent; this check does not authorize an
+allocation transfer or change the persisted identity format.
+Ledger spellings use the same lexical absolute-path key as the write lock;
+the original loaded path remains available for lookup. Start timestamps are
+quoted on write so YAML inference cannot change UTC spelling or precision
+between a cached snapshot and an uncached read.
+
 [Committed-save notifications](committed-save-notifications.md) describes the
 bounded optional capture and after-all-record/pair-holds delivery boundary.
 It does not make canonical persistence and observation history atomic.
