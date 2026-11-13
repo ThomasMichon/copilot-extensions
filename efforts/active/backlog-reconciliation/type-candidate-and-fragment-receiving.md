@@ -4,6 +4,28 @@
 
 Parent: [Backlog Reconciliation](README.md), continuing Phase 2.
 
+## Selected outcome: finite source completion, not receiving retirement
+
+The corrected plan merged in [#12392](https://github.com/ThomasMichon/copilot-extensions/pull/12392).
+The subsequent finite delivery assessment corroborated the existing owner's
+P3 and bounded P4a completion against actual reviewed delivery, source/control
+semantics, provider execution metadata and current source correspondence.
+Whole original qualification and separate public acknowledgments precede
+verified CLOSED/COMPLETED outcomes:
+[#9862](https://github.com/ThomasMichon/copilot-extensions/issues/9862#issuecomment-6847061985)
+and [#9916](https://github.com/ThomasMichon/copilot-extensions/issues/9916#issuecomment-6847064692).
+
+- [x] Independently assess both whole finite source requests, preserve
+  historical execution evidence grades, acknowledge actual fulfillment and
+  verify the completed provider states without changing originals or custody.
+
+The receiving-only proposal/checklists below are retained reviewed history,
+superseded for these fulfilled children by the selected completion route;
+they are not an outstanding instruction to redo implementation or append
+unfinished work. No direct #9807 receiving amendment was performed or claimed.
+#9807 remains OPEN for its strict-all/copy/other-family scope. No source or
+resource claim is released and no installed activation follows.
+
 ## Existing receiver and complete scope
 
 Propose existing OPEN [#9807](https://github.com/ThomasMichon/copilot-extensions/issues/9807)
@@ -43,7 +65,7 @@ disposition, assess this newly identified delivery evidence under the child's
 finite source-only bar; demonstrated fulfillment takes the completed route
 rather than describing delivered work as newly planned.
 
-## Direct receiving crosswalk and campaign verification
+## Reviewed receiving alternative (not selected after fulfillment)
 
 - [ ] T1 (#9862) - Require the SAME admitted MyPy contracts on the exact frozen
   immutable release candidate, not merely Dev. Preserve candidate identity,
