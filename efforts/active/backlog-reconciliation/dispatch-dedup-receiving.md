@@ -2,6 +2,27 @@
 
 Back to [Backlog Reconciliation](README.md).
 
+## Accepted tracking effect
+
+The proposal below cleared review and merged in #12451 as `efb86ab9af`.
+Fresh complete source/receiver metadata, originals/discussions, collaborator
+qualification and the retained renamed-title history preceded publication.
+The complete actual #11674 body was read back and matched the reviewed
+section and four numeric updates. All eight incumbent sections, 31 original
+checkbox rows/states, old edit versions and the complete discussion remain.
+The receiver stays OPEN with **nine lanes, 32 unchecked rows and 36 cases**.
+
+Only after direct receiving acceptance, the
+[source-specific explanation](https://github.com/ThomasMichon/copilot-extensions/issues/11912#issuecomment-6857163996)
+was published and #11912 separately verified `CLOSED` / `NOT_PLANNED`,
+with its original unchanged. Its technical work remains planned in the
+unchecked receiving row. #11995 stays on its original token; no passing
+result, new implementer, claim/resource release or installed acceptance follows.
+
+The proposal and sequence below remain the reviewed historical contract,
+not pending issue effects. See the
+[actual-effect journal](journal/2026/11.13-current-contracts-and-dedup-proposal.md#actual-receiving-and-separate-tracking-retirement).
+
 ## Proposed route and effect boundary
 
 Add #11912's complete exact-dedup/detail regression contract as independent
