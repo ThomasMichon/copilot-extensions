@@ -344,11 +344,13 @@ the non-public approval conversation.
 
 The [current-contract study](journal/2026/11.13-current-contracts-and-dedup-proposal.md)
 retains sixteen whole unions and two positive whole-source qualification
-gaps. Its [exact-dedup receiving proposal](dispatch-dedup-receiving.md)
-preserves #11912's complete alternatives in one direct Dispatch lane, leaving
-the distinct #11995 Worktrees budget question on its original token.
-Review, actual receiving/readback and separate source retirement remain
-pending; 869 whole open is 140 above the fixed target.
+gaps. Its [exact-dedup receiving](dispatch-dedup-receiving.md) cleared reviewed
+proposal #12451 and actual whole-body acceptance, preserving #11912's
+complete alternatives in one direct Dispatch lane. The separate source
+retirement is verified `NOT_PLANNED`; the receiver remains OPEN with
+32 unchecked rows and 36 cases. The distinct #11995 Worktrees budget question
+stays on its original token. The subsequent complete census is 868 whole
+open, 139 above the fixed target.
 
 The [loader/report study](journal/2026/11.13-loader-report-source-and-accountability-proposal.md)
 retains eighteen whole unions and verifies two finite source completions,
@@ -3435,10 +3437,11 @@ sources, transferring owners or turning partial/planning gains into completion.
 The [current-contract audit](journal/2026/11.13-current-contracts-and-dedup-proposal.md)
 verifies all 22 materialized source blobs, distinguishes 21 actual model reads
 from one acquired-but-unread file, and retains eleven stable PR records.
-The direct receiving proposal preserves all eight incumbent sections and
-31 check states, adding one unchecked row with only eight numeric bytes
-otherwise changed. It is not actual receiving, technical acceptance or
-resource release; all 143 migration inventory obligations remain separate.
+Actual receiving readback after #12451 preserves all eight incumbent sections
+and 31 check states, adding one unchecked row with only eight numeric bytes
+otherwise changed. The source explanation and `CLOSED` / `NOT_PLANNED`
+readback establish tracking retirement, not technical acceptance or resource
+release; all 143 migration inventory obligations remain separate.
 
 The [loader/report and receiving audit](journal/2026/11.13-loader-report-source-and-accountability-proposal.md)
 verifies 25 actual source blobs among 29 qualified files, source-owner
