@@ -24,14 +24,17 @@ from promotion_unit_contract import (
 from promotion_unit_effects import UnitRun
 from promotion_unit_packet import verify_packet
 from promotion_release_helpers import verify_helper_contract
-from pytest_portfolio_guard import configure_temp_links
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKET = ROOT / "tools/promotion_unit_tests"
 
 
 class FrameworkTemporaryPaths:
-    pytest_configure = staticmethod(configure_temp_links)
+    @staticmethod
+    def pytest_configure(config) -> None:
+        from pytest_portfolio_guard import configure_temp_links
+
+        configure_temp_links(config)
 
 
 def prepare_framework_io() -> None:

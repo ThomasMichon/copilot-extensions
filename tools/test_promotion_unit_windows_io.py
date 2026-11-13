@@ -55,18 +55,26 @@ def test_native_unit_runner_suppresses_only_pytest_convenience_links(tmp_path):
     code = """
 import os, runpy, sys
 from pathlib import Path
-import _pytest.pathlib, _pytest.tmpdir, pytest
+import _pytest.pathlib, _pytest.tmpdir, coverage, pytest
 root, temporary = map(Path, sys.argv[1:])
 sys.path.insert(0, str(root / "tools"))
 runner = runpy.run_path(str(root / "tools/run-promotion-unit-tests.py"))
+assert "coverage_guided_selection" not in sys.modules
 test = temporary / "test_temporary.py"
 test.write_text("def test_temporary(tmp_path):\\n    assert tmp_path.is_dir()\\n")
+config = temporary / "pytest.ini"
+config.write_text("[pytest]\\n")
 original = _pytest.pathlib._force_symlink, getattr(_pytest.tmpdir, "_force_symlink", None), os.symlink
 base = temporary / "pytest"
-assert pytest.main([
-    "-q", "-c", os.devnull, "--noconftest", "-p", "no:cacheprovider",
-    "--basetemp", str(base), str(test),
-], plugins=[runner["FrameworkTemporaryPaths"]()]) == 0
+target = root / "tools/coverage_guided_selection/__init__.py"
+cov = coverage.Coverage(data_file=None, config_file=False, include=[str(target)])
+with cov.collect():
+    assert pytest.main([
+        "-q", "-c", str(config), "--noconftest", "-p", "no:cacheprovider",
+        "--rootdir", str(temporary),
+        "--basetemp", str(base), str(test),
+    ], plugins=[runner["FrameworkTemporaryPaths"]()]) == 0
+assert target in map(Path, cov.get_data().measured_files())
 assert not list(base.glob("*current"))
 assert original == (
     _pytest.pathlib._force_symlink, getattr(_pytest.tmpdir, "_force_symlink", None), os.symlink,

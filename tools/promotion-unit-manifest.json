@@ -5712,7 +5712,7 @@
         "tools/release_controller_shell.py": "4753af55971f20782ace481dd8fb94e2fed53d0deac021b70494c0427b62d96a",
         "tools/release_helper_loaders.py": "1de576109656102302be557a67275ce14e1750386ac0180df5a08ad312d5b879",
         "tools/reuse_promotion_artifacts.py": "06cfd2091623b48d18e0a181f0e8353bf0b07d8b904a9890574af6d530603d4d",
-        "tools/run-promotion-unit-tests.py": "132f320e0c3b71c351e5e15869fab4cca17b97ddcad02c8845c677f658abe3d8",
+        "tools/run-promotion-unit-tests.py": "7aecb496e887d76080ea27652931b35e9c2d3c62dae3dc4d3271d888be3819af",
         "tools/pytest_portfolio_guard.py": "983cfac4650ff0739efa5c79a8330c4555ca446df751247b734503802ba1c88d",
         "tools/runtime_profile.py": "5c6b21a3819c4c57e60ae59dde014933751ae22df25662c40fa45a795c26a48c",
         "tools/runtime_profile_policy.py": "e4c1503c038a5dc3fdbe11432defb91fcb53e3fb2b147396fe8cb7c9cec5dabe",
