@@ -457,7 +457,12 @@ async def _run_headed_once(
         if auth_receiver is None or not auth_receiver.stopped_for_auth:
             publish("child_exited")
         return result
-    except Exception:
+    except Exception as error:
+        if native_handoff is not None:
+            from agent_procutil.owned_process import OwnedCleanupError
+
+            if isinstance(error, OwnedCleanupError):
+                raise
         if owner.proc is None:
             raise
         if auth_receiver is not None:

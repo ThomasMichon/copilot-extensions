@@ -233,3 +233,96 @@ async def test_executor_refusal_retains_native_custody_without_replaying_dispatc
     assert dispatch.call_count == 1
     job.terminate_and_wait.assert_not_called()
     child.kill.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_peer_loss_cannot_turn_cancelled_settlement_into_normal_exit(tmp_path, monkeypatch):
+    from agent_procutil.owned_process import OwnedCleanupError
+
+    _windows(monkeypatch)
+    image = tmp_path / "copilot.exe"
+    image.write_bytes(b"MZfixture")
+    child, job = Mock(pid=os.getpid()), Mock()
+    peer_lost, running, unavailable = (asyncio.Event() for _ in range(3))
+    actions = []
+
+    class Owner:
+        proc = None
+        pid = os.getpid()
+        returncode = None
+
+        def launch(self, *_args, **_kwargs):
+            self.proc = child
+
+        async def wait(self):
+            actions.append("wait")
+            if actions.count("wait") > 1:
+                return 23
+            try:
+                await asyncio.Future()
+            except asyncio.CancelledError as error:
+                raise OwnedCleanupError(child, job) from error
+
+        async def terminate(self):
+            actions.append("settle")
+
+    class Backend:
+        extension_pid = 321
+
+        def __init__(self, *_args, **_kwargs):
+            self.bound = asyncio.Event()
+            self.lost = peer_lost
+
+        async def serve(self):
+            self.bound.set()
+
+        def declaration(self):
+            return {}
+
+        async def close(self):
+            pass
+
+    class Host:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        async def serve(self, **_kwargs):
+            return 12345
+
+        async def close(self):
+            pass
+
+    original_write = launcher._write_host_state
+
+    def publish(path, state):
+        original_write(path, state)
+        if state["state"] == "running":
+            running.set()
+        elif state["state"] == "control_unavailable":
+            unavailable.set()
+
+    monkeypatch.setattr(launcher, "_PaneChild", Owner)
+    monkeypatch.setattr(launcher, "HeadedBackend", Backend)
+    monkeypatch.setattr(launcher, "SessionHost", Host)
+    monkeypatch.setattr(launcher, "_write_host_state", publish)
+    monkeypatch.setattr(launcher, "contained_test_mode", lambda: True)
+    monkeypatch.setattr(launcher, "_require_receiving_policy", Mock())
+    task = asyncio.create_task(launcher.run_headed(
+        [str(image), "--session-id", "selected"], session_id="selected",
+        attempt_directory=tmp_path / "attempt", state_file=tmp_path / "state.json",
+        native_handoff=WindowsNativeHandoff(lambda _process: None),
+    ))
+    try:
+        await asyncio.wait_for(running.wait(), 2)
+        peer_lost.set()
+        await asyncio.wait_for(unavailable.wait(), 2)
+        task.cancel()
+        with pytest.raises(OwnedCleanupError) as caught:
+            await task
+        assert caught.value.process is child and caught.value.job is job
+        assert actions == ["wait", "settle"]
+        assert "control_error" not in json.loads((tmp_path / "state.json").read_text())
+    finally:
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
