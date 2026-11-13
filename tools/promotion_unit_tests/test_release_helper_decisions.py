@@ -547,10 +547,12 @@ def test_packaged_manager_provider_loads_its_declared_canonical_owners(tmp_path,
         modules = {
             name: importlib.import_module(name) for name in (
                 "local_install_source", "local_install_profile", "local_runtime_promotion",
-                "build_python_artifacts", "standalone_python_artifacts",
+                "build_python_artifacts", "standalone_python_artifacts", "source_preparation_process",
             )
         }
         assert all(Path(module.__file__).is_relative_to(bundle) for module in modules.values())
+        permissions = modules["source_preparation_process"].procutil_module("python_cache_permissions")
+        assert Path(permissions.__file__).is_relative_to(bundle)
         assert modules["local_install_source"].repository_source(
             tmp_path, {"source": "github", "repo": "Example/Suite"}, deadline=1,
         ) == {"kind": "github", "canonical": "github:example/suite", "ref": ""}
