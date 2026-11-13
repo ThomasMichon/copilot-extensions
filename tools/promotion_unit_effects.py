@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import os
 import sys
+import threading
 from pathlib import Path
 
 from coverage import CoveragePlugin
@@ -25,6 +26,11 @@ def canonical_path(value) -> Path:
     return Path(path_spelling(str(Path(value).resolve()), sys.platform))
 
 
+class _OpenPaths(threading.local):
+    def __init__(self):
+        self.paths: list[tuple[str, Path]] = []
+
+
 class UnitRun(CoveragePlugin):
     def __init__(self, coverage, root: Path, sources: dict, temporary: Path, *, nodes=()):
         self.coverage = coverage
@@ -40,7 +46,11 @@ class UnitRun(CoveragePlugin):
         self.call_code = None
         self.call_node = None
         self._os_open = os.open
-        self._open_paths: list[tuple[str, Path]] = []
+        self._open_state = _OpenPaths()
+
+    @property
+    def _open_paths(self) -> list[tuple[str, Path]]:
+        return self._open_state.paths
 
     def refuse(self, effect: str) -> None:
         self.effects.append(effect)
