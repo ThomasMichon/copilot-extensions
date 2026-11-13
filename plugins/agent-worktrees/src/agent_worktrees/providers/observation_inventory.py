@@ -46,7 +46,15 @@ def inventory(
             if deadline is not None and time.monotonic() >= deadline:
                 raise ValueError("inventory deadline exhausted")
             path = f"/repos/{quote(repo, safe='/')}/pulls?state=open&page={page}"
-            if provider.name == "github":
+            if provider.name == "github" and credentials.http_profile == "direct-v1":
+                from .observation_http import read_get
+                status, body = read_get(
+                    endpoint + path + f"&per_page={PAGE_SIZE}", credentials.authorization(),
+                    invoke=run_cli, deadline=deadline, github=True,
+                )
+                if status != 200:
+                    raise ProviderError("inventory read failed")
+            elif provider.name == "github":
                 material = credentials.acquire()
                 if time.monotonic() >= deadline:
                     raise ValueError("inventory deadline exhausted")
