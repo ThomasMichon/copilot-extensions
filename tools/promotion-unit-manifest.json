@@ -5829,7 +5829,7 @@
         "libs/machine-transport/src/machine_transport/execution_identity.py": "4ebf47dc68fbec9536704f2f24aded203d0625b052794c6c18d5d384dd044027",
         "libs/machine-transport/src/machine_transport/execution_platform.py": "d04e459a34cba4d21d73cbdea6f22a1635f2a8ef504d98c6b4482c60aea2344a",
         "libs/machine-transport/src/machine_transport/identity.py": "63179f3e5161e45d1445b870b8e8043b4a1d4ad35d48cb57b2e37bdfafbb2c0b",
-        "libs/machine-transport/src/machine_transport/local_execution.py": "9d09c897004ff9d96c76053281ca2db1b76d6e9dae21fef14a9ebf47412f5d05",
+        "libs/machine-transport/src/machine_transport/local_execution.py": "4eaafde53253a5616d732a9a299f3a2c5c06408dad543c28cec16b95d4c55edb",
         "libs/machine-transport/src/machine_transport/transport.py": "e0eb0294d7786a78cd5533bc1916e0dc271f9528b250fc0c202f35126eab9f84",
         "libs/machine-transport/src/machine_transport/__init__.py": "45ee13e8af7c54400af88ec2e33ab562d81e2ae5e028140e3c130fa69c69d729",
         "plugins/agent-worktrees/src/agent_worktrees/pr_publication_labels.py": "f76a36dcbb55761bd489768fb2d38e57c351d1b83187ca8bfc0123339f257b14",
