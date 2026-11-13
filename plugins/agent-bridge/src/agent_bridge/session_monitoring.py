@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import contextlib
 import time
 from typing import Any
 
@@ -47,24 +46,8 @@ class _SessionMonitoringMixin:
                 client is not None
                 and client.host_child_exit_code is not None
             ):
-                with contextlib.suppress(Exception):
-                    await client.shutdown()
-                self._reap_host_record(
-                    rec,
-                    "Session Host child exit observed by attached client",
-                )
-                session.client = None
-                session.status = SessionStatus.STOPPED
-                self._db.update_session_status(
-                    rec.session_id, SessionStatus.STOPPED.value, time.time()
-                )
-                if session.event_log:
-                    session.event_log.append("session_state_changed", {
-                        "status": SessionStatus.STOPPED.value,
-                        "host_child_exited": True,
-                        "exit_code": client.host_child_exit_code,
-                    })
-                self._clear_disconnected_reattach_retry_state(rec.session_id)
+                if not session._lifecycle_lock.locked():
+                    await self._settle_exited_host_client(session, rec, client)
                 continue
             # A live, running client needs nothing; surface a stall and move on.
             if client is not None and client.is_running:

@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-13 - Resident-companion lifecycle intake](journal/2026/11.13-resident-companion-lifecycle-intake.md)
+
 - [2026-11-13 - Finite recovery and account-execution intake](journal/2026/11.13-finite-recovery-and-account-intake.md)
 
 - [2026-11-13 - Canonical keepers and finite receiving gaps](journal/2026/11.13-canonical-keepers-and-finite-intake.md)

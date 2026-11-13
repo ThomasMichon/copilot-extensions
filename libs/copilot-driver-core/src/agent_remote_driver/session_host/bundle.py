@@ -54,6 +54,7 @@ _PROCUTIL_MODULES = (
     "_daemon_instance_records.py",
     "_daemon_instance_store.py", "_interpreter.py", "_linux_pidfd.py", "_output_relay.py",
     "_windows_caller_owned.py", "_windows_job_types.py", "python_cache.py",
+    "python_cache_store.py", "python_cache_permissions.py", "python_cache_catalog.py",
     "daemon.py", "daemon_broker.py", "daemon_instances.py", "linux_daemon_scope.py", "native_child.py",
     "owned_process.py", "owned_budget.py", "startup.py", "streaming.py",
 )
