@@ -196,6 +196,10 @@ def read_exact_record(worktree_id: str, *, include_workspace: bool = False) -> d
             "creation_nonce": record.creation_nonce,
             "status": record.status,
             "session_count": len(record.sessions) if record.sessions is not None else None,
+            "session_ids": (
+                [entry.session_id for entry in record.sessions]
+                if record.sessions is not None else None
+            ),
             "last_session_id": record.resolved_head_session,
             "execution_leg": leg.to_dict() if leg is not None else record.execution_leg_raw,
             "execution_leg_opaque": record.execution_leg_opaque,

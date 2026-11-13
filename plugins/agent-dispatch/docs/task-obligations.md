@@ -10,8 +10,11 @@ This is the evidence boundary for the
 [reviewed worktree-owned responsibility design](../../../efforts/active/agent-dispatch-monitor-and-confirmed-state/submission-closeout-amendment.md).
 The source queue also integrates protected relationships at direct assignment
 and allocator workspace attachment, as described below. That integration
-requires an explicitly assembled, qualified ground-owner writer; ordinary
-coordinator construction leaves it disabled. Neither this evidence nor an
+requires an explicitly assembled, qualified ground-owner writer; default
+finite-task construction leaves it disabled. The opt-in
+[native ordinary assembly](configuration.md#native-local-ordinary-admission)
+qualifies local ordinary participants through their existing owners.
+Neither this evidence nor an
 assignment claim finalizes a worktree or authorizes physical cleanup.
 Writer-cohort activation, submission readiness and same-worker rejection
 recovery remain separate qualification gates.

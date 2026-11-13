@@ -5,12 +5,15 @@ from __future__ import annotations
 import asyncio
 import json
 import sqlite3
+import subprocess
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
+from agent_dispatch import bridge_command_delivery as transport
 from agent_dispatch import coordinator_execution_sender as sender
 from agent_dispatch.coordinator_execution_wakes import deliver_execution_wake
 from agent_dispatch.events import EventBus
@@ -163,6 +166,153 @@ def test_ambiguous_wake_never_recovers_or_resends_after_lease_expiry(
     assert calls == [wake.id]
     _close(queue, binding)
     assert _row(restarted, wake)["execution_send_state"] == ("pending" if failure == "settlement" else "unknown")
+
+
+@pytest.fixture
+def native_transport(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
+    reply = SimpleNamespace(
+        code=75,
+        payload={
+            "outcome": "refused_busy", "target": "bridge-a", "retryable": True,
+            "reason": "busy", "error": "original native is running a turn",
+        },
+        calls=[],
+    )
+
+    def run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        reply.calls.append((argv, kwargs["input"]))
+        payload = reply.payload if len(reply.calls) == 1 else {}
+        return subprocess.CompletedProcess(
+            argv, reply.code if len(reply.calls) == 1 else 0,
+            payload if isinstance(payload, str) else json.dumps(payload), "",
+        )
+
+    monkeypatch.setattr(transport.remote_dispatch, "local_machine", lambda: "host")
+    monkeypatch.setattr(transport.subprocess, "run", run)
+
+    def send(wake: Wake) -> bool:
+        return transport.native_prompt(
+            "bridge-a", "session-a", "continue", idempotency_key=wake.id, machine="host",
+            launch_prefix=lambda: ["selected-bridge"],
+            run_ssh=lambda *a, **k: pytest.fail("native wake changed transport"),
+        )
+
+    reply.send = send
+    return reply
+
+
+def test_typed_pre_admission_busy_retries_only_the_original_wake(
+    cohort: Cohort, native_transport: SimpleNamespace,
+) -> None:
+    queue, pending, _binding = cohort
+    before = queue.get(pending.task_id)
+    wake = _claim(queue, pending)
+    assert wake is not None
+    assert deliver_execution_wake(
+        queue, wake, INCARNATION, lambda: native_transport.send(wake),
+    ) is False
+    assert _row(queue, wake)["execution_send_state"] == "not_sent"
+    original_send = json.loads(_row(queue, wake)["execution_send"])
+    with pytest.raises(TaskError, match="observation only"):
+        deliver_execution_wake(
+            queue, wake, INCARNATION, lambda: pytest.fail("same delivery token retried"),
+        )
+    retry = _finish(queue, wake, delivered=False, retry_base=0.01)
+    assert retry.status == "pending"
+    queue = TaskQueue(queue.db_path)
+    next_wake = _claim(queue, pending, now=retry.not_before + 0.001)
+    assert next_wake is not None and next_wake.id == wake.id
+    assert next_wake.delivery_token != wake.delivery_token
+    def send_after_history() -> bool:
+        with queue._connect() as conn:
+            notes = conn.execute(
+                "SELECT note FROM task_events WHERE task_id=?", (wake.task_id,),
+            ).fetchall()
+        [retained] = [
+            json.loads(row["note"].split(": ", 1)[1])
+            for row in notes if row["note"].startswith("wake known-not-sent retry: ")
+        ]
+        assert retained["identity"] == original_send
+        assert retained["refusal"]["native_session_id"] == wake.owner_session_id
+        assert retained["next_delivery_token"] == next_wake.delivery_token
+        return native_transport.send(next_wake)
+
+    assert deliver_execution_wake(queue, next_wake, INCARNATION, send_after_history)
+    assert _finish(queue, next_wake, delivered=True).status == "delivered"
+    assert _row(queue, next_wake)["execution_send_state"] == "sent"
+    assert len(native_transport.calls) == 2
+    assert native_transport.calls[0] == native_transport.calls[1]
+    current = queue.get(pending.task_id)
+    assert (current.owner, current.owner_session_id, current.generation) == (
+        before.owner, before.owner_session_id, before.generation,
+    )
+
+
+@pytest.mark.parametrize("change", ["malformed", "target", "retryable", "reason", "exit"])
+def test_unconfirmed_busy_shape_remains_unknown_without_retry(
+    cohort: Cohort, native_transport: SimpleNamespace, change: str,
+) -> None:
+    queue, pending, _binding = cohort
+    if change == "malformed":
+        native_transport.payload = "not-json"
+    elif change == "target":
+        native_transport.payload["target"] = "other-bridge"
+    elif change == "retryable":
+        native_transport.payload["retryable"] = 1
+    elif change == "reason":
+        native_transport.payload["reason"] = "acceptance_unknown"
+    else:
+        native_transport.code = 70
+    wake = _claim(queue, pending)
+    assert wake is not None
+    assert deliver_execution_wake(
+        queue, wake, INCARNATION, lambda: native_transport.send(wake),
+    ) is False
+    assert _row(queue, wake)["execution_send_state"] == "unknown"
+    assert _finish(queue, wake, delivered=False, max_attempts=1).status == "delivering"
+    future = wake.delivery_expires_at + 100
+    assert _recover(queue, wake, now=future) == 0
+    assert _claim(queue, wake, now=future) is None
+    assert len(native_transport.calls) == 1
+
+
+def test_legacy_not_sent_without_typed_refusal_does_not_authorize_another_send(
+    cohort: Cohort,
+) -> None:
+    queue, pending, _binding = cohort
+    wake = _claim(queue, pending)
+    assert wake is not None
+    task = queue.get(wake.task_id)
+    provenance = sender.CoordinatorExecutionProvenance(queue, task, INCARNATION).prepare()
+    admission = queue.admit_execution_wake(wake, provenance=provenance)
+    queue.settle_execution_wake(wake, admission, outcome="not_sent", detail="legacy refusal")
+    retry = _finish(queue, wake, delivered=False, retry_base=0.01)
+    next_wake = _claim(queue, pending, now=retry.not_before + 0.001)
+    assert next_wake is not None
+    with pytest.raises(TaskError, match="observation only"):
+        deliver_execution_wake(
+            queue, next_wake, INCARNATION, lambda: pytest.fail("untyped refusal retried"),
+        )
+
+
+@pytest.mark.parametrize("mismatch", ["key", "native"])
+def test_refusal_for_another_native_request_cannot_release_original_wake(
+    cohort: Cohort, mismatch: str,
+) -> None:
+    queue, pending, _binding = cohort
+    wake = _claim(queue, pending)
+    assert wake is not None
+
+    def deliver() -> bool:
+        raise transport.NativePromptNotSent(
+            "bridge-a", "other-native" if mismatch == "native" else wake.owner_session_id,
+            "other-key" if mismatch == "key" else wake.id,
+        )
+
+    with pytest.raises(TaskError, match="original wake identity"):
+        deliver_execution_wake(queue, wake, INCARNATION, deliver)
+    assert _row(queue, wake)["execution_send_state"] == "unknown"
+    assert _finish(queue, wake, delivered=False, max_attempts=1).status == "delivering"
 
 
 @pytest.mark.parametrize("race", ["closure", "token", "generation", "session", "expired"])

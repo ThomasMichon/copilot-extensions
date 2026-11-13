@@ -15,6 +15,19 @@ from .procutil import no_window_kwargs
 log = logging.getLogger(__name__)
 
 
+class NativePromptNotSent(RuntimeError):
+    """The selected Bridge CLI positively refused before native admission."""
+
+    def __init__(self, bridge_session: str, native_session: str, invocation_key: str) -> None:
+        super().__init__("Bridge refused the original native prompt before admission: busy")
+        self.receipt = {
+            "schema": "dispatch-native-prompt-refusal", "version": 1,
+            "outcome": "refused_busy", "reason": "busy", "retryable": True,
+            "bridge_session_id": bridge_session, "native_session_id": native_session,
+            "invocation_key": invocation_key,
+        }
+
+
 def steering_prompt(task_id: str, message: str | None) -> str:
     return message or (
         f"Task {task_id} received steering. Resume, run `agent-dispatch steer "
@@ -130,7 +143,7 @@ def native_prompt(
     timeout: float | None = 20.0,
 ) -> bool:
     """Bridge owns protocol negotiation, native admission and receipt recovery."""
-    return send_command(
+    result = _command_result(
         [
             "--json", "send", bridge_session,
             "--expected-native-session-id", native_session,
@@ -141,3 +154,19 @@ def native_prompt(
         prompt, machine=machine, launch_prefix=launch_prefix, run_ssh=run_ssh,
         timeout=timeout,
     )
+    if result is not None and result.returncode == 75:
+        try:
+            refusal = json.loads(result.stdout)
+        except (TypeError, ValueError):
+            refusal = None
+        if (
+            isinstance(refusal, dict)
+            and refusal.get("outcome") == "refused_busy"
+            and refusal.get("target") == bridge_session
+            and refusal.get("retryable") is True
+            and refusal.get("reason") == "busy"
+            and isinstance(refusal.get("error"), str)
+            and refusal["error"].strip()
+        ):
+            raise NativePromptNotSent(bridge_session, native_session, idempotency_key)
+    return result is not None and result.returncode == 0

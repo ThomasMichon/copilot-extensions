@@ -135,10 +135,39 @@ def _matches_receipt(value: object, request: dict, *, phase: str | None = None) 
 
 
 class QueueTaskRelationshipsMixin:
-    def _relationship_selection(self, task: Task) -> tuple[object, str | None]:
+    def _spawn_relationship_selection(self, driver: str | None) -> tuple[object, str | None]:
+        if driver == "ordinary-bridge" and getattr(self, "_ordinary_relationship_writer", None) is not None:
+            return self._ordinary_relationship_writer, "local"
+        return self._relationship_writer, self._relationship_authority
+
+    def _relationship_selection(
+        self, task: Task, *, reservation_key: str | None = None,
+    ) -> tuple[object, str | None]:
         if task.kind == "standing-charter" and self._standing_relationship_writer is not None:
             return self._standing_relationship_writer, "local"
+        if reservation_key is not None and getattr(self, "_ordinary_relationship_writer", None) is not None:
+            reservation = self.get_reservation(reservation_key)
+            if reservation is not None and reservation.task_id == task.id:
+                return self._spawn_relationship_selection(reservation.driver)
         return self._relationship_writer, self._relationship_authority
+
+    def _retain_pool_relationship_requirement(
+        self, conn: sqlite3.Connection, task: Task, key: str, driver: str | None,
+    ) -> None:
+        governed = latest_relationship(conn, task.id) is not None
+        writer, authority = self._spawn_relationship_selection(driver)
+        if governed and writer is None:
+            raise TaskError("governed allocator assignment requires its original relationship writer")
+        if governed:
+            from .queue_relationship_continuation import continue_pool_startup
+
+            continue_pool_startup(conn, task, key, authority=authority)
+        if writer is not None or governed:
+            conn.execute(
+                "UPDATE spawn_reservations SET task_relationship_required=1,"
+                " task_relationship_generation=? WHERE key=?",
+                (task.generation + 1, key),
+            )
 
     def _replay_relationship_claim(
         self,
@@ -200,7 +229,7 @@ class QueueTaskRelationshipsMixin:
         ts: float,
         reservation_key: str | None = None,
     ) -> int:
-        writer, authority = self._relationship_selection(task)
+        writer, authority = self._relationship_selection(task, reservation_key=reservation_key)
         if writer is None or authority not in {
             "local",
             "central",
@@ -279,7 +308,9 @@ class QueueTaskRelationshipsMixin:
         from .task_obligations import read_snapshot
 
         task = self.get(request["task_id"])
-        authority = self._relationship_selection(task)[1] if task is not None else None
+        authority = self._relationship_selection(
+            task, reservation_key=request.get("reservation_key"),
+        )[1] if task is not None else None
         snapshot = read_snapshot(
             self, request["task_id"], assignment_event_id=request["event_id"],
         )
@@ -330,7 +361,9 @@ class QueueTaskRelationshipsMixin:
             raise TaskError("no retained task relationship request")
         request = value["request"]
         task = self.get(task_id)
-        selected_writer, authority = self._relationship_selection(task) if task is not None else (None, None)
+        selected_writer, authority = self._relationship_selection(
+            task, reservation_key=request.get("reservation_key"),
+        ) if task is not None else (None, None)
         if (
             selected_writer is None
             or authority != request["authority"]
