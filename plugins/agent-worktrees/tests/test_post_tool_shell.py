@@ -440,6 +440,7 @@ def prepared_read_event(tmp_path, monkeypatch, monkeypatch_config, request):
     path = records / "worktree.yaml"
     record = tracking._load_record_uncached(path)
     record.repo = "example"
+    record.platform = cfg.detect_platform()
     record.creation_nonce = "read-incarnation"
     record.status_note_at = "2026-11-05T20:00:00.123+05:30"
     tracking.save_record(record, path)
