@@ -236,6 +236,8 @@ def test_paired_target_probe_shares_bound_and_settles_second_target_descendants(
 @pytest.mark.skipif(os.name != "nt", reason="Windows probe and venv-launcher descendants")
 @pytest.mark.timeout(15)
 def test_target_probe_has_its_own_bound_and_settles_descendants(tmp_path, monkeypatch):
+    import ctypes
+
     marker = tmp_path / "probe-descendant"
     script = (
         "import os,pathlib,subprocess,sys,time\n"
@@ -246,12 +248,51 @@ def test_target_probe_has_its_own_bound_and_settles_descendants(tmp_path, monkey
     )
     monkeypatch.setattr(seed, "_TARGET", script)
     monkeypatch.setattr(seed, "_TARGET_PROBE_TIMEOUT_SECONDS", 2)
+    procutil = worker_procutil()
+    spawn = procutil.spawn_sync_in_kill_on_close_job
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.OpenProcess.argtypes = [ctypes.c_uint32, ctypes.c_int, ctypes.c_uint32]
+    kernel.OpenProcess.restype = ctypes.c_void_p
+    kernel.WaitForSingleObject.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
+    kernel.WaitForSingleObject.restype = ctypes.c_uint32
+    kernel.CloseHandle.argtypes = [ctypes.c_void_p]
+    kernel.CloseHandle.restype = ctypes.c_int
+    handles = []
     started = time.monotonic()
-    with pytest.raises(ValueError, match="target probe"):
-        seed._target(Path(sys.executable), dict(os.environ), started + 60, worker_procutil())
-    assert time.monotonic() - started < 10
-    assert marker.is_file(), "the actual descendant must start before probe timeout"
-    assert not _running(int(marker.read_text()))
+
+    def retain_descendant(*arguments, **options):
+        process, job = spawn(*arguments, **options)
+        try:
+            while time.monotonic() < started + 2:
+                try:
+                    pid = int(marker.read_text())
+                except (FileNotFoundError, ValueError):
+                    time.sleep(0.01)
+                    continue
+                # The live probe still owns its child's handle, excluding PID reuse here.
+                handle = kernel.OpenProcess(0x00100000, False, pid)
+                if not handle:
+                    raise ctypes.WinError(ctypes.get_last_error())
+                handles.append(handle)
+                break
+            return process, job
+        except BaseException:
+            job.terminate_and_wait(10)
+            process.wait(timeout=10)
+            raise
+
+    monkeypatch.setattr(procutil, "spawn_sync_in_kill_on_close_job", retain_descendant)
+    try:
+        with pytest.raises(ValueError, match="target probe"):
+            seed._target(Path(sys.executable), dict(os.environ), started + 60, procutil)
+        assert time.monotonic() - started < 10
+        assert marker.is_file(), "the actual descendant must start before probe timeout"
+        assert len(handles) == 1, "retain the exact descendant before timeout"
+        assert kernel.WaitForSingleObject(handles[0], 0) == 0
+    finally:
+        for handle in handles:
+            if not kernel.CloseHandle(handle):
+                raise ctypes.WinError(ctypes.get_last_error())
 
 
 @pytest.mark.skipif(
