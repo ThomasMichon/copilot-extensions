@@ -11,6 +11,11 @@ on:
       - "plugins/agent-mcp/src/agent_mcp/owner_entry.py"
       - "plugins/agent-mcp/src/agent_mcp/owner_section.py"
       - "plugins/agent-mcp/src/agent_mcp/owner_section_native.py"
+      - "plugins/agent-mcp/src/agent_mcp/owner_snapshot.py"
+      - "plugins/agent-mcp/src/agent_mcp/owner_section.cs"
+      - "plugins/agent-mcp/pyproject.toml"
+      - "plugins/agent-worktrees/scripts/native-seed-process.ps1"
+      - "plugins/agent-worktrees/scripts/native-seed-process.cs"
       - "plugins/agent-mcp/src/agent_mcp/owner_handoff.py"
       - "plugins/agent-mcp/src/agent_mcp/owner_capabilities.py"
       - "plugins/agent-mcp/src/agent_mcp/execution_context.py"
@@ -26,6 +31,8 @@ on:
       - "plugins/agent-mcp/tests/test_owner_exec.py"
       - "plugins/agent-mcp/tests/test_owner_entry.py"
       - "plugins/agent-mcp/tests/test_owner_section.py"
+      - "plugins/agent-mcp/tests/test_owner_snapshot.py"
+      - "plugins/agent-mcp/tests/owner_section_security.py"
       - "plugins/agent-mcp/tests/test_custody_host.py"
       - "plugins/agent-mcp/tests/test_custody_conduit.py"
       - "plugins/agent-mcp/tests/test_custody_launch.py"
@@ -64,6 +71,7 @@ jobs:
           --test-file tests/test_owner_handoff.py
           --test-file tests/test_owner_entry.py
           --test-file tests/test_owner_section.py
+          --test-file tests/test_owner_snapshot.py
           --test-file tests/test_owner_capabilities.py
           --test-file tests/test_custody_host.py
           --test-file tests/test_custody_conduit.py
@@ -83,6 +91,7 @@ jobs:
           path: ${{ runner.temp }}/mcp-owner-exec-${{ github.run_id }}
           if-no-files-found: warn
           retention-days: 7
+
       - name: Exercise trace-varying physical and optional-receiver handover
         run: >-
           python tools/run-plugin-tests.py agent-mcp
@@ -143,5 +152,32 @@ jobs:
         with:
           name: mcp-owner-native-client
           path: ${{ runner.temp }}/mcp-owner-copilot-${{ github.run_id }}
+          if-no-files-found: warn
+          retention-days: 7
+
+  windows-publication:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Exercise native publication and independent delayed snapshots
+        run: >-
+          python tools/run-plugin-tests.py agent-mcp
+          --test-file tests/test_owner_section.py
+          --test-file tests/test_owner_snapshot.py
+          --junit-dir "${{ runner.temp }}/mcp-owner-publication-${{ github.run_id }}"
+      - name: Retain native publication source controls
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mcp-owner-native-publication
+          path: ${{ runner.temp }}/mcp-owner-publication-${{ github.run_id }}
           if-no-files-found: warn
           retention-days: 7

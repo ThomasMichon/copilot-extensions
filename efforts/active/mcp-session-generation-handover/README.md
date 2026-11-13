@@ -366,8 +366,10 @@ handover. Preserve held sessions and the separate pre-feature adoption hold.
       principal boundary, read-only retention, strict binding and owner-death
       refusal; see the
       [provider controls](journal/2026/11.10-explicit-owner-cli.md#windows-native-owner-section-provider).
-      Production creation-owner integration and actual-client acceptance
-      remain separate.
+      #12330 adds the opt-in, in-process pre-execution seam to the existing
+      native creation/wait owner, including actual native refusal and packaged
+      companion controls. Section publication, anonymous bootstrap integration,
+      production caller selection and actual-client acceptance remain separate.
   - [x] **Explicit Linux exec caller:** capture the exec owner's native pair
     and pass a sealed, session-only overlay for explicitly named configured
     entries, with actual-start discovery bound to a physical optional receiver.

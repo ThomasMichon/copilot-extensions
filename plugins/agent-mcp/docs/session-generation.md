@@ -513,16 +513,38 @@ padding. ASCII JSON has exactly `schema`, integer `version`, `binding`, native
 `pid` and `birth`; the schema is `agent-mcp.windows-native-owner`. Unknown,
 duplicate, missing, oversized, malformed or differently bound records refuse.
 The section carries no credentials or durable ownership claim.
-`acquire(binding)` opens read-only, verifies the living native identity and
-current principal, and returns the existing pinned `SessionOwner`; its caller
-must close that observation. Missing sections, birth mismatch and owner death
-never become an unowned ordinary call.
+`acquire(binding)` opens read-only and returns `owner_snapshot.WindowsOrigin`,
+which pins the native process and verifies birth, principal and liveness before
+returning. It exposes `pid`, `birth`, `require_alive()` and idempotent `close()`;
+its caller must close that observation. The complete `owner_snapshot.py`
+source uses only the Python standard library and can be copied into an
+anonymous startup snapshot without importing an installed MCP or shared
+runtime. Missing sections, birth mismatch and owner death never become an
+unowned ordinary call.
+
+The packaged `owner_section.cs` companion supplies
+`AgentMcp.NativeOwnerSection` for an existing in-process PowerShell/.NET creation
+owner. Load it once with `Add-Type -Path`, prepare the object before creation,
+include `InheritedHandle` in the native handle list, then call
+`Publish(creationHandle, pid, birth)` while the actual child is suspended.
+Only a true publication result permits the existing owner to resume. The
+publisher verifies the supplied PID/birth and current principal against the
+creation handle, writes once, and creates or waits for no process. Dispose its
+handles after publication; the child's explicitly inherited read-only handle
+retains the section. A headed coordinator's identity is not evidence of its
+eventual native client's identity.
 
 The focused `tests/test_owner_section.py` packet covers suspended native
 creation-handle capture, protected DACL, read-only inheritance, delayed reading
 after publisher-handle closure, collision, malformed/binding refusal, owner
-death before and after acquisition, and final-handle cleanup. These are source
-provider controls, not actual-client or installed-launcher qualification.
+death before and after acquisition, and final-handle cleanup. The focused
+`tests/test_owner_snapshot.py` controls also run the C# publisher in the
+existing suspended-creation seam, close all publisher handles and exit its
+process before releasing a delayed, stdlib-only reader. They cover missing
+inheritance, protected DACL, read-only handle rights, mismatched and dead
+creation identities, one-shot publication and exact final-handle cleanup.
+These are source provider controls, not actual-client or installed-launcher
+qualification.
 Windows advertisement, bootstrap adoption and production caller integration
 remain disabled. The section requires no new process, network request,
 filesystem scan or steady-state message work; installed launch/update latency
