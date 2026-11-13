@@ -25,6 +25,7 @@ if TYPE_CHECKING:
 _OPTIONS = {
     "agent_name", "caller_id", "caller_session_id", "mcp_servers", "copilot_args",
     "env_overrides", "caller_owner_ref", "model", "effort",
+    "dispatch_origin",
 }
 
 

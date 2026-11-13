@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_serializer, model_validator
 from .plugin_readiness import PluginReadinessRequest
+from .dispatch_origin import DispatchSessionOrigin
 
 if TYPE_CHECKING:
     from .acquisition_policy import AcquisitionDecision
@@ -66,6 +67,7 @@ class AcquisitionRequest(BaseModel):
     caller_owner_ref: str | None = Field(default=None, min_length=1)
     caller_session_id: str | None = Field(default=None, min_length=1)
     worktree_writer: WorktreeWriterRequirement | None = None
+    dispatch_origin: DispatchSessionOrigin | None = None
 
     @model_serializer(mode="wrap")
     def serialize_request(self, handler):
@@ -73,6 +75,7 @@ class AcquisitionRequest(BaseModel):
         for field in (
             "plugin_readiness", "caller_worktree", "caller_owner_ref", "caller_session_id",
             "worktree_writer",
+            "dispatch_origin",
         ):
             if getattr(self, field) is None:
                 result.pop(field, None)
@@ -80,6 +83,11 @@ class AcquisitionRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_intent(self) -> AcquisitionRequest:
+        if self.dispatch_origin is not None and (
+            self.mode != "acp" or self.dispatch_origin.task_id != self.task_id
+            or self.dispatch_origin.reservation_key != self.reservation_key
+        ):
+            raise ValueError("dispatch origin requires the same ACP task and reservation")
         if self.version >= 2 and (not self.project or not self.worktree_path):
             raise ValueError("workspace-qualified acquisition requires project and path")
         if (self.version == 3) != (self.worktree_writer is not None):

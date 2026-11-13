@@ -385,10 +385,14 @@ function Invoke-AwNativeSeedBackend {
         [string]$PreserveSeedId,
         [string]$NativeResumeSession,
         [scriptblock]$BeforeResume,
-        [IntPtr[]]$InheritedHandles = @()
+        [IntPtr[]]$InheritedHandles = @(),
+        [switch]$RequireDirectClient
     )
     if ($InheritedHandles.Count -and -not $BeforeResume) {
         throw 'Explicit inherited handles require the pre-execution creation owner.'
+    }
+    if ($RequireDirectClient -and -not $BeforeResume) {
+        throw 'Direct-client ownership requires pre-execution publication.'
     }
     $runtime = Get-AwNativeSeedRuntime $Root
     $prepareArgs = @('--phase', 'prepare', '--record', $Record)
@@ -428,6 +432,28 @@ function Invoke-AwNativeSeedBackend {
         '--operation-id', [string]$prepared.operation_id
     )
     if ($prepared.parent_id) { $callbackArgs += @('--launch-parent-id', [string]$prepared.parent_id) }
+    if ($RequireDirectClient) {
+        $direct = $false
+        try {
+            $selected = [string]$prepared.argv[0]
+            if (
+                $IsWindows -and -not $prepared.headed -and
+                [IO.Path]::IsPathFullyQualified($Command[0]) -and [IO.Path]::IsPathFullyQualified($selected) -and
+                [IO.Path]::GetFullPath($Command[0]).Equals(
+                    [IO.Path]::GetFullPath($selected), [StringComparison]::OrdinalIgnoreCase
+                ) -and [IO.Path]::GetExtension($selected) -ieq '.exe'
+            ) {
+                $image = [IO.File]::OpenRead($selected)
+                try { $direct = $image.ReadByte() -eq 77 -and $image.ReadByte() -eq 90 }
+                finally { $image.Dispose() }
+            }
+        } catch { $direct = $false }
+        if (-not $direct) {
+            $null = Invoke-AwNativeSeedPhase $Root (@('--phase', 'spawn-failed') + $callbackArgs) -Runtime $runtime
+            [Console]::Error.WriteLine('Direct native client preparation is unconfirmed; no backend started.')
+            return 3
+        }
+    }
     $info = [Diagnostics.ProcessStartInfo]::new([string]$prepared.argv[0])
     $info.UseShellExecute = $false
     $info.WorkingDirectory = $PWD.ProviderPath

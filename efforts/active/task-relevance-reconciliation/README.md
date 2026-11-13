@@ -138,13 +138,17 @@ merged plan does not establish running adoption.
       through the owning Worktrees creation and Bridge session-state paths.
       Distinguish original allocation from later assignment or reuse.
       The [original assignment audit](../../../plugins/agent-dispatch/docs/task-obligations.md#original-assignment-cohort)
-      retains verified creation and exact pool-assignment facts; propagation to
-      Worktrees creation and Bridge session state remains open.
+      retains verified creation and exact pool-assignment facts. Conditional
+      Worktrees creation propagation merged in #12360; Bridge session-state
+      propagation and running qualification remain open.
       Worktrees provider expansion retains optional original cohort metadata in
-      first-save records and replay; automatic Dispatch and Bridge callers remain
-      unmodified until actual receiver support is established.
+      first-save records and replay. Dispatch discovers the selected provider
+      before sealing its immutable wire choice; Bridge callers remain unmodified.
       The reservation owner retains allocation-cohort evidence before body
       preparation, separately from later assignment audit evidence.
+      The [ACP session-origin provider](../../../plugins/agent-bridge/docs/dispatch-session-origin.md)
+      retains optional original assignment on first save; CLI-native registration,
+      caller migration and running qualification remain open.
 - [ ] Expose forward and reverse correlation through existing owner APIs.
       Pool identity must identify the actual registration/assignment, not just
       a display name; opaque legacy records remain explicitly unattributed.

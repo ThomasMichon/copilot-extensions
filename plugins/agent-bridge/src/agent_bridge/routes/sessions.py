@@ -53,6 +53,8 @@ from ..remote_acp_config import is_remote_address
 from ..session_start_selection import find_reusable_caller_session as _find_reusable_session
 from ..worktree_head import resolve_head
 from ..preference_requests import apply_request_preferences, reused_preference_source
+from ..dispatch_origin import inspect as inspect_dispatch_origin
+from ..persisted_session_views import persisted_session_info as _persisted_session_info
 from ._start_refusals import LocalLaunchPreparationError, start_refusal
 from .event_pages import DEFAULT_PAGE_LIMIT, MAX_PAGE_LIMIT, events_before_page, rows_to_events as _rows_to_events
 from .prompts import (  # noqa: F401 -- preserved public route imports
@@ -398,6 +400,7 @@ def _session_info(s, manager=None) -> SessionInfo:  # noqa: ANN001
         target_host=s.target.host,
         project=getattr(s.target, "project", None),
         worktree_id=s.target.worktree_id,
+        dispatch_origin=inspect_dispatch_origin(manager.db.get_session(s.session_id)) if manager else None,
         elevated=s.target.elevated,
         read_only=False,
         remote_relationship=(
@@ -427,69 +430,6 @@ def _session_info(s, manager=None) -> SessionInfo:  # noqa: ANN001
         ),
         liveness=liveness,
         at_rest=at_rest,
-    )
-
-
-def _persisted_session_info(
-    row: dict[str, Any], *, daemon_running: bool
-) -> SessionInfo:
-    """Convert an elevated database row to its read-only public view."""
-    from datetime import datetime, timezone
-
-    target_json = row.get("target_json")
-    target = (
-        SpawnTarget.from_json(target_json)
-        if target_json
-        else SpawnTarget(
-            type=row.get("target_type", "local"),
-            cwd=row.get("target_dir", "."),
-        )
-    )
-    session_status = SessionStatus(row["status"])
-    if not daemon_running and session_status in {
-        SessionStatus.CREATED,
-        SessionStatus.STARTING,
-        SessionStatus.RUNNING,
-        SessionStatus.IDLE,
-        SessionStatus.STOPPING,
-    }:
-        session_status = SessionStatus.STOPPED
-
-    context_size = row.get("context_size")
-    context_used = row.get("context_used")
-    context_pct = (
-        round(context_used / context_size * 100, 1)
-        if context_size and context_used is not None
-        else None
-    )
-    last_usage_at = row.get("last_usage_at")
-    return SessionInfo(
-        session_id=row["id"],
-        name=row["name"],
-        agent_name=row.get("agent_name"),
-        caller_id=row.get("caller_id"), caller_session_id=row.get("caller_session_id"),
-        acp_session_id=row.get("acp_session_id"),
-        durable_session_id=row.get("acp_session_id") or row["id"],
-        target_dir=target.cwd,
-        target_type=target.type,
-        target_host=target.host,
-        project=getattr(target, "project", None),
-        worktree_id=target.worktree_id,
-        elevated=True,
-        read_only=True,
-        status=session_status,
-        pid=row.get("pid") if daemon_running else None,
-        turn_count=row.get("turn_count", 0),
-        context_size=context_size,
-        context_used=context_used,
-        context_pct=context_pct,
-        usage_model=row.get("usage_model"),
-        last_usage_at=(
-            datetime.fromtimestamp(last_usage_at, tz=timezone.utc).isoformat()
-            if last_usage_at else None
-        ),
-        created_at=datetime.fromtimestamp(row["created_at"], tz=timezone.utc),
-        updated_at=datetime.fromtimestamp(row["updated_at"], tz=timezone.utc),
     )
 
 
@@ -650,8 +590,8 @@ async def _start_session_admitted(req: StartSessionRequest, request: Request):
             )
 
     if agent_name and is_remote_address(agent_name):
-        if req.worktree_writer is not None:
-            raise HTTPException(422, "retained creation writer requires a local ACP target")
+        if req.worktree_writer is not None or req.dispatch_origin is not None:
+            raise HTTPException(422, "retained creation writer or dispatch origin requires a local ACP target")
         return await start_remote_session(mgr, req, agent_name)
     if req.remote_session_id is not None:
         raise HTTPException(422, "remote_session_id requires a configured remote ACP target")
@@ -693,7 +633,9 @@ async def _start_session_admitted(req: StartSessionRequest, request: Request):
             )
         try:
             target = await resolver.resolve_async(
-                agent_name, sender_repo=req.sender_repo, activate=req.worktree_writer is None,
+                agent_name, sender_repo=req.sender_repo,
+                activate=req.worktree_writer is None and req.dispatch_origin is None,
+                **({"allow_elevation": False} if req.dispatch_origin is not None else {}),
             )
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc))
@@ -1470,7 +1412,7 @@ async def interrupt_turn(session_id: str, request: Request):
         session = await mgr.interrupt_turn(session_id)
     except KeyError:
         raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
-    return _session_info(session)
+    return _session_info(session, mgr)
 
 
 @router.post("/{session_id}/handoff", response_model=SessionInfo)
@@ -1504,7 +1446,7 @@ async def handoff_session(
         raise HTTPException(status_code=409, detail=str(exc))
     except RuntimeError as exc:
         raise HTTPException(status_code=502, detail=str(exc))
-    return _session_info(successor)
+    return _session_info(successor, mgr)
 
 
 @router.delete("/{session_id}", status_code=204)
