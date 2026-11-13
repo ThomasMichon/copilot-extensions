@@ -5265,7 +5265,7 @@
         "tools/typecheck_bootstrap_views.py"
     ],
     "sources": {
-        "tools/application_sources.py": "b99405162a56c0a98d9cba587d0ee9e98c99f43d7dd2f6a4a26fe961ff4658ff",
+        "tools/application_sources.py": "f03db26e7d29751ae319a767c1575dba8e6c54bdb036cfafbe1198ea43c97649",
         "tools/promotion_unit_tests/test_application_sources.py": "e54a8d337813e28ae9dcad7c4066c70e21db3d4116a342e4f956239fa49fb3b7",
         "tools/promotion_unit_tests/test_prepared_cell_membership.py": "0d46c2ef80b1507fb8f80beda2a903f25c4dda86ca38974d8ccd6bbdf1905be5",
         "plugins/agent-worktrees/scripts/managed_session.py": "373989e7c6c72b629f9e3e48093077ae758752bb16c7989a5589ec2febe2e09e",

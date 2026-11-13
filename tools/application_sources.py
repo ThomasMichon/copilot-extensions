@@ -4,8 +4,6 @@ from __future__ import annotations
 from pathlib import Path, PurePosixPath
 import re
 
-from packaging.utils import canonicalize_name
-
 from python_project_inventory import contained_path
 
 _NAME = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?")
@@ -83,6 +81,8 @@ def artifact_project(root: Path, selector: str) -> tuple[Path, dict]:
 
 def application_sources(metadata: dict) -> dict[str, str]:
     """Read explicit distribution-to-project associations without resolving inputs."""
+    from packaging.utils import canonicalize_name
+
     settings = metadata.get("tool", {}).get("copilot-extensions", {})
     if not isinstance(settings, dict):
         raise ValueError("application source settings must be a table")
