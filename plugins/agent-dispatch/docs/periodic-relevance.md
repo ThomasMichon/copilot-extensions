@@ -106,8 +106,8 @@ partial index excluding successful recurring `needed` checks. Examined but
 ineligible rows advance their cursor without spending a check attempt.
 
 `needed` schedules another inspection after the configured interval.
-`unknown` and failures use exponential retry capped by that interval. Attempts
-are bounded across restart; exhaustion remains `failed`, with its error visible
+`unknown` and failures use exponential retry capped by that interval. Source-check
+attempts are bounded across restart; exhaustion remains `failed`, with its error visible
 through `TaskQueue.relevance_evaluations(task_id)`. The owning library can
 explicitly retry that failed registration/generation through
 `retry_relevance_evaluation`; this retains an unresolved saved judgment rather
@@ -118,6 +118,9 @@ Before applying a judgment, the owner persists its complete request identity.
 Restart recovers that original request before invoking the script again.
 Saved-report recovery remains eligible after the final fresh-check attempt;
 recovering an accepted receipt does not spend another source-check attempt.
+Authority loss or an unavailable receipt retains the original report as pending
+recovery with backoff, even on the final source-check attempt; it is not another
+failed source judgment and does not require an owner retry to resume recovery.
 The atomic receiver checks the delivery token/lease together with task and
 registration revision fences. Post-commit callback failures recover the accepted
 receipt, not a second abandonment/steer. If receipt state cannot be read,

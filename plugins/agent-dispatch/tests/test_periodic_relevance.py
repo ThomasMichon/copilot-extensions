@@ -659,3 +659,31 @@ def test_final_attempt_recovers_committed_report_after_crash(q, periodic, venue,
         for _ in range(2):
             tick(restarted, periodic, runner=check)
         assert check.call_count == 2
+
+
+@pytest.mark.parametrize("interruption", ["authority", "receipt_unavailable"])
+def test_final_attempt_retains_report_recovery_after_interruption(q, periodic, venue, monkeypatch, interruption):
+    declaration(venue[1], "review-evaluator", "evaluator", {
+        **periodic[1], "periodic_relevance": {
+            **periodic[1]["periodic_relevance"], "max_attempts": 1,
+        },
+    })
+    t = task(q)
+    active = [True]
+    check = runner(callback=(
+        lambda _event: active.__setitem__(0, False)
+    ) if interruption == "authority" else None)
+    with monkeypatch.context() as scoped:
+        if interruption == "receipt_unavailable":
+            scoped.setattr(q, "reconcile_task_relevance", Mock(side_effect=OSError("report interrupted")))
+            scoped.setattr(q, "relevance_receipt", Mock(side_effect=OSError("receipt unavailable")))
+        tick(q, periodic, runner=check, can_continue=lambda: active[0])
+    row = q.relevance_evaluations(t.id)[0]
+    saved = json.loads(row["report_json"])
+    assert row["status"] == "pending" and row["attempts"] == 1
+    active[0] = True
+    periodic[3][0] = row["next_due"]
+    recovered = tick(q, periodic, runner=check)
+    assert recovered["accepted"][0]["request_id"] == saved["request_id"]
+    assert check.call_count == 1
+    assert q.get(t.id).status == Status.ABANDONED

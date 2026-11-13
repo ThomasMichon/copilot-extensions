@@ -325,7 +325,7 @@ class QueueRelevanceEvaluationsMixin:
         ts = self._now(now)
         retry = verdict != "needed"
         attempts = entry["attempts"] if retry else 0
-        exhausted = retry and attempts >= policy.max_attempts
+        exhausted = retry and attempts >= policy.max_attempts and not preserve_report
         delay = min(policy.interval_seconds, policy.retry_base * 2 ** max(0, attempts - 1))
         with self._connect() as conn:
             changed = conn.execute(
