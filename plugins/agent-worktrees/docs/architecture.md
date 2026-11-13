@@ -1298,8 +1298,13 @@ existing creation/wait owner with direct-client publication, delayed MCP startup
 original byte streams, fixture-provider context parity and natural settlement.
 Preparation, admission and execution receipt responses are substituted, and the
 MCP provider implements a synthetic protocol rather than the production optional
-receiver. The separate physical-receiver/custody packet still uses publisher
-exit, not this retained wait owner. Neither packet qualifies an installed
+receiver. The separate physical-receiver/custody packet now independently
+exercises publisher exit and this retained wait owner. The latter keeps the
+same preparation/admission/execution receipt substitutions, but uses the real
+optional receiver and custody handover path, retaining the actual client,
+conduit, keeper and upstream across replacement and rollback. It requires the
+original wait owner to remain alive through those transitions and exit
+naturally with its client. Neither packet qualifies an installed
 adapter or production caller selection. Headed creation still belongs to its
 separate actual-client owner, not the shell's coordinator handle.
 The headed path discovers preparation/receipt support against one captured,
