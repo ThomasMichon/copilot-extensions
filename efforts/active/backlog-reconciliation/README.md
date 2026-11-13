@@ -3164,12 +3164,23 @@ sources, transferring owners or turning partial/planning gains into completion.
   receiving objective or a retained gap; investigate actual implementation
   evidence when claiming completion, rather than making that the prerequisite
   for discovering thematic alignment.
+  The [onboarding/conclusion/key-consumer intake](journal/2026/11.13-onboarding-conclusion-and-key-intake.md)
+  proposes eighteen unchecked rows in existing Fleet, Draft tidier and
+  attribution plans, preserving strict annexes, pilot/credential/custody
+  gates and two canonical keepers. No new operational action or source
+  disposition follows from this five-source proposal.
   The [distinct decision/consumer/transfer intake](journal/2026/11.13-distinct-decisions-and-transfer-intake.md)
   proposes #5956's separately owned architecture decision, #5960's complete
   Phase 2 consumer promises and #6028's inherited custom-force family in
   existing ROOTs. Twenty-three unchecked rows preserve literal alternatives,
   original native credit and all custodians; three canonical keepers remain.
   No source disposition is claimed; 857 whole open is still 128 above target.
+  Subsequent complete current receiving readback after #12496 supports
+  #5960/#6028's separate redundant-tracking retirements, while #5956 remains
+  the distinct architecture canonical. All 23 technical rows remain
+  unchecked; the [post-merge judgment](journal/2026/11.13-distinct-decisions-and-transfer-intake.md#separate-post-merge-receiving-and-tracking-judgments)
+  retains #5683's independent child gate and records 856 whole open,
+  still 127 above target.
   The [named scheduled-configuration intake](journal/2026/11.13-named-scheduled-configuration-intake.md)
   proposes #5941's complete finite execution-time NAME lookup, authorized
   refusal and explicit-file compatibility family in existing Logger planning.
