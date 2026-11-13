@@ -100,6 +100,9 @@ and Phase4's owning fixture/runner/hygiene wave. Preserve the existing
 primary, installer/test/process/GUI/native, audit/cohort/periodic-failure,
 release and resource custodians, OPEN #1303 and #6237/#6747/#7256/#7075
 reservations. Its completed ten-adopter sweep and cache repair stay credited.
+The inherited #6675 registration-authority family retains #6682's exact
+fixture/186-case credit and the existing coordination owner's remaining-group
+coverage request OR attributed accepted narrowing/tracked disposition.
 Normal review, actual complete direct Plan/local AND global Validation/
 Coordination/Journal delivery and permitted whole-current source/receiver/
 custody readback precede any separate administrative judgment. No new
@@ -1499,6 +1502,16 @@ is delivered, not work reopened by these unchecked accounting rows.)_
   Preserve actual installer/subprocess/native/GUI coverage, inventory,
   assertions and current resource/deadline limits. No dropped boundaries,
   skip, timeout growth, CI waiver or new every-native-host programme.
+- [ ] **P5245-7:** Retain the complete inherited #6675 exact-session fixture
+  contract: use the shared configuration/registration-authority fixture,
+  preserve actual registrations and deterministic record ordering, and credit
+  merged #6682's established 186-case related family and exact fast guard.
+  The historical 15-group run stopped in group 11; it does not prove later
+  groups. Obtain the actual requested remaining registration-authority
+  family/remaining-group evidence OR an attributed accepted narrowing/tracked
+  disposition through its existing coordination owner. Do not reopen the
+  delivered fixture fix, waive that request or impose a universal new
+  native/full-plugin qualification requirement.
 - [ ] **V5245-1:** Keep an exact TEN-adopter delivered-versus-spot-check
   ledger and cache/two-cycle credit, naming the actual remaining diagnostic
   tail and custodian rather than reopening the original repairs.
@@ -1510,6 +1523,12 @@ is delivered, not work reopened by these unchecked accounting rows.)_
   launch, current required-unit/periodic and containing Linux release
   evidence separate. Current policy need not preserve every historical
   budget byte-for-byte; no relaxed retry or waiver is authorized.
+- [ ] **V5245-4:** Reconcile the inherited #6675 remaining-family/group
+  request against the already-passing 186-case family and exact real
+  registration/deterministic-order fixture. Record executed, blocked and
+  unexecuted boundaries separately. Later groups are not proved by the failed
+  historical run; any accepted narrowing/disposition is attributable to its
+  existing coordination owner, not inferred as a pass.
 
 ### Finite Logger interpreter, probe and retry fixtures from #7243
 
@@ -1926,8 +1945,10 @@ every-host or release prerequisite is added to a finite family.
 - [ ] **G5245:** Resolve EVERY P5245/local Validation/continuing Coordination
   clause at its original finite scope: completed TEN-adopter sweep and cache
   repair credited, retained bounded diagnostic tail fixed OR explicitly
-  tracked, real controls/assertions/current tiers and limits preserved by
-  the same holders. Tracking intake is not a native full pass, accepted
+  tracked, complete inherited #6675 exact-registration/186-case credit and
+  remaining-family/group evidence OR attributed accepted narrowing retained,
+  real controls/assertions/current tiers and limits preserved by the same
+  holders. Tracking intake is not a native full pass, accepted
   flake, implementation, parent completion or custody/resource release.
 
 ## Proposal
@@ -1938,6 +1959,23 @@ with another unbounded full-suite run. Portfolio reductions follow only after
 the inventory and evidence gates are available.
 
 ## Journal
+
+### 2026-11-12 - Proposed inherited registration-family receiving
+
+Added unchecked P5245-7/V5245-4 and the corresponding actual global G5245
+and continuing Coordination clauses. The current #5245 union includes the
+entire #6675 fixture correction and its remaining-family/group request,
+which were not directly retained by the older hygiene/diagnostic family.
+#6682's real registration, deterministic ordering, 186-case family and exact
+guard remain credited. The failed historical group-11 stop does not prove
+later groups; requested evidence OR attributed accepted narrowing/tracked
+disposition remains with the existing coordination owner.
+
+All incumbent rows, checked credit, participants and source/resource
+reservations remain. This is documentary intake, not a fixture change,
+native/full-suite pass, waiver, implementation appointment, source closure
+or custody transfer. Actual reviewed delivery, current whole receiving and
+source-specific conditions precede any separate administrative judgment.
 
 ### 2026-11-12 - Proposed Manager runtime-source containment intake
 
