@@ -94,6 +94,49 @@ spawn queries use existing task indexes.
 This is bounded source/transport qualification, not an installed/native latency
 measurement or a complete assignment/finalization qualification.
 
+## Original assignment cohort
+
+New protected assignment requests retain an additive `cohort` object with
+schema `dispatch-assignment-cohort`, version `1`, in the same original audit
+row. The existing task-detail `task_obligation.relationship`, exact-event
+query and relationship read expose it; no additional store or endpoint is used.
+The enclosing request supplies the task, generation, worker, workspace,
+reservation and original queue identity.
+
+`emitter` is the matched managed creation receipt: `repo`, `source`,
+`generation`, `request_id`, `producer_id` and `task_id`. It is null without a
+matching coordinator-owned receipt and coherent task producer fence.
+Caller-supplied source labels alone do not identify an emitter. The receipt
+does not contain a producer capability and does not establish that the producer
+is still eligible or that a present-day registration owns the task.
+
+`pool` is the original exact-reservation pool assignment, containing `task_id`,
+`registration_id`, `machine`, `env`, `reservation_key`, `task_generation` and
+`catalog_revision`. A display name, another reservation or the current catalog
+cannot substitute for that assignment. Null means that no such assignment was
+captured, not positive evidence that no pool ever existed.
+
+Capture runs inside the existing assignment transaction. Retries, restarts,
+producer handoff and later catalog/assignment changes read the retained facts,
+not recomputed labels. Historical requests without `cohort` remain unattributed;
+reads never backfill them. This is informational provenance, not permission to
+retire an agent, abandon a task or delete its workspace.
+
+The optional response declares its own schema/version from the executing
+coordinator. Existing request and callback formats are unchanged, and older
+readers may ignore the addition. A provider rollback still reads previously
+retained cohort facts without creating them for new assignments. Consumers
+requiring this evidence must retain an explicit unattributed state when it is
+absent; they must not infer support from package versions.
+Worktrees' original `dispatch_attempt` creation stamp and Bridge session-state
+propagation are not supplied by this slice. The selected in-process
+request-admission callback receives the cohort with the rest of the original
+request; the existing Worktrees reserve/bind wire payload remains unchanged.
+
+Each new protected assignment adds two indexed point reads at most: its task
+pool assignment and its managed producer creation receipt. No new process,
+network request, registrar scan or per-read enrichment is introduced.
+
 ## Protected retained-relationship callback
 
 The existing explicit local/central `claim-status` callbacks also understand
