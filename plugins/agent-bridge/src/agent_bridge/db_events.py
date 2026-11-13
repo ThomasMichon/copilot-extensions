@@ -94,7 +94,28 @@ class _EventsMixin:
         native_admission: KeyedNativePrompt | NativeSendPrompt | None = None,
         runtime_admission: RuntimeAdmission | None = None,
         native_consumer: NativeTurnConsumer | None = None,
+        live_message_id: int | None = None,
     ) -> dict | None:
+        if live_message_id is not None:
+            if any(value is not None for value in (
+                delivery_id, pending_prompt_id, native_admission, runtime_admission, native_consumer,
+            )):
+                raise ValueError("Ordinary inbox delivery cannot acquire lifecycle custody")
+            with self._runtime_transaction(write=True) as conn:
+                message = conn.execute(
+                    "SELECT 1 FROM live_messages WHERE id=? AND session_id=? "
+                    "AND runtime_custody_json IS NULL AND handoff_json IS NOT NULL "
+                    "AND handoff_started_at IS NOT NULL AND consumed_at IS NULL "
+                    "AND kind IN ('prompt','notify','status-check') AND delivery IN ('queue','steer')",
+                    (live_message_id, session_id),
+                ).fetchone()
+                if message is None:
+                    raise ValueError("Original ordinary inbox admission is unavailable")
+                conn.execute(
+                    "INSERT INTO turns (session_id,turn_index,prompt,started_at,live_message_id) "
+                    "VALUES (?,?,?,?,?)", (session_id, turn_index, prompt, now, live_message_id),
+                )
+            return
         custody = admission_document(runtime_admission)
         handoff = None
         if native_consumer is not None:

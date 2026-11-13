@@ -63,6 +63,20 @@ def _draining(
     )
 
 
+@pytest.mark.parametrize("remote", [False, True])
+def test_ordinary_message_post_never_uses_the_connect_grace_to_resend(remote):
+    client = BridgeClient("http://127.0.0.1:0", "tok", connect_grace=30)
+    client.daemon_supports = Mock(return_value=True)
+    with patch("agent_bridge.client.urllib.request.urlopen", side_effect=_draining()) as request:
+        with pytest.raises(BridgeClientError) as refused:
+            if remote:
+                client.send_remote_live_message("peer-host", "worker", sender="peer", message="once")
+            else:
+                client.send_live_message("worker", sender="peer", body="once")
+    assert refused.value.status == 503
+    assert request.call_count == 1
+
+
 class TestConnectGrace:
     def test_default_covers_a_sustained_restart(self) -> None:
         client = BridgeClient("http://127.0.0.1:0", "tok")

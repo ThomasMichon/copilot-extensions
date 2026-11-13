@@ -131,7 +131,9 @@ def producer_id(installation: str, epoch: int, producer: RuntimeProducer) -> str
     return hashlib.sha256(encode([installation, epoch, asdict(producer)]).encode()).hexdigest()
 
 
-def _schema_definitions() -> tuple[dict[str, str], dict[str, tuple[str, str]]]:
+def _schema_definitions(
+    *, compatible_messages: bool = True,
+) -> tuple[dict[str, str], dict[str, tuple[str, str]]]:
     tables = {
         "bridge_runtime_epoch": "CREATE TABLE IF NOT EXISTS bridge_runtime_epoch ("
         "singleton INTEGER PRIMARY KEY CHECK(singleton=1),"
@@ -142,17 +144,35 @@ def _schema_definitions() -> tuple[dict[str, str], dict[str, tuple[str, str]]]:
         "id TEXT PRIMARY KEY, installation TEXT NOT NULL, epoch INTEGER NOT NULL,"
         "producer_json TEXT NOT NULL)",
     }
-    return tables, operation_triggers(("sessions", "turns"))
+    return tables, operation_triggers(("sessions", "turns"), compatible_messages=compatible_messages)
 
 
-def operation_triggers(tables: tuple[str, ...]) -> dict[str, tuple[str, str]]:
+def operation_triggers(
+    tables: tuple[str, ...], *, compatible_messages: bool = False,
+) -> dict[str, tuple[str, str]]:
     """Canonical admission, association and history guards for DB-owned operations."""
     triggers = {}
     for table in tables:
+        closed_guard = ""
+        if compatible_messages and table == "live_messages":
+            closed_guard = (
+                "AND (NEW.runtime_custody_json IS NOT NULL "
+                "OR NEW.kind NOT IN ('prompt','notify','status-check')) "
+            )
+        elif compatible_messages and table == "turns":
+            closed_guard = (
+                "AND NOT (NEW.runtime_custody_json IS NULL AND NEW.live_message_id IS NOT NULL "
+                "AND EXISTS (SELECT 1 FROM live_messages m WHERE m.id=NEW.live_message_id "
+                "AND m.session_id=NEW.session_id AND m.runtime_custody_json IS NULL "
+                "AND m.handoff_json IS NOT NULL AND m.handoff_started_at IS NOT NULL "
+                "AND m.kind IN ('prompt','notify','status-check') "
+                "AND m.delivery IN ('queue','steer'))) "
+            )
         triggers[f"{table}_runtime_admission"] = (table,
             f"CREATE TRIGGER IF NOT EXISTS {table}_runtime_admission "
             f"BEFORE INSERT ON {table} BEGIN "
             "SELECT CASE WHEN EXISTS (SELECT 1 FROM bridge_runtime_epoch WHERE state='closed') "
+            + closed_guard +
             "THEN RAISE(ABORT,'bridge_runtime_admission_closed') END;"
             "SELECT CASE WHEN NEW.runtime_custody_json IS NOT NULL "
             "AND NOT json_valid(NEW.runtime_custody_json) "
@@ -189,15 +209,24 @@ def operation_triggers(tables: tuple[str, ...]) -> dict[str, tuple[str, str]]:
     return triggers
 
 
-def ensure_schema(conn: sqlite3.Connection) -> None:
+def ensure_schema(conn: sqlite3.Connection, *, compatible_messages: bool = True) -> None:
     """Prepare custody storage through the writable schema owner only."""
-    tables, triggers = _schema_definitions()
+    tables, triggers = _schema_definitions(compatible_messages=compatible_messages)
     for statement in tables.values():
         conn.execute(statement)
     for table in ("sessions", "turns"):
         columns = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
         if "runtime_custody_json" not in columns:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN runtime_custody_json TEXT")
+    if compatible_messages:
+        if "live_message_id" not in {
+            row[1] for row in conn.execute("PRAGMA table_info(turns)")
+        }:
+            conn.execute("ALTER TABLE turns ADD COLUMN live_message_id INTEGER")
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_turn_live_message "
+            "ON turns(live_message_id) WHERE live_message_id IS NOT NULL"
+        )
     for _table, statement in triggers.values():
         conn.execute(statement)
 
@@ -206,9 +235,21 @@ def _normalized_schema(statement: str) -> str:
     return " ".join(statement.split()).replace(" IF NOT EXISTS ", " ")
 
 
-def validate_schema(conn: sqlite3.Connection) -> None:
+def validate_schema(conn: sqlite3.Connection, *, compatible_messages: bool = True) -> None:
     """Refuse incomplete custody storage without provisioning or migration."""
-    tables, triggers = _schema_definitions()
+    tables, triggers = _schema_definitions(compatible_messages=compatible_messages)
+    if compatible_messages:
+        column = next(
+            (row for row in conn.execute("PRAGMA table_info(turns)") if row[1] == "live_message_id"),
+            None,
+        )
+        indexes = {row[1]: row for row in conn.execute("PRAGMA index_list(turns)")}
+        index = indexes.get("idx_turn_live_message")
+        if (column is None or column[2].upper() != "INTEGER" or column[3] != 0
+                or index is None or index[2] != 1
+                or [row[2] for row in conn.execute("PRAGMA index_info(idx_turn_live_message)")]
+                != ["live_message_id"]):
+            raise RuntimeCustodyError("Ordinary inbox turn receipts require writable preparation")
     expected = {
         name: ("table", name, statement) for name, statement in tables.items()
     }
@@ -240,3 +281,18 @@ def validate_schema(conn: sqlite3.Connection) -> None:
             raise RuntimeCustodyError(
                 f"Runtime custody schema requires supported writable preparation: {name}"
             )
+
+
+def migrate_compatible_turns(conn: sqlite3.Connection) -> None:
+    """Keep lifecycle guards; permit only an original ordinary-inbox turn."""
+    validate_schema(conn, compatible_messages=False)
+    if "live_message_id" not in {row[1] for row in conn.execute("PRAGMA table_info(turns)")}:
+        conn.execute("ALTER TABLE turns ADD COLUMN live_message_id INTEGER")
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_turn_live_message "
+        "ON turns(live_message_id) WHERE live_message_id IS NOT NULL"
+    )
+    name = "turns_runtime_admission"
+    conn.execute(f"DROP TRIGGER {name}")
+    conn.execute(_schema_definitions()[1][name][1])
+    validate_schema(conn)

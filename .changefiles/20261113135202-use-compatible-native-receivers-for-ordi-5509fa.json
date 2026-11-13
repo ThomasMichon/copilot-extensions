@@ -1,0 +1,9 @@
+{
+  "comment": "Use compatible native receivers for ordinary messaging without installation or process-provenance admission.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

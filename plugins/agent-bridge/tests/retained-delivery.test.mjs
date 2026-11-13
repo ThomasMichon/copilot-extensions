@@ -46,26 +46,19 @@ function fixture() {
       f.frontendReady = true;
       result = { contract, binding, expected_incarnation: f.current?.incarnation ?? null };
     } else if (path === `${prefix}/enroll`) {
-      if (f.current?.incarnation === body.consumer.incarnation) {
-        assert.deepEqual(body, f.enrolledRequest);
-      } else {
-        assert.equal(body.expected_incarnation, f.current?.incarnation ?? null);
-        f.current = clone(body.consumer);
-        f.enrolledRequest = clone(body);
-      }
-      result = { contract, binding, expected_incarnation: body.expected_incarnation };
+      f.current = clone(body.consumer);
+      f.enrolledRequest = clone(body);
+      result = { contract, binding: body.binding, expected_incarnation: body.expected_incarnation };
     } else if (path === `${prefix}/poll`) {
       assert.equal(body.limit, 1);
       assert.deepEqual(body.consumer, f.current);
-      assert.deepEqual(body.binding, binding);
       const row = f.rows.find((r) => r.handoff_stage !== "consumed");
       if (row && !row.handoff_id) {
         row.handoff_id = `handoff-${row.id}`;
         row.consumer = clone(body.consumer);
         row.handoff_stage = "offered";
       }
-      if (row) assert.deepEqual(row.consumer, body.consumer);
-      result = { contract, binding, consumer: body.consumer, messages: row ? [clone(row)] : [] };
+      result = { contract, binding: body.binding, consumer: body.consumer, messages: row ? [clone(row)] : [] };
     } else if (path === `${prefix}/begin`) {
       if (f.closed) throw new Error("epoch closed");
       const row = f.rows.find((r) => r.id === body.message_id);
@@ -140,16 +133,27 @@ test("driver consumption requires explicit source selection and still binds the 
   assert.equal(f.sends.length, 1);
 });
 
-test("selected retained mode refuses old or malformed protocol without a legacy request", async () => {
+test("compatible endpoints work independently of an installation's advertised generation", async () => {
   for (const version of [undefined, 49, "50", null]) {
     const f = fixture();
     f.version = version;
     f.add();
     await f.consumer().tick(sid);
-    assert.deepEqual(f.calls.map((c) => c.path), ["/health"]);
-    assert.equal(f.sends.length, 0);
-    assert.match(f.logs.join("\n"), /protocol/);
+    assert.equal(f.calls.some((c) => c.path === "/health"), false);
+    assert.equal(f.sends.length, 1, f.logs.join("\n"));
   }
+});
+
+test("an unsupported endpoint contract refuses without SDK delivery or a legacy downgrade", async () => {
+  const f = fixture();
+  f.add();
+  f.after = async (_method, path, _body, result) => {
+    if (path.endsWith("/negotiate")) result.contract = "unsupported-inbox";
+  };
+  await f.consumer().tick(sid);
+  assert.equal(f.sends.length, 0);
+  assert.equal(f.calls.some((call) => call.path.includes("/messages")), false);
+  assert.match(f.logs.join("\n"), /negotiation/);
 });
 
 test("portable consumer declares its attempt only after explicit provider qualification", async () => {
@@ -367,7 +371,7 @@ test("lost consumed reply is recovered without another SDK call", async () => {
   assert.equal(f.sends.length, 1);
 });
 
-test("retired offered handoffs remain blocked; reload cannot begin or resend them", async () => {
+test("a receiver reload can finish an offered handoff using its original receipt identity", async () => {
   const f = fixture();
   f.add();
   f.after = async (_method, path) => {
@@ -377,9 +381,9 @@ test("retired offered handoffs remain blocked; reload cannot begin or resend the
   f.after = null;
   await f.consumer("reloaded").tick(sid);
   assert.equal(f.rows[0].consumer.incarnation, "consumer-a");
-  assert.equal(f.rows[0].handoff_stage, "offered");
-  assert.equal(f.sends.length, 0);
-  assert.ok(f.logs.some((line) => /original|retired/.test(line)));
+  assert.equal(f.rows[0].handoff_stage, "sdk_accepted");
+  assert.equal(f.sends.length, 1, f.logs.join("\n"));
+  assert.match(f.sends[0].prompt, /retained-consumer="consumer-a"/);
 });
 
 test("lost acceptance report reply is read back through its original receipt", async () => {
@@ -493,7 +497,7 @@ test("timed-out SDK invocation stays fenced until it settles, without starting a
   assert.equal(f.sends.length, 1);
 });
 
-test("frontend restart reestablishes negotiation without changing the original enrollment CAS", async () => {
+test("frontend restart refreshes advisory enrollment without changing the receiver or message", async () => {
   const f = fixture();
   const consumer = f.consumer();
   await consumer.tick(sid);
@@ -505,10 +509,10 @@ test("frontend restart reestablishes negotiation without changing the original e
   f.clock += 30_000;
   await consumer.tick(sid);
   assert.equal(f.sends.length, 1);
-  assert.deepEqual(f.enrolledRequest, original);
+  assert.deepEqual(f.enrolledRequest.consumer, original.consumer);
   const enrollments = f.calls.filter((call) => call.path.endsWith("/enroll"));
   assert.equal(enrollments.length, 2);
-  assert.deepEqual(enrollments[1].body, enrollments[0].body);
+  assert.deepEqual(enrollments[1].body.consumer, enrollments[0].body.consumer);
   assert.equal(f.calls.filter((call) => call.path.endsWith("/negotiate")).length, 2);
 });
 
@@ -538,7 +542,7 @@ test("recovery pagination reaches later receipts despite older unknowns and the 
   assert.equal(f.sends.length, 1);
 });
 
-test("frontend restart after a lost enrollment reply still recovers the original CAS", async () => {
+test("frontend restart after a lost enrollment reply still begins the original message only once", async () => {
   const f = fixture();
   f.add();
   const consumer = f.consumer();
@@ -557,11 +561,20 @@ test("frontend restart after a lost enrollment reply still recovers the original
     await consumer.tick(sid);
   }
   assert.equal(f.sends.length, 1);
-  assert.deepEqual(f.enrolledRequest, original);
+  assert.deepEqual(f.enrolledRequest.consumer, original.consumer);
   assert.equal(f.calls.filter((call) => call.path.endsWith("/begin")).length, 1);
 });
 
-test("frontend recovery refuses a changed binding or another current consumer", async () => {
+test("missing process birth or PID observations do not prevent compatible native delivery", async () => {
+  const f = fixture();
+  f.add();
+  await f.consumer("receiver", { processIdentity: undefined }).tick(sid);
+  assert.equal(f.sends.length, 1, f.logs.join("\n"));
+  assert.equal(f.current.pid, null);
+  assert.equal(f.current.process_started_at, null);
+});
+
+test("frontend recovery retains the message across changed provenance observations", async () => {
   for (const problem of ["binding", "consumer"]) {
     const f = fixture();
     const consumer = f.consumer();
@@ -577,8 +590,7 @@ test("frontend recovery refuses a changed binding or another current consumer", 
     };
     f.clock += 30_000;
     await consumer.tick(sid);
-    assert.equal(f.sends.length, 0);
-    assert.equal(f.calls.filter((call) => call.path.endsWith("/enroll")).length, 1);
-    assert.match(f.logs.join("\n"), /original binding or consumer/);
+    assert.equal(f.sends.length, 1, f.logs.join("\n"));
+    assert.equal(f.calls.filter((call) => call.path.endsWith("/enroll")).length, 2);
   }
 });

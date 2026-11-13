@@ -78,6 +78,12 @@ class _SessionsMixin:
                 (status, now, session_id),
                 membership=True,
             )
+        if status not in ("idle", "running"):
+            self.execute_write(
+                "UPDATE live_sessions SET status='expired', updated_at=? "
+                "WHERE session_id=? AND role='acp'", (now, session_id),
+                membership=True,
+            )
 
     def update_session_stopped(
         self, session_id: str, now: float, background_recovery_enabled: bool,
@@ -108,6 +114,10 @@ class _SessionsMixin:
                 ).fetchone()
                 if row is None:
                     raise KeyError(session_id)
+                conn.execute(
+                    "UPDATE live_sessions SET status='expired', updated_at=? "
+                    "WHERE session_id=? AND role='acp'", (now, session_id),
+                )
                 conn.commit()
                 return bool(row["background_recovery_enabled"])
             except BaseException:

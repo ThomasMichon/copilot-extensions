@@ -8,7 +8,7 @@ import pytest
 
 from agent_bridge.live_inbox_runtime import LiveInboxRuntime
 from test_live_inbox_producer import PAYLOAD
-from test_live_inbox_runtime import enroll, installation as installation, serving as serving
+from test_live_inbox_runtime import close_epoch, enroll, installation as installation, serving as serving
 
 
 @pytest.fixture
@@ -53,22 +53,18 @@ def test_active_alias_retains_original_receipt_and_rejects_successor_recovery(re
 
 
 @pytest.mark.parametrize("frontend", ["serving", "missing", "closed"])
-def test_active_alias_never_downgrades_original_enrollment_to_legacy(renamed, frontend) -> None:
+def test_active_alias_routes_new_work_without_retargeting_an_original_receipt(renamed, frontend) -> None:
     (app, client, db, _), url, _, original = renamed
     if frontend == "missing":
         app.state.live_inbox_runtime = LiveInboxRuntime()
     elif frontend == "closed":
-        owner = app.state.loop_governance.runtime_installation(db)
-        db.close_runtime_epoch(
-            owner, db.runtime_epoch(owner), transition_id="transition-a",
-            target_assembly="target-a", predecessor=app.state.live_inbox_runtime._producer,
-        )
-    rejected = client.post(url, json={**PAYLOAD, "idempotency_key": "new-operation"})
-    assert rejected.status_code == 409, rejected.text
-    assert rejected.json()["detail"]["code"] == "retained_inbox_refused"
-    assert len(db.execute_read("SELECT * FROM live_messages")) == 1
-    assert dict(db.execute_read("SELECT * FROM live_messages")[0]) == original
-    assert db.list_pending_live_messages("native-b") == []
+        close_epoch(app, db)
+    admitted = client.post(url, json={**PAYLOAD, "idempotency_key": "new-operation"})
+    assert admitted.status_code == 200, admitted.text
+    assert admitted.json()["session_id"] == "native-b"
+    assert len(db.execute_read("SELECT * FROM live_messages")) == 2
+    assert dict(db.execute_read("SELECT * FROM live_messages ORDER BY id")[0]) == original
+    assert len(db.list_pending_live_messages("native-b")) == 1
     for kind in ("control:set-mode", "startup:prompt:1"):
         mid, reason = db.enqueue_live_message_if_fresh(
             "native-a", sender="sender", body="unsupported", kind=kind, now=time.time(),

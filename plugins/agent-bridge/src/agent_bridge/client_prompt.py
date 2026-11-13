@@ -19,6 +19,7 @@ class PromptClientMixin(_Base):
         queue: bool = False,
         caller_id: str | None = None,
         request_timeout: float | None = None,
+        no_resume: bool = False,
     ) -> dict[str, Any]:
         """POST /api/v1/sessions/{id}/turns.
 
@@ -31,6 +32,13 @@ class PromptClientMixin(_Base):
         from .startup_observation import StartupObservationError, current
 
         payload: dict[str, Any] = {"prompt": prompt}
+        request = self._request
+        if no_resume:
+            from .client_protocol_floor import protocol_floored_request
+            from .protocol import COOPERATIVE_STOP_PROTOCOL_VERSION
+
+            request = protocol_floored_request(self, COOPERATIVE_STOP_PROTOCOL_VERSION)
+            payload["no_resume"] = True
         if queue:
             payload["queue"] = True
             if caller_id:
@@ -68,7 +76,7 @@ class PromptClientMixin(_Base):
                 expired_clock, "prompt-admission", observation.clock.elapsed,
                 reason="admission_unknown",
             ) from failure
-        return self._request(
+        return request(
             "POST",
             f"/api/v1/sessions/{session_id}/turns",
             payload,

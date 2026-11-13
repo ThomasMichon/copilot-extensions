@@ -161,17 +161,97 @@ def test_combined_reply_or_startup_wait_is_refused_before_admission(delivery_api
     assert not tmp_db.list_pending_live_messages("live-1")
 
 
-def test_current_client_refuses_unsupported_provider_before_send():
+def test_current_client_retains_admission_when_provider_has_no_observer():
     class OldProvider:
         _base = "http://example.invalid"
+
+        def __init__(self):
+            self.sends = []
+
+        def send_live_message(self, session_id, **message):
+            self.sends.append((session_id, message))
+            return {"ok": True, "session_id": session_id, "message_id": 17,
+                    "receipt": {"session_id": session_id, "message_id": 17, "stage": "admitted"}}
 
         def _request(self, *args, **kwargs):
             if args[:2] == ("GET", "/health"):
                 return {"protocol_version": 52, "capabilities": {}}
-            pytest.fail("unsupported provider received an effect")
+            pytest.fail("unsupported provider received an observation request")
 
-    with pytest.raises(BridgeClientError, match="request was not sent"):
-        send_and_wait(OldProvider(), "live-1", timeout=1, sender="peer", body="update")
+    client = OldProvider()
+    result = send_and_wait(client, "live-1", timeout=1, sender="peer", body="update")
+    assert len(client.sends) == 1
+    assert result["ok"] and result["message_id"] == 17
+    assert result["receipt"]["stage"] == "admitted"
+    assert result["delivery_observation"]["outcome"] == "unavailable"
+    assert result["receipt_current"] is False
+
+
+@pytest.mark.parametrize("observation", [
+    None, [], {"receipt": []}, {"receipt": {"session_id": "other", "message_id": 17}},
+    {"receipt": {"session_id": "live-1", "message_id": 18}},
+    {"receipt": {"session_id": "live-1", "message_id": 17}, "outcome": "consumed", "attention": None},
+    {"receipt": {"session_id": "live-1", "message_id": 17}, "outcome": "new-unsupported-state"},
+])
+def test_malformed_observation_keeps_original_admission(monkeypatch, observation):
+    from agent_bridge import live_delivery_client
+
+    admission = {"ok": True, "session_id": "live-1", "message_id": 17,
+                 "receipt": {"session_id": "live-1", "message_id": 17, "stage": "admitted"}}
+    monkeypatch.setattr(live_delivery_client, "observe", lambda *_a, **_kw: observation)
+    result = live_delivery_client.wait_for_receipt(object(), admission, timeout=0)
+    assert result["ok"] and result["message_id"] == 17
+    assert result["receipt"]["stage"] == "admitted"
+    assert result["delivery_observation"]["outcome"] == "unavailable"
+    assert result["receipt_current"] is False
+
+
+def test_remote_wait_uses_original_receipt_without_resending():
+    class RemoteProvider:
+        def __init__(self):
+            self.requests = []
+
+        def _remote_path(self, machine, path):
+            assert machine == "peer-host"
+            return "/remote" + path
+
+        def _request(self, method, path, body, **kwargs):
+            self.requests.append((method, path, body, kwargs))
+            return {"receipt": {"session_id": "live-1", "message_id": 17, "stage": "consumed"},
+                    "outcome": "consumed",
+                    "attention": {"availability": "unavailable", "state": "unknown", "reasons": []}}
+
+    from agent_bridge.live_delivery_client import wait_for_receipt
+
+    client = RemoteProvider()
+    result = wait_for_receipt(
+        client, {"ok": True, "session_id": "live-1", "message_id": 17},
+        timeout=1, machine="peer-host",
+    )
+    assert result["receipt"]["stage"] == "consumed"
+    assert len(client.requests) == 1
+    assert client.requests[0][:3] == (
+        "POST", "/remote/live-sessions/live-1/messages/17/delivery", {"timeout": 1.0},
+    )
+
+
+@pytest.mark.parametrize("failure", ["http", "encoding", "connection"])
+def test_observer_failure_after_send_is_unavailable_not_refused(monkeypatch, failure):
+    from http.client import RemoteDisconnected
+    from agent_bridge import live_delivery_client
+
+    errors = {"http": RemoteDisconnected("observer disconnected"),
+              "encoding": UnicodeError("invalid observer response"),
+              "connection": ConnectionError("observer unavailable")}
+
+    def observe(*_args, **_kwargs):
+        raise errors[failure]
+
+    monkeypatch.setattr(live_delivery_client, "observe", observe)
+    admission = {"ok": True, "session_id": "live-1", "message_id": 17}
+    result = live_delivery_client.wait_for_receipt(object(), admission, timeout=0)
+    assert result["ok"] and result["message_id"] == 17
+    assert result["delivery_observation"]["outcome"] == "unavailable"
 
 
 @pytest.mark.parametrize("value", ["nan", "-1", "601"])

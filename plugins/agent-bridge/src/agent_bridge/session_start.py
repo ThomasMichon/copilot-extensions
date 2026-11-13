@@ -803,6 +803,13 @@ class _SessionStartMixin:
             self._db.update_session_status(
                 session_id, SessionStatus.IDLE.value, time.time(), pid=session.pid
             )
+            from .acp_inbox import register
+
+            try:
+                register(self, session)
+            except Exception:
+                log.warning("ACP inbox registration failed for %s", session_id, exc_info=True)
+                session.event_log.append("inbox_unavailable", {"reason": "receiver_registration_failed"})
             session.event_log.append("session_state_changed", {
                 "status": SessionStatus.IDLE.value,
                 "acp_session_id": acp_sid,

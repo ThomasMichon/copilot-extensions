@@ -50,14 +50,8 @@ class StatusRuntime:
         selected = StatusStore(state.db)
         pending = selected.pending()
         if pending:
-            admission = None
-            refusal = None
-            try:
-                admission = state.live_inbox_runtime.producer_admission(state.db, state.loop_governance)
-            except (RuntimeCustodyError, AttributeError):
-                refusal = "Current retained inbox frontend is unavailable"
             for sub in pending:
-                deliver_notice(state.db, sub["id"], admission=admission, refusal=refusal)
+                deliver_notice(state.db, sub["id"], admission=None, refusal=None)
         # Silence is an observation, never an instruction to cancel/recreate.
         from .routes.live_sessions import _live_liveness
         from .db_core import live_session_is_fresh

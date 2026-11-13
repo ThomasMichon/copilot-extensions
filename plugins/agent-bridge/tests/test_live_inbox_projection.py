@@ -7,7 +7,6 @@ import json
 
 import pytest
 
-from agent_bridge.runtime_custody import RuntimeCustodyError
 from test_inbox_custody import inbox as inbox
 
 
@@ -83,13 +82,8 @@ def test_ordinary_admission_is_bounded_by_consumer_history_indexes(
                 idempotency_key="new-operation", enrolled_inbox=True, runtime_admission=admission,
             )
 
-        if target == "retired":
-            with pytest.raises(RuntimeCustodyError, match="current frontend and consumer enrollment"):
-                send()
-            assert db.execute_read("SELECT * FROM live_messages") == []
-        else:
-            mid, reason = send()
-            assert mid is not None and reason is None
+        mid, reason = send()
+        assert mid is not None and reason is None
     finally:
         conn.set_progress_handler(None, 0)
     assert len(ticks) * 100 <= 10_000
@@ -133,17 +127,13 @@ def test_admission_indexes_retained_history_without_reclassifying_legacy(
                 idempotency_key="new-operation", enrolled_inbox=True, runtime_admission=admission,
             )
 
-        if retained:
-            with pytest.raises(RuntimeCustodyError, match="current frontend and consumer enrollment"):
-                send()
-        else:
-            mid, reason = send()
-            assert mid is not None and reason is None
+        mid, reason = send()
+        assert mid is not None and reason is None
     finally:
         conn.set_progress_handler(None, 0)
     assert len(ticks) * 100 <= 10_000
     stored, = db.execute_read("SELECT * FROM live_messages WHERE id=?", (mid,))
     if retained:
-        assert dict(stored) == original
-    else:
-        assert stored["runtime_custody_json"] is None and stored["handoff_json"] is None
+        prior, = db.execute_read("SELECT * FROM live_messages WHERE id=?", (original["id"],))
+        assert dict(prior) == original
+    assert stored["runtime_custody_json"] is None and stored["handoff_json"] is None

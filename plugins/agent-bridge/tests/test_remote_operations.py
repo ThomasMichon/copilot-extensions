@@ -152,6 +152,52 @@ def test_continuity_id_is_normalized_and_safe() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["disconnect", "timeout"])
+async def test_message_carrier_loss_is_unknown_and_never_automatically_replayed(failure):
+    carrier = SimpleNamespace(
+        request=AsyncMock(side_effect=(
+            CarrierUnavailable("response lost", reconnectable=True)
+            if failure == "disconnect" else TimeoutError()
+        )),
+        ensure_started=AsyncMock(),
+    )
+    lease = SimpleNamespace(carrier=carrier, release=AsyncMock())
+    service = RemoteOperationService(SimpleNamespace())
+    service._lease = AsyncMock(return_value=lease)
+    with pytest.raises(RemoteBridgeError) as unknown:
+        await service.send_live_message(
+            "peer-host", "worker", sender="peer", message="once", kind="prompt",
+        )
+    assert unknown.value.code == "send_outcome_unknown" and not unknown.value.reconnectable
+    carrier.request.assert_awaited_once()
+    carrier.ensure_started.assert_not_awaited()
+    lease.release.assert_awaited_once()
+
+
+def test_project_routes_keep_send_and_receipt_on_the_same_existing_owner():
+    from fastapi import FastAPI
+    from agent_bridge.routes import remote
+
+    service = SimpleNamespace(
+        send_live_message=AsyncMock(return_value={"session_id": "receiver", "message_id": 17}),
+        observe_live_delivery=AsyncMock(return_value={"outcome": "timeout"}),
+    )
+    app = FastAPI()
+    app.state.remote_operations = service
+    app.include_router(remote.router)
+    with TestClient(app) as api:
+        sent = api.post("/api/v1/remote/peer-host/projects/example-repo/live-sessions/worker/messages",
+                        json={"sender": "peer", "message": "once"})
+        observed = api.post(
+            "/api/v1/remote/peer-host/projects/example-repo/live-sessions/receiver/messages/17/delivery",
+            json={"timeout": 0},
+        )
+    assert sent.status_code == observed.status_code == 200
+    assert service.send_live_message.await_args.kwargs["project"] == "example-repo"
+    assert service.observe_live_delivery.await_args.kwargs["project"] == "example-repo"
+
+
+@pytest.mark.asyncio
 async def test_unsupported_version_fails_before_client_resolution() -> None:
     calls = 0
 

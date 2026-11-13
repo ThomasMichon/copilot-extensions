@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 
 from agent_bridge.db import Database
 from test_live_inbox_runtime import (
-    PREFIX, attempt, enroll, message, poll, report, serving as serving,
+    PREFIX, attempt, close_epoch, enroll, message, poll, report, serving as serving,
 )
 from test_loop_governance_custody import installation as installation
 
@@ -22,12 +22,7 @@ def test_recovery_reads_original_receipt_after_reload_closure_and_passive_reopen
     row = poll(client, body)
     assert client.post(PREFIX + "/begin", json=attempt(body, row)).json()["begin"]
     enroll(client, replace(consumer, incarnation="successor"))
-    owner = app.state.loop_governance.runtime_installation(db)
-    runtime = app.state.live_inbox_runtime
-    db.close_runtime_epoch(
-        owner, db.runtime_epoch(owner), transition_id="closed",
-        target_assembly="retained", predecessor=runtime._producer,
-    )
+    close_epoch(app, db)
     db.deregister_live_session(consumer.session_id)
     passive = Database(db.db_path, read_only=True)
     app.state.db = passive
@@ -35,7 +30,7 @@ def test_recovery_reads_original_receipt_after_reload_closure_and_passive_reopen
     app.state.session_manager = SimpleNamespace(is_draining=True)
     app.state.live_inbox_runtime = None
     app.state.loop_governance = None
-    before = db.runtime_epoch(owner)
+    before = [dict(row) for row in db.execute_read("SELECT * FROM bridge_runtime_epoch")]
     try:
         response = client.get(PREFIX + f"/recovery/{mid}")
         assert response.status_code == 200, response.text
@@ -47,7 +42,7 @@ def test_recovery_reads_original_receipt_after_reload_closure_and_passive_reopen
         assert page.status_code == 200, page.text
         assert page.json()["messages"] == [receipt]
         assert "original body" not in page.text
-        assert db.runtime_epoch(owner) == before
+        assert [dict(row) for row in db.execute_read("SELECT * FROM bridge_runtime_epoch")] == before
         # Unextended receipt shape stays byte-for-byte compatible.
         legacy = client.get(f"/api/v1/live-sessions/native-a/messages/{mid}/receipt").json()
         assert set(legacy) == {

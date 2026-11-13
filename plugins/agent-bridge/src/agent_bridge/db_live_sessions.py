@@ -500,7 +500,8 @@ class _LiveSessionsMixin(LiveControlsMixin):
             "SELECT ?, ?, ?, ? "
             "WHERE NOT EXISTS ("
             "  SELECT 1 FROM live_sessions "
-            "  WHERE worktree_id = ? AND status = 'live' AND updated_at >= ?"
+            "  WHERE worktree_id = ? AND status = 'live' AND updated_at >= ? "
+            "    AND NOT (role IS 'acp' AND session_id=?)"
             ") "
             "ON CONFLICT(worktree_id) DO UPDATE SET "
             "session_id=excluded.session_id, updated_at=excluded.updated_at "
@@ -513,10 +514,11 @@ class _LiveSessionsMixin(LiveControlsMixin):
             "    )"
             "  ) AND NOT EXISTS ("
             "    SELECT 1 FROM live_sessions "
-            "    WHERE worktree_id = ? AND status = 'live' AND updated_at >= ?"
+            "    WHERE worktree_id = ? AND status = 'live' AND updated_at >= ? "
+            "      AND NOT (role IS 'acp' AND session_id=?)"
             "  )",
             (worktree_id, session_id, now, now,
-             worktree_id, cutoff, worktree_id, cutoff),
+             worktree_id, cutoff, session_id, worktree_id, cutoff, session_id),
         )
         if cur.rowcount == 1:
             return True
@@ -656,7 +658,7 @@ class _LiveSessionsMixin(LiveControlsMixin):
         return [
             r
             for r in self.list_live_sessions(worktree_id)
-            if live_session_is_fresh(r, now, stale_seconds)
+            if r.get("role") != "acp" and live_session_is_fresh(r, now, stale_seconds)
         ]
 
     def resolve_live_session(

@@ -14,6 +14,7 @@ const source = readFileSync(new URL("../extensions/agent-bridge/extension.mjs", 
 
 async function load(selected, version = 50, {
   exact = false, nativeId = "native-a", driver = false, headed = false, headedRefused = false,
+  incompatible = false,
 } = {}) {
   const calls = [], sends = [], logs = [], timers = [], handlers = [], driverSends = [], headedSends = [];
   const shutdowns = new Map();
@@ -36,7 +37,7 @@ async function load(selected, version = 50, {
     if (route === "/health") result = { protocol_version: version };
     else if (route.includes("/recovery?")) result = { messages: [], next_after: null };
     else if (route.endsWith("/negotiate")) result = {
-      contract: "retained-inbox-v1", binding, expected_incarnation: null,
+      contract: incompatible ? "unsupported-inbox" : "retained-inbox-v1", binding, expected_incarnation: null,
     };
     else if (route.endsWith("/enroll")) {
       consumer = body.consumer;
@@ -118,10 +119,13 @@ async function load(selected, version = 50, {
     }) },
     "./metadata.mjs": {
       processIdentity: () => ({ pid: 102, process_started_at: 1 }),
+      resolveMachineAsync: async () => "synthetic",
       resolveMetadataAsync: async () => ({ machine: "synthetic", cwd: process.cwd() }),
       metadataRefresher: () => async () => false,
+      refreshRegistrationMetadata: async (state) => state.meta,
       registrationMetadata: (meta) => meta,
     },
+    "./machine-context.mjs": { machineLookup: () => async () => "synthetic" },
   };
   context.__dependencies = dependencies;
   // Stable VM scripts avoid the Node 22 experimental-module SIGSEGV. Only
@@ -179,43 +183,45 @@ test("actual selected extension exclusively wires retained delivery off the even
   assert.equal(f.calls.length, count);
 });
 
-test("actual selected extension holds on old protocol instead of silently downgrading", async () => {
-  const f = await load("1", 49);
+test("actual selected extension refuses an unsupported receiving contract", async () => {
+  const f = await load("1", 49, { incompatible: true });
   assert.equal(f.sends.length, 0);
   assert.equal(f.calls.some((call) => /\/messages|\/controls|\/enroll/.test(call.route)), false);
-  assert.ok(f.logs.some((line) => line.includes("protocol 50")));
+  assert.ok(f.logs.some((line) => line.includes("negotiation")));
 });
 
-test("launch-selected driver cannot fall through to legacy native delivery or controls", async () => {
+test("driver launches receive through the compatible native API without a launch binding", async () => {
   const f = await load("0", 50, { driver: true });
-  assert.equal(f.sends.length, 0);
-  assert.equal(f.driverSends.length, 1);
+  assert.equal(f.sends.length, 1);
+  assert.equal(f.driverSends.length, 0);
   assert.equal(f.calls.some((call) => /\/messages|\/controls/.test(call.route)), false);
   const old = await load("0", 49, { driver: true });
-  assert.equal(old.sends.length, 0);
+  assert.equal(old.sends.length, 1);
   assert.equal(old.driverSends.length, 0);
-  assert.equal(old.calls.some((call) => /\/messages|\/controls|\/enroll/.test(call.route)), false);
+  assert.ok(old.calls.some((call) => call.route.endsWith("/enroll")));
 });
 
-test("the actual extension selects launch-bound common delivery ahead of both legacy paths", async () => {
+test("headed launches retain receipts without making launch provenance a send prerequisite", async () => {
   for (const driver of [false, true]) {
     const f = await load("0", 50, { headed: true, driver });
-    assert.equal(f.sends.length, 0);
+    assert.equal(f.sends.length, 1);
     assert.equal(f.driverSends.length, 0);
-    assert.equal(f.headedSends.length, 1);
-    assert.match(f.headedSends[0].prompt, /retained-handoff="handoff-a"/);
-    assert.equal(f.headedSends[0].mode, "immediate");
+    assert.equal(f.headedSends.length, 0);
+    assert.match(f.sends[0].prompt, /retained-handoff="handoff-a"/);
+    assert.equal(f.sends[0].mode, "immediate");
     assert.equal(f.calls.some((call) => /\/messages|\/controls/.test(call.route)), false);
     f.shutdowns.get("SIGTERM")();
-    assert.equal(f.closed(), 1);
+    assert.equal(f.closed(), 0);
   }
 });
 
-test("an unavailable selected headed client never falls through to the SDK or old driver", async () => {
-  await assert.rejects(load("0", 50, { headed: true, headedRefused: true }), /selected headed client unavailable/);
+test("unavailable optional headed bindings do not prevent registration or ordinary SDK delivery", async () => {
+  const f = await load("0", 50, { headed: true, headedRefused: true });
+  assert.equal(f.sends.length, 1);
+  assert.ok(f.calls.some((call) => call.route === "/api/v1/live-sessions"));
   const old = await load("0", 49, { headed: true });
-  assert.equal(old.sends.length, 0);
+  assert.equal(old.sends.length, 1);
   assert.equal(old.driverSends.length, 0);
   assert.equal(old.headedSends.length, 0);
-  assert.equal(old.calls.some((call) => /\/messages|\/controls|\/enroll/.test(call.route)), false);
+  assert.ok(old.calls.some((call) => call.route.endsWith("/enroll")));
 });

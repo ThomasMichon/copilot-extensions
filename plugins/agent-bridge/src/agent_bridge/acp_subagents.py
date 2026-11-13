@@ -95,6 +95,7 @@ BG_TASK_INACTIVE_STATUSES = frozenset(
 COPILOT_META_KEY = "github.com/copilot"
 COPILOT_SESSION_EVENT_METHOD = "github.com/copilot/sessionEvent"
 SUBAGENT_EVENT_TYPES: tuple[str, ...] = (
+    "user.message",
     "subagent.started",
     "subagent.completed",
     "subagent.failed",
@@ -352,7 +353,12 @@ class SubagentAttribution:
 
         if agent_id is not None and parent is None:
             parent = self.subagents.get(agent_id)
-        if event_type == "tool.execution_start":
+        if event_type == "user.message":
+            if agent_id is None and not data.get("agentId") and parent is None:
+                content = data.get("transformedContent") or data.get("content")
+                if isinstance(content, str):
+                    self._emit("root_user_message", {"content": content})
+        elif event_type == "tool.execution_start":
             tool_call_id = _str_or_none(data.get("toolCallId"))
             if agent_id is not None and tool_call_id:
                 self._remember(self.tool_call_agents, tool_call_id, (agent_id, parent))

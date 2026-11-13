@@ -221,47 +221,41 @@ class _PromptClient:
     def resolve_live_session(self, _handle):
         return None
 
-    def submit_prompt(self, session_id, prompt, **_kw):
-        return dict(self._result)
+    def get_session(self, target):
+        return {"session_id": "s-1", "status": "idle"}
+
+    def send_live_message(self, session_id, **_kw):
+        return {"ok": True, "session_id": session_id, "message_id": 17,
+                "duplicate": False, **self._result}
+
+    def submit_prompt(self, *_a, **_kw):
+        pytest.fail("ordinary messages must use the coordinator inbox")
+
+    def resume_session(self, *_a, **_kw):
+        pytest.fail("ordinary messages must not resume a target")
 
 
-@pytest.mark.parametrize("result,outcome", [
-    ({"turn_index": 3}, "delivered"), ({"queued": True, "queue_id": 4, "position": 1}, "queued")])
-def test_prompt_path_outcomes_and_stdout_is_only_json(monkeypatch, capsys, result, outcome):
-    def resolve(_client, _target, force=False, caller_id=None):
-        print("[>] Resuming stopped session s-1...")  # progress text must not reach stdout
-        return "s-1"
-
-    monkeypatch.setattr(m, "_resolve_target", resolve)
-    monkeypatch.setattr(m, "_caller_id_for", lambda _a: "caller")
-    monkeypatch.setattr(m, "_connection_identity", lambda _c, sid: {"session_id": sid})
-    monkeypatch.setattr(stc, "_mark_resume_if_behind", lambda *a, **k: False)
-    code, out, err = _run(monkeypatch, capsys, _PromptClient(result), queue=outcome == "queued")
-    assert code == 0 and out["outcome"] == outcome and out["session_id"] == "s-1"
-    assert "Resuming stopped session" in err
-
-
-@pytest.mark.parametrize("queued", [False, True])
-def test_a_prompt_that_handed_off_reports_the_successor_throughout(monkeypatch, capsys, queued):
-    result = {"queued": True, "queue_id": 4, "position": 1} if queued else {"turn_index": 0}
-    monkeypatch.setattr(m, "_resolve_target", lambda *a, **k: "s-1")
-    monkeypatch.setattr(m, "_caller_id_for", lambda _a: "caller")
-    monkeypatch.setattr(m, "_connection_identity", lambda _c, sid: {"session_id": sid})
-    monkeypatch.setattr(stc, "_mark_resume_if_behind", lambda *a, **k: False)
-    code, out, _ = _run(monkeypatch, capsys, _PromptClient({**result, "session_id": "s-2"}), queue=queued,
-                        no_wait=True)
-    assert code == 0 and out["session_id"] == "s-2" and out["connection"] == {"session_id": "s-2"}
+@pytest.mark.parametrize("stage", ["admitted", "sdk_accepted", "consumed"])
+def test_acp_fallback_returns_the_same_inbox_outcome_without_streaming(monkeypatch, capsys, stage):
+    monkeypatch.setattr(m, "_resolve_target", lambda *_a, **_kw: pytest.fail("no lifecycle resolver"))
+    code, out, err = _run(
+        monkeypatch, capsys, _PromptClient({"receipt": {"stage": stage}}),
+    )
+    assert code == 0 and out["outcome"] == stage and out["session_id"] == "s-1"
+    assert out["message_id"] == 17 and out["accepted"]
+    assert not err
 
 
 def test_an_unknown_target_is_refused_unavailable_not_silent(monkeypatch, capsys):
     """A stale id that is neither a session nor an agent: one typed document."""
-    def unknown(_client, target, force=False, caller_id=None):
-        print(f"[FAIL] '{target}' is not a known agent name or session ID", file=__import__("sys").stderr)
-        raise SystemExit(m._SEND_UNAVAILABLE_EXIT)
+    class Unknown(_PromptClient):
+        def get_session(self, target):
+            raise BridgeClientError(404, "not found")
 
-    monkeypatch.setattr(m, "_resolve_target", unknown)
-    monkeypatch.setattr(m, "_caller_id_for", lambda _a: "caller")
-    code, out, _ = _run(monkeypatch, capsys, _PromptClient({}))
+        def list_sessions(self):
+            return []
+
+    code, out, _ = _run(monkeypatch, capsys, Unknown({}))
     assert code == 69 and out["outcome"] == "refused_unavailable" and out["reason"] == "not_found"
 
 
@@ -278,45 +272,33 @@ def test_the_real_resolver_exits_unavailable_for_an_unknown_target(monkeypatch):
 
     monkeypatch.setattr(m, "_start_agent_session", no_agent)
     monkeypatch.setattr(m, "_resolve_read_worktree_session", lambda *a, **k: None)
-    with pytest.raises(SystemExit) as exc:
+    with pytest.raises(send_outcome.SendRefused) as exc:
         stc._resolve_target(Empty(), "stale-id")
-    assert exc.value.code == 69
+    assert exc.value.exit_code == 69
 
 
 def test_a_session_gone_between_resolve_and_submit_is_refused_unavailable(monkeypatch, capsys):
     class Gone(_PromptClient):
-        def submit_prompt(self, session_id, prompt, **_kw):
+        def send_live_message(self, session_id, **_kw):
             raise BridgeClientError(404, f"Session {session_id} not found")
 
-    monkeypatch.setattr(m, "_resolve_target", lambda *a, **k: "s-1")
-    monkeypatch.setattr(m, "_caller_id_for", lambda _a: "caller")
-    monkeypatch.setattr(stc, "_mark_resume_if_behind", lambda *a, **k: False)
     code, out, _ = _run(monkeypatch, capsys, Gone({}))
     assert code == 69 and out["outcome"] == "refused_unavailable" and out["reason"] == "not_found"
 
 
-def test_a_turn_that_starts_between_the_check_and_the_submit_is_refused_busy(monkeypatch, capsys):
+def test_a_busy_acp_target_returns_admission_instead_of_a_turn_conflict(monkeypatch, capsys):
     class Racing(_PromptClient):
-        def submit_prompt(self, session_id, prompt, **_kw):
-            raise BridgeClientError(409, "Session s-1 is running, not idle")
+        def get_session(self, target):
+            return {"session_id": "s-1", "status": "running"}
 
-    monkeypatch.setattr(m, "_resolve_target", lambda *a, **k: "s-1")
-    monkeypatch.setattr(m, "_caller_id_for", lambda _a: "caller")
-    monkeypatch.setattr(stc, "_mark_resume_if_behind", lambda *a, **k: False)
-    code, out, _ = _run(monkeypatch, capsys, Racing({}))
-    assert code == 75 and out["outcome"] == "refused_busy"
+    code, out, _ = _run(monkeypatch, capsys, Racing({"receipt": {"stage": "admitted"}}))
+    assert code == 0 and out["outcome"] == "admitted"
 
 
-def test_a_busy_target_is_refused_busy_with_exit_75(monkeypatch, capsys):
-    def busy(_client, _target, force=False, caller_id=None):
-        print("[BUSY] running a turn", file=__import__("sys").stderr)
-        raise SystemExit(m._SEND_BUSY_EXIT)
-
-    monkeypatch.setattr(m, "_resolve_target", busy)
-    monkeypatch.setattr(m, "_caller_id_for", lambda _a: "caller")
-    code, out, _ = _run(monkeypatch, capsys, _PromptClient({}))
-    assert code == 75
-    assert out["outcome"] == "refused_busy" and out["retryable"] is True and out["target"] == "wt-target"
+def test_force_cannot_turn_raw_send_into_replacement(monkeypatch, capsys):
+    code, out, _ = _run(monkeypatch, capsys, _PromptClient({}), force=True)
+    assert code == 2 and out["outcome"] == "refused_invalid"
+    assert out["reason"] == "lifecycle_option" and out["retryable"] is False
 
 
 def test_a_usage_error_is_not_a_typed_refusal(monkeypatch, capsys):
@@ -327,9 +309,7 @@ def test_a_usage_error_is_not_a_typed_refusal(monkeypatch, capsys):
     assert capsys.readouterr().out == ""
 
 
-def test_an_older_daemons_unnamed_handoff_is_reported_not_misattributed(monkeypatch, capsys):
-    """A pre-generation-25 daemon omits session_id; when the target reads stopped
-    after a successful submit, the prompt went to a successor it didn't name."""
+def test_an_old_daemons_stopped_acp_target_requires_explicit_resume(monkeypatch, capsys):
     class OldDaemon(_PromptClient):
         def daemon_supports(self, _version):
             return False
@@ -337,19 +317,33 @@ def test_an_older_daemons_unnamed_handoff_is_reported_not_misattributed(monkeypa
         def get_session(self, sid):
             return {"session_id": sid, "status": "stopped"}
 
-    monkeypatch.setattr(m, "_resolve_target", lambda *a, **k: "s-1")
-    monkeypatch.setattr(m, "_caller_id_for", lambda _a: "caller")
-    monkeypatch.setattr(stc, "_mark_resume_if_behind", lambda *a, **k: False)
     code, out, err = _run(monkeypatch, capsys, OldDaemon({"turn_index": 0}), no_wait=False)
-    assert code == 0 and out["session_id"] is None and out["handed_off_from"] == "s-1"
-    assert "doesn't name" in err
+    assert code == 69 and out["reason"] == "not_found"
+    assert "explicitly resume" in err
 
 
 def test_a_target_gone_while_resolving_is_refused_unavailable(monkeypatch, capsys):
-    def gone(_client, target, force=False, caller_id=None):
-        raise BridgeClientError(404, f"Session {target} not found")  # e.g. during its resume
+    class Gone(_PromptClient):
+        def get_session(self, target):
+            raise BridgeClientError(404, f"Session {target} not found")
 
-    monkeypatch.setattr(m, "_resolve_target", gone)
-    monkeypatch.setattr(m, "_caller_id_for", lambda _a: "caller")
-    code, out, _ = _run(monkeypatch, capsys, _PromptClient({}))
+    code, out, _ = _run(monkeypatch, capsys, Gone({}))
     assert code == 69 and out["outcome"] == "refused_unavailable" and out["reason"] == "not_found"
+
+
+@pytest.mark.parametrize("failure", ["connection", "remote", "missing-receipt"])
+def test_uncertain_admission_is_never_reported_as_refused_or_retryable(monkeypatch, capsys, failure):
+    from agent_bridge.client import BridgeConnectionError
+
+    class Unknown(_LiveClient):
+        def send_live_message(self, session_id, **_kw):
+            if failure == "connection":
+                raise BridgeConnectionError("response lost")
+            if failure == "remote":
+                raise BridgeClientError(503, {"code": "send_outcome_unknown"})
+            return {}
+
+    code, out, err = _run(monkeypatch, capsys, Unknown(), idempotency_key="original")
+    assert code == 70 and out["outcome"] == "unknown"
+    assert out["accepted"] is None and out["retryable"] is False
+    assert out["idempotency_key"] == "original" and "do not resend" in err

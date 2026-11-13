@@ -544,6 +544,12 @@ async def _lifespan(app: FastAPI):
     async def _heartbeat_loop() -> None:
         while True:
             await asyncio.sleep(_HEARTBEAT_INTERVAL_S)
+            from .acp_inbox import refresh
+
+            try:
+                await refresh(mgr)
+            except Exception:
+                log.warning("Ordinary inbox refresh failed", exc_info=True)
             try:
                 if await _governance_backoff(
                     governance,

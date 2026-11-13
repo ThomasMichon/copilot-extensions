@@ -214,7 +214,7 @@ def _set_project_override(project: str | None) -> None:
 
 _PROJECT_CONSUMING_VERBS = frozenset({
     "agents", "agent-show", "create", "machines", "send",
-    "observe-session", "session-observation-history", "observe-owner",
+    "observe-session", "session-observation-history", "observe-owner", "delivery-receipt",
 })
 
 

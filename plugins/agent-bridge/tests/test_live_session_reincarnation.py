@@ -1,6 +1,4 @@
-"""A conversation resumed in a new process keeps its session id: a dead row for
-that id (``expired``, or ``live`` past its heartbeat lease) is revived by the new
-incarnation, while a live row is never taken over by another process."""
+"""Compatible receivers register without proving process birth or incarnation."""
 
 from __future__ import annotations
 
@@ -34,7 +32,8 @@ def test_an_expired_row_is_revived_by_its_resumed_conversation(tmp_db: Database)
 
 
 def test_a_live_row_past_its_lease_is_revived_before_the_sweep_marks_it(tmp_db: Database, monkeypatch) -> None:
-    monkeypatch.setattr(aliases, "local_pid_alive", lambda pid: False)
+    monkeypatch.setattr(aliases, "local_pid_alive", lambda pid: pytest.fail("presence must not probe processes"),
+                        raising=False)
     now = time.time()
     lapsed = now - LIVE_SESSION_STALE_SECONDS - 5
     assert _register(tmp_db, "conv-2", lapsed, pid=100, started=lapsed) == "live"
@@ -42,34 +41,30 @@ def test_a_live_row_past_its_lease_is_revived_before_the_sweep_marks_it(tmp_db: 
     assert tmp_db.get_live_session("conv-2")["pid"] == 200
 
 
-def test_a_lapsed_row_whose_local_process_still_runs_is_not_taken_over(tmp_db: Database, monkeypatch) -> None:
-    """The reaper's rule: a lapsed local row whose pid is alive is wedged, not
-    dead, so admission does not depend on whether the sweep ran yet."""
-    monkeypatch.setattr(aliases, "local_pid_alive", lambda pid: True)
+def test_process_observations_do_not_gate_a_lapsed_registration(tmp_db: Database, monkeypatch) -> None:
+    monkeypatch.setattr(aliases, "local_pid_alive", lambda pid: pytest.fail("presence must not probe processes"),
+                        raising=False)
     now = time.time()
     lapsed = now - LIVE_SESSION_STALE_SECONDS - 5
     assert _register(tmp_db, "conv-5", lapsed, pid=100, started=lapsed) == "live"
-    assert _register(tmp_db, "conv-5", now, pid=200, started=now) == "incarnation_mismatch"
-    assert tmp_db.get_live_session("conv-5")["pid"] == 100
+    assert _register(tmp_db, "conv-5", now, pid=200, started=now) == "live"
+    assert tmp_db.get_live_session("conv-5")["pid"] == 200
 
 
-@pytest.mark.parametrize("alive, admitted", [(False, True), (True, False), (None, False)])
-def test_a_wedged_row_is_revived_only_once_its_process_is_provably_gone(tmp_db: Database, monkeypatch, alive,
-                                                                      admitted) -> None:
-    """A row the sweep found wedged (its pid alive then) whose process has since
-    exited: the resumed process need not wait for the next sweep."""
-    monkeypatch.setattr(aliases, "local_pid_alive", lambda pid: alive)
+def test_a_receiver_can_refresh_its_wedged_registration_without_process_proof(tmp_db: Database, monkeypatch) -> None:
+    monkeypatch.setattr(aliases, "local_pid_alive", lambda pid: pytest.fail("presence must not probe processes"),
+                        raising=False)
     now = time.time()
     assert _register(tmp_db, "conv-6", now - 600, pid=100, started=now - 600) == "live"
     tmp_db.execute_write("UPDATE live_sessions SET status='wedged' WHERE session_id=?", ("conv-6",))
     got = _register(tmp_db, "conv-6", now, pid=200, started=now)
-    assert got == ("live" if admitted else "incarnation_mismatch")
+    assert got == "live"
 
 
-def test_a_fresh_live_row_is_never_taken_over_by_another_process(tmp_db: Database) -> None:
+def test_a_fresh_live_receiver_can_register_after_a_process_change(tmp_db: Database) -> None:
     now = time.time()
     assert _register(tmp_db, "conv-3", now, pid=100, started=now) == "live"
-    assert _register(tmp_db, "conv-3", now + 1, pid=200, started=now + 1) == "incarnation_mismatch"
+    assert _register(tmp_db, "conv-3", now + 1, pid=200, started=now + 1) == "live"
     assert _register(tmp_db, "conv-3", now + 2, pid=100, started=now) == "live"  # its own heartbeat
     assert tmp_db.get_live_session("conv-3")["pid"] == 100
 
@@ -116,7 +111,6 @@ def test_the_route_admits_a_resumed_process_for_an_expired_row(tmp_path, monkeyp
         response = client.post("/api/v1/live-sessions", json=resumed)
         assert response.status_code == 200, response.text
         assert response.json()["pid"] == 200
-        # A second, different process while that one is live is still refused.
         other = {**body, "pid": 300, "process_started_at": time.time() + 1}
-        refused = client.post("/api/v1/live-sessions", json=other)
-        assert refused.status_code == 409 and refused.json()["detail"]["reason"] == "incarnation_mismatch"
+        refreshed = client.post("/api/v1/live-sessions", json=other)
+        assert refreshed.status_code == 200 and refreshed.json()["pid"] == 300

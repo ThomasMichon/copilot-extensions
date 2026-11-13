@@ -8,9 +8,9 @@ import sys
 
 def deliver_to_live_session(client, args: argparse.Namespace, session_id: str, prompt: str,
                             *, core, remote_address=None) -> None:
-    from .client import BridgeClientError
+    from .client import BridgeClientError, BridgeConnectionError
     from .live_message_models import validate_live_reply_timeout
-    from .send_outcome import SendRefused, emit, live_outcome, refusal_from_live_error
+    from .send_outcome import SendRefused, SendUnknown, emit, live_outcome, refusal_from_live_error
 
     wait = getattr(args, "wait_reply", False) and not getattr(args, "no_wait", False)
     wait_timeout = getattr(args, "reply_timeout", 120.0)
@@ -65,10 +65,20 @@ def deliver_to_live_session(client, args: argparse.Namespace, session_id: str, p
                 **delivery_options,
             )
     except BridgeClientError as exc:
+        if isinstance(exc.detail, dict) and exc.detail.get("code") == "send_outcome_unknown":
+            raise SendUnknown(session_id, idempotency_key=idempotency) from exc
         refused = refusal_from_live_error(exc, session_id)
         if refused is None:
             raise
         raise refused from exc
+    except (BridgeConnectionError, OSError) as exc:
+        raise SendUnknown(session_id, idempotency_key=idempotency) from exc
+    if not isinstance(result, dict) or not result.get("message_id"):
+        raise SendUnknown(session_id, idempotency_key=idempotency)
+    if result.get("receipt") is not None and not isinstance(result["receipt"], dict):
+        result.update(
+            receipt=None, receipt_current=False, receipt_error="Admission returned malformed receipt evidence",
+        )
     session_id = result.get("session_id", session_id)
     if args.json:
         # A daemon that reports duplicates always includes the field; an older

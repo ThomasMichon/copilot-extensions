@@ -72,6 +72,15 @@ class SendRefused(Exception):
                 "reason": self.reason, "error": self.error}
 
 
+class SendUnknown(Exception):
+    """A submitted message cannot be reported refused or safely sent again."""
+
+    def __init__(self, target: str, *, idempotency_key: str | None = None) -> None:
+        super().__init__("Send outcome is unknown; inspect the original receipt or session, do not resend.")
+        self.target = target
+        self.idempotency_key = idempotency_key
+
+
 def live_outcome(result: dict[str, Any], delivery: str, *, duplicate_known: bool = True) -> str:
     """``duplicate_known`` is False for a keyed send to a daemon too old to say
     whether it matched an earlier request: then the outcome is ``accepted``."""
@@ -167,6 +176,15 @@ def run_send(args: Any, send: Callable[[Any], None]) -> None:
             ):
                 payload["idempotency_key"] = args.idempotency_key
             emit(payload)
+        sys.exit(70)
+    except SendUnknown as unknown:
+        print(f"[UNKNOWN] {unknown}", file=sys.stderr)
+        if as_json:
+            emit({
+                "outcome": "unknown", "target": unknown.target, "retryable": False,
+                "accepted": None, "reason": "admission_unconfirmed",
+                "idempotency_key": unknown.idempotency_key, "error": str(unknown),
+            })
         sys.exit(70)
     except SendRefused as refused:
         refused.target = refused.target or target

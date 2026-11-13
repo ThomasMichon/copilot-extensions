@@ -87,9 +87,12 @@ def _cmd_send(args: argparse.Namespace) -> None:
 
 
 def _send(args: argparse.Namespace) -> None:
+    from .ordinary_send import normalize_arguments, remote_target
     from .send_outcome import SendRefused
     from .startup_observation import configure_client, validate_options
 
+    normalize_arguments(args)
+    remote = remote_target(args)
     validate_options(args)
     core = _core()
     if getattr(args, "wait_delivery", False):
@@ -140,7 +143,7 @@ def _send(args: argparse.Namespace) -> None:
     if getattr(args, "new", False):
         print(
             "[FAIL] `agent-bridge send --new` has been removed. `send` always "
-            "reuses (and resumes) this caller's existing session.\n"
+            "addresses an already-live receiver and never creates or resumes it.\n"
             "       For a brand-new session, use:\n"
             f"         agent-bridge create {args.target} \"<prompt>\"",
             file=sys.stderr,
@@ -164,6 +167,14 @@ def _send(args: argparse.Namespace) -> None:
         _hold_protocol_floor(client, min_protocol)
     target = args.target
     prompt = _resolve_prompt(args, required=True)
+    if remote is not None:
+        if not prompt.strip():
+            raise SendRefused(
+                "refused_invalid", reason="empty_message", retryable=False,
+                target=target, error="Refusing to deliver an empty peer message.",
+            )
+        _deliver_to_live_session(client, args, target, prompt, remote_address=remote)
+        return
     if getattr(args, "plugin_context_stdin", False):
         from .plugin_readiness import PluginReadinessRequest
         from .protocol import PLUGIN_READINESS_PROTOCOL_VERSION
@@ -237,9 +248,6 @@ def _send(args: argparse.Namespace) -> None:
         _deliver_to_live_session(client, args, live["session_id"], prompt)
         return
     if address is not None:
-        if getattr(args, "wait_delivery", False):
-            raise SendRefused("refused_unavailable", reason="delivery_wait_remote", retryable=False,
-                              target=target, error="remote delivery waiting is not supported; no message sent")
         if getattr(args, "plugin_context_stdin", False):
             raise SendRefused("refused_unavailable", reason="startup_target", retryable=False,
                               target=target, error="prepared startup requires the registered native session")
@@ -251,19 +259,13 @@ def _send(args: argparse.Namespace) -> None:
             error=f"Target {target!r} has no live session matching {args.expected_session_id!r}.",
         )
 
-    if getattr(args, "wait_delivery", False):
-        raise SendRefused("refused_unavailable", reason="delivery_wait_target", retryable=False,
-                          target=target, error="--wait requires a registered live session; no message sent")
     if getattr(args, "plugin_context_stdin", False):
         raise SendRefused("refused_unavailable", reason="startup_target", retryable=False,
                           target=target, error="prepared startup cannot fall back to ACP or create a session")
-    caller_id = core._caller_id_for(args)
-    session_id = core._resolve_target(
-        client, target, force=getattr(args, "force", False), caller_id=caller_id,
-    )
-    if not getattr(args, "full_history", False):
-        _mark_resume_if_behind(client, session_id, caller_id=caller_id)
-    core._submit_and_stream(client, args, session_id, prompt, caller_id=caller_id)
+    from .ordinary_send import resolve_existing_session
+
+    session_id = resolve_existing_session(client, target)
+    _deliver_to_live_session(client, args, session_id, prompt)
 
 
 def _caller_worktree_handle() -> str | None:
@@ -379,6 +381,7 @@ def _submit_and_stream(
                 queue=queue,
                 caller_id=caller_id,
                 request_timeout=core._startup_request_timeout(resume=True, fresh_fallback=True),
+                **({"no_resume": True} if getattr(args, "ordinary_live", False) else {}),
             )
     except BridgeClientError as exc:
         if exc.status == 404:
@@ -389,6 +392,15 @@ def _submit_and_stream(
                               target=session_id, error=str(exc.detail)) from exc
         if exc.status != 409:
             raise
+        if getattr(args, "ordinary_live", False) and (
+            "session_stopped" in str(exc.detail) or "session_not_running" in str(exc.detail)
+        ):
+            from .send_outcome import SendRefused
+
+            raise SendRefused(
+                "refused_unavailable", reason="not_running", retryable=False,
+                target=session_id, error="Receiver stopped; explicitly resume it before sending.",
+            ) from exc
         # A turn started between the busy check and this submit: the same
         # refusal as a busy target, not a generic HTTP failure.
         print(f"[BUSY] Session {session_id} started a turn before this prompt arrived: {exc.detail}",
@@ -557,6 +569,10 @@ def _resolve_target(
     core = _core()
     from .client import BridgeClientError
 
+    if not force_new:
+        from .ordinary_send import resolve_existing_session
+
+        return resolve_existing_session(client, target)
     try:
         session = client.get_session(target)
         if session:
@@ -851,11 +867,14 @@ def _mark_resume_if_behind(client, session_id: str, *, caller_id: str | None) ->
 
 def register_session_targeting_commands(sub: argparse._SubParsersAction) -> None:
     core = _core()
-    send_p = sub.add_parser("send", help="Send a prompt to an agent or session (reuses/resumes this caller's existing session)")
+    send_p = sub.add_parser("send", help="Queue a message to an existing live agent/session; dormant targets require explicit resume")
     from .hosting_admission_cli import add_argument as add_hosting_argument
     add_hosting_argument(send_p)
-    send_p.add_argument("target", help="Agent name, session ID, or a live session's worktree handle (a worktree handle resolves to whichever session is live now)")
+    send_p.add_argument("target", nargs="?", help="Agent name, session ID, or a live session's worktree handle (a worktree handle resolves to whichever session is live now)")
     send_p.add_argument("prompt", nargs="?", default=None, help="Prompt text to send (omit and use --prompt-file for multi-line prompts that shouldn't transit the shell's argv)")
+    send_p.add_argument("--agent", help="Target agent/session or managed worktree handle, instead of positional TARGET.")
+    send_p.add_argument("--message", help="Message text, instead of the positional prompt or --prompt-file.")
+    send_p.add_argument("--machine", help="Resolve and send on this machine through the existing authenticated carrier; never create or resume a target.")
     send_p.add_argument("--prompt-file", dest="prompt_file", default=None, metavar="PATH", help="Read the prompt from PATH (or '-' for stdin) instead of the positional argument. Use this for multi-line prompts to avoid shell argv mangling (e.g. PowerShell word-splitting a prompt at the first embedded double-quote). Mutually exclusive with the positional prompt.")
     send_p.add_argument("--sender", "--from", dest="sender", default=None, help="Attribution label when the target is a live interactive session (default: this caller's worktree/user). Legibility only, not routing.")
     send_p.add_argument("--reply-to", dest="reply_to", default=None, help="Routable peer reply address: live:<machine>:<project>:<worktree>, a legacy local worktree handle, or an exact session id. Defaults to the caller's registered qualified worktree address. Rendered as the envelope's reply-to.")
@@ -880,8 +899,8 @@ def register_session_targeting_commands(sub: argparse._SubParsersAction) -> None
     add_startup_arguments(send_p)
     send_p.add_argument("--new", action="store_true", help=argparse.SUPPRESS)
     send_p.add_argument("--full-history", action="store_true", help="When resuming an existing session, replay its prior conversation instead of fast-forwarding past it (default hides the backlog and prints a marker)")
-    send_p.add_argument("--force", action="store_true", help="If the target's session is busy running a turn, terminate that in-flight turn and start a fresh session to deliver this prompt (discards the in-flight turn's work). Without --force, a busy target is rejected with guidance to wait/observe or end it.")
-    send_p.add_argument("--queue", action="store_true", help="If the target's session is busy, durably queue this prompt server-side (in the bridge's pending_prompts table) for FIFO delivery when the current turn settles -- surviving a caller remount and a bridge/host restart -- instead of rejecting it. The opposite of --force: it preserves the in-flight turn.")
+    send_p.add_argument("--force", action="store_true", help="Retired lifecycle option: raw send refuses this flag; explicitly resume or create a receiver first.")
+    send_p.add_argument("--queue", action="store_true", help="Alias for --delivery queue; preserve the receiver's current turn and return an inbox receipt.")
     send_p.add_argument("--idempotency-key", help="stable producer key; retries return the original live-message id instead of enqueuing a duplicate")
     send_p.add_argument("--plugin-context-stdin", action="store_true",
                         help="Read a Bridge-owned prompt/prepared-context JSON envelope from --prompt-file -")
@@ -897,6 +916,7 @@ def register_session_targeting_commands(sub: argparse._SubParsersAction) -> None
     receipt_p = sub.add_parser("delivery-receipt", help="Observe an existing message without resending")
     receipt_p.add_argument("target", help="Original live session id")
     receipt_p.add_argument("message_id", type=int)
+    receipt_p.add_argument("--machine", help="Observe this receipt on its hosting machine.")
     receipt_p.add_argument("--timeout", type=wait_seconds, default=0.0, help="Finite wait, 0..600 seconds")
     receipt_p.set_defaults(func=delivery_receipt)
 

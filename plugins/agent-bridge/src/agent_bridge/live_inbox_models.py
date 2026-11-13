@@ -19,8 +19,8 @@ class InboxConsumerInfo(BaseModel):
 
     session_id: str = Field(min_length=1)
     incarnation: str = Field(min_length=1)
-    pid: int = Field(gt=0)
-    process_started_at: float = Field(gt=0)
+    pid: int | None = Field(default=None, gt=0)
+    process_started_at: float | None = Field(default=None, gt=0)
     portable_launch: str | None = Field(default=None, pattern=r"^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$")
 
     @model_serializer(mode="wrap")
@@ -86,6 +86,7 @@ class RetainedInboxMessage(LiveMessage):
 
     handoff_id: str = Field(validation_alias=AliasPath("handoff", "id"))
     handoff_stage: InboxStage
+    consumer: InboxConsumerInfo | None = None
 
 
 class InboxPollResult(BaseModel):

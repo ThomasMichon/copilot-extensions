@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 from unittest.mock import AsyncMock
 
+from agent_procutil import direct_python, no_window_kwargs
 import pytest
 
 from agent_bridge.carrier import (
@@ -34,23 +35,30 @@ def test_remote_carrier_command_is_cross_platform():
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows command-shim regression")
-def test_windows_remote_carrier_command_preserves_binary_hello(tmp_path: Path):
+@pytest.mark.parametrize("project", [None, "example-repo"])
+def test_windows_remote_carrier_command_preserves_binary_hello(tmp_path: Path, project):
     bin_dir = tmp_path / ".local" / "bin"
     bin_dir.mkdir(parents=True)
-    shim = bin_dir / "agent-bridge.cmd"
+    python, python_env = direct_python(sys.executable)
+    shim = bin_dir / f"{project or 'agent-bridge'}.cmd"
     shim.write_text(
-        f'@echo off\r\n"{sys.executable}" -m agent_bridge %*\r\n',
+        (f'@echo off\r\n"{python}" -m agent_bridge %*\r\n' if project is None else
+         '@echo off\r\nif not "%~1"=="bridge" exit /b 92\r\n'
+         'set AGENT_WORKTREES_PROJECT_ROUTED=1\r\n'
+         f'"{python}" -m agent_bridge --project {project} %2 %3\r\n'),
         encoding="utf-8",
     )
     env = dict(os.environ)
+    env.update(python_env)
     env["USERPROFILE"] = str(tmp_path)
 
     proc = subprocess.Popen(
-        build_remote_carrier_command("windows"),
+        build_remote_carrier_command("windows", project=project),
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         env=env,
+        **no_window_kwargs(),
     )
     assert proc.stdin is not None
     assert proc.stdout is not None
@@ -92,6 +100,7 @@ def test_carrier_stdio_negotiates_errors_and_exits_on_eof():
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
+        **no_window_kwargs(),
     )
     assert proc.stdin is not None
     assert proc.stdout is not None
@@ -120,3 +129,18 @@ def test_carrier_stdio_negotiates_errors_and_exits_on_eof():
         if proc.poll() is None:
             proc.kill()
             proc.wait(timeout=5)
+
+
+@pytest.mark.parametrize("project", ["../other", "repo;echo", "repo with spaces", 'repo"quoted'])
+@pytest.mark.asyncio
+async def test_invalid_project_cannot_reach_the_ssh_owner(project):
+    manager = AsyncMock()
+    with pytest.raises(ValueError, match="registered repository"):
+        await acquire_remote_carrier("example-host", "windows", manager=manager, project=project)
+    manager.ensure_connected.assert_not_awaited()
+
+
+def test_posix_project_carrier_uses_the_registered_repo_front_door():
+    assert build_remote_carrier_command("linux", project="example-repo") == (
+        '"$HOME/.local/bin/example-repo" bridge carrier --stdio'
+    )

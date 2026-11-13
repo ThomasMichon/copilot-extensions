@@ -245,6 +245,7 @@ class CarrierRequestRouter:
     _OPERATIONS = frozenset(
         {
             "live_session.send",
+            "live_session.delivery",
             "session.create",
             "session.end",
             "session.status",
@@ -471,6 +472,17 @@ class CarrierRequestRouter:
                     caller_id=caller_id,
                 )
                 return Envelope(EnvelopeType.RESPONSE, payload={"result": result})
+            if operation == "live_session.delivery":
+                from .live_delivery_client import observe
+
+                message_id = payload.get("message_id")
+                if type(message_id) is not int or message_id <= 0:
+                    raise RemoteBridgeError(400, "invalid_request", "message_id must be a positive integer")
+                result = await asyncio.to_thread(
+                    observe, self._client(), session_id, message_id,
+                    timeout=_peer_wait_timeout(payload.get("timeout", 0.0)),
+                )
+                return Envelope(EnvelopeType.RESPONSE, payload={"result": result})
             if operation == "live_session.resolve":
                 if _peer_reply_requested(payload):
                     await _require_peer_reply_protocol(self._client())
@@ -554,14 +566,15 @@ class CarrierRequestRouter:
             )
         except BridgeClientError as exc:
             return _error_envelope(envelope, _bridge_error(exc))
-        except BridgeConnectionError as exc:
+        except (BridgeConnectionError, OSError) as exc:
+            ordinary = payload.get("operation") == "live_session.send"
             return _error_envelope(
                 envelope,
                 RemoteBridgeError(
                     503,
-                    "remote_bridge_unavailable",
+                    "send_outcome_unknown" if ordinary else "remote_bridge_unavailable",
                     str(exc),
-                    reconnectable=True,
+                    reconnectable=not ordinary,
                 ),
             )
         except RemoteBridgeError as exc:
@@ -834,10 +847,15 @@ class RemoteOperationService:
         self._manager = manager
         self._request_timeout = request_timeout
 
-    async def _lease(self, host: str) -> CarrierLease:
+    async def _lease(self, host: str, *, project: str | None = None) -> CarrierLease:
         from .carrier import acquire_remote_carrier
 
         host = validate_host(host)
+        if project is not None and (
+            not isinstance(project, str)
+            or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", project) is None
+        ):
+            raise RemoteBridgeError(400, "invalid_request", "project must name one registered repository command")
         try:
             machine, environment = self._resolver.resolve_ssh_environment(host)
         except ValueError as exc:
@@ -878,6 +896,7 @@ class RemoteOperationService:
                 remote_platform,
                 config_source=source,
                 manager=self._manager,
+                **({"project": project} if project is not None else {}),
             )
         except Exception as exc:
             reconnectable = bool(getattr(exc, "reconnectable", False))
@@ -895,7 +914,8 @@ class RemoteOperationService:
         *,
         timeout: float | None = None,
     ) -> dict[str, Any]:
-        lease = await self._lease(host)
+        project = payload.get("project")
+        lease = await self._lease(host, project=project) if project is not None else await self._lease(host)
         deadline = time.monotonic() + (
             self._request_timeout if timeout is None else timeout
         )
@@ -913,6 +933,12 @@ class RemoteOperationService:
                 except CarrierRemoteError as exc:
                     raise RemoteBridgeError.from_carrier(exc) from exc
                 except CarrierUnavailable as exc:
+                    if payload.get("operation") == "live_session.send":
+                        raise RemoteBridgeError(
+                            503, "send_outcome_unknown",
+                            "Remote message admission is unconfirmed; observe the original request, do not resend",
+                            reconnectable=False,
+                        ) from exc
                     if not exc.reconnectable or time.monotonic() >= deadline:
                         raise RemoteBridgeError(
                             503,
@@ -946,6 +972,12 @@ class RemoteOperationService:
                             reconnectable=True,
                         ) from reconnect_exc
                 except (TimeoutError, asyncio.TimeoutError) as exc:
+                    if payload.get("operation") == "live_session.send":
+                        raise RemoteBridgeError(
+                            504, "send_outcome_unknown",
+                            "Remote message admission is unconfirmed; observe the original request, do not resend",
+                            reconnectable=False,
+                        ) from exc
                     raise RemoteBridgeError(
                         504,
                         "remote_operation_timeout",
@@ -1061,6 +1093,7 @@ class RemoteOperationService:
         wait: bool = False,
         wait_timeout: float = 120.0,
         qualified_peer: bool = False,
+        project: str | None = None,
     ) -> dict[str, Any]:
         if delivery not in LIVE_MESSAGE_DELIVERIES:
             raise RemoteBridgeError(
@@ -1090,8 +1123,26 @@ class RemoteOperationService:
                 "wait": wait,
                 "wait_timeout": _peer_wait_timeout(wait_timeout) if wait else 120.0,
                 **({"qualified_peer": True} if qualified_peer else {}),
+                **({"project": project} if project is not None else {}),
             },
             timeout=timeout,
+        )
+        result = response.get("result")
+        return dict(result) if isinstance(result, dict) else {}
+
+    async def observe_live_delivery(
+        self, host: str, session_id: str, message_id: int, *, timeout: float = 0.0,
+        project: str | None = None,
+    ) -> dict[str, Any]:
+        if type(message_id) is not int or message_id <= 0:
+            raise RemoteBridgeError(400, "invalid_request", "message_id must be a positive integer")
+        seconds = _peer_wait_timeout(timeout)
+        response = await self._request(
+            host, {
+                "operation": "live_session.delivery", "session_id": validate_session_id(session_id),
+                "message_id": message_id, "timeout": seconds,
+                **({"project": project} if project is not None else {}),
+            }, timeout=seconds + 15.0,
         )
         result = response.get("result")
         return dict(result) if isinstance(result, dict) else {}

@@ -172,3 +172,40 @@ def test_adoption_rechecks_shape_changed_after_passive_preparation(tmp_path):
         assert passive.read_only and passive._writer_thread is None
     finally:
         passive.close()
+
+
+def test_compatible_migration_preserves_original_queue_and_keeps_lifecycle_guards(tmp_path):
+    from agent_bridge.inbox_custody import schema_triggers
+    from agent_bridge.runtime_custody import operation_triggers
+
+    path = tmp_path / "sessions.db"
+    current = Database(path)
+    current.register_live_session(
+        "receiver", machine=None, cwd=None, worktree_id=None, repo=None,
+        branch=None, pid=None, role=None, now=10.0,
+    )
+    mid = current.enqueue_live_message("receiver", "peer", "retained input", 10.0)
+    original = dict(current.execute_read("SELECT * FROM live_messages WHERE id=?", (mid,))[0])
+    current.close()
+    with sqlite3.connect(path) as conn:
+        conn.execute("DROP TRIGGER live_messages_runtime_admission")
+        conn.execute(schema_triggers(compatible_messages=False)["live_messages_runtime_admission"][1])
+        conn.execute("DROP TRIGGER turns_runtime_admission")
+        conn.execute(operation_triggers(("turns",))["turns_runtime_admission"][1])
+        conn.execute("DROP INDEX idx_turn_live_message")
+        conn.execute("ALTER TABLE turns DROP COLUMN live_message_id")
+        conn.execute("UPDATE schema_version SET version=46")
+    prepared = Database(path)
+    try:
+        assert dict(prepared.execute_read("SELECT * FROM live_messages WHERE id=?", (mid,))[0]) == original
+        prepared.execute_write(
+            "INSERT INTO bridge_runtime_epoch VALUES (1,'other',1,1,'closed','{}')"
+        )
+        fresh, reason = prepared.enqueue_live_message_if_fresh(
+            "receiver", sender="peer", body="ordinary", now=11.0, enrolled_inbox=True,
+        )
+        assert fresh and reason is None
+        with pytest.raises(sqlite3.IntegrityError, match="admission_closed"):
+            prepared.create_session("blocked", "lifecycle", None, ".", "local", "idle", 11.0)
+    finally:
+        prepared.close()

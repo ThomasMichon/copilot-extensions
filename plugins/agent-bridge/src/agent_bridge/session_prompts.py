@@ -89,6 +89,7 @@ class _SessionPromptMixin:
         native_admission: KeyedNativePrompt | NativeSendPrompt | None = None,
         pending_prompt_id: int | None = None,
         pending_prompt_caller_id: str | None = None,
+        ordinary_handoff: dict | None = None,
     ) -> int:
         """Submit a prompt to a session, returning the turn index.
 
@@ -104,7 +105,9 @@ class _SessionPromptMixin:
         """
         from .cold_outages import assert_prompt_allowed, reconnect_admitted_before_drain
 
-        if self._draining and not reconnect_admitted_before_drain(
+        if ordinary_handoff is not None:
+            no_resume = True
+        if ordinary_handoff is None and self._draining and not reconnect_admitted_before_drain(
             self, session_id, delivery_id, prompt=prompt, no_resume=no_resume,
         ):
             raise DaemonDrainingError("turn")
@@ -112,17 +115,18 @@ class _SessionPromptMixin:
         session = self._sessions.get(session_id)
         if not session:
             raise KeyError(f"Session {session_id} not found")
-        assert_prompt_allowed(self._db, session_id, delivery_id)
+        if ordinary_handoff is None:
+            assert_prompt_allowed(self._db, session_id, delivery_id)
         if session.status not in (SessionStatus.IDLE, SessionStatus.STOPPED):
             raise ValueError(
                 f"Session {session_id} is {session.status.value}, not idle"
             )
         if no_resume and session.status == SessionStatus.STOPPED:
             raise SessionStoppedError(f"{SessionStoppedError.code}: Session {session_id} is stopped")
-        native_owner = session._native_turn_transport
+        native_owner = session._native_turn_transport if ordinary_handoff is None else None
         if native_owner is not None:
             native_owner.require_current()
-        else:
+        elif ordinary_handoff is None:
             from .acquisition_launch_owner import require_unassociated_session
 
             require_unassociated_session(self, session, operation="prompt")
@@ -158,7 +162,7 @@ class _SessionPromptMixin:
 
         from .remote_relationships import assert_admission
         await assert_admission(self, session)
-        if self._draining and not reconnect_admitted_before_drain(
+        if ordinary_handoff is None and self._draining and not reconnect_admitted_before_drain(
             self, session_id, delivery_id, prompt=prompt, no_resume=no_resume,
         ):
             raise DaemonDrainingError("turn")
@@ -173,7 +177,12 @@ class _SessionPromptMixin:
         } if native_owner is not None else {})
 
         # Persist turn skeleton
-        if native_admission is not None:
+        if ordinary_handoff is not None:
+            self._db.create_turn(
+                session_id, turn_index, prompt, now,
+                live_message_id=ordinary_handoff["message_id"],
+            )
+        elif native_admission is not None:
             admitted = self._db.create_turn(
                 session_id, turn_index, prompt, now, delivery_id=delivery_id,
                 native_admission=native_admission,
@@ -240,6 +249,8 @@ class _SessionPromptMixin:
                 {"source": "agent-bridge", "caller_id": native_admission.caller_id}
                 if isinstance(native_admission, NativeSendPrompt) else {}
             )
+            if ordinary_handoff is not None:
+                provenance = {"source": "agent-bridge", "message_id": ordinary_handoff["message_id"]}
             session.event_log.append("user_message", {"content": prompt, **provenance})
             session.event_log.append("session_state_changed", {
                 "status": SessionStatus.RUNNING.value,
@@ -248,6 +259,8 @@ class _SessionPromptMixin:
 
         # Run the prompt as a background task
         session._prompt_task = asyncio.create_task(
+            self._run_prompt(session, turn_index, prompt, ordinary_handoff=ordinary_handoff)
+            if ordinary_handoff is not None else
             self._run_prompt(session, turn_index, prompt) if native_attempt is None
             else self._run_prompt(session, turn_index, prompt, native_attempt=native_attempt)
         )
@@ -531,14 +544,22 @@ class _SessionPromptMixin:
     async def _run_prompt(
         self, session: Session, turn_index: int, prompt: str, *,
         native_attempt: NativeTurnAttempt | None = None,
+        ordinary_handoff: dict | None = None,
     ) -> None:
         """Background task: send prompt via ACP and persist the result."""
+        def consumed() -> None:
+            from .acp_inbox import record
+
+            if ordinary_handoff is not None:
+                record(self._db, ordinary_handoff, "consumed")
+
         try:
             result = await (
+                session.client.send_prompt(prompt, ordinary_message=True, on_consumed=consumed)
+                if ordinary_handoff is not None else
                 session.client.send_prompt(prompt) if native_attempt is None
                 else native_attempt.owner.client.send_prompt(prompt, native_attempt=native_attempt)
             )
-
             # Persist completed turn
             self._db.update_turn(
                 session.session_id,
@@ -549,6 +570,11 @@ class _SessionPromptMixin:
                 tool_calls_json=json.dumps(result.get("tool_calls", [])),
                 completed_at=time.time(),
             )
+            if ordinary_handoff is not None:
+                from .acp_inbox import record
+
+                record(self._db, ordinary_handoff, "sdk_accepted")
+                record(self._db, ordinary_handoff, "consumed")
             from .cold_outages import provider_result
 
             provider_result(self, session, turn_index, result)
@@ -559,11 +585,19 @@ class _SessionPromptMixin:
             )
 
         except asyncio.CancelledError:
+            if ordinary_handoff is not None:
+                from .acp_inbox import record
+
+                record(self._db, ordinary_handoff, "unknown")
             from .cold_outages import provider_result
 
             provider_result(self, session, turn_index, None)
             raise
         except Exception as exc:
+            if ordinary_handoff is not None:
+                from .acp_inbox import record
+
+                record(self._db, ordinary_handoff, "unknown")
             from .cold_outages import provider_result
 
             provider_result(self, session, turn_index, None)
@@ -604,6 +638,9 @@ class _SessionPromptMixin:
         # own settle re-enters here for the next. Atomic queue-to-turn commit, and
         # a no-op when the queue is empty or the process has since died.
         await self._drain_pending_prompts(session)
+        from .acp_inbox import deliver
+
+        await deliver(self, session)
 
         # If a context-pressure handoff came due mid-turn and the queue is now
         # drained (session still idle), roll the worktree to a fresh successor.

@@ -5,6 +5,7 @@
 - **Branch(es):** independent, serial per-slice PRs targeting `dev`
 - **Created:** 2026-10-08
 - **Status:** Active
+- **Owner:** Released for transfer; successor lifecycle owner acceptance pending
 - **Vision:** `visions/plugin-services/README.md` - process-count-scales-with-services-not-sessions and hooks-and-callbacks-are-transient; `visions/plugins/context-handoff/README.md` - host-agnostic trigger and durable recovery
 - **Tracking issues:** #5579, #5664, #2619
 - **Related, separately driven mitigation:** #5637
@@ -27,12 +28,27 @@ recovery, process ownership, terminal behavior, or handoff mode gates.
 ## Coordination
 
 - **Topology:** one writer, serial reviewable slices.
-- **Host (owns PRs):** Lifecycle driver.
+- **Host (owns PRs):** Transferring; successor lifecycle owner acceptance pending.
 - **Delegates:** evidence-only research; no delegated edits.
 - **Handoff:** the successor reads this README and resumes the first unchecked
   Plan and Validation Plan items, preserving any outstanding PR obligations.
 - Do not take over #5637's active implementation or broaden this effort into
   all monitor scheduling, transcript archival, or a new process-host framework.
+
+## Ownership handoff
+
+The current driver has stopped starting new launch-lifecycle work for an
+assigned transfer. Guiding Intent, remaining Plan and Validation Plan items,
+required review, installed qualification and unresolved runtime obligations
+remain open. This is not a completion, abandonment or worktree-finalization
+record.
+
+The [compatible messaging prerequisite](../compatible-agent-messaging/README.md#handoff)
+contains unpublished Bridge-core implementation and its known failing checks.
+Preserve that source checkpoint while coordinating its distinct scope with the
+existing delivery owner. Acceptance of Mux-launch work does not automatically
+assign that owner unrelated client/carrier work, nor release retained session,
+resource or installation custody.
 
 ## Context
 

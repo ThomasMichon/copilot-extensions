@@ -65,9 +65,12 @@ class _SchemaMixin:
             ).fetchone():
                 recorded = conn.execute("SELECT version FROM schema_version").fetchone()
                 if recorded is not None and recorded["version"] >= 28:
-                    validate_schema(conn)
+                    validate_schema(conn, compatible_messages=recorded["version"] >= 47)
                 if recorded is not None and recorded["version"] >= 30:
-                    validate_inbox_schema(conn, exact_native=recorded["version"] >= 40)
+                    validate_inbox_schema(
+                        conn, exact_native=recorded["version"] >= 40,
+                        compatible_messages=recorded["version"] >= 47,
+                    )
                 if recorded is not None and recorded["version"] >= 31:
                     validate_consumer_schema(
                         conn, require_history_indexes=recorded["version"] >= 32,
@@ -161,6 +164,14 @@ class _SchemaMixin:
             item[1] for item in conn.execute("PRAGMA table_info(turns)")
         }:
             conn.execute("ALTER TABLE turns ADD COLUMN native_admission_json TEXT")
+        if "live_message_id" not in {
+            item[1] for item in conn.execute("PRAGMA table_info(turns)")
+        }:
+            conn.execute("ALTER TABLE turns ADD COLUMN live_message_id INTEGER")
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_turn_live_message "
+            "ON turns(live_message_id) WHERE live_message_id IS NOT NULL"
+        )
         live_columns = {
             row[1] for row in conn.execute("PRAGMA table_info(live_messages)").fetchall()
         }
@@ -791,8 +802,8 @@ class _SchemaMixin:
             from .runtime_custody import ensure_schema, validate_schema
 
             self._ensure_current_columns(conn)
-            ensure_schema(conn)
-            validate_schema(conn)
+            ensure_schema(conn, compatible_messages=False)
+            validate_schema(conn, compatible_messages=False)
             conn.execute("UPDATE schema_version SET version=?", (28,))
             conn.commit()
             log.info("Schema migrated to version 28: required runtime custody storage")
@@ -807,8 +818,8 @@ class _SchemaMixin:
         if from_version < 30:
             from .inbox_custody import ensure_schema, validate_schema
 
-            ensure_schema(conn, exact_native=False)
-            validate_schema(conn, exact_native=False)
+            ensure_schema(conn, exact_native=False, compatible_messages=False)
+            validate_schema(conn, exact_native=False, compatible_messages=False)
             conn.execute("UPDATE schema_version SET version=?", (30,))
             conn.commit()
             log.info("Schema migrated to version 30: retained inbox handoff storage")
@@ -898,7 +909,7 @@ class _SchemaMixin:
             self._ensure_current_columns(conn)
             conn.execute("BEGIN IMMEDIATE")
             with conn:
-                migrate_exact_native_guard(conn)
+                migrate_exact_native_guard(conn, compatible_messages=False)
                 conn.execute("UPDATE schema_version SET version=?", (40,))
             log.info("Schema migrated to version 40: exact-native input and cold rollback fence")
 
@@ -948,3 +959,13 @@ class _SchemaMixin:
             conn.execute("UPDATE schema_version SET version=?", (46,))
             conn.commit()
             log.info("Schema migrated to version 46: original CLI session assignment")
+
+        if from_version < 47:
+            from .inbox_custody import migrate_compatible_messages
+            from .runtime_custody import migrate_compatible_turns
+
+            with conn:
+                migrate_compatible_messages(conn)
+                migrate_compatible_turns(conn)
+                conn.execute("UPDATE schema_version SET version=?", (47,))
+            log.info("Schema migrated to version 47: compatible ordinary messaging")

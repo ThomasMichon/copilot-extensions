@@ -355,6 +355,7 @@ class AcpClient(RemoteAcpClientMixin, AcpHostStreamsMixin, AcpPreferencesMixin, 
             lambda: self._acp_session_id,
         )
         self._prompt_error: str | None = None
+        self._ordinary_input: tuple[str, Callable[[], None] | None] | None = None
         self._stop_reason: str | None = None
         self._pending_permission_future: asyncio.Future[RequestPermissionResponse] | None = None
         self._pending_permission_id: str | None = None
@@ -763,6 +764,12 @@ class AcpClient(RemoteAcpClientMixin, AcpHostStreamsMixin, AcpPreferencesMixin, 
 
     def _emit(self, event_type: str, data: dict[str, Any]) -> None:
         """Push event to the session's callback."""
+        if event_type == "root_user_message":
+            pending = getattr(self, "_ordinary_input", None)
+            if pending is not None and data.get("content") == pending[0] and callable(pending[1]):
+                pending[1]()
+                self._ordinary_input = None
+            return
         if self._on_event:
             try:
                 self._on_event(event_type, data)

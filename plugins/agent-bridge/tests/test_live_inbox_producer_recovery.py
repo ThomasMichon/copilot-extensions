@@ -17,7 +17,7 @@ from test_inbox_custody import close, inbox as inbox
 
 
 @pytest.mark.parametrize("winner", ["send", "closure"])
-def test_enrolled_producer_and_closure_commit_in_one_serial_order(inbox, winner: str) -> None:
+def test_ordinary_send_and_lifecycle_closure_preserve_one_serial_order(inbox, winner: str) -> None:
     db, owner, _, admission, consumer = inbox
     other = Database(db.db_path)
     entered, release, competing = threading.Event(), threading.Event(), threading.Event()
@@ -61,8 +61,8 @@ def test_enrolled_producer_and_closure_commit_in_one_serial_order(inbox, winner:
             release.set()
             first.result(timeout=10)
             if winner == "closure":
-                with pytest.raises(RuntimeCustodyError, match="original open epoch"):
-                    second.result(timeout=10)
+                mid, reason = second.result(timeout=10)
+                assert mid and reason is None
             else:
                 # The competing closure observed its revision before the send
                 # committed. Its failed CAS must reconcile, not ignore that send.
@@ -70,13 +70,10 @@ def test_enrolled_producer_and_closure_commit_in_one_serial_order(inbox, winner:
                     second.result(timeout=10)
                 close(inbox)
             assert not timeouts
-        rows = db.runtime_custody_inventory(owner)["rows"]["live_messages"]
-        assert len(rows) == (1 if winner == "send" else 0)
-        if rows:
-            retained = db.execute_read("SELECT * FROM live_messages")[0]
-            assert retained["body"] == "original body"
-            assert retained["runtime_custody_json"] == admission.document()
-            assert retained["handoff_json"] is None
+        retained, = db.execute_read("SELECT * FROM live_messages")
+        assert retained["body"] == "original body"
+        assert retained["runtime_custody_json"] is None
+        assert json.loads(retained["handoff_json"])["consumer"] == consumer.document()
     finally:
         release.set()
         other.close()

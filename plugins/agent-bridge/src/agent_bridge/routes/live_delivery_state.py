@@ -74,9 +74,19 @@ async def _observe(
             }
         row = request.app.state.db.get_live_session(session_id)
         attention = request.app.state.live_delivery_state.inspect(row)
+        if row is not None and row.get("role") == "acp":
+            manager = getattr(request.app.state, "session_manager", None)
+            if callable(getattr(manager, "get_session", None)):
+                from ..acp_inbox import attention as acp_attention
+
+                attention = acp_attention(manager.get_session(session_id))
         if fact["stage"] == "consumed":
+            acp = request.app.state.db.execute_read(
+                "SELECT 1 FROM turns WHERE session_id=? AND live_message_id=? AND completed_at IS NOT NULL",
+                (session_id, message_id),
+            )
             return {"receipt": fact, "outcome": "consumed", "attention": attention,
-                    "evidence": "attributed_root_user_message"}
+                    "evidence": "completed_acp_prompt" if acp else "attributed_root_user_message"}
         if attention["state"] == "blocked":
             return {"receipt": fact, "outcome": "blocked", "attention": attention}
         if time.monotonic() >= deadline:

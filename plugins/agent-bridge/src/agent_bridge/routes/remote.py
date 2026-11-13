@@ -23,6 +23,7 @@ from ..remote_operations import (
     validate_caller_id,
 )
 from ..live_peer_address import peer_operation_timeout
+from .live_delivery_state import DeliveryWait
 
 router = APIRouter(prefix="/api/v1/remote", tags=["remote"])
 
@@ -271,6 +272,7 @@ async def remote_send_live_message(
     target: str,
     body: RemoteLiveMessageRequest,
     request: Request,
+    project: str | None = None,
 ) -> dict[str, Any]:
     try:
         return await _service(request).send_live_message(
@@ -287,9 +289,38 @@ async def remote_send_live_message(
             wait=body.wait,
             wait_timeout=body.wait_timeout,
             **({"qualified_peer": True} if body.qualified_peer else {}),
+            **({"project": project} if project is not None else {}),
         )
     except RemoteBridgeError as exc:
         _raise(exc)
+
+
+@router.post("/{host}/projects/{project}/live-sessions/{target:path}/messages")
+async def remote_send_project_message(
+    host: str, project: str, target: str, body: RemoteLiveMessageRequest, request: Request,
+) -> dict[str, Any]:
+    return await remote_send_live_message(host, target, body, request, project=project)
+
+
+@router.post("/{host}/live-sessions/{session_id}/messages/{message_id}/delivery")
+async def remote_observe_delivery(
+    host: str, session_id: str, message_id: int, body: DeliveryWait, request: Request,
+    project: str | None = None,
+) -> dict[str, Any]:
+    try:
+        return await _service(request).observe_live_delivery(
+            host, session_id, message_id, timeout=body.timeout,
+            **({"project": project} if project is not None else {}),
+        )
+    except RemoteBridgeError as exc:
+        _raise(exc)
+
+
+@router.post("/{host}/projects/{project}/live-sessions/{session_id}/messages/{message_id}/delivery")
+async def remote_observe_project_delivery(
+    host: str, project: str, session_id: str, message_id: int, body: DeliveryWait, request: Request,
+) -> dict[str, Any]:
+    return await remote_observe_delivery(host, session_id, message_id, body, request, project=project)
 
 
 @router.get("/{host}/sessions/{session_id}/events")

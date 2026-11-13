@@ -22,7 +22,7 @@ import json
 import logging
 from typing import Any
 
-from .db_core import LIVE_SESSION_STALE_SECONDS, local_pid_alive
+from .db_core import LIVE_SESSION_STALE_SECONDS
 from .owner_membership_signal import commit
 
 log = logging.getLogger("agent-bridge")
@@ -74,7 +74,7 @@ _REGISTER_SQL = (
     "  SELECT 1 FROM worktree_ownership wo "
     "  JOIN sessions s ON s.id = wo.session_id "
     "  WHERE wo.worktree_id = ? AND ? IS NOT NULL "
-    "    AND s.status IN ('running', 'idle')"
+    "    AND s.status IN ('running', 'idle') AND s.id != ?"
     ") "
     "ON CONFLICT(session_id) DO UPDATE SET "
     # A heartbeat that omits metadata (only the id, while the extension's own
@@ -105,7 +105,7 @@ _REGISTER_SQL = (
     "  SELECT 1 FROM worktree_ownership wo "
     "  JOIN sessions s ON s.id = wo.session_id "
     "  WHERE wo.worktree_id = COALESCE(excluded.worktree_id, live_sessions.worktree_id) "
-    "    AND s.status IN ('running', 'idle')"
+    "    AND s.status IN ('running', 'idle') AND s.id != excluded.session_id"
     ")"
 )
 
@@ -114,38 +114,11 @@ def _incarnation_mismatch(
     row: Any, *, machine: str | None, pid: int | None,
     process_started_at: float | None, aliased: bool, now: float,
 ) -> bool:
-    """Whether a registration's own identity contradicts the canonical row it
-    would update (inside the caller's transaction, after alias resolution).
-
-    Another process (pid, or a known start time outside the tolerance) never
-    updates a *live* row. Through an alias -- a heartbeat for a renamed id,
-    landing on its successor's row -- another machine doesn't either (a direct
-    re-registration may still move machines, as before). Omitted fields never
-    conflict -- an id-only heartbeat keeps the row's metadata -- and a
-    taken-over row is left to the write's own rejection. A dead row -- ``expired``,
-    or still ``live`` but past its heartbeat lease and not provably running
-    here (the reaper's own rule: a lapsed row whose local pid is alive is
-    ``wedged``, never dead) -- belongs to no running process, so the new
-    incarnation revives it: that is a conversation resumed in a new process
-    (after a restart, or its CodeSpace stopping), which keeps its session id."""
-    if row is None:
-        return False
-    status = row["status"] or "live"
-    if status in ("taken-over", "expired"):
-        return False
-    if (status == "live" and (row["updated_at"] or 0) < now - LIVE_SESSION_STALE_SECONDS
-            and (row["venue"] or local_pid_alive(row["pid"]) is not True)):
-        return False
-    if status == "wedged" and not row["venue"] and local_pid_alive(row["pid"]) is False:
-        return False  # its process was alive when the sweep looked, and is provably gone now
-    if (aliased and machine and row["machine"]
-            and machine.casefold() != str(row["machine"]).casefold()):
-        return True
-    if pid is not None and row["pid"] is not None and int(pid) != int(row["pid"]):
-        return True
-    known = row["process_started_at"]
-    return (process_started_at is not None and known is not None
-            and abs(float(process_started_at) - float(known)) >= PROCESS_START_TOLERANCE_SECONDS)
+    """Keep destination scope for aliases; process metadata does not gate presence."""
+    return bool(
+        row is not None and aliased and machine and row["machine"]
+        and machine.casefold() != str(row["machine"]).casefold()
+    )
 
 
 def register_live_session_atomic(
@@ -203,7 +176,7 @@ def register_live_session_atomic(
                 _REGISTER_SQL,
                 (session_id, session_id, machine, cwd, worktree_id, repo, branch, pid,
                  role, driven_by, venue, process_started_at, origin, now, now, worktree_id,
-                 worktree_id),
+                 worktree_id, session_id),
             )
             session_id = db.resolve_live_session_id(session_id)  # the id actually written
             if cur.rowcount != 1:

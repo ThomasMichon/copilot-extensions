@@ -7,10 +7,10 @@ from pathlib import Path
 
 import bridge_http50_evidence as evidence
 from bridge_http_retained_probes import capture_request, record_observations
-from agent_bridge.db import Database
+from agent_bridge.db import Database, SCHEMA_VERSION
 from agent_bridge.protocol import HTTP_PROTOCOL_VERSION
 from agent_bridge.models import SessionStatus
-from agent_bridge.runtime_custody import RuntimeCustodyError
+from agent_bridge.runtime_custody import RuntimeCustodyError, RuntimeProducer
 from agent_bridge.session_manager import Session, SessionManager
 from agent_bridge.transport import SpawnTarget
 from test_live_inbox_runtime import (
@@ -82,10 +82,13 @@ def test_http50_capture_actual_observations(serving, request, tmp_path) -> None:
         and db.execute_read("SELECT * FROM bridge_runtime_epoch") == []
     )
     body = enroll(client, consumer)
-    admission = app.state.live_inbox_runtime._admission
-    assert admission is not None
+    owner = app.state.loop_governance.runtime_installation(db)
+    epoch = db.initialize_runtime_epoch(owner)
+    producer = RuntimeProducer("synthetic-lifecycle", 123, "synthetic-birth")
+    admission = db.enroll_runtime_producer(owner, epoch.epoch, producer)
     observed["idle_custody"] = asyncio.run(idle_custody(db, admission, tmp_path, vector["requests"]))
     ids = []
+    admitted = []
     for key in ("first", "second"):
         sent = client.post("/api/v1/live-sessions/native-a/messages", json={
             "sender": "synthetic-sender", "body": vector["requests"]["body"],
@@ -93,6 +96,7 @@ def test_http50_capture_actual_observations(serving, request, tmp_path) -> None:
         })
         assert sent.status_code == 200, sent.text
         ids.append(sent.json()["message_id"])
+        admitted.append(sent.json()["receipt"])
     payload = {**current(body), "limit": vector["requests"]["poll_limit"]}
     first = client.post(PREFIX + "/poll", json=payload)
     assert first.status_code == 200, first.text
@@ -120,12 +124,14 @@ def test_http50_capture_actual_observations(serving, request, tmp_path) -> None:
         "old_receipt_shape": set(legacy) == {
             "session_id", "message_id", "stage", "admitted_at", "sdk_accepted_at", "consumed_at",
         },
-        "no_send_permission": client.post(PREFIX + "/begin", json=attempt(body, row)).status_code == 409,
+        "no_send_permission": client.post(PREFIX + "/begin", json=attempt(body, row)).json() == {"begin": False},
     }
-    owner = app.state.loop_governance.runtime_installation(db)
+    recovery_before_close = client.get(PREFIX + "/recovery", params={
+        "limit": vector["requests"]["page_limit"],
+    }).json()
     db.close_runtime_epoch(
         owner, db.runtime_epoch(owner), transition_id="synthetic-close",
-        target_assembly="synthetic-retained", predecessor=app.state.live_inbox_runtime._producer,
+        target_assembly="synthetic-retained", predecessor=producer,
     )
     db.deregister_live_session(consumer.session_id)
     app.state.ready = False
@@ -141,7 +147,7 @@ def test_http50_capture_actual_observations(serving, request, tmp_path) -> None:
         })
         observed["passive_after_close"] = {
             "status": response.status_code,
-            "unchanged": response.json() == {"messages": [receipt], "next_after": None},
+            "unchanged": response.json() == recovery_before_close,
             "no_epoch_mutation": db.runtime_epoch(owner) == epoch,
         }
     finally:
@@ -167,6 +173,12 @@ def test_http50_capture_actual_observations(serving, request, tmp_path) -> None:
     expected = json.loads(json.dumps(vector["expected"]))
     if bound is None:
         expected["advertised"]["protocol_version"] = HTTP_PROTOCOL_VERSION
+        expected["schema"]["version"] = SCHEMA_VERSION
+        expected["bounded_poll"]["unoffered_untouched"] = False
+        second = db.live_message_handoff_receipt(consumer.session_id, ids[1])
+        assert second["consumer"] == consumer.document() and second["stage"] == "offered"
+        assert second["admitted_at"] == admitted[1]["admitted_at"]
+        expected["pending_after_consumption"] = {"messages": [second], "next_after": None}
     assert observed == expected
     if bound is not None:
         record_observations(evidence, bound, request.node.callspec.params["installation"], observed)

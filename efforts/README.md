@@ -19,7 +19,7 @@ rewriting historical journal evidence or treating a source merge as rollout.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
-| [Compatible Agent Messaging](active/compatible-agent-messaging/README.md) | Draft; compatibility-first ordinary send contract before implementation | #12487; existing Bridge/Driver, receipt and discovery owners retained; no implicit resume or rollout |
+| [Compatible Agent Messaging](active/compatible-agent-messaging/README.md) | Active; contract accepted in #12488; unpublished implementation frozen and released for ownership transfer, not ready | #12487; successor acceptance pending; existing Bridge/Driver, receipt and discovery owners retained; no implicit resume or rollout |
 | [Task Relevance Reconciliation](active/task-relevance-reconciliation/README.md) | Active; source receiver, emitter caller and periodic evaluator merged; source episodes, cohort attribution and actual closeout remain | #12274; existing queue, wake, session and workspace owners; no runtime activation |
 | [Python Bytecode Cache Lifecycle](active/python-bytecode-cache-lifecycle/README.md) | Active; design accepted, additive private user-cache provider under implementation; consumer migration and retirement/update relief remain | #10968 bytecode follow-on; preserves runtime retention, other hygiene tracks and normal update authority; no real cleanup or rollout |
 | [Latest Waiting Update](active/latest-waiting-update/README.md) | Done; reviewed queue source merged and actual Main release verified; pending archive | #11985 under #7758; existing execution, component provisioning and maintenance owners retained; no rollout |

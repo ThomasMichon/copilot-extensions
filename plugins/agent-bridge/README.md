@@ -2,6 +2,13 @@
 
 [Configuration reference](docs/configuration.md)
 
+[Ordinary messaging](docs/ordinary-messaging.md) resolves an existing live
+ACP/session or registered worktree receiver, queues once and returns a receipt.
+Local, direct SSH and `send --machine` forms share that contract. Optional
+delivery waiting observes the same receipt in the caller; raw send never
+creates or resumes an agent. Compatible endpoint/database contracts suffice
+without installation, process-birth or incarnation prerequisites.
+
 The optional [known-session semantic observation/history reads](docs/session-observations.md)
 reuse admitted retained event logs without starting an actor. Runtime capability
 negotiation, partial coverage and cursor/lifetime qualification remain explicit.
@@ -34,10 +41,11 @@ can acquire a declared HTTP source lease and renew an existing approved POSIX
 native plaintext account slot. They remain unactivated source APIs, not a
 renewal daemon, new login flow or native execution auth-wait implementation.
 
-Persistent inter-agent communication service for Copilot CLI. One instance per
-machine, providing session management, SSE event streaming, live-session
+Persistent inter-agent communication service for Copilot CLI. A coordinator
+instance provides session management, SSE event streaming, live-session
 messaging, and agent subprocess spawning across local, SSH, CodeSpace, and
-container venues.
+container venues. Independent installation contexts can host separate instances;
+repository front doors retain the selected context for remote messaging.
 
 An explicitly configured, already-running remote ACP server is also a client
 target: see [experimental remote ACP](docs/remote-acp.md) for the neutral
@@ -65,9 +73,9 @@ is explicitly opt-in. Legacy defaults are unchanged; selected retained delivery
 requires HTTP 50 recovery and never silently downgrades or resends an ambiguous
 original. Native qualification and installed adoption remain separate.
 An original headed-core launch can also select it with its private client
-declaration: delivery then uses the retained common Session Host rather than
-a competing direct SDK sender. Ordinary launches without that declaration
-keep their existing selection.
+declaration. That optional client is not an ordinary messaging prerequisite:
+a compatible native SDK receiver can deliver without a headed launch binding.
+Original handoffs and uncertain outcomes remain retained.
 
 Remote credential-relay admission and persisted-session reconnect use
 `timeouts.session_host_ready` (90 seconds by default) as a bounded readiness

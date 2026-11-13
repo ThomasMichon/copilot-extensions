@@ -1,4 +1,4 @@
-"""Explicit local enrollment and retained handoff; never a legacy downgrade."""
+"""Authenticated compatible receiving with retained original handoff outcomes."""
 
 from __future__ import annotations
 
@@ -85,7 +85,7 @@ def recover_handoff(
     return InboxHandoffReceipt.model_validate(row)
 
 
-def _current_owners(request: Request) -> tuple[Database, LoopGovernance, LiveInboxRuntime]:
+def _current_owners(request: Request) -> tuple[Database, LoopGovernance | None, LiveInboxRuntime]:
     db = _local_database(request)
     manager = getattr(request.app.state, "session_manager", None)
     if (
@@ -96,7 +96,7 @@ def _current_owners(request: Request) -> tuple[Database, LoopGovernance, LiveInb
         raise HTTPException(status_code=503, detail="retained inbox frontend is not serving")
     governance = getattr(request.app.state, "loop_governance", None)
     runtime = getattr(request.app.state, "live_inbox_runtime", None)
-    if not isinstance(governance, LoopGovernance) or not isinstance(runtime, LiveInboxRuntime):
+    if not isinstance(runtime, LiveInboxRuntime):
         raise HTTPException(status_code=503, detail="retained inbox owners are unavailable")
     return db, governance, runtime
 
@@ -122,33 +122,15 @@ def enqueue_message(
     request: Request, db: Database, session_id: str, body: SendMessageRequest, *,
     kind: str, expected_session_id: str | None, now: float,
 ) -> tuple[int | None, str | None]:
-    """Associate ordinary admitted sends only with their currently enrolled inbox.
-
-    Observing unavailable owners is not a legacy fallback. The DB serializes
-    the actual enrollment decision and surfaces this refusal for retained work.
-    Identical keyed recovery needs neither a new enrollment nor an open epoch.
-    """
+    """Enqueue and retain original message identity without provenance admission."""
     if db.read_only:
         raise HTTPException(status_code=503, detail="retained inbox database is read-only")
-    admission = None
-    refusal = None
-    try:
-        current_db, governance, runtime = _current_owners(request)
-        if current_db is not db:
-            raise RuntimeCustodyError("Inbox frontend database owner changed")
-        admission = runtime.producer_admission(db, governance)
-    except HTTPException as exc:
-        detail = exc.detail
-        refusal = detail.get("message", str(detail)) if isinstance(detail, dict) else str(detail)
-    except RuntimeCustodyError as exc:
-        refusal = str(exc)
     with _refusals():
         return db.enqueue_live_message_if_fresh(
             session_id, sender=body.sender, body=body.body, now=now,
             reply_to=body.reply_to, kind=kind, delivery=body.delivery,
             expected_session_id=expected_session_id, idempotency_key=body.idempotency_key,
-            report_duplicate=True, runtime_admission=admission,
-            enrolled_inbox=True, inbox_refusal=refusal,
+            report_duplicate=True, enrolled_inbox=True,
             exact_session=body.exact_session,
         )
 

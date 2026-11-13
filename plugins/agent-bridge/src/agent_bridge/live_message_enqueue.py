@@ -124,6 +124,8 @@ def _enrolled_admission(
     db: Database, conn: sqlite3.Connection, request: LiveMessageEnqueue,
     frontend: RuntimeAdmission | None, refusal: str | None,
 ) -> RuntimeAdmission | None:
+    if request.kind in ("prompt", "notify", "status-check") and request.delivery in ("steer", "queue"):
+        return None
     rows = conn.execute(
         "SELECT * FROM bridge_inbox_consumers "
         f"WHERE current=1 AND (session_id=? OR session_id={_CANON}) LIMIT 1",
@@ -151,6 +153,11 @@ def _enrolled_admission(
             (request.session_id, request.session_id, request.session_id),
         ).fetchone() is None:
             return None
+    if (
+        rows and request.idempotency_key and request.idempotency_key.strip()
+        and _ready_startup(conn, request)
+    ):
+        return None
     if refusal is not None:
         raise RuntimeCustodyError(refusal)
     if frontend is None or not rows or rows[0]["current"] != 1:
@@ -183,7 +190,12 @@ def enqueue_fresh(
             if replay is not None:
                 return replay
             selected = _enrolled_admission(db, conn, request, admission, inbox_refusal)
-            return _insert(db, request, selected, conn.execute)
+            result = _insert(db, request, selected, conn.execute)
+            if result[0] is not None and result[1] is None:
+                from .compatible_inbox import retain_message
+
+                retain_message(conn, result[0])
+            return result
     return _insert(
         db, request, admission,
         lambda statement, params: db._execute_runtime_admitted_write(statement, params, admission),

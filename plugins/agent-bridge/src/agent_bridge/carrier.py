@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import sys
 from typing import Any
 
@@ -17,7 +18,7 @@ from ssh_manager import (
 )
 
 
-def build_remote_carrier_command(remote_platform: str) -> str:
+def build_remote_carrier_command(remote_platform: str, *, project: str | None = None) -> str:
     """Build the far-side ``agent-bridge carrier --stdio`` command.
 
     The installed binstub is addressed explicitly because non-interactive SSH
@@ -26,14 +27,20 @@ def build_remote_carrier_command(remote_platform: str) -> str:
     not decoded and re-encoded by a PowerShell native-command pipeline.
     """
     platform = remote_platform.strip().lower()
+    if project is not None and (
+        not isinstance(project, str) or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", project) is None
+    ):
+        raise ValueError("project must name one registered repository command")
+    command = project if project is not None else "agent-bridge"
+    arguments = "bridge carrier --stdio" if project is not None else "carrier --stdio"
     if platform in {"windows", "win", "pwsh", "powershell"}:
         return (
-            'cmd.exe /d /s /c ""%USERPROFILE%\\.local\\bin\\agent-bridge.cmd" '
-            'carrier --stdio"'
+            f'cmd.exe /d /s /c ""%USERPROFILE%\\.local\\bin\\{command}.cmd" '
+            f'{arguments}"'
         )
     _posix_carrier = (
-        '"$HOME/.local/bin/agent-bridge" '  # marketplace-isolation: allow remote-management
-        'carrier --stdio'
+        f'"$HOME/.local/bin/{command}" '  # marketplace-isolation: allow remote-management
+        f'{arguments}'
     )
     if platform in {"linux", "wsl", "posix", "sh", "bash"}:
         return _posix_carrier
@@ -47,11 +54,13 @@ async def acquire_remote_carrier(
     config_source: ConfigSource | None = None,
     manager: ConnectionManager | None = None,
     port_forwards: list[str] | None = None,
+    project: str | None = None,
     **options: Any,
 ) -> CarrierLease:
     """Acquire Agent Bridge's shared carrier for one normalized SSH identity."""
     owner = manager or get_default_manager()
     source = config_source or SSHProfileSource(host_alias=host)
+    command = build_remote_carrier_command(remote_platform, project=project)
     await owner.ensure_connected(
         host,
         source,
@@ -60,7 +69,7 @@ async def acquire_remote_carrier(
     )
     return await owner.acquire_carrier(
         host,
-        build_remote_carrier_command(remote_platform),
+        command,
         **options,
     )
 

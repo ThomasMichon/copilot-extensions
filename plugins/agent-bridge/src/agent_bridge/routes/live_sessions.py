@@ -148,7 +148,7 @@ def _resolve_registration(db: Database, ref: str) -> dict[str, Any] | None:
     if ownership:
         owned = db.get_session(ownership.get("session_id") or "")
         if owned is not None and owned.get("status") in {"running", "idle"}:
-            return None
+            return db.get_live_session(ownership["session_id"])
     session_id = db.current_represented_session_for_worktree(
         ref, now=time.time()
     )
@@ -398,6 +398,16 @@ async def resolve_live_session(handle: str, request: Request, qualified_peer: bo
     the path-param route.
     """
     db = _db(request)
+    manager = getattr(request.app.state, "session_manager", None)
+    if callable(getattr(manager, "get_session", None)) and not handle.startswith("live:"):
+        from ..acp_inbox import resolve
+
+        try:
+            owned = resolve(manager, handle)
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        if owned is not None:
+            return _to_info(owned)
     try:
         row = db.resolve_live_session(handle, now=time.time(), qualified_peer=qualified_peer)
     except ValueError as exc:
@@ -719,6 +729,17 @@ async def post_live_message(
         raise HTTPException(400, detail="startup kinds require typed Bridge-owned acquisition")
     db = _db(request)
     now = time.time()
+    manager = getattr(request.app.state, "session_manager", None)
+    owned = None
+    if callable(getattr(manager, "get_session", None)):
+        from ..acp_inbox import is_live, resolve
+
+        owned = manager.get_session(session_id)
+        if owned is not None:
+            if not is_live(owned):
+                raise HTTPException(404, "ACP receiver is dormant; explicitly resume it before sending")
+            resolve(manager, session_id)
+            session_id = owned.session_id
     target = db.get_live_session(session_id)
     target_session_id = target["session_id"] if target is not None else session_id
     message_kind = body.kind
@@ -738,7 +759,7 @@ async def post_live_message(
     # later, unrelated incarnation could receive. The race-free enforcement NF's
     # client-side pre-send freshness guard (#2905) can only approximate.
     after = 0
-    if body.wait:
+    if body.wait and owned is None:
         # Capture the represented head WITHOUT creating a store entry -- a
         # rejected send must not leak a permanent LiveEventStore log for a
         # stale/absent id. get_or_create is deferred until after the enqueue
@@ -794,6 +815,14 @@ async def post_live_message(
         )
     if message_id is None:  # defensive: unreachable when reason is None
         raise HTTPException(status_code=500, detail="enqueue produced no id")
+    if owned is not None:
+        from ..acp_inbox import deliver
+        from ..session_manager import log
+
+        try:
+            await deliver(manager, owned)
+        except Exception:
+            log.warning("ACP message %s is admitted; receiving outcome unavailable", message_id, exc_info=True)
     admitted_receipt, receipt_current = admission_evidence(
         db, session_id, message_id, now, duplicate
     )
@@ -808,6 +837,17 @@ async def post_live_message(
             receipt=admitted_receipt,
             receipt_current=receipt_current,
             receipt_error=None if receipt_current else "live-message receipt is no longer retained",
+        )
+
+    if owned is not None:
+        from ..acp_inbox import wait_reply
+
+        reply = await wait_reply(db, target_session_id, message_id, body.wait_timeout)
+        current = db.live_message_receipt(target_session_id, message_id)
+        return SendMessageResult(
+            session_id=target_session_id, message_id=message_id, duplicate=False,
+            receipt=LiveMessageReceipt(**current) if current else admitted_receipt,
+            receipt_current=current is not None, reply_correlation="post_consumption_turn", **reply,
         )
 
     store = _store(request)

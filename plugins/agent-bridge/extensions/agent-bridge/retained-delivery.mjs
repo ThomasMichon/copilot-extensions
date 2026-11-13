@@ -23,7 +23,8 @@ export const retainedDeliverySelected = (value) => /^(1|true|on|yes)$/i.test(val
 
 function consumerValid(value, sid) {
   return value?.session_id === sid && nonblank(value.incarnation)
-    && positive(value.pid) && time(value.process_started_at)
+    && (value.pid == null || positive(value.pid))
+    && (value.process_started_at == null || time(value.process_started_at))
     && (value.portable_launch === undefined
       || /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/.test(value.portable_launch));
 }
@@ -192,7 +193,7 @@ export function createRetainedInbox({
       if (receipt.stage === "consumed") continue;
       if (events.some((event) => retainedConsumption(event, receipt, sourceAllowed))) {
         await report(receipt, "consumed");
-      } else if (receipt.stage !== "offered" || !sameConsumer(receipt.consumer, context.consumer)) {
+      } else if (receipt.stage !== "offered") {
         held = true;
         note(`original handoff ${receipt.message_id}/${receipt.handoff_id} remains ${receipt.stage}; no resend`);
       }
@@ -202,7 +203,7 @@ export function createRetainedInbox({
   }
 
   async function drain(sid, allowSend) {
-    if (now() >= healthUntil) {
+    if (portableLaunch !== undefined && now() >= healthUntil) {
       const health = await request("GET", "/health");
       if (!Number.isSafeInteger(health?.protocol_version) || health.protocol_version < PROTOCOL) {
         throw new Error(`protocol ${PROTOCOL} recovery support required; legacy downgrade refused`);
@@ -218,7 +219,7 @@ export function createRetainedInbox({
     if (!context || context.sid !== sid || context.cwd !== workingDirectory) {
       const consumer = {
         session_id: sid, incarnation: incarnation(),
-        pid: processIdentity?.pid, process_started_at: processIdentity?.process_started_at,
+        pid: processIdentity?.pid ?? null, process_started_at: processIdentity?.process_started_at ?? null,
         ...(portableLaunch === undefined ? {} : { portable_launch: portableLaunch }),
       };
       if (!consumerValid(consumer, sid)) throw new Error("consumer process observations unavailable");
@@ -246,11 +247,15 @@ export function createRetainedInbox({
         };
       } else if (frontendStale) {
         const observed = await request("POST", `${base(sid)}/negotiate`, owner);
-        if (observed?.contract !== CONTRACT || !sameBinding(observed.binding, negotiation.binding)
-            || (observed.expected_incarnation !== context.consumer.incarnation
-              && observed.expected_incarnation !== negotiation.expected_incarnation)) {
-          throw new Error("frontend recovery changed the original binding or consumer; no reenrollment");
+        if (observed?.contract !== CONTRACT || !nonblank(observed.binding?.installation)
+            || !positive(observed.binding?.epoch)
+            || !(observed.expected_incarnation === null || nonblank(observed.expected_incarnation))) {
+          throw new Error("frontend recovery is incompatible; original work retained");
         }
+        negotiation = {
+          contract: CONTRACT, binding: observed.binding,
+          expected_incarnation: observed.expected_incarnation,
+        };
       }
       await nativeContext(sid);
       if (!sendAllowed(sid, allowSend)) return;
@@ -287,9 +292,9 @@ export function createRetainedInbox({
       note(`original handoff ${msg.id}/${msg.handoff_id} remains ${msg.handoff_stage}; no resend`);
       return;
     }
-    const receipt = {
-      session_id: sid, message_id: msg.id, handoff_id: msg.handoff_id, consumer: context.consumer,
-    };
+    const consumer = msg.consumer ?? context.consumer;
+    if (!consumerValid(consumer, sid)) throw new Error("original handoff identity is unavailable");
+    const receipt = { session_id: sid, message_id: msg.id, handoff_id: msg.handoff_id, consumer };
     const readiness = async () => {
       if (!startup) return;
       if (!msg.plugin_readiness || msg.delivery !== "queue"
@@ -308,7 +313,7 @@ export function createRetainedInbox({
     await nativeContext(sid);
     if (!sendAllowed(sid, allowSend)) return;
     const grant = await currentRequest(sid, "begin", {
-      ...owner, binding: negotiation.binding, message_id: msg.id, handoff_id: msg.handoff_id,
+      ...owner, consumer, binding: negotiation.binding, message_id: msg.id, handoff_id: msg.handoff_id,
     });
     if (grant?.begin !== true) {
       note(`original handoff ${msg.id}/${msg.handoff_id} has no final grant; no send`);

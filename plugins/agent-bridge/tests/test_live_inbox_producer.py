@@ -14,7 +14,7 @@ from agent_bridge.loop_governance import LoopGovernance
 from agent_bridge.runtime_custody import RuntimeCustodyError, RuntimeInstallation
 from agent_bridge.plugin_readiness import PluginReadinessRequest, PluginReadinessResult, startup_input_digest
 from test_live_inbox_runtime import (
-    PREFIX, attempt, enroll, installation as installation, poll,
+    PREFIX, attempt, close_epoch, enroll, installation as installation, poll,
     request as consumer_request, serving as serving,
 )
 
@@ -32,7 +32,7 @@ def test_ordinary_send_uses_current_enrollment_and_never_legacy_ack(serving) -> 
     assert reply.status_code == 200, reply.text
     mid = reply.json()["message_id"]
     stored, = db.execute_read("SELECT * FROM live_messages")
-    assert stored["runtime_custody_json"] == app.state.live_inbox_runtime._admission.document()
+    assert stored["runtime_custody_json"] is None and stored["handoff_json"] is not None
     assert stored["body"] == PAYLOAD["body"] and stored["idempotency_key"] == PAYLOAD["idempotency_key"]
     assert db.list_pending_live_messages(consumer.session_id) == []
     assert db.ack_live_messages(consumer.session_id, [mid], time.time()) == 0
@@ -68,12 +68,7 @@ def test_lost_admission_reply_reopens_original_key_after_closure_and_registratio
     first = client.post(MESSAGES, json=PAYLOAD)
     assert first.status_code == 200, first.text
     original = dict(db.execute_read("SELECT * FROM live_messages")[0])
-    runtime = app.state.live_inbox_runtime
-    owner = app.state.loop_governance.runtime_installation(db)
-    db.close_runtime_epoch(
-        owner, db.runtime_epoch(owner), transition_id="transition-a",
-        target_assembly="target-a", predecessor=runtime._producer,
-    )
+    close_epoch(app, db)
     db.deregister_live_session(consumer.session_id)
     reopened = Database(db.db_path)
     app.state.db = reopened
@@ -171,7 +166,7 @@ def test_original_key_recovers_after_native_renames_and_alias_cleanup(serving, c
     "frontend", "database", "closed", "draining", "proxy", "public-bind", "incarnation",
     "pid", "expiry", "installation", "readonly",
 ])
-def test_selected_retained_target_refuses_without_legacy_downgrade(
+def test_compatible_send_ignores_provenance_but_preserves_liveness_and_readonly_refusals(
     serving, monkeypatch: pytest.MonkeyPatch, problem: str,
 ) -> None:
     app, client, db, consumer = serving
@@ -183,11 +178,7 @@ def test_selected_retained_target_refuses_without_legacy_downgrade(
         other = Database(db.db_path, read_only=problem == "readonly")
         app.state.db = other
     elif problem == "closed":
-        owner = app.state.loop_governance.runtime_installation(db)
-        db.close_runtime_epoch(
-            owner, db.runtime_epoch(owner), transition_id="transition-a",
-            target_assembly="target-a", predecessor=app.state.live_inbox_runtime._producer,
-        )
+        close_epoch(app, db)
     elif problem == "draining":
         app.state.session_manager.is_draining = True
     elif problem == "proxy":
@@ -207,10 +198,12 @@ def test_selected_retained_target_refuses_without_legacy_downgrade(
         monkeypatch.setattr(app.state.loop_governance, "runtime_installation", refuse)
     try:
         reply = client.post(MESSAGES, json=PAYLOAD)
-        assert reply.status_code == (503 if problem == "readonly" else 409), reply.text
-        if problem != "readonly":
-            assert reply.json()["detail"]["code"] == "retained_inbox_refused"
-        assert db.execute_read("SELECT * FROM live_messages") == []
+        if problem in ("readonly", "expiry"):
+            assert reply.status_code == (503 if problem == "readonly" else 409), reply.text
+            assert db.execute_read("SELECT * FROM live_messages") == []
+        else:
+            assert reply.status_code == 200, reply.text
+            assert len(db.execute_read("SELECT * FROM live_messages")) == 1
     finally:
         if other is not None:
             app.state.db = db
@@ -219,7 +212,6 @@ def test_selected_retained_target_refuses_without_legacy_downgrade(
 
 @pytest.mark.parametrize("changes", [
     {"delivery": "interrupt"}, {"kind": "startup:prompt:1"}, {"kind": "control:set-mode"},
-    {"idempotency_key": None}, {"idempotency_key": " "},
 ])
 def test_unsupported_message_effects_never_enter_the_enrolled_queue(serving, changes: dict) -> None:
     _, client, db, consumer = serving
@@ -297,7 +289,6 @@ def test_retained_startup_admission_requires_its_original_ready_input(serving, c
     options = {
         **PAYLOAD, "kind": f"startup:prompt:{control}", "expected_session_id": consumer.session_id,
         "now": time.time(), "enrolled_inbox": True,
-        "runtime_admission": app.state.live_inbox_runtime._admission,
     }
     if changed in {"body", "sender"}:
         options[changed] = "changed"
@@ -309,14 +300,14 @@ def test_retained_startup_admission_requires_its_original_ready_input(serving, c
         message_id, reason = db.enqueue_live_message_if_fresh(consumer.session_id, **options)
         assert message_id is not None and reason is None
         message, = db.execute_read("SELECT * FROM live_messages WHERE kind NOT LIKE 'control:%'")
-        assert message["runtime_custody_json"] is not None
+        assert message["runtime_custody_json"] is None
     else:
-        with pytest.raises(RuntimeCustodyError, match="unsupported"):
+        with pytest.raises(RuntimeCustodyError):
             db.enqueue_live_message_if_fresh(consumer.session_id, **options)
         assert db.execute_read("SELECT * FROM live_messages WHERE kind NOT LIKE 'control:%'") == []
 
 
-def test_new_frontend_retains_original_admission_on_retry_and_selects_new_one_for_new_work(serving) -> None:
+def test_new_frontend_retains_original_message_and_adds_only_new_work(serving) -> None:
     app, client, db, consumer = serving
     enroll(client, consumer)
     first = client.post(MESSAGES, json=PAYLOAD)
@@ -324,7 +315,7 @@ def test_new_frontend_retains_original_admission_on_retry_and_selects_new_one_fo
     original = dict(db.execute_read("SELECT * FROM live_messages")[0])
     app.state.live_inbox_runtime = LiveInboxRuntime()
     app.state.loop_governance = LoopGovernance()
-    # Negotiation recovers the same epoch; this is not SDK send authority.
+    # Negotiation is compatible receiving, not SDK send authority.
     assert client.post(PREFIX + "/negotiate", json=consumer_request(consumer)).status_code == 200
     retry = client.post(MESSAGES, json=PAYLOAD)
     assert retry.status_code == 200 and retry.json()["duplicate"]
@@ -332,10 +323,9 @@ def test_new_frontend_retains_original_admission_on_retry_and_selects_new_one_fo
     fresh = client.post(MESSAGES, json={**PAYLOAD, "idempotency_key": "new-operation"})
     assert fresh.status_code == 200
     rows = db.execute_read("SELECT * FROM live_messages ORDER BY id")
-    assert rows[0]["runtime_custody_json"] != rows[1]["runtime_custody_json"]
-    assert json.loads(rows[0]["runtime_custody_json"])["epoch"] == json.loads(
-        rows[1]["runtime_custody_json"],
-    )["epoch"]
+    assert rows[0]["runtime_custody_json"] is None and rows[1]["runtime_custody_json"] is None
+    assert rows[0]["id"] != rows[1]["id"]
+    assert json.loads(rows[0]["handoff_json"])["id"] != json.loads(rows[1]["handoff_json"])["id"]
     assert json.loads(db.execute_read("SELECT consumer_json FROM bridge_inbox_consumers")[0][0]) == (
         consumer.document()
     )

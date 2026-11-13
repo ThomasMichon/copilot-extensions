@@ -827,7 +827,7 @@ class BridgeClient(StatusClientMixin, PromptClientMixin, AnswerClientMixin, Sess
             )
         return request(
             "POST", f"/api/v1/live-sessions/{session_id}/messages", payload,
-            request_timeout=request_timeout,
+            request_timeout=request_timeout, allow_retry=False,
         ) or {}
 
     def get_session_usage(self, session_id: str) -> dict[str, Any]:
@@ -1382,6 +1382,7 @@ class BridgeClient(StatusClientMixin, PromptClientMixin, AnswerClientMixin, Sess
         wait: bool = False,
         wait_timeout: float = 120.0,
         qualified_peer: bool = False,
+        project: str | None = None,
     ) -> dict[str, Any]:
         """Deliver to a represented remote session through the carrier."""
         if wait:
@@ -1409,7 +1410,8 @@ class BridgeClient(StatusClientMixin, PromptClientMixin, AnswerClientMixin, Sess
             "POST",
             self._remote_path(
                 host,
-                "/live-sessions/"
+                ("/projects/" + urllib.parse.quote(project, safe="") if project is not None else "")
+                + "/live-sessions/"
                 + urllib.parse.quote(target, safe="")
                 + "/messages",
             ),
@@ -1426,7 +1428,7 @@ class BridgeClient(StatusClientMixin, PromptClientMixin, AnswerClientMixin, Sess
                 "wait_timeout": wait_timeout if wait else 120.0,
                 **({"qualified_peer": True} if qualified_peer else {}),
             },
-            request_timeout=timeout + 15.0,
+            request_timeout=timeout + 15.0, allow_retry=False,
         ) or {}
 
     def stream_remote_events(

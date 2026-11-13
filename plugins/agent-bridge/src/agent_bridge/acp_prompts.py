@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from acp import text_block
@@ -19,15 +20,18 @@ class AcpPromptMixin:
     @idle_operation
     async def send_prompt(
         self, text: str, *, native_attempt: NativeTurnAttempt | None = None,
+        ordinary_message: bool = False,
+        on_consumed: Callable[[], None] | None = None,
     ) -> dict[str, Any]:
         """Send a prompt and return the full result after its turn completes."""
         if not self._connection or not self._acp_session_id:
             raise RuntimeError("No active ACP session")
         if self._idle_transport is not None and not self.is_running:
             raise RuntimeError("Private idle ACP continuation is not activated")
-        if self._acquisition_launch is not None and self._native_turn_transport is None:
+        if (not ordinary_message and self._acquisition_launch is not None
+                and self._native_turn_transport is None):
             raise RuntimeCustodyError("Original acquisition turn transport has not been captured")
-        if (
+        if not ordinary_message and (
             self._native_turn_transport is not None
             and (native_attempt is None or native_attempt.owner is not self._native_turn_transport)
             or native_attempt is not None and native_attempt.owner.client is not self
@@ -38,6 +42,7 @@ class AcpPromptMixin:
             self._reset_buffers()
             self._cancel_out_of_turn()
             self._prompt_in_flight = True
+            self._ordinary_input = (text, on_consumed) if ordinary_message else None
             try:
                 result = await (
                     self._prompt_or_transport_lost(text) if native_attempt is None
@@ -53,6 +58,7 @@ class AcpPromptMixin:
                 raise
             finally:
                 self._prompt_in_flight = False
+                self._ordinary_input = None
             return self._build_turn_result()
 
     async def _prompt_or_transport_lost(

@@ -114,12 +114,12 @@ def caller_reply_address(args: Namespace, client_factory: Callable[[], BridgeCli
     return handle or session
 
 
-def send_remote_peer(client: BridgeClient, args: Namespace, address: LivePeerAddress, *, sender: str,
+def send_remote_peer(client: BridgeClient, args: Namespace, address, *, sender: str,
                      reply_to: str | None, kind: str, delivery: str, prompt: str) -> dict[str, Any]:
     """Explicit peer targets never fall through to agent creation."""
     import sys
 
-    from .send_outcome import SendRefused
+    from .send_outcome import SendUnknown
 
     if reply_to and not getattr(args, "reply_to", None):
         try:
@@ -132,6 +132,7 @@ def send_remote_peer(client: BridgeClient, args: Namespace, address: LivePeerAdd
             reply_to = None
     wait = getattr(args, "wait_reply", False) and not getattr(args, "no_wait", False)
     wait_timeout = getattr(args, "reply_timeout", 120.0) if wait else 120.0
+    project = getattr(args, "project", None)
     result = client.send_remote_live_message(
         address.machine, str(address), sender=sender, message=prompt,
         reply_to=reply_to, kind=kind, delivery=delivery, wait=wait,
@@ -139,13 +140,22 @@ def send_remote_peer(client: BridgeClient, args: Namespace, address: LivePeerAdd
         expected_session_id=getattr(args, "expected_session_id", None),
         idempotency_key=getattr(args, "idempotency_key", None),
         timeout=peer_operation_timeout(20.0, wait=wait, wait_timeout=wait_timeout),
-        qualified_peer=True,
+        qualified_peer=LivePeerAddress.parse(str(address)) is not None,
+        **({"project": project} if project is not None else {}),
     )
-    if not result.get("message_id"):
-        raise SendRefused(
-            "refused_unavailable", reason="invalid_receipt", retryable=False,
-            target=str(address), error="Remote peer delivery returned no message receipt.",
+    if not isinstance(result, dict) or not result.get("message_id"):
+        raise SendUnknown(
+            str(address), idempotency_key=getattr(args, "idempotency_key", None),
         )
+    if getattr(args, "wait_delivery", False):
+        from .live_delivery_client import wait_for_receipt
+
+        result = wait_for_receipt(
+            client, result, timeout=args.wait_timeout, machine=address.machine, project=project,
+        )
+    result["machine"] = address.machine
+    if project is not None:
+        result["project"] = project
     return result
 
 
