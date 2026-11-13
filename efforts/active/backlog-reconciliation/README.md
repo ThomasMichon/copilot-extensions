@@ -3164,6 +3164,19 @@ sources, transferring owners or turning partial/planning gains into completion.
   receiving objective or a retained gap; investigate actual implementation
   evidence when claiming completion, rather than making that the prerequisite
   for discovering thematic alignment.
+  Complete current ROOT/strict-annex receiving readback after #12478 supports
+  #5675's separate redundant-tracking retirement, not technical completion.
+  All original D/R/W witness rows and custodians remain; #5791's complete
+  accepted Phase 2 intake does not withdraw its explicit WHOLE independently
+  OPEN keeper condition. The [dated judgment](journal/2026/11.13-resident-companion-lifecycle-intake.md#separate-recoveryaccount-receiving-judgments)
+  records 860 whole open issues, still 131 above target, and no product effects.
+  The [resident-companion intake](journal/2026/11.13-resident-companion-lifecycle-intake.md)
+  proposes #5820's complete S1-S7 version-candidate, independent lifecycle,
+  exact resident-chain and native ordinary-update family directly under
+  installer recovery, preserving the original failure alternative and
+  #2395's separate inhibition/expiry acceptance. Three canonical keepers
+  and two actual primary-author gaps remain distinct; documentary delivery
+  neither supplies technical proof nor releases source/resource custody.
   The [finite recovery/account intake](journal/2026/11.13-finite-recovery-and-account-intake.md)
   proposes #5675's original guarded recovery/witness family directly under
   Dispatch Phase 3 and #5791's complete original plus #330/#2755 family

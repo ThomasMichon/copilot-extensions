@@ -43,6 +43,34 @@ These are candidate families, not assertions that each needs a new defect or
 issue. Each implementation unit must identify a
 specific failing boundary, supported contract and unconflicted owner.
 
+## L5820 - Whole installer and resident-companion lifecycle
+
+Source: #5820, including its original version-slot/whole-lifecycle intent,
+resident-helper refinement and inherited #2395 acceptance. Direct owner:
+the existing [installer-recovery Plan](README.md#whole-installer-and-resident-companion-lifecycle---5820),
+not a new implementation appointment. Preserve all original owners, claims,
+holds and activation gates.
+
+| Clause | Unresolved acceptance retained directly in the Plan |
+|--------|----------------------------------------------------|
+| S1 - Payload exclusion | Only fast payload copy enters an attributable version-slot OR equivalent pending candidate; build/health/cutover/task waits stay outside replaceable payload throughout lifetime, with immutable completed slots preserved. |
+| S2 - Failure alternative | Staging failure hard-fails OR performs an enforced bounded protected attempt; never silently executes unprotected in place. Both alternatives are not mandatory. |
+| S3 - Independent lifetime | Background reconcile, descendants, tree custody, uncertainty and owned cleanup have independent bounds; a staged child UV timeout alone is insufficient. |
+| S4 - Exact companion chain | Exact registered resident `dtssh` start/stop/health command AND waiting PowerShell/host-helper descendants remain covered across supervision, health, restart and update. |
+| S5 - Identity and ownership | Selected source/provenance, argv/config/service identity, containment, child exit, readiness/reporting, exact-generation ownership and owned cleanup remain explicit, consistent with authoritative incoming replacement rather than an old-state veto. |
+| S6 - Native update witness | Ordinary native Windows plugin update while this companion is actively supervised, without manual killing, retry race or stopping unrelated/shared trees; automatic post-update supervision/readiness. |
+| S7 - Separate inherited acceptance | #2395 temporary per-unit restart-inhibition/expiry remains separately open unless implemented OR explicitly transferred to its rightful supervision owner. |
+
+Delivered fail-closed MCP/Budget staging and narrower constructor/reconcile/
+lifetime source credit are retained. #5827's CWD-prevention evidence and
+installer rename/CWD fixtures do not accept this exact Windows companion chain.
+V5820-L, V5820-N AND G5820 preserve the complete family; technical/native proof
+is future unchecked work, not a prerequisite to documenting it. The original
+#2385 consolidation condition remains: accept this concrete resident-helper
+tail while preserving #5820's complete current contract and existing ownership.
+No updater, live companion operation, resource release or custody transfer
+is authorized by this documentary intake.
+
 ## Required controls for a selected case
 
 | Control | Observable postcondition |
