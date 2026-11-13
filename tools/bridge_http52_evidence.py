@@ -70,6 +70,7 @@ AFFECTED = (
         "dispatch_origin.py", "persisted_session_views.py", "acquisition_plugins.py",
         "acquisition_local_launch.py", "creation_local_launch.py",
         "worktree_native_resume.py", "singleton_resume.py", "routes/dispatch_tasks.py",
+        "routes/worktrees.py",
     )),
     *("plugins/agent-worktrees/src/agent_worktrees/" + name for name in (
         "retained_record_writer.py", "resource_relationship_cli.py", "tracking_write.py",
