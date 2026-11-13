@@ -118,8 +118,54 @@ a rolled-back provider remain null; migration and later retries do not backfill
 them from current state. Null is unknown, not an empty or disposable cohort.
 Older readers may ignore the additive field. No request syntax changes, and
 the field's schema/version describes support independently of package versions.
-Automatic Worktrees or Bridge callers are not enabled by this source change;
-they must select capable receivers before propagating the original snapshot.
+New Worktrees creation conditionally forwards this retained snapshot as
+`--dispatch-cohort`. Dispatch observes `dispatch_cohort` schema
+`dispatch-assignment-cohort`, version `1`, through the selected direct
+Worktrees runtime's existing `worktree-allocation capabilities --json` response
+(allocation schema/version `1`, origin role). It uses the same resolved
+interpreter for creation, not the marketplace payload or package version.
+Direct interpreter forms use Python isolated mode for both operations, so a
+checkout-local module, `PYTHONPATH` or user site cannot shadow the selected
+installed package. Existing mutable-shim baselines do not authorize discovery.
+The read uses the existing owned process-tree capture with a five-second
+execution timeout, normal tree cleanup and a 65,536-character combined output
+limit. Timeout/overflow becomes unknown support only after that owner's cleanup.
+Results are cached for up to 32 selected runtime prefixes per process;
+changing the selected runtime triggers fresh discovery.
+An unavailable observation remains unknown for that process/runtime selection.
+
+Prior providers without the declaration, invalid/unsupported declarations,
+mutable-shim launchers and provider rollback use the existing five-field
+Dispatch attempt without a cohort flag, with an explicit unattributed warning.
+Legacy reservations without a snapshot need no discovery. This optional audit
+carrier grants no new lifecycle authority and does not gate baseline creation.
+Before the first creation, the existing allocation transaction seals
+`allocation_cohort_transport` as `baseline` or `cohort-v1`. New reservations can
+start unselected; historical reservations migrate to baseline because an old
+creation may already have taken effect. Retries and later task episodes inherit
+the original selection. A lost binding response holds creation until the
+coordinator confirms the same choice. A baseline attempt never gains a cohort
+on upgrade; a cohort-bearing attempt requires a capable provider after rollback,
+rather than dropping immutable facts. Migration does not guess legacy evidence.
+An older caller omitting the choice cannot re-bind an unrecorded cohort-v1
+allocation; it must upgrade and confirm the transport. Metadata-only binding
+after a workspace has been recorded remains compatible.
+Before selecting cohort-v1, Dispatch checks the complete v1 reference fields,
+512-character string and counter limits, and 16-KiB encoded JSON bound. An
+unrepresentable new snapshot warns and selects baseline; an already-sealed
+cohort-v1 request refuses rather than changing facts.
+An effectful creation failure is never replayed using a second syntax.
+Creation-key recovery remains with the original owner. Prior callers still work
+with upgraded receivers on the baseline. The old form has no scheduled retirement.
+
+Only the new-allocation path sends the snapshot, using its original
+`allocation_reservation_key` task/attempt, never the current task's labels or
+assignment audit. Carried/targeted worktrees are resolved without discovery or
+restamping. Bridge session-state propagation remains separate and open.
+Ordinary initial-start validation admits the optional cohort only when it
+matches the retained allocation evidence, and requires it for a cohort-v1
+creation. All original sessionless task, reservation, attempt, driver,
+supervisor, creating-machine and ownership checks still apply before prompting.
 
 ## Original assignment cohort
 
@@ -155,10 +201,11 @@ readers may ignore the addition. A provider rollback still reads previously
 retained cohort facts without creating them for new assignments. Consumers
 requiring this evidence must retain an explicit unattributed state when it is
 absent; they must not infer support from package versions.
-Worktrees' original `dispatch_attempt` creation stamp and Bridge session-state
-propagation are not supplied by this slice. The selected in-process
-request-admission callback receives the cohort with the rest of the original
-request; the existing Worktrees reserve/bind wire payload remains unchanged.
+Worktrees' original `dispatch_attempt` creation stamp uses the earlier
+[allocation snapshot](#original-allocation-cohort), not this later audit.
+Bridge session-state propagation remains separate. The selected in-process
+request-admission callback receives the assignment cohort with the rest of the
+original request; the existing Worktrees reserve/bind wire payload remains unchanged.
 
 Each new protected assignment adds two indexed point reads at most: its task
 pool assignment and its managed producer creation receipt. No new process,

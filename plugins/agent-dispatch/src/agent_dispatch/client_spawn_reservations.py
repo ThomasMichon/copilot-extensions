@@ -36,11 +36,13 @@ class SpawnReservationClientMixin:
 
     def record_spawn_allocation(
         self, key: str, project: str, *, worktree_writer_requirement: dict | None = None,
+        cohort_transport: str | None = None,
     ) -> dict:
         """Persist the selected execution repository before allocation effects."""
         return self._unwrap(self._http.post(
             f"/spawn-reservations/{key}/allocation", json={
                 "project": project,
+                **({"cohort_transport": cohort_transport} if cohort_transport is not None else {}),
                 **({"worktree_writer_requirement": worktree_writer_requirement}
                    if worktree_writer_requirement is not None else {}),
             },
