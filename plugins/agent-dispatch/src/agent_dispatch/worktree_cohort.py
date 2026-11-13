@@ -8,7 +8,7 @@ import logging
 from pathlib import Path
 import subprocess
 
-from .procutil import agent_worktrees_environment, no_window_kwargs
+from .procutil import OutputLimitExceeded, agent_worktrees_environment, run_background_capture
 
 _LOG = logging.getLogger(__name__)
 _SCHEMA = "dispatch-assignment-cohort"
@@ -47,15 +47,14 @@ def _supports_cohort(prefix: tuple[str, ...]) -> bool:
     if len(prefix) < 3 or prefix[-2:] != ("-m", "agent_worktrees") or not Path(prefix[0]).is_absolute():
         return False
     try:
-        result = subprocess.run(
+        result = run_background_capture(
             [*prefix, "worktree-allocation", "capabilities", "--json"],
-            check=False, capture_output=True, text=True, timeout=5,
-            env=agent_worktrees_environment(), **no_window_kwargs(),
+            timeout=5, max_output=64 * 1024, env=agent_worktrees_environment(),
         )
-        if result.returncode != 0:
+        if result is None or result.returncode != 0:
             return False
         value = json.loads(result.stdout)
-    except (OSError, subprocess.SubprocessError, ValueError, TypeError):
+    except (OSError, subprocess.SubprocessError, OutputLimitExceeded, ValueError, TypeError):
         return False
     if not isinstance(value, dict):
         return False

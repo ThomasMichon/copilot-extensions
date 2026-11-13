@@ -124,8 +124,11 @@ New Worktrees creation conditionally forwards this retained snapshot as
 Worktrees runtime's existing `worktree-allocation capabilities --json` response
 (allocation schema/version `1`, origin role). It uses the same resolved
 interpreter for creation, not the marketplace payload or package version.
-The read is bounded to five seconds and cached for up to 32 selected runtime
-prefixes per process; changing the selected runtime triggers fresh discovery.
+The read uses the existing owned process-tree capture with a five-second
+execution timeout, normal tree cleanup and a 65,536-character combined output
+limit. Timeout/overflow becomes unknown support only after that owner's cleanup.
+Results are cached for up to 32 selected runtime prefixes per process;
+changing the selected runtime triggers fresh discovery.
 An unavailable observation remains unknown for that process/runtime selection.
 
 Prior providers without the declaration, invalid/unsupported declarations,

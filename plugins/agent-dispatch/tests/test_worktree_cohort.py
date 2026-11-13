@@ -50,6 +50,12 @@ with Path(os.environ["CALL_LOG"]).open("a") as out:
     out.write(json.dumps(args) + "\\n")
 cap = json.loads(os.environ["CAPABILITIES"])
 if args == ["worktree-allocation", "capabilities", "--json"]:
+    if os.environ.get("STALL_PROBE"):
+        import subprocess, time
+        subprocess.Popen([sys.executable, "-c",
+            "import time; from pathlib import Path; time.sleep(7); "
+            "Path(" + repr(os.environ["DESCENDANT_MARKER"]) + ").write_text('survived')"])
+        time.sleep(30)
     if cap == "legacy":
         print("unknown command: worktree-allocation", file=sys.stderr)
         sys.exit(2)
@@ -169,12 +175,15 @@ def test_legacy_reservation_has_no_discovery_or_guessed_cohort(provider):
     assert "--dispatch-cohort" not in calls()[0]
 
 
-@pytest.mark.parametrize("failure", [OSError("unavailable"), subprocess.TimeoutExpired("capabilities", 5)])
+@pytest.mark.parametrize("failure", [
+    OSError("unavailable"), subprocess.TimeoutExpired("capabilities", 5),
+    worktree_cohort.OutputLimitExceeded("oversized declaration"),
+])
 def test_unavailable_discovery_preserves_optional_baseline(monkeypatch, failure, caplog):
     def fail(*_args, **_kwargs):
         raise failure
 
-    monkeypatch.setattr(worktree_cohort.subprocess, "run", fail)
+    monkeypatch.setattr(worktree_cohort, "run_background_capture", fail)
     assert worktree_cohort.selection(
         [sys.executable, "-m", "agent_worktrees"], cohort(),
     ) == "baseline"
@@ -182,7 +191,7 @@ def test_unavailable_discovery_preserves_optional_baseline(monkeypatch, failure,
 
 
 def test_mutable_shim_never_authorizes_new_syntax(monkeypatch):
-    monkeypatch.setattr(worktree_cohort.subprocess, "run", lambda *_a, **_k: pytest.fail("no shim probe"))
+    monkeypatch.setattr(worktree_cohort, "run_background_capture", lambda *_a, **_k: pytest.fail("no shim probe"))
     assert worktree_cohort.selection(["/fixture/bin/worktrees"], cohort()) == "baseline"
 
 
@@ -374,3 +383,17 @@ def test_unrepresentable_new_cohort_uses_baseline_but_sealed_cohort_refuses(
     with pytest.raises(SpawnPreparationRetained, match="preserve its wire form"):
         create(allocation_cohort=value, cohort_transport="cohort-v1")
     assert len(calls()) == 1
+
+
+def test_timed_out_probe_reaps_pipe_holding_descendant_and_uses_baseline(provider, tmp_path):
+    import time
+
+    create, calls, env, _, _ = provider
+    marker = tmp_path / "descendant-survived"
+    env.update(STALL_PROBE="1", DESCENDANT_MARKER=str(marker))
+    started = time.monotonic()
+    assert create()["worktree"] == "workspace"
+    assert time.monotonic() - started < 15
+    assert "--dispatch-cohort" not in calls()[-1]
+    time.sleep(3)
+    assert not marker.exists()
