@@ -526,6 +526,31 @@ def test_probe_capacity_and_affinity_are_bounded_without_new_effects():
     asyncio.run(run())
 
 
+def test_maximum_inventory_has_bounded_inprocess_policy_work():
+    async def run():
+        sources = tuple(source(str(index)) for index in range(32))
+        checks = 0
+
+        def snapshot(key):
+            nonlocal checks
+            checks += 1
+            return sources
+
+        coordinator = AvailableTokenCoordinator(snapshot)
+        started = time.perf_counter()
+        result = await coordinator.lookup(KEY)
+        elapsed = time.perf_counter() - started
+        assert result.state == "cache-exhausted"
+        assert all(len(item.provider.calls) == 1 for item in sources)
+        assert checks <= 1 + 3 * len(sources)
+        assert await coordinator.drain()
+        assert coordinator.pending_count == 0
+        print(f"availability-source-sample sources={len(sources)} "
+              f"policy_callbacks={checks} elapsed_seconds={elapsed:.6f}")
+
+    asyncio.run(run())
+
+
 def test_reconnected_controller_keeps_affinity_without_reusing_old_binding():
     async def run():
         order = []

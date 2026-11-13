@@ -81,6 +81,29 @@ The owner calls `stop()` to close admission/cancel reads and `drain(timeout=...)
 to observe cleanup. `False` retains unresolved responsibility; neither expiry
 nor object disposal proves cleanup. Use one coordinator per event loop.
 
+## Performance boundary
+
+The caller is an explicit SDK lookup, not a hook, render callback or poller.
+For N admitted sources, one lookup invokes the synchronous current-policy
+snapshot at most `1 + 3N` times: initial inventory, per-source pre-dispatch,
+per-completion validation and final candidate validation. Each snapshot validates
+at most N source bindings, so the worst-case bookkeeping is bounded O(N squared),
+not a claim of unbounded scalability. N is capped at 32 (at most 97 snapshots);
+the owner should reuse its already-validated current in-memory policy/inventory.
+Changed or missing policy remains an actual refusal, not stale evidence reuse.
+
+The core adds no subprocess, network request, filesystem/tree scan, installation,
+repository-content hashing or history read. Provider work is separate, bounded
+by the shared phase and outstanding-read limit; policy callbacks must not hide
+blocking I/O.
+The maximum-inventory test guards callback work and prints one synthetic
+in-process wall-time sample. Run that focused case with `-s` for the raw sample;
+one sample is insufficient for tail or native performance qualification.
+There is no installed/serving caller or real channel adapter in this slice.
+Cold/warm complete channel/provider timings and resource coverage therefore
+remain unavailable until that composition is implemented and explicitly
+qualified under #6443; a passing unit cost bound is not native readiness.
+
 ## Integration and compatibility boundary
 
 This source seam is not yet a multi-Controller service-offer registry, a
