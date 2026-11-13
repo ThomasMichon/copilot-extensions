@@ -460,6 +460,26 @@ def test_cohort_cli_parser_and_pre_effect_validation(monkeypatch):
     assert len(seen) == 1
 
 
+@pytest.mark.parametrize("with_cohort", [False, True])
+def test_oversized_cli_attempt_refuses_before_allocation(monkeypatch, with_cohort):
+    parser = argparse.ArgumentParser()
+    worktree_ops_cli.add_parsers(parser.add_subparsers(dest="command"))
+    fields = cohort_attempt()
+    cohort = fields.pop("cohort")
+    fields["attempt"] = 2**63
+    argv = ["create", "--json", "--no-owner"]
+    for key, value in fields.items():
+        argv.extend(["--dispatch-" + key.replace("_", "-"), str(value)])
+    if with_cohort:
+        argv.extend(["--dispatch-cohort", json.dumps(cohort)])
+    monkeypatch.setattr(
+        worktree_ops_cli, "_create_worktree_core",
+        lambda *a, **k: pytest.fail("oversized provenance reached allocation"),
+    )
+    with output.capture_json_output():
+        assert worktree_ops_cli.cmd_create(parser.parse_args(argv)) == 1
+
+
 @pytest.mark.parametrize("failure", [False, True])
 def test_local_different_project_uses_original_owner_and_restores_project(owner, monkeypatch, failure):
     _, config = owner

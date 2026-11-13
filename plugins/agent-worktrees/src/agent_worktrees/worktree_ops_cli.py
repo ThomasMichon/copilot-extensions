@@ -385,8 +385,11 @@ def cmd_create(args: argparse.Namespace) -> int:
         return 1
     if present_dispatch_fields:
         attempt = dispatch_fields["attempt"]
-        if not isinstance(attempt, int) or isinstance(attempt, bool) or attempt <= 0:
-            message = "dispatch attempt must be a positive integer"
+        if (
+            not isinstance(attempt, int) or isinstance(attempt, bool)
+            or not 1 <= attempt <= tracking.MAX_PERSISTED_COUNTER
+        ):
+            message = f"dispatch attempt must be an integer between 1 and {tracking.MAX_PERSISTED_COUNTER}"
             if args.json:
                 return output._json_error(message)
             output.err(message)

@@ -160,6 +160,33 @@ def test_legacy_or_unattributed_cohort_is_never_backfilled(receiver):
     assert parsed.to_dict()["emitter"] is None and parsed.to_dict()["pool"] is None
 
 
+@pytest.mark.parametrize("damage", [
+    {"driver": " \t "}, {"supervisor": " \t "},
+    {"driver": " " + "x" * 513 + " "}, {"supervisor": " " + "x" * 513 + " "},
+    {"attempt": 2**63},
+])
+def test_unreloadable_attempt_refuses_before_receiving_or_direct_allocation(
+    receiver, monkeypatch, damage,
+):
+    from agent_worktrees import execution_spaces, worktree_creation
+
+    attempt = {**cohort_attempt(), **damage}
+    receiver = with_attempt(receiver, attempt)
+    config, _, records = receiver
+    with pytest.raises(ValueError, match="cohort attempt"):
+        receive("create", request(receiver), config)
+    monkeypatch.setattr(
+        execution_spaces, "require_current_execution_space",
+        lambda *a: pytest.fail("invalid provenance reached allocation preflight"),
+    )
+    with pytest.raises(ValueError, match="cohort attempt"):
+        worktree_creation._create_worktree_core(
+            config, dispatch_attempt=attempt, build_launch_plan=False,
+        )
+    assert not list(records.glob("*.yaml"))
+    assert not (records.parent / "workspace-creation.sqlite3").exists()
+
+
 def request(receiver: tuple, identity: dict | None = None) -> dict:
     _, admission, _ = receiver
     return {

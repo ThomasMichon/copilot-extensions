@@ -43,6 +43,24 @@ class DispatchCohort:
     encoded: str
 
     @classmethod
+    def from_attempt(cls, attempt: dict[str, object]) -> DispatchCohort:
+        """Reject provenance that cannot survive tracking reload before allocation."""
+        if (
+            type(attempt.get("attempt")) is not int
+            or not 1 <= attempt["attempt"] <= MAX_COUNTER
+            or any(
+                not isinstance(attempt.get(key), str) or not attempt[key].strip()
+                or len(attempt[key].strip()) > TEXT_MAX
+                for key in ("driver", "supervisor")
+            )
+        ):
+            raise ValueError("invalid dispatch cohort attempt fields")
+        return cls.from_fields(
+            attempt["cohort"], task_id=attempt["task_id"],
+            reservation_key=attempt["reservation_key"],
+        )
+
+    @classmethod
     def from_fields(
         cls, value: object, *, task_id: str, reservation_key: str,
     ) -> DispatchCohort:

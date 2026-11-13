@@ -517,10 +517,8 @@ def _create_worktree_core(
     from .dispatch_cohort import DispatchCohort
 
     cohort = (
-        DispatchCohort.from_fields(
-            dispatch_attempt["cohort"], task_id=dispatch_attempt["task_id"],
-            reservation_key=dispatch_attempt["reservation_key"],
-        ) if dispatch_attempt is not None and "cohort" in dispatch_attempt else None
+        DispatchCohort.from_attempt(dispatch_attempt)
+        if dispatch_attempt is not None and "cohort" in dispatch_attempt else None
     )
 
     if (build_launch_plan and kind != "system") or pending_seed:

@@ -61,9 +61,7 @@ def _options(admission: receiving.ReceivingAllocation) -> dict:
         ):
             raise ValueError("invalid receiving dispatch attempt")
         if "cohort" in attempt:
-            dispatch_cohort.DispatchCohort.from_fields(
-                attempt["cohort"], task_id=attempt["task_id"], reservation_key=attempt["reservation_key"],
-            )
+            dispatch_cohort.DispatchCohort.from_attempt(attempt)
     return options
 
 
