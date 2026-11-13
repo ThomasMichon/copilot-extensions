@@ -803,16 +803,16 @@ _versioned_slot_clean() {
 
 _versioned_mark_complete() {
     local actual_hash
-    local -a retention_options=()
+    local retention_option=""
     actual_hash="$(_payload_hash)" || return 1
     if [[ -n "${1:-}" && "$1" != "$actual_hash" ]]; then
         printf '%s\n' 'Payload changed during construction; completion refused' >&2
         return 1
     fi
     if [[ "${_RUNTIME_CONSTRUCTION_REUSE:-0}" != 1 ]]; then
-        retention_options=(--retain-helpers)
+        retention_option=--retain-helpers
     fi
-    _runtime_construction_complete "$actual_hash" "${retention_options[@]}"
+    _runtime_construction_complete "$actual_hash" ${retention_option:+"$retention_option"}
 }
 
 _slot_admission() {
