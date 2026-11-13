@@ -124,6 +124,9 @@ New Worktrees creation conditionally forwards this retained snapshot as
 Worktrees runtime's existing `worktree-allocation capabilities --json` response
 (allocation schema/version `1`, origin role). It uses the same resolved
 interpreter for creation, not the marketplace payload or package version.
+Direct interpreter forms use Python isolated mode for both operations, so a
+checkout-local module, `PYTHONPATH` or user site cannot shadow the selected
+installed package. Existing mutable-shim baselines do not authorize discovery.
 The read uses the existing owned process-tree capture with a five-second
 execution timeout, normal tree cleanup and a 65,536-character combined output
 limit. Timeout/overflow becomes unknown support only after that owner's cleanup.

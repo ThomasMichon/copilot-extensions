@@ -122,7 +122,7 @@ def create_worktree(
     workers have no bound knowledge repo to be given (see
     ``agent-worktrees create --no-pair``).
     """
-    exe_prefix = runtime_prefix or _agent_worktrees_launch_prefix()
+    exe_prefix = worktree_cohort.execution_prefix(runtime_prefix or _agent_worktrees_launch_prefix())
     if exe_prefix is None:
         raise EmbodyUnavailable("agent-worktrees CLI not found on PATH")
     cmd = list(exe_prefix)

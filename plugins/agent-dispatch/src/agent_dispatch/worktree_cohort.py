@@ -14,6 +14,16 @@ _LOG = logging.getLogger(__name__)
 _SCHEMA = "dispatch-assignment-cohort"
 
 
+def execution_prefix(prefix: list[str] | None) -> list[str] | None:
+    """Keep installed module discovery and creation independent of checkout code."""
+    if (
+        prefix and len(prefix) >= 3 and prefix[-2:] == ["-m", "agent_worktrees"]
+        and Path(prefix[0]).is_absolute() and "-I" not in prefix[1:-2]
+    ):
+        return [prefix[0], "-I", *prefix[1:]]
+    return prefix
+
+
 def _carrier_json(cohort: object) -> str | None:
     """Observe the v1 receiver's bounded carrier without importing another plugin."""
     if (
@@ -44,7 +54,10 @@ def _carrier_json(cohort: object) -> str | None:
 def _supports_cohort(prefix: tuple[str, ...]) -> bool:
     # A mutable shim can select a different runtime on its next invocation.
     # Only the resolver's direct interpreter form can retain this observation.
-    if len(prefix) < 3 or prefix[-2:] != ("-m", "agent_worktrees") or not Path(prefix[0]).is_absolute():
+    if (
+        len(prefix) < 4 or prefix[-2:] != ("-m", "agent_worktrees")
+        or "-I" not in prefix[1:-2] or not Path(prefix[0]).is_absolute()
+    ):
         return False
     try:
         result = run_background_capture(
@@ -95,7 +108,7 @@ def prepare_creation(client, reservation: dict, project: str | None) -> list[str
     from .embody import _agent_worktrees_launch_prefix
     from .workspace_binding import bind_allocation
 
-    prefix = _agent_worktrees_launch_prefix()
+    prefix = execution_prefix(_agent_worktrees_launch_prefix())
     transport = None
     if "allocation_cohort_transport" in reservation:
         transport = reservation["allocation_cohort_transport"]

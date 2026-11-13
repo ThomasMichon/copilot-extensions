@@ -6,6 +6,7 @@ import json
 import os
 import subprocess
 import sys
+import venv
 
 import pytest
 
@@ -40,7 +41,13 @@ def clear_capabilities():
 @pytest.fixture
 def provider(tmp_path, monkeypatch):
     """A strict current/prior process boundary, never the installed owner."""
-    package = tmp_path / "agent_worktrees"
+    runtime = tmp_path / "runtime"
+    venv.EnvBuilder(with_pip=False, symlinks=os.name != "nt").create(runtime)
+    site = (
+        runtime / "Lib" / "site-packages" if os.name == "nt" else
+        runtime / "lib" / f"python{sys.version_info.major}.{sys.version_info.minor}" / "site-packages"
+    )
+    package = site / "agent_worktrees"
     package.mkdir()
     (package / "__main__.py").write_text(
         '''import argparse, json, os, sys
@@ -93,7 +100,7 @@ print(json.dumps({
         **os.environ, "PYTHONPATH": str(tmp_path), "CALL_LOG": str(log),
         "CREATION_JOURNAL": str(tmp_path / "creation.json"),
     }
-    prefix = [sys.executable, "-m", "agent_worktrees"]
+    prefix = [str(runtime / ("Scripts/python.exe" if os.name == "nt" else "bin/python")), "-I", "-m", "agent_worktrees"]
     monkeypatch.setattr(embody, "_agent_worktrees_launch_prefix", lambda: prefix)
     monkeypatch.setattr(embody, "agent_worktrees_environment", lambda: environment.copy())
     monkeypatch.setattr(worktree_cohort, "agent_worktrees_environment", lambda: environment.copy())
@@ -105,7 +112,7 @@ print(json.dumps({
 
     def create(**kwargs):
         original = kwargs.pop("allocation_cohort", cohort())
-        transport = kwargs.pop("cohort_transport", worktree_cohort.selection(prefix, original))
+        transport = kwargs.pop("cohort_transport", worktree_cohort.selection(worktree_cohort.execution_prefix(prefix), original))
         return embody.create_worktree(
             project="example", task_id="original", reservation_key="dispatch-task:original:1",
             attempt=1, driver="agent-dispatch", supervisor="supervisor",
@@ -185,7 +192,7 @@ def test_unavailable_discovery_preserves_optional_baseline(monkeypatch, failure,
 
     monkeypatch.setattr(worktree_cohort, "run_background_capture", fail)
     assert worktree_cohort.selection(
-        [sys.executable, "-m", "agent_worktrees"], cohort(),
+        [sys.executable, "-I", "-m", "agent_worktrees"], cohort(),
     ) == "baseline"
     assert "support is unknown" in caplog.text
 
@@ -396,4 +403,22 @@ def test_timed_out_probe_reaps_pipe_holding_descendant_and_uses_baseline(provide
     assert time.monotonic() - started < 15
     assert "--dispatch-cohort" not in calls()[-1]
     time.sleep(3)
+    assert not marker.exists()
+
+
+def test_installed_probe_and_create_ignore_checkout_and_pythonpath(provider, tmp_path, monkeypatch):
+    create, calls, env, prefix, _ = provider
+    shadow = tmp_path / "checkout" / "agent_worktrees"
+    shadow.mkdir(parents=True)
+    marker = tmp_path / "checkout-code-executed"
+    (shadow / "__main__.py").write_text(
+        "from pathlib import Path\nPath(" + repr(str(marker)) + ").write_text('executed')\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(shadow.parent)
+    env["PYTHONPATH"] = str(shadow.parent)
+    # The legacy resolver form receives the same isolation as a current prefix.
+    prefix.remove("-I")
+    assert create()["worktree"] == "workspace"
+    assert len(calls()) == 2 and "--dispatch-cohort" in calls()[-1]
     assert not marker.exists()
