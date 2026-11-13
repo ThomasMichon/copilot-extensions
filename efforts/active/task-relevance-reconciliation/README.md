@@ -147,8 +147,10 @@ merged plan does not establish running adoption.
       The reservation owner retains allocation-cohort evidence before body
       preparation, separately from later assignment audit evidence.
       The [ACP session-origin provider](../../../plugins/agent-bridge/docs/dispatch-session-origin.md)
-      merged in #12373 and retains optional original assignment on first save; CLI-native registration,
-      caller migration and running qualification remain open.
+      merged in #12373; CLI-native first-save registration and selected-daemon
+      acquisition negotiation merged in #12387. The ordinary keyed-creation
+      CLI/client carrier, Dispatch caller migration and running qualification
+      remain open.
 - [ ] Expose forward and reverse correlation through existing owner APIs.
       Pool identity must identify the actual registration/assignment, not just
       a display name; opaque legacy records remain explicitly unattributed.
