@@ -591,26 +591,44 @@ agent-vault cache-populate --entry API/OpenAI
 agent-vault cache-verify --entry API/OpenAI
 ```
 
-An enabled service reads and writes this same protected store in its own OS
-protection context. Fresh backend reads attribute records to the canonical
-database, runtime home, installation and group; entry, field and generation
-remain bound to that record. A matching record can satisfy the existing `get`
-request after the master password expires, without another unlock. Unattributed
-legacy records and records for another context are never adopted by a read.
-Authoritative refresh bypasses cached values; explicit service locking revokes
-its attributed records, and mutations invalidate affected entries before backend
-work. Pending password-replacement journals remain pending, including when
-revocation removes a previous value's service attribution.
+An enabled service uses its own OS protection context and a separate
+`service_entries` collection inside this same encrypted store. Fresh backend
+reads bind records to the canonical database, runtime home, installation, group,
+entry and field. They never populate the ordinary `(entry, field)` slots that
+older direct readers use, so reading another database through the service
+cannot poison those slots. Unattributed legacy values are not adopted.
 
-Value/generation snapshots are read together. A client's exact writeback of a
-service-attributed result retains its original age and attribution rather than
-renewing freshness. Other/older writers may remove attribution; the service then
-needs a fresh backend read, not a guessed binding. Existing callers, cache
-formats, DPAPI/key protection and direct `--cache-only` behavior are unchanged;
-old services simply lack locked-service cache access. A backend read whose
-cache write fails reports additive `cache_warning: "service_cache_write_failed"`,
-not successful cache population. Unlock-triggered warming is separate from
-these read-through semantics.
+A matching service record can satisfy the existing `get` request after the
+master password expires. Value/generation snapshots are read together.
+Standard field aliases such as `Password` and `password` share one cache and
+journal identity; custom field names remain case-sensitive. Ordinary client
+writeback and entry migration do not rewrite service records or renew their age.
+
+Authoritative refresh never returns a cached value or deletes the caller's
+existing recovery record before trying the backend. A successful read updates
+only the service-owned collection; the caller still owns missing-only recovery
+insertion into its ordinary collection. Explicit locking and mutations revoke
+the relevant service records. Pending password journals remain intact, but
+observing a pending replacement revokes earlier service values so rolling it
+back cannot resurrect a revoked value.
+
+The existing store lock also protects a small non-secret revocation-epoch file.
+It contains only hashed subjects and random fences, never credentials. Recording
+revocation before attempting credential decoding prevents a replacement service
+from reviving old records after a temporarily unavailable crypto backend returns.
+An opted-in but unavailable protected cache is not cache opt-out: dependent
+mutations fail before backend writes, and locking still clears the master while
+reporting failed protected-cache revocation. Malformed metadata fails closed.
+
+The encrypted format, DPAPI/key protection, existing request syntax and direct
+`--cache-only` behavior remain unchanged; `cache-status` reports service records
+separately as `service_field_count`. Old services lack locked-service cache access
+and do not maintain its invalidation protocol. Resuming this feature after older
+providers mutate the backend requires explicit cache invalidation/repopulation;
+retained service-cache state across that downgrade is not supported.
+A live read whose service-cache write fails reports additive
+`cache_warning: "service_cache_write_failed"`. Unlock-triggered warming remains
+separate work.
 
 Fernet caches and `seal`/`unseal` use the optional `pycryptodomex` dependency
 (`cache` / `kek` extras), also supplied by the native `ssh` profile above.

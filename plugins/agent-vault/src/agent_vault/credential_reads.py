@@ -10,6 +10,7 @@ import sys
 
 from . import config
 from .cache_dpapi import CacheDecryptionUnavailable
+from .credential_fields import canonical_field
 
 CACHE_DECRYPTION_WARNING = (
     "cache_decryption_unavailable; protected cache retained; service-only read"
@@ -30,7 +31,7 @@ def read_credential(args) -> CredentialRead:
     from .cache import get_cache
 
     entry = args.entry
-    field = args.field or "password"
+    field = canonical_field(args.field or "password")
     try:
         cache_entry = config.normalize_entry(entry, config.resolve_context().group)
     except (RuntimeError, ValueError, OSError) as exc:

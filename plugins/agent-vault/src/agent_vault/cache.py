@@ -476,16 +476,6 @@ class PersistentCache:
             entries[entry] = fields
         return entries, fields
 
-    @staticmethod
-    def _attributed_replay(current: object, value: str, generation: int | None) -> bool:
-        return (
-            isinstance(current, dict)
-            and isinstance(current.get("service_binding"), str)
-            and current.get("value") == value
-            and type(generation) is int and type(current.get("generation")) is int
-            and current["generation"] == generation
-        )
-
     def get(
         self,
         entry: str,
@@ -496,21 +486,6 @@ class PersistentCache:
         readonly: bool = False,
     ) -> str | None:
         """Read a cached value; readonly mode refuses migration and corrupt data."""
-        record = self.get_record(
-            entry, field, max_age_seconds, legacy_entry=legacy_entry, readonly=readonly,
-        )
-        return record.get("value") if record is not None else None
-
-    def get_record(
-        self,
-        entry: str,
-        field: str = "password",
-        max_age_seconds: int | None = None,
-        *,
-        legacy_entry: str | None = None,
-        readonly: bool = True,
-    ) -> dict | None:
-        """Read a value and its generation from the same protected snapshot."""
         if not self.enabled:
             return None
         from .cache_recovery import require_coordinated
@@ -522,13 +497,13 @@ class PersistentCache:
                 if self._recovery else contextlib.nullcontext()
             ):
                 require_coordinated(self._root_dir, self._recovery)
-                return self._get_record(
+                return self._get_value(
                     entry, field, max_age_seconds, legacy_entry=legacy_entry, readonly=readonly,
                 )
 
-    def _get_record(
+    def _get_value(
         self, entry, field, max_age_seconds, *, legacy_entry, readonly,
-    ) -> dict | None:
+    ) -> str | None:
         store = (
             self._read_store(readonly=True, strict=True)
             if readonly else self._read_store()
@@ -561,7 +536,7 @@ class PersistentCache:
                 return None
             if time.time() - cached_epoch > max_age_seconds:
                 return None
-        return dict(rec)
+        return rec.get("value")
 
     def put(
         self,
@@ -572,7 +547,6 @@ class PersistentCache:
         *,
         strict: bool = False,
         legacy_entry: str | None = None,
-        service_binding: str | None = None,
     ) -> bool:
         """Cache a value (cache-through). No-op when disabled."""
         if not self.enabled:
@@ -590,10 +564,6 @@ class PersistentCache:
                 current = fields.get(field)
                 if isinstance(current, dict) and "rotation" in current:
                     return True
-                if self._attributed_replay(current, value, generation) and (
-                    service_binding is None or current["service_binding"] == service_binding
-                ):
-                    return True
                 if (
                     isinstance(current, dict)
                     and int(current.get("generation", 0)) > generation
@@ -605,8 +575,6 @@ class PersistentCache:
                     "cached_at_epoch": time.time(),
                     "generation": generation,
                 }
-                if service_binding is not None:
-                    fields[field]["service_binding"] = service_binding
                 return self._write_store_unlocked(store)
         except Exception:
             return False
@@ -699,8 +667,6 @@ class PersistentCache:
                 _, fields = self._fields_for_write(store, entry)
                 current = fields.get(field)
                 rotation = current.get("rotation") if isinstance(current, dict) else None
-                if self._attributed_replay(current, value, generation):
-                    return True
                 if isinstance(rotation, dict):
                     if int(rotation.get("operation", -1)) != operation:
                         return False
@@ -725,8 +691,6 @@ class PersistentCache:
         field: str,
         value: str,
         generation: int = 0,
-        *,
-        service_binding: str | None = None,
     ) -> bool:
         """Authoritatively replace a cached value and clear any journal."""
         if not self.enabled:
@@ -735,19 +699,12 @@ class PersistentCache:
             with self._store_lock():
                 store = self._read_store()
                 _, fields = self._fields_for_write(store, entry)
-                current = fields.get(field)
-                if self._attributed_replay(current, value, generation) and (
-                    service_binding is None or current["service_binding"] == service_binding
-                ):
-                    return True
                 fields[field] = {
                     "value": value,
                     "cached_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
                     "cached_at_epoch": time.time(),
                     "generation": generation,
                 }
-                if service_binding is not None:
-                    fields[field]["service_binding"] = service_binding
                 return self._write_store_unlocked(store)
         except Exception:
             return False
@@ -781,8 +738,6 @@ class PersistentCache:
                             entry = legacy_entry
                 _, fields = self._fields_for_write(store, entry)
                 current = fields.get(field)
-                if self._attributed_replay(current, value, generation):
-                    return True
                 if (
                     generation is not None
                     and isinstance(current, dict)
@@ -867,10 +822,7 @@ class PersistentCache:
         except Exception:
             return False
 
-    def invalidate(
-        self, entry: str, field: str | None = None, *, missing_ok: bool = False,
-        preserve_pending: bool = False,
-    ) -> bool:
+    def invalidate(self, entry: str, field: str | None = None) -> bool:
         """Drop a cached entry (or one field). No-op when disabled."""
         if not self.enabled:
             return False
@@ -879,19 +831,11 @@ class PersistentCache:
                 store = self._read_store()
                 entries = store.get("entries")
                 if not isinstance(entries, dict) or entry not in entries:
-                    return missing_ok
+                    return False
                 fields = entries[entry]
                 if not isinstance(fields, dict):
                     del entries[entry]
                     return self._write_store_unlocked(store)
-                pending = [
-                    name for name, record in fields.items()
-                    if isinstance(record, dict) and "rotation" in record
-                ] if preserve_pending else []
-                if field in pending:
-                    return True
-                if field is None and pending:
-                    return False
                 if field is None:
                     del entries[entry]
                 elif field in fields:
@@ -899,34 +843,7 @@ class PersistentCache:
                     if not fields:
                         del entries[entry]
                 else:
-                    return missing_ok
-                return self._write_store_unlocked(store)
-        except Exception:
-            return False
-
-    def invalidate_service_bindings(self, prefix: str) -> bool:
-        """Revoke only service-attributed records in the selected store."""
-        if not self.enabled:
-            return True
-        try:
-            with self._store_lock():
-                store = self._read_store(readonly=True, strict=True)
-                for entry, fields in list(store["entries"].items()):
-                    if not isinstance(fields, dict):
-                        continue
-                    for field, record in list(fields.items()):
-                        if isinstance(record, dict) and isinstance(record.get("rotation"), dict):
-                            previous = record["rotation"].get("previous")
-                            old_binding = (
-                                previous.get("service_binding") if isinstance(previous, dict) else None
-                            )
-                            if isinstance(old_binding, str) and old_binding.startswith(prefix):
-                                del previous["service_binding"]
-                        binding = record.get("service_binding") if isinstance(record, dict) else None
-                        if isinstance(binding, str) and binding.startswith(prefix):
-                            del fields[field]
-                    if not fields:
-                        del store["entries"][entry]
+                    return False
                 return self._write_store_unlocked(store)
         except Exception:
             return False
@@ -980,6 +897,10 @@ class PersistentCache:
             "key_exists": self._key_file.exists(),
             "entry_count": len(entries),
             "field_count": total_fields,
+            "service_field_count": (
+                len(store.get("service_entries", {}))
+                if isinstance(store.get("service_entries", {}), dict) else 0
+            ),
             "oldest": oldest,
             "newest": newest,
             "readable": readable,

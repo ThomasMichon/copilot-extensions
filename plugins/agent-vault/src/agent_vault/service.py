@@ -17,6 +17,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from .cache import get_cache
+from .credential_fields import canonical_field
 from . import __version__ as _PROCESS_VERSION
 from .config import (
     DEFAULT_TCP_PORT as DEFAULT_TCP_PORT,
@@ -159,14 +160,11 @@ class VaultService:
         self._credential_generations[cache_key] = generation
         if (
             persistent.enabled
-            and not persistent.replace(
-                entry, "password", password, generation,
-                service_binding=service_cache.binding_for(
-                    kpdb, getattr(self._request_ctx, "group", None),
-                ),
-            )
+            and not persistent.replace(entry, "password", password, generation)
         ):
             raise RuntimeError("Password updated, but the offline cache update failed")
+        if not service_cache.remember_password(self, persistent, kpdb, entry, password, generation):
+            raise RuntimeError("Password updated, but the service cache update failed")
 
     def _set_password(
         self,
@@ -199,6 +197,11 @@ class VaultService:
                     "error": "Password mutation expired before the backend write",
                 }
             operation = time.time_ns()
+            if not service_cache.invalidate_entry(
+                get_cache(), kpdb, entry, getattr(self._request_ctx, "group", None),
+                "password", legacy=False,
+            ):
+                return {"ok": False, "error": service_cache.UNAVAILABLE}
             try:
                 persistent, operation = self._prepare_password_cache(
                     kpdb,
@@ -515,7 +518,7 @@ class VaultService:
             normalized = normalize_entry(entry, group)
             return (
                 value,
-                self._credential_generations.get((kpdb, normalized, field), 0),
+                self._credential_generations.get((kpdb, normalized, canonical_field(field)), 0),
             )
 
     def has(self, kpdb: str, entry: str, group: str | None = None) -> bool | None:
@@ -851,7 +854,7 @@ class VaultService:
             if not self.ensure_unlocked(kpdb, vault_name, reason):
                 error_msg = self._last_error(kpdb) or self._last_error("") or "Vault locked"
                 return {"ok": False, "error": error_msg, "needs_unlock": True}
-            if not service_cache.invalidate_entry(get_cache(), entry):
+            if not service_cache.invalidate_entry(get_cache(), kpdb, entry, group):
                 return {"ok": False, "error": service_cache.UNAVAILABLE}
             ok, msg = self.cli.edit_username(kpdb, entry, username)
             if ok:
@@ -875,7 +878,7 @@ class VaultService:
             if not self.ensure_unlocked(kpdb, vault_name, reason):
                 error_msg = self._last_error(kpdb) or self._last_error("") or "Vault locked"
                 return {"ok": False, "error": error_msg, "needs_unlock": True}
-            if not service_cache.invalidate_entry(get_cache(), entry):
+            if not service_cache.invalidate_entry(get_cache(), kpdb, entry, group):
                 return {"ok": False, "error": service_cache.UNAVAILABLE}
             ok, msg = self.cli.remove_entry(kpdb, entry)
             if ok:
@@ -904,7 +907,10 @@ class VaultService:
                 return {"ok": False, "error": error_msg, "needs_unlock": True}
             new_path = dest_group.rstrip("/") + "/" + entry.rsplit("/", 1)[-1]
             persistent = get_cache()
-            if not all(service_cache.invalidate_entry(persistent, path) for path in (entry, new_path)):
+            if not all(
+                service_cache.invalidate_entry(persistent, kpdb, path, group)
+                for path in (entry, new_path)
+            ):
                 return {"ok": False, "error": service_cache.UNAVAILABLE}
             ok, msg = self.cli.move_entry(kpdb, entry, dest_group)
             if ok:
