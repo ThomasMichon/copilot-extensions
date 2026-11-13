@@ -3195,3 +3195,32 @@ input comparison, any required recapture, current-head CI and new installed
 qualification remain prerequisites before this changed head can be accepted.
 No constructor/publication ownership, baseline admission, rollout or Main
 authority is transferred by this integration.
+
+### Current closure recapture and checkout-byte correction
+
+Run 43359694729, attempt 1, succeeds at exact
+`8a6236f3d468c596151a1e38354014d229c4aa9f`. The existing Ubuntu owner passes
+all 403 capture cases, independently replays them without writing, verifies
+historical publication guards, validates canonical evidence and exports 184
+outputs. Artifact 14008591345 has provider archive digest
+`9801a64f305c3168d8f4196e0ae7306b56363bd2353ae1dbfea2710df6c30537`.
+Its independently downloaded manifest matches the trusted export digest
+`4d2332cd8ef5ef6baea75473b8875202357f5e7ce8af0dd31922eb5dfcaf5579`.
+The canonical adapter verifies complete source/output preimages and materializes
+all 184 outputs through its locked publisher at the same frozen source.
+This refreshes controlled compatibility evidence, not installed acceptance.
+
+CI 43359649568 at that source correctly fails before unit execution:
+the local manifest refresh accidentally bound three LF-declared invocation
+templates to stale CRLF working-tree bytes. The local raw-byte check therefore
+passed but did not prove the normal checkout contract. Only those three hashes
+are corrected; the product template blobs are unchanged. Their local formatting
+now matches declared LF. A complete batched comparison of all 765 committed
+sources with actual Git EOL attributes passes, as does the actual local
+source-admission check. The five admitted native PowerShell inputs retain
+their declared CRLF checkout hashes. No validator or checkout rule is weakened.
+
+Current-head CI and new installed-suite native proof remain required.
+Run 43352995266 remains the qualified positive for `40f1e6c4bd` only.
+Both outstanding review threads and the parent negative, admitted-baseline,
+frozen-candidate and Main-adoption gates remain open.
