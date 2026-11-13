@@ -23,6 +23,8 @@ import pytest
 from websockets.asyncio.client import connect
 
 from agent_remote_driver.headed.backend import HeadedBackend
+from agent_remote_driver.headed.launcher import _PaneChild
+from agent_remote_driver.headed.native_handoff import WindowsNativeHandoff
 from agent_remote_driver.headed.staging import stage_extension
 from agent_remote_driver.session_host.client import SessionHostClient
 from agent_remote_driver.session_host.host import SessionHost
@@ -116,6 +118,57 @@ def _logs(directory):
         path.read_text(encoding="utf-8", errors="replace")[-6000:]
         for path in directory.rglob("*.log")
     )
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows native creation handoff")
+@pytest.mark.parametrize("refuse", [False, True], ids=["original-wait", "pre-execution-refusal"])
+@pytest.mark.asyncio
+async def test_actual_headed_child_creation_handoff_retains_native_handle_and_wait(offline_cli, refuse):
+    import ctypes
+    from ctypes import wintypes
+
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.GetProcessId.argtypes, kernel.GetProcessId.restype = [wintypes.HANDLE], wintypes.DWORD
+    kernel.GetProcessTimes.argtypes = [wintypes.HANDLE] + [ctypes.POINTER(wintypes.FILETIME)] * 4
+    kernel.GetProcessTimes.restype = wintypes.BOOL
+    created = []
+
+    def publish(process):
+        handle = int(process._handle)
+        assert kernel.GetProcessId(handle) == process.pid != os.getpid()
+        times = [wintypes.FILETIME() for _ in range(4)]
+        assert kernel.GetProcessTimes(handle, *(ctypes.byref(value) for value in times))
+        assert times[0].dwHighDateTime or times[0].dwLowDateTime
+        assert process.poll() is None
+        created.append((process, handle))
+        if refuse:
+            raise ValueError("fixture publication refused")
+
+    owner = _PaneChild()
+    options = dict(
+        native_handoff=WindowsNativeHandoff(publish),
+        cwd=str(offline_cli.workspace), env=offline_cli.env,
+        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        **no_window_kwargs(),
+    )
+    try:
+        if refuse:
+            with pytest.raises(ValueError, match="fixture publication refused"):
+                owner.launch([offline_cli.executable, "--version"], **options)
+            assert owner.proc is None and len(created) == 1
+            assert created[0][0].poll() is not None
+            assert created[0][0].stdout.closed and created[0][0].stderr.closed
+        else:
+            owner.launch([offline_cli.executable, "--version"], **options)
+            assert created == [(owner.proc, int(owner.proc._handle))]
+            assert await asyncio.wait_for(owner.wait(), 30) == 0
+            assert b"GitHub Copilot CLI" in owner.proc.stdout.read()
+            assert owner.job is None
+    finally:
+        if owner.proc is not None:
+            await owner.terminate()
+            owner.proc.stdout.close()
+            owner.proc.stderr.close()
 
 
 @pytest.mark.parametrize("configured", [False, True])

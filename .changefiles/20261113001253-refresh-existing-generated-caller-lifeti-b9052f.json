@@ -1,0 +1,17 @@
+{
+  "comment": "Refresh existing generated caller-lifetime archives for the shared native creation helper without changing installation or cleanup policy",
+  "changes": [
+    {
+      "plugin": "wsl-setup",
+      "type": "patch"
+    },
+    {
+      "plugin": "libs/update-driver",
+      "type": "patch"
+    },
+    {
+      "plugin": "libs/installation-context",
+      "type": "patch"
+    }
+  ]
+}
