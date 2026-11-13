@@ -197,6 +197,10 @@ under the SQLite write lock.
 Exact retries after restart or a lost response return the committed terminal
 outcome without reobserving, repeating the transition audit or reemitting its
 terminal event. Conflicting arguments or a changed task episode refuse.
+The receipt retains the task's current attachment separately from the original
+closeout native: a same-generation yield without resource release may clear
+the task's native field without losing the original closeout conversation.
+Transition and replay both validate that retained task attachment.
 The nullable additive field remains absent for earlier closeouts; no historical
 acknowledgement is reconstructed. Acceptance receipts remain original intent,
 while the existing current-closeout view exposes this later observation.

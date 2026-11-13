@@ -133,6 +133,32 @@ def test_restart_and_lost_terminal_reply_replay_without_observation_or_duplicate
     assert restarted.events(task.id) == before
 
 
+def test_prepared_then_yielded_owner_finishes_and_retries_with_retained_native(
+    finalized: readiness.Ready, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_dispatch import pool_decline_observation
+
+    queue, owner, workspace, task, calls = finalized
+    yielded = queue.yield_task(task.id, workspace.worker_id, release_spawn=False)
+    assert yielded.owner is None and yielded.owner_session_id is None
+    first = finish(finalized)
+    assert first.event_type == "task.abandoned"
+    assert first.task.owner_session_id is None
+    closeout = queue.relevance_snapshot(task.id)["closeout"]
+    assert closeout["owner_session_id"] == "native"
+    assert closeout["acknowledgement"]["task_attachment"] == {
+        "generation": yielded.generation, "owner_session_id": None,
+    }
+
+    def unexpected(*_: object) -> dict:
+        raise AssertionError("a yielded closeout replay must not repeat observation")
+
+    monkeypatch.setattr(pool_decline_observation, "observe", unexpected)
+    restarted = TaskQueue(queue.db_path, relationship_writer=owner, relationship_authority="local")
+    second = finish((restarted, owner, workspace, task, calls))
+    assert second.event_type is None and second.task == first.task
+
+
 @pytest.mark.parametrize("change", ["hold", "native", "reservation", "relationship", "generation"])
 def test_change_during_finalized_observation_retains_task_and_receipt_absence(
     finalized: readiness.Ready, monkeypatch: pytest.MonkeyPatch, change: str,

@@ -32,7 +32,10 @@ def _replay(
         or receipt["binding"] != json.loads(row["resource_binding"])
         or task is None or task.status != Status.ABANDONED or task.owner is not None
         or task.generation != arguments["expected_generation"]
-        or task.owner_session_id != arguments["native_id"] or task.updated_at != receipt["at"]
+        or {
+            "generation": task.generation, "owner_session_id": task.owner_session_id,
+        } != receipt["task_attachment"]
+        or task.updated_at != receipt["at"]
     ):
         raise TaskError("relevance closeout acknowledgement incarnation changed; custody retained")
     return CompletionOutcome(task, None)
@@ -86,6 +89,10 @@ def finish(queue: TaskQueue, task_id: str, **arguments: str | int) -> Completion
     receipt = {
         "task_id": task_id, "arguments": arguments, "binding": original["binding"],
         "observation": observation, "at": ts, "process_retirement": False,
+        "task_attachment": {
+            "generation": original["task"]["generation"],
+            "owner_session_id": original["task"]["owner_session_id"],
+        },
     }
 
     def retain(conn: sqlite3.Connection) -> None:
@@ -104,8 +111,8 @@ def finish(queue: TaskQueue, task_id: str, **arguments: str | int) -> Completion
             task_id, allowed=allowed, to=to, worker_id=arguments["worker_id"],
             require_owner=False, now=ts, note="source relevance owner closeout acknowledged",
             extra={"owner": None, "lease_expires_at": None},
-            expected_generation=arguments["expected_generation"],
-            expected_owner_session_id=arguments["native_id"],
+            expected_generation=receipt["task_attachment"]["generation"],
+            expected_owner_session_id=receipt["task_attachment"]["owner_session_id"],
             expected_status=original["task"]["status"], reject_if_held=True,
             transaction_guard=retain,
         )
