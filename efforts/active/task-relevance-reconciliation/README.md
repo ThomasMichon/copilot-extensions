@@ -170,6 +170,9 @@ merged plan does not establish running adoption.
 - [ ] Connect owner closeout acknowledgement to the existing terminal task,
       session and managed-workspace lifecycle. Preserve actual unlanded work,
       open PRs and foreign obligations rather than force-clearing them.
+      Acceptance-time resource selection now retains the original relationship
+      and exact execution reservation; acknowledgement and lifecycle effects
+      remain unimplemented.
 - [ ] Publish receiver support before enabling new callers; document baseline,
       upgrade and rollback behavior against the executing runtime.
 

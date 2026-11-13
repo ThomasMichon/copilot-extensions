@@ -287,6 +287,31 @@ transport-internal redirects/retries and external custodian work still need
 their own qualified bounds under the caller's original shared allowance.
 The declaration neither verifies credentials nor grants live effects.
 
+Typed GitHub/Gitea `snapshot` and `inventory` calls can explicitly select
+`--http-profile direct-v1`. Omission retains `legacy`: existing `gh`, proxy,
+curl configuration and ambient-account behavior are not silently changed.
+The option requires `--credential-command`; native Python callers can use
+`providers.observation_credentials.with_http_profile(source, "direct-v1")`.
+Other providers refuse this profile before credential acquisition.
+
+The direct profile reuses the native provider's GET endpoints, parsing and
+per-page credential renewal, but invokes curl with `-q` first (no default
+configuration), HTTP/1.1, URL globbing off, proxies disabled, configured retries
+zero, redirects disabled and HTTPS-only URLs. Authorization goes through stdin,
+not process arguments or a token environment override. Captured responses remain
+byte-bounded; authorization loss aborts the observation without fallback.
+Caller-selected pages still make distinct requests. A redirect is an unsuccessful
+read, never permission to follow it with the credential.
+
+Passive `inventory --contract --json` adds `observation_http_profiles.direct-v1`
+with its option, supported providers, enforced transport settings and
+`requires_binary_qualification: true`. This receiver-first declaration is not
+proof about the selected curl executable, TLS backend, trust store, environment,
+credential issuer, or physical-send count. A consumer requiring bounded actual
+provider traffic must qualify that executing generation and include external
+issuance/verification requests in the original shared allowance. No old syntax
+is deprecated; consumers must discover support before sending the new option.
+
 For example, the prefix may invoke the separately installed
 [Fleet credential command](../../../fleet-manager/docs/gateway-runtime.md)
 with its explicit worker policy, source/account and exact `ForgeScope`.
