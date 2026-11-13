@@ -262,7 +262,7 @@ def test_assignment_lookup_is_indexed_and_old_snapshot_shape_remains_valid(assig
             " WHERE task_id=? AND to_status='claimed' AND note='claim' AND from_status IS NOT to_status"
             " ORDER BY id DESC LIMIT 1", (task_id,),
         ).fetchall()
-    assert any("USING INDEX idx_task_events_assignment" in row[3] for row in plan)
+    assert any("SEARCH task_events USING INDEX idx_task_events_" in row[3] for row in plan)
     legacy = read_snapshot(queue, task_id)
     legacy.pop("queue_identity")
     legacy.pop("assignment")

@@ -147,6 +147,9 @@ class AssignmentSubject:
             outcome == "unassigned_queued"
             and same_assignment_worker(value["unassignment"]["worker_id"], self.worker_id)
             and value["unassignment"]["event_id"] > self.assignment_event_id
+        ) or (
+            outcome == "relevance_closeout_ready" and self.recovery is not None
+            and value["closeout"]["relationship_request_id"] == self.request_id
         )
         return {
             "exists": True, "state": value["state"],
