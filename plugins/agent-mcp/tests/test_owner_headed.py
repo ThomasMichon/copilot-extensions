@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import time
 from types import SimpleNamespace
 from unittest.mock import Mock
 import zipfile
@@ -29,13 +30,14 @@ def _entry():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("outcome", ["success", "native-cleanup", "cancelled"])
-async def test_selected_producer_publishes_actual_child_and_preserves_original_wait(monkeypatch, outcome):
+@pytest.mark.parametrize("finalizers_fail", [False, True])
+async def test_selected_producer_publishes_actual_child_and_preserves_original_wait(
+    monkeypatch, outcome, finalizers_fail,
+):
     from agent_procutil.owned_process import OwnedCleanupError
 
     monkeypatch.setattr(owner_headed, "os", SimpleNamespace(name="nt"))
     section = Mock(binding="a" * 64, inherited_handle=77)
-    section.__enter__ = Mock(return_value=section)
-    section.__exit__ = Mock(return_value=False)
     import agent_mcp.owner_section as sections
 
     monkeypatch.setattr(sections, "OwnerSection", lambda: section)
@@ -47,6 +49,9 @@ async def test_selected_producer_publishes_actual_child_and_preserves_original_w
             raise OSError("fixture transfer cancellation")
 
     transfer.send.side_effect = send
+    if finalizers_fail:
+        transfer.close.side_effect = OSError("fixture transfer close failed")
+        section.close.side_effect = OSError("fixture section close failed")
     monkeypatch.setattr(owner_overlay_pipe, "OverlayPipe", lambda overlay: transfer)
     original = {"mcpServers": {"chosen": _entry(), "other": _entry()}}
     before = copy.deepcopy(original)
@@ -73,15 +78,67 @@ async def test_selected_producer_publishes_actual_child_and_preserves_original_w
         ["copilot.exe", "--session-id", "selected"], configuration=original,
         names=["chosen"], session_id="selected",
     )
-    if outcome == "success":
+    if outcome == "success" and not finalizers_fail:
         assert await result == 23
     else:
-        with pytest.raises(type(fault)) as caught:
+        expected = OwnedCleanupError if outcome == "success" else type(fault)
+        with pytest.raises(expected) as caught:
             await result
-        assert caught.value is fault
+        if outcome != "success":
+            assert caught.value is fault
+        if finalizers_fail:
+            retained = caught.value if outcome == "success" else caught.value.mcp_cleanup
+            assert isinstance(retained, OwnedCleanupError)
+            assert retained.cleanup_resources == (
+                ("configuration-transfer", transfer), ("owner-section", section),
+            )
+            transfer.close.side_effect = section.close.side_effect = None
+            retained.retry_cleanup(deadline=time.monotonic() + 1)
+            assert transfer.close.call_count == section.close.call_count == 2
     assert transferred == [True] and seen == [{"session_id": "selected"}]
     assert original == before
-    transfer.close.assert_called_once()
+    assert transfer.close.call_count == section.close.call_count == (2 if finalizers_fail else 1)
+
+
+@pytest.mark.asyncio
+async def test_transfer_failure_is_redacted_before_original_native_wait_finishes(monkeypatch, capsys):
+    import agent_mcp.owner_section as sections
+
+    monkeypatch.setattr(owner_headed, "os", SimpleNamespace(name="nt"))
+    section = Mock(binding="a" * 64, inherited_handle=77)
+    monkeypatch.setattr(sections, "OwnerSection", lambda: section)
+    transfer = Mock(path=r"\\.\pipe\fixture")
+    transfer.send.side_effect = OSError("sensitive-fixture-error")
+    monkeypatch.setattr(owner_overlay_pipe, "OverlayPipe", lambda overlay: transfer)
+    reported, release = asyncio.Event(), asyncio.Event()
+    report = owner_headed._report
+
+    def observe(message):
+        report(message)
+        reported.set()
+
+    monkeypatch.setattr(owner_headed, "_report", observe)
+
+    async def run(_argv, *, native_handoff, **_kwargs):
+        native_handoff.on_suspended(SimpleNamespace(pid=1234, _handle=900))
+        await release.wait()
+        return 23
+
+    monkeypatch.setattr(launcher, "run_headed", run)
+    task = asyncio.create_task(owner_headed.run_headed(
+        ["copilot.exe"], configuration={"mcpServers": {"chosen": _entry()}}, names=["chosen"],
+    ))
+    try:
+        await asyncio.wait_for(reported.wait(), 2)
+        assert not task.done()
+        message = capsys.readouterr().err
+        assert "configuration transfer failed" in message
+        assert "sensitive-fixture-error" not in message
+        transfer.close.assert_not_called()
+    finally:
+        release.set()
+        with pytest.raises(OSError, match="sensitive-fixture-error"):
+            await task
 
 
 @pytest.mark.asyncio

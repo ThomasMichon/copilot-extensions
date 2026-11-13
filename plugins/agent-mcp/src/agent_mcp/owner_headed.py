@@ -11,6 +11,45 @@ import json
 import os
 from pathlib import Path
 import sys
+import time
+
+
+def _report(message: str) -> None:
+    try:
+        print("agent-mcp: " + message, file=sys.stderr, flush=True)
+    except (OSError, ValueError):
+        pass
+
+
+def _retry_release(resources, deadline: float) -> None:
+    if time.monotonic() >= deadline:
+        raise TimeoutError("MCP handoff cleanup budget expired")
+    _release(resources, None)
+
+
+def _release(resources, active: BaseException | None) -> None:
+    from agent_procutil.owned_process import OwnedCleanupError
+
+    failed, errors = [], []
+    for name, resource in resources:
+        try:
+            resource.close()
+        except BaseException as error:
+            failed.append((name, resource))
+            errors.append(error)
+    if not failed:
+        return
+    retained = tuple(failed)
+    cleanup = OwnedCleanupError(
+        None, cleanup_resources=retained,
+        cleanup_retry=lambda deadline: _retry_release(retained, deadline),
+    )
+    cleanup.mcp_cleanup_errors = tuple(errors)
+    _report("native MCP handoff resource cleanup is unconfirmed")
+    if active is not None:
+        active.mcp_cleanup = cleanup
+        return
+    raise cleanup from errors[0]
 
 
 async def run_headed(child_argv: list[str], *, configuration: dict, names: list[str], **kwargs) -> int:
@@ -28,59 +67,74 @@ async def run_headed(child_argv: list[str], *, configuration: dict, names: list[
         for arg in child_argv[1:]
     ):
         raise ValueError("MCP headed ownership does not support delimiters or layered overlays")
-    worker = None
-    with OwnerSection() as section:
+    worker, transfer, failure = None, None, None
+    finishing = False
+    section = OwnerSection()
+    resources = [("owner-section", section)]
+    try:
         replacement = windows_overlay(configuration, names, binding=section.binding)
         if set(replacement["mcpServers"]) != set(names):
             raise ValueError("Every selected native MCP entry must support the literal launch form")
         transfer = OverlayPipe(replacement)
-        failure = None
-        try:
-            def publish(process):
-                nonlocal worker
-                section.publish(int(process._handle), process.pid)
-                transfer.bind(int(process._handle), process.pid)
-                sending = asyncio.to_thread(transfer.send)
-                try:
-                    worker = asyncio.create_task(sending)
-                except BaseException:
-                    sending.close()
-                    raise
+        resources.insert(0, ("configuration-transfer", transfer))
 
-            result = await run_native(
-                [*child_argv, "--additional-mcp-config", "@" + transfer.path],
-                native_handoff=WindowsNativeHandoff(publish, (section.inherited_handle,)),
-                **kwargs,
-            )
-            if worker is not None:
-                await asyncio.shield(worker)
-            return result
-        except BaseException as error:
-            failure = error
-            raise
-        finally:
-            transfer.cancel()
+        def completed(task):
+            if task.cancelled():
+                return
             try:
-                if worker is not None:
-                    while not worker.done():
-                        try:
-                            await asyncio.shield(worker)
-                        except asyncio.CancelledError:
-                            if failure is None:
-                                raise
-                        except BaseException:
-                            if failure is None:
-                                raise
-                    if failure is None:
+                task.result()
+            except BaseException:
+                if not finishing:
+                    _report("native MCP configuration transfer failed; original client wait retained")
+
+        def publish(process):
+            nonlocal worker
+            section.publish(int(process._handle), process.pid)
+            transfer.bind(int(process._handle), process.pid)
+            sending = asyncio.to_thread(transfer.send)
+            try:
+                worker = asyncio.create_task(sending)
+                worker.add_done_callback(completed)
+            except BaseException:
+                sending.close()
+                raise
+
+        result = await run_native(
+            [*child_argv, "--additional-mcp-config", "@" + transfer.path],
+            native_handoff=WindowsNativeHandoff(publish, (section.inherited_handle,)),
+            **kwargs,
+        )
+        if worker is not None:
+            await asyncio.shield(worker)
+        return result
+    except BaseException as error:
+        failure = error
+        raise
+    finally:
+        finishing = True
+        try:
+            if transfer is not None:
+                transfer.cancel()
+            if worker is not None:
+                while not worker.done():
+                    try:
+                        await asyncio.shield(worker)
+                    except asyncio.CancelledError:
+                        if failure is None:
+                            raise
+                    except BaseException:
+                        if failure is None:
+                            raise
+                if failure is None:
+                    worker.result()
+                else:
+                    # Preserve native custody/cancellation while observing the transfer outcome.
+                    try:
                         worker.result()
-                    else:
-                        # Observe the transfer outcome without replacing native cleanup custody.
-                        try:
-                            worker.result()
-                        except BaseException:
-                            pass
-            finally:
-                transfer.close()
+                    except BaseException:
+                        pass
+        finally:
+            _release(resources, failure if failure is not None else sys.exc_info()[1])
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -670,8 +670,14 @@ before any JSON bytes are sent. A different same-user process receives no
 configuration. The existing overlapped-I/O owner supplies one 15-second
 cancellable transfer deadline and a 1 MiB maximum. The one-use worker closes
 its own pipe and duplicated process reference; no listener or supervisor is
-left running. Native cleanup errors retain their original process/Job custody
-even when transfer cancellation also fails. The pre-existing input
+left running. A failed transfer immediately emits one fixed, redacted diagnostic
+without cancelling the original native wait or taking over Job cleanup.
+Both resource finalizers are attempted. An already-active native cleanup or
+cancellation exception remains the primary exception; its optional
+`mcp_cleanup` receipt retains separately failed releases as an
+`OwnedCleanupError` with exact resource references and a bounded retry operation.
+Without an active error, failed finalization raises that receipt directly.
+The pre-existing input
 configuration retains its existing storage and permissions.
 
 The explicit `tests/native/test_owner_headed_windows.py` packet checks the
