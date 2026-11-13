@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import json
+import subprocess
 import time
+from collections.abc import Callable
 from types import SimpleNamespace
 
 import pytest
@@ -21,7 +24,24 @@ ready = readiness.ready
 finalized = acknowledgements.finalized
 
 
+class BoundGroundOwner:
+    def __init__(self, owner: readiness.GroundOwner) -> None:
+        self.owner = owner
+
+    def bind_request(
+        self, _: dict, *, authority_guard: Callable[[], None] | None = None,
+    ) -> Callable:
+        def write(workspace: object, operation: str, payload: dict) -> dict:
+            if authority_guard is not None:
+                authority_guard()
+            return self.owner(workspace, operation, payload)
+
+        return write
+
+
 def api(value: readiness.Ready, **options: object) -> TestClient:
+    if isinstance(value[0]._relationship_writer, readiness.GroundOwner):
+        value[0]._relationship_writer = BoundGroundOwner(value[1])
     return TestClient(
         create_app(
             value[0],
@@ -154,7 +174,7 @@ def test_captured_owner_can_close_out_unassigned_or_submitted_work(
     assert set(response.json()["result"]) == {"id", "status", "generation"}
 
 
-@pytest.mark.parametrize("boundary", ["readiness", "claim", "finalization"])
+@pytest.mark.parametrize("boundary", ["readiness", "claim", "writer-record", "finalization"])
 @pytest.mark.parametrize("invalidation", ["epoch", "expiry"])
 def test_authority_is_rechecked_after_independent_owner_io(
     ready: readiness.Ready,
@@ -204,6 +224,36 @@ def test_authority_is_rechecked_after_independent_owner_io(
                 invalidate()
 
         owner.before_reply = before_reply
+    elif boundary == "writer-record":
+        from agent_dispatch import assignment_relationship_owner
+        from tests.test_assignment_relationship_owner import WRITER_IDENTITY, support
+
+        records: list[list[str]] = []
+
+        def capture(argv: list[str], **options: object) -> subprocess.CompletedProcess:
+            if "capabilities" in argv:
+                result = support()
+            elif "record" in argv:
+                records.append(argv)
+                if len(records) == 2:
+                    invalidate()
+                result = {"ok": True, "worktree": {
+                    "id": workspace.worktree, "repo": workspace.project,
+                    "path": workspace.path, "creation_nonce": workspace.creation_nonce,
+                }}
+            else:
+                operation = argv[argv.index("resource-relationship") + 1]
+                result = owner(workspace, operation, json.loads(options["input_text"]))
+                result["writer_identity"] = dict(WRITER_IDENTITY)
+            return subprocess.CompletedProcess(argv, 0, json.dumps(result), "")
+
+        monkeypatch.setattr(assignment_relationship_owner, "run_background_capture", capture)
+        queue._relationship_writer = assignment_relationship_owner.WorktreeRelationshipWriter(
+            ["selected"], admit_workspace=lambda *_: None,
+            admit_request=lambda _workspace, _identity, original: (
+                queue._admit_original_relationship_request(original)
+            ),
+        )
     else:
         def observe_finalized(*_: object) -> dict:
             invalidate()
@@ -249,6 +299,20 @@ def test_scoped_finish_and_replay_never_return_generic_task_content(
     assert scoped.json()["result"] == {
         "id": task.id, "status": Status.ABANDONED, "generation": arguments["expected_generation"],
     }
+
+
+def test_opaque_writer_cannot_silently_drop_closeout_authority(
+    ready: readiness.Ready,
+) -> None:
+    client = api(ready)
+    ready[0]._relationship_writer = ready[1]
+    closes = sum(operation == "close" for operation, _ in ready[1].calls)
+    response = client.post(path(ready, "/prepare"), json=body(ready), headers=headers(ready))
+    assert response.status_code == 200, response.text
+    result = response.json()["result"]["relationship"]
+    assert result["state"] == "retained" and "request-bound closeout authority" in result["error"]
+    assert sum(operation == "close" for operation, _ in ready[1].calls) == closes
+    assert ready[0].task_relationship(ready[3].id)["state"] == "bound"
 
 
 @pytest.mark.parametrize(

@@ -369,7 +369,11 @@ class QueueTaskRelationshipsMixin:
         common = {"expected_creation_nonce": workspace.creation_nonce}
         writer = selected_writer
         bind_request = getattr(writer, "bind_request", None)
-        if callable(bind_request):
+        if authority_guard is not None:
+            if not callable(bind_request):
+                raise TaskError("selected relationship writer lacks request-bound closeout authority")
+            writer = bind_request(copy.deepcopy(request), authority_guard=authority_guard)
+        elif callable(bind_request):
             writer = bind_request(copy.deepcopy(request))
 
         def write(operation: str, payload: dict, *, phase: str | None = None) -> dict:

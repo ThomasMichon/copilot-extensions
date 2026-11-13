@@ -244,7 +244,10 @@ native and generation and remain unexpired under the current coordinator fence.
 The same credential fence and expiry are checked again after independent owner
 observations, before retaining readiness, before relationship writes and in the
 terminal transaction. A credential invalidated during observation cannot settle
-the claim or acknowledge finalization.
+the claim or acknowledge finalization. The request-bound writer carries that
+server-local guard past its own resident/record reads and cleanup waits, checking
+again immediately before invoking the relationship subprocess. An opaque writer
+that cannot accept request-bound closeout authority retains the claim.
 The provider also validates current resource custody, or the exact committed
 acknowledgement for a terminal retry. An accepted owner may therefore inspect
 and finish its same-generation unassigned or submitted closeout without gaining
