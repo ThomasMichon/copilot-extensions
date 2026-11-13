@@ -34,7 +34,8 @@ settle. No detached worker or timeout-based resource abandonment is used.
 Each target uses the existing credential and backend custody. Warming requires
 the already-unlocked master password: it never invokes another provider or
 dialog if the password expires, including expiry while waiting for backend
-custody. It does not extend password lifetime or an inherited handoff deadline.
+custody or a protected-store lookup. It does not extend password lifetime or an
+inherited handoff deadline.
 The same internal deadline reaches the protected read owner, which checks it
 again immediately before admitting a KeePass entry read after custody waits.
 

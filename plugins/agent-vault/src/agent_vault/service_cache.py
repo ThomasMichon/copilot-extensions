@@ -102,6 +102,7 @@ def read(
                     service.cache[key] = record["value"]
                     service._credential_generations[key] = record["generation"]
                     return record["value"]
+            service._check_password_ttl()
             if not service.ensure_unlocked(kpdb):
                 return None
             deadline = getattr(service._request_ctx, "cache_warm_deadline", None)

@@ -219,9 +219,11 @@ def test_pending_rotation_is_preserved_and_never_reported_as_warmed(
     assert persistent.pending_replace("Allowed/entry", "Password") == journal
 
 
+@pytest.mark.parametrize("phase", ["custody", "protected-lookup"])
 def test_expiry_during_backend_custody_cannot_reinvoke_an_unlock_provider(
     warming_service: CacheFixture,
     monkeypatch: pytest.MonkeyPatch,
+    phase: str,
 ) -> None:
     vault, _persistent, kpdb, clock = warming_service
     registry = extensions.get_registry()
@@ -232,17 +234,43 @@ def test_expiry_during_backend_custody_cannot_reinvoke_an_unlock_provider(
     )
     monkeypatch.setattr(vault.cli, "verify_password", lambda *_args: True)
     monkeypatch.setattr(service, "prompt_password", lambda *_args: pytest.fail("warming prompted"))
+    inside = [False]
+    expired: list[bool] = []
+    reads: list[str] = []
+    original_record = service_cache.ServiceCacheStore.record
+
+    def lookup(
+        selected: service_cache.ServiceCacheStore,
+        *args: object,
+        **kwargs: object,
+    ) -> dict[str, object] | None:
+        record = original_record(selected, *args, **kwargs)
+        if phase == "protected-lookup" and inside[0] and not expired:
+            clock[0] = 1010.0
+            expired.append(True)
+        return record
 
     @contextlib.contextmanager
     def expiring_custody(*_args: object) -> Iterator[None]:
-        clock[0] = 1010.0
-        yield
+        inside[0] = True
+        if phase == "custody":
+            clock[0] = 1010.0
+            expired.append(True)
+        try:
+            yield
+        finally:
+            inside[0] = False
 
     monkeypatch.setattr(service_cache, "backend_custody", expiring_custody)
+    monkeypatch.setattr(service_cache.ServiceCacheStore, "record", lookup)
+    monkeypatch.setattr(
+        vault.cli, "get_entry", lambda _db, entry, _field: reads.append(entry) or "fixture-value"
+    )
     vault._cache_warm.enqueue(kpdb, "Allowed", confirmed=True)
     status = asyncio.run(drain(vault, kpdb))
     assert status["state"] == "partial" and status["cached"] == 0
-    assert providers == [] and not vault.cli.has_password(kpdb)
+    assert expired == [True] and providers == [] and reads == []
+    assert not vault.cli.has_password(kpdb)
     assert kpdb not in vault._password_set_at
 
 
