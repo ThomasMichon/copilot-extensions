@@ -532,6 +532,56 @@ def test_explicit_application_source_requires_canonical_attributable_input(tmp_p
             age.contract_source(requirement, path, projects, tmp_path)
 
 
+@pytest.mark.parametrize("relative", [".marketplace/owned-sdk", "applications/owned-sdk"])
+def test_declared_project_inventory_audits_dependencies_and_policy_without_core_roots(tmp_path, relative):
+    from python_project_inventory import runtime_roots
+
+    write(tmp_path / "pyproject.toml", (
+        '[tool.copilot-extensions.python-projects]\n'
+        f'owned-sdk="{relative}"\n'
+    ))
+    consumer = write(tmp_path / "plugins/consumer/pyproject.toml", (
+        '[project]\nname="consumer"\nversion="1"\n'
+        'dependencies=["owned-sdk[feature]>=1,<2"]\n'
+        '[tool.copilot-extensions.application-sources]\nowned-sdk="owned-sdk"\n'
+    ))
+    source = write(tmp_path / relative / "pyproject.toml", (
+        '[project]\nname="owned-sdk"\nversion="1"\n'
+        '[project.optional-dependencies]\nfeature=["external>=1"]\n'
+    ))
+    _, projects = age.inventory(tmp_path)
+    assert source in projects
+    assert age.contract_source(Requirement("owned-sdk[feature]>=1,<2"), consumer, projects, tmp_path) == source
+    assert runtime_roots(tmp_path, {"owned-sdk": (source.parent, {})})["core"] == []
+
+    def metadata(files):
+        return lambda _: json.dumps({"releases": {"1": files}})
+
+    assert age.audit(tmp_path, fetch=metadata(release()), now=NOW)[1] == []
+    _, errors = age.audit(tmp_path, fetch=metadata(release(NOW)), now=NOW)
+    assert errors and any("external" in error for error in errors)
+    source.write_text(source.read_text().replace('exclude-newer = "7 days"', 'exclude-newer = "1 day"'))
+    _, errors = age.audit(tmp_path, fetch=metadata(release()), now=NOW)
+    assert errors and any("[tool.uv]" in error and "7 days" in error for error in errors)
+
+
+@pytest.mark.parametrize("relative", ["libs/consumer", "apps/other/libs/consumer"])
+def test_declared_library_cannot_gain_application_source_audit_exemptions(tmp_path, relative):
+    write(tmp_path / "pyproject.toml", (
+        '[tool.copilot-extensions.python-projects]\n'
+        f'consumer="{relative}"\n'
+    ))
+    write(tmp_path / relative / "pyproject.toml", (
+        '[project]\nname="consumer"\nversion="1"\ndependencies=["owned-sdk>=1"]\n'
+        '[tool.copilot-extensions.application-sources]\nowned-sdk="standalone:fleet-manager"\n'
+    ))
+    write(tmp_path / "fleet-manager/pyproject.toml", (
+        '[project]\nname="owned-sdk"\nversion="1"\n'
+    ))
+    with pytest.raises(ValueError, match="cannot be a vendored library"):
+        age.audit(tmp_path, fetch=lambda _: pytest.fail("invalid source must refuse before lookup"), now=NOW)
+
+
 @pytest.mark.parametrize("plugin,dependency,source", [
     ("agent-index", "fleet-manager", "fleet-manager"),
     ("agent-worktrees", "fleet-manager", "fleet-manager"),

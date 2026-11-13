@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
+import shutil
 import sys
 
 import pytest
@@ -189,6 +191,42 @@ def test_materializer_refuses_missing_standalone_manifest(tmp_path, monkeypatch)
     assert (
         len(log) == 1 and log[0].startswith("SKIP local source") and "missing" in log[0]
     )
+
+
+@pytest.mark.parametrize("copied", [False, True], ids=["in-place", "promotion-copy"])
+def test_whole_snapshot_materializes_declared_project_closure(tmp_path, copied):
+    source = tmp_path / "source"
+    _write(source / "pyproject.toml", (
+        '[tool.copilot-extensions.python-projects]\nexample = "applications/example"\n'
+    ))
+    application = source / "applications" / "example"
+    _write(application / "pyproject.toml", (
+        '[project]\nname = "example"\nversion = "1"\n'
+        '[tool.uv.sources]\nshared = {path = "../../libs/shared", editable = true}\n'
+    ))
+    _write(source / "libs/shared/pyproject.toml", '[project]\nname = "shared"\nversion = "1"\n')
+    _write(source / "libs/shared/src/shared/__init__.py", 'VALUE = "shared"\n')
+    _write(source / "resources/helper.py", 'VALUE = "packaged"\n')
+    _write(application / "packaged-assets.json", json.dumps({
+        "schema": "copilot-extensions.packaged-assets", "version": 2,
+        "groups": [{"canonicalDir": "resources", "payloadDir": "helpers", "files": ["helper.py"]}],
+    }))
+    before = {path.relative_to(source): path.read_bytes()
+              for path in source.rglob("*") if path.is_file()}
+    candidate = tmp_path / "candidate" if copied else source
+    if copied:
+        shutil.copytree(source, candidate)
+    log = materializer.materialize(candidate, canonical_root=source)
+    assert not any(line.startswith("SKIP") for line in log), log
+    consumer = candidate / "applications" / "example"
+    assert (consumer / "helpers/helper.py").read_bytes() == before[Path("resources/helper.py")]
+    assert (consumer / "libs/shared/src/shared/__init__.py").read_bytes() == before[
+        Path("libs/shared/src/shared/__init__.py")
+    ]
+    assert editable.materialized_local_source_problems(consumer) == []
+    if copied:
+        assert before == {path.relative_to(source): path.read_bytes()
+                          for path in source.rglob("*") if path.is_file()}
 
 
 @pytest.mark.parametrize("nested", [False, True])
