@@ -537,6 +537,7 @@ def test_real_source_and_frozen_candidate_frontdoors_enforce_version_matrix(
         "tools/typecheck.py", "tools/_admission_protocol.py", "tools/cache_directory_paths.py",
         "tools/plugin_test_resources.py",
         "tools/typecheck_source_views.py", "tools/typecheck_catalog_views.py",
+        "tools/typecheck_bootstrap_views.py",
         "tools/native_test_paths.py", "tools/typecheck-requirements.txt",
         *(
             "libs/installer-engine/" + name
