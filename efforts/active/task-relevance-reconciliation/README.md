@@ -177,6 +177,10 @@ merged plan does not establish running adoption.
       Internal acknowledgement now reuses independent finalized-workspace
       observation and the existing terminal transition; actual own-worker
       caller adoption, native conclusion and running qualification remain open.
+      The provider-first HTTP expansion exposes captured-owner preparation,
+      validated state and terminal acknowledgement under existing authentication,
+      drain and terminal hooks. Its task-scoped exception is confined to these
+      closeout routes; worker caller migration remains separate.
 - [ ] Publish receiver support before enabling new callers; document baseline,
       upgrade and rollback behavior against the executing runtime.
 

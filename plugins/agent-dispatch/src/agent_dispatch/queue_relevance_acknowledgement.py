@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 import json
 import math
 import sqlite3
@@ -58,8 +59,13 @@ def _prepared(queue: TaskQueue, conn: sqlite3.Connection, task_id: str, argument
     }
 
 
-def finish(queue: TaskQueue, task_id: str, **arguments: str | int) -> CompletionOutcome:
+def finish(
+    queue: TaskQueue, task_id: str, *,
+    authority_guard: Callable[[], None] | None = None, **arguments: str | int,
+) -> CompletionOutcome:
     """Internal receiver: no caller-supplied finalization or terminal proof."""
+    if authority_guard is not None:
+        authority_guard()
     with queue._connect() as conn:
         conn.execute("BEGIN")
         replay = _replay(queue, conn, task_id, arguments)
@@ -96,6 +102,8 @@ def finish(queue: TaskQueue, task_id: str, **arguments: str | int) -> Completion
     }
 
     def retain(conn: sqlite3.Connection) -> None:
+        if authority_guard is not None:
+            authority_guard()
         if _encoded(_prepared(queue, conn, task_id, arguments)) != _encoded(original):
             raise TaskError(
                 "relevance closeout changed during finalized observation; custody retained",

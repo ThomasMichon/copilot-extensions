@@ -342,6 +342,15 @@ the non-public approval conversation.
 
 ## Plan
 
+The [monitor-goals and decline-source study](journal/2026/11.13-monitor-goals-and-decline-source-completions.md)
+retains seventeen whole unions and #11534's unavailable original edit.
+Four finite source requests are completed with exact public readbacks;
+existing local-HTTP and native Windows records supply their actual
+validation tiers without new execution. Six whole-file provenance refusals,
+explicit landing/consumer conditions and distinct source defects remain.
+The complete 870-open queue is 141 above target; no installed, live-fleet
+or resource completion is inferred.
+
 The [comment receiving and source-qualification study](journal/2026/11.13-comment-receiving-and-source-qualification.md)
 retains fifteen whole histories and #11175's unavailable original revision.
 The existing reviewed comment-identity contract directly receives #11128's
@@ -3404,6 +3413,15 @@ sources, transferring owners or turning partial/planning gains into completion.
   normal publication flow.
 
 ## Validation Plan
+
+The [monitor/decline audit](journal/2026/11.13-monitor-goals-and-decline-source-completions.md)
+verifies four finite completions against whole originals, direct source,
+fresh complete metadata/roster and exact acknowledgments/terminal state.
+Historical comment-shaped and earlier-revision reviews remain literal;
+current source/provider corroboration does not invent an approval or rerun.
+The follow-through verifies 22 new attributed text parts, three immutable
+messages and eleven reused source identities while retaining failed/skipped
+execution grades, all actual source holds and existing custody.
 
 The [comment-receiving audit](journal/2026/11.13-comment-receiving-and-source-qualification.md)
 verifies whole direct receiving readback, unchanged originals, fresh complete
