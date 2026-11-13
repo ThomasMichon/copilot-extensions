@@ -313,9 +313,11 @@ Successful records have exactly `entry`, `field`, `value`, `ok: true` and
 escaping does not change them. `source` is `cache` or `service`. Failed records
 have `ok: false`, `value: null`, an error string and the attempted source
 (`cache`, `service` or `none`).
-Protected-cache failures are sanitized per item without service fallback,
-cache replacement or key regeneration. Later requests are still represented;
-the legacy single `get` protection behavior is unchanged.
+Protected-cache failures are sanitized per item without cache replacement or
+key regeneration. The selected Windows logon's DPAPI decryption failure uses
+the same narrowly scoped service-only fallback as ordinary `get`, with a fixed
+stderr warning and `source: service`; other protection failures do not fall
+back. Later requests are still represented.
 
 Exit status is `0` when every request succeeds (also for an empty array), `2`
 for a mixture of successes and failures, and `1` when every request fails.
@@ -532,7 +534,19 @@ diagnostics or plaintext artifacts.
 
 ## Locking, prompting, and robustness
 
+On Windows, KeePassXC and credential-helper console children run without creating
+terminal windows, including when their parent is a windowless service. Explicit
+password dialogs remain visible; console suppression does not enable prompting,
+detach children from their caller or change credential stdin/output handling.
+
 - The daemon keeps KeePass master passwords in memory **per database**. `VAULT_PASSWORD_TTL` controls the password TTL (default `3600` seconds). `agent-vault lock` drops the cached password immediately.
+- A Windows logon that cannot decrypt the selected DPAPI cache may read through
+  the same selected service without modifying that cache. Successful ordinary
+  reads emit a fixed `cache_decryption_unavailable` warning; service refusal is
+  authoritative and never triggers a stale-cache fallback or implicit prompt.
+  `--cache-only` still refuses without service access. Explicit authoritative
+  refresh still requires successful cache reconciliation. Schema, selection,
+  permissions and recovery-policy errors are not decryption fallback triggers.
 - Credential reads fail fast by default when locked: they return an actionable error instead of hanging on a hidden prompt. Use `agent-vault unlock`, `agent-vault unlock --terminal`, or `agent-vault get --prompt ...` when you want an interactive prompt.
 - Unlock-source extensions run before prompts, so a configured provider can satisfy locked reads without UI.
 - The CLI cold-starts the daemon when needed. Windows scheduling is opt-in via the native [`windows_scheduled_task` policy](docs/configuration.md#windows-scheduling-is-separate-from-activation); clean installs leave tasks absent and existing registrations are preserved by default. Linux/WSL installs retain the systemd user unit named `agent-vault.service` when systemd is available.

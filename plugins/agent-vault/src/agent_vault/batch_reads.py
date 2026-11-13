@@ -67,6 +67,9 @@ def cmd_batch_get(args):
                 "error": "cache_read_failed; credential cache could not be read",
             })
             continue
+        warning = getattr(result, "warning", None)
+        if warning:
+            print(f"Warning: {warning}", file=sys.stderr)
         ok = result.code == 0 and isinstance(result.value, str)
         record = {
             "entry": entry, "field": field, "value": result.value if ok else None,
