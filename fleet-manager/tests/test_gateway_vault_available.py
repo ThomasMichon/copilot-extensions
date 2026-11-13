@@ -243,6 +243,86 @@ def test_source_withdrawal_during_loser_cancellation_cannot_release_a_token():
     asyncio.run(run())
 
 
+@pytest.mark.parametrize("denied_check", [2, 3])
+def test_dispatch_policy_denial_aborts_lookup_and_cancels_started_reads(denied_check):
+    async def run():
+        cancelled = asyncio.Event()
+
+        async def wait(key):
+            try:
+                await asyncio.Event().wait()
+            finally:
+                cancelled.set()
+
+        sources = (
+            source("one", Provider(wait)),
+            source("two", Provider(lambda key: asyncio.sleep(0, result=hit(key)))),
+            source("three", Provider(lambda key: asyncio.sleep(0, result=hit(key)))),
+        )
+        checks = 0
+
+        def snapshot(key):
+            nonlocal checks
+            checks += 1
+            if checks == denied_check:
+                raise PermissionError("caller-denied-at-dispatch")
+            return sources
+
+        coordinator = AvailableTokenCoordinator(snapshot)
+        with pytest.raises(PermissionError, match="caller-denied-at-dispatch"):
+            await coordinator.lookup(KEY)
+        assert len(sources[0].provider.calls) == (denied_check == 3)
+        assert all(item.provider.calls == [] for item in sources[1:])
+        assert await coordinator.drain()
+        assert cancelled.is_set() == (denied_check == 3)
+        assert coordinator.pending_count == 0
+        assert not coordinator._affinity
+
+    asyncio.run(run())
+
+
+def test_provider_failure_is_not_an_owner_policy_denial_or_a_secret_diagnostic():
+    async def run():
+        async def broken(key):
+            raise PermissionError("synthetic-secret-provider-detail")
+
+        selected = source("one", Provider(broken))
+        coordinator = AvailableTokenCoordinator(lambda key: (selected,))
+        result = await coordinator.lookup(KEY)
+        assert result.state == "uncertain"
+        assert "synthetic-secret-provider-detail" not in repr(result)
+        assert await coordinator.drain()
+
+    asyncio.run(run())
+
+
+def test_completed_authorized_alternative_survives_provisional_winner_withdrawal():
+    async def run():
+        sources = []
+
+        async def ready(key):
+            return hit(key)
+
+        async def loser(key):
+            try:
+                await asyncio.Event().wait()
+            finally:
+                sources.pop(0)
+
+        sources[:] = [
+            source("first", Provider(ready)), source("second", Provider(ready)),
+            source("loser", Provider(loser)),
+        ]
+        second = sources[1].identity
+        coordinator = AvailableTokenCoordinator(lambda key: tuple(sources))
+        result = await coordinator.lookup(KEY)
+        assert result.state == "available"
+        assert result.source == second
+        assert await coordinator.drain()
+
+    asyncio.run(run())
+
+
 @pytest.mark.parametrize("delay", ["queued", "policy"])
 def test_expired_phase_never_starts_queued_or_policy_delayed_provider_work(monkeypatch, delay):
     async def run():
@@ -310,6 +390,39 @@ def test_one_phase_deadline_retains_cancellation_resistant_probe_custody():
         assert (await coordinator.lookup(KEY)).state == "uncertain"
         await cancelled.wait()
         release.set()
+        assert await coordinator.drain()
+
+    asyncio.run(run())
+
+
+def test_reconnect_cannot_duplicate_an_unsettled_logical_source_refresh():
+    async def run():
+        release, cancelled = asyncio.Event(), asyncio.Event()
+
+        async def stalled(key):
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                cancelled.set()
+                await release.wait()
+            return hit(key)
+
+        old, replacement = Provider(stalled), Provider(
+            lambda key: asyncio.sleep(0, result=hit(key)))
+        sources = [source("one", old)]
+        coordinator = AvailableTokenCoordinator(lambda key: tuple(sources), budget=0.02)
+        assert (await coordinator.lookup(KEY)).state == "uncertain"
+        await cancelled.wait()
+        sources[:] = [source("one", replacement, incarnation="new-connection")]
+        assert (await coordinator.lookup(KEY)).state == "uncertain"
+        assert replacement.calls == []
+        assert coordinator.pending_count == 1
+        release.set()
+        assert await coordinator.drain()
+        result = await coordinator.lookup(KEY)
+        assert result.state == "available"
+        assert result.source == sources[0].identity
+        assert len(old.calls) == len(replacement.calls) == 1
         assert await coordinator.drain()
 
     asyncio.run(run())

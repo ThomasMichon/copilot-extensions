@@ -28,7 +28,8 @@ object also invalidates an outstanding result. An advertisement alone is not
 an admitted source. This synchronous policy callback must be cheap and avoid
 blocking I/O. The phase deadline is rechecked after policy validation and
 immediately before provider dispatch; delayed work never starts a refresh after
-its budget has expired.
+its budget has expired. A policy exception aborts the whole lookup and cancels
+remaining reads; it cannot become a source failure followed by another success.
 
 Each explicitly code-registered provider implements
 `fleet-manager.vault-available/v1`: `get_available(key, deadline=...)` returns
@@ -53,6 +54,8 @@ Sources start in most-recent same-key success order, concurrently within one
 shared phase of at most 30 seconds. A slow preferred source does not consume
 each alternative's budget in sequence. Simultaneously ready valid responses use
 that order; otherwise the first valid currently authorized response wins.
+Completed alternatives remain eligible within the original deadline if cleanup
+withdraws the provisional winner.
 Expiry and current source/caller policy are checked before return. Affinity is
 bounded metadata only (256 keys by default), never token bytes or authority.
 Reconnection may retain Controller/source preference but must supply its new
@@ -66,8 +69,10 @@ No outcome starts interactive authentication or sends a device notice.
 
 Losing or timed-out reads receive cancellation. Cancellation is not settlement:
 an uncooperative adapter remains owned and counted against the global probe
-limit (128 by default), and the same key/source cannot be dispatched again until
-it settles. Its late result cannot fulfil the returned lookup or update affinity.
+limit (128 by default), and the same logical key/Controller/source cannot be
+dispatched again until it settles, even across a connection replacement.
+Incarnation checks still govern accepting results. Its late result cannot fulfil
+the returned lookup or update affinity.
 The coordinator yields cancellation without awaiting an unbounded adapter.
 The owner calls `stop()` to close admission/cancel reads and `drain(timeout=...)`
 to observe cleanup. `False` retains unresolved responsibility; neither expiry

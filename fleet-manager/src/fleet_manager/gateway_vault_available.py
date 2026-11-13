@@ -141,7 +141,7 @@ class AvailableTokenCoordinator:
         self._sources, self._budget = sources, budget
         self._affinity_limit, self._probe_limit = affinity_limit, probe_limit
         self._affinity: OrderedDict[TokenKey, tuple[str, str]] = OrderedDict()
-        self._probes: dict[tuple[TokenKey, SourceIdentity], asyncio.Task] = {}
+        self._probes: dict[tuple[TokenKey, str, str], asyncio.Task] = {}
         self._closed = False
 
     @property
@@ -160,7 +160,7 @@ class AvailableTokenCoordinator:
         return any(item.identity == source.identity and item.provider is source.provider
                    for item in self._snapshot(key))
 
-    def _settled(self, probe_key: tuple[TokenKey, SourceIdentity], task: asyncio.Task) -> None:
+    def _settled(self, probe_key: tuple[TokenKey, str, str], task: asyncio.Task) -> None:
         if self._probes.get(probe_key) is task:
             del self._probes[probe_key]
         if not task.cancelled():
@@ -168,15 +168,16 @@ class AvailableTokenCoordinator:
 
     async def _probe(
         self, key: TokenKey, source: AvailableSource, deadline: float,
+        authorize: Callable[[AvailableSource], bool],
     ) -> SourceAvailability:
+        loop = asyncio.get_running_loop()
+        if self._closed or loop.time() >= deadline:
+            return SourceAvailability("uncertain")
+        if not authorize(source):
+            return SourceAvailability("unavailable")
+        if self._closed or loop.time() >= deadline:
+            return SourceAvailability("uncertain")
         try:
-            loop = asyncio.get_running_loop()
-            if self._closed or loop.time() >= deadline:
-                return SourceAvailability("uncertain")
-            if not self._current(key, source):
-                return SourceAvailability("unavailable")
-            if self._closed or loop.time() >= deadline:
-                return SourceAvailability("uncertain")
             return await source.provider.get_available(key, deadline=deadline)
         except asyncio.CancelledError:
             raise
@@ -203,17 +204,29 @@ class AvailableTokenCoordinator:
             (source.identity.controller, source.identity.source) != preferred)))
         tasks: dict[asyncio.Task, AvailableSource] = {}
         observations: dict[SourceIdentity, SourceObservation] = {}
-        winner: tuple[AvailableSource, AvailableToken] | None = None
+        candidates: list[tuple[AvailableSource, AvailableToken]] = []
+        policy_error: Exception | None = None
+
+        def authorize(source: AvailableSource) -> bool:
+            nonlocal policy_error
+            if policy_error is not None:
+                raise policy_error
+            try:
+                return self._current(key, source)
+            except Exception as error:
+                policy_error = error
+                raise
+
         try:
             for source in sources:
-                probe_key = (key, source.identity)
+                probe_key = (key, source.identity.controller, source.identity.source)
                 if (getattr(source.provider, "contract", None) != AVAILABLE_CONTRACT
                         or not callable(getattr(source.provider, "get_available", None))):
                     observations[source.identity] = SourceObservation(source.identity, "unsupported")
                 elif probe_key in self._probes or len(self._probes) >= self._probe_limit:
                     observations[source.identity] = SourceObservation(source.identity, "uncertain")
                 else:
-                    task = loop.create_task(self._probe(key, source, deadline))
+                    task = loop.create_task(self._probe(key, source, deadline, authorize))
                     self._probes[probe_key] = task
                     task.add_done_callback(
                         lambda done, probe_key=probe_key: self._settled(probe_key, done))
@@ -232,7 +245,7 @@ class AvailableTokenCoordinator:
                     if type(result) is not SourceAvailability:
                         result = SourceAvailability("uncertain")
                     token = result.token
-                    current = self._current(key, source)
+                    current = authorize(source)
                     if not current:
                         result = SourceAvailability("unavailable")
                     elif token is not None and (
@@ -242,9 +255,8 @@ class AvailableTokenCoordinator:
                     if (result.state == "available" and not self._closed
                             and loop.time() < deadline):
                         assert result.token is not None
-                        winner = source, result.token
-                        break
-                if winner is not None:
+                        candidates.append((source, result.token))
+                if candidates:
                     break
             for source in tasks.values():
                 observations[source.identity] = SourceObservation(source.identity, "uncertain")
@@ -255,9 +267,10 @@ class AvailableTokenCoordinator:
                 task.cancel()
             if tasks:
                 await asyncio.sleep(0)
-        if winner is not None:
-            source, token = winner
-            current = self._current(key, source)
+        if policy_error is not None:
+            raise policy_error
+        for source, token in candidates:
+            current = authorize(source)
             if (current and not self._closed and loop.time() < deadline
                     and token.expires_at > time.time()):
                 self._affinity[key] = (source.identity.controller, source.identity.source)
