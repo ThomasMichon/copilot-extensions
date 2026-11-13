@@ -166,6 +166,22 @@ venv. Neither path allocates a workspace, mux or additional launch journal.
 Original native startup admission and literal prompt argv are preserved.
 Full caller migration and restoration qualification remain in progress.
 
+An in-process Windows caller may explicitly supply
+`run_headed(..., native_handoff=WindowsNativeHandoff(callback, handles))`.
+The existing headed native-child owner creates the selected direct
+`copilot.exe` suspended, retains its original `Popen` and strict Job, and calls
+the finite callback before execution. Explicit handles must already be
+inheritable; the native handle list borrows them without changing their flags.
+The callback must return `None` and must not resume or substitute the child.
+The same owner retains the original wait and settles its Job after exit.
+Interrupted settlement retains its original cleanup task and native custody
+in the cleanup error; it never authorizes replay.
+Script/coordinator images, shell/executable overrides, unsupported platforms
+and auth-wait composition are refused. This API is not a serialized-code hook,
+CLI option or automatic MCP overlay. Default headed creation, startup admission and auth custody remain
+unchanged; selecting and consuming a productive overlay through the retained
+executable remains separate qualification.
+
 `headed.caller.execute` retains that executable as the original Python
 caller's foreground child. A live, PID/birth-bound admission channel rechecks
 the original launch immediately before native creation. The native receipt

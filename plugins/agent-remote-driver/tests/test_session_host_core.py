@@ -57,6 +57,24 @@ def _relocate(tmp_path: Path, *, legacy: bool = False) -> Path:
     return relocated
 
 
+def test_relocated_compact_export_retains_opt_in_native_handoff_closure(tmp_path):
+    archive = _relocate(tmp_path)
+    script = """
+import sys
+sys.path.insert(0,sys.argv[1])
+from agent_remote_driver.headed import native_handoff
+from agent_procutil import _suspended_handoff
+assert native_handoff.__file__.startswith(sys.argv[1])
+assert _suspended_handoff.__file__.startswith(sys.argv[1])
+assert native_handoff.WindowsNativeHandoff(lambda child: None).inherited_handles == ()
+"""
+    result = subprocess.run(
+        [sys.executable, "-I", "-S", "-c", script, str(archive)], cwd=archive.parent,
+        capture_output=True, timeout=15, **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stderr.decode(errors="replace")
+
+
 @pytest.mark.parametrize("legacy", [False, True])
 def test_relocated_compact_recovery_codec_roundtrips_complete_record(tmp_path, legacy):
     archive = _relocate(tmp_path, legacy=legacy)
