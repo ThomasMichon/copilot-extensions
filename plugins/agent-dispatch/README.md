@@ -1298,6 +1298,8 @@ lookback window without double-creating.
 
 For election-versus-production diagnostics and explicit renewal-fenced
 migration recovery, see [Emitter recovery](docs/emitter-recovery.md).
+Task-authoring command emitters can opt into
+[retained-receipt relevance checks](docs/emitter-relevance.md) without a new daemon.
 
 A domain producer that exposes an idempotent one-shot command can be declared as
 an **emitter** and run on a cadence by the singleton supervisor. The supervisor
@@ -2492,6 +2494,9 @@ explicit repository policy. An identity that cannot approve or land records a
 visible blocked/terminal outcome instead of retrying indefinitely.
 
 ### Emitter command receipts (`agent-dispatch emitter receipts`)
+
+For optional authoritative source checks over these receipts, see
+[emitter relevance](docs/emitter-relevance.md).
 
 A `task_output=json` command-emitter authors tasks on every tick, but the
 resulting ids are otherwise visible for exactly that tick and then gone. A

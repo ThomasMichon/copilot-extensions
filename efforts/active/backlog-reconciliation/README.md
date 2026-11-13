@@ -2977,9 +2977,11 @@ sources, transferring owners or turning partial/planning gains into completion.
 - [ ] Verify and publish supported dispositions, preserving source versus
   release versus rollout distinctions and all active ownership.
   The [ordered reliability map](reliability-ordered-tracking.md) preserves
-  #4231's five-area TRACK objective and proposes complete named receiving
-  for its separate actual Host-child diagnostic lane. Normal review, actual
-  direct receiving/readback and source judgment remain; #4231 stays OPEN.
+  #4231's accepted five-area TRACK map and actual named diagnostic receiving
+  under unchanged custodians. The [complete-ROOT checkpoint](journal/2026/11.12-complete-root-receiving-and-required-source-scope.md)
+  records its separate tracking retirement, #5115/#4128's whole planned
+  receiving, fifteen qualified source unions, three provenance holds and
+  new inflow. Its 905-open census remains 176 above the fixed whole target.
   The [menu/source-ownership checkpoint](journal/2026/11.12-menu-completion-and-source-ownership-receiving.md)
   records #4437's finite source completion and #4220's complete accepted
   receiving, sixteen other whole retentions and unchanged actual custodians.

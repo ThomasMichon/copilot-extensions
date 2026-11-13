@@ -32,6 +32,7 @@ neither live enrollment nor deployment, destructive retirement or capacity acces
 | Plan steward | Plan/vision reconciliation, issue coordination and review stewardship | Managed planning worktree; umbrella issue |
 | Contract implementer | Release/role #6240, operation/receipt #6241 and isolated observation-storage #5862 contracts | Managed implementation worktree; assigned sub-issues |
 | Gateway/index integrator | End-to-end new Gateway, index client and subscribed credential integration #6443 | Separate managed worktree; #6443 and index consumer #6383 |
+| Profile prerequisite contributor | Bounded explicit RS256 application-token plus enrolled-proof source proposal and library integration, not provider/enrollment/adopter custody | Managed source worktree; #6804 and the linked source proposal |
 | Existing campaign owners | Routing, standalone client, role deployment and provider integration | Existing campaign issues and canonical efforts |
 | Adopter | Configuration, capacity, enrollment and live activation approval | Explicit downstream adoption workflow |
 
@@ -373,6 +374,10 @@ All detailed slices are **agent-recommended** and remain subject to review.
   [Windows/Entra application adapter](runtime-authentication.md#selected-windowsentra-application-adapter)
   with the retained auth owner: actual broker/API proof compatibility,
   provider renewal and scoped enrollment, without changing management/SSH.
+- [ ] Review and deliver the bounded
+  [RS256 application-token plus enrolled-proof service prerequisite](rs256-enrolled-service-profile.md),
+  preserving existing profiles and caller-only bearer semantics. Common source
+  acceptance is not actual provider interoperability or live enrollment.
 - [ ] Supply the resident role-selected Gateway and fixed-service index route
   using the existing release, offer/request and operation/receipt contracts.
   Source implementation and signed-grant index ingress landed in #6809.
@@ -482,6 +487,9 @@ All entries are **agent-recommended implementation gates**, not completed tests.
   Prove long-lived provider/OS sessions renew without Gateway-added presence
   prompts, with real challenge, explicit revocation and optional dead-man
   outcomes distinct from token/lease churn or temporary unavailability.
+- [ ] Complete the bounded [RS256 enrolled-service source controls](rs256-enrolled-service-profile.md#validation-and-stopping-boundary)
+  with real synthetic-token/proof verification and contained TLS service-path
+  tests; retain actual provider/protected-key/enrollment and live-adoption gates.
 - [ ] Real first-touch Windows/Linux install with no Copilot/plugin/runtime cache;
   offline installed use and precise missing/incompatible/unauthorized failures.
 - [ ] Concurrent activation/admission: one authoritative writer, unique resource

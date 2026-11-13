@@ -885,6 +885,27 @@ def test_missing_emitter_command_refused_before_effects():
     assert not instance_dir().exists()
 
 
+@pytest.mark.parametrize("command,message", [
+    (["nonexistent-relevance-fixture-command"], "missing command dependency"),
+    ([sys.executable, "missing-relevance.py"], "missing script dependency"),
+])
+def test_missing_relevance_checker_refused_before_worker_persistence(tmp_path, command, message):
+    with pytest.raises(RegistrarError, match=message):
+        save_instance(
+            "template:reviewer", digest(templates()["reviewer"]),
+            {"name": "review", "repo_root": str(tmp_path), "declaration": {
+                "repo": "github.com/example/project", "task_label": "review-work",
+                "emitter": {
+                    "command": [sys.executable, "-c", "print('[]')"],
+                    "interval_seconds": 60, "cwd": str(tmp_path), "task_output": "json",
+                    "relevance": {"command": command},
+                },
+                "evaluator": {"evaluator_spec": {"rules": []}},
+            }},
+        )
+    assert not instance_dir().exists()
+
+
 def test_reviewer_script_and_relative_cwd_keep_repository_context(tmp_path):
     script = tmp_path / "reviews.py"
     script.write_text("print('fixture only')\n", encoding="utf-8")
