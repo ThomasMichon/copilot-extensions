@@ -504,12 +504,18 @@ def test_definite_spawn_failure_restores_once_without_automatic_retry(record):
 
 
 @pytest.mark.skipif(os.name != "nt" or shutil.which("pwsh") is None, reason="Native PowerShell required")
-@pytest.mark.parametrize("preparation", ["headed", "substituted"])
+@pytest.mark.parametrize("preparation", ["headed", "substituted", "drive-relative", "root-relative"])
 def test_direct_client_refusal_restores_a_real_seed(record, tmp_path, preparation):
     seed = seeds.stage(record, kind="new", text="retry only after definite pre-creation refusal")
     reply = native.prepare(record, [sys.executable], seed_id=seed.seed_id)
     if preparation == "headed":
         reply["headed"] = {"version": 1}
+    elif preparation in {"drive-relative", "root-relative"}:
+        image = Path(sys.executable)
+        reply["argv"][0] = (
+            image.drive + str(image)[len(image.anchor):]
+            if preparation == "drive-relative" else str(image)[len(image.drive):]
+        )
     assert seeds.peek(record).handoff_id
     prepared = tmp_path / "prepared.json"
     prepared.write_text(json.dumps(reply), encoding="utf-8")
@@ -531,10 +537,11 @@ def test_direct_client_refusal_restores_a_real_seed(record, tmp_path, preparatio
         return "'" + str(value).replace("'", "''") + "'"
 
     boundary = Path(__file__).resolve().parents[1] / "scripts" / "native-seed-boundary.ps1"
-    selected = sys.executable if preparation == "headed" else str(tmp_path / "forwarder.exe")
+    selected = str(tmp_path / "forwarder.exe") if preparation == "substituted" else reply["argv"][0]
     driver = tmp_path / "refused.ps1"
     driver.write_text(
         f". {literal(boundary)}\n"
+        f"[Environment]::CurrentDirectory={literal(Path(sys.executable).anchor)}\n"
         "function Get-AwNativeSeedRuntime {return @{Python='fixture';Bootstrap='fixture'}}\n"
         "function Test-AwHeadedPreparation {return $false}\n"
         "function Invoke-AwNativeSeedPhase {param([string]$Root,[string[]]$Arguments)\n"

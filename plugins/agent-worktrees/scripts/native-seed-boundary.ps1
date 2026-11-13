@@ -438,7 +438,7 @@ function Invoke-AwNativeSeedBackend {
             $selected = [string]$prepared.argv[0]
             if (
                 $IsWindows -and -not $prepared.headed -and
-                [IO.Path]::IsPathRooted($Command[0]) -and [IO.Path]::IsPathRooted($selected) -and
+                [IO.Path]::IsPathFullyQualified($Command[0]) -and [IO.Path]::IsPathFullyQualified($selected) -and
                 [IO.Path]::GetFullPath($Command[0]).Equals(
                     [IO.Path]::GetFullPath($selected), [StringComparison]::OrdinalIgnoreCase
                 ) -and [IO.Path]::GetExtension($selected) -ieq '.exe'
