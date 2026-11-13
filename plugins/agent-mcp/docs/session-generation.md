@@ -585,6 +585,10 @@ observes the pinned publisher, client and physical receiver settle and the
 final section disappear; the bounded runner owns all fixture descendants.
 Late ACP session notifications are validated while draining through stream EOF.
 Client exit must be natural, not test-forced termination.
+The persisted launch plan uses a minimal Windows process-variable allowlist
+with explicit private home, application-data and temporary directories. It
+never copies the rest of the caller environment; a focused serialization
+control plants synthetic inherited credentials and requires their absence.
 
 The physical receiver's exit code and Python finalization/EOF witness must
 match that ordinary baseline. A native client that abruptly settles its MCP

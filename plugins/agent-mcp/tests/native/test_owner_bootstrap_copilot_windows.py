@@ -39,6 +39,23 @@ def _exit_code(native, handle):
     return value.value
 
 
+def _environment(home):
+    allowed = {"SYSTEMROOT", "WINDIR", "COMSPEC", "PATH", "PATHEXT", "OS", "SYSTEMDRIVE"}
+    environment = {key: value for key, value in os.environ.items() if key.upper() in allowed}
+    temporary, local, roaming = home / "tmp", home / "AppData" / "Local", home / "AppData" / "Roaming"
+    for path in (temporary, local, roaming):
+        path.mkdir(parents=True)
+    environment.update(
+        HOME=str(home), USERPROFILE=str(home), APPDATA=str(roaming), LOCALAPPDATA=str(local),
+        TEMP=str(temporary), TMP=str(temporary), COPILOT_HOME=str(home / ".copilot"),
+        COPILOT_PLUGIN_DIR_ONLY="true", COPILOT_OFFLINE="true",
+        COPILOT_DISABLE_LOGIN_SHELL_ENV="1", COPILOT_PROVIDER_TYPE="openai",
+        COPILOT_PROVIDER_BASE_URL="http://127.0.0.1:1",
+        COPILOT_PROVIDER_MODEL_ID="gpt-4.1", COPILOT_MODEL="gpt-4.1",
+    )
+    return environment
+
+
 def _provider(root):
     venv.EnvBuilder(with_pip=False).create(root)
     package = root / "Lib" / "site-packages" / "agent_mcp"
@@ -153,6 +170,20 @@ async def _rpc(process, identifier, method, params):
             return message["result"]
 
 
+def test_publisher_plan_does_not_persist_inherited_credentials(tmp_path, monkeypatch):
+    for name in ("AWS_SECRET_ACCESS_KEY", "OPENAI_API_KEY", "UNLISTED_FIXTURE_SECRET"):
+        monkeypatch.setenv(name, "synthetic-sensitive-value-" + name)
+    home = tmp_path / "home"
+    _publisher(
+        tmp_path, tmp_path, Path("copilot.exe"), {"mcpServers": {}}, _environment(home), False,
+    )
+    document = (tmp_path / "launch.json").read_text(encoding="utf-8")
+    assert "synthetic-sensitive-value-" not in document
+    environment = json.loads(document)["environment"]
+    assert environment["USERPROFILE"] == str(home)
+    assert environment["TEMP"] == str(home / "tmp")
+
+
 @pytest.mark.asyncio
 async def test_offline_native_client_consumes_delayed_snapshot_after_publisher_exit(
     tmp_path, record_testsuite_property,
@@ -173,18 +204,7 @@ async def test_offline_native_client_consumes_delayed_snapshot_after_publisher_e
         root.mkdir()
         home, receipt_file = root / "home", root / "mcp.json"
         home.mkdir()
-        environment = {
-            key: value for key, value in os.environ.items()
-            if not key.startswith(("COPILOT_", "AGENT_", "GH_", "GITHUB_", "NODE_", "OTEL_", "WORKTREE_"))
-            and key not in {"TMUX", "TMUX_PANE"}
-        }
-        environment.update(
-            HOME=str(home), USERPROFILE=str(home), COPILOT_HOME=str(home / ".copilot"),
-            COPILOT_PLUGIN_DIR_ONLY="true", COPILOT_OFFLINE="true",
-            COPILOT_DISABLE_LOGIN_SHELL_ENV="1", COPILOT_PROVIDER_TYPE="openai",
-            COPILOT_PROVIDER_BASE_URL="http://127.0.0.1:1",
-            COPILOT_PROVIDER_MODEL_ID="gpt-4.1", COPILOT_MODEL="gpt-4.1",
-        )
+        environment = _environment(home)
         configuration = {"mcpServers": {"owner-fixture": {
             "type": "local", "command": str(python),
             "args": ["-I", "-m", "agent_mcp", "bridge", "fixture"], "tools": ["*"],
