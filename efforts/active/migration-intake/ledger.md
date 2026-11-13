@@ -183,3 +183,22 @@ activation programme. Independent capture/measurement is not retroactively
 gated on behavioral calibration. Prior ledger rows, custody and all
 incumbent acceptance remain unchanged.
 
+## Finite link-capability and portable-timeout intake (2026-11-13)
+
+This proposes `routed`; it takes effect only when normal review merges the
+accompanying complete direct domain Plan amendment. Ledger publication
+alone is not acceptance. Prior rows and unresolved residuals remain unchanged.
+
+| Candidate | Source | Disposition | Primary canonical owner | Tracker outcome |
+|-----------|--------|-------------|-------------------------|-----------------|
+| Logger five-boundary link-fixture capability and inherited two HostProfile controls/direct packet | Public #6093 including admitted #9618 acceptance | routed | [test-portfolio-rationalization](../test-portfolio-rationalization/README.md), Phase 4 only | Retain #6093 and OPEN #1303; no new issue or umbrella; preserve LFV3 and existing source custodians |
+| Portable PowerShell spaced-path/Force timeout and investigator's candidate-first correction-OR-retry disposition | Public #6138, complete original/refinement | routed | [test-portfolio-rationalization](../test-portfolio-rationalization/README.md), Phase 4 only | Retain #6138 and OPEN #1303; no new issue or umbrella; #6131/#6135 remain independent |
+
+Deduplication keeps each complete existing tracker family once: #9618 is
+inherited acceptance, not another candidate or implementation owner.
+Phase 7 is the intake/review route, not a second primary phase. These
+finite portable fixture contracts use the existing Logger/Manager and
+Budget waves; no new programme, runner or alternative domain owner is
+created. Existing claims, original alternatives, budgets and source/
+resource responsibilities remain. Reviewed planned receiving is not a
+fixture repair, causal timeout disposition, native PASS or source closure.
