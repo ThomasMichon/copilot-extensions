@@ -503,7 +503,7 @@ def repository(tmp_path):
     repository.mkdir()
     flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
     subprocess.run(["git", "init", "--quiet", str(repository)], check=True, creationflags=flags)
-    (repository / "version.txt").write_text("released-version\n", encoding="utf-8")
+    (repository / "version.txt").write_bytes(b"released-version\n")
     local.preparation._git(repository, "add", "version.txt")
     local.preparation._git(
         repository, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",

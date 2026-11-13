@@ -30,7 +30,10 @@ _RUNTIME_LIBRARY = (
     else _TOOL_DIRECTORY.parent / "libs" / "versioned-runtime"
 )
 sys.path.insert(0, str(_RUNTIME_LIBRARY))
-from versioned_runtime import _AV_RETRY_ATTEMPTS, _AV_RETRY_BACKOFF, _is_transient_lock, construction_lease
+from versioned_runtime import (
+    _AV_RETRY_ATTEMPTS, _AV_RETRY_BACKOFF, _is_transient_lock,
+    _normalize_windows_extended_path, construction_lease,
+)
 from versioned_runtime_source import (
     SOURCE_FILE,
     SourceIdentity,
@@ -136,10 +139,11 @@ def _archive(source: Path, commit: str, archive: Path, *, deadline: float | None
     permissions.check_ancestors(archive.parent)
     file_owner = procutil_module("_daemon_instance_owner")
     descriptor = file_owner.open_private(archive, os.O_WRONLY | os.O_CREAT | os.O_EXCL)
+    git_path = _normalize_windows_extended_path(str(archive)) if os.name == "nt" else str(archive)
     with os.fdopen(descriptor, "wb"):
         _git(
             source, "-c", "tar.umask=0022", "-c", "core.eol=lf",
-            "archive", "--format=tar", "--output=" + str(archive), commit, deadline=deadline,
+            "archive", "--format=tar", "--output=" + git_path, commit, deadline=deadline,
         )
 
 
