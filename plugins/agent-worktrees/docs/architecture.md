@@ -1295,10 +1295,13 @@ controls exercise actual birth, pre-execution refusal, literal arguments,
 environment/cwd/stdin/output/exit preservation, exclusive section inheritance,
 final-handle cleanup and the existing admission/wait path. The MCP source packet also runs actual offline native Copilot through this
 existing creation/wait owner with direct-client publication, delayed MCP startup,
-original byte streams, physical receiver/context parity and natural settlement.
-Only finite admission is substituted in that packet; it does not qualify an
-installed adapter or production caller selection. Headed creation still belongs
-to its separate actual-client owner, not the shell's coordinator handle.
+original byte streams, fixture-provider context parity and natural settlement.
+Preparation, admission and execution receipt responses are substituted, and the
+MCP provider implements a synthetic protocol rather than the production optional
+receiver. The separate physical-receiver/custody packet still uses publisher
+exit, not this retained wait owner. Neither packet qualifies an installed
+adapter or production caller selection. Headed creation still belongs to its
+separate actual-client owner, not the shell's coordinator handle.
 The headed path discovers preparation/receipt support against one captured,
 completed immutable runtime slot for preparation, admission and spawn; each
 finite call independently refuses a changed current selection before effects.

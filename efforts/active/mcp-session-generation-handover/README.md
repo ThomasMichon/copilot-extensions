@@ -417,11 +417,12 @@ handover. Preserve held sessions and the separate pre-feature adoption hold.
         `c807f2e8d051ff6152deefb0f71755eaf17d827e` after current-head approval,
         required CI and hosted Windows/Linux qualification using the real
         provider declaration. Release and installed acceptance remain open.
-    - [ ] **Direct Windows creation/wait caller source:** qualify the section
-      publisher inside the existing native seed owner, with actual-client
+    - [ ] **Direct Windows creation/wait fixture-provider source:** qualify the
+      section publisher inside the existing native seed owner, with actual-client
       attribution before execution, coordinator/substitution refusal, delayed
-      MCP startup and original streams/context/settlement. Local source controls
-      pass; review and hosted qualification remain pending. This does not
+      MCP startup and original streams/fixture-provider context/settlement.
+      Local source controls pass; review and hosted qualification remain pending. This does not
+      qualify retained-wait composition with the production physical receiver,
       enroll a headed or default caller or close installed acceptance.
   - [x] **Explicit Linux exec caller:** capture the exec owner's native pair
     and pass a sealed, session-only overlay for explicitly named configured

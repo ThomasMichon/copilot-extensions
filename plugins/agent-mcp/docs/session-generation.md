@@ -611,11 +611,13 @@ Windows runner; required unit-only CI is unchanged.
 The packet additionally composes the section publisher with the existing native
 seed creation/wait owner. That owner remains alive while the actual native
 client starts MCP after publisher handles close; the receipt must name the
-client, not its waiting parent. Original ACP streams, provider/context and
-settlement match the ordinary baseline. Finite preparation/admission responses
-are controlled source fixtures, not installed-runtime acceptance. The independent
-publisher-exit control remains separate. Neither case enrolls a default or headed
-production caller.
+client, not its waiting parent. Original ACP streams, fixture-provider context
+and settlement match the ordinary baseline. Preparation, admission and execution
+receipt responses are substituted, and this synthetic provider is not the
+production optional receiver. The independent publisher-exit control remains
+separate; the physical-receiver/custody handover packet below still uses that
+publisher-exit path, not the retained wait owner. These controls are not
+installed-runtime acceptance and enroll no default or headed production caller.
 
 The separate `tests/native/test_generation_handover_copilot.py` packet now
 composes that Windows caller with the selected physical receiver and shared
