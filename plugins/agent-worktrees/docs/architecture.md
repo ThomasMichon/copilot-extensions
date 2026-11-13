@@ -1277,7 +1277,10 @@ publication, refuses headed preparations, relative or substituted executable
 paths, non-`.exe` commands and missing native-image headers. The prepared target
 must be the caller's explicitly selected executable, not a coordinator discovered
 later. This is a direct-launch check, not an attestation of an arbitrary native
-executable's behavior. An independently updated caller must check the actual
+executable's behavior. A refusal invokes the correlated `spawn-failed` callback
+to restore a prepared seed only while no child has been created; restoration
+never repeats the original seed or relaxes uncertain-creation handling.
+An independently updated caller must check the actual
 loaded function's parameter metadata before requesting it; older copied adapters
 do not acquire this optional support from a package-version comparison.
 The original byte transfers, admission,

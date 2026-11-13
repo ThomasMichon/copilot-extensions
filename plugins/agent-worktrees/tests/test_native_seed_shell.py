@@ -295,7 +295,7 @@ def test_direct_client_handoff_never_publishes_a_coordinator_or_forwarder(tmp_pa
     else:
         assert result.returncode == 3, result.stdout + result.stderr
         assert not result.stdout
-        assert [event[1] for event in events] == ["prepare"]
+        assert [event[1] for event in events] == ["prepare", "spawn-failed"]
         assert "Direct native client preparation is unconfirmed" in result.stderr
 
 

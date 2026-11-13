@@ -426,6 +426,12 @@ function Invoke-AwNativeSeedBackend {
         [Console]::Error.WriteLine('Native backend preparation is unconfirmed; no backend started.')
         return 3
     }
+    $callbackArgs = @(
+        '--record', $Record, '--launch-attempt-id', [string]$prepared.attempt_id,
+        '--launch-resolution-id', [string]$prepared.resolution_id,
+        '--operation-id', [string]$prepared.operation_id
+    )
+    if ($prepared.parent_id) { $callbackArgs += @('--launch-parent-id', [string]$prepared.parent_id) }
     if ($RequireDirectClient) {
         $direct = $false
         try {
@@ -443,16 +449,11 @@ function Invoke-AwNativeSeedBackend {
             }
         } catch { $direct = $false }
         if (-not $direct) {
+            $null = Invoke-AwNativeSeedPhase $Root (@('--phase', 'spawn-failed') + $callbackArgs) -Runtime $runtime
             [Console]::Error.WriteLine('Direct native client preparation is unconfirmed; no backend started.')
             return 3
         }
     }
-    $callbackArgs = @(
-        '--record', $Record, '--launch-attempt-id', [string]$prepared.attempt_id,
-        '--launch-resolution-id', [string]$prepared.resolution_id,
-        '--operation-id', [string]$prepared.operation_id
-    )
-    if ($prepared.parent_id) { $callbackArgs += @('--launch-parent-id', [string]$prepared.parent_id) }
     $info = [Diagnostics.ProcessStartInfo]::new([string]$prepared.argv[0])
     $info.UseShellExecute = $false
     $info.WorkingDirectory = $PWD.ProviderPath

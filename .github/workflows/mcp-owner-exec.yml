@@ -18,6 +18,7 @@ on:
       - "plugins/agent-worktrees/scripts/native-seed-process.cs"
       - "plugins/agent-worktrees/scripts/native-seed-boundary.ps1"
       - "plugins/agent-worktrees/tests/test_native_seed_shell.py"
+      - "plugins/agent-worktrees/tests/test_launch_seed_native.py"
       - "plugins/agent-mcp/src/agent_mcp/owner_handoff.py"
       - "plugins/agent-mcp/src/agent_mcp/owner_capabilities.py"
       - "plugins/agent-mcp/src/agent_mcp/execution_context.py"
@@ -185,7 +186,8 @@ jobs:
       - name: Refuse coordinator attribution before native publication
         run: >-
           python tools/run-plugin-tests.py agent-worktrees
-          --test-file tests/test_native_seed_shell.py -k direct_client_handoff
+          --test-file tests/test_native_seed_shell.py
+          --test-file tests/test_launch_seed_native.py -k direct_client
           --test-timeout 45 --timeout 90 --plugin-timeout 120
           --junit-dir "${{ runner.temp }}/mcp-owner-publication-${{ github.run_id }}"
       - name: Retain native publication source controls

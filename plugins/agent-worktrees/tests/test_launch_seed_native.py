@@ -503,6 +503,76 @@ def test_definite_spawn_failure_restores_once_without_automatic_retry(record):
         native.spawn_failed(record, _identity(reply), reply["operation_id"])
 
 
+@pytest.mark.skipif(os.name != "nt" or shutil.which("pwsh") is None, reason="Native PowerShell required")
+@pytest.mark.parametrize("preparation", ["headed", "substituted"])
+def test_direct_client_refusal_restores_a_real_seed(record, tmp_path, preparation):
+    seed = seeds.stage(record, kind="new", text="retry only after definite pre-creation refusal")
+    reply = native.prepare(record, [sys.executable], seed_id=seed.seed_id)
+    if preparation == "headed":
+        reply["headed"] = {"version": 1}
+    assert seeds.peek(record).handoff_id
+    prepared = tmp_path / "prepared.json"
+    prepared.write_text(json.dumps(reply), encoding="utf-8")
+    restore = tmp_path / "restore.py"
+    restore.write_text(
+        "import argparse,json\nfrom pathlib import Path\n"
+        "from agent_worktrees import launch_seed_native as native,launch_execution as audit\n"
+        "parser=argparse.ArgumentParser()\n"
+        "for name in ('record','launch-attempt-id','launch-resolution-id','operation-id',"
+        "'launch-parent-id'):parser.add_argument('--'+name)\n"
+        "args=parser.parse_args()\n"
+        "native.spawn_failed(Path(args.record),audit.Correlation("
+        "args.launch_attempt_id,args.launch_resolution_id,args.launch_parent_id),args.operation_id)\n"
+        "print(json.dumps({'recorded':True}))\n",
+        encoding="utf-8",
+    )
+
+    def literal(value):
+        return "'" + str(value).replace("'", "''") + "'"
+
+    boundary = Path(__file__).resolve().parents[1] / "scripts" / "native-seed-boundary.ps1"
+    selected = sys.executable if preparation == "headed" else str(tmp_path / "forwarder.exe")
+    driver = tmp_path / "refused.ps1"
+    driver.write_text(
+        f". {literal(boundary)}\n"
+        "function Get-AwNativeSeedRuntime {return @{Python='fixture';Bootstrap='fixture'}}\n"
+        "function Test-AwHeadedPreparation {return $false}\n"
+        "function Invoke-AwNativeSeedPhase {param([string]$Root,[string[]]$Arguments)\n"
+        f" if($Arguments[1] -eq 'prepare'){{return (Get-Content -Raw {literal(prepared)} | ConvertFrom-Json)}}\n"
+        " if($Arguments[1] -ne 'spawn-failed'){throw 'unexpected post-preparation phase'}\n"
+        f" $info=[Diagnostics.ProcessStartInfo]::new({literal(sys.executable)})\n"
+        " $info.UseShellExecute=$false;$info.CreateNoWindow=$true\n"
+        " $info.RedirectStandardOutput=$true;$info.RedirectStandardError=$true\n"
+        f" foreach($arg in @('-I',{literal(restore)})+@($Arguments|Select-Object -Skip 2))"
+        "{$info.ArgumentList.Add($arg)}\n"
+        " $process=[Diagnostics.Process]::Start($info)\n"
+        " try{\n"
+        "  $out=$process.StandardOutput.ReadToEndAsync();$err=$process.StandardError.ReadToEndAsync()\n"
+        "  if(-not $process.WaitForExit(15000)){throw 'restoration did not settle'}\n"
+        "  if($process.ExitCode -ne 0){throw $err.GetAwaiter().GetResult()}\n"
+        "  return (ConvertFrom-Json -InputObject $out.GetAwaiter().GetResult())\n"
+        " }finally{$process.Dispose()}\n"
+        "}\n"
+        f"exit (Invoke-AwNativeSeedBackend -Root {literal(tmp_path)} -Record {literal(record)} "
+        f"-SeedId {literal(seed.seed_id)} -Command @({literal(selected)}) "
+        "-RequireDirectClient -BeforeResume {throw 'refused target must never be published'})\n",
+        encoding="utf-8",
+    )
+    result = run_caller_owned(
+        [shutil.which("pwsh"), "-NoLogo", "-NoProfile", "-File", str(driver)],
+        cwd=tmp_path, timeout=30, max_stdout_bytes=4096, max_stderr_bytes=4096,
+    )
+    assert result.returncode == 3, result.stdout + result.stderr
+    assert not result.stdout
+    assert "Direct native client preparation is unconfirmed" in result.stderr
+    restored = seeds.peek(record)
+    assert (restored.seed_id, restored.text, restored.handoff_id) == (seed.seed_id, seed.text, None)
+    assert _saved(record, reply)["events"][-1]["phase"] == "execution-returned"
+    retry = native.prepare(record, [sys.executable], seed_id=seed.seed_id)
+    assert seeds.peek(record).handoff_id
+    native.spawn_failed(record, _identity(retry), retry["operation_id"])
+
+
 def test_unconfirmed_child_identity_never_finishes_or_restores(record):
     seed = seeds.stage(record, kind="new", text="unknown remains held")
     reply = native.prepare(record, ["copilot"], seed_id=seed.seed_id)
