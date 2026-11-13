@@ -226,7 +226,10 @@ report ambiguous chains as unknown.
 Session reactivation and End retain the original qualified self-session claim
 for the tracked session and proven receiving project/worktree, rather than
 reconstructing it from a renamed reporter. Other projects, worktrees, sessions
-and opaque/producer claims remain independent. Creator-scoped terminal cleanup
+and opaque/producer claims remain independent. Session End and terminal cleanup
+preserve every competing historical self-claim when more than one machine key
+could name the tracked session; receiving locality alone cannot disambiguate them.
+Creator-scoped terminal cleanup
 uses the original reservation/driver or creation nonce and actual receiving
 proof even without a companion; an explicitly foreign creator selection still
 refuses.

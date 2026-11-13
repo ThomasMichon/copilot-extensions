@@ -27,4 +27,5 @@ def self_claims(record: WorktreeRecord, session_id: str) -> list[ResourceClaim]:
             continue
         if record_reporting.historical_owner_is_local(record, ref.machine):
             current.append(claim)
-    return current
+    # Receiving locality cannot distinguish competing historical machine keys.
+    return current if len(current) == 1 else []

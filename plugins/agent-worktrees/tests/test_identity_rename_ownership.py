@@ -110,8 +110,9 @@ def test_ordinary_child_finalization_does_not_reopen_closed_parent_claim(
 
 
 @pytest.mark.parametrize("reactivate", [False, True])
-def test_session_end_releases_original_self_claim_after_rename(
-    tmp_path, monkeypatch, reactivate,
+@pytest.mark.parametrize("unmapped_remote", [False, True])
+def test_session_end_releases_only_unambiguous_self_claim_after_rename(
+    tmp_path, monkeypatch, reactivate, unmapped_remote,
 ):
     creation = _creation_fixture(tmp_path, monkeypatch, native_git=True, tuple_identity=True)
     path = creation.record.yaml_path
@@ -143,7 +144,7 @@ def test_session_end_releases_original_self_claim_after_rename(
     ))
     record.resources.extend(others)
     tracking.save_record(record)
-    rename(creation, foreign_creator="remote-space")
+    rename(creation, foreign_creator=None if unmapped_remote else "remote-space")
     if reactivate:
         assert registration.apply_session_register(args).get("ok")
     monkeypatch.setattr(deregistration, "stop_fsmonitor_daemon", lambda _: None)
@@ -152,9 +153,12 @@ def test_session_end_releases_original_self_claim_after_rename(
     })
     assert result.get("ok"), result
     current = tracking.load_record(path)
-    assert next(claim for claim in current.resources if claim.ref == original_ref).state == "released"
+    original = next(claim for claim in current.resources if claim.ref == original_ref)
+    assert original.is_live if unmapped_remote else original.state == "released"
     assert all(next(claim for claim in current.resources if claim.ref == other.ref).is_live for other in others)
-    assert len(current.resources) == 5
+    assert len(current.resources) == 5 + int(unmapped_remote and reactivate)
+    if unmapped_remote:
+        assert all(claim.is_live for claim in current.resources)
     assert current.session_entry("own-session").ended_at is not None
 
 
@@ -167,8 +171,13 @@ def test_creator_conclusion_without_companion_survives_rename(
 
 
 @pytest.mark.parametrize("policy", [terminal.BRIDGE_CREATION_POLICY, terminal.DISPATCH_ATTEMPT_POLICY])
-def test_conclusion_preserves_unrelated_claim_with_same_session_suffix(tmp_path, monkeypatch, policy):
-    _conclusion_fixture(tmp_path, monkeypatch, policy, unrelated=True)
+@pytest.mark.parametrize("unmapped_remote", [False, True])
+def test_conclusion_preserves_unrelated_claim_with_same_session_suffix(
+    tmp_path, monkeypatch, policy, unmapped_remote,
+):
+    _conclusion_fixture(
+        tmp_path, monkeypatch, policy, unrelated=True, unmapped_remote=unmapped_remote,
+    )
 
 
 def test_dispatch_still_refuses_explicit_foreign_creator(tmp_path, monkeypatch):
@@ -179,6 +188,7 @@ def test_dispatch_still_refuses_explicit_foreign_creator(tmp_path, monkeypatch):
 
 def _conclusion_fixture(
     tmp_path, monkeypatch, policy, *, pair_kind=None, unrelated=False, foreign_creator=False,
+    unmapped_remote=False,
 ) -> None:
     creation = _creation_fixture(tmp_path, monkeypatch, native_git=True, tuple_identity=True)
     record = tracking.load_record(creation.record.yaml_path)
@@ -205,7 +215,9 @@ def _conclusion_fixture(
         record.pair_ref = f"{old_creator}/knowledge/@anchor"
     tracking.save_record(record)
     git_ops.git("update-ref", "refs/remotes/origin/main", "HEAD", cwd=creation.anchors["harness"])
-    rename(creation, foreign_creator=old_creator if foreign_creator else "remote-space" if unrelated else None)
+    rename(creation, foreign_creator=(
+        old_creator if foreign_creator else "remote-space" if unrelated and not unmapped_remote else None
+    ))
     monkeypatch.setattr(sessions, "has_mux_session", lambda _: False)
     monkeypatch.setattr(sessions, "scan_sessions_fast", lambda _: SimpleNamespace(active_sessions={}))
     result = terminal.conclude_disposable_worktree(
