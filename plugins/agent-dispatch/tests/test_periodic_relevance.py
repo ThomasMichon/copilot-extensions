@@ -8,6 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 from subprocess import CompletedProcess
 from unittest.mock import Mock
 import sys
+import uuid
 
 import pytest
 
@@ -50,7 +51,23 @@ def periodic(q, venue, monkeypatch):
 
 
 def task(q, **changes):
-    return emitted(q, evaluator_ref="review-loop", now=80, **changes)
+    if changes.get("source", "emitter") != "emitter" or changes.get("repo", TEST_REPO) != TEST_REPO:
+        return emitted(q, evaluator_ref="review-loop", now=80, **changes)
+    producer = changes.get("origin_ref", SPEC["id"])
+    current = q.producer_scope_status(TEST_REPO, "emitter")
+    grant = getattr(q, "_test_periodic_grant", None)
+    if grant is None or current.active_producer != producer:
+        grant = q.handoff_producer_scope(
+            TEST_REPO, "emitter", producer_id=producer,
+            expected_generation=current.current_generation,
+        )
+        q._test_periodic_grant = grant
+    return emitted(
+        q, evaluator_ref="review-loop", now=80, **changes,
+        producer_scope={"repo": TEST_REPO, "source": "emitter"}, producer_id=producer,
+        producer_generation=grant.state.current_generation,
+        producer_capability=grant.producer_capability, producer_request_id=str(uuid.uuid4()),
+    )
 
 
 def runner(verdict="obsolete", *, callback=None):
@@ -71,8 +88,9 @@ def tick(q, periodic, **kwargs):
 
 
 def test_periodic_closure_uses_receiver_and_only_eligible_source_tasks(q, periodic):
-    eligible = task(q)
+    unverified = emitted(q, evaluator_ref="review-loop", now=80)
     young = emitted(q, evaluator_ref="review-loop", now=99)
+    eligible = task(q)
     manual = task(q, source="manual")
     other_repo = task(q, repo="other/repo")
     bound = task(q)
@@ -81,10 +99,26 @@ def test_periodic_closure_uses_receiver_and_only_eligible_source_tasks(q, period
     for _ in range(8):
         tick(q, periodic, runner=check)
     assert q.get(eligible.id).status == Status.ABANDONED
-    assert all(q.get(t.id).status == Status.QUEUED for t in (young, manual, other_repo))
+    assert all(q.get(t.id).status == Status.QUEUED for t in (unverified, young, manual, other_repo))
     assert q.get(bound.id).status == Status.CLAIMED
     assert check.call_count == 1
     assert q.relevance_evaluations(eligible.id)[0]["status"] == "finished"
+
+
+def test_managed_receipt_from_another_producer_cannot_enroll_checker_payload(q, periodic):
+    grant = q.handoff_producer_scope(TEST_REPO, "emitter", producer_id="other-producer", expected_generation=0)
+    forged = emitted(
+        q, evaluator_ref="review-loop", now=80, payload_inline="caller-selected-object",
+        producer_scope={"repo": TEST_REPO, "source": "emitter"}, producer_id="other-producer",
+        producer_generation=grant.state.current_generation,
+        producer_capability=grant.producer_capability, producer_request_id="foreign-producer",
+    )
+    check = Mock(side_effect=AssertionError("unverified provenance must not reach checker"))
+    for _ in range(2):
+        assert tick(q, periodic, runner=check)["accepted"] == []
+    assert q.get(forged.id).status == Status.QUEUED
+    assert q.relevance_evaluations(forged.id) == []
+    check.assert_not_called()
 
 
 @pytest.mark.parametrize("verdict", ["needed", "unknown"])

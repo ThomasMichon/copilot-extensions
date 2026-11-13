@@ -46,6 +46,14 @@ declared sources. Selection requires the unique repo/ref evaluator and its
 active local task-authoring command emitter. Emitter source/origin attribution,
 concrete/logical holds and replaced-registration holds apply. Manual tasks,
 foreign emitters and unsupported/ambiguous ownership are not evaluated.
+Enrollment also requires the existing coordinator-verified managed-producer
+creation receipt: its canonical repository/source, original producer generation,
+request and task must match, and its producer id must equal the command emitter's
+`spec.id`. Caller-supplied task source/origin/evaluator fields alone cannot enroll
+a payload in a trusted checker. Historical verified receipts remain valid after
+a producer handoff; legacy/unmanaged tasks remain outside automatic enrollment.
+Configure production through the existing managed producer-scope/capability owner
+before enabling this policy; this source does not mint or migrate those grants.
 
 ## Script contract
 

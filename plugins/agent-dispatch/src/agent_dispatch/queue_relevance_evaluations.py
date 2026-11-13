@@ -17,6 +17,21 @@ from .queue_relevance_registration import (
 from .relevance_evaluation import PeriodicRelevancePolicy
 
 
+def _verified_producer(conn: sqlite3.Connection, task: Task) -> bool:
+    fence = task.producer_fence
+    if not fence or (
+        fence.get("scope") != {"repo": task.repo, "source": task.source}
+        or fence.get("producer_id") != task.origin_ref
+    ):
+        return False
+    return conn.execute(
+        "SELECT 1 FROM producer_create_requests WHERE repo=? AND source=?"
+        " AND generation=? AND request_id=? AND producer_id=? AND task_id=?",
+        (task.repo, task.source, fence.get("generation"), fence.get("request_id"),
+         task.origin_ref, task.id),
+    ).fetchone() is not None
+
+
 class QueueRelevanceEvaluationsMixin:
     @staticmethod
     def _migrate_relevance_evaluations(conn: sqlite3.Connection) -> None:
@@ -176,6 +191,8 @@ class QueueRelevanceEvaluationsMixin:
                             (task.id, row["generation"], selector.registration_id),
                         )
                         continue
+                    if not _verified_producer(conn, task):
+                        continue
                     try:
                         resolve_registration(
                             conn, task, selector, disabled_ids=disabled_ids,
@@ -206,6 +223,8 @@ class QueueRelevanceEvaluationsMixin:
             )
             for candidate in rows:
                 task = self._fetch(conn, candidate["id"])
+                if not _verified_producer(conn, task):
+                    continue
                 if task.created_at > ts - policy.min_age_seconds or conn.execute(
                     "SELECT 1 FROM task_relevance_closeouts WHERE task_id=?", (task.id,),
                 ).fetchone():
