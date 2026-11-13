@@ -500,6 +500,9 @@ preserves the complete pre-amendment record.
 - [ ] S2: Verify combined replacement coverage against preserved #11121 source
   before superseding its implementation; retain its history and ten-review-round
   limit. A small diff or passing review alone is not replacement completeness.
+  The original #11121 instead merged with its history preserved and no
+  supersession; [source and bounded native credit](journal/2026/11.13%20canonical-application-integration.md)
+  does not close combined whole-inventory or installed acceptance.
 
 ### Phase W — Wheel-first independent suite (proposal extension)
 
@@ -701,6 +704,8 @@ independent objectives, not recursively imported completion gates.
   superseding #11121. Journal actual bounded outcomes and remaining approved
   adoption gates without claiming release/live state from a PR or transferring
   custody through a checklist disposition.
+  #11121 has current source review/CI, actual merge and containing Main credit
+  (#12353); remaining slices and adoption gates stay open in the latest journal.
 
 ## Proposal
 
@@ -726,6 +731,7 @@ onto one branch.
 
 ## Journal
 
+- [2026-11-13 - Original canonical application integration merged](journal/2026/11.13%20canonical-application-integration.md)
 - [2026-11-12 - Composition delivered and complete preparation integration](journal/2026/11.12%20complete-preparation.md)
 - [2026-11-11 - Bounded public metadata acquisition delivered](journal/2026/11.11%20bounded-metadata-acquisition.md)
 
