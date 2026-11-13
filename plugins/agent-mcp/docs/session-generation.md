@@ -471,11 +471,12 @@ handling and bind any successful report to their actual selected command before
 supplying mandatory ownership arguments. Missing or stale discovery is not
 permission to replay a possibly accepted session.
 
-The explicit native pair is supported on Windows and Linux. The optional
-physical receiver can execute on both platforms, but remains advertised only
-on Linux. Windows provider-only qualification supplies a captured native pair
-directly to the selected physical receiver; it does not enable the Linux-only
-bootstrap, controlled-launcher capture or automatic caller adoption.
+The explicit native pair and optional physical receiver are advertised on
+Windows and Linux. This provider-first declaration follows native bootstrap,
+actual-client consumption and joined physical-handover source qualification;
+it does not enable controlled production launcher capture or automatic caller
+adoption. Unsupported platforms and failed physical/native admission still
+report no support.
 
 On Windows, a pre-effect ordinary fallback starts the original command with
 explicitly inherited stdin, stdout and stderr handles, the restored original
@@ -568,8 +569,8 @@ binary frames, EOF, context, native owner refusal and nonzero exits.
 wait failure without replay. These controlled packages do not qualify actual
 Copilot consumption or an installed handover.
 
-Windows advertisement, automatic bootstrap adoption and production caller
-integration remain disabled. The section requires no new process, network request,
+Windows automatic bootstrap adoption and production caller integration remain
+disabled. The section requires no new process, network request,
 filesystem scan or steady-state message work; installed launch/update latency
 remains unqualified until caller adoption.
 
@@ -603,6 +604,15 @@ creation-bound handoff, not installed custody, Windows physical-generation
 handover, productive caller enrollment or update latency. The existing optional
 source workflow pins the public client asset and runs this packet only on its
 Windows runner; required unit-only CI is unchanged.
+
+The separate `tests/native/test_generation_handover_copilot.py` packet now
+composes that Windows caller with the selected physical receiver and shared
+custody. Replacement, rollback and same-slot replacement retain the original
+native client, conduit, keeper and upstream, including accepted in-flight
+tool calls, actual client ping replies and terminal unknown-delivery fencing
+without replay. Its private runtime uses the real provider declaration, not a
+test-only capability override. The pinned Windows and Linux source lanes remain
+separate from installed acceptance and productive caller enrollment.
 
 ### Hosted originating-owner qualification
 

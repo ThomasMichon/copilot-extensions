@@ -567,8 +567,8 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
                 "session_handle, worktree, inherited_worktree, "
                 "worktree_ownership, conversation_retired, allocation_project, worktree_path, "
                 "creating_host, driver, reserved_at, updated_at, allocation_revision, "
-                "creation_key, allocation_reservation_key, agent_info, execution_machine) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "creation_key, allocation_reservation_key, agent_info, execution_machine, allocation_cohort_transport) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)",
                 (
                     key,
                     task_id,
@@ -859,6 +859,7 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
 
     def record_spawn_allocation(
         self, key: str, project: str, *, worktree_writer_requirement: dict | None = None,
+        cohort_transport: str | None = None,
     ) -> SpawnReservation:
         """Bind execution routing before the first non-transactional allocation."""
         if not isinstance(project, str) or not project.strip():
@@ -872,14 +873,11 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
                 raise TaskError("allocation binding requires a reserving attempt")
             if row["allocation_project"] is not None and row["allocation_project"] != project:
                 raise TaskError("recorded allocation project cannot change")
-            from .ordinary_writer_admission import allocation_requirement
-            retained = allocation_requirement(dict(row), project, worktree_writer_requirement)
-            conn.execute(
-                "UPDATE spawn_reservations SET allocation_project=?, worktree_writer_requirement=?, "
-                "updated_at=? WHERE key=?",
-                (project, retained, self._now(None), key),
+            from .queue_assignment_cohort import bind_allocation_facts
+            updated = bind_allocation_facts(
+                conn, row, project, cohort_transport=cohort_transport,
+                worktree_writer_requirement=worktree_writer_requirement, now=self._now(None),
             )
-            updated = conn.execute("SELECT * FROM spawn_reservations WHERE key=?", (key,)).fetchone()
             conn.execute("COMMIT")
         return SpawnReservation._from_row(updated)
 
