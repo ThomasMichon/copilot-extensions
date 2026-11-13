@@ -23,7 +23,7 @@ def add_parsers(sub) -> None:
 
     worktree_allocation_cli.add_parsers(sub)
     parser = sub.add_parser("resource-producer", help="Reserve/fence/bind/inspect/verify-close disposable ownership; JSON stdin/stdout")
-    parser.add_argument("operation", choices=("capabilities", "reserve", "begin", "complete", "bind", "inspect", "close"))
+    parser.add_argument("operation", choices=("capabilities", "reserve", "begin", "complete", "bind", "inspect", "retain", "close"))
     parser.add_argument("--json", action="store_true", required=True)
     parser.add_argument("--owner-ref", help="Qualified local owner; omitted, resolve current worktree/supported anchor")
     add_relationship_parser(sub)
@@ -70,8 +70,10 @@ def cmd_resource_producer(args) -> int:
         if args.operation == "capabilities":
             output._json_output({
                 "schema": producer.SCHEMA, "version": producer.VERSION,
-                "operations": ["reserve", "begin", "complete", "bind", "inspect", "close"],
+                "operations": ["reserve", "begin", "complete", "bind", "inspect", "retain", "close"],
                 "allocation_fencing": 1,
+                "artifact_retention": 1,
+                "optional_lifetimes": [producer.ARTIFACT_LIFETIME],
                 "lifetime": "disposable-owned", "ref_encoding": "namespace:r1.base64url",
                 "max_ref_bytes": producer.MAX_REF_BYTES, "max_input_bytes": producer.MAX_INPUT_BYTES,
             })

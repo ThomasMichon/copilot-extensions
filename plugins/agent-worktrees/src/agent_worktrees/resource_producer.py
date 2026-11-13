@@ -13,6 +13,7 @@ from typing import Iterator
 
 SCHEMA = "copilot-extensions.resource-producer"
 VERSION = 1
+ARTIFACT_LIFETIME = "artifact-owned"
 MAX_REF_BYTES = 4096
 MAX_INPUT_BYTES = 16384
 FROZEN_OWNER_STATUSES = frozenset({
@@ -60,6 +61,8 @@ def claim_ref(metadata: dict) -> str:
         from .resource_relationship import claim_ref as relationship_ref
         return relationship_ref(metadata)
     envelope = {key: metadata[key] for key in ("version", "token", "creator", "recovery")}
+    if metadata.get("lifetime") == ARTIFACT_LIFETIME:
+        envelope["lifetime"] = ARTIFACT_LIFETIME
     envelope["phase"] = "allocating" if metadata["phase"] == "allocating" else (
         "bound" if "identity" in metadata else "pending"
     )
@@ -89,7 +92,9 @@ def decode_ref(ref: str) -> dict:
         data = json.loads(base64.b64decode(encoded + "=" * (-len(encoded) % 4), altchars=b"-_", validate=True))
     except (ValueError, UnicodeError) as exc:
         raise ValueError("invalid producer callback envelope") from exc
-    metadata = {**data, "namespace": namespace, "lifetime": "disposable-owned"} if isinstance(data, dict) else {}
+    metadata = {
+        **data, "namespace": namespace, "lifetime": data.get("lifetime", "disposable-owned"),
+    } if isinstance(data, dict) else {}
     if not valid_metadata(metadata) or claim_ref(metadata) != ref:
         raise ValueError("invalid or noncanonical producer callback envelope")
     return data
@@ -112,7 +117,10 @@ def valid_metadata(value: object) -> bool:
         required | {"identity", "closeout", "transfer", "allocation_epoch", "allocation_completion"}
     ):
         return False
-    if type(value["version"]) is not int or value["version"] != VERSION or value["lifetime"] != "disposable-owned":
+    if (
+        type(value["version"]) is not int or value["version"] != VERSION
+        or value["lifetime"] not in {"disposable-owned", ARTIFACT_LIFETIME}
+    ):
         return False
     if not is_valid_token(value["token"]):
         return False
@@ -126,9 +134,9 @@ def valid_metadata(value: object) -> bool:
     if parsed is None or not parsed.is_qualified or parsed.session or parsed.canonical() != creator:
         return False
     phase = value["phase"]
-    if phase not in ("pending", "allocating", "bound", "closed", "transferred") or not isinstance(value["recovery"], dict):
+    if phase not in ("pending", "allocating", "bound", "retained", "closed", "transferred") or not isinstance(value["recovery"], dict):
         return False
-    if phase in ("bound", "transferred") and not isinstance(value.get("identity"), dict):
+    if phase in ("bound", "retained", "transferred") and not isinstance(value.get("identity"), dict):
         return False
     if phase in {"pending", "allocating"} and "identity" in value:
         return False
@@ -145,7 +153,12 @@ def valid_metadata(value: object) -> bool:
             return False
     except (ValueError, TypeError, UnicodeError, RecursionError):
         return False
-    if phase == "closed":
+    if phase == "retained":
+        if value["lifetime"] != ARTIFACT_LIFETIME or not verified_retention(
+            value.get("closeout"), ref, value["identity"],
+        ):
+            return False
+    elif phase == "closed":
         proof = value.get("closeout")
         if not isinstance(proof, dict) or proof.get("available") is not True or not verified_absence(proof, ref):
             return False
@@ -178,6 +191,25 @@ def verified_absence(result: object, ref: str) -> bool:
     )
 
 
+def verified_retention(result: object, ref: str, identity: dict) -> bool:
+    """Only the registered artifact provider can attest quiescent retained bytes."""
+    if not isinstance(result, dict) or result.get("available") is not True or result.get("exists") is not True:
+        return False
+    proof = result.get("producer_verification")
+    if not isinstance(proof, dict):
+        return False
+    return (
+        type(proof.get("version")) is int and proof["version"] == VERSION
+        and proof.get("subject") == ref and proof.get("allocation_finished") is True
+        and proof.get("work_settled") is True
+        and isinstance(proof.get("identity"), dict)
+        and canonical_json(proof["identity"]) == canonical_json(identity)
+        and proof.get("retention") == {
+            "class": "disposable-scratch", "cleanup": "explicit-owner-pass",
+        }
+    )
+
+
 def wire_metadata(value: object) -> dict:
     """Expose invalid raw YAML as an explicit error, never as wire authority."""
     if isinstance(value, dict) and valid_metadata(value):
@@ -190,7 +222,7 @@ def unsettled(claim) -> bool:
     value = claim.producer
     return (
         not valid_metadata(value)
-        or value["phase"] not in ("closed", "transferred")
+        or value["phase"] not in ("closed", "transferred", "retained")
         or claim_ref(value) != claim.ref
     )
 

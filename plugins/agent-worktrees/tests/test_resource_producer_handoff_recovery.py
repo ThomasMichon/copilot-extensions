@@ -334,8 +334,7 @@ def test_historical_producer_foreign_context_retains_exact_ledgers(
         {"machine": "foreign-host-wsl"} if violation == "machine" else
         {"worktree_path": str(path.parent / "foreign" / record.worktree_id)}
     )
-    record = replace(record, **changes)
-    tracking.save_record(record, target)
+    _rewrite(target, lambda mapping: mapping.update(changes))
     paths = (path, path.with_name("consumer.yaml"), handoffs.registry_path())
     before = {item: item.read_bytes() for item in paths}
     with pytest.raises(handoffs.ClaimHandoffError):

@@ -87,6 +87,7 @@ from plugin_test_containment import (
     run_contained,
 )
 from plugin_test_command_safety import UnsafeTestCommand, check_test_sources
+from plugin_test_owned_scratch import add_cli_argument, test_sandbox
 
 REPO = Path(__file__).resolve().parents[1]
 PLUGINS = REPO / "plugins"
@@ -100,6 +101,7 @@ EXTERNAL_TEST_DEPENDENCIES = {
 }
 LEASE_LIB = REPO / "libs" / "single-instance-lease" / "src"
 TOOLS_DIR = REPO / "tools"
+OWNED_SCRATCH_OWNER: str | None = None
 
 
 # Plugins whose OWN test suites assert properties about OTHER plugins (a
@@ -299,8 +301,9 @@ def declared_test_tooling_requirements(name: str) -> tuple[str, ...]:
 
 def _ensure_venv(name: str, uv: str, *, reinstall: bool) -> Path:
     """Detach build children before preparation, not only before pytest."""
-    retained = _venv_root()
-    with _TestSandbox(prefix="ce-prep-", dir=runs_root(REPO)) as private:
+    parent = runs_root(REPO) if OWNED_SCRATCH_OWNER is None else None
+    with test_sandbox(OWNED_SCRATCH_OWNER, REPO, _TestSandbox, stage="preparation", prefix="ce-prep-", dir=parent) as private:
+        retained = _venv_root()
         record_owner(Path(private), REPO, retention="disposable after verified preparation cleanup")
         from plugin_test_environment import preparation_environment
 
@@ -573,18 +576,10 @@ def run_plugin(
         # A fresh plugin directory prevents retries from overwriting prior evidence.
         report_directory.mkdir(mode=0o700, parents=True, exist_ok=False)
     py = _ensure_venv(name, uv, reinstall=reinstall)
-    sandbox_parent = runs_root(REPO)
-    with _TestSandbox(
-        # Deliberately short: this sandbox root sits at the top of a path
-        # whose depth (home/.agent-logger/snapshots/<ver>/libs/<lib>/
-        # build/bdist.win-amd64/wheel/...) can approach Windows' 260-char
-        # MAX_PATH for a plugin with deep installer-provisioned content
-        # (coverage-guided-ci effort, 2026-10-05) -- every char saved here
-        # is real headroom, and this prefix is purely a disposable
-        # per-run temp dir, never read by anything outside this process.
-        prefix=run_prefix(name),
-        dir=sandbox_parent,
-    ) as raw_sandbox, _group_cleanup_worker() as (cleanup_pool, cleanups):
+    sandbox_scope = test_sandbox(OWNED_SCRATCH_OWNER, REPO, _TestSandbox, stage="tests",
+        prefix=run_prefix(name), dir=runs_root(REPO) if OWNED_SCRATCH_OWNER is None else None,
+    )
+    with sandbox_scope as raw_sandbox, _group_cleanup_worker() as (cleanup_pool, cleanups):
         sandbox = Path(raw_sandbox)
         record_owner(sandbox, REPO, retention="disposable after verified process cleanup")
         basetemp = sandbox / "t"
@@ -620,6 +615,8 @@ def run_plugin(
                     file=sys.stderr,
                 )
                 returncode = 124
+                if OWNED_SCRATCH_OWNER is not None:
+                    sandbox_scope.record_result(index, returncode)
                 break
             group_limits = Limits(
                 wall_seconds=min(limits.wall_seconds, remaining),
@@ -682,6 +679,8 @@ def run_plugin(
                 sandbox=sandbox,
                 limits=group_limits,
             )
+            if OWNED_SCRATCH_OWNER is not None:
+                sandbox_scope.record_result(index, returncode)
             if returncode == 0 and report is not None and not report.is_file():
                 raise ContainmentError(f"{name}: successful group produced no requested JUnit report: {report}")
             # Only this group's pytest files are disposable after verified
@@ -725,12 +724,14 @@ def run_plugin(
 
 
 def main(argv: list[str] | None = None) -> int:
+    global OWNED_SCRATCH_OWNER
     ap = argparse.ArgumentParser(description="Run plugin pytest suites in managed venvs.")
     ap.add_argument("plugins", nargs="*", help="plugin names (default: --changed)")
     ap.add_argument("--all", action="store_true", help="every plugin with a suite")
     ap.add_argument("--changed", action="store_true", help="plugins changed vs --base")
     ap.add_argument("--base", default="origin/main", help="diff base for --changed")
     ap.add_argument("--reinstall", action="store_true", help="rebuild the venv(s)")
+    add_cli_argument(ap)
     ap.add_argument("-k", dest="kexpr", default=None, help="pytest -k filter")
     ap.add_argument(
         "--selection-file", type=Path, help="validated exact-node JSON selection; "
@@ -806,6 +807,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--allow-explicit-tiers", action="store_true",
                     help="allow T3/T4 tests that are otherwise skipped by default")
     args = ap.parse_args(argv)
+    OWNED_SCRATCH_OWNER = args.owned_scratch_owner
     if args.junit_dir is not None and (args.prepare_only or args.list_only):
         ap.error("--junit-dir requires test collection or execution")
     try:

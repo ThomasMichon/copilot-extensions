@@ -143,7 +143,7 @@ def ownership_snapshot(
     for row in valid:
         metadata = row.metadata
         assert isinstance(metadata, dict)
-        if metadata["phase"] == "bound":
+        if metadata["phase"] in {"bound", "retained"}:
             key = (row.kind, metadata["namespace"], identities[id(row)])
             subjects[key].append(row)
     for key, claims in subjects.items():

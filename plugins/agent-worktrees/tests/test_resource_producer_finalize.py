@@ -38,7 +38,7 @@ def _copy_final_owner(seed, root, monkeypatch):
     monkeypatch.setattr(cfg, "install_dir", lambda: root / ".agent-worktrees")
     _git("remote", "set-url", "origin", str(root / "origin.git"), cwd=root / "anchor")
     config = cfg.Config(
-        srcroot=str(root), machine=MACHINE, platform="linux",
+        srcroot=str(root), machine=MACHINE, platform=cfg.detect_platform(),
         repo_name=PROJECT, repos={PROJECT: cfg.RepoConfig(
             anchor=str(root / "anchor"), worktree_root=str(root),
             default_branch="base", remote="origin",
@@ -48,6 +48,7 @@ def _copy_final_owner(seed, root, monkeypatch):
     path = records / "owner.yaml"
     record = tracking.load_record(path)
     record.repo = config.repo_name
+    record.platform = config.platform
     tracking.save_record(record, path)
     monkeypatch.setattr(cfg, "load_project_config", lambda *a, **k: config)
     monkeypatch.setattr(cfg, "load_config", lambda *a, **k: config)
@@ -55,7 +56,7 @@ def _copy_final_owner(seed, root, monkeypatch):
 
 
 @pytest.fixture
-def final_owner(tmp_path, monkeypatch, _final_owner_seed):
+def final_owner(tmp_path, monkeypatch, _final_owner_seed, git_only_mux):
     return _copy_final_owner(_final_owner_seed, tmp_path, monkeypatch)
 
 
@@ -70,7 +71,7 @@ def _owner_snapshot(root):
 
 
 @pytest.mark.parametrize("attempt", range(2))
-def test_final_owner_copies_keep_git_and_owner_state_private(_final_owner_seed, tmp_path, attempt):
+def test_final_owner_copies_keep_git_and_owner_state_private(_final_owner_seed, tmp_path, attempt, git_only_mux):
     from agent_worktrees import claim_providers
 
     seed = _final_owner_seed
@@ -180,6 +181,41 @@ def test_confirmed_close_then_actual_finalize(final_owner, monkeypatch):
     assert finalize.validate_and_finalize("owner", config) is True
     current = tracking.load_record(path)
     assert current.status == "finalized" and current.resources[0].producer["phase"] == "closed"
+
+
+def test_retained_artifact_allows_actual_finalize_without_removing_bytes(final_owner, monkeypatch):
+    from agent_worktrees import claim_providers
+    from test_resource_producer_retention import retention
+
+    root, path, config = final_owner
+    owner_ref = tracking.format_claim_ref(config.machine, config.repo_name, "owner")
+    reserved = call(path, "reserve", {
+        "kind": "artifact", "namespace": "scratch", "lifetime": "artifact-owned",
+        "recovery": {"allocation": "fixture"},
+    }, ref=owner_ref)
+    assert reserved.get("ok"), reserved
+    permit = call(path, "begin", {"token": reserved["token"]}, ref=owner_ref)
+    assert permit.get("ok"), permit
+    allocated = root / "retained-diagnostics"
+    allocated.mkdir()
+    diagnostic = allocated / "failure.txt"
+    diagnostic.write_text("bounded useful evidence")
+    bound = call(path, "bind", {
+        "token": reserved["token"], "allocation_fence": permit["allocation_fence"],
+        "identity": {"allocation": str(allocated), "nonce": "fixture"},
+    }, ref=owner_ref)
+    assert bound.get("ok"), bound
+    assert finalize.validate_and_finalize("owner", config) is False
+    monkeypatch.setattr(claim_providers, "resolve_claim_status", lambda ref: retention(bound))
+    retained = call(path, "retain", {"token": reserved["token"]}, ref=owner_ref)
+    assert retained.get("ok"), retained
+    monkeypatch.setattr(finalize, "_warn_of_codespace_claims_for_worktree", lambda *a: None)
+    monkeypatch.setattr(finalize, "_warn_of_dev_slot_claims_for_worktree", lambda *a: None)
+    assert finalize.validate_and_finalize("owner", config) is True
+    record = tracking.load_record(path)
+    assert record.status == "finalized" and not record.resources[0].is_unsettled
+    assert record.resources[0].producer["phase"] == "retained"
+    assert diagnostic.read_text() == "bounded useful evidence"
 
 
 @pytest.mark.parametrize("layout", ["legacy", "legacy-exported", "managed"])
