@@ -76,7 +76,7 @@ line-length = 99
 headed = ["agent-copilot-driver-core"]
 dev = [
     "agent-copilot-driver-core",
-    "pytest>=9.1.1",
+    "pytest>=9.2.0",
     "pytest-asyncio>=1.4.0",
     # tomllib is stdlib on 3.11+; tomli backports it for 3.10 (this plugin's
     # requires-python floor). Only needed by
