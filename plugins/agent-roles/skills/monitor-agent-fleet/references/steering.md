@@ -71,9 +71,13 @@ never replay.
 - Answer the target's permission prompts, approve its scope change or merge.
   A routine parked question is answered only under the separate answer scope
   in [parked questions](pending-input.md).
-- Start, stop, restart or replace the target's session or venue.
+- Start, stop, restart or replace the target's session or venue. Recovering
+  a blocked agent's transport or session is the separate
+  [graduated repair](repair-escalation.md) mode with its own grant.
 - Edit the target's effort, agenda, claims, branch or checkpoint. Correcting
   an inactive owner's records is the separate
-  [dormant correction](dormant-correction.md) mode with its own grant.
+  [dormant correction](dormant-correction.md) mode with its own grant. Asking
+  a live agent to rework or backfill its own charter is a steer; see
+  [per-agent charters](agent-charters.md).
 - Steer a reviewer's verdict or an author's consent.
 - Treat a steer, acknowledgement or successful send as completion evidence.
