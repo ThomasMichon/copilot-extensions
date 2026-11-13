@@ -589,6 +589,10 @@ The persisted launch plan uses a minimal Windows process-variable allowlist
 with explicit private home, application-data and temporary directories. It
 never copies the rest of the caller environment; a focused serialization
 control plants synthetic inherited credentials and requires their absence.
+Cleanup receives a process handle only after that same handle's native birth,
+principal and liveness are verified. A mismatched candidate is closed without
+becoming a cleanup target; a native negative control requires the mismatched
+fixture process to remain alive until its own input reaches EOF.
 
 The physical receiver's exit code and Python finalization/EOF witness must
 match that ordinary baseline. A native client that abruptly settles its MCP

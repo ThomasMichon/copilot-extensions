@@ -15,6 +15,7 @@ import venv
 import pytest
 from agent_procutil import no_window_kwargs
 from agent_procutil._daemon_instance_identity import birth_identity
+from agent_procutil._interpreter import physical_executable
 
 from agent_mcp import owner_exec, owner_snapshot
 from agent_mcp.owner_bootstrap import ENVIRONMENT_KEYS
@@ -37,6 +38,32 @@ def _exit_code(native, handle):
     query.argtypes, query.restype = [c.c_void_p, c.POINTER(c.c_uint32)], c.c_int32
     native.require(query(handle, c.byref(value)))
     return value.value
+
+
+def _pin(native, pid, birth, rights):
+    handle = native.require(native.k.OpenProcess(rights, False, pid))
+    try:
+        identity = native.identity(handle, pid)
+        if "windows:" + identity.start_time != birth or identity.principal != native.current_sid():
+            raise ValueError("Native fixture identity mismatch")
+        native.alive(handle)
+    except BaseException:
+        native.close(handle)
+        raise
+    return handle
+
+
+async def _settle_client(native, client):
+    if client is None:
+        return
+    natural = await asyncio.to_thread(native.k.WaitForSingleObject, client, 15000) == 0
+    if not natural:
+        terminate = native.k.TerminateProcess
+        terminate.argtypes, terminate.restype = [c.c_void_p, c.c_uint32], c.c_int32
+        native.require(terminate(client, 91))
+        assert await asyncio.to_thread(native.k.WaitForSingleObject, client, 10000) == 0
+    assert natural, "Exact-owned cleanup succeeded only after forced native exit"
+    assert _exit_code(native, client) == 0
 
 
 def _environment(home):
@@ -185,6 +212,30 @@ def test_publisher_plan_does_not_persist_inherited_credentials(tmp_path, monkeyp
 
 
 @pytest.mark.asyncio
+async def test_mismatched_identity_is_closed_without_becoming_a_cleanup_target():
+    process = await asyncio.create_subprocess_exec(
+        physical_executable(sys._base_executable), "-I", "-S", "-c",
+        "import sys;print('ready',flush=True);sys.stdin.buffer.read()",
+        stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE, **no_window_kwargs(),
+    )
+    native, client = SectionNative(), None
+    try:
+        assert await asyncio.wait_for(process.stdout.readline(), 10) == b"ready\r\n"
+        with pytest.raises(ValueError, match="identity mismatch"):
+            client = _pin(native, process.pid, "windows:1", 0x101001)
+        assert client is None
+        await _settle_client(native, client)
+        assert process.returncode is None
+        assert birth_identity(process.pid).startswith("windows:")
+    finally:
+        process.stdin.close()
+        assert await asyncio.wait_for(process.wait(), 10) == 0
+        assert await asyncio.wait_for(process.stdout.read(), 5) == b""
+        assert await asyncio.wait_for(process.stderr.read(), 5) == b""
+
+
+@pytest.mark.asyncio
 async def test_offline_native_client_consumes_delayed_snapshot_after_publisher_exit(
     tmp_path, record_testsuite_property,
 ):
@@ -229,8 +280,7 @@ async def test_offline_native_client_consumes_delayed_snapshot_after_publisher_e
             line = await asyncio.wait_for(process.stdout.readline(), 30)
             assert line, (await asyncio.wait_for(stderr, 5)).decode(errors="replace")
             published = json.loads(line)
-            client = native.require(native.k.OpenProcess(0x101001, False, published["pid"]))
-            assert published["birth"] == birth_identity(published["pid"])
+            client = _pin(native, published["pid"], published["birth"], 0x101001)
             assert await asyncio.to_thread(native.k.WaitForSingleObject, producer, 10000) == 0
             assert not receipt_file.exists()
             with owner_snapshot.WindowsOrigin(published["binding"]) as owner:
@@ -252,8 +302,7 @@ async def test_offline_native_client_consumes_delayed_snapshot_after_publisher_e
                 await asyncio.sleep(.05)
             assert receipt_file.exists(), "Actual client never initialized the configured MCP"
             observed = json.loads(receipt_file.read_text(encoding="utf-8"))
-            server = native.require(native.k.OpenProcess(0x101000, False, observed["server_pid"]))
-            assert observed["server_birth"] == birth_identity(observed["server_pid"])
+            server = _pin(native, observed["server_pid"], observed["server_birth"], 0x101000)
             assert observed["initialized"] == 1
             record_testsuite_property(
                 "windows_" + mode + "_mcp_roundtrip_ms", (time.monotonic() - started) * 1000,
@@ -272,15 +321,7 @@ async def test_offline_native_client_consumes_delayed_snapshot_after_publisher_e
         finally:
             process.stdin.close()
             try:
-                if client is not None:
-                    natural = await asyncio.to_thread(native.k.WaitForSingleObject, client, 15000) == 0
-                    if not natural:
-                        terminate = native.k.TerminateProcess
-                        terminate.argtypes, terminate.restype = [c.c_void_p, c.c_uint32], c.c_int32
-                        native.require(terminate(client, 91))
-                        assert await asyncio.to_thread(native.k.WaitForSingleObject, client, 10000) == 0
-                    assert natural, "Exact-owned cleanup succeeded only after forced native exit"
-                    assert _exit_code(native, client) == 0
+                await _settle_client(native, client)
                 assert await asyncio.wait_for(process.wait(), 10) == 0
                 remaining = await asyncio.wait_for(process.stdout.read(), 5)
                 for line in remaining.splitlines():
