@@ -17,6 +17,36 @@ from artifact_source_build import validate_static_build
 from standalone_python_artifacts import artifact_label, injected_resources, project_key
 
 
+@pytest.fixture
+def preparation_permissions(monkeypatch):
+    import local_install_source as local
+
+    calls = []
+
+    def checked(path, **options):
+        calls.append(("check", path, options))
+
+    def ancestors(path):
+        calls.append(("ancestors", path, {}))
+
+    def bytecode(path, **options):
+        calls.append(("bytecode", path, options))
+
+    def mkdir(path):
+        Path(path).mkdir(mode=0o700)
+
+    resources = {
+        "python_cache_permissions": SimpleNamespace(
+            check=checked, check_ancestors=ancestors, check_bytecode=bytecode, mkdir=mkdir,
+        ),
+        "_daemon_instance_owner": SimpleNamespace(
+            mkdir_private=mkdir, open_private=lambda path, flags: os.open(path, flags, 0o600),
+        ),
+    }
+    monkeypatch.setattr(local.preparation_process, "procutil_module", resources.__getitem__)
+    return calls
+
+
 @pytest.mark.parametrize("variant", [None, "cp313d", "cp313t"])
 def test_native_interpreter_request_preserves_marker_environment_and_refuses_variants(variant):
     from runtime_application_project import target_python_request
@@ -38,7 +68,7 @@ def test_native_interpreter_request_preserves_marker_environment_and_refuses_var
 
 @pytest.mark.parametrize("phase", ["complete", "profile-failed", "expired", "earlier-changed"])
 def test_complete_application_portfolio_builds_once_and_publishes_only_after_readback(
-    tmp_path, monkeypatch, phase,
+    tmp_path, monkeypatch, phase, preparation_permissions,
 ):
     import local_install_profile as profiles
     import local_install_source as local
@@ -178,6 +208,11 @@ def test_complete_application_portfolio_builds_once_and_publishes_only_after_rea
             assert calls[-1] == "readback:worktree-manager"
         else:
             assert not any(call.startswith("readback:") for call in calls)
+    assert preparation_permissions[:3] == [
+        ("check", output.parent, {"ancestor": True}),
+        ("ancestors", output.parent, {}),
+        ("check", Path(local.native_retained_path(output)), {"private": True}),
+    ]
 
 
 @pytest.mark.parametrize("absolute_deadline", [False, True])
@@ -314,7 +349,9 @@ def test_shared_artifact_owner_preserves_selected_uv_and_deadline(
 
 
 @pytest.mark.parametrize("phase", ["reused", "miss", "worker-failed"])
-def test_complete_output_reuse_does_not_replay_worker_failures(tmp_path, monkeypatch, phase):
+def test_complete_output_reuse_does_not_replay_worker_failures(
+    tmp_path, monkeypatch, phase, preparation_permissions,
+):
     import local_install_source as local
     import build_toolchain_lock as locks
 
@@ -366,6 +403,8 @@ def test_complete_output_reuse_does_not_replay_worker_failures(tmp_path, monkeyp
             None if phase == "miss" else {"agent-worktrees": "retained"}
         )
     assert calls == [previous]
+    assert any(operation == "bytecode" and path == previous
+               for operation, path, _options in preparation_permissions)
 
 
 def test_missing_retained_toolchain_cannot_start_construction(tmp_path, monkeypatch):
