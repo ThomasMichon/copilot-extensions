@@ -342,6 +342,15 @@ the non-public approval conversation.
 
 ## Plan
 
+The [comment receiving and source-qualification study](journal/2026/11.13-comment-receiving-and-source-qualification.md)
+retains fifteen whole histories and #11175's unavailable original revision.
+The existing reviewed comment-identity contract directly receives #11128's
+whole unfinished union; its redundant tracking retirement is verified, not
+technical completion. Seven source-file provenance refusals, explicit
+original acceptance tokens and finite source defects remain. The complete
+876-open queue is 147 above target; no native, installed or custody
+completion is inferred.
+
 The [adoption-source and original-history study](journal/2026/11.13-adoption-source-and-original-history.md)
 retains seventeen complete histories plus #11065's exact unavailable revision.
 Five finite source completions are verified with exact public readbacks;
@@ -3394,6 +3403,15 @@ sources, transferring owners or turning partial/planning gains into completion.
   normal publication flow.
 
 ## Validation Plan
+
+The [comment-receiving audit](journal/2026/11.13-comment-receiving-and-source-qualification.md)
+verifies whole direct receiving readback, unchanged originals, fresh complete
+metadata/roster and exact public acknowledgment plus CLOSED/NOT_PLANNED
+state for #11128. Parent blob verification corrects three qualified-only,
+unacquired test-file claims without reading or executing them.
+Stable null history and actual whole-file refusals remain genuine boundaries,
+not universal barriers to independent source. Existing owners, literal
+alternatives and every unchecked technical or resource obligation remain.
 
 The [nine-completion audit](journal/2026/11.13-finite-leaf-and-guidance-completions.md)
 separates actual historical review acceptance, owner-recorded execution,
