@@ -145,6 +145,12 @@ def reconsider_unbound_tasks(
             # writes. The receiver rechecks direct rows and holds atomically.
             report_admission = source.prepare()
             with local_policy() as (machine, env, disabled):
+                if not can_continue():
+                    queue.finish_relevance_evaluation(
+                        entry, policy, verdict=None, error="coordinator no longer active",
+                        preserve_report=True,
+                    )
+                    break
                 accepted = queue.reconcile_task_relevance(
                     entry["task_id"], **{
                         key: value for key, value in report.items()

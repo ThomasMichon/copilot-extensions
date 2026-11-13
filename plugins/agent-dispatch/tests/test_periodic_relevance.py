@@ -392,3 +392,76 @@ def test_registration_rejects_nonfinite_script_timeout(q, periodic):
             },
         }, reg_id="invalid", machine="host-a")
     assert q.get_registration("invalid") is None
+
+
+def test_authority_lost_during_report_discovery_retains_original_request(q, periodic, monkeypatch):
+    t = task(q)
+    active = [True]
+    original = periodic[0].prepare
+    discoveries = [0]
+
+    def prepare():
+        discoveries[0] += 1
+        admission = original()
+        if discoveries[0] == 2:
+            active[0] = False
+        return admission
+
+    monkeypatch.setattr(periodic[0], "prepare", prepare)
+    check = runner()
+    assert not tick(q, periodic, runner=check, can_continue=lambda: active[0])["accepted"]
+    row = q.relevance_evaluations(t.id)[0]
+    saved = json.loads(row["report_json"])
+    assert q.get(t.id).status == Status.QUEUED
+    assert q.relevance_receipt(t.id, saved["request_id"]) is None
+    active[0] = True
+    periodic[3][0] = row["next_due"]
+    accepted = tick(q, periodic, runner=check)["accepted"][0]
+    assert accepted["request_id"] == saved["request_id"]
+    assert check.call_count == 1
+
+
+def test_needed_task_with_short_interval_cannot_starve_next_candidate(q, periodic, venue):
+    declaration(venue[1], "review-evaluator", "evaluator", {
+        **periodic[1], "periodic_relevance": {
+            **periodic[1]["periodic_relevance"], "interval_seconds": 1,
+        },
+    })
+    tasks = [task(q), task(q)]
+    seen = set()
+    check = runner("needed", callback=lambda event: seen.add(event["task"]["id"]))
+    for _ in range(5):
+        tick(q, periodic, runner=check)
+        periodic[3][0] += 60
+    assert seen == {t.id for t in tasks}
+    assert all(q.get(t.id).status == Status.QUEUED for t in tasks)
+
+
+def test_held_retry_page_rotates_to_bound_owner_closeout(q, periodic, venue, monkeypatch):
+    from types import SimpleNamespace
+    from uuid import UUID
+    from agent_dispatch.overrides import set_override
+
+    declaration(venue[1], "other-source", "emitter", {
+        **SPEC, "id": "other-source", "evaluator_ref": "review-loop",
+    })
+    with monkeypatch.context() as scoped:
+        identifiers = iter(range(1, 4))
+        scoped.setattr("agent_dispatch.queue_storage.uuid", SimpleNamespace(
+            uuid4=lambda: UUID(int=next(identifiers)),
+        ))
+        held = [task(q), task(q)]
+        bound = task(q, origin_ref="other-source")
+    for _ in range(4):
+        tick(q, periodic, runner=runner("unknown"))
+    assert all(q.relevance_evaluations(t.id)[0]["attempts"] == 1 for t in [*held, bound])
+    q.claim_one("host/worker", task_id=bound.id)
+    set_override(venue[2], "declared:example:review-source", reason="maintenance")
+    periodic[3][0] = 105
+    results = [tick(q, periodic, runner=runner()) for _ in range(3)]
+    assert any(
+        acceptance["task_id"] == bound.id and acceptance["decision"] == "closeout_pending"
+        for result in results for acceptance in result["accepted"]
+    )
+    assert q.get(bound.id).status == Status.CLAIMED
+    assert all(q.relevance_evaluations(t.id)[0]["attempts"] == 1 for t in held)

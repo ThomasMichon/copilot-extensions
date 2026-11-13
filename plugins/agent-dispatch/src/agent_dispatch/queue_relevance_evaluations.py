@@ -29,8 +29,18 @@ class QueueRelevanceEvaluationsMixin:
         )
         conn.execute(
             "CREATE TABLE IF NOT EXISTS task_relevance_evaluation_cursors ("
-            "registration_id TEXT PRIMARY KEY, task_id TEXT NOT NULL)"
+            "registration_id TEXT PRIMARY KEY, task_id TEXT NOT NULL,"
+            " retry_task_id TEXT NOT NULL DEFAULT '', retry_generation INTEGER NOT NULL DEFAULT -1)"
         )
+        columns = {row["name"] for row in conn.execute(
+            "PRAGMA table_info(task_relevance_evaluation_cursors)",
+        )}
+        for name, declaration in (
+            ("retry_task_id", "TEXT NOT NULL DEFAULT ''"),
+            ("retry_generation", "INTEGER NOT NULL DEFAULT -1"),
+        ):
+            if name not in columns:
+                conn.execute(f"ALTER TABLE task_relevance_evaluation_cursors ADD COLUMN {name} {declaration}")
         conn.execute(
             "CREATE TABLE IF NOT EXISTS task_relevance_evaluation_owner ("
             "singleton INTEGER PRIMARY KEY CHECK(singleton=1), registration_id TEXT NOT NULL)"
@@ -38,6 +48,10 @@ class QueueRelevanceEvaluationsMixin:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_relevance_evaluations_due"
             " ON task_relevance_evaluations(registration_id, status, next_due)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_relevance_evaluations_retry"
+            " ON task_relevance_evaluations(registration_id,status,task_id,generation)"
         )
 
     def rotate_relevance_evaluators(self, registration_ids: list[str]) -> list[str]:
@@ -81,15 +95,28 @@ class QueueRelevanceEvaluationsMixin:
                 raise TaskError("periodic relevance registration changed")
             if _held(reg, disabled_ids, effective.predecessor_override_ids):
                 return None
+            cursor = conn.execute(
+                "SELECT * FROM task_relevance_evaluation_cursors WHERE registration_id=?",
+                (selector.registration_id,),
+            ).fetchone()
+            retry_after = (
+                (cursor["retry_task_id"], cursor["retry_generation"]) if cursor else ("", -1)
+            )
             # Continue an evaluation admitted while unbound, even when a claim
             # won during its check. Refresh judgment, never replay a stale goal.
             retries = conn.execute(
                 "SELECT * FROM task_relevance_evaluations WHERE registration_id=?"
                 " AND status='pending' AND (report_json IS NOT NULL OR attempts>0) AND next_due<=?"
-                " AND (token IS NULL OR expires_at<=?) ORDER BY next_due, task_id LIMIT ?",
-                (selector.registration_id, ts, ts, policy.batch_size),
+                " AND (token IS NULL OR expires_at<=?) AND (task_id,generation)>(?,?)"
+                " ORDER BY task_id,generation LIMIT ?",
+                (selector.registration_id, ts, ts, *retry_after, policy.batch_size),
             ).fetchall()
+            if not retries:
+                self._advance_relevance_retry_cursor(conn, selector.registration_id, "", -1)
             for row in retries:
+                self._advance_relevance_retry_cursor(
+                    conn, selector.registration_id, row["task_id"], row["generation"],
+                )
                 task = self._fetch(conn, row["task_id"])
                 if task is not None and any(
                     item["kind"] == "emitter"
@@ -146,10 +173,6 @@ class QueueRelevanceEvaluationsMixin:
                 " AND token IS NOT NULL AND expires_at<=?",
                 (selector.registration_id, policy.max_attempts, ts),
             )
-            cursor = conn.execute(
-                "SELECT task_id FROM task_relevance_evaluation_cursors WHERE registration_id=?",
-                (selector.registration_id,),
-            ).fetchone()
             after = cursor["task_id"] if cursor else ""
             rows = conn.execute(
                 "SELECT t.id FROM tasks t LEFT JOIN task_relevance_evaluations e"
@@ -166,7 +189,7 @@ class QueueRelevanceEvaluationsMixin:
                  reg["spec"].get("repo"), ts, ts, policy.batch_size),
             ).fetchall()
             conn.execute(
-                "INSERT INTO task_relevance_evaluation_cursors VALUES (?, ?)"
+                "INSERT INTO task_relevance_evaluation_cursors (registration_id,task_id) VALUES (?, ?)"
                 " ON CONFLICT(registration_id) DO UPDATE SET task_id=excluded.task_id",
                 (selector.registration_id, rows[-1]["id"] if rows else ""),
             )
@@ -193,8 +216,24 @@ class QueueRelevanceEvaluationsMixin:
                     entry["snapshot_json"] = self._relevance_evaluation_snapshot(
                         conn, task, reg, effective.revision,
                     )
+                conn.execute(
+                    "UPDATE task_relevance_evaluation_cursors SET task_id=? WHERE registration_id=?",
+                    (task.id, selector.registration_id),
+                )
                 return self._lease_relevance_evaluation(conn, entry, ts, lease_seconds)
         return None
+
+    @staticmethod
+    def _advance_relevance_retry_cursor(
+        conn: sqlite3.Connection, registration_id: str, task_id: str, generation: int,
+    ) -> None:
+        conn.execute(
+            "INSERT INTO task_relevance_evaluation_cursors"
+            " (registration_id,task_id,retry_task_id,retry_generation) VALUES (?,'',?,?)"
+            " ON CONFLICT(registration_id) DO UPDATE SET retry_task_id=excluded.retry_task_id,"
+            " retry_generation=excluded.retry_generation",
+            (registration_id, task_id, generation),
+        )
 
     @staticmethod
     def _relevance_evaluation_snapshot(
