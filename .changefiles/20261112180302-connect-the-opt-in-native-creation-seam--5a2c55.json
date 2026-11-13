@@ -1,0 +1,9 @@
+{
+  "comment": "Connect the opt-in native creation seam to private owner publication and an installation-independent Windows snapshot",
+  "changes": [
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    }
+  ]
+}
