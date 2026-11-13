@@ -82,6 +82,10 @@ def apply_follow_up_resolve(args: dict) -> dict:
 
     with tracking._RecordLock(yaml_path, require_sidecar=True):
         record = tracking.load_record(yaml_path)
+        if follow_up_id == "legacy":
+            return _settle_legacy_follow_up(
+                record, yaml_path, result_ref=result_ref
+            )
         item = tracking.resolve_follow_up(
             record, follow_up_id, result_ref=result_ref, save=False
         )
@@ -107,6 +111,8 @@ def apply_follow_up_dismiss(args: dict) -> dict:
 
     with tracking._RecordLock(yaml_path, require_sidecar=True):
         record = tracking.load_record(yaml_path)
+        if follow_up_id == "legacy":
+            return _settle_legacy_follow_up(record, yaml_path, reason=reason)
         item = tracking.dismiss_follow_up(record, follow_up_id, reason=reason, save=False)
         if item is None:
             return {"error": "not_found"}
@@ -121,6 +127,59 @@ def apply_follow_up_dismiss(args: dict) -> dict:
     return {"ok": True, "follow_up": _follow_up_to_dict(item)}
 
 
+def _settle_legacy_follow_up(
+    record: tracking.WorktreeRecord,
+    yaml_path: Path,
+    *,
+    result_ref: str | None = None,
+    reason: str | None = None,
+) -> dict:
+    """Settle only the boolean obligation, under the caller's record lock."""
+    dismissed = reason is not None
+    evidence = reason if dismissed else result_ref
+    if not isinstance(evidence, str) or not evidence.strip():
+        return {
+            "error": "legacy_refused",
+            "message": "legacy follow-up settlement requires a result reference or dismissal reason",
+        }
+    if record.active_effort is not None or record.status in {"finalizing", "orphaned"}:
+        return {
+            "error": "legacy_refused",
+            "message": "legacy follow-up is effort-bound or its owner is frozen; "
+            "reconcile that owner before settling it",
+        }
+    item = next((fu for fu in record.follow_ups if fu.id == "legacy"), None)
+    if not record.follow_up:
+        if item is not None and not item.is_effective_open:
+            return {"ok": True, "follow_up": _follow_up_to_dict(item)}
+        return {"error": "not_found"}
+    now = tracking._now_iso()
+    if item is None:
+        item = tracking.FollowUpRecord(
+            id="legacy",
+            summary="Legacy boolean follow-up",
+            state="open",
+            revision=0,
+            created_at=now,
+            updated_at=now,
+        )
+        record.follow_ups.append(item)
+    item.state = "dismissed" if dismissed else "resolved"
+    item.result_ref = None if dismissed else evidence.strip()
+    item.reason = evidence.strip() if dismissed else ""
+    item.updated_at = now
+    item.revision += 1
+    record.follow_up = False
+    tracking.save_record(record, yaml_path)
+    activity.log_event(
+        "follow_up_dismissed" if dismissed else "follow_up_resolved",
+        worktree_id=record.worktree_id,
+        follow_up_id=item.id,
+        **({"reason": item.reason} if dismissed else {"result_ref": item.result_ref}),
+    )
+    return {"ok": True, "follow_up": _follow_up_to_dict(item)}
+
+
 tracking_write.register_verb("follow_up_add", apply_follow_up_add)
-tracking_write.register_verb("follow_up_resolve", apply_follow_up_resolve)
-tracking_write.register_verb("follow_up_dismiss", apply_follow_up_dismiss)
+tracking_write.register_verb("follow_up_resolve", apply_follow_up_resolve, version=2)
+tracking_write.register_verb("follow_up_dismiss", apply_follow_up_dismiss, version=2)
