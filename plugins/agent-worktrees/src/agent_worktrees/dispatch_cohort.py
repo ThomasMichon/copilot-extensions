@@ -47,6 +47,12 @@ class DispatchCohort:
         cls, value: object, *, task_id: str, reservation_key: str,
     ) -> DispatchCohort:
         """Validate original references against the creating task and reservation."""
+        if any(
+            not isinstance(item, str) or not item or item != item.strip()
+            or len(item) > TEXT_MAX or "\0" in item
+            for item in (task_id, reservation_key)
+        ):
+            raise ValueError("dispatch cohort requires canonical task and reservation IDs")
         if (
             not isinstance(value, dict) or set(value) != {"schema", "version", "emitter", "pool"}
             or value["schema"] != SCHEMA or type(value["version"]) is not int

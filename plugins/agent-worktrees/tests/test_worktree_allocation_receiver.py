@@ -123,6 +123,23 @@ def test_invalid_or_mismatched_cohort_is_refused_before_allocation(receiver, dam
     assert not (records.parent / "workspace-creation.sqlite3").exists()
 
 
+@pytest.mark.parametrize("field,reference", [("task_id", "emitter"), ("reservation_key", "pool")])
+def test_padded_attempt_ids_with_matching_cohort_refuse_before_receiving_effects(
+    receiver, field, reference,
+):
+    attempt = cohort_attempt()
+    attempt[field] = " " + attempt[field] + " "
+    attempt["cohort"][reference][field] = attempt[field]
+    if field == "task_id":
+        attempt["cohort"]["pool"][field] = attempt[field]
+    receiver = with_attempt(receiver, attempt)
+    config, _, records = receiver
+    with pytest.raises(ValueError, match="canonical task and reservation"):
+        receive("create", request(receiver), config)
+    assert not list(records.glob("*.yaml"))
+    assert not (records.parent / "workspace-creation.sqlite3").exists()
+
+
 def test_legacy_or_unattributed_cohort_is_never_backfilled(receiver):
     config, _, records = receiver
     created = receive("create", request(receiver), config)

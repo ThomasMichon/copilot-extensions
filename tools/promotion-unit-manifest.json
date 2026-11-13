@@ -5990,6 +5990,6 @@
         "tools/prepare_manager_application.py": "d50f8d8d6c9cb7bc87586d60cc876280f16fabf6cf0dca7243e06ee214ca6aae",
         "tools/coverage_guided_selection/auditability.py": "7732bc5a9b14a2ab6083f9e73f5d7698888461b387515cb1a17a08174a066ed5",
         "tools/plugin_test_command_safety.py": "e9c38a3d45053f7cdda54eafd99fe696119e8f59f5b8abb71258d74751eb93e0",
-        "plugins/agent-worktrees/src/agent_worktrees/dispatch_cohort.py": "084533aa9fe552932d7a508451e04c276cc533081ad1c2bfe782cb212395463a"
+        "plugins/agent-worktrees/src/agent_worktrees/dispatch_cohort.py": "9c05449f8001b557520c4d2cd81a7c71b2f4e02a30a64038f958279e5b23b4ed"
     }
 }
