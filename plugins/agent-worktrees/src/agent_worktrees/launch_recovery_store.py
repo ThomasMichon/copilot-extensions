@@ -24,6 +24,7 @@ _VERB = "launch_recovery_compare_and_swap"
 _SCHEMA = "worktree-launch-recovery-store"
 _MAX_RECORDS = 64
 _MAX_BYTES = 2 * 1024 * 1024
+_MISSING = object()
 
 
 def _safe_path(path: Path) -> None:
@@ -76,7 +77,7 @@ def _unique(pairs):
     return value
 
 
-def _read(path: Path, nonce: str, owner: str, worktree_id: str) -> list[RecoveryRecord]:
+def _read_document(path: Path) -> object:
     _safe_path(path)
     try:
         with path.open("rb") as stream:
@@ -84,10 +85,16 @@ def _read(path: Path, nonce: str, owner: str, worktree_id: str) -> list[Recovery
                 raise ValueError("Recovery state must be a regular file")
             raw = stream.read(_MAX_BYTES + 1)
     except FileNotFoundError:
-        return []
+        return _MISSING
     if len(raw) > _MAX_BYTES:
         raise ValueError("Recovery store exceeds its budget")
-    value = json.loads(raw, object_pairs_hook=_unique)
+    return json.loads(raw, object_pairs_hook=_unique)
+
+
+def _read(path: Path, nonce: str, owner: str, worktree_id: str) -> list[RecoveryRecord]:
+    value = _read_document(path)
+    if value is _MISSING:
+        return []
     if (
         type(value) is not dict
         or set(value) != {"schema", "version", "creation_nonce", "records"}
@@ -119,6 +126,10 @@ def _write(path: Path, nonce: str, records: list[RecoveryRecord]) -> None:
         "schema": _SCHEMA, "version": 1, "creation_nonce": nonce,
         "records": [encode_recovery_record(record).decode("utf-8") for record in records],
     }, ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode("utf-8")
+    _publish(path, raw)
+
+
+def _publish(path: Path, raw: bytes) -> None:
     if len(raw) > _MAX_BYTES:
         raise ValueError("Recovery store exceeds its budget")
     _safe_path(path)

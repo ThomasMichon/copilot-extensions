@@ -38,6 +38,15 @@ waiting for a complete installer redesign.
 
 ## Coordination
 
+The [installation convergence map](../source-managed-runtime-installs/installation-convergence.md)
+connects this effort's remaining Phase3 sequencing to the common incoming
+installation path. Prepare the complete required set before activation;
+do not treat sequential combined build-and-start installers as staging.
+Fresh and update construction are identical, with incumbent compatibility and
+state transfer confined to activation. Existing command/profile credit,
+coordinator custody and open validation remain intact; no second updater or
+atomic selector is implied.
+
 The finite #3491 ordinary POSIX new-slot serving family continues through the existing
 #6820 sequencing coordinator and Bridge lifecycle/adopter/native/deployment,
 #6476/shared-constructor/installer-engine and incumbent source/maintenance/driver

@@ -46,6 +46,14 @@ These are coordination dependencies, not new assignments or ownership transfers.
 
 ## Coordination
 
+The [installation convergence map](../source-managed-runtime-installs/installation-convergence.md)
+uses this effort's affected-installation cases to qualify the same incoming
+path as a fresh install, not a separate legacy reconstruction algorithm.
+Complete staging precedes live compatibility checks, state transfer and
+activation. Preserve this effort's existing recovery/adopter/native owners,
+holds and all open acceptance; no old footprint is declared recovered by
+documentation or a completed package environment.
+
 - **Topology:** serial bounded source units, with normal independent PRs where
   their edit and acceptance scopes do not overlap.
 - **Host:** Workstream driver owns this effort, its PRs and completion gate.

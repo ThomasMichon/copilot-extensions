@@ -17,6 +17,12 @@ classification, user state and session keepers, and protect the then-current
 generation during central-only cleanup. Record remaining adoption work without
 rewriting historical journal evidence or treating a source merge as rollout.
 
+For the connected fresh-install/update delivery sequence, use the existing
+[Source-Managed Runtime Installs convergence map](active/source-managed-runtime-installs/installation-convergence.md).
+It links artifact/profile, Manager/onboarding, staging/sequencing, lifecycle,
+observability and upgrade-acceptance owners without merging their custody or
+declaring their remaining gates complete.
+
 | Effort | Status | Coordination |
 |--------|--------|--------------|
 | [Compatible Agent Messaging](active/compatible-agent-messaging/README.md) | Draft; compatibility-first ordinary send contract before implementation | #12487; existing Bridge/Driver, receipt and discovery owners retained; no implicit resume or rollout |
