@@ -53,6 +53,13 @@ requirement. The exact decision and its limits are recorded in the
 [installed-lifecycle scope approval](installed-manager-lifecycle.md#november-12-readiness-compatibility-approval).
 This adds no rollout, shared-repair or Main-activation authority.
 
+The subsequent census-budget decision selects `allow-query-five-seconds`:
+change only the process-census per-query limit from one to five seconds,
+add focused controls and require new native proof. Session creation, overall
+job/stage deadlines, cadence, caps and fatal-error policy stay unchanged.
+The [scope approval](installed-manager-lifecycle.md#november-12-census-query-budget-approval)
+preserves the exact prompt and response; it grants no rollout or failure waiver.
+
 ## Guiding Intent
 
 The former Guiding Intent is retained verbatim in Goal above. The

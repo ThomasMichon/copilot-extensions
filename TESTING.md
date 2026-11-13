@@ -322,7 +322,7 @@ default after a timeout.
 
 For a narrow Manager census diagnosis, select
 `submit --tools --test-file tools/test_manager_census_native.py --allow-explicit-tiers`.
-The four T3 cases run the same one-second local DCOM census with six seconds
+The four T3 cases run the same local DCOM census with six seconds
 of quiet, single-child churn or eight-child CPU/churn bursts using base Python
 or a private no-pip Windows venv (the `venv-burst` case). They retain sanitized
 failure phase/category/numeric HRESULT and aggregate scan/query-pipeline timing
@@ -10251,10 +10251,11 @@ messages are omitted; diagnostic codes do not change failure classification
 or acceptance. No extra provider query is issued to obtain them.
 The census requests only its four consumed process properties. Scan-error
 samples also retain elapsed milliseconds and the record count at failure;
-query timeout, polling cadence and failure policy remain unchanged.
+polling cadence and failure policy remain unchanged.
 After the observation window arms, one owned local DCOM CIM session is reused
-for the census and closed in `finally`. Creation and queries retain their
-one-second limits. A scan or session-close failure remains fatal; an unarmed
+for the census and closed in `finally`. Creation retains its one-second limit;
+each query has the explicitly approved five-second limit. The outer deadline,
+cadence and record/failure caps are unchanged. A scan or session-close failure remains fatal; an unarmed
 window creates no session. No service or remote endpoint is provisioned.
 The assembled Manager update retains a finite stderr allowance of 4 MiB per
 declared component plus Manager, rather than applying one component's 4 MiB

@@ -99,6 +99,25 @@ probe replay, operator installation, shared repair, baseline admission or
 Main activation. Ordinary commands and separately authorized installer actions
 remain available. The parent's older-baseline upgrade proof remains open.
 
+### November 12 census query budget approval
+
+The decision prompt was:
+
+> All three Windows cases failed because the strict process census recorded WMI timeout status 0x40004. The fixture stages and settlement passed, but those scan errors still block acceptance. Changing the existing one-second query limit needs a specific decision: may I raise only the per-query limit to five seconds, add focused controls, and seek new native proof? Session creation, overall job/stage deadlines, cadence, caps and fatal-error policy would stay unchanged. This would not authorize rollout or waive the failed run.
+
+The selected option was:
+
+> Allow a five-second query limit; require new tests and native proof
+
+The operator's exact response was `allow-query-five-seconds`.
+
+This authorizes only the query-limit source change and its focused controls
+and new native qualification through the existing disposable Windows owner.
+The session-creation limit remains one second. Existing cadence, record/failure
+caps, outer deadline, job/stage limits and fatal scan/session-close policy
+remain unchanged. Run 43336441832 remains failed; no prior result is relabeled.
+This adds no rollout, shared-repair, baseline-admission or Main authority.
+
 ## Plan
 
 The following implementation decomposition is **agent-recommended**.
@@ -2988,3 +3007,56 @@ current capture owner independently recomputes the complete execution closure:
 all 2,238 entries equal the original capture, with no changed, added or removed
 input. Both contract validation and all 701 canonical unit bindings pass.
 No new capture or native success is claimed from this equivalence check.
+
+### Exact-head Windows attempt: fatal WMI timeout status retained
+
+Required CI 43335332650 succeeds at
+`4a634c7840a723103173911ffdeac702c5e34fc0`. The existing disposable Windows
+owner then executes run 43336441832, attempt 1, at that exact source. All three
+selected jobs fail: normal 131593706491, repair 131593706463 and fresh
+131593706555. This is failed qualification, not permission to merge or publish.
+
+The canonical runner records prepare, exercise, assertions and settlement
+returning zero in every case. Settlement reports no errors or remaining tasks.
+Fresh records all five authentic Create/Open/detach/normal-exit/Resume outcomes
+as true. Normal and repair retain their separate replacement witnesses; they
+are not relabeled as fresh Manager lifecycle evidence.
+
+Each process trace nevertheless records two fatal query-pipeline CIM failures.
+The newly captured structured `error_Code` is 262148 (`0x40004`) in all six
+failures, with `CIMStatusCode` 1 and `error_Category` 0. Microsoft documents
+`0x40004` as `WBEM_S_TIMEDOUT` in the
+[WBEMSTATUS enumeration](https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-wmi/a2899649-a5a3-4b13-9ffa-d8394dcdac63).
+The generic exception HRESULT remains -2146233088, native/status codes remain
+1, and no embedded or inner HRESULT is present. This identifies a timeout
+status that the earlier diagnostics could not expose; it does not establish
+why the provider timed out or isolate provider time from pipeline consumption.
+
+Normal completes 4,820 scans with 4,818 successes; repair 4,364 with 4,362;
+fresh 2,339 with 2,337. All traces observe the armed window, stop marker and
+successful CIM-session close. Each reaches the existing 512-record truncation
+bound. None of those facts cancels a scan failure or establishes a complete
+untruncated process census.
+
+Artifacts 13999510505 (normal), 13997633845 (repair) and 13997713593 (fresh)
+retain the canonical runner, setup, result, settlement and process traces.
+The one-second DCOM/query bounds, 100 ms cadence, failure/record caps, outer
+deadline and fatal scan/close policy remain unchanged. No unchanged retry,
+additional profile matrix, query relaxation, shared-host repair or rollout is
+performed. Both review threads, older-baseline upgrade, frozen-candidate
+enforcement and separate Main adoption remain open.
+
+The subsequent `allow-query-five-seconds` decision above explicitly authorizes
+only the per-query budget change. The existing PowerShell consumer controls
+first fail with the prior one-second query, then all 21 process-trace controls
+pass in 35.22 seconds with the approved five-second query. The controls retain
+one-second session creation, fatal scan/session-close behavior, birth identity,
+private argument filtering and the original record cap. Their two-call stop
+marker is now written before checking query arguments so an argument regression
+does not rely on the subprocess timeout to stop the fixture.
+
+The diagnostic profile roster is unchanged and is not rerun as another
+speculative matrix. No local whole-suite execution occurs. The next acceptance
+attempt must use a published exact-source revision, required green CI and the
+same existing disposable Windows owner. Unit/control success is not a native
+pass, and the previous timeout failures remain unwaived.

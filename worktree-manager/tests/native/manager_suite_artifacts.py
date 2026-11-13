@@ -117,7 +117,7 @@ def _runtime_process_trace_script(home: Path, ready: Path, stop: Path, report: P
         "$queryStarted=[Diagnostics.Stopwatch]::StartNew();"
         "Get-CimInstance Win32_Process -CimSession $cimSession -Filter \"Name LIKE 'python%.exe'\" "
         "-Property ProcessId,ParentProcessId,CreationDate,CommandLine "
-        "-OperationTimeoutSec 1 | ForEach-Object {"
+        "-OperationTimeoutSec 5 | ForEach-Object {"
         "$process=$_;$line=[string]$process.CommandLine;"
         "$start=$line.IndexOf($homePrefix,[StringComparison]::OrdinalIgnoreCase);"
         "if($start -lt 0){return};"
