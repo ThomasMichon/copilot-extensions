@@ -571,6 +571,9 @@ detach children from their caller or change credential stdin/output handling.
   credential and extension handlers retain custody. Legacy owner-gated exports
   refuse busy custody and atomically capture complete, unexpired password/clock
   pairs; unknown clocks are not exported.
+  Housekeeping uses one owned expiry worker, independent of the credential
+  request executor, so expiry checks and their cancellation do not queue behind
+  credential requests before lifecycle ticks.
 - Credential reads fail fast by default when locked: they return an actionable error instead of hanging on a hidden prompt. Use `agent-vault unlock`, `agent-vault unlock --terminal`, or `agent-vault get --prompt ...` when you want an interactive prompt.
 - Unlock-source extensions run before prompts, so a configured provider can satisfy locked reads without UI.
 - The CLI cold-starts the daemon when needed. Windows scheduling is opt-in via the native [`windows_scheduled_task` policy](docs/configuration.md#windows-scheduling-is-separate-from-activation); clean installs leave tasks absent and existing registrations are preserved by default. Linux/WSL installs retain the systemd user unit named `agent-vault.service` when systemd is available.

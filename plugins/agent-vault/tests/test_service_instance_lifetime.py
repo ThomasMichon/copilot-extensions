@@ -1,9 +1,13 @@
 """One actual resident admission spans setup, listeners and shutdown."""
 
+import asyncio
 import json
 import os
 import subprocess
 import sys
+import threading
+from concurrent.futures import ThreadPoolExecutor
+from types import SimpleNamespace
 
 import pytest
 
@@ -194,3 +198,59 @@ def test_actual_main_has_one_resident_and_no_finished_setup_record(tmp_path, mod
     assert result.returncode == 0, result.stdout + result.stderr
     summary = json.loads(result.stdout.splitlines()[-1])
     assert summary["records"] == (1 if mode in {"foreground", "windows"} else 0)
+
+
+@pytest.mark.parametrize("phase", ["tick", "cancel"])
+def test_expiry_progress_and_cancellation_ignore_saturated_request_executor(
+    monkeypatch: pytest.MonkeyPatch, phase: str,
+) -> None:
+    from agent_vault import service
+
+    checked = threading.Event()
+
+    async def scenario() -> None:
+        loop = asyncio.get_running_loop()
+        started, progressed = asyncio.Event(), asyncio.Event()
+        release = threading.Event()
+        loop.set_default_executor(ThreadPoolExecutor(max_workers=1))
+        vault = SimpleNamespace(
+            _shutdown=False, is_expired=False, _check_password_ttl=checked.set,
+        )
+
+        class Generation:
+            def __init__(self, *_args: object) -> None:
+                pass
+
+            async def start(self, _port: int) -> None:
+                pass
+
+            async def tick(self) -> None:
+                assert checked.is_set()
+                progressed.set()
+
+        def block_request_worker() -> None:
+            loop.call_soon_threadsafe(started.set)
+            assert release.wait(5)
+
+        monkeypatch.setattr(service, "ServiceGeneration", Generation)
+        blocker = loop.run_in_executor(None, block_request_worker)
+        await asyncio.wait_for(started.wait(), 2)
+        pending = asyncio.create_task(service._serve(vault, 0, [], [], None))
+        try:
+            if phase == "tick":
+                await asyncio.wait_for(progressed.wait(), 1)
+            else:
+                await asyncio.sleep(0)
+            pending.cancel()
+            done, _ = await asyncio.wait({pending}, timeout=1)
+            assert pending in done, "expiry cancellation waited for a request worker"
+            with pytest.raises(asyncio.CancelledError):
+                pending.result()
+            assert not release.is_set()
+        finally:
+            release.set()
+            if not pending.done():
+                pending.cancel()
+            await asyncio.gather(pending, blocker, return_exceptions=True)
+
+    asyncio.run(scenario())

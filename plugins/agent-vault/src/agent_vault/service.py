@@ -13,6 +13,7 @@ import signal
 import sys
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from .cache import get_cache
@@ -1044,10 +1045,12 @@ async def run_server(service: VaultService, tcp_port: int | None = None) -> None
 async def _serve(service, tcp_port, servers, pipe_servers, connections):
     generation = service._generation = ServiceGeneration(service, connections, servers, pipe_servers)
     await generation.start(tcp_port)
-    while not service._shutdown and not service.is_expired:
-        await settle_owned(asyncio.to_thread(service._check_password_ttl))
-        await generation.tick()
-        await asyncio.sleep(0.5)
+    loop = asyncio.get_running_loop()
+    with ThreadPoolExecutor(max_workers=1, thread_name_prefix="vault-expiry") as expiry:
+        while not service._shutdown and not service.is_expired:
+            await settle_owned(loop.run_in_executor(expiry, service._check_password_ttl))
+            await generation.tick()
+            await asyncio.sleep(0.5)
 
 
 def cleanup() -> None:
