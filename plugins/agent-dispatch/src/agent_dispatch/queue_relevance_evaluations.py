@@ -25,8 +25,16 @@ class QueueRelevanceEvaluationsMixin:
             "task_id TEXT NOT NULL, generation INTEGER NOT NULL, registration_id TEXT NOT NULL,"
             "status TEXT NOT NULL, attempts INTEGER NOT NULL, next_due REAL NOT NULL,"
             "token TEXT, expires_at REAL, snapshot_json TEXT NOT NULL, report_json TEXT,"
-            "last_error TEXT, PRIMARY KEY(task_id, generation, registration_id))"
+            "last_error TEXT, retry_requested INTEGER NOT NULL DEFAULT 0,"
+            " PRIMARY KEY(task_id, generation, registration_id))"
         )
+        if "retry_requested" not in {
+            row["name"] for row in conn.execute("PRAGMA table_info(task_relevance_evaluations)")
+        }:
+            conn.execute(
+                "ALTER TABLE task_relevance_evaluations"
+                " ADD COLUMN retry_requested INTEGER NOT NULL DEFAULT 0"
+            )
         conn.execute(
             "CREATE TABLE IF NOT EXISTS task_relevance_evaluation_cursors ("
             "registration_id TEXT PRIMARY KEY, task_id TEXT NOT NULL,"
@@ -53,6 +61,14 @@ class QueueRelevanceEvaluationsMixin:
             "CREATE INDEX IF NOT EXISTS idx_relevance_evaluations_retry"
             " ON task_relevance_evaluations(registration_id,status,task_id,generation)"
         )
+        for name, keys in (
+            ("idx_relevance_candidates", "evaluator_ref,owner,kind,id"),
+            ("idx_relevance_candidates_repo", "evaluator_ref,repo,owner,kind,id"),
+        ):
+            conn.execute(
+                f"CREATE INDEX IF NOT EXISTS {name} ON tasks({keys})"
+                " WHERE status IN ('proposed','queued')"
+            )
 
     def rotate_relevance_evaluators(self, registration_ids: list[str]) -> list[str]:
         """Bound registrar traversal and keep later registrations from starvation."""
@@ -106,7 +122,8 @@ class QueueRelevanceEvaluationsMixin:
             # won during its check. Refresh judgment, never replay a stale goal.
             retries = conn.execute(
                 "SELECT * FROM task_relevance_evaluations WHERE registration_id=?"
-                " AND status='pending' AND (report_json IS NOT NULL OR attempts>0) AND next_due<=?"
+                " AND status='pending' AND (report_json IS NOT NULL OR attempts>0 OR retry_requested=1)"
+                " AND next_due<=?"
                 " AND (token IS NULL OR expires_at<=?) AND (task_id,generation)>(?,?)"
                 " ORDER BY task_id,generation LIMIT ?",
                 (selector.registration_id, ts, ts, *retry_after, policy.batch_size),
@@ -174,19 +191,20 @@ class QueueRelevanceEvaluationsMixin:
                 (selector.registration_id, policy.max_attempts, ts),
             )
             after = cursor["task_id"] if cursor else ""
+            repo_clause = "" if reg["spec"].get("all_repos") else " AND t.repo=?"
+            repo_args = () if not repo_clause else (reg["spec"].get("repo"),)
             rows = conn.execute(
                 "SELECT t.id FROM tasks t LEFT JOIN task_relevance_evaluations e"
                 " ON e.task_id=t.id AND e.generation=t.generation AND e.registration_id=?"
                 " WHERE t.id>? AND t.kind='finite' AND t.status IN ('proposed','queued')"
                 " AND t.owner IS NULL AND t.created_at<=? AND t.evaluator_ref=?"
-                " AND (? OR t.repo=?)"
+                + repo_clause +
                 " AND NOT EXISTS (SELECT 1 FROM task_relevance_closeouts c WHERE c.task_id=t.id)"
                 " AND (e.task_id IS NULL OR (e.status='pending' AND e.next_due<=?"
                 " AND (e.token IS NULL OR e.expires_at<=?)))"
                 " ORDER BY t.id LIMIT ?",
                 (selector.registration_id, after, ts - policy.min_age_seconds,
-                 reg["spec"]["evaluator_ref"], bool(reg["spec"].get("all_repos")),
-                 reg["spec"].get("repo"), ts, ts, policy.batch_size),
+                 reg["spec"]["evaluator_ref"], *repo_args, ts, ts, policy.batch_size),
             ).fetchall()
             conn.execute(
                 "INSERT INTO task_relevance_evaluation_cursors (registration_id,task_id) VALUES (?, ?)"
@@ -250,11 +268,11 @@ class QueueRelevanceEvaluationsMixin:
     def _lease_relevance_evaluation(
         conn: sqlite3.Connection, entry: dict, ts: float, lease_seconds: float,
     ) -> dict:
-        entry.update(token=uuid.uuid4().hex, expires_at=ts + lease_seconds)
+        entry.update(token=uuid.uuid4().hex, expires_at=ts + lease_seconds, retry_requested=0)
         entry["attempts"] += 1
         columns = (
             "task_id", "generation", "registration_id", "status", "attempts", "next_due",
-            "token", "expires_at", "snapshot_json", "report_json", "last_error",
+            "token", "expires_at", "snapshot_json", "report_json", "last_error", "retry_requested",
         )
         conn.execute(
             f"INSERT OR REPLACE INTO task_relevance_evaluations ({','.join(columns)})"
@@ -314,7 +332,7 @@ class QueueRelevanceEvaluationsMixin:
         with self._connect() as conn:
             changed = conn.execute(
                 "UPDATE task_relevance_evaluations SET status='pending', attempts=0,"
-                " next_due=?, token=NULL, expires_at=NULL, last_error=NULL"
+                " next_due=?, token=NULL, expires_at=NULL, last_error=NULL, retry_requested=1"
                 " WHERE task_id=? AND generation=? AND registration_id=? AND status='failed'",
                 (self._now(now), task_id, generation, registration_id),
             )

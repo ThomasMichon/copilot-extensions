@@ -52,6 +52,8 @@ foreign emitters and unsupported/ambiguous ownership are not evaluated.
 The existing trusted script runner receives a JSON event on stdin:
 `type: "task.reconsider"`, the selected task under `task`, and its generation,
 audit revision and registration observations under `relevance_snapshot`.
+Spilled payloads are hydrated through the existing payload owner outside queue
+write locks before invoking the script.
 The same script must continue handling its ordinary lifecycle events.
 It must check the authoritative backing object and return:
 
@@ -89,6 +91,8 @@ registrations and checks at most one task per registration. `batch_size` bounds
 each registration's candidate scan, not its script concurrency. Persistent
 cursors prevent unattributed candidates or later registrations from starvation.
 Source commands and registrar discovery run outside queue write locks.
+Evaluator/repository/keyset indexes exclude unrelated queued work from candidate
+traversal under the writer lock.
 
 `needed` schedules another inspection after the configured interval.
 `unknown` and failures use exponential retry capped by that interval. Attempts

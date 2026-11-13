@@ -465,3 +465,80 @@ def test_held_retry_page_rotates_to_bound_owner_closeout(q, periodic, venue, mon
     )
     assert q.get(bound.id).status == Status.CLAIMED
     assert all(q.relevance_evaluations(t.id)[0]["attempts"] == 1 for t in held)
+
+
+def test_spilled_payload_is_hydrated_outside_queue_writer_lock(q, periodic, monkeypatch):
+    q.blob_threshold = 1
+    t = task(q, payload_inline="source-object:42")
+    assert t.payload_inline is None and t.payload_ref
+    original = q.read_payload
+
+    def read_payload(selected):
+        with q._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+        return original(selected)
+
+    monkeypatch.setattr(q, "read_payload", read_payload)
+    seen = []
+    check = runner(callback=lambda event: seen.append(event["task"]["payload_inline"]))
+    assert tick(q, periodic, runner=check)["accepted"][0]["decision"] == "abandoned"
+    assert seen == ["source-object:42"]
+
+
+def test_explicit_retry_of_exhausted_claimed_task_reaches_original_owner(q, periodic):
+    t = task(q)
+    tick(q, periodic, runner=runner(
+        callback=lambda _event: q.claim_one("host/worker", task_id=t.id),
+    ))
+    periodic[3][0] = 105
+    tick(q, periodic, runner=runner("unknown"))
+    assert q.relevance_evaluations(t.id)[0]["status"] == "failed"
+    assert q.get(t.id).status == Status.CLAIMED
+    q.retry_relevance_evaluation(
+        t.id, registration_id=periodic[2], generation=t.generation,
+    )
+    check = runner()
+    for _ in range(2):
+        result = tick(q, periodic, runner=check)
+        if result["accepted"]:
+            break
+    assert result["accepted"][0]["decision"] == "closeout_pending"
+    assert check.call_count == 1
+    assert q.get(t.id).owner == "host/worker"
+
+
+def test_unrelated_tasks_do_not_expand_candidate_scan_under_writer_lock(q, periodic, monkeypatch):
+    original = q._connect
+    selections = []
+
+    def connect():
+        conn = original()
+        conn.set_trace_callback(lambda sql: selections.append(sql) if sql.startswith(
+            "SELECT t.id FROM tasks t LEFT JOIN task_relevance_evaluations e"
+        ) else None)
+        return conn
+
+    monkeypatch.setattr(q, "_connect", connect)
+
+    def candidate_steps():
+        tick(q, periodic, runner=Mock(side_effect=AssertionError("no eligible tasks")))
+        sql = selections[-1]
+        with original() as conn:
+            plan = [row["detail"] for row in conn.execute("EXPLAIN QUERY PLAN " + sql)]
+            assert any("idx_relevance_candidates" in detail for detail in plan)
+            steps = [0]
+
+            def progress():
+                steps[0] += 1
+                return 0
+
+            conn.set_progress_handler(progress, 1)
+            assert list(conn.execute(sql)) == []
+            conn.set_progress_handler(None, 0)
+        return steps[0]
+
+    before = candidate_steps()
+    for _ in range(200):
+        emitted(q, evaluator_ref="unrelated-loop", now=80)
+    after = candidate_steps()
+    assert after <= before + 50

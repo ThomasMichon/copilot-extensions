@@ -19,6 +19,7 @@ from .producers.evaluator import (
     MAX_SCRIPT_EVALUATOR_TIMEOUT, load_registration_evaluator,
 )
 from .queue import TaskError, TaskQueue
+from .queue_common import Task
 from .queue_relevance_registration import RelevanceRegistration
 from .relevance_evaluation import PeriodicRelevancePolicy, RelevanceJudgment
 from .relevance_source import RelevanceSource
@@ -115,8 +116,10 @@ def reconsider_unbound_tasks(
             if report is None:
                 snapshot = json.loads(entry["snapshot_json"])
                 evaluator = load_registration_evaluator(snapshot["registration_spec"], runner=runner)
+                task_payload = dict(snapshot["task"])
+                task_payload["payload_inline"] = queue.read_payload(Task(**task_payload))
                 decisions = evaluator.evaluate({
-                    "type": "task.reconsider", "task": snapshot["task"],
+                    "type": "task.reconsider", "task": task_payload,
                     "relevance_snapshot": {
                         key: value for key, value in snapshot.items()
                         if key not in {"task", "registration_spec"}
