@@ -10,6 +10,7 @@ from enum import Enum
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Literal
+from machine_transport import LocalExecutionContext
 
 if TYPE_CHECKING:
     from .tracking import WorktreeRecord
@@ -421,7 +422,9 @@ def _validate_snapshot(
             ancestors.remove(id(value))
 
 
-def parse(content: str, path: Path) -> WorktreeRecord:
+def parse(
+    content: str, path: Path, *, reporting_context: LocalExecutionContext | None = None,
+) -> WorktreeRecord:
     from . import tracking
 
     content_bytes(content)
@@ -429,7 +432,7 @@ def parse(content: str, path: Path) -> WorktreeRecord:
     if not isinstance(data, dict):
         raise CaptureOmitted("saved-record-not-mapping")
     _validate_snapshot(data, [MAX_NODES, MAX_CONTENT_BYTES], set())
-    return tracking.parse_record_data(data, path=path)
+    return tracking.parse_record_data(data, path=path, reporting_context=reporting_context)
 
 
 def receipt(

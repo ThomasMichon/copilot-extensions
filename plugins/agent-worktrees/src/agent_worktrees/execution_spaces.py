@@ -302,7 +302,10 @@ def require_record_mutation(record: Any, config: Any, *, recover_receiving: bool
 
     if record is None:
         return
-    if getattr(record, "platform", cfg.detect_platform()) != cfg.detect_platform():
+    reporting = getattr(record, "_reporting_context", None) is not None
+    if reporting and record._reporting_context.environment != cfg.detect_platform():
+        raise ExecutionSpaceError("reporter observations belong to another execution platform")
+    if not reporting and getattr(record, "platform", cfg.detect_platform()) != cfg.detect_platform():
         raise ExecutionSpaceError(
             "record snapshot identity/platform belongs to a different execution space/platform; "
             "native execution platform required"
@@ -361,6 +364,11 @@ def require_record_mutation(record: Any, config: Any, *, recover_receiving: bool
                 raise ExecutionSpaceError(
                     "owned local record requires its original receiving allocation or proven local parent"
                 )
+        return
+    if reporting:
+        from .record_reporting import require_receiving_subject
+
+        require_receiving_subject(record, config)
         return
     entries = registry_for_config(config)
     from .legacy_wsl_record_locality import resolve_legacy_wsl_owner_ref

@@ -444,6 +444,8 @@ def _receiving_admission(ledger: Path, config):
     from .checkout_relocation_plan import read_record
 
     passive = read_record(ledger)
+    from . import record_reporting
+    record_reporting.apply_context(passive, record_reporting.current_context(config.repo_name))
     if passive.worktree_id != ledger.stem or passive.repo != config.repo_name:
         raise ValueError("relocation record does not match the receiving ledger identity/project")
     if passive.receiving_allocation_present:

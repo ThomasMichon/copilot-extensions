@@ -475,7 +475,7 @@ def test_canonical_identity_rejection_still_writes_nothing_and_captures_nothing(
 
     owner, path, _home = native
     data = yaml.safe_load(path.read_text())
-    data["execution_machine"] = "foreign-execution"
+    data["worktree_id"] = "foreign-subject"
     path.write_text(yaml.safe_dump(data))
     before = path.read_bytes()
     result = compute(owner, path)

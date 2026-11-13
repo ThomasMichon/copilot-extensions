@@ -26,6 +26,8 @@ def paired_ref(record: WorktreeRecord | None) -> str | None:
 def reciprocal_sibling(record: WorktreeRecord) -> WorktreeRecord | None:
     """Resolve an exact reciprocal worktree pair in either direction."""
     from . import tracking
+    from .record_reporting import same_reporter
+    from .tracking_lookup import reciprocal_pair_subjects
 
     try:
         ref = record.pair_claim_ref
@@ -33,7 +35,6 @@ def reciprocal_sibling(record: WorktreeRecord) -> WorktreeRecord | None:
             not record.pair_id or record.pair_kind != "worktree"
             or record.pair_role not in {"harness", "knowledge"}
             or ref is None or not ref.is_qualified
-            or ref.machine != record.execution_machine
         ):
             return None
         sibling = tracking.find_paired_record(record)
@@ -46,14 +47,11 @@ def reciprocal_sibling(record: WorktreeRecord) -> WorktreeRecord | None:
             sibling is not None
             and sibling.repo == ref.project
             and sibling.worktree_id == ref.worktree_id
-            and sibling.execution_machine == record.execution_machine
-            and sibling.platform == record.platform
+            and same_reporter(record, sibling)
             and sibling.pair_id == record.pair_id
             and {record.pair_role, sibling.pair_role} == {"harness", "knowledge"}
             and sibling.pair_kind == "worktree"
-            and sibling.pair_ref == tracking.format_claim_ref(
-                record.execution_machine, record.repo, record.worktree_id,
-            )
+            and reciprocal_pair_subjects(record, sibling)
         )
         return sibling if valid else None
     except (OSError, ValueError, TypeError, AttributeError):
@@ -98,7 +96,7 @@ def ensure_claim(
     parsed = record.pair_claim_ref
     if (
         not record.pair_id or parsed is None or not parsed.is_qualified
-        or parsed.machine != record.execution_machine
+        or parsed.machine != record.execution_machine and reciprocal_sibling(record) is None
     ):
         raise ValueError("paired knowledge worktree identity is not verifiable")
     state = obligations.ACTIVE if require_active or not sibling_finalized(record) else obligations.AT_REST
@@ -217,7 +215,7 @@ def _lifecycle_guard(record: WorktreeRecord) -> Iterator[None]:
         yield
         return
     parsed = record.pair_claim_ref
-    if parsed is None or not parsed.is_qualified or parsed.machine != record.execution_machine:
+    if parsed is None or not parsed.is_qualified:
         raise ValueError("paired knowledge worktree finalization cannot be verified")
     sibling_path = cfg.project_dir(parsed.project) / "worktrees" / f"{parsed.worktree_id}.yaml"
     with ExitStack() as stack:
@@ -231,6 +229,8 @@ def _lifecycle_guard(record: WorktreeRecord) -> Iterator[None]:
             raise ValueError(
                 "paired knowledge worktree finalization is changing; retry after its lifecycle settles"
             ) from exc
+        if parsed.machine != record.execution_machine and reciprocal_sibling(record) is None:
+            raise ValueError("paired knowledge worktree finalization cannot be verified")
         yield
 
 

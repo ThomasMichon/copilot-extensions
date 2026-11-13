@@ -54,6 +54,9 @@ def _creation_fixture(
         context = resolve_local_execution_context({}, hostname="raw-host", environment=platform)
         machine = context.execution_machine
         physical = context.machine if tuple_identity else machine
+    else:
+        observed_host = physical if tuple_identity or platform != "wsl" else "host"
+        monkeypatch.setattr(cfg.socket, "gethostname", lambda: observed_host)
     identity_fields = WorktreeMachineIdentity(physical, platform, machine) if tuple_identity else None
     short = "win" if platform == "windows" else platform
     identity = f"{physical}-{short}-20261013-100000-{suffix}"
@@ -456,9 +459,10 @@ def test_creation_repairs_original_native_pair_after_optional_naming(
     child_paths = sorted(creation.projects["knowledge"].joinpath("worktrees").glob("*.yaml"))
     assert len(child_paths) == 1
     child = tracking.load_record(child_paths[0])
+    parent = tracking.load_record(creation.record.yaml_path)
     assert child.worktree_id == creation.record.worktree_id + "-k"
-    assert child.machine_identity == creation.record.machine_identity
-    assert child.execution_machine == creation.record.execution_machine
+    assert child.machine_identity == parent.machine_identity
+    assert child.execution_machine == parent.execution_machine == "friendly-space"
     assert launch_seed_state.state_path(creation.record.yaml_path).read_bytes() == seed_before
 
 
@@ -466,7 +470,7 @@ def test_creation_repairs_original_native_pair_after_optional_naming(
 @pytest.mark.parametrize("conflict", [
     "hostname", "platform", "nonce", "owner", "namespace", "receiving_binding",
     "companion_binding", "companion_anchor", "companion_platform", "companion_relative_root",
-    "foreign_key", "former_custom",
+    "foreign_key", "record_subject",
 ])
 def test_creation_naming_compatibility_refuses_independent_authority_conflicts(
     tmp_path, monkeypatch, capsys, tuple_identity, conflict, overwrite_record_nonce,
@@ -486,9 +490,10 @@ def test_creation_naming_compatibility_refuses_independent_authority_conflicts(
     if conflict == "hostname":
         monkeypatch.setattr(cfg.socket, "gethostname", lambda: "another-host")
     elif conflict == "platform":
-        record.platform = "wsl" if cfg.detect_platform() != "wsl" else "windows"
-        if tuple_identity:
-            record.machine_identity = replace(record.machine_identity, environment=record.platform)
+        settings = creation.configs["harness"]
+        creation.configs["harness"] = replace(
+            settings, platform="wsl" if cfg.detect_platform() != "wsl" else "windows",
+        )
     elif conflict == "nonce":
         overwrite_record_nonce(record.yaml_path, None)
     elif conflict == "owner":
@@ -533,14 +538,9 @@ def test_creation_naming_compatibility_refuses_independent_authority_conflicts(
             "execution_platform": cfg.detect_platform(),
         }
         topology.write_text(json.dumps(mapping))
-    if conflict in {"platform", "former_custom"}:
+    if conflict == "record_subject":
         raw = yaml.safe_load(record.yaml_path.read_text())
-        if conflict == "platform":
-            raw["platform"] = record.platform
-        else:
-            raw["machine"] = "former-friendly-host" if tuple_identity else "former-custom-space"
-            if tuple_identity:
-                raw["execution_machine"] = "former-custom-space"
+        raw["worktree_id"] = "replacement"
         record.yaml_path.write_text(yaml.safe_dump(raw))
     elif conflict == "owner":
         tracking.save_record(record)
@@ -666,7 +666,8 @@ def test_creation_repair_preserves_only_proven_local_parent_refs(
     )
     record = tracking.load_record(creation.record.yaml_path)
     record.owner_ref = tracking.format_claim_ref(
-        parent.execution_machine, "harness", "missing" if parent_kind == "missing" else "parent",
+        "foreign-space" if parent_kind in {"foreign", "same-physical"} else parent.execution_machine,
+        "harness", "missing" if parent_kind == "missing" else "parent",
     )
     tracking.save_record(record)
     parent_before = parent.yaml_path.read_bytes()
@@ -754,6 +755,10 @@ def test_creation_refuses_legacy_parent_receiving_conflicts_before_effects(
                 "hostname": "other-host", "physical_host": "other-host",
             }}}),
         )
+    if conflict == "platform":
+        creation.configs[parent_project] = replace(
+            parent_config, platform="wsl" if actual != "wsl" else "windows",
+        )
     if conflict in {"binding", "bound-owner"}:
         creation.configs[parent_project] = replace(
             parent_config, machine="other-space", configured_machine="other-space",
@@ -790,6 +795,7 @@ def test_creation_repairs_native_child_with_nonce_less_legacy_parent(
         creation.projects["knowledge"] / "worktrees",
     )
     parent = overwrite_record_nonce(parent.yaml_path, None)
+    parent = tracking.load_record(parent.yaml_path)
     record = tracking.load_record(creation.record.yaml_path)
     record.owner_ref = tracking.format_claim_ref(parent.execution_machine, "knowledge", "parent")
     tracking.save_record(record)
@@ -1550,9 +1556,12 @@ def test_creation_native_git_identity_check(tmp_path):
 @pytest.mark.guard
 @pytest.mark.parametrize("field", ["worktree_path", "branch", "platform"])
 def test_creation_refuses_moved_or_mismatched_parent(creation, monkeypatch, capsys, field):
-    value = str(creation.anchors["harness"]) if field == "worktree_path" else "other"
-    setattr(creation.record, field, value)
-    tracking.save_record(creation.record)
+    if field == "platform":
+        creation.configs["harness"] = replace(creation.configs["harness"], platform="other")
+    else:
+        value = str(creation.anchors["harness"]) if field == "worktree_path" else "other"
+        setattr(creation.record, field, value)
+        tracking.save_record(creation.record)
     monkeypatch.setattr(
         permissions, "clone_permissions", lambda *a: pytest.fail("mismatched parent mutated"),
     )
@@ -1600,6 +1609,10 @@ def test_creation_real_cli_first_touch_report_and_fix(tmp_path, monkeypatch, gui
     root = tmp_path / "checkouts"
     platform = cfg.detect_platform()
     machine = "host-wsl" if platform == "wsl" else "host"
+    (anchor / "machines.yaml").write_text(json.dumps({"machines": {machine: {
+        "hostname": cfg.socket.gethostname(), "execution_platform": platform,
+        "physical_host": "host",
+    }}}))
     short = "win" if platform == "windows" else platform
     identity = f"{machine}-{short}-20261013-100000-abcd"
     checkout = root / identity
@@ -1648,7 +1661,7 @@ def test_creation_real_cli_first_touch_report_and_fix(tmp_path, monkeypatch, gui
     command = [
         sys.executable, "-c",
         "import sys; from agent_worktrees import __main__ as main, sessions; "
-        "sessions._list_mux_sessions = lambda **kwargs: {}; "
+        "sessions.verify_worktree_active = lambda record: sessions.LiveVerdict(); "
         + guidance +
         "raise SystemExit(main.main(sys.argv[1:]))",
         "--project", "fixture",

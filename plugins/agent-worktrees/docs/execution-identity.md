@@ -84,25 +84,52 @@ produce a nonzero diagnostic before state preparation or launcher publication.
 This naming admission does not replace repository hosting policy, installation
 ownership, receiving-project or actual-record mutation checks.
 
-## Versioned tracking identity
+## Reporter naming and tracking data
 
-Tracking readers also recognize an explicitly versioned physical/environment
-tuple. This is record metadata, not the configured-authority response above:
+Canonical tracking YAML does not store `machine`, `platform`,
+`machine_identity_version`, `environment` or `execution_machine`. Parsers ignore
+these legacy keys, including obsolete tuple versions, and ordinary saves remove
+them without a migration. IDs, checkouts, sessions, qualified references and
+allocation evidence are separate data and are not rewritten.
+Companion-allocation location sidecars likewise omit naming snapshots.
+Their receiver, original path and parent incarnation remain immutable;
+legacy `owner` naming observations do not participate in those comparisons.
 
-```yaml
-machine_identity_version: 1
-machine: sample-host
-environment: wsl
-execution_machine: custom-guest-space
-platform: wsl
+Local lookups resolve the actual hostname and execution environment through
+the shared `machine-transport.resolve_local_execution_context` core. The selected
+project's declared checkout supplies its canonical-plus-legacy machine map;
+an explicitly bound knowledge checkout supplies the fallback map. This naming
+lookup reads filesystem metadata, not full project policy or Git, and does not
+spawn a CLI. Configured `machine` bindings do not override the observed reporter.
+An unconfigured standalone reader uses the observed hostname/environment.
+Strict naming lookups reject invalid or ambiguous configured maps. Low-level
+local record reads remain usable for independent retained-checkout proof: they
+expose fresh observed naming with an explicit `machine_context` unavailable
+notice, never an old record label. That notice does not authorize an allocation,
+remote route or mutation without receiving-side proof.
+
+Exact-record and local row replies retain compatible transient naming fields:
+
+```json
+{
+  "machine_identity_version": 1,
+  "machine": "sample-host",
+  "environment": "wsl",
+  "execution_machine": "custom-guest-space",
+  "platform": "wsl"
+}
 ```
 
 `machine` names the physical host. `execution_machine` supplies the one-term
-owner in qualified worktree, session, pair, controller and resource references.
-The same fields are retained in exact-record, list, lineage and resident-row
-JSON. `platform` must agree with `environment`; missing version metadata keeps
-the original legacy machine/platform interpretation. Unsupported, partial or
-conflicting explicit tuples are errors, never fallback execution authority.
+reporter in qualified worktree, session, pair, controller and resource references.
+Each local lookup refreshes these facts even when the durable record is cached;
+a batch resolves its reporter once. The no-deep-copy path detaches only the
+top-level reporter view and continues sharing read-only nested data.
+Pure mapping parsing performs no discovery: a remote caller must supply its
+reporting host's context rather than borrowing the coordinator's hostname.
+Naming facts do not authorize mutation or replace configured execution authority.
+Allocation journals and historical references have their own retained-evidence
+contracts below; their tuple codecs are not canonical tracking fields.
 
 ### Retained local checkout authority
 
@@ -116,8 +143,8 @@ It also covers adopted linked checkouts and retained managed checkouts outside
 a newer allocation root. An anchor record instead proves the exact configured
 local Git anchor, including a bare repository or a Git-file anchor whose
 `gitdir` and optional `commondir` point to the actual repository metadata.
-The record's platform must still match the actual current execution environment;
-an optional topology's platform label cannot replace that OS check.
+The receiving configuration and reporter observations must still match actual
+execution; an optional topology's platform label cannot replace that OS check.
 A branch switch or detached HEAD does not change locality or rewrite the
 recorded branch. Branch-sensitive custody is separate: managed cleanup outside
 the current allocation namespace retains recorded-branch proof, and a conflicting
@@ -147,12 +174,11 @@ The reserved `@anchor` ID is always scoped to the selected project, never a
 cross-project global-ID or relocation candidate. A declared local target still
 carries its proven receiving project and canonical worktree ID into resume.
 
-No identity migration is necessary. IDs, historical physical and execution
-names, sessions, pairs, claims and owner references remain intact. Qualified
-owner lookup must name the actual retained record's execution owner. That
-accessor preserves the original machine label for legacy records; a versioned
-guest's physical host is not an alias for its execution owner. An unrelated
-native or remote owner does not select a coincident local ID.
+No identity migration is necessary. IDs, sessions, pairs, claims and qualified
+historical references remain intact. Qualified owner lookup uses the retained
+record's current reporter execution owner; a guest's physical host is not an
+alias for that execution owner. An unrelated native or remote owner does not
+select a coincident local ID.
 Receipt-backed ownership continues to require its original receiving creation
 journal, incarnation, relationships and finality. Locality neither releases a
 claim nor waives live process, launch, handoff or lifecycle ownership.
@@ -176,24 +202,19 @@ rewriting historical identities.
 
 ### Unretained records and new execution
 
-The typed tracking accessor preserves the exact historical machine label for
-legacy records. Ordinary saves do not migrate their format or alter a versioned
-identity. Concurrent changes to environment, execution owner or identity version
-invalidate a loaded writer even when its physical host is unchanged. Mutation
-without retained-local proof requires the receiving project's current execution
-context and actual platform; sharing a physical host does not make native and
-guest owners equal.
-The optional receiving registry customizes that context rather than enrolling
-the local machine. The complete physical/environment/execution tuple must match
-the validated context, and explicit registered execution keys retain their
-canonical-key and platform checks. Project and actual-ledger snapshot checks
-remain independent of naming; a detected name is not a receiving-record grant.
-Without retained-local proof, cleanup, including forced removal, applies that
-tuple check before any missing, empty or unscoped registry fallback retained for
-historical records. Resolved
-controller navigation and strict resource-owner scans use the execution owner;
-malformed explicit tuples make the scan incomplete rather than borrowing the
-physical host or disappearing behind an owner filter.
+Ordinary saves fence the receiving ledger, project, ID, checkout, branch and
+start incarnation independently of reporter labels. A configuration rename or
+an obsolete naming field is not replacement of that subject. Existing nonce,
+revision, allocation and relationship checks remain separate.
+Mutation without retained-local Git proof requires the selected receiving
+project, exact ledger/snapshot, current platform and managed checkout namespace.
+Explicit registered execution keys retain their configured authority checks;
+sharing a physical host does not make native and guest execution interchangeable.
+A detected name alone is not a receiving-record grant. Cleanup, including forced
+removal, cannot substitute reporter naming for those checks.
+Resolved controller navigation and strict resource-owner scans use the reporting
+host's execution owner; ignored legacy naming fields cannot hide a valid claim
+behind a malformed tuple or an owner filter.
 Publication privacy guards check both physical and execution names. Terminal
 pair receipts preserve the exact legacy identity shape; versioned receipts
 retain the full tuple while reciprocal references use the execution owner.
@@ -206,7 +227,8 @@ Ordinary Create (session and system), JSON New (session and bridge), interactive
 New, embody New and structured request admission explicitly select the internal
 `identity_mode="tuple-v1"` mode. Interactive prospective/preflight and dry-run
 names use the same physical/environment derivation as actual New. Existing
-lookup, Resume and completed receipt replay retain their original records.
+lookup and Resume retain allocation and relationship data while refreshing
+reporter naming. Completed receipt replay retains its separate evidence contract.
 
 `_create_worktree_core` still defaults to `legacy` when the internal mode is
 omitted. Tuple mode derives the physical/environment/owner tuple
@@ -238,11 +260,11 @@ Parent-obligation settlement uses the same validated execution owner, including
 when the map customizes only the native or guest sibling.
 The reciprocal creation claim uses the admitted tuple owner as well; native
 configuration may retain its raw hostname without changing the child's qualified
-reference. Legacy creation and settlement preserve their original owner labels.
+reference. Historical qualified allocation references retain their spelling.
 Implicit CWD ownership and the owner reference exported into launch environments
 use the retained record's execution owner, not the detected machine scalar.
-An absent ledger uses validated local execution context; an existing legacy
-ledger is never relabeled to admit a tuple child. Explicit/env foreign owners
+An absent ledger uses validated local execution context; existing records derive
+reporter naming without a label-repair write. Explicit/env foreign owners
 retain precedence and their normal receiving-record fences.
 After locality is established, coordination readiness is loaded from the
 qualified owner's project, even when its tuple execution owner differs from
@@ -271,14 +293,14 @@ matching a configured path override alone cannot admit a foreign-platform
 record. Only the earlier actual-record compatibility proof preserves a valid
 legacy override.
 
-New session and bridge names use the selected physical machine and environment;
+New session and bridge IDs use the selected physical machine and environment;
 a physical name ending in a platform-like suffix is not truncated. Names
 that cannot form a portable path and Git-reference component refuse before
 allocation reservation or carving, including path separators, drive qualifiers,
 traversal and invalid characters. The tuple codec also rejects NUL/control-line
 metadata. Identity metadata is not permission to create a nested ID. System IDs
-keep their existing `sys-...` form. Tracking, JSON and paired worktree records
-share the typed tuple; qualified companion references use its execution owner,
+keep their existing `sys-...` form. JSON and paired worktree reporting views
+share the transient tuple; qualified companion references use its execution owner,
 including anchor companions. Completed creation-key replay retains its stored
 representation even if the caller selects the other supported mode. The
 authoritative creation path validates the retained record against the receiving
@@ -362,8 +384,8 @@ checks the configured anchor, and external adoption keeps Git's actual anchor,
 linked-checkout path, ID and branch as authority. It does not rename an externally
 created checkout to match prospective naming. Opt-in derivation errors propagate
 instead of falling back to a legacy write. Existing records, including a
-competing creation winner, return with their original identity and bytes and
-without requesting a new tuple from the registry. Newly created records retain
+competing creation winner, retain their allocation and bytes while local reads
+refresh reporter naming. Newly created records retain
 their supplied tracking destination for subsequent path-implicit saves,
 including legacy anchor callers using a nondefault tracking directory.
 Ordinary CWD inference and session registration select tuple mode only for

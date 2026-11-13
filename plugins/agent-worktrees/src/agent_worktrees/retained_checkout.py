@@ -107,11 +107,11 @@ def _require_linked_checkout(checkout: Path, anchor: Path) -> str:
 
 def _local_head(record, config) -> str | None:
     """Prove a retained local checkout without consulting machine topology."""
-    from . import tracking
+    from . import record_cache, tracking
 
     try:
         repo = config.repos.get(record.repo)
-        if repo is None or config.repo_name != record.repo or record.platform != cfg.detect_platform():
+        if repo is None or config.repo_name != record.repo or config.platform != cfg.detect_platform():
             return None
         checkout = Path(record.worktree_path)
         ledger = cfg.project_dir(record.repo) / "worktrees" / f"{record.worktree_id}.yaml"
@@ -127,7 +127,7 @@ def _local_head(record, config) -> str | None:
             return None
         if record.worktree_id != "@anchor" and not (checkout / ".git").is_file():
             return None
-        current = tracking.load_record(ledger)
+        current = record_cache.cached_load(ledger, tracking._load_record_uncached)
         if (
             record.receiving_allocation_present and not current.receiving_allocation_present
             and record.receiving_allocation != current.receiving_allocation
@@ -139,7 +139,7 @@ def _local_head(record, config) -> str | None:
             require_record(current, config, local_record=True)
         fields = (
             "repo", "worktree_id", "worktree_path", "branch", "creation_nonce",
-            "machine", "platform", "machine_identity", "checkout_managed",
+            "checkout_managed",
             "owner_ref", "pair_ref", "receiving_allocation", "receiving_allocation_present",
         )
         if any(getattr(current, field) != getattr(record, field) for field in fields):

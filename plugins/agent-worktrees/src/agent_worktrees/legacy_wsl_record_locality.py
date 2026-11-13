@@ -47,12 +47,11 @@ def record_namespace_matches(record: "WorktreeRecord", config: cfg.Config) -> bo
     root = Path(repo.anchor if anchor else repo.worktree_root).expanduser()
     if not root.is_absolute() or not checkout.is_absolute():
         return False
-    expected = root if anchor else root / record.worktree_id
     resolved_expected = root.resolve() if anchor else root.resolve() / record.worktree_id
     current_namespace = (
         not checkout.is_symlink()
         and (not checkout.exists() or checkout.is_dir())
-        and checkout == expected and checkout.resolve() == resolved_expected
+        and checkout.resolve() == resolved_expected
     )
     if current_namespace or anchor:
         return current_namespace
@@ -128,6 +127,17 @@ def resolve_legacy_wsl_owner_ref(ref: "ClaimRef", config: cfg.Config) -> Path | 
             if not observed_ref:
                 raise
             direct = None
+        observed_context = resolve_local_execution_context(
+            {}, hostname=cfg.socket.gethostname(), environment=actual,
+        )
+        if (
+            actual == "wsl" and (direct is None or direct.entry is None)
+            and ref.machine.casefold() in {
+                observed_context.hostname.casefold(), observed_context.machine.casefold(),
+            }
+            and ref.machine.casefold() != observed_context.execution_machine.casefold()
+        ):
+            return None
         if direct is not None and direct.entry is not None and direct.exact:
             declared = direct.entry.execution_platform
             if declared and declared != actual and not direct.entry.legacy_key:
@@ -167,7 +177,7 @@ def resolve_legacy_wsl_owner_ref(ref: "ClaimRef", config: cfg.Config) -> Path | 
         from .execution_spaces import project_record_config, require_owner_identity, require_record_mutation
 
         receiving_config = project_record_config(record)
-        if record.machine_identity is not None:
+        if record.machine_identity is not None and getattr(record, "_reporting_context", None) is None:
             if ref.machine != record.execution_machine:
                 return None
             require_record_mutation(record, receiving_config)
@@ -225,10 +235,8 @@ def resolve_legacy_wsl_owner_ref(ref: "ClaimRef", config: cfg.Config) -> Path | 
     except _RESOLUTION_ERRORS as exc:
         _LOG.warning("Cannot establish legacy WSL record locality: %s", exc)
         return None
-    # The record's own ``machine`` field is the trusted ground truth for
-    # "which legacy label it was actually written under" -- but it may name
-    # yet another topology label (hostname/alias/key) than the ref does, so
-    # resolve it through the same topology check, not a literal string match.
+    # Current registry selection and the receiving namespace qualify an alias;
+    # legacy naming fields in the record supply no identity evidence.
     return path
 
 

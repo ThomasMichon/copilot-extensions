@@ -17,6 +17,32 @@ from artifact_source_build import validate_static_build
 from standalone_python_artifacts import artifact_label, injected_resources, project_key
 
 
+def _fixture_storage(monkeypatch, local, root):
+    """Substitute native ownership actors, retaining real fixture-file behavior."""
+    def check(path, **_options):
+        assert Path(path).is_dir() and Path(path).resolve().is_relative_to(root.resolve())
+
+    def mkdir(path):
+        Path(path).mkdir(mode=0o700)
+
+    permissions = SimpleNamespace(
+        check=check, check_ancestors=check, mkdir=mkdir,
+        check_bytecode=check,
+    )
+    owner = SimpleNamespace(
+        mkdir_private=mkdir,
+        open_private=lambda path, flags: os.open(path, flags, 0o600),
+    )
+    original = local.preparation_process.procutil_module
+    actors = {"python_cache_permissions": permissions, "_daemon_instance_owner": owner}
+    monkeypatch.setattr(
+        local.preparation_process, "procutil_module",
+        lambda name: actors[name] if name in actors else original(name),
+    )
+    monkeypatch.setattr(local, "native_retained_path", lambda path: str(path))
+    return permissions, owner
+
+
 @pytest.mark.parametrize("variant", [None, "cp313d", "cp313t"])
 def test_native_interpreter_request_preserves_marker_environment_and_refuses_variants(variant):
     from runtime_application_project import target_python_request
@@ -44,6 +70,7 @@ def test_complete_application_portfolio_builds_once_and_publishes_only_after_rea
     import local_install_source as local
     import installer_engine_health as health
 
+    _fixture_storage(monkeypatch, local, tmp_path.parent)
     deadline = time.monotonic() + 30
     clock = time.monotonic
     expired = [False]
@@ -323,8 +350,7 @@ def test_complete_output_reuse_does_not_replay_worker_failures(tmp_path, monkeyp
         "source_commit": "a" * 40, "source_tree": "b" * 40,
         "projects": {"agent-worktrees": {"artifact": {"build_toolchain": {"fixture": True}}}},
     }
-    permissions = local.preparation_process.procutil_module("python_cache_permissions")
-    owner = local.preparation_process.procutil_module("_daemon_instance_owner")
+    permissions, owner = _fixture_storage(monkeypatch, local, tmp_path)
     tmp_path = tmp_path / "private"
     permissions.mkdir(tmp_path)
     permissions.check(tmp_path, private=True)
