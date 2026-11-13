@@ -145,7 +145,7 @@ emit({"jsonrpc":"2.0", "method":"notifications/upstream-eof",
 
 def build_runtimes(
     private: Path, retained: ExitStack, *, observations: Path | None = None,
-    caller_context: Path | None = None,
+    caller_context: Path | None = None, windows_owner_entry: bool = False,
 ) -> tuple[Path, dict[str, tuple[str, Path]]]:
     """Use the construction owner, not a copied venv or patched launch identity."""
     for library in ("installer-engine", "versioned-runtime"):
@@ -229,6 +229,11 @@ def build_runtimes(
                 ), encoding="utf-8")
             capabilities = payload / "src" / "agent_mcp" / "owner_capabilities.py"
             body = capabilities.read_text(encoding="utf-8")
+            if windows_owner_entry:
+                # Only this copied qualification payload opts into the unadvertised receiver.
+                needle = '    if platform != "linux":'
+                assert body.count(needle) == 1
+                body = body.replace(needle, '    if platform not in {"linux", "windows"}:')
             needle = "    print(json.dumps(result, sort_keys=True))"
             assert body.count(needle) == 1
             capabilities.write_text(body.replace(

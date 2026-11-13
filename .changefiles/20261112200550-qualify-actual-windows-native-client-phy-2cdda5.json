@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify actual Windows native client physical handover and rollback in private runtimes",
+  "changes": [
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    }
+  ]
+}

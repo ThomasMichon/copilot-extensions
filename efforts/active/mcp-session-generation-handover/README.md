@@ -385,14 +385,27 @@ handover. Preserve held sessions and the separate pre-feature adoption hold.
       advertisement and production caller selection remain disabled.
       #12350 merged at `ce3a3c1a3db4e5012154d2b0f069fb1e311a3cde`
       after current-head approval, required CI and Windows/Linux source
-      controls. Actual native-client creation-bound consumption is next.
-    - [ ] **Windows native-client consumption source:** qualify actual offline
+      controls. Native-client consumption follows below; joined Windows
+      physical-generation handover remains open.
+    - [x] **Windows native-client consumption source:** qualify actual offline
       native Copilot through the existing suspended-creation owner and
       anonymous bootstrap after publisher exit. Require the exact native
       PID/birth, physical receiver, real upstream/client round trip, ordinary
       context/settlement parity and owned cleanup. Distinguish client-owned
       abrupt MCP settlement from graceful upstream EOF; neither this packet
       nor its source merge is installed or productive caller adoption.
+      #12358 merged at `ef38cf03d57d4427ec2472dcb57315fd509186fb`
+      after current-head approval, required CI, both source platform lanes
+      and the actual pinned Windows native packet passed. See the
+      [source result](journal/2026/11.10-explicit-owner-cli.md#windows-native-client-consumption-reviewed-and-merged).
+    - [ ] **Joined Windows native handover source:** compose the actual native
+      caller and anonymous snapshot with private physical receiver/custody
+      replacement, rollback and same-slot replacement. Require accepted
+      in-flight calls, original client/conduit/keeper/upstream identity,
+      actual client ping replies, unknown-delivery fencing without replay
+      and exact settlement. Local qualification passes; current-head review,
+      required CI and hosted Linux/Windows qualification remain open.
+      Production capability advertisement and caller enrollment stay off.
   - [x] **Explicit Linux exec caller:** capture the exec owner's native pair
     and pass a sealed, session-only overlay for explicitly named configured
     entries, with actual-start discovery bound to a physical optional receiver.
