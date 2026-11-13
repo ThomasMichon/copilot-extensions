@@ -104,7 +104,8 @@ An ordinary detail read adds one connection/read transaction and five point-scop
 SELECTs, with no child process, network request, scan of repository files or
 per-call schema migration. The task read also performs an indexed closeout-row
 lookup. A retained closeout readiness adds bounded, original-resource lookups
-inside that same snapshot; it never re-runs external readiness.
+and indexed workspace/allocation native-history selection inside that same
+snapshot; it never re-runs external readiness.
 Task-event lookup uses partial `(task_id, id)`
 transition and worker-assignment indexes; pool assignment and
 spawn queries use existing task indexes.

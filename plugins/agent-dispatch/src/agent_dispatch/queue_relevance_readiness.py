@@ -6,7 +6,7 @@ import json
 import sqlite3
 from typing import TYPE_CHECKING
 
-from .assignment_workspace import AssignmentWorkspace
+from .assignment_workspace import AssignmentWorkspace, same_assignment_worker
 from .queue_records import SpawnState, TaskError
 from .queue_relevance_delivery import closeout_owner_matches
 from .queue_task_relationships import _encoded, _matches_receipt
@@ -62,7 +62,8 @@ def _state(queue: TaskQueue, conn: sqlite3.Connection, task_id: str, arguments: 
         or request["request_id"] != binding["relationship_request_id"]
         or request["event_id"] != binding["assignment_event_id"]
         or request["workspace"] != binding["workspace"]
-        or workspace.worker_id != row["owner"] or event["worker"] != row["owner"]
+        or not same_assignment_worker(workspace.worker_id, row["owner"])
+        or not same_assignment_worker(event["worker"], row["owner"])
         or request["task_id"] != task_id or request["recovery"]["queue_identity"] != identity
         or relationship["state"] not in {"bound", "closed"}
         or not _matches_receipt(relationship["receipt"], request, phase=relationship["state"])
@@ -117,6 +118,7 @@ def _state(queue: TaskQueue, conn: sqlite3.Connection, task_id: str, arguments: 
         raise TaskError("relevance closeout original allocation changed; custody retained")
     return {
         "arguments": arguments, "binding": binding, "relationship": relationship,
+        "assignment_worker": event["worker"],
         "reservation": dict(reservation), "assignment": dict(assignment),
         "allocation": dict(allocation), "status": task.status,
     }
@@ -188,6 +190,6 @@ def release_evidence(queue: TaskQueue, conn: sqlite3.Connection, raw: str) -> di
         "generation": receipt["arguments"]["expected_generation"],
         "assignment_event_id": request["event_id"],
         "relationship_request_id": request["request_id"],
-        "worker_id": receipt["arguments"]["worker_id"],
+        "worker_id": state["assignment_worker"],
         "native_id": receipt["arguments"]["native_id"],
     }

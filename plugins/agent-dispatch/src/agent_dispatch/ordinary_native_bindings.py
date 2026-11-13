@@ -110,7 +110,11 @@ def native_binding_evidence(
     histories = conn.execute(
         "SELECT s.*,a.native_session_id FROM spawn_reservations s "
         "LEFT JOIN acquisition_receipts a ON a.reservation_key=s.key "
-        "WHERE (s.worktree=? OR s.worktree IS NULL AND (s.key=? OR s.allocation_reservation_key=?)) "
+        "WHERE s.key IN ("
+        "SELECT key FROM spawn_reservations WHERE worktree=? "
+        "UNION SELECT key FROM spawn_reservations WHERE worktree IS NULL AND key=? "
+        "UNION SELECT key FROM spawn_reservations"
+        " WHERE worktree IS NULL AND allocation_reservation_key=?) "
         "AND (s.task_id=? OR s.creation_key=? "
         "OR s.key=? OR s.allocation_reservation_key=? OR ("
         "s.exclusive_key=? AND s.session_handle IS NOT NULL AND EXISTS ("

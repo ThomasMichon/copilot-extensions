@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
 from copy import deepcopy
@@ -19,6 +20,7 @@ from agent_dispatch.queue import Task, TaskError, TaskQueue
 from agent_dispatch.task_obligations import read_snapshot, valid_snapshot
 from tests import test_task_relevance_binding as bindings
 from tests.test_assignment_relationships import GroundOwner, start_managed
+from tests.test_pool_placement import place, pool, publish
 from tests.test_task_relevance import report
 
 assignment = bindings.assignment
@@ -229,3 +231,84 @@ def test_existing_exact_assignment_callback_carries_readiness_and_refuses_prior_
     assert read_snapshot(
         queue, task.id, assignment_event_id=original["request"]["event_id"] + 1,
     )["release_outcome"] is None
+
+
+def test_normalized_pool_owner_keeps_original_audit_worker_spelling(
+    assignment: bindings.Assignment, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_dispatch import submission_readiness_observation
+
+    queue, _, workspace, task = assignment
+    publish(queue, pool())
+    reservation, _ = place(queue, task)
+    queue.record_spawn_worktree(
+        reservation.key, workspace.worktree, ownership="created",
+        execution_machine=workspace.machine, allocation_project=workspace.project,
+        worktree_path=workspace.path, driver="cli", creation_nonce=workspace.creation_nonce,
+    )
+    queue.record_spawn(
+        reservation.key, session_handle="native", worktree=workspace.worktree,
+        startup_complete=True, startup_revision=reservation.startup_revision,
+    )
+    worker = f"{workspace.machine.upper()}/{workspace.worktree}"
+    queue.start(
+        task.id, worker, owner_session_id="native",
+        expected_generation=queue.get(task.id).generation,
+    )
+    report(queue, task.id, scope=bindings._scope(queue, task.id))
+    monkeypatch.setattr(submission_readiness_observation, "observe", lambda *_: {"ready": True})
+    result = queue.prepare_relevance_closeout(
+        task.id, request_id="closed-source", worker_id=worker, native_id="native",
+        expected_generation=queue.get(task.id).generation,
+    )
+    assert result["relationship"]["state"] == "closed"
+    snapshot = read_snapshot(queue, task.id)
+    assert snapshot["assignment"]["worker_id"] == workspace.worker_id
+    assert snapshot["closeout"]["worker_id"] == workspace.worker_id
+    assert snapshot["release_outcome"] == "relevance_closeout_ready"
+
+
+def test_repeated_readiness_reads_do_not_scan_unrelated_reservation_history(
+    ready: Ready, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    queue, _, workspace, task, _ = ready
+    prepare(queue, workspace, task)
+    connect = queue._connect
+    steps = 0
+    queries: list[str] = []
+
+    def progress() -> int:
+        nonlocal steps
+        steps += 1
+        return 0
+
+    def traced() -> sqlite3.Connection:
+        conn = connect()
+        conn.set_progress_handler(progress, 100)
+        conn.set_trace_callback(queries.append)
+        return conn
+
+    monkeypatch.setattr(queue, "_connect", traced)
+
+    def read_cost(start: int, end: int) -> int:
+        nonlocal steps
+        with connect() as conn:
+            conn.executemany(
+                "INSERT INTO spawn_reservations"
+                " (key,task_id,attempt,state,reserved_at,updated_at,worktree)"
+                " VALUES (?, ?, 1, 'failed', 1, 1, ?)",
+                [(f"foreign-{i}", f"foreign-{i}", None if i % 2 else f"tree-{i}")
+                 for i in range(start, end)],
+            )
+        steps = 0
+        assert read_snapshot(queue, task.id)["release_outcome"] == "relevance_closeout_ready"
+        return steps
+
+    small, large = read_cost(0, 100), read_cost(100, 1000)
+    assert large <= small * 2 + 20, (small, large)
+    history = next(
+        query for query in queries if query.startswith("SELECT s.*,a.native_session_id")
+    )
+    with connect() as conn:
+        plan = conn.execute("EXPLAIN QUERY PLAN " + history).fetchall()
+    assert not any(row[3].startswith("SCAN s") for row in plan), [row[3] for row in plan]
