@@ -22,6 +22,7 @@ from .client_pool_decline import PoolDeclineClientMixin
 from .client_pool_startup import PoolStartupClientMixin
 from .client_registrations import RegistrationClientMixin
 from .client_relevance import RelevanceClientMixin
+from .client_relevance_closeout import RelevanceCloseoutClientMixin
 from .client_schedules import ScheduleClientMixin
 from .client_spawn_reservations import SpawnReservationClientMixin
 from .client_spawn_terminal import SpawnTerminalClientMixin
@@ -34,7 +35,7 @@ from .client_verification import VerificationClientMixin
 from .client_worktree_status import WorktreeStatusClientMixin
 
 
-class DispatchClient(RelevanceClientMixin, PoolDeclineClientMixin, PoolStartupClientMixin, PoolPlacementClientMixin, TaskRecoveryClientMixin, CleanupRecoveryClientMixin, CategoryClientMixin, ScheduleClientMixin, RegistrationClientMixin, WorktreeStatusClientMixin, CompletionReviewMixin, SuspendClientMixin, VerificationClientMixin, ClearExcludeClientMixin, SpawnTerminalClientMixin, SpawnReservationClientMixin, EventStreamClientMixin, SteeringClientMixin, StandingClientMixin):
+class DispatchClient(RelevanceCloseoutClientMixin, RelevanceClientMixin, PoolDeclineClientMixin, PoolStartupClientMixin, PoolPlacementClientMixin, TaskRecoveryClientMixin, CleanupRecoveryClientMixin, CategoryClientMixin, ScheduleClientMixin, RegistrationClientMixin, WorktreeStatusClientMixin, CompletionReviewMixin, SuspendClientMixin, VerificationClientMixin, ClearExcludeClientMixin, SpawnTerminalClientMixin, SpawnReservationClientMixin, EventStreamClientMixin, SteeringClientMixin, StandingClientMixin):
     """A synchronous client for one coordinator base URL."""
 
     def __init__(

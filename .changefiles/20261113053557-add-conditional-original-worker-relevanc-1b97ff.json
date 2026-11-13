@@ -1,0 +1,9 @@
+{
+  "comment": "Add conditional original-worker relevance closeout through pinned task authority and canonical workspace finalization",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}
