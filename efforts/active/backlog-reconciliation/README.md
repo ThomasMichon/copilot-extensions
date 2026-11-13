@@ -342,6 +342,14 @@ the non-public approval conversation.
 
 ## Plan
 
+The [reviewed-receiving readiness unit](journal/2026/11.13-reviewed-receiving-readiness.md)
+screens 46 older mapped originals and verifies actual complete D4214
+receiving in the existing Active Dispatch effort. #4214's separate
+`NOT_PLANNED` retirement changes no receiver byte or check state; all four
+technical rows remain unchecked. #4783's actual bot-linked-source
+qualification gap and other prior owner conditions survive. The complete
+queue is 863 open, 134 above fixed 729.
+
 The [23-contract study](journal/2026/11.13-finite-source-and-existing-receivers.md)
 verifies two finite source completions, retains nineteen positive gaps and
 records accepted [Bridge](bridge-reregistration-receiving.md) and
@@ -3442,6 +3450,14 @@ sources, transferring owners or turning partial/planning gains into completion.
   normal publication flow.
 
 ## Validation Plan
+
+The [existing-receiving audit](journal/2026/11.13-reviewed-receiving-readiness.md)
+verifies eight whole documentary files and full primary histories, actual
+ROOT/direct/local/global/coordination/journal inclusion, the complete
+original/two-comment crosswalk, fresh source/roster/blob applicability and
+exact `NOT_PLANNED` acknowledgment with original/discussions unchanged.
+No receiver edit or implementation/native/resource acceptance is inferred;
+the other 24 OPEN mapped originals are not newly adjudicated by this unit.
 
 The [finite-source/receiving audit](journal/2026/11.13-finite-source-and-existing-receivers.md)
 verifies 23 whole unions, all 29 admitted materialized blobs, three unread
