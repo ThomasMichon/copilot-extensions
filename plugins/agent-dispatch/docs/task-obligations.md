@@ -167,6 +167,64 @@ matches the retained allocation evidence, and requires it for a cohort-v1
 creation. All original sessionless task, reservation, attempt, driver,
 supervisor, creating-machine and ownership checks still apply before prompting.
 
+## Original session-origin reservation
+
+The reservation owner independently retains `session_origin` in the Bridge
+`DispatchSessionOrigin` version-1 shape: original `task_id`, `reservation_key`
+and `cohort` (`dispatch-assignment-cohort`, version `1`). It captures the actual
+producer receipt and matching pool claim inside the original reservation
+transaction, before any body preparation. Failure rolls back the claim.
+This is a candidate birth input, not evidence that a native was created:
+Bridge's first-save session record alone identifies the actual session origin.
+Resuming an older session never backfills its origin.
+
+Session and workspace keys have different lifetimes. A new acquisition delivery
+belongs to its current reservation, even when its workspace retains an earlier
+allocation or task episode. Ordinary keyed creation instead retains the first
+ordinary reservation for that `creation_key`; retrying a lost creation response
+cannot substitute a later task's origin. `session_origin_reservation_key`
+identifies that original reservation. Driver changes do not borrow an acquisition
+request as the original ordinary creation. A new allocation key gets its own
+snapshot; an existing targeted/reused workspace is never restamped.
+
+The existing reservation and pool-placement operations optionally accept
+`session_origin_transport: "baseline"` or `"origin-v1"`. Selection commits with
+the original snapshot and claim, never in a later preparation transaction.
+Omission selects baseline for a new native request. Thus an unchanged caller
+cannot send baseline while leaving a mutable pending choice for a later retry.
+Origin-v1 requires representable original evidence. Evidence, original-owner
+references and the selected transport are immutable.
+
+All ordinary attempts for a creation key participate in transport reconciliation,
+including an intervening rolled-back provider's baseline. Historical null choices
+remain conservatively baseline; contradictory sealed choices refuse. An active
+reservation replay cannot change its transport. A separately keyed acquisition
+or first ordinary creation can select origin-v1 despite inherited workspace
+facts: carrying a project/path is not current-attempt preparation.
+Lost responses retain the same reservation/request, never a second native form.
+Granting a new ordinary attempt on an origin-v1 lineage requires explicit
+origin-v1 confirmation. An unchanged supervisor that omits it is refused before
+the new reservation/claim commits, rather than receiving permission to send a
+baseline creation. Existing baseline lineages remain compatible.
+
+The running coordinator advertises `session_origin_reservation_versions: [1]`
+through its existing pool-placement contract. The explicit client checks that
+selected peer before sending the optional property and confirms the returned
+selection before permitting startup. Older callers retain unchanged request
+bodies; an older, invalid or rolled-back provider receives no new syntax.
+Historical rows migrate to baseline with null evidence and remain unattributed.
+The old form has no scheduled retirement. No separate selection endpoint or
+preparation marker is introduced. This expansion does not yet migrate automatic
+session callers, qualify Bridge adoption or confer cleanup authority.
+
+Capture adds indexed reservation/creation-key reads plus the existing
+producer and exact-assignment point reads, once per newly committed reservation.
+Ordinary transport reconciliation examines that creation key's indexed attempt
+lineage and returns grouped choices; it does not scan unrelated reservations.
+Reads do not enrich or recapture it. No process, network request, registrar scan,
+background flow or additional ownership registry is introduced. Selection stays
+inside the existing reservation transaction.
+
 ## Original assignment cohort
 
 New protected assignment requests retain an additive `cohort` object with
