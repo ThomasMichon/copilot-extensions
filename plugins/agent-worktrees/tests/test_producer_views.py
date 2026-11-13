@@ -32,9 +32,14 @@ def ledgers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setattr(cfg, "load_project_config", lambda *a, **k: config)
     monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path / "p" / "worktrees")
     monkeypatch.setattr(cfg, "detect_platform", lambda: "linux")
+    monkeypatch.setattr(cfg.socket, "gethostname", lambda: "m")
+    monkeypatch.setattr(cfg, "global_config_path", lambda: tmp_path / "global.yaml")
     for project in ("p", "q"):
         records = tmp_path / project / "worktrees"
         records.mkdir(parents=True)
+        (records.parent / "config.yaml").write_text(yaml.safe_dump({
+            "repos": {project: {"anchor": str(tmp_path)}},
+        }), encoding="utf-8")
         for name in ("owner", "consumer", "last"):
             tracking.create_new_record(name, f"worktree/{name}", str(tmp_path / "trees" / name), project, "m", "linux", records)
     return tmp_path
@@ -102,7 +107,7 @@ def test_tuple_reservation_scans_execution_owner_or_explicit_uncertainty(
     monkeypatch.setattr(cfg, "load_config", lambda *_a, **_kw: config)
     monkeypatch.setattr(cfg, "load_project_config", lambda *_a, **_kw: config)
     (ledgers / "machines.yaml").write_text(
-        "machines:\n  guest-space: {execution_platform: linux, physical_host: desk}\n",
+        "machines:\n  guest-space: {hostname: m, execution_platform: linux, physical_host: desk}\n",
         encoding="utf-8",
     )
     mutate(ledgers, lambda data: data.update(
@@ -120,23 +125,19 @@ def test_tuple_reservation_scans_execution_owner_or_explicit_uncertainty(
             if damage == "version":
                 data["machine_identity_version"] = 2
             elif damage == "execution":
-                data.pop("execution_machine")
+                data.pop("execution_machine", None)
             elif damage == "environment":
                 data["environment"] = "windows"
             else:
-                data.pop("platform")
+                data.pop("platform", None)
         mutate(ledgers, corrupt)
     before = {path: path.read_bytes() for path in ledgers.rglob("*") if path.is_file()}
     snapshot = scan_ownership(owner="guest-space/p/owner")
-    if damage:
-        assert not snapshot["complete"] and snapshot["resolution"] == "unknown"
-        assert "record-unavailable" in {item["code"] for item in snapshot["issues"]}
-    else:
-        assert snapshot["complete"], snapshot["issues"]
-        assert snapshot["entries"][0]["record_owner"] == "guest-space/p/owner"
-        assert snapshot["entries"][0]["current_owner"] == "guest-space/p/owner"
-        assert snapshot["entries"][0]["creator"] == "guest-space/p/owner"
-        assert snapshot["entries"][0]["phase"] == "pending"
+    assert snapshot["complete"], snapshot["issues"]
+    assert snapshot["entries"][0]["record_owner"] == "guest-space/p/owner"
+    assert snapshot["entries"][0]["current_owner"] == "guest-space/p/owner"
+    assert snapshot["entries"][0]["creator"] == "guest-space/p/owner"
+    assert snapshot["entries"][0]["phase"] == "pending"
     assert before == {path: path.read_bytes() for path in ledgers.rglob("*") if path.is_file()}
 
 
@@ -153,6 +154,61 @@ def test_real_transfer_chain_preserves_creator_and_current_owner(ledgers: Path) 
     assert [row["record_owner"] for row in snapshot["entries"] if row["resolution"] == "current"] == ["m/p/last"]
     only_creator = scan_ownership(owner="m/p/owner")
     assert only_creator["entries"][0]["current_owner"] == "m/p/last"
+
+
+@pytest.mark.parametrize("transferred", [False, True])
+def test_rename_projects_current_owner_without_rewriting_producer_history(
+    ledgers: Path, transferred: bool,
+) -> None:
+    bound = reserve(ledgers, bound=True)
+    if transferred:
+        bundle, _ = claim_handoffs.offer("m/p/owner", "m/p/consumer", [bound["ref"]], machine="m")
+        claim_handoffs.accept(bundle.bundle_id, actor="m/p/consumer", machine="m")
+    (ledgers / "machines.yaml").write_text(
+        "machines:\n  renamed: {hostname: m, execution_platform: linux}\n", encoding="utf-8",
+    )
+    before = {path: path.read_bytes() for path in ledgers.rglob("*.yaml")}
+    current = "consumer" if transferred else "owner"
+    snapshot = scan_ownership(owner=f"renamed/p/{current}")
+    assert snapshot["complete"], snapshot["issues"]
+    assert len(snapshot["entries"]) == 1
+    row = snapshot["entries"][0]
+    assert row["creator"] == row["producer"]["creator"] == "m/p/owner"
+    assert row["record_owner"] == row["current_owner"] == f"renamed/p/{current}"
+    assert row["resolution"] == "current"
+    assert {path: path.read_bytes() for path in before} == before
+
+
+@pytest.mark.parametrize("rename_again", [False, True])
+def test_transfer_after_rename_reconciles_all_historical_creator_spellings(
+    ledgers: Path, monkeypatch: pytest.MonkeyPatch, rename_again: bool,
+) -> None:
+    from dataclasses import replace
+
+    bound = reserve(ledgers, bound=True)
+    topology = ledgers / "machines.yaml"
+    topology.write_text(
+        "machines:\n  renamed: {hostname: m, execution_platform: linux}\n", encoding="utf-8",
+    )
+    config = replace(cfg.load_config(), machine="renamed")
+    monkeypatch.setattr(cfg, "load_config", lambda *a, **k: config)
+    monkeypatch.setattr(cfg, "load_project_config", lambda *a, **k: config)
+    bundle, _ = claim_handoffs.offer(
+        "renamed/p/owner", "renamed/p/consumer", [bound["ref"]], machine="renamed",
+    )
+    claim_handoffs.accept(bundle.bundle_id, actor="renamed/p/consumer", machine="renamed")
+    current = "renamed"
+    if rename_again:
+        current = "latest"
+        topology.write_text(
+            "machines:\n  latest: {hostname: m, execution_platform: linux}\n", encoding="utf-8",
+        )
+    before = {path: path.read_bytes() for path in ledgers.rglob("*.yaml")}
+    snapshot = scan_ownership()
+    assert snapshot["complete"], snapshot["issues"]
+    assert {row["creator"] for row in snapshot["entries"]} == {"m/p/owner"}
+    assert {row["current_owner"] for row in snapshot["entries"]} == {f"{current}/p/consumer"}
+    assert {path: path.read_bytes() for path in before} == before
 
 
 @pytest.mark.parametrize("damage", ["missing", "marker", "source", "mismatch", "cycle"])
@@ -218,7 +274,7 @@ def test_explicit_empty_registry_is_only_not_observed(ledgers: Path) -> None:
     assert not snapshot["absence_proof"] and not snapshot["cleanup_authority"]
 
 
-@pytest.mark.parametrize("field,value", [("machine", None), ("repo", "other"), ("worktree_id", "other"), ("branch", [])])
+@pytest.mark.parametrize("field,value", [("repo", "other"), ("worktree_id", "other"), ("branch", [])])
 def test_record_identity_damage_is_explicit(ledgers: Path, field: str, value: object) -> None:
     mutate(ledgers, lambda data: data.update({field: value}))
     assert not scan_ownership()["complete"]

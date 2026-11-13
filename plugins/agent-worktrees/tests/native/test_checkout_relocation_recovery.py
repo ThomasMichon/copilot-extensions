@@ -43,6 +43,49 @@ def test_failed_pointer_barrier_keeps_the_retryable_preceding_checkpoint(checkou
     assert not checkout.source.exists()
 
 
+@pytest.mark.parametrize("abort", [False, True])
+def test_legacy_move_journal_recovers_after_reporter_rename(checkout, monkeypatch, abort):
+    from agent_worktrees import config as cfg
+
+    fixture = checkout
+    stopped = relocation._stopped
+
+    def scoped(record, path):
+        if (
+            record.yaml_path == fixture.record.yaml_path
+            and record.creation_nonce == fixture.record.creation_nonce
+            and Path(path).parent in {fixture.source.parent, fixture.destination.parent}
+            and not record.sessions and not record.head_session
+        ):
+            return
+        stopped(record, path)
+
+    monkeypatch.setattr(relocation, "_stopped", scoped)
+    with monkeypatch.context() as injection:
+        def interrupted(*args):
+            raise OSError("fixture copy interruption")
+        injection.setattr(relocation.transfer, "copy", interrupted)
+        with pytest.raises(OSError, match="fixture copy"):
+            relocation.move(fixture.record.worktree_id, str(fixture.destination), fixture.config)
+    retained = state.read(fixture.record.yaml_path)
+    retained["identity"].update(
+        machine=fixture.record.machine, platform=fixture.record.platform,
+        execution_machine=fixture.record.execution_machine, machine_identity=None,
+    )
+    state.write(fixture.record.yaml_path, retained)
+    (fixture.anchor / "machines.yaml").write_text(json.dumps({"machines": {
+        "renamed": {"hostname": cfg.socket.gethostname(), "execution_platform": cfg.detect_platform()},
+    }}), encoding="utf-8")
+    config = replace(fixture.config, machine="renamed")
+    operation = relocation.abort if abort else relocation.move
+    result = operation(fixture.record.worktree_id, str(fixture.destination), config)
+    assert result["phase"] == ("cancelled" if abort else "complete")
+    assert result["stage"] == retained["stage"]
+    assert result["identity"]["creation_nonce"] == fixture.record.creation_nonce
+    assert fixture.source.exists() is abort
+    assert fixture.destination.exists() is not abort
+
+
 @pytest.mark.parametrize("kind", ["trust", "permissions"])
 def test_permission_write_access_is_rechecked_under_its_owner_lock(checkout, kind):
     paths = relocation.permission_paths

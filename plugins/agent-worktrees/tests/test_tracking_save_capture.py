@@ -181,8 +181,8 @@ def test_unchanged_and_failed_canonical_writes_do_not_invent_transitions(saved):
         before = path.read_bytes()
         events.clear()
         legacy.clear()
-        record._loaded_machine = "different-owner"
-        with pytest.raises(ValueError, match="owner machine changed"):
+        record._loaded_record_subject = ("different-ledger",)
+        with pytest.raises(ValueError, match="record subject changed"):
             tracking.save_record(record, path)
         assert path.read_bytes() == before
     assert events == legacy == []
