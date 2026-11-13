@@ -23,6 +23,15 @@ historical binary rollback or native SDK evidence.
 
 ## Current HTTP-52 owner-membership evidence
 
+The ordinary keyed-creation CLI/client origin carrier adds 25 source controls,
+bringing the current portfolio to 491. File/stdin parser calls join the real
+client, health negotiation, HTTP owner and first-save database without an
+acquisition. Composed writer/origin requirements, unsupported peers, cutover
+without baseline replay and invalid pre-connection forms retain strict
+semantics. The executing CLI publishes its creation and acquisition carriers
+through the existing contract declaration. No daemon capability or HTTP
+generation changes; automatic Dispatch callers remain separate.
+
 The independently optional `dispatch_cli_session_origin: 1` expansion adds 24
 source controls for original-acquisition first-save registration, pending
 unconfirmed launch, replay, same-process rename, legacy and stamped resume,

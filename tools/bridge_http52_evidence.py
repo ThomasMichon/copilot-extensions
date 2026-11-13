@@ -125,6 +125,7 @@ EXTRA_PATHS = (
     "plugins/agent-bridge/tests/test_workspace_creation.py",
     "plugins/agent-bridge/tests/test_dispatch_session_origin.py",
     "plugins/agent-bridge/tests/test_dispatch_cli_origin.py",
+    "plugins/agent-bridge/tests/test_dispatch_origin_cli.py",
     "plugins/agent-bridge/tests/test_worktree_native_resume.py",
     "plugins/agent-bridge/docs/dispatch-session-origin.md",
     "plugins/agent-bridge/docs/retained-acquisition-writer.md",
@@ -146,6 +147,11 @@ EXTRA_PATHS = (
 )
 PROBES = {
     **retained.PROBES,
+    "test_origin_cli_reaches_actual_keyed_owner_without_acquisition": 2,
+    "test_origin_creation_client_composes_required_selected_peer_capabilities": 6,
+    "test_origin_creation_client_rechecks_after_cutover_without_baseline_replay": 1,
+    "test_origin_creation_client_invalid_scope_refuses_before_peer_discovery": 6,
+    "test_origin_cli_invalid_forms_refuse_before_connect": 10,
     "test_origin_client_negotiates_mode_capability_before_acquisition": 10,
     "test_connected_cli_creation_persists_before_delivery_and_replays": 1,
     "test_unconfirmed_first_save_keeps_pending_effect_without_prompt_or_relaunch": 1,

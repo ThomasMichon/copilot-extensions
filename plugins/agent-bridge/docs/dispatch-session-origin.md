@@ -92,6 +92,24 @@ declarations refuse before POST instead of letting an older additive reader
 silently launch without retaining the metadata. Ordinary requests without
 origin metadata keep their prior negotiation path.
 
+Ordinary keyed ACP creation accepts `--dispatch-origin-file <path>` on
+`create`; `-` reads JSON from stdin and cannot share that stream with a prompt
+or writer requirement. It requires a prepared local worktree and creation key.
+Invalid JSON, scope and remote/provider/CLI forms refuse before connection.
+The existing Python `start_session` client accepts `dispatch_origin` and
+negotiates the ACP-origin capability before each selected-endpoint send,
+composing with retained-writer requirements. Retry across an unsupported
+daemon cutover refuses rather than dropping metadata or replaying a baseline
+form. The receiver's keyed facts retain changed/dropped-origin refusal.
+
+The executing CLI's existing `version --contracts-json` declares
+`agent-bridge.create` capability `keyed-dispatch-origin` and
+`agent-bridge.acquire` capabilities `dispatch-acp-session-origin` and
+`dispatch-cli-session-origin`. A future caller must observe the corresponding
+CLI declaration before invoking the new carrier, as well as running-daemon
+support. This does not enable automatic Dispatch enrollment or retrofit
+metadata into existing pending invocations.
+
 `tests/test_dispatch_session_origin.py` exercises strict nested input,
 original request persistence, HTTP keyed creation, changed/dropped replay facts,
 restart, mutable targeting, reused legacy sessions and pre-effect venue refusal.
@@ -104,4 +122,7 @@ SQLite, aliases and HTTP views; it covers original replay, first-save refusal,
 rollback, resume, opaque storage and schema preparation.
 These are synthetic native/owner source controls, not installed-runtime,
 native Windows or production cohort qualification.
+`tests/test_dispatch_origin_cli.py` joins the actual parser, client, HTTP
+receiver and first-save database without an acquisition. It also checks
+unsupported peers, composed requirements, cutover and pre-connection refusal.
 Required unit-packet nodes, permissions, targets and budgets are unchanged.
