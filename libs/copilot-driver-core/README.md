@@ -38,6 +38,17 @@ See the [optional provider contract](../../plugins/agent-remote-driver/README.md
 for supported ACP operations, permission limits and separate activity snapshots.
 Inventory availability does not enable automatic idle retirement.
 
+The Session Host Python `main(..., headed_run=...)` seam accepts an explicitly
+supplied in-process headed receiver while retaining the ordinary parser,
+repository policy and native creation/wait owners. Headless execution rejects
+that override rather than silently ignoring it. `--support-json` additively
+declares `headed_receivers: ["explicit-inprocess-v1"]` when headed execution
+is present. It is not a serialized-code or environment hook; a consumer owns
+any fixed retained executable and additional dependencies. The optional
+[MCP headed receiver](../../plugins/agent-mcp/docs/session-generation.md#opt-in-retained-windows-headed-receiver)
+is one explicit consumer. Ordinary core bundles have no MCP dependency or
+automatic originating-owner enrollment.
+
 Worktrees' mux-creation adapter also consumes this core. The core owns its
 short native check/create lease, neutral client working directory, nesting
 scrub and uncertain-creation handling. Workspace allocation, pane argument
@@ -165,6 +176,22 @@ receiving executable under the original attempt, independent of the caller's
 venv. Neither path allocates a workspace, mux or additional launch journal.
 Original native startup admission and literal prompt argv are preserved.
 Full caller migration and restoration qualification remain in progress.
+
+An in-process Windows caller may explicitly supply
+`run_headed(..., native_handoff=WindowsNativeHandoff(callback, handles))`.
+The existing headed native-child owner creates the selected direct
+`copilot.exe` suspended, retains its original `Popen` and strict Job, and calls
+the finite callback before execution. Explicit handles must already be
+inheritable; the native handle list borrows them without changing their flags.
+The callback must return `None` and must not resume or substitute the child.
+The same owner retains the original wait and settles its Job after exit.
+Interrupted settlement retains its original cleanup task and native custody
+in the cleanup error; it never authorizes replay.
+Script/coordinator images, shell/executable overrides, unsupported platforms
+and auth-wait composition are refused. This API is not a serialized-code hook,
+CLI option or automatic MCP overlay. Default headed creation, startup admission and auth custody remain
+unchanged; selecting and consuming a productive overlay through the retained
+executable remains separate qualification.
 
 `headed.caller.execute` retains that executable as the original Python
 caller's foreground child. A live, PID/birth-bound admission channel rechecks

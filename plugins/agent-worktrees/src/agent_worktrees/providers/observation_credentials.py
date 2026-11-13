@@ -6,12 +6,14 @@ import base64
 import math
 import time
 from collections.abc import Callable
+from dataclasses import dataclass, field
 from typing import Protocol
 from urllib.parse import urlsplit
 
 from .base import ProviderError
 
 MAX_SNAPSHOT_REQUESTS = 64
+HTTP_PROFILES = ("legacy", "direct-v1")
 
 
 class ForgeBinding(Protocol):
@@ -39,6 +41,22 @@ class ObservationCredential(Protocol):
 CredentialSource = Callable[[], ObservationCredential]
 
 
+@dataclass(frozen=True)
+class _ProfiledSource:
+    source: CredentialSource = field(repr=False)
+    http_profile: str
+
+    def __call__(self) -> ObservationCredential:
+        return self.source()
+
+
+def with_http_profile(source: CredentialSource, profile: str) -> CredentialSource:
+    """Request a transport, not credential verification or effect authority."""
+    if profile not in HTTP_PROFILES or not callable(source):
+        raise ValueError("unsupported native observation HTTP profile")
+    return source if profile == "legacy" else _ProfiledSource(source, profile)
+
+
 class ObservationCredentialError(ProviderError):
     """Abort the entire observation, including otherwise best-effort reads."""
 
@@ -55,6 +73,11 @@ class ObservationCredentials:
         self.source = source
         self.provider, self.api_base, self.repository = provider, api_base, repository
         self.max_requests, self.requests = max_requests, 0
+        self.http_profile = getattr(source, "http_profile", "legacy")
+        if self.http_profile not in HTTP_PROFILES or (
+            self.http_profile != "legacy" and provider not in ("github", "gitea")
+        ):
+            raise ValueError("unsupported native observation HTTP profile")
 
     def acquire(self) -> ObservationCredential:
         if self.max_requests is not None and self.requests >= self.max_requests:

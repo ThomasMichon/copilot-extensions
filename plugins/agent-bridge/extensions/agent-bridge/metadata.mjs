@@ -21,14 +21,9 @@
 // readiness. The four calls also run in parallel (`Promise.all`), bounded by
 // the single slowest one instead of their sum.
 //
-// Even async, a `get` can outlast any fixed timeout on a contended host, and a
-// lookup that always times out would leave the session untargetable for its
-// whole life. So the identity agent-worktrees' sessionStart hook already
-// stamped into this session's own state folder (`worktree-binding.json`) is
-// read first -- a bounded async file read, no subprocess -- and re-read on
-// every refresh, since that hook can finish after this extension loaded. The
-// CLI stays the fallback for whatever the binding lacks, and the refresher
-// gives it a longer timeout than the load-time lookup.
+// The session binding supplies association only. Current machine naming comes
+// from live OS/configuration observations, never a saved worktree/binding field.
+// Missing associations retain the asynchronous, backoff-bounded CLI fallback.
 import { exec, execFile } from "node:child_process";
 import { constants, realpathSync } from "node:fs";
 import { lstat, open } from "node:fs/promises";
@@ -125,7 +120,7 @@ async function readBindingFile(root, sessionId) {
   }
 }
 
-// Resolves this session's `{ worktree_id, machine, repo }` from its binding
+// Resolves this session's `{ worktree_id, repo }` from its binding
 // (each null when the binding lacks a usable value), or null without one.
 export async function readSessionBinding(sessionId, { env = process.env } = {}) {
   if (!bindingSegment(sessionId)) return null;
@@ -134,9 +129,9 @@ export async function readSessionBinding(sessionId, { env = process.env } = {}) 
     if (!binding || typeof binding !== "object" || binding.sessionId !== sessionId) continue;
     const usable = (value) => (bindingSegment(value) ? value : null);
     const identity = {
-      worktree_id: usable(binding.worktreeId), machine: usable(binding.machine), repo: usable(binding.project),
+      worktree_id: usable(binding.worktreeId), repo: usable(binding.project),
     };
-    if (identity.worktree_id || identity.machine || identity.repo) return identity;
+    if (identity.worktree_id || identity.repo) return identity;
   }
   return null;
 }
@@ -148,6 +143,7 @@ export async function readSessionBinding(sessionId, { env = process.env } = {}) 
 // absent/partial value and self-corrects on the next heartbeat.
 export async function resolveMetadataAsync({
   cwd = process.cwd(), env = process.env, sessionId = null, timeoutMs = METADATA_CLI_TIMEOUT_MS,
+  machineResolver = resolveMachineAsync,
 } = {}) {
   if (env.AGENT_BRIDGE_RECEIVING_PLUGIN_ROOT) {
     const root = env.AGENT_BRIDGE_RECEIVING_PLUGIN_ROOT;
@@ -172,7 +168,7 @@ export async function resolveMetadataAsync({
   const [branch, sessionScopeId, machine, repo] = await Promise.all([
     runCliAsync("git", ["rev-parse", "--abbrev-ref", "HEAD"], cwd),
     known(env.AGENT_BRIDGE_SCOPE_ID || bound?.worktree_id, "session-scope-id"),
-    known(bound?.machine, "machine"),
+    machineResolver({ cwd, timeoutMs }),
     known(bound?.repo, "project"),
   ]);
   return {
@@ -201,6 +197,23 @@ export async function resolveMetadataAsync({
   };
 }
 
+export async function resolveMachineAsync({
+  cwd = process.cwd(), timeoutMs = METADATA_CLI_TIMEOUT_MS, lookup = async () => undefined,
+} = {}) {
+  const current = await lookup().catch(() => null);
+  if (current !== undefined) return current;
+  return runCliAsync("agent-worktrees", ["get", "machine"], cwd, { timeoutMs }); // marketplace-isolation: allow agent-worktrees-management
+}
+
+export async function refreshRegistrationMetadata(state, machineResolver = resolveMachineAsync) {
+  if (state.meta?.receiving_scope_id === state.meta?.worktree_id && state.meta?.receiving_scope_id) {
+    return registrationMetadata(state.meta);
+  }
+  const machine = await machineResolver({ cwd: state.meta?.cwd || process.cwd() }).catch(() => null);
+  state.meta = { ...state.meta, machine: machine || null };
+  return registrationMetadata(state.meta);
+}
+
 // The identity fields a registration needs for the bridge (and its clients) to
 // place the session in its worktree: when the load-time lookup misses them (a
 // slow or failed `agent-worktrees get` under load, as right after a reboot),
@@ -221,8 +234,8 @@ export function registrationMetadata(meta) {
   };
 }
 
-// ``refresh()`` fills in an identity field above that is still missing, and
-// never replaces a value already known. Every call re-reads the sessionStart
+// ``refresh()`` fills in an association that is still missing, and
+// never replaces a known association. Every call re-reads the sessionStart
 // binding (no subprocess); the CLI lookup runs at most once per backoff (30 s
 // doubling to 10 min) with the longer refresh timeout, and once a few lookups
 // still leave the identity incomplete it is logged, once. Resolves true when
@@ -240,7 +253,7 @@ export function metadataRefresher(state, resolve = resolveMetadataAsync, now = D
   const missingFields = () => {
     const meta = state.meta || {};
     if (meta.receiving_scope_id && meta.receiving_scope_id === meta.worktree_id) return [];
-    return IDENTITY_FIELDS.filter((k) => !meta[k]);
+    return ["worktree_id", "repo"].filter((k) => !meta[k]);
   };
   const fill = (fresh) => {
     const filled = {};
@@ -257,7 +270,8 @@ export function metadataRefresher(state, resolve = resolveMetadataAsync, now = D
     running = true;
     try {
       const fresh = await resolve({
-        sessionId: state.sessionId, env, timeoutMs: METADATA_REFRESH_CLI_TIMEOUT_MS,
+        cwd: state.meta?.cwd, sessionId: state.sessionId, env,
+        timeoutMs: METADATA_REFRESH_CLI_TIMEOUT_MS, machineResolver: async () => null,
       }).catch(() => null);
       attempts += 1;
       const fromLookup = fill(fresh);

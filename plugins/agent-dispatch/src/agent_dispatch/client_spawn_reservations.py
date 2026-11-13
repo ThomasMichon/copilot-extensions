@@ -15,6 +15,30 @@ from typing import Any
 import httpx
 
 
+def require_session_origin_support(contract: dict, requested: str | None = None) -> None:
+    from .client_errors import DispatchError
+
+    versions = contract.get("session_origin_reservation_versions")
+    version = 2 if requested == "prefer-origin-v1" else 1
+    if not isinstance(versions, list) or not any(type(v) is int and v == version for v in versions):
+        raise DispatchError(426, f"coordinator lacks session origin reservation version {version}")
+
+
+def selected_session_origin(result: dict, requested: str | None) -> dict:
+    from .client_errors import DispatchError
+
+    if requested is not None and (
+        not isinstance(result, dict) or not isinstance(result.get("reservation"), dict)
+        or result["reservation"].get("session_origin_transport") not in (
+            ("baseline", "origin-v1") if requested == "prefer-origin-v1" else (requested,)
+        )
+        or result["reservation"].get("session_origin_transport") == "origin-v1"
+        and not isinstance(result["reservation"].get("session_origin"), dict)
+    ):
+        raise DispatchError(502, "session origin reservation outcome is unknown")
+    return result
+
+
 class SpawnReservationClientMixin:
     """``list_reservations``/``get_reservation``, mixed into
     ``DispatchClient``.

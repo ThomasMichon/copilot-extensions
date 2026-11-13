@@ -1,0 +1,9 @@
+{
+  "comment": "Derive live-session machine naming from current reporter observations and machine configuration rather than saved bindings",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

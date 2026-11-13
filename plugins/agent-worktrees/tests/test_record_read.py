@@ -57,6 +57,27 @@ def invoke(*args):
     return rc, json.loads(captured.getvalue())
 
 
+@pytest.mark.parametrize("session_state", ["active", "yielded", "concluded"])
+@pytest.mark.parametrize("checkout_managed", [None, True, False])
+def test_exact_record_exposes_indexed_id_even_without_an_active_head(
+    record_fixture, session_state, checkout_managed,
+):
+    data, path = record_fixture
+    data["sessions"] = [{"session_id": "original-native", "state": session_state}]
+    if checkout_managed is not None:
+        data["checkout_managed"] = checkout_managed
+    path.write_text(yaml.safe_dump(data), encoding="utf-8")
+    before = path.read_bytes()
+    rc, response = invoke(data["worktree_id"])
+    assert rc == 0
+    record = response["worktree"]
+    assert record["session_ids"] == ["original-native"]
+    assert record["session_count"] == 1
+    assert record["last_session_id"] == ("original-native" if session_state == "active" else None)
+    assert record["checkout_managed"] is checkout_managed
+    assert path.read_bytes() == before
+
+
 def test_exact_record_never_falls_back_to_matching_foreign_head(record_fixture, monkeypatch):
     data, path = record_fixture
     foreign_dir = path.parents[2] / ".other-project" / "worktrees"
@@ -305,6 +326,7 @@ def test_record_read_exact_unpublished_record_and_unchanged_list(record_fixture,
         "creation_nonce": data["creation_nonce"],
         "status": "active",
         "session_count": 0,
+        "session_ids": [],
         "last_session_id": None,
         "execution_leg": None,
         "execution_leg_opaque": False,
@@ -328,7 +350,10 @@ def test_record_read_exact_unpublished_record_and_unchanged_list(record_fixture,
 
 
 @pytest.mark.parametrize("task_id", ["assigned-task", "foreign-task"])
-def test_record_read_preserves_canonical_dispatch_attribution(record_fixture, task_id, monkeypatch):
+@pytest.mark.parametrize("with_cohort", [False, True])
+def test_record_read_preserves_canonical_dispatch_attribution(
+    record_fixture, task_id, monkeypatch, with_cohort,
+):
     data, path = record_fixture
     attribution = {
         "task_id": task_id,
@@ -339,6 +364,20 @@ def test_record_read_preserves_canonical_dispatch_attribution(record_fixture, ta
         "creator_machine": "example-owner",
         "ownership": "created",
     }
+    if with_cohort:
+        attribution["cohort"] = {
+            "schema": "dispatch-assignment-cohort", "version": 1,
+            "emitter": {
+                "repo": data["repo"], "source": "emitter", "producer_id": "source-reader",
+                "generation": 2, "request_id": "original-request", "task_id": task_id,
+            },
+            "pool": {
+                "task_id": task_id, "registration_id": "original-pool",
+                "machine": "example-owner", "env": "linux",
+                "reservation_key": attribution["reservation_key"],
+                "task_generation": 3, "catalog_revision": 7,
+            },
+        }
     data["dispatch_attempt"] = attribution
     path.write_text(yaml.safe_dump(data), encoding="utf-8")
     before = path.read_bytes()

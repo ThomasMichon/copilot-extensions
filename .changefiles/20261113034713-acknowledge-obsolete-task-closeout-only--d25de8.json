@@ -1,0 +1,9 @@
+{
+  "comment": "Acknowledge obsolete-task closeout only after independent finalized-workspace observation and an atomic terminal transition.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

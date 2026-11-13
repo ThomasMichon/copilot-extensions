@@ -815,6 +815,9 @@ def fingerprint_source(
             resolved_parents[parent] = Path(_normalize_windows_extended_path(str(
                 _native_path(parent).resolve(),
             )))
+        # Unlike a symlink name, '..' must match the root normalized by native I/O.
+        if os.name == "nt" and raw.name == "..":
+            return resolved_parents[parent].parent
         return resolved_parents[parent] / raw.name
 
     roots = [_declared_root_path(p) for p in paths]

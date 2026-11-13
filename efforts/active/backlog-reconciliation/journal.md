@@ -3,6 +3,26 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-13 - Reviewed receiving readiness recovered](journal/2026/11.13-reviewed-receiving-readiness.md)
+
+- [2026-11-13 - Finite source completions and existing receivers](journal/2026/11.13-finite-source-and-existing-receivers.md)
+
+- [2026-11-13 - Current contracts and exact-dedup proposal](journal/2026/11.13-current-contracts-and-dedup-proposal.md)
+
+- [2026-11-13 - Loader/report source and accountability proposal](journal/2026/11.13-loader-report-source-and-accountability-proposal.md)
+
+- [2026-11-13 - Monitor goals and decline source completions](journal/2026/11.13-monitor-goals-and-decline-source-completions.md)
+
+- [2026-11-13 - Comment receiving and source qualification](journal/2026/11.13-comment-receiving-and-source-qualification.md)
+
+- [2026-11-13 - Adoption source and original-history boundaries](journal/2026/11.13-adoption-source-and-original-history.md)
+
+- [2026-11-13 - Finite source and MCP receiving boundaries](journal/2026/11.13-finite-source-and-mcp-receiving.md)
+
+- [2026-11-13 - Source fixtures and independent typing receiving](journal/2026/11.13-source-fixtures-and-typing-receiving.md)
+
+- [2026-11-13 - Finite leaf and guidance completions](journal/2026/11.13-finite-leaf-and-guidance-completions.md)
+
 - [2026-11-12 - Finite source completion and receiver corrections](journal/2026/11.12-finite-source-completion-and-receiver-corrections.md)
 
 - [2026-11-12 - Producer, recovery and snapshot boundaries](journal/2026/11.12-producer-recovery-and-snapshot-boundaries.md)

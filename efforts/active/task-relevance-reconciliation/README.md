@@ -110,6 +110,9 @@ merged plan does not establish running adoption.
 - [ ] Preserve closeout intent through restart, owner recovery and requeue.
       Recovering an obsolete task must not restart its original work.
       Unknown or unavailable owner state remains visible for recovery.
+      Accepted original-owner wake and steering now survive same-generation
+      unassignment and requeue in source controls. Generation-advancing recovery,
+      uncaptured owners and actual lifecycle closeout remain open.
 
 ### Phase 3 - Source and periodic evaluation integration
 
@@ -143,20 +146,51 @@ merged plan does not establish running adoption.
       propagation and running qualification remain open.
       Worktrees provider expansion retains optional original cohort metadata in
       first-save records and replay. Dispatch discovers the selected provider
-      before sealing its immutable wire choice; Bridge callers remain unmodified.
+      before sealing its immutable wire choice.
       The reservation owner retains allocation-cohort evidence before body
       preparation, separately from later assignment audit evidence.
       The [ACP session-origin provider](../../../plugins/agent-bridge/docs/dispatch-session-origin.md)
       merged in #12373; CLI-native first-save registration and selected-daemon
       acquisition negotiation merged in #12387. The ordinary keyed-creation
-      CLI/client carrier, Dispatch caller migration and running qualification
-      remain open.
-- [ ] Expose forward and reverse correlation through existing owner APIs.
+      CLI/client carrier and executing-CLI declarations merged in #12396.
+      The reservation owner now captures session-origin candidates separately
+      from reusable allocation evidence and seals optional wire selection in its
+      existing reservation/placement transaction; source merged in #12398.
+      Ordinary keyed retries retain their original session request; acquisition
+      deliveries retain their own attempt. Conditional CLI acquisition migration
+      merged in #12405; managed ordinary keyed migration merged in #12408.
+      Running qualification remains open.
+- [x] Expose forward and reverse correlation through existing owner APIs.
       Pool identity must identify the actual registration/assignment, not just
       a display name; opaque legacy records remain explicitly unattributed.
+      The [correlation guide](../../../plugins/agent-dispatch/docs/cohort-correlation.md)
+      maps existing attachment, reservation, workspace and session views.
+      Contained source controls cover original pool references after reassignment
+      and stopped/expired session discovery; installed qualification stays open.
 - [ ] Connect owner closeout acknowledgement to the existing terminal task,
       session and managed-workspace lifecycle. Preserve actual unlanded work,
       open PRs and foreign obligations rather than force-clearing them.
+      Acceptance-time resource selection now retains the original relationship
+      and exact execution reservation; acknowledgement and lifecycle effects
+      remain open. The internal independent-readiness provider can settle only
+      that original claim without releasing the native or reservation.
+      Internal acknowledgement now reuses independent finalized-workspace
+      observation and the existing terminal transition; actual own-worker
+      caller adoption, native conclusion and running qualification remain open.
+      The provider-first HTTP expansion exposes captured-owner preparation,
+      validated state and terminal acknowledgement under existing authentication,
+      drain and terminal hooks; source merged in #12435. Its task-scoped exception
+      is confined to these closeout routes, with post-observation authority
+      checks reaching the actual relationship invocation and content-free
+      scoped terminal replies. Automatic caller migration remains separate.
+      The conditional [worker CLI](../../../plugins/agent-dispatch/docs/relevance-closeout-worker.md)
+      now connects pinned own-closeout discovery, original-claim settlement,
+      canonical actual-worker finalization and independent acknowledgement.
+      New closeout wakes now direct the original worker through read-only
+      executing-CLI support discovery and that conditional caller, without a
+      generic task-read/steer prerequisite or rewriting accepted wakes.
+      Native conclusion and running qualification remain open; source prompt
+      adoption does not close the aggregate item.
 - [ ] Publish receiver support before enabling new callers; document baseline,
       upgrade and rollback behavior against the executing runtime.
 
@@ -186,6 +220,13 @@ merged plan does not establish running adoption.
       reassignment, session exit and a later task episode without guessed stamps.
 - [ ] Actual session conclusion and workspace disposition are verified
       separately from task abandonment. Live use and genuine obligations hold.
+      The [isolated original-owner composition](journal/2026/11.12-receiver-delivery.md#isolated-original-owner-composition)
+      proves the positive native/workspace path with real component processes
+      and a synthetic source/ACP actor. Its
+      [dirty-work companion](journal/2026/11.12-receiver-delivery.md#isolated-dirty-work-preservation)
+      proves actual readiness refusal while the original bound claim, checkout
+      bytes and open native hold survive. Foreign/live-use obligations, other
+      owner states and production qualification remain open.
 - [ ] Exercise current/prior receiver compatibility and declared rollback;
       unsupported peers refuse new effects without breaking existing operations.
 

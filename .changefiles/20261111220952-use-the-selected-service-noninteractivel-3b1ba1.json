@@ -1,0 +1,9 @@
+{
+  "comment": "Use the selected service noninteractively when Windows DPAPI cache decryption is unavailable, retaining unreadable cache files and authoritative failure semantics.",
+  "changes": [
+    {
+      "plugin": "agent-vault",
+      "type": "patch"
+    }
+  ]
+}

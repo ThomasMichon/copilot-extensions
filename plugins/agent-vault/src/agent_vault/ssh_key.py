@@ -188,6 +188,7 @@ def read_for_install(service, kpdb: str, entry: str) -> dict:
     if not service._credential_lock.acquire(timeout=5.0):
         raise IdentityKeyError("service_busy", FAILURE_HINTS["service_busy"])
     try:
+        service._check_password_ttl()
         if not service.ensure_unlocked(kpdb):
             raise IdentityKeyError("needs_unlock", FAILURE_HINTS["needs_unlock"])
         if time.monotonic() >= deadline:
@@ -223,6 +224,7 @@ def prepare(service, kpdb: str, entry: str, initialize: bool, confirm: bool) -> 
     if not service._credential_lock.acquire(timeout=5.0):
         raise IdentityKeyError("service_busy", FAILURE_HINTS["service_busy"])
     try:
+        service._check_password_ttl()
         if not service.ensure_unlocked(kpdb):
             raise IdentityKeyError("needs_unlock", FAILURE_HINTS["needs_unlock"])
         if time.monotonic() >= operation_deadline:

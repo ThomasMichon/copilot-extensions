@@ -11,6 +11,10 @@ class CacheProtectionError(RuntimeError):
     """A protected cache cannot safely be read or replaced."""
 
 
+class CacheDecryptionUnavailable(CacheProtectionError):
+    """This process cannot decrypt the selected Windows cache."""
+
+
 class DpapiCacheCipher:
     def encrypt(self, plaintext: bytes) -> bytes:
         try:
@@ -26,4 +30,6 @@ class DpapiCacheCipher:
         try:
             return kek._dpapi(False, ciphertext[len(MAGIC):])
         except kek.KekError as exc:
-            raise CacheProtectionError("Windows cache cannot be decrypted by this user") from exc
+            raise CacheDecryptionUnavailable(
+                "Windows cache cannot be decrypted by this logon"
+            ) from exc

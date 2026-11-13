@@ -76,12 +76,24 @@ source revisions and reopened/new source episodes.
 
 The existing wake drainer sends the closeout prompt to the retained owner and
 native conversation. Busy/idle transport handling stays with Bridge. A suspended
-task remains suspended: the prompt tells its agent to take closeout steering,
-not run `start` or `resume`. Steering consumption selects the closeout instead
+task remains suspended: new prompts direct its agent through executing-CLI
+support discovery to the guarded original-worker closeout command, not `start`
+or `resume`. Steering consumption selects the closeout instead
 of older goal instructions and does not restore a suspended execution lease.
 Submitted work can use its recorded `completed_by` worker and retained native
-without reassigning the task. Absent or changed ownership stays pending; this
-receiver never guesses a historical owner or creates a replacement agent.
+without reassigning the task. An owner absent at acceptance, or a conflicting
+later owner, stays pending; this receiver never guesses a historical owner or
+creates a replacement agent.
+
+When closeout acceptance already captured the original worker and native,
+same-generation yield, reset and requeue may clear the task's current assignment
+without invalidating that closeout's linked wake or steering. Only unassigned
+proposed/queued work can use this retained target; a different worker, native,
+generation or terminal status cannot. Delivery and steering do not restore task
+ownership, its execution lease or the original goal. A hosted conversation still
+requires its retained reservation and native identity, with release, retirement,
+cooling and conclusion guards unchanged. Recovery that advances the generation
+remains fenced; preserving intent does not authorize waking a retired native.
 
 Only the outbox row linked through the closeout's actual steer can pass its
 original-goal admission fence. A later ordinary/event-note wake cannot supersede
@@ -100,13 +112,189 @@ Supported original-native receipt reconciliation can settle acceptance without
 another send; a missing receipt is not proof of absence. A delivered wake may
 still be awaiting the agent's work.
 
+A selected Bridge CLI's typed `refused_busy` result (exit 75, matching target,
+`reason: busy`, `retryable: true`) establishes pre-admission refusal, not an
+ambiguous send. Its original invocation key and native identity must match the
+wake before settlement as `not_sent`. A later normally claimed attempt repeats
+all current owner, generation, runtime, lane and delivery-token admission.
+The prior send identity and refusal are appended to the task's existing audit
+transaction before installing the new attempt identity; no separate retry store
+is used. The wake/idempotency key and ordinary backoff/attempt cap remain the
+same. Reusing the same delivery token, an untyped historical `not_sent`,
+malformed or mismatched output, a lost response and pending/unknown outcomes
+cannot authorize another send. Existing unknown records are never rewritten
+from busy-looking error text.
+
+At first acceptance the existing closeout row also freezes `resource_binding`
+in the same queue transaction. A captured binding identifies the queue, original
+relationship audit event/request, managed workspace and, for a placed task,
+the exact execution reservation and startup revision. The current pool pointer,
+retained native identity and original relationship must agree; selection never
+falls back to the newest reservation or a matching workspace in history.
+An admitted same-workspace continuation keeps its original relationship event
+while the closeout retains the current generation/native.
+
+Missing or inconsistent ownership records produce an `unconfirmed` binding with
+a reason; notification still proceeds without authorizing resource release.
+Pre-existing closeouts have a null binding, not a reconstruction from newer
+task state. Receipt and snapshot reads decode this additive observation field.
+Requeue, restart and subsequent reports never replace the first capture.
+This is retained selection evidence only: a captured binding is neither
+owner acknowledgement nor readiness, terminal disposition, session retirement
+or worktree finalization.
+
 `closeout_pending` means **intent retained**, not resources finalized.
 `pending_owner_closeout` means no wake was linked to an available original
 owner/native. `relevance_receipt` separates immutable acceptance, current wake
 status and steering consumption. None proves actual session/workspace cleanup.
-Session conclusion, workspace disposition, recovery of cleared historical
+Session conclusion, workspace disposition, recovery of previously uncaptured
 owners and externally registered relevance callers remain pending. This slice
 does not release reservations or delete files.
+
+## Original-claim readiness
+
+The queue provider `prepare_relevance_closeout` prepares settlement
+of the captured original task relationship. The conditional HTTP provider below
+exposes it; the optional [original-worker CLI](relevance-closeout-worker.md)
+adopts it conditionally, without migrating automatic callers.
+A caller identifies the accepted closeout request, worker, native
+and generation; it cannot supply a readiness observation.
+
+The provider reads the captured relationship and exact execution reservation,
+then asks the selected local Worktrees runtime for its existing
+`agent-worktrees.dispatch-worker-readiness` version-1 observation. That owner
+independently checks the current workspace/head, original managed allocation,
+landing, holds and foreign obligations while excepting only this exact task
+claim. Unsupported, remote, unattributed or conflicting resources retain
+custody. External observation runs outside the SQLite transaction; the queue
+rechecks the original state under a write lock before retaining the first
+readiness on the existing closeout row.
+
+Only that retained, currently valid readiness allows the existing relationship
+owner to reconcile the captured assignment claim. The claim callback verifies
+the queue and original request/event, not just the task id. A lost close reply
+stays visibly retained and can converge through the original request after
+restart, without another readiness observation. Holds, changed generations,
+changed natives/reservations, cooling or pending retirement still refuse.
+The receipt is not a transferable readiness permission.
+
+Preparation changes neither task status nor native, placement or reservation
+release flags. In particular it does not yield/requeue or abandon the task:
+those transitions could let the supervisor end the original conversation before
+its agent finalizes. The agent's actual own-workspace finalization and native
+conclusion remain separate integration gates. This provider never deletes a
+checkout.
+
+Existing detail and `claim-status` syntax carry the additive
+`relevance_closeout_ready` evidence described in
+[task obligations](task-obligations.md#snapshot-and-outcomes). Older callbacks
+do not recognize that release outcome and retain the claim rather than treating
+it as ordinary completion. A prior queue without retained readiness cannot
+produce this proof; no fallback to abandonment exists. Baseline operations remain
+unchanged, with no old surface retirement. Upgrade the receiver and callback
+before enabling any caller; source qualification is not running adoption.
+
+## Finalized-workspace acknowledgement
+
+The internal `finish_relevance_closeout` receiver requires the retained
+readiness and a closed original assignment claim. It independently reads the
+selected local Worktrees owner's existing `observe-finalized` result, using
+the original allocation key rather than a later execution reservation. The
+captured workspace creation nonce must still match. No worker-supplied receipt
+can substitute for this observation.
+
+The existing task lifecycle owns abandonment. A queue-local transaction guard
+revalidates the captured task, closeout, relationship, placement and reservation
+after observation and stores `acknowledgement` on the existing closeout row in
+that same terminal transaction. A hold, changed incarnation or failed task
+write cannot leave an acknowledgement committed separately. Worktrees
+observation IPC never runs under the SQLite write lock.
+
+Exact retries after restart or a lost response return the committed terminal
+outcome without reobserving, repeating the transition audit or reemitting its
+terminal event. Conflicting arguments or a changed task episode refuse.
+The receipt retains the task's current attachment separately from the original
+closeout native: a same-generation yield without resource release may clear
+the task's native field without losing the original closeout conversation.
+Transition and replay both validate that retained task attachment.
+The nullable additive field remains absent for earlier closeouts; no historical
+acknowledgement is reconstructed. Acceptance receipts remain original intent,
+while the existing current-closeout view exposes this later observation.
+
+This receiver does not finalize a workspace, retire a native, release a
+reservation or delete a checkout. Those effects remain with the actual worker
+and existing conclusion owners. Its HTTP provider does not enable an automatic caller.
+Unsupported Worktrees observation retains custody, not an abandon fallback;
+baseline operations and prior readers remain unchanged. Caller migration,
+session conclusion and running qualification remain open.
+
+## Original-owner HTTP provider
+
+The serving coordinator advertises additive
+`/health.task_relevance.owner_closeout` metadata:
+`protocol: task_relevance_closeout/v1`, `supported_versions: [1]`, and
+`path: /tasks/{task_id}/relevance-closeout`. This is receiver support, not
+proof that any worker, Worktrees runtime or native conclusion owner adopted it.
+
+The existing coordinator authentication boundary protects three operations:
+
+| Method and suffix | Result |
+|---|---|
+| `GET` with no suffix | Current validated captured closeout, including readiness and acknowledgement |
+| `POST /prepare` | Independent readiness and exact original-claim settlement; task/native stay retained |
+| `POST /finish` | Independent finalized observation and existing terminal transition |
+
+Both POST bodies strictly require `version: 1`, `request_id`, `worker_id`,
+`native_id` and `expected_generation`. They accept no caller-supplied proof.
+Responses use `{protocol, version: 1, result}`; prepare returns the queue's
+readiness/relationship result. Finish returns only `id`, `status` and `generation`
+for a task-scoped caller, including exact terminal retries; trusted shared
+bearers retain the ordinary task view. Both writes
+participate in the existing drain gate; the shared terminal hook releases a
+handoff claim and emits the event only for a new transition, not an exact replay.
+The existing active-route middleware still applies.
+
+A task-scoped token must match the accepted closeout's original task, worker,
+native and generation and remain unexpired under the current coordinator fence.
+The same credential fence and expiry are checked again after independent owner
+observations, before retaining readiness, before relationship writes and in the
+terminal transaction. A credential invalidated during observation cannot settle
+the claim or acknowledge finalization. The request-bound writer carries that
+server-local guard past its own resident/record reads and cleanup waits, checking
+again immediately before invoking the relationship subprocess. An opaque writer
+that cannot accept request-bound closeout authority retains the claim.
+The provider also validates current resource custody, or the exact committed
+acknowledgement for a terminal retry. An accepted owner may therefore inspect
+and finish its same-generation unassigned or submitted closeout without gaining
+generic task authority. Other task reads, grant minting and lifecycle mutations
+retain their existing held/current-owner rules. A scoped header never falls
+back to a supplied shared bearer when it is invalid. The existing trusted
+data/control bearer policy is unchanged; those callers must still supply the
+captured tuple and satisfy the queue's conditional checks.
+
+Read the closeout before preparation: a committed acknowledgement means finish
+can be retried without another observation or terminal event; do not prepare
+or finalize again. Otherwise prepare and confirm the original claim is closed,
+then the original worker must finalize its own workspace before finish.
+Preparation alone is not finalization. An expired token after unassignment or
+terminal acknowledgement needs recovery through the existing trusted owner;
+this provider does not mint a new grant or revive old authority.
+
+This is the provider-expansion phase. Existing callers, source-control relevance
+routes and generic administrative abandon retain their semantics. A future
+caller must discover support from the running coordinator before effects.
+Trusted callers can use the health descriptor. A task-only caller can read its
+own closeout and validate the response's protocol/version; this read does not
+grant global health access and a legacy receiver returns unsupported/not found.
+Missing, malformed or unsupported metadata, including provider
+rollback, means closeout is unsupported before effects; no effectful probe or
+fallback to generic abandonment is equivalent. No old surface is retired.
+The conditional [original-worker caller](relevance-closeout-worker.md) connects
+preparation, canonical own-workspace finalization and acknowledgement.
+New closeout wakes conditionally direct the original worker through CLI support
+discovery and that guarded command; existing wakes are not rewritten.
+Native conclusion and running qualification remain
+tracked by the [active effort](../../../efforts/active/task-relevance-reconciliation/README.md).
 
 ## Registered receiver and compatibility
 

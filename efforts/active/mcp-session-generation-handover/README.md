@@ -142,6 +142,10 @@ and authorized installed-consumer acceptance. No global validation rule is waive
   the coordinator. Lopsided-gasket's MCP handover implementation and retained
   source changes remain independently owned; this correction does not replace
   that writer or settle its remaining work.
+- The [direct receiving annex](direct-receiving.md) retains #10652, #10653
+  and #10742 under their existing independent owners. Tracking consolidation
+  cannot release the affected installation's mutation hold or claim technical
+  completion; full reattachment is not an incoming-publication prerequisite.
 
 ## Context
 
@@ -426,14 +430,45 @@ handover. Preserve held sessions and the separate pre-feature adoption hold.
       This does not qualify retained-wait composition with the production
       physical receiver, enroll a headed or default caller or close installed
       acceptance.
-    - [ ] **Retained-wait physical receiver composition:** independently run the
+    - [x] **Retained-wait physical receiver composition:** independently run the
       complete native-client physical receiver/custody handover packet through
       the existing native creation/wait owner and after publisher exit. Keep
       finite preparation/admission/execution receipt substitutions explicit;
       require original streams, actual client attribution, accepted in-flight
       and unknown outcomes, retained native lifetimes and exact settlement.
-      Review and hosted qualification remain required; headed/default caller
-      adoption, release and installed acceptance remain separate.
+      #12380 merged at `eb1468ff95703cc68214e297906079eaac94746e` after
+      current-head approval, required CI and hosted Windows/Linux qualification.
+      Headed/default caller adoption, release and installed acceptance remain
+      separate.
+    - [x] **Headed native-child creation seam:** qualify an explicitly selected
+      in-process publisher at the existing headed client's actual suspended
+      creation, retaining its original native handle, streams, wait and cleanup.
+      Keep default and auth-wait paths unchanged. Refuse forwarding/coordinator
+      images and unsupported custody before publication; preserve uncertain
+      cleanup without replay. Retained-executable caller selection and the
+      productive MCP overlay remain separate integration work.
+      #12389 merged at `c86ac86473bd3ba9483b129b9344a23494452b2d` after
+      current-head Copilot approval, required CI and hosted Windows/Linux
+      qualification. This closes the in-process creation/callback boundary,
+      not productive MCP publication or retained-executable caller adoption.
+    - [x] **Explicit retained headed MCP producer:** join the section publisher,
+      actual suspended native-child owner and fixed copied executable with
+      session-only private configuration transport. Qualify actual MCP startup
+      attribution, wrong-reader refusal, original wait and exact cleanup;
+      retain old-core refusal and unchanged default/auth behavior.
+      #12423 merged at `ae8c1d537beafd23ff0c5d0327b1fdf79d486f0c` after
+      genuine current-head approval, required CI and hosted Windows/Linux
+      qualification, including actual copied-receiver MCP startup and
+      native-owned protected-name lifetime after publisher handles close.
+      Installed handover, release and productive/default enrollment are
+      independent remaining gates.
+    - [ ] **Joined retained headed physical receiver:** compose this copied
+      producer with the real optional physical receiver/custody through
+      replacement, rollback, accepted/in-flight/unknown outcomes and exact
+      settlement. Keep actual native/client/conduit/keeper/upstream attribution
+      and the existing pre-effect context barrier; a synthetic configuration
+      provider or a separately qualified creation/wait packet is not this
+      composition. Default and installed adoption remain separate.
   - [x] **Explicit Linux exec caller:** capture the exec owner's native pair
     and pass a sealed, session-only overlay for explicitly named configured
     entries, with actual-start discovery bound to a physical optional receiver.
@@ -587,6 +622,13 @@ Git and the append-only journal preserve the earlier proposal as history, not
 as an active MCP contract. The unused calibration approval remains held; this
 withdrawal authorizes no GUI effect or change to the SDK's own admission rules.
 
+### Direct retained qualification lanes
+
+- [ ] Resolve the independent incoming-publication, protected-retirement and
+  authentic-input prepared/mixed requirements in the
+  [direct receiving annex](direct-receiving.md#plan), preserving every existing
+  milestone, unchecked item, owner and actual hold.
+
 ## Validation Plan
 
 - [ ] First-slice incoming publication succeeds with a live old keeper,
@@ -699,6 +741,12 @@ withdrawal authorizes no GUI effect or change to the SDK's own admission rules.
   focus/window calibration, foreground restoration, Terminal-host attribution
   and debugger conditions. The actual generated-CMD functional two-cycle and
   owned-cleanup controls remain required without those conditions.
+
+- [ ] Qualify the independent MRV-I/MRV-R/MRV-A lanes in the
+  [direct receiving Validation Plan](direct-receiving.md#validation-plan).
+  MRV-T requires reviewed whole receiving readback before separate tracking
+  judgments; neither tracking state nor a planned clause is runtime acceptance
+  or source/resource release.
 
 ## Proposal
 

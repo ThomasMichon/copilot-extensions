@@ -8,6 +8,9 @@ import shutil
 import subprocess
 import time
 
+from agent_procutil import no_window_kwargs
+from .credential_fields import attribute_name
+
 
 class PasswordMutationAmbiguous(RuntimeError):
     """The password subprocess failed after its commit state became unknown."""
@@ -74,6 +77,7 @@ class KeePassXCBackend:
                 capture_output=True,
                 text=True,
                 timeout=10,
+                **no_window_kwargs(),
             )
             return r.returncode == 0
         except Exception:
@@ -96,19 +100,13 @@ class KeePassXCBackend:
                 capture_output=True,
                 text=True,
                 timeout=timeout,
+                **no_window_kwargs(),
             )
         except Exception:
             return None
 
     def get_entry(self, kpdb: str, entry_path: str, field: str = "password") -> str | None:
-        attr_map = {
-            "password": "Password",
-            "username": "UserName",
-            "url": "URL",
-            "title": "Title",
-            "notes": "Notes",
-        }
-        attr = attr_map.get(field, field)
+        attr = attribute_name(field)
         r = self._run(kpdb, ["show", "-q", "-s", kpdb, entry_path, "-a", attr])
         if r and r.returncode == 0:
             return r.stdout.strip()
@@ -208,6 +206,7 @@ class KeePassXCBackend:
                 capture_output=True,
                 text=True,
                 timeout=min(10, remaining),
+                **no_window_kwargs(),
             )
         except (OSError, subprocess.SubprocessError):
             # Completion is unknown. The caller must reread, never retry add.
@@ -243,6 +242,7 @@ class KeePassXCBackend:
                     capture_output=True,
                     text=True,
                     timeout=10,
+                    **no_window_kwargs(),
                 )
             except Exception:
                 pass
@@ -279,6 +279,7 @@ class KeePassXCBackend:
                 capture_output=True,
                 text=True,
                 timeout=10,
+                **no_window_kwargs(),
             )
             if r.returncode == 0:
                 return True, "Entry created"
@@ -307,6 +308,7 @@ class KeePassXCBackend:
                 capture_output=True,
                 text=True,
                 timeout=10,
+                **no_window_kwargs(),
             )
             if r.returncode == 0:
                 return True, "Password updated"
@@ -346,6 +348,7 @@ class KeePassXCBackend:
                 capture_output=True,
                 text=True,
                 timeout=10,
+                **no_window_kwargs(),
             )
             if r.returncode == 0:
                 return True, f"Imported {attachment_name}"
@@ -386,6 +389,7 @@ class KeePassXCBackend:
                 capture_output=True,
                 text=True,
                 timeout=10,
+                **no_window_kwargs(),
             )
             if r.returncode == 0:
                 with open(tmp_path, "rb") as f:

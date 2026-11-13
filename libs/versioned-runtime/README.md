@@ -116,6 +116,9 @@ On Windows, fingerprint I/O accepts ordinary and extended-length source paths
 through the existing native-path helper, without changing machine-wide settings.
 Relative digest labels and paths reported to file observers retain their logical
 spelling; staging depth and the extended-length prefix do not change the digest.
+Directory roots ending in `..` are normalized after their parent is resolved,
+so equivalent paths and relocated trees retain their fingerprint without
+duplicating files declared under both spellings.
 Missing or unreadable inputs and the existing symlink restrictions still fail
 closed.
 

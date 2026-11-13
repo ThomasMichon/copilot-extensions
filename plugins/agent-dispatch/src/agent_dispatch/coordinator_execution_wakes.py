@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 
+from .bridge_command_delivery import NativePromptNotSent
 from .coordinator_execution_sender import CoordinatorExecutionProvenance
 from .queue import TaskQueue
+from .queue_execution_custody import SendOutcome
 from .queue_execution_wakes import Wake, wake_table
 from .queue_records import TaskError
 
@@ -31,17 +34,28 @@ def deliver_execution_wake(
     if not admission.send_required:
         return True
     accepted = False
+    outcome: SendOutcome = "unknown"
+    detail = "coordinator wake transport did not establish acceptance or absence"
     try:
         accepted = deliver()
+        if accepted:
+            outcome = "sent"
+            detail = "coordinator wake transport returned acceptance"
         return accepted
+    except NativePromptNotSent as exc:
+        if (
+            exc.receipt["invocation_key"] != wake.id
+            or exc.receipt["native_session_id"] != wake.owner_session_id
+        ):
+            raise TaskError("native refusal differs from the original wake identity") from exc
+        outcome = "not_sent"
+        detail = json.dumps(exc.receipt, sort_keys=True, separators=(",", ":"))
+        return False
     finally:
         if admission.identity is not None:
             queue.settle_execution_wake(
                 wake,
                 admission,
-                outcome="sent" if accepted else "unknown",
-                detail=(
-                    "coordinator wake transport returned acceptance"
-                    if accepted else "coordinator wake transport did not establish acceptance or absence"
-                ),
+                outcome=outcome,
+                detail=detail,
             )

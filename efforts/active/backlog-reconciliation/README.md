@@ -342,6 +342,103 @@ the non-public approval conversation.
 
 ## Plan
 
+The [reviewed-receiving readiness unit](journal/2026/11.13-reviewed-receiving-readiness.md)
+screens 46 older mapped originals and verifies actual complete D4214
+receiving in the existing Active Dispatch effort. #4214's separate
+`NOT_PLANNED` retirement changes no receiver byte or check state; all four
+technical rows remain unchecked. #4783's actual bot-linked-source
+qualification gap and other prior owner conditions survive. The complete
+queue is 863 open, 134 above fixed 729.
+
+The [23-contract study](journal/2026/11.13-finite-source-and-existing-receivers.md)
+verifies two finite source completions, retains nineteen positive gaps and
+records accepted [Bridge](bridge-reregistration-receiving.md) and
+[checker-resource](checker-resources-receiving.md) lanes after reviewed
+proposal #12455. Two separate `NOT_PLANNED` retirements preserve OPEN
+receivers with sixteen and seven unchecked rows. Three full-file provenance
+gaps and existing claim/source/native holds remain. The subsequent complete
+queue is 864 open, 135 above fixed 729.
+
+The [current-contract study](journal/2026/11.13-current-contracts-and-dedup-proposal.md)
+retains sixteen whole unions and two positive whole-source qualification
+gaps. Its [exact-dedup receiving](dispatch-dedup-receiving.md) cleared reviewed
+proposal #12451 and actual whole-body acceptance, preserving #11912's
+complete alternatives in one direct Dispatch lane. The separate source
+retirement is verified `NOT_PLANNED`; the receiver remains OPEN with
+32 unchecked rows and 36 cases. The distinct #11995 Worktrees budget question
+stays on its original token. The subsequent complete census is 868 whole
+open, 139 above the fixed target.
+
+The [loader/report study](journal/2026/11.13-loader-report-source-and-accountability-proposal.md)
+retains eighteen whole unions and verifies two finite source completions,
+including the actual named-Maintainer policy rather than an invented extra
+vote. The [five-case accountability receiving](dispatch-accountability-receiving.md)
+landed after reviewed proposal #12443: actual #11674 preserves its incumbent
+26 rows and all original alternatives, adding five unchecked rows. The
+separate #11745 retirement is verified `NOT_PLANNED`, not technical completion.
+Explicit owner OPEN conditions and all other gaps remain. The subsequent
+complete census is 868 whole open, 139 above target.
+
+The [monitor-goals and decline-source study](journal/2026/11.13-monitor-goals-and-decline-source-completions.md)
+retains seventeen whole unions and #11534's unavailable original edit.
+Four finite source requests are completed with exact public readbacks;
+existing local-HTTP and native Windows records supply their actual
+validation tiers without new execution. Six whole-file provenance refusals,
+explicit landing/consumer conditions and distinct source defects remain.
+The complete 870-open queue is 141 above target; no installed, live-fleet
+or resource completion is inferred.
+
+The [comment receiving and source-qualification study](journal/2026/11.13-comment-receiving-and-source-qualification.md)
+retains fifteen whole histories and #11175's unavailable original revision.
+The existing reviewed comment-identity contract directly receives #11128's
+whole unfinished union; its redundant tracking retirement is verified, not
+technical completion. Finite #11196 and #11333 source completions have exact
+public acknowledgments and unchanged-original readbacks. Initial seven and
+one additional source-file provenance refusals, explicit original acceptance
+tokens and finite defects remain. The complete 874-open queue is 145 above
+target; no native, installed or custody completion is inferred.
+
+The [adoption-source and original-history study](journal/2026/11.13-adoption-source-and-original-history.md)
+retains seventeen complete histories plus #11065's exact unavailable revision.
+Five finite source completions are verified with exact public readbacks;
+#10951's source is fulfilled while its actual canonical-owner OPEN condition
+remains. Explicit claims, Draft audits, current code gaps and #11118's whole
+installer-provenance boundary remain. Inflow stays counted: five completions
+and one arrival leave 877 whole open, 148 above target. No native, installed,
+carrier, resource or parent completion is inferred.
+
+The [finite-source and MCP receiving study](journal/2026/11.13-finite-source-and-mcp-receiving.md)
+retains thirteen whole contracts and verifies four finite source completions
+with exact public acknowledgments and unchanged originals. Reviewed #12418
+and whole receiving readback precede three separately verified MCP
+redundant-tracking retirements; all direct technical clauses remain unchecked.
+Existing contributor PRs, the exact early-enumeration defect, canonical daemon
+parent and affected installation's mutation hold remain with their actual
+owners. The complete 880-open queue is 151 above target; source completion
+and tracking consolidation do not close remaining technical gates or the
+affected installation's mutation hold.
+
+The [source-fixture and independent typing study](journal/2026/11.13-source-fixtures-and-typing-receiving.md)
+retains sixteen complete originals and verifies #10408's finite source
+completion, with public acknowledgment and unchanged-original readback.
+Registration, adapter and native-read delivery retain their actual remaining
+qualification. Reviewed #12409 and whole relevant receiving readback precede
+three separately verified #10331/#10362/#10371 redundant-tracking retirements.
+Their direct typing lanes preserve completed checker, preparation and 27-file
+strict-test work without admitting pending production or consumers. The actual
+acquisition pause and whole-source provenance holds remain; the complete
+885-open queue is still 156 above target.
+
+The [finite leaf and guidance completion audit](journal/2026/11.13-finite-leaf-and-guidance-completions.md)
+retains eighteen whole contracts and verifies nine finite source completions,
+with separate public acknowledgments/provider readbacks and honest historical
+execution grades. Later code differences are not new original gates;
+#9971's later body/provenance boundary remains unread and unresolved.
+Nine other sources retain exact native, original-token, review or installed
+conditions; proposed #9939-to-#10064 receiving is not accepted or published.
+The complete 889-open queue remains 160 above target; no owner/resource
+transfer or whole typing/campaign completion is inferred.
+
 The [type-candidate and fragment receiving plan](type-candidate-and-fragment-receiving.md)
 retains the reviewed #12392 alternative, then records independently verified
 whole finite #9862/#9916 source fulfillment and their actual `COMPLETED`
@@ -3353,6 +3450,72 @@ sources, transferring owners or turning partial/planning gains into completion.
   normal publication flow.
 
 ## Validation Plan
+
+The [existing-receiving audit](journal/2026/11.13-reviewed-receiving-readiness.md)
+verifies eight whole documentary files and full primary histories, actual
+ROOT/direct/local/global/coordination/journal inclusion, the complete
+original/two-comment crosswalk, fresh source/roster/blob applicability and
+exact `NOT_PLANNED` acknowledgment with original/discussions unchanged.
+No receiver edit or implementation/native/resource acceptance is inferred;
+the other 24 OPEN mapped originals are not newly adjudicated by this unit.
+
+The [finite-source/receiving audit](journal/2026/11.13-finite-source-and-existing-receivers.md)
+verifies 23 whole unions, all 29 admitted materialized blobs, three unread
+full-file gaps, literal review/execution grades and two exact completed-state
+acknowledgments. Actual receiver readbacks after #12455 preserve all incumbent
+bytes/checks, discussion/history and direct original alternatives: sixteen
+Bridge rows and seven checker rows stay unchecked. Separate source explanations
+and `CLOSED` / `NOT_PLANNED` readbacks establish tracking retirement, not
+passing results. The caller's executable/live and existing resource
+qualification remain independent.
+
+The [current-contract audit](journal/2026/11.13-current-contracts-and-dedup-proposal.md)
+verifies all 22 materialized source blobs, distinguishes 21 actual model reads
+from one acquired-but-unread file, and retains eleven stable PR records.
+Actual receiving readback after #12451 preserves all eight incumbent sections
+and 31 check states, adding one unchecked row with only eight numeric bytes
+otherwise changed. The source explanation and `CLOSED` / `NOT_PLANNED`
+readback establish tracking retirement, not technical acceptance or resource
+release; all 143 migration inventory obligations remain separate.
+
+The [loader/report and receiving audit](journal/2026/11.13-loader-report-source-and-accountability-proposal.md)
+verifies 25 actual source blobs among 29 qualified files, source-owner
+execution grades, current delivery/role/check metadata and exact two
+acknowledgments/terminal states. After #12443 merged, complete actual receiving
+readback matched the reviewed addition: every incumbent section/checkbox is
+preserved, with only eight numeric bytes replaced besides one new lane.
+#11674 remains OPEN with 31 unchecked rows, 35 cases and eight lanes; #11745's
+separate public explanation and `CLOSED` / `NOT_PLANNED` readback establish
+tracking retirement, not technical credit or resource release. Historical
+unknown classifications are not silently promoted into current source holds.
+
+The [monitor/decline audit](journal/2026/11.13-monitor-goals-and-decline-source-completions.md)
+verifies four finite completions against whole originals, direct source,
+fresh complete metadata/roster and exact acknowledgments/terminal state.
+Historical comment-shaped and earlier-revision reviews remain literal;
+current source/provider corroboration does not invent an approval or rerun.
+The follow-through verifies 22 new attributed text parts, three immutable
+messages and eleven reused source identities while retaining failed/skipped
+execution grades, all actual source holds and existing custody.
+
+The [comment-receiving audit](journal/2026/11.13-comment-receiving-and-source-qualification.md)
+verifies whole direct receiving readback, unchanged originals, fresh complete
+metadata/roster and exact public acknowledgment plus CLOSED/NOT_PLANNED
+state for #11128, plus two separately verified finite source completions.
+Original scopes and literal source-versus-installed bars remain unchanged;
+later accepted intent is explicit. Parent blob verification corrects three
+qualified-only, unacquired test-file claims without reading or executing them.
+Stable null history and actual whole-file refusals remain genuine boundaries,
+not universal barriers to independent source. Existing owners, literal
+alternatives and every unchecked technical or resource obligation remain.
+
+The [nine-completion audit](journal/2026/11.13-finite-leaf-and-guidance-completions.md)
+separates actual historical review acceptance, owner-recorded execution,
+independently verified source/admission/path evidence and fresh terminal
+tracker effects. Original scopes/alternatives, title/body bytes, current
+source-object holds and all source/resource custodians remain unchanged.
+Generic green CI, metadata identity or missing current receipt is not
+substituted for whole original fulfillment, failure or new permission.
 
 The [type receiving audit](type-candidate-and-fragment-receiving.md)
 preserves the unselected receiving route's whole-parent readback condition.

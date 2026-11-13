@@ -1,0 +1,9 @@
+{
+  "comment": "Retain original managed assignment bindings when accepting task relevance closeout",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

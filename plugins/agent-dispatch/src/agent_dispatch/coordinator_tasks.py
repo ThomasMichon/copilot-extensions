@@ -211,6 +211,9 @@ def register_task_routes(
             _emit(event_type, result)
         return result
 
+    from .coordinator_relevance_closeout import register_closeout_routes
+    register_closeout_routes(app, queue, guard=_guard)
+
     @app.get("/producer-scopes/status")
     def producer_scope_status(repo: str, source: str) -> dict:
         try:

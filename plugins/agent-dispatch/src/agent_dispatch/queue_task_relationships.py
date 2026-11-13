@@ -7,6 +7,7 @@ import copy
 import json
 import secrets
 import sqlite3
+from collections.abc import Callable
 from dataclasses import asdict
 
 from .assignment_workspace import AssignmentWorkspace, same_assignment_worker
@@ -134,10 +135,39 @@ def _matches_receipt(value: object, request: dict, *, phase: str | None = None) 
 
 
 class QueueTaskRelationshipsMixin:
-    def _relationship_selection(self, task: Task) -> tuple[object, str | None]:
+    def _spawn_relationship_selection(self, driver: str | None) -> tuple[object, str | None]:
+        if driver == "ordinary-bridge" and getattr(self, "_ordinary_relationship_writer", None) is not None:
+            return self._ordinary_relationship_writer, "local"
+        return self._relationship_writer, self._relationship_authority
+
+    def _relationship_selection(
+        self, task: Task, *, reservation_key: str | None = None,
+    ) -> tuple[object, str | None]:
         if task.kind == "standing-charter" and self._standing_relationship_writer is not None:
             return self._standing_relationship_writer, "local"
+        if reservation_key is not None and getattr(self, "_ordinary_relationship_writer", None) is not None:
+            reservation = self.get_reservation(reservation_key)
+            if reservation is not None and reservation.task_id == task.id:
+                return self._spawn_relationship_selection(reservation.driver)
         return self._relationship_writer, self._relationship_authority
+
+    def _retain_pool_relationship_requirement(
+        self, conn: sqlite3.Connection, task: Task, key: str, driver: str | None,
+    ) -> None:
+        governed = latest_relationship(conn, task.id) is not None
+        writer, authority = self._spawn_relationship_selection(driver)
+        if governed and writer is None:
+            raise TaskError("governed allocator assignment requires its original relationship writer")
+        if governed:
+            from .queue_relationship_continuation import continue_pool_startup
+
+            continue_pool_startup(conn, task, key, authority=authority)
+        if writer is not None or governed:
+            conn.execute(
+                "UPDATE spawn_reservations SET task_relationship_required=1,"
+                " task_relationship_generation=? WHERE key=?",
+                (task.generation + 1, key),
+            )
 
     def _replay_relationship_claim(
         self,
@@ -199,7 +229,7 @@ class QueueTaskRelationshipsMixin:
         ts: float,
         reservation_key: str | None = None,
     ) -> int:
-        writer, authority = self._relationship_selection(task)
+        writer, authority = self._relationship_selection(task, reservation_key=reservation_key)
         if writer is None or authority not in {
             "local",
             "central",
@@ -278,7 +308,9 @@ class QueueTaskRelationshipsMixin:
         from .task_obligations import read_snapshot
 
         task = self.get(request["task_id"])
-        authority = self._relationship_selection(task)[1] if task is not None else None
+        authority = self._relationship_selection(
+            task, reservation_key=request.get("reservation_key"),
+        )[1] if task is not None else None
         snapshot = read_snapshot(
             self, request["task_id"], assignment_event_id=request["event_id"],
         )
@@ -319,14 +351,19 @@ class QueueTaskRelationshipsMixin:
                 raise TaskError("original prepared workspace and reservation are unconfirmed")
         return snapshot
 
-    def reconcile_task_relationship(self, task_id: str, *, event_id: int | None = None) -> dict:
+    def reconcile_task_relationship(
+        self, task_id: str, *, event_id: int | None = None,
+        authority_guard: Callable[[], None] | None = None,
+    ) -> dict:
         """Replay the same ground-owner request; never hold SQLite during I/O."""
         value = self.task_relationship(task_id, event_id=event_id)
         if value is None:
             raise TaskError("no retained task relationship request")
         request = value["request"]
         task = self.get(task_id)
-        selected_writer, authority = self._relationship_selection(task) if task is not None else (None, None)
+        selected_writer, authority = self._relationship_selection(
+            task, reservation_key=request.get("reservation_key"),
+        ) if task is not None else (None, None)
         if (
             selected_writer is None
             or authority != request["authority"]
@@ -336,7 +373,9 @@ class QueueTaskRelationshipsMixin:
         if value["state"] in {"closed", "absent"}:
             return value
         snapshot = self._admit_original_relationship_request(request)
-        retiring = snapshot["release_outcome"] in {"completed", "unassigned_queued"}
+        retiring = snapshot["release_outcome"] in {
+            "completed", "unassigned_queued", "relevance_closeout_ready",
+        }
         if retiring and snapshot["release_outcome"] == "unassigned_queued":
             retiring = (
                 same_assignment_worker(snapshot["unassignment"]["worker_id"], workspace.worker_id)
@@ -363,11 +402,17 @@ class QueueTaskRelationshipsMixin:
         common = {"expected_creation_nonce": workspace.creation_nonce}
         writer = selected_writer
         bind_request = getattr(writer, "bind_request", None)
-        if callable(bind_request):
+        if authority_guard is not None:
+            if not callable(bind_request):
+                raise TaskError("selected relationship writer lacks request-bound closeout authority")
+            writer = bind_request(copy.deepcopy(request), authority_guard=authority_guard)
+        elif callable(bind_request):
             writer = bind_request(copy.deepcopy(request))
 
         def write(operation: str, payload: dict, *, phase: str | None = None) -> dict:
             self._admit_original_relationship_request(request)
+            if authority_guard is not None:
+                authority_guard()
             try:
                 result = writer(workspace, operation, {**payload, **common})
             except Exception as exc:
@@ -380,6 +425,8 @@ class QueueTaskRelationshipsMixin:
 
         if retiring:
             self._admit_original_relationship_request(request)
+            if authority_guard is not None:
+                authority_guard()
             receipt = writer(
                 workspace,
                 "inspect",
@@ -429,6 +476,8 @@ class QueueTaskRelationshipsMixin:
             state = "bound"
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
+            if authority_guard is not None:
+                authority_guard()
             retained = conn.execute(
                 "SELECT task_relationship FROM task_events WHERE id=? AND task_id=?",
                 (request["event_id"], task_id),

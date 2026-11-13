@@ -109,6 +109,35 @@ def test_fingerprint_cli_preserves_deep_ordinary_source_paths(
     assert runtime.fingerprint_source([extended]) == expected
 
 
+@pytest.mark.skipif(os.name != "nt", reason="native Windows walk-path normalization")
+@pytest.mark.parametrize("native_spelling", [False, True])
+def test_fingerprint_cli_preserves_parent_directory_root_labels(
+    primitive: Path, tmp_path: Path, native_spelling: bool,
+) -> None:
+    native = runtime._runtime_component("versioned_runtime_construction").native_path
+    roots = [tmp_path / "source", tmp_path / "relocated"]
+    for root in roots:
+        (root / "child").mkdir(parents=True)
+        (root / "module.py").write_bytes(b"VALUE = 7\n")
+        (root / "child" / "other.py").write_bytes(b"OTHER = 9\n")
+    expected = runtime.fingerprint_source([roots[0]])
+    for root in roots:
+        logical = root / "child" / ".."
+        selected = native(root / "child") / ".." if native_spelling else logical
+        result = invoke(primitive, tmp_path / "runtime", ["fingerprint", str(selected)])
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert result.stdout == expected + "\n"
+        observed = {}
+        assert runtime.fingerprint_source(
+            [selected], on_file=lambda path, content: observed.update({path: content}),
+        ) == expected
+        assert runtime.fingerprint_source([root, selected]) == expected
+        assert observed == {
+            root / "module.py": b"VALUE = 7\n",
+            root / "child" / "other.py": b"OTHER = 9\n",
+        }
+
+
 def test_fingerprint_preserves_declared_input_outside_windows(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

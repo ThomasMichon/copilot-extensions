@@ -71,6 +71,11 @@ def _credential(binding: HttpBinding, field: str, prompt: bool) -> str:
                 ) from None
         finally:
             logging.disable(previous_logging)
+    warning = getattr(result, "warning", None)
+    if warning:
+        import sys
+
+        print(f"Warning: {warning}", file=sys.stderr)
     if (
         result.code != 0
         or not isinstance(result.value, str)

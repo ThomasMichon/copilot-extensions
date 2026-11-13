@@ -15,7 +15,8 @@ from agent_procutil.owned_process import OwnedCleanupError, run_caller_owned
 from agent_procutil.owned_budget import OwnedExecutionBudget
 
 from .providers.observation_credentials import (
-    MAX_SNAPSHOT_REQUESTS, CredentialSource, ObservationCredentialError,
+    HTTP_PROFILES, MAX_SNAPSHOT_REQUESTS, CredentialSource, ObservationCredentialError,
+    with_http_profile,
 )
 
 _MAX_BYTES = 65536
@@ -31,6 +32,7 @@ def add_snapshot_arguments(parser: argparse.ArgumentParser) -> None:
         "--max-credential-requests", type=int, default=None,
         help="Lower typed credential acquisition limit (1..64; not a physical HTTP-send limit)",
     )
+    parser.add_argument("--http-profile", choices=HTTP_PROFILES, default="legacy")
 
 
 def snapshot_source(args: argparse.Namespace) -> CredentialSource | None:
@@ -38,11 +40,14 @@ def snapshot_source(args: argparse.Namespace) -> CredentialSource | None:
     if args.max_credential_requests is not None and args.credential_command is None:
         raise ValueError("--max-credential-requests requires --credential-command")
     if args.credential_command is None:
+        if getattr(args, "http_profile", "legacy") != "legacy":
+            raise ValueError("--http-profile requires --credential-command")
         return None
     if args.token is not None:
         raise ValueError("--credential-command cannot be combined with --token")
     return command_source(
         args.credential_command, max_acquisitions=args.max_credential_requests,
+        http_profile=getattr(args, "http_profile", "legacy"),
     )
 
 
@@ -75,6 +80,7 @@ def command_source(
     serialized: str, *, remaining: Callable[[], float] | None = None,
     enclosing_budget: OwnedExecutionBudget | None = None,
     max_acquisitions: int | None = None,
+    http_profile: str = "legacy",
 ) -> CredentialSource:
     """Validate trusted non-secret argv once; acquire new typed material on every call."""
     if max_acquisitions is not None and (
@@ -139,4 +145,4 @@ def command_source(
                 "PR observation credential command unavailable", transient=True,
             ) from None
 
-    return acquire
+    return with_http_profile(acquire, http_profile)

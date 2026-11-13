@@ -36,12 +36,8 @@ def assignment(task: dict, reservation: dict, *, driver: str = "ordinary-bridge"
     return value
 
 
-def initial_machine(task: dict, reservation: dict) -> str | None:
-    """Qualify the existing local Bridge launch before it can create anything."""
-    placed = assignment(task, reservation)
-    if placed is None:
-        return None
-    from .bridge_remote import normalize_host
+def local_execution_machine() -> str | None:
+    """Resolve the installed service binding before project-scoped discovery."""
     from .identity import resolve_machine
     from .remote_dispatch import configured_service_machine
 
@@ -49,7 +45,17 @@ def initial_machine(task: dict, reservation: dict) -> str | None:
         machine = configured_service_machine(strict=True)
     except (OSError, UnicodeError) as exc:
         raise TaskError("ordinary pool startup installed machine binding is unreadable") from exc
-    machine = machine or resolve_machine()
+    return machine or resolve_machine()
+
+
+def initial_machine(task: dict, reservation: dict) -> str | None:
+    """Qualify the existing local Bridge launch before it can create anything."""
+    placed = assignment(task, reservation)
+    if placed is None:
+        return None
+    from .bridge_remote import normalize_host
+
+    machine = local_execution_machine()
     if (
         not isinstance(machine, str) or not machine.strip()
         or normalize_host(machine) != normalize_host(placed["machine"])

@@ -16,6 +16,7 @@ import sqlite3
 
 from .queue_common import CompletionOutcome, Task
 from .queue_records import Status, TaskError
+from .queue_relevance_binding import capture_binding, closeout_detail
 from .queue_relevance_registration import (
     RelevanceAdmission, RelevanceRegistration, registration_revision, resolve_registration,
 )
@@ -114,6 +115,37 @@ class QueueRelevanceMixin:
             "task_id TEXT PRIMARY KEY, request_id TEXT NOT NULL, generation INTEGER NOT NULL,"
             "owner TEXT, owner_session_id TEXT, steer_id INTEGER NOT NULL, created_at REAL NOT NULL)"
         )
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(task_relevance_closeouts)")}
+        for column in ("resource_binding", "readiness", "acknowledgement"):
+            if column in columns:
+                continue
+            try:
+                conn.execute(f"ALTER TABLE task_relevance_closeouts ADD COLUMN {column} TEXT")
+            except sqlite3.OperationalError as exc:
+                if "duplicate column name" not in str(exc).lower():
+                    raise
+
+    def prepare_relevance_closeout(
+        self, task_id: str, *, request_id: str, worker_id: str, native_id: str,
+        expected_generation: int, authority_guard: Callable[[], None] | None = None,
+    ) -> dict:
+        from .queue_relevance_readiness import prepare
+        return prepare(
+            self, task_id, request_id=request_id, worker_id=worker_id, native_id=native_id,
+            expected_generation=expected_generation,
+            authority_guard=authority_guard,
+        )
+
+    def finish_relevance_closeout(
+        self, task_id: str, *, request_id: str, worker_id: str, native_id: str,
+        expected_generation: int, authority_guard: Callable[[], None] | None = None,
+    ) -> CompletionOutcome:
+        from .queue_relevance_acknowledgement import finish
+        return finish(
+            self, task_id, request_id=request_id, worker_id=worker_id, native_id=native_id,
+            expected_generation=expected_generation,
+            authority_guard=authority_guard,
+        )
 
     def relevance_snapshot(
         self, task_id: str, *, registration: RelevanceRegistration | None = None,
@@ -138,7 +170,7 @@ class QueueRelevanceMixin:
                 "origin_ref": task.origin_ref, "generation": task.generation,
                 "revision": _revision(conn, task_id), "status": task.status,
                 "custody": _custody(conn, task),
-                "closeout": dict(closeout) if closeout is not None else None,
+                "closeout": closeout_detail(closeout),
                 **({
                     "registration_id": registration.registration_id,
                     "registration_revision": registration_revision(conn),
@@ -261,12 +293,12 @@ class QueueRelevanceMixin:
                     steer_id = inserted.lastrowid
                     conn.execute(
                         "INSERT INTO task_relevance_closeouts"
-                        " (task_id, request_id, generation, owner, owner_session_id, steer_id, created_at)"
-                        " VALUES (?, ?, ?, ?, ?, ?, ?)",
+                        " (task_id, request_id, generation, owner, owner_session_id, steer_id,"
+                        " created_at, resource_binding) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                         (task_id, request_id, task.generation, (
                             task.owner or (task.completed_by if task.status == Status.SUBMITTED else None)
                         ),
-                         task.owner_session_id, steer_id, ts),
+                         task.owner_session_id, steer_id, ts, _encoded(capture_binding(conn, task))),
                     )
             wake = None
             if decision == "closeout_pending":
@@ -336,7 +368,7 @@ class QueueRelevanceMixin:
                 (closeout["steer_id"],),
             ).fetchone() if closeout else None
             return {
-                "acceptance": result, "closeout": dict(closeout) if closeout else None,
+                "acceptance": result, "closeout": closeout_detail(closeout),
                 "steer_consumed_at": steer["taken_at"] if steer and steer["taken"] else None,
                 "wake": dict(wake) if wake else None,
             }

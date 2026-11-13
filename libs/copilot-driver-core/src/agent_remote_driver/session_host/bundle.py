@@ -26,6 +26,7 @@ _DRIVER_MODULES = (
     "headed/backend.py",
     "headed/staging.py",
     "headed/launcher.py",
+    "headed/native_handoff.py",
     "headed/receipt.py",
     "headed/recovery.py",
     "headed/recovery_codec.py",
@@ -47,13 +48,14 @@ _DRIVER_MODULES = (
 )
 _PROCUTIL_MODULES = (
     "__init__.py", "_async.py", "_caller_owned.py", "_darwin_caller_owned.py", "_job_scopes.py",
+    "_suspended_handoff.py",
     "_daemon_instance_child.py", "_daemon_instance_identity.py", "_daemon_instance_native.py",
     "_daemon_instance_owner.py", "_daemon_instance_clock.py", "_daemon_instance_reconcile.py",
     "_daemon_instance_records.py",
     "_daemon_instance_store.py", "_interpreter.py", "_linux_pidfd.py", "_output_relay.py",
     "_windows_caller_owned.py", "_windows_job_types.py", "python_cache.py",
     "daemon.py", "daemon_broker.py", "daemon_instances.py", "linux_daemon_scope.py", "native_child.py",
-    "owned_process.py", "startup.py", "streaming.py",
+    "owned_process.py", "owned_budget.py", "startup.py", "streaming.py",
 )
 
 

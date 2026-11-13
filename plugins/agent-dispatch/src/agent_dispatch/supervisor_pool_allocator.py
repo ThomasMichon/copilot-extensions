@@ -122,9 +122,12 @@ def reserve(
     driver = "ordinary-bridge" if ordinary else driver
     if restricted or driver not in {"cli", "ordinary-bridge"} or not ordinary and driver != "cli":
         raise DispatchUpgradeRequired("managed pool allocation requires a qualified ordinary Bridge or CLI backend")
+    from .session_origin import reservation_options
+
     placed = client.place_pool_task(
         task["id"], reserved_by=supervisor_id, catalog_revision=revision,
         driver=driver, expected_instance=instance, startup_timeout=startup_timeout,
+        **reservation_options(client, ordinary=ordinary),
     )
     return {
         **placed, "reservation": {

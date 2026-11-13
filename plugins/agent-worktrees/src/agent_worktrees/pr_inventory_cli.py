@@ -21,6 +21,8 @@ def dispatch(argv: list[str]) -> int:
     parser.add_argument("--max-pulls", type=int, default=200)
     parser.add_argument("--seconds", type=int, default=60)
     parser.add_argument("--json", action="store_true")
+    from .providers.observation_credentials import HTTP_PROFILES
+    parser.add_argument("--http-profile", choices=HTTP_PROFILES, default="legacy")
     try:
         args = parser.parse_args(argv)
     except SystemExit as error:
@@ -30,6 +32,7 @@ def dispatch(argv: list[str]) -> int:
             if args.repo or args.config or args.credential_command:
                 raise ValueError("contract discovery cannot select repository or credentials")
             from .providers.observation_credentials import MAX_SNAPSHOT_REQUESTS
+            from .providers.observation_http import contract
             print(json.dumps({
                 "protocol": "agent-worktrees.pr-inventory/v1",
                 "providers": ["github", "gitea"], "credential": "observe/per-request",
@@ -40,6 +43,7 @@ def dispatch(argv: list[str]) -> int:
                     "version": 1, "option": "--max-credential-requests",
                     "maximum": MAX_SNAPSHOT_REQUESTS,
                 },
+                "observation_http_profiles": contract(),
             }))
             return 0
         if not args.repo or not args.config or not args.credential_command or not args.json:
@@ -52,6 +56,7 @@ def dispatch(argv: list[str]) -> int:
         deadline = time.monotonic() + args.seconds
         source = command_source(
             args.credential_command, remaining=lambda: deadline - time.monotonic(),
+            http_profile=args.http_profile,
         )
         selected = load_binding(Path(args.config), args.repo)
         result = inventory(

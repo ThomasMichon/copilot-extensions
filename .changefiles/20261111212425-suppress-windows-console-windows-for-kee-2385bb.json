@@ -1,0 +1,9 @@
+{
+  "comment": "Suppress Windows console windows for KeePassXC, credential helpers and prompt hosts while preserving captured I/O and intended GUI dialogs.",
+  "changes": [
+    {
+      "plugin": "agent-vault",
+      "type": "patch"
+    }
+  ]
+}

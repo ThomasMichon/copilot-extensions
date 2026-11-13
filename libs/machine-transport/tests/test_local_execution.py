@@ -14,6 +14,30 @@ from machine_transport import (
 pytestmark = pytest.mark.contract("machine-transport.local-context.observation")
 
 
+@pytest.mark.parametrize("observed", ["victim", "victim-alias", "victim-compat"])
+def test_observation_cannot_override_a_conflicting_explicit_hostname(observed: str) -> None:
+    entry = MachineEntry(
+        "victim", "", hostname="real-host", physical_host="real-host",
+        execution_platform="linux", alias="victim-alias", compatibility_aliases=("victim-compat",),
+    )
+    with pytest.raises(IdentityError, match="conflicts"):
+        resolve_local_execution_context({entry.key: entry}, hostname=observed, environment="linux")
+
+
+def test_physical_family_cannot_override_another_platforms_explicit_hostname() -> None:
+    entries = {
+        "shared-root": MachineEntry(
+            "shared-root", "", hostname="observed-host", physical_host="shared-root",
+            execution_platform="windows",
+        ),
+        "victim": MachineEntry(
+            "victim", "", hostname="real-host", physical_host="shared-root", execution_platform="linux",
+        ),
+    }
+    with pytest.raises(IdentityError, match="conflicts"):
+        resolve_local_execution_context(entries, hostname="observed-host", environment="linux")
+
+
 @pytest.mark.parametrize("environment", ["windows", "wsl", "linux"])
 @pytest.mark.parametrize("manifest", ["absent", "empty", "unrelated", "matching"])
 def test_local_context_does_not_require_enrollment(environment: str, manifest: str) -> None:
@@ -442,16 +466,28 @@ def test_generated_guest_key_cannot_shadow_identity_labels(slot: str, configured
         )
 
 
-@pytest.mark.parametrize("hostname", ["raw-host", "host"])
-def test_unscoped_guest_sibling_precedes_unscoped_native_fallback(hostname: str) -> None:
+def test_unscoped_guest_sibling_precedes_unscoped_native_fallback() -> None:
     entries = {
         key: MachineEntry(key, "", hostname="raw-host")
         for key in ("host", "host-wsl")
     }
-    context = resolve_local_execution_context(entries, hostname=hostname, environment="wsl")
+    context = resolve_local_execution_context(entries, hostname="raw-host", environment="wsl")
     assert (context.machine, context.execution_machine, context.customization_key) == (
         "host", "host-wsl", "host-wsl",
     )
+
+
+def test_unscoped_logical_key_is_not_a_conflicting_os_hostname_observation() -> None:
+    entries = {
+        key: MachineEntry(key, "", hostname="raw-host")
+        for key in ("host", "host-wsl")
+    }
+    with pytest.raises(IdentityError, match="conflicts"):
+        resolve_local_execution_context(entries, hostname="host", environment="wsl")
+    configured = resolve_local_execution_context(
+        entries, hostname="host", environment="wsl", configured_machine="host-wsl",
+    )
+    assert configured.execution_machine == "host-wsl"
 
 
 @pytest.mark.parametrize(("key", "hostname", "actual", "observed"), [

@@ -13,9 +13,10 @@ from pathlib import Path
 from agent_procutil import no_window_kwargs
 
 from . import config, launch, rendezvous
+from .cache_manifests import read_cache_manifest as _read_cache_manifest
 from .cache_recovery import status_command as cmd_cache_status
 from .config import IS_WINDOWS, SOCKET_PATH, ResolvedVault
-from .credential_reads import cmd_get
+from .credential_reads import cmd_get, legacy_cache_entry
 from .prompt import prompt_password as gui_prompt_password
 from .winpipe import pipe_send
 
@@ -727,17 +728,15 @@ _TRANSPORT_LABELS = {
 
 
 def cmd_ping(args):
+    from .service_status import format_service_status
+
     resp = send_command({"action": "ping"})
     if resp and resp.get("ok"):
         status = _vault_status_label(resp["cli"])
         transport = _TRANSPORT_LABELS.get(
             resp.get("_transport", ""), resp.get("_transport", "unknown")
         )
-        print(
-            f"Vault service running - PID {resp['pid']}, "
-            f"TTL {resp['ttl']}s, {resp['cached']} cached, "
-            f"status={status}, via {transport}"
-        )
+        print(format_service_status(resp, status=status, transport=transport))
         return 0
     print("Vault service not running")
     return 1
@@ -910,8 +909,10 @@ def cmd_set_password(args):
         args.entry,
         config.resolve_context().group,
     )
-    persistent.migrate_entry(args.entry, cache_entry, "password")
     with persistent.replacement_lock():
+        legacy = legacy_cache_entry(args.entry, cache_entry)
+        if legacy is not None:
+            persistent.migrate_entry(legacy, cache_entry, "password")
         pending = persistent.pending_replace(cache_entry, "password")
         if pending is not None:
             recovery = send_command({
@@ -1311,21 +1312,6 @@ def cmd_kek_list(args):
     return 0
 
 
-def _read_cache_manifest(path: Path) -> list[tuple[str, str]]:
-    """Parse ``entry | field`` lines (``#`` comments) from a manifest file."""
-    pairs: list[tuple[str, str]] = []
-    for raw in path.read_text(encoding="utf-8").splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#"):
-            continue
-        entry, sep, field = line.partition("|")
-        entry = entry.strip()
-        field = field.strip() if sep else "password"
-        if entry:
-            pairs.append((entry, field or "password"))
-    return pairs
-
-
 def cmd_cache_populate(args):
     """Pre-warm the vault cache for a set of entries.
 
@@ -1334,12 +1320,13 @@ def cmd_cache_populate(args):
     is fetched so the daemon caches it (and missing entries surface early).
     """
     from .extensions import get_registry
+    from .credential_fields import canonical_field
 
     pairs: list[tuple[str, str]] = []
     seen: set[tuple[str, str]] = set()
 
     def _add(entry: str, field: str) -> None:
-        pair = (entry, field or "password")
+        pair = (entry, canonical_field(field or "password"))
         if pair[0] and pair not in seen:
             seen.add(pair)
             pairs.append(pair)
@@ -1415,7 +1402,9 @@ def cmd_cache_populate(args):
                         entry,
                         config.resolve_context().group,
                     )
-                    cache.migrate_entry(entry, cache_entry, field)
+                    legacy = legacy_cache_entry(entry, cache_entry)
+                    if legacy is not None and not cache._recovery:
+                        cache.migrate_entry(legacy, cache_entry, field)
                     generation = resp.get("generation")
                     update = cache.recover_missing if cache._recovery else cache.reconcile_authoritative
                     if not update(
@@ -1466,12 +1455,13 @@ def cmd_cache_verify(args):
     launch-time gate can confirm an unattended box is primed while still locked.
     """
     from .cache import get_cache
+    from .credential_fields import attribute_name, canonical_field
 
     pairs: list[tuple[str, str]] = []
     seen: set[tuple[str, str]] = set()
 
     def _add(entry: str, field: str) -> None:
-        pair = (entry, field or "password")
+        pair = (entry, canonical_field(field or "password"))
         if pair[0] and pair not in seen:
             seen.add(pair)
             pairs.append(pair)
@@ -1500,7 +1490,11 @@ def cmd_cache_verify(args):
     present = 0
     missing: list[str] = []
     for entry, field in pairs:
-        if cache.get(entry, field, readonly=True) is not None:
+        cache_entry = config.normalize_entry(entry, config.resolve_context().group)
+        if cache.get(
+            cache_entry, field, readonly=True, legacy_field=attribute_name(field),
+            legacy_entry=legacy_cache_entry(entry, cache_entry),
+        ) is not None:
             present += 1
         else:
             missing.append(f"{entry} [{field}]")
