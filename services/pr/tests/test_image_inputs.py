@@ -1,13 +1,15 @@
 """Real retained-wheel context controls; no image daemon or feed access."""
 from __future__ import annotations
 
-from contextlib import AbstractContextManager, contextmanager
+from contextlib import AbstractContextManager, ExitStack, contextmanager
+from dataclasses import replace
 import hashlib
 import os
 from pathlib import Path
 import sys
 import time
 from typing import TYPE_CHECKING, Any, Callable, Iterator, cast
+import zipfile
 
 import pytest
 
@@ -196,7 +198,10 @@ def test_corrupt_wheel_bytes_refuse_even_with_profile_matching_digest(tmp_path: 
                 pytest.fail("matching digest substituted for actual wheel inspection")
 
 
-def test_generated_context_installs_offline_into_fresh_environment(tmp_path: Path) -> None:
+@pytest.mark.parametrize("separate_profiles", [False, True])
+def test_generated_context_installs_offline_into_fresh_environment(
+    tmp_path: Path, separate_profiles: bool,
+) -> None:
     from agent_procutil.owned_process import run_caller_owned
 
     environment = tmp_path / "installed"
@@ -206,8 +211,16 @@ def test_generated_context_installs_offline_into_fresh_environment(tmp_path: Pat
     )
     assert created.returncode == 0, created.stderr
     python = environment / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-    with retained(tmp_path) as (profile, snapshot, deadline):
-        with prepare(profile, snapshot, deadline) as result:
+    with ExitStack() as stack:
+        additional = {}
+        if separate_profiles:
+            profile, snapshot, native, native_wheels, deadline = stack.enter_context(
+                separate_application_inputs(tmp_path),
+            )
+            additional["additional_inputs"] = ((native, native_wheels),)
+        else:
+            profile, snapshot, deadline = stack.enter_context(retained(tmp_path))
+        with prepare(profile, snapshot, deadline, **additional) as result:
             command = [
                 str(python), "-I", "-m", "pip", "install", "--no-index",
                 "--find-links", str(result.path / "wheels"), "--only-binary=:all:",
@@ -233,3 +246,103 @@ def test_generated_context_installs_offline_into_fresh_environment(tmp_path: Pat
             )
             assert refused.returncode != 0
             assert "HASHES" in refused.stderr.upper()
+
+
+@contextmanager
+def separate_application_inputs(
+    tmp_path: Path, *, conflict: bool = False, different_target: bool = False,
+) -> Iterator[tuple[RuntimeProfile, WheelSnapshot, RuntimeProfile, WheelSnapshot, float]]:
+    profile, archives = fixture_inputs(tmp_path)
+    original = profile.record()
+    service = original | {
+        "wheels": [wheel for wheel in original["wheels"] if wheel["name"] != "agent-worktrees"],
+    }
+    service["roots"] = [wheel["name"] + "==1.0" for wheel in service["wheels"]]
+    native = profile.record() | {"component": "agent-worktrees"}
+    native["wheels"] = [
+        wheel for wheel in native["wheels"] if wheel["name"] in {"agent-worktrees", "fleet-manager"}
+    ]
+    native["roots"] = [wheel["name"] + "==1.0" for wheel in native["wheels"]]
+    native_archives = dict(archives)
+    if conflict:
+        wheel = next(wheel for wheel in native["wheels"] if wheel["name"] == "fleet-manager")
+        data = cast(Callable[..., bytes], wheel_bytes)(
+            name="fleet_manager", prefix="fleet_manager-1.0.dist-info/",
+            metadata=b"Metadata-Version: 2.3\nName: fleet-manager\nVersion: 1.0\nSummary: different\n\n",
+        )
+        path = tmp_path / "different.whl"
+        path.write_bytes(data)
+        native_archives[wheel["filename"]] = path
+        wheel["sha256"] = "sha256:" + hashlib.sha256(data).hexdigest()
+    if different_target:
+        native["target"]["environment"]["platform_machine"] = "aarch64"
+    deadline = time.monotonic() + 60
+    with ExitStack() as stack:
+        selected = []
+        for record, paths in ((service, archives), (native, native_archives)):
+            frozen = validate_profile(record)
+            expected = {wheel["filename"]: wheel["sha256"] for wheel in record["wheels"]}
+            snapshot = stack.enter_context(cast(Callable[..., AbstractContextManager[WheelSnapshot]], retain_wheel_inputs)(
+                {name: paths[name] for name in expected}, expected,
+                max_wheels=10, max_archive_bytes=LIMITS.max_archive_bytes,
+                max_total_bytes=LIMITS.max_archive_bytes, max_snapshot_bytes=LIMITS.max_archive_bytes,
+                deadline=deadline,
+            ))
+            selected.append((frozen, snapshot))
+        yield selected[0][0], selected[0][1], selected[1][0], selected[1][1], deadline
+
+
+def test_separate_native_profile_composes_without_inventing_merged_approval(tmp_path: Path) -> None:
+    with separate_application_inputs(tmp_path) as (service, service_wheels, native, native_wheels, deadline):
+        originals = service.canonical, native.canonical
+        with prepare(service, service_wheels, deadline, additional_inputs=((native, native_wheels),)) as result:
+            assert result.profile_lock_ids == (service.lock_id, native.lock_id)
+            assert result.lock_id not in result.profile_lock_ids
+            assert (service.canonical, native.canonical) == originals
+            assert len(list((result.path / "wheels").iterdir())) == len(NAMES)
+            lock = (result.path / "requirements.lock").read_text().splitlines()
+            assert {line.split("==")[0] for line in lock} == set(NAMES)
+            assert len(lock) == len(NAMES)
+            context = result.path
+        assert not context.exists()
+        cast(Callable[[], None], service_wheels.verify)()
+        cast(Callable[[], None], native_wheels.verify)()
+
+
+@pytest.mark.parametrize("budget", ["archive", "expanded"])
+def test_composed_profiles_share_one_aggregate_byte_budget(tmp_path: Path, budget: str) -> None:
+    with separate_application_inputs(tmp_path) as (service, service_wheels, native, native_wheels, deadline):
+        paths = dict(service_wheels.paths) | dict(native_wheels.paths)
+        size = sum(path.stat().st_size for path in paths.values())
+        if budget == "expanded":
+            size = 0
+            for path in paths.values():
+                with zipfile.ZipFile(path) as archive:
+                    size += sum(member.file_size for member in archive.infolist())
+        limits = replace(
+            LIMITS, **{"max_archive_bytes" if budget == "archive" else "max_expanded_bytes": size - 1},
+        )
+        with pytest.raises(ProfileError):
+            with prepare(
+                service, service_wheels, deadline, limits=limits,
+                additional_inputs=((native, native_wheels),),
+            ):
+                pytest.fail("separate profiles multiplied the image byte budget")
+
+
+def test_composed_profiles_refuse_different_bytes_for_shared_distribution(tmp_path: Path) -> None:
+    with separate_application_inputs(tmp_path, conflict=True) as (
+        service, service_wheels, native, native_wheels, deadline,
+    ):
+        with pytest.raises(ProfileError, match="shared|conflicting"):
+            with prepare(service, service_wheels, deadline, additional_inputs=((native, native_wheels),)):
+                pytest.fail("conflicting shared distribution admitted")
+
+
+def test_composed_profiles_refuse_different_runtime_targets(tmp_path: Path) -> None:
+    with separate_application_inputs(tmp_path, different_target=True) as (
+        service, service_wheels, native, native_wheels, deadline,
+    ):
+        with pytest.raises(ProfileError, match="different targets"):
+            with prepare(service, service_wheels, deadline, additional_inputs=((native, native_wheels),)):
+                pytest.fail("foreign native runtime target admitted")

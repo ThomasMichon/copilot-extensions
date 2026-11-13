@@ -1,0 +1,9 @@
+{
+  "comment": "Compose independently admitted service and native profiles into offline PR image inputs",
+  "changes": [
+    {
+      "plugin": "services/pr",
+      "type": "patch"
+    }
+  ]
+}
