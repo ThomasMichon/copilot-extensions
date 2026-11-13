@@ -1,9 +1,0 @@
-{
-  "comment": "Partition unchanged real-Git finalization and reconciliation tests from publication tests.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

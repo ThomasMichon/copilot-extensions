@@ -1,9 +1,0 @@
-{
-  "comment": "Name the attention boundary on current attention rows: optional since and position, comparable within one target, behind HTTP protocol 42",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Add scoped peer authority and multi-agent rules of engagement guidance",
-  "changes": [
-    {
-      "plugin": "agent-conduct-guidance",
-      "type": "patch"
-    }
-  ]
-}

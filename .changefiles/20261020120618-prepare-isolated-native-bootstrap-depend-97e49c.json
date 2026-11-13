@@ -1,9 +1,0 @@
-{
-  "comment": "Prepare isolated native bootstrap dependencies before disconnected health-gate tests",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}
