@@ -344,7 +344,7 @@ handover. Preserve held sessions and the separate pre-feature adoption hold.
     [source-pinned query qualification](journal/2026/11.10-explicit-owner-cli.md#discovery-provider-qualification-and-merge)
     passed. Caller discovery/capture integration and rollback adoption remain
     open. #12306 corrects the live Windows declaration to retain explicit-pair
-    support without advertising the Linux-only optional receiver; promoted
+    support without advertising the optional receiver on Windows; promoted
     release and installed adoption of that correction remain separate.
   - [ ] **Windows controlled caller:** expand and qualify the optional
     physical receiver before emitting Windows caller overlays. Capture the
@@ -355,7 +355,18 @@ handover. Preserve held sessions and the separate pre-feature adoption hold.
     new per-client supervisor. Native handle retention is an explicit
     qualification obligation, not a documented client guarantee. A
     [bounded native retention proof and realization sequence](journal/2026/11.10-explicit-owner-cli.md#windows-native-retention-proof-and-next-realization)
-    now establish feasibility, not provider support or caller adoption.
+    establish feasibility, not caller adoption.
+    - [x] **Windows provider-only receiver:** #12316 qualifies direct selected
+      physical entry, native pre-effect fallback and owner refusal, physical
+      replacement/rollback and exact cleanup. Capability advertisement,
+      bootstrap, section transfer and controlled caller capture remain open;
+      see the [source qualification](journal/2026/11.10-explicit-owner-cli.md#windows-provider-only-receiver-qualification-and-merge).
+     - [ ] **Windows section provider:** bounded versioned native-owner
+      section, actual creation-handle identity, protected principal boundary,
+      read-only retention, strict binding and owner-death refusal; see the
+      [provider controls](journal/2026/11.10-explicit-owner-cli.md#windows-native-owner-section-provider).
+      Production creation-owner integration and actual-client acceptance
+      remain separate.
   - [x] **Explicit Linux exec caller:** capture the exec owner's native pair
     and pass a sealed, session-only overlay for explicitly named configured
     entries, with actual-start discovery bound to a physical optional receiver.
