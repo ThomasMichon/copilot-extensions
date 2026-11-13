@@ -311,6 +311,7 @@ def _build_input_fingerprint(roots: tuple[Path, ...]) -> tuple:
 
 def _application_export_paths(source: Path, projects: tuple[str, ...]) -> tuple[str, ...]:
     import build_python_artifacts as builder
+    from application_sources import canonical_application, declared_projects
     from standalone_python_artifacts import COMPONENTS
 
     if not projects or len(set(projects)) != len(projects):
@@ -318,22 +319,20 @@ def _application_export_paths(source: Path, projects: tuple[str, ...]) -> tuple[
     for key in projects:
         if key == "composition:core":
             continue
-        if key.startswith("standalone:"):
-            relative = COMPONENTS.get(key.split(":", 1)[1])
-        else:
-            relative = "plugins/" + key if builder.uer.is_safe_lib_name(key) else None
-        if relative is None or not (source / relative / "pyproject.toml").is_file():
+        if not (canonical_application(source, key) / "pyproject.toml").is_file():
             raise ValueError("local source requires unique declared Python projects")
     builder = _load_module(Path(builder.__file__), "_local_install_export_builder")
     builder.REPO, builder.PLUGINS_DIR, builder.LIBS_DIR = source, source / "plugins", source / "libs"
     roots = set(_build_input_roots(source, projects, builder))
     roots.update((source / "plugins").glob("*/pyproject.toml"))
+    roots.update(directory / "pyproject.toml" for directory in declared_projects(source).values())
     roots.update(
         source / relative / "pyproject.toml"
         for relative in COMPONENTS.values() if (source / relative).exists()
     )
     roots.update(
-        source / relative for relative in ("bundle/core.json", ".github/plugin/marketplace.json")
+        source / relative
+        for relative in ("pyproject.toml", "bundle/core.json", ".github/plugin/marketplace.json")
         if (source / relative).exists() or (source / relative).is_symlink()
     )
     selected = []
