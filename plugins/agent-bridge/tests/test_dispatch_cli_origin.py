@@ -6,6 +6,7 @@ from copy import deepcopy
 import json
 import sqlite3
 import time
+from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI
@@ -13,8 +14,11 @@ from fastapi.testclient import TestClient
 
 from agent_bridge.acquisition_contract import AcquisitionRefused, AcquisitionRequest, cli_driver
 from agent_bridge.acquisition_store import AcquisitionStore
+from agent_bridge.acquisition_cli import acquire as client_acquire
+from agent_bridge.client import BridgeClientError
 from agent_bridge.db import Database
 from agent_bridge.dispatch_cli_origin import inspect
+from agent_bridge.protocol import HTTP_PROTOCOL_VERSION
 from agent_bridge.routes.live_sessions import router
 from test_acquisition_runtime import req, rig as _rig
 from test_dispatch_session_origin import origin
@@ -42,6 +46,38 @@ def launching(db: Database, **changes) -> tuple[AcquisitionRequest, AcquisitionS
     )
     db.create_cli_mode_reservation(request.worktree_id, now=time.time())
     return request, store
+
+
+@pytest.mark.parametrize("mode", ["cli", "acp"])
+@pytest.mark.parametrize("capability", [None, False, 0, "1", 1])
+def test_origin_client_negotiates_mode_capability_before_acquisition(mode, capability):
+    request = req(mode=mode, dispatch_origin=origin())
+    calls = []
+
+    def send(method, path, *args, **kwargs):
+        calls.append((method, path))
+        if path == "/health":
+            assert kwargs["_endpoint"] == "http://fixture"
+            return {
+                "protocol_version": HTTP_PROTOCOL_VERSION, "min_protocol_version": 1,
+                "capabilities": {f"dispatch_{mode}_session_origin": capability},
+            }
+        assert path == "/api/v1/acquisitions"
+        assert args[0]["dispatch_origin"] == origin()
+        return {
+            **request.model_dump(mode="json"), "session_id": "native", "native_session_id": "native",
+            "acquired": "created",
+        }
+
+    client = SimpleNamespace(_base="http://fixture", daemon_supports=lambda floor: True, _request=send)
+    if type(capability) is int and capability == 1:
+        assert client_acquire(client, request).native_session_id == "native"
+        assert calls == [("GET", "/health"), ("POST", "/api/v1/acquisitions")]
+    else:
+        with pytest.raises(BridgeClientError) as refused:
+            client_acquire(client, request)
+        assert refused.value.status == 426
+        assert calls == [("GET", "/health")]
 
 
 @pytest.mark.asyncio

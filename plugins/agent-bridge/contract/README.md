@@ -23,11 +23,13 @@ historical binary rollback or native SDK evidence.
 
 ## Current HTTP-52 owner-membership evidence
 
-The independently optional `dispatch_cli_session_origin: 1` expansion adds 14
+The independently optional `dispatch_cli_session_origin: 1` expansion adds 24
 source controls for original-acquisition first-save registration, pending
 unconfirmed launch, replay, same-process rename, legacy and stamped resume,
 opaque storage, transaction rollback and schema preparation. The original
-ACP provider retains its separate capability. The current vector observes
+ACP provider retains its separate capability. Mode-specific acquisition-client
+controls refuse unsupported or malformed declarations before POST.
+The current vector observes
 both declarations; only current-generation evidence is refreshed. CLI source
 controls use synthetic native registration, not a live Copilot process.
 Automatic Dispatch callers and installed lifecycle qualification remain separate.

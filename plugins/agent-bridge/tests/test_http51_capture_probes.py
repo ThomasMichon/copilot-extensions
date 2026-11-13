@@ -18,6 +18,8 @@ import test_live_inbox_runtime as inbox_controls
 import test_native_send_admission as native_controls
 import test_gc as gc_controls
 from test_dispatch_cli_origin import (
+    test_origin_client_negotiates_mode_capability_before_acquisition
+    as test_origin_client_negotiates_mode_capability_before_acquisition,
     test_connected_cli_creation_persists_before_delivery_and_replays
     as test_connected_cli_creation_persists_before_delivery_and_replays,
     test_unconfirmed_first_save_keeps_pending_effect_without_prompt_or_relaunch

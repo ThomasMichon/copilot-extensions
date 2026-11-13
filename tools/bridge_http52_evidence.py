@@ -146,6 +146,7 @@ EXTRA_PATHS = (
 )
 PROBES = {
     **retained.PROBES,
+    "test_origin_client_negotiates_mode_capability_before_acquisition": 10,
     "test_connected_cli_creation_persists_before_delivery_and_replays": 1,
     "test_unconfirmed_first_save_keeps_pending_effect_without_prompt_or_relaunch": 1,
     "test_original_snapshot_survives_restart_heartbeat_alias_and_mutable_targeting": 1,

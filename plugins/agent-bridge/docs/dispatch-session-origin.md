@@ -85,6 +85,13 @@ silently repairing it. Older providers do not supply the CLI-origin contract;
 they are not an equivalent path for metadata-bearing launch or rename. No
 baseline form is retired here.
 
+The existing acquisition request-file client checks the mode-specific named
+capability on the selected daemon before each send attempt, composing with
+retained-writer requirements when supplied. Missing or invalid capability
+declarations refuse before POST instead of letting an older additive reader
+silently launch without retaining the metadata. Ordinary requests without
+origin metadata keep their prior negotiation path.
+
 `tests/test_dispatch_session_origin.py` exercises strict nested input,
 original request persistence, HTTP keyed creation, changed/dropped replay facts,
 restart, mutable targeting, reused legacy sessions and pre-effect venue refusal.
