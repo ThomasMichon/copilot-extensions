@@ -342,6 +342,15 @@ the non-public approval conversation.
 
 ## Plan
 
+The [finite-source and MCP receiving study](journal/2026/11.13-finite-source-and-mcp-receiving.md)
+retains thirteen whole contracts and verifies four finite source completions
+with exact public acknowledgments and unchanged originals. Three independent
+planned MCP receiving lanes preserve their full unfinished contracts.
+Existing contributor PRs, the exact early-enumeration defect, canonical daemon
+parent and affected installation's mutation hold remain with their actual
+owners. One arrival offsets four completions: the complete 883-open queue is
+154 above target; source completion does not close remaining technical gates.
+
 The [source-fixture and independent typing study](journal/2026/11.13-source-fixtures-and-typing-receiving.md)
 retains sixteen complete originals and verifies #10408's finite source
 completion, with public acknowledgment and unchanged-original readback.
