@@ -412,6 +412,13 @@ def validate_manifest(manifest: dict) -> None:
         core = "composition" in manifest
         primary_role = "standalone" if standalone else "plugin"
         source_root = COMPONENTS[manifest["component"]] if standalone else f"plugins/{label}"
+        if "project_path" in manifest:
+            from application_sources import project_locations
+            if standalone or core:
+                raise PromotionArtifactError("project path is only valid for a declared independent project")
+            source_root = project_locations({"tool": {"copilot-extensions": {
+                "python-projects": {label: manifest["project_path"]},
+            }}})[label]
         if core:
             selection = manifest.get("selection")
             if (
@@ -511,8 +518,13 @@ def validate_source_binding(manifest: dict, root: Path, *, core_hash_workers: in
     label = _artifact_label(manifest)
     standalone = "component" in manifest
     core = "composition" in manifest
-    plugin_dir = root / COMPONENTS[manifest["component"]] if standalone else root / "plugins" / label
+    from application_sources import canonical_application
     try:
+        plugin_dir = root / COMPONENTS[manifest["component"]] if standalone else canonical_application(root, label)
+        if not core and not standalone and manifest.get("project_path", "plugins/" + label) != (
+            plugin_dir.relative_to(root).as_posix()
+        ):
+            raise PromotionArtifactError("artifact project path differs from the repository declaration")
         if not core and (
             plugin_dir.is_symlink() or builder.uer._find_symlink(plugin_dir, skip_test_runs=False) is not None
         ):

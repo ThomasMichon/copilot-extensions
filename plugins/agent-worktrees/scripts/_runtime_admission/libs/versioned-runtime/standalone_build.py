@@ -26,6 +26,7 @@ APPLICATION_RESOURCES = {
         "scripts/runtime-source-tools/**/*",
         "scripts/runtime-input-provider/**/*",
         "scripts/libs/payload-invocation/*.py",
+        "scripts/libs/versioned-runtime/standalone_build.py",
         "bin/**/*",
         "references/control-plane-provider.json", "references/uninstall-contract.json",
     ),

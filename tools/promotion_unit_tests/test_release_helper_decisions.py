@@ -559,7 +559,8 @@ def test_packaged_manager_provider_loads_its_declared_canonical_owners(tmp_path,
         projection = bundle / (
             "plugins/customizing-copilot/skills/reviewing-customizations/scripts"
         )
-        monkeypatch.syspath_prepend(str(projection))
+        # Keep both path changes on the same undo stack.
+        monkeypatch.setattr(sys, "path", [str(projection), *sys.path])
         loaded = importlib.import_module("instruction_projections")
         assert Path(loaded.__file__).is_relative_to(bundle)
     finally:
