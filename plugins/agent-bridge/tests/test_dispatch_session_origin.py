@@ -84,7 +84,7 @@ def test_origin_detaches_nested_input_and_legacy_request_digest_is_unchanged():
 
 
 @pytest.mark.parametrize("changes", [
-    {"mode": "cli"}, {"task_id": "task-b"}, {"reservation_key": "reservation-b"},
+    {"mode": "remote"}, {"task_id": "task-b"}, {"reservation_key": "reservation-b"},
 ])
 def test_acquisition_refuses_unqualified_modes_and_other_assignments(changes):
     with pytest.raises(ValidationError):

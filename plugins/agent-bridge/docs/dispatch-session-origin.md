@@ -1,13 +1,14 @@
-# Original Dispatch assignment on ACP sessions
+# Original Dispatch assignment on Bridge sessions
 
 The [session acquisition](session-acquisition.md) receiver accepts optional
-`dispatch_origin` metadata for local ACP sessions. This is a provider expansion,
+`dispatch_origin` metadata for local ACP and CLI-native sessions. This is a provider expansion,
 not automatic Dispatch enrollment or permission to retire a session.
 
 ## Contract and scope
 
 The executing daemon advertises `capabilities.dispatch_acp_session_origin: 1`
-through `/health`. An upgraded caller must observe that declaration on the
+and independently `capabilities.dispatch_cli_session_origin: 1`
+through `/health`. An upgraded caller must observe the declaration for its mode on the
 daemon it will actually invoke before sending this field; a package version or
 an installed CLI is not evidence that the daemon supports it.
 
@@ -26,7 +27,7 @@ counters, unsupported schema versions and cross-task/reservation references
 are rejected. This caller-supplied annotation is not independent proof of
 producer authority, native custody, current assignment or cleanup permission.
 
-`POST /api/v1/acquisitions` accepts the field only for ACP requests and requires
+`POST /api/v1/acquisitions` accepts the field for either mode and requires
 the same task and reservation as the acquisition. Both the original serialized
 request and its existing replay digest retain it before launch.
 `POST /api/v1/sessions/workspace-creations` (and keyed creation through the
@@ -46,6 +47,21 @@ The session list and detail views read this original config, never mutable
 target metadata or current task/pool labels. Missing or unrecognized metadata
 is exposed as `null`; its raw stored config remains unchanged.
 
+For CLI acquisitions, the original request, selected creation decision and held
+launch gate supply the first-save input. Inside the existing registration
+transaction, a new native row retains the snapshot in nullable
+`live_sessions.dispatch_origin_json`, before reservation claim and alias folding
+commit. Heartbeats never backfill or overwrite it. Mutable `driven_by`, venue,
+worktree or current task labels are not birth evidence; the driver must match
+the original pending acquisition and its retained request digest.
+Both live-session list and detail expose the validated annotation, with `null`
+for absent or opaque storage. A same-process rename carries the original raw
+snapshot; a resume into an already recorded conversation preserves that
+conversation's snapshot or legacy absence instead of inheriting its provisional
+registration's stamp. A newly created CLI without the requested first-save
+evidence remains a pending acquisition: no task prompt is admitted or replacement
+process launched to hide that missing evidence.
+
 A reused/resumed conversation keeps its original stamp, including honest
 legacy absence. A new session in a reused workspace must name its own creating
 assignment, not the workspace's older allocation cohort. A separately created
@@ -58,11 +74,23 @@ owners remain authoritative for actual obligations and disposition.
 Old callers preserve their request/replay meaning: absent acquisition metadata
 is omitted from serialization, and absent creation metadata adds no option to
 the keyed facts. Old receivers may ignore additive JSON; that is not successful
-retention. No automatic CLI or Dispatch caller sends this field yet. Such a
+retention. No automatic Dispatch caller sends this field yet. Such a
 caller must negotiate support before migration, retain its original wire
 choice for pending attempts and never replay an unknown outcome in another form.
 Provider rollback leaves baseline unstamped operations available, not an
-equivalent metadata-enforcing fallback. No baseline form is retired here.
+equivalent metadata-enforcing fallback. Schema 46 adds nullable CLI storage
+without backfilling existing rows. Read-only adoption requires supported writable
+preparation; an already-current schema missing the column refuses rather than
+silently repairing it. Older providers do not supply the CLI-origin contract;
+they are not an equivalent path for metadata-bearing launch or rename. No
+baseline form is retired here.
+
+The existing acquisition request-file client checks the mode-specific named
+capability on the selected daemon before each send attempt, composing with
+retained-writer requirements when supplied. Missing or invalid capability
+declarations refuse before POST instead of letting an older additive reader
+silently launch without retaining the metadata. Ordinary requests without
+origin metadata keep their prior negotiation path.
 
 `tests/test_dispatch_session_origin.py` exercises strict nested input,
 original request persistence, HTTP keyed creation, changed/dropped replay facts,
@@ -71,6 +99,9 @@ Real-resolver controls exercise both HTTP creation and acquisition without
 calling the privileged startup owner.
 Run it with the existing contained plugin runner alongside
 `test_acquisition_runtime.py` and `test_workspace_creation.py`.
+`tests/test_dispatch_cli_origin.py` joins acquisition, native registration,
+SQLite, aliases and HTTP views; it covers original replay, first-save refusal,
+rollback, resume, opaque storage and schema preparation.
 These are synthetic native/owner source controls, not installed-runtime,
-native Windows, CLI-native registration or production cohort qualification.
+native Windows or production cohort qualification.
 Required unit-packet nodes, permissions, targets and budgets are unchanged.

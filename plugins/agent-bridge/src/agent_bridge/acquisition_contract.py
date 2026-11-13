@@ -84,10 +84,10 @@ class AcquisitionRequest(BaseModel):
     @model_validator(mode="after")
     def validate_intent(self) -> AcquisitionRequest:
         if self.dispatch_origin is not None and (
-            self.mode != "acp" or self.dispatch_origin.task_id != self.task_id
+            self.dispatch_origin.task_id != self.task_id
             or self.dispatch_origin.reservation_key != self.reservation_key
         ):
-            raise ValueError("dispatch origin requires the same ACP task and reservation")
+            raise ValueError("dispatch origin requires the same task and reservation")
         if self.version >= 2 and (not self.project or not self.worktree_path):
             raise ValueError("workspace-qualified acquisition requires project and path")
         if (self.version == 3) != (self.worktree_writer is not None):

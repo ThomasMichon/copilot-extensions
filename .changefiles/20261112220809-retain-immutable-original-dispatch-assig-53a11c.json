@@ -1,0 +1,9 @@
+{
+  "comment": "Retain immutable original Dispatch assignment on first-save CLI-native registration and preserve conversation attribution through resume and aliases.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}
