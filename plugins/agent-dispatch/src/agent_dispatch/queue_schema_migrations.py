@@ -706,6 +706,13 @@ def run_queue_schema_migrations(conn: sqlite3.Connection, *, now_fn) -> None:
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_spawn_res_state ON spawn_reservations(state)"
     )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_spawn_res_worktree ON spawn_reservations(worktree)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_spawn_res_allocation"
+        " ON spawn_reservations(allocation_reservation_key)"
+    )
     conn.execute("BEGIN IMMEDIATE")
     try:
         conn.execute("DROP INDEX IF EXISTS idx_spawn_res_exclusive_active")
