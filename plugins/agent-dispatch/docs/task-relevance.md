@@ -80,8 +80,19 @@ task remains suspended: the prompt tells its agent to take closeout steering,
 not run `start` or `resume`. Steering consumption selects the closeout instead
 of older goal instructions and does not restore a suspended execution lease.
 Submitted work can use its recorded `completed_by` worker and retained native
-without reassigning the task. Absent or changed ownership stays pending; this
-receiver never guesses a historical owner or creates a replacement agent.
+without reassigning the task. An owner absent at acceptance, or a conflicting
+later owner, stays pending; this receiver never guesses a historical owner or
+creates a replacement agent.
+
+When closeout acceptance already captured the original worker and native,
+same-generation yield, reset and requeue may clear the task's current assignment
+without invalidating that closeout's linked wake or steering. Only unassigned
+proposed/queued work can use this retained target; a different worker, native,
+generation or terminal status cannot. Delivery and steering do not restore task
+ownership, its execution lease or the original goal. A hosted conversation still
+requires its retained reservation and native identity, with release, retirement,
+cooling and conclusion guards unchanged. Recovery that advances the generation
+remains fenced; preserving intent does not authorize waking a retired native.
 
 Only the outbox row linked through the closeout's actual steer can pass its
 original-goal admission fence. A later ordinary/event-note wake cannot supersede
@@ -104,7 +115,7 @@ still be awaiting the agent's work.
 `pending_owner_closeout` means no wake was linked to an available original
 owner/native. `relevance_receipt` separates immutable acceptance, current wake
 status and steering consumption. None proves actual session/workspace cleanup.
-Session conclusion, workspace disposition, recovery of cleared historical
+Session conclusion, workspace disposition, recovery of previously uncaptured
 owners and externally registered relevance callers remain pending. This slice
 does not release reservations or delete files.
 

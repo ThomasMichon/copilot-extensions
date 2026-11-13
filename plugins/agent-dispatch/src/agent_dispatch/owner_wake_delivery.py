@@ -32,13 +32,17 @@ def _closeout_delivery(conn, task_id, owner, owner_session_id, key) -> bool:
 
 def _require_retained_owner(task, reservation: SpawnReservation, owner, owner_session_id, *,
                             closeout: bool = False):
+    unassigned_closeout = bool(
+        closeout and task is not None and task.status in {Status.PROPOSED, Status.QUEUED}
+        and task.owner is None and task.owner_session_id is None
+    )
     if (
-        task is None or not (
+        task is None or not (unassigned_closeout or (
             task.owner == owner
             or closeout and task.status == Status.SUBMITTED
             and task.owner is None and task.completed_by == owner
-        ) or task.owner_session_id != owner_session_id
-        or not (task.status in Status.OWNED or closeout and task.status == Status.SUBMITTED)
+        ) and task.owner_session_id == owner_session_id
+        and (task.status in Status.OWNED or closeout and task.status == Status.SUBMITTED))
         or not owner_session_id
         or reservation.state not in {SpawnState.SPAWNED, SpawnState.COLD}
         or reservation.conversation_retired or reservation.release_requested
