@@ -68,6 +68,14 @@ as independent per-plugin PRs; see Coordination._
 
 ## Coordination
 
+The [installation convergence map](../source-managed-runtime-installs/installation-convergence.md)
+composes this effort's shared construction/adopter mechanics into complete
+application staging before activation. It does not create another engine or
+extend a legacy per-plugin build-and-start loop as the fresh/update target.
+Preserve existing phase owners, Worktrees/Budget exceptions, paused adopters
+and required native/installed acceptance; those are not transferred or passed
+by this cross-link.
+
 The proposed finite #5955 intake retains the SAME legacy bootstrap/installer
 and adopter custodians for Containers, SSH and Machines. Direct tracking of
 their first-use acquisition order does not start an adopter, resume the paused
