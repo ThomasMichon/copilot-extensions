@@ -202,6 +202,10 @@ reservation replay cannot change its transport. A separately keyed acquisition
 or first ordinary creation can select origin-v1 despite inherited workspace
 facts: carrying a project/path is not current-attempt preparation.
 Lost responses retain the same reservation/request, never a second native form.
+Granting a new ordinary attempt on an origin-v1 lineage requires explicit
+origin-v1 confirmation. An unchanged supervisor that omits it is refused before
+the new reservation/claim commits, rather than receiving permission to send a
+baseline creation. Existing baseline lineages remain compatible.
 
 The running coordinator advertises `session_origin_reservation_versions: [1]`
 through its existing pool-placement contract. The explicit client checks that

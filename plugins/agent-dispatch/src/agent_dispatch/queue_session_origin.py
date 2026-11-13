@@ -75,6 +75,8 @@ def retain(conn: sqlite3.Connection, task: Task, *, key: str, requested: str | N
         raise TaskError("unsupported session origin transport")
     if requested is not None and requested != transport:
         raise TaskError("original session origin transport cannot change")
+    if transport == "origin-v1" and requested != "origin-v1":
+        raise TaskError("origin-v1 retry requires explicit session origin confirmation")
     if transport == "origin-v1" and not _representable(encoded, original):
         raise TaskError("session origin transport requires representable original evidence")
     conn.execute(

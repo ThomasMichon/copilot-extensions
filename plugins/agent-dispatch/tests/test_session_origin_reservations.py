@@ -85,7 +85,11 @@ def test_keyed_ordinary_retry_lost_reply_and_later_episode_keep_original_choice(
     first, _ = queue.reserve_spawn(task.id, driver="ordinary-bridge", session_origin_transport=transport)
     queue.defer_spawn(first.key, detail="creation reply lost")
     restarted = TaskQueue(queue.db_path)
-    retry, _ = restarted.reserve_spawn(task.id, driver="ordinary-bridge")
+    if transport == "origin-v1":
+        with pytest.raises(TaskError, match="explicit session origin confirmation"):
+            restarted.reserve_spawn(task.id, driver="ordinary-bridge")
+        assert len(restarted.list_reservations(task_id=task.id)) == 1
+    retry, _ = restarted.reserve_spawn(task.id, driver="ordinary-bridge", session_origin_transport=transport)
     assert retry.creation_key == first.creation_key
     assert retry.session_origin == first.session_origin
     assert retry.session_origin_reservation_key == first.key
@@ -98,7 +102,7 @@ def test_keyed_ordinary_retry_lost_reply_and_later_episode_keep_original_choice(
     restarted.start(task.id, "worker")
     restarted.complete(task.id, "worker")
     later_task = restarted.create("later episode", repo=task.repo, dedup_key="logical")
-    later, _ = restarted.reserve_spawn(later_task.id, driver="ordinary-bridge")
+    later, _ = restarted.reserve_spawn(later_task.id, driver="ordinary-bridge", session_origin_transport=transport)
     assert later.creation_key == first.creation_key
     assert later.session_origin == first.session_origin
     assert later.session_origin_transport == transport
@@ -116,6 +120,29 @@ def test_unselected_ordinary_retry_retains_baseline_for_unknown_earlier_send(tmp
         queue.reserve_spawn(task.id, session_origin_transport="origin-v1")
     assert queue.get_reservation(first.key).session_origin_transport == "baseline"
     assert queue.get_reservation(retry.key).session_origin_transport == "baseline"
+
+
+def test_unchanged_supervisor_cannot_obtain_a_baseline_spawn_for_origin_lineage(tmp_path):
+    from agent_dispatch import ordinary_bridge
+
+    queue = TaskQueue(tmp_path / "queue.db")
+    task = queue.create("work", repo="example")
+    first, _ = queue.reserve_spawn(
+        task.id, driver="ordinary-bridge", session_origin_transport="origin-v1",
+    )
+    queue.defer_spawn(first.key, detail="keyed origin creation result unknown")
+    with TestClient(create_app(queue, enable_mcp=False, verification_interval=0)) as api:
+        def respond(request):
+            assert "session_origin_transport" not in json.loads(request.content)
+            response = api.request(request.method, str(request.url), content=request.content, headers=request.headers)
+            return httpx.Response(response.status_code, json=response.json())
+
+        with DispatchClient("http://testserver", transport=httpx.MockTransport(respond)) as client:
+            with pytest.raises(DispatchError, match="explicit session origin confirmation"):
+                ordinary_bridge.reserve_for_backend(client, asdict(task), "supervisor", ordinary=True)
+    assert queue.get(task.id).status == "queued"
+    assert len(queue.list_reservations(task_id=task.id)) == 1
+    assert queue.get_reservation(first.key).session_origin_transport == "origin-v1"
 
 
 def test_switch_from_acquisition_to_keyed_creation_does_not_inherit_its_session_origin(tmp_path):
