@@ -2501,8 +2501,8 @@ The actual offline native-client packet is
 Set `COPILOT_NATIVE_TEST_EXECUTABLE` to an explicitly selected native executable.
 Linux uses the existing exec caller; Windows uses PowerShell and the existing
 suspended-creation publisher, which exits before ACP and delayed MCP startup.
-Only the private copied Windows runtime advertises the optional receiver for
-this qualification; production advertisement and caller enrollment stay off.
+The private runtime uses the provider's actual optional-receiver declaration
+without a fixture capability override. Production caller enrollment stays off.
 The same native client, conduit, keeper and upstream must survive replacement,
 rollback and same-slot replacement, including three accepted in-flight tool
 calls, real client ping replies and withheld/unknown delivery without replay.

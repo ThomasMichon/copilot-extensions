@@ -142,8 +142,8 @@ class QueueBackedClient:
             self._q.record_spawn_worktree(key, worktree, **kwargs)
         )
 
-    def record_spawn_allocation(self, key, project):
-        return asdict(self._q.record_spawn_allocation(key, project))
+    def record_spawn_allocation(self, key, project, **kwargs):
+        return asdict(self._q.record_spawn_allocation(key, project, **kwargs))
 
     def fail_spawn(
         self,

@@ -79,6 +79,7 @@ def ordinary(
             "task_id": kwargs["task_id"], "reservation_key": kwargs["reservation_key"],
             "attempt": kwargs["attempt"], "driver": kwargs["driver"],
             "supervisor": kwargs["supervisor"], "creator_machine": "host-a", "ownership": "created",
+            **({"cohort": kwargs["allocation_cohort"]} if kwargs.get("cohort_transport") == "cohort-v1" else {}),
         }
         return {
             "worktree": ground["id"], "project": ground["repo"], "path": ground["path"],
@@ -193,6 +194,47 @@ def launch(ordinary: SimpleNamespace) -> dict:
     return ordinary_bridge.start(
         ordinary.task, client=ordinary.client, agent="local", project="example", prompt=seed,
     )
+
+
+def test_original_cohort_receipt_reaches_ordinary_initial_prompt(ordinary, monkeypatch):
+    from agent_dispatch import embody, worktree_cohort
+
+    monkeypatch.setattr(embody, "_agent_worktrees_launch_prefix", lambda: ["/fixture/python", "-m", "agent_worktrees"])
+    monkeypatch.setattr(worktree_cohort, "_supports_cohort", lambda _prefix: True)
+    launch(ordinary)
+    stored = ordinary.q.get_reservation(ordinary.placed["reservation"]["key"])
+    assert stored.allocation_cohort_transport == "cohort-v1"
+    assert ordinary.creation_records[0]["dispatch_attempt"]["cohort"] == stored.allocation_cohort
+    assert any(argv[2] == "send" for argv, _ in ordinary.calls)
+
+
+@pytest.mark.parametrize("change", ["missing", "foreign", "ownership"])
+def test_cohort_receipt_keeps_original_allocation_checks(ordinary, monkeypatch, change):
+    from copy import deepcopy
+    from agent_dispatch import embody, worktree_cohort
+    from agent_dispatch.ordinary_pool_startup import created_workspace_record
+
+    monkeypatch.setattr(embody, "_agent_worktrees_launch_prefix", lambda: ["/fixture/python", "-m", "agent_worktrees"])
+    monkeypatch.setattr(worktree_cohort, "_supports_cohort", lambda _prefix: True)
+    launch(ordinary)
+    stored = ordinary.client.get_reservation(ordinary.placed["reservation"]["key"])
+    record = deepcopy(ordinary.creation_records[0])
+    if change == "missing":
+        record["dispatch_attempt"].pop("cohort")
+    elif change == "foreign":
+        record["dispatch_attempt"]["cohort"]["pool"]["registration_id"] = "foreign"
+    else:
+        record["dispatch_attempt"]["ownership"] = "reused"
+    info = {
+        "session_id": "bridge-a", "ready": True, "status": "awaiting_first_prompt",
+        "creation": {
+            "version": 1, "status": "complete", "native_session_id": "native-a",
+            "turn_index": None, "worktree": record,
+        },
+        "connection": {"native_session_id": "native-a", "worktree_id": "worktree-a", "repo": "example"},
+    }
+    with pytest.raises(TaskError, match="original sessionless allocation"):
+        created_workspace_record(ordinary.task, stored, info)
 
 
 @pytest.mark.parametrize("ordinary", [True], indirect=True)
