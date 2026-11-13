@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-12 - Claim-kind source credit and current contract boundaries](journal/2026/11.12-claim-kind-credit-and-current-contracts.md)
+
 - [2026-11-12 - Approved-source tracking retirement and retained contracts](journal/2026/11.12-approved-source-retirement-and-contract-study.md)
 
 - [2026-11-12 - Account source credit and retained execution custody](journal/2026/11.12-account-source-credit-and-retained-custody.md)
