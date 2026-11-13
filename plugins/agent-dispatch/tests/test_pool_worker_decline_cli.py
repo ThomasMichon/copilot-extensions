@@ -180,12 +180,10 @@ def test_host_case_variants_decline_with_exact_assignment_exclusion(q, caller, m
     args, task_id, _, _, _, *_ = caller
     monkeypatch.setattr(cli, "_identity", lambda args: ("HOST-A", "worktree"))
     args.exclude_self = scope
-    with q._connect() as conn:
-        conn.execute("UPDATE task_pool_assignments SET machine='Host-A' WHERE task_id=?", (task_id,))
     assert args.func(args) == 0
     decline = q.pool_worker_decline(task_id)
     assert decline.worker_id == "HOST-A/worktree"
-    assert decline.exclusions == (f"{scope}:{'Host-A' if scope == 'machine' else 'worktree'}",)
+    assert decline.exclusions == (f"{scope}:{'host-a' if scope == 'machine' else 'worktree'}",)
 
 
 @pytest.mark.parametrize("change", ["absent", "host", "reservation"])

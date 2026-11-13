@@ -141,7 +141,8 @@ does not release reservations or delete files.
 
 The queue provider `prepare_relevance_closeout` prepares settlement
 of the captured original task relationship. The conditional HTTP provider below
-exposes it; no CLI or automatic caller adopts it yet.
+exposes it; the optional [original-worker CLI](relevance-closeout-worker.md)
+adopts it conditionally, without migrating automatic callers.
 A caller identifies the accepted closeout request, worker, native
 and generation; it cannot supply a readiness observation.
 
@@ -274,8 +275,10 @@ grant global health access and a legacy receiver returns unsupported/not found.
 Missing, malformed or unsupported metadata, including provider
 rollback, means closeout is unsupported before effects; no effectful probe or
 fallback to generic abandonment is equivalent. No old surface is retired.
-Worker finalization integration, native conclusion and running qualification
-remain tracked by the [active effort](../../../efforts/active/task-relevance-reconciliation/README.md).
+The conditional [original-worker caller](relevance-closeout-worker.md) connects
+preparation, canonical own-workspace finalization and acknowledgement.
+Automatic caller adoption, native conclusion and running qualification remain
+tracked by the [active effort](../../../efforts/active/task-relevance-reconciliation/README.md).
 
 ## Registered receiver and compatibility
 

@@ -112,6 +112,14 @@ def register_task_lifecycle_commands(sub) -> None:
     p.add_argument("--note", required=True, help="Meaningful reason this assignment cannot be accepted")
     p.set_defaults(func=cmd_decline)
 
+    from .relevance_closeout_cli import cmd_relevance_closeout
+    p = sub.add_parser(
+        "relevance-closeout",
+        help="Finalize your own captured workspace before acknowledging obsolete work",
+    )
+    p.add_argument("task_id")
+    p.set_defaults(func=cmd_relevance_closeout)
+
     p = sub.add_parser(
         "suspend",
         help="park a started task as dormant while retaining its owner",
