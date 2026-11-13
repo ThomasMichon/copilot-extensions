@@ -42,6 +42,27 @@ def native_construction_options(plugin: Path, inputs) -> tuple[str, dict]:
     }
 
 
+def installed_identity(slot: Path, runtime, refusal) -> dict:
+    python = runtime.slot_python(slot.parent.parent, slot.name)
+    if python is None:
+        raise refusal("Retained runtime has no interpreter for deployment evidence")
+    probe = (
+        "import json,pathlib,sys; from importlib.metadata import version; "
+        "from agent_worktrees import _build_info; "
+        "assert pathlib.Path(_build_info.__file__).resolve().is_relative_to("
+        "pathlib.Path(sys.prefix).resolve()); "
+        "print(json.dumps({'package_version':version('agent-worktrees'),"
+        "'build_info':_build_info.BUILD_INFO}))"
+    )
+    result = subprocess.run(
+        [str(python), "-I", "-B", "-c", probe],
+        executable=str(python) if os.name == "nt" else None,
+        capture_output=True, text=True, timeout=30, check=True,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    return json.loads(result.stdout)
+
+
 def selected_repair(root: Path, version: str, previous: str | None, source_identity, governance) -> str:
     """Choose the selected repair; the constructor still admits its exact inputs."""
     import re
