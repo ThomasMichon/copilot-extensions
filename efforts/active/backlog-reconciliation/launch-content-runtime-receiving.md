@@ -5,6 +5,22 @@
 Parent: [Backlog Reconciliation](README.md), continuing Phase 2.
 Method: [Weighted Semantic Consolidation](semantic-density-consolidation.md).
 
+## Delivered receiving and separate tracking outcome
+
+The plan merged in [#12374](https://github.com/ThomasMichon/copilot-extensions/pull/12374).
+Fresh complete source/receiver qualification preceded additive publication.
+The whole actual #7943 body now directly retains LR1-LR8 and the crosswalk;
+its original body, discussions, title, labels, assignments and Windows claim
+remain intact. Only the completed receiving bookkeeping row is checked.
+After separate whole-source judgment and the
+[public explanation](https://github.com/ThomasMichon/copilot-extensions/issues/7694#issuecomment-6844894171),
+#7694 closed `NOT_PLANNED`. #7943 stays OPEN; every unfinished technical
+acceptance, existing pause and source/resource custodian remains.
+
+The proposal and crosswalk below retain the reviewed rationale. This outcome
+establishes tracking receipt, not implementation, native/installed acceptance,
+maintenance enrollment, claim release or rollout.
+
 ## Receiving direction and actual shared surface
 
 Propose existing [#7943](https://github.com/ThomasMichon/copilot-extensions/issues/7943)
@@ -203,12 +219,12 @@ copy boundaries; a delivery receipt is not model-loaded evidence.
 
 ### LR8 - Complete receiving and separate tracking disposition
 
-- [ ] After review, append all direct clauses to #7943 without losing its
+- [x] After review, append all direct clauses to #7943 without losing its
   incumbent body, discussion, unchecked acceptance, title, labels,
   assignments or Windows reservation. Qualify current source/receiver
   provenance and read back the whole actual receiving contract; a plan
   link or successful write is not complete acceptance.
-- [ ] Only after a separate whole-source judgment, retire redundant #7694
+- [x] Only after a separate whole-source judgment, retire redundant #7694
   tracking as `NOT_PLANNED`, explicitly retaining its entire unfinished
   launch/maintenance work in open #7943. Do not mark a technical fix,
   close #7943, settle a claim or lift a pause. Preserve useful labels and

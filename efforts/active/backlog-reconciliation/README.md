@@ -342,16 +342,19 @@ the non-public approval conversation.
 
 ## Plan
 
-The [protected launch/content receiver proposal](launch-content-runtime-receiving.md)
-keeps #7943's explicit Windows/token condition and proposes retaining whole
-#7694 there, without moving runtime or guidance ownership. The
-[terminal-reservation sublane](terminal-reservation-receiving.md) proposes
-complete #7805 receiving under #7116's actual AS-A9 authority, preserving
-unverified source acceptance and all resource protections. Review and whole
-direct issue readback precede separate source adjudication. The
+The [protected launch/content receiver](launch-content-runtime-receiving.md)
+keeps #7943's explicit Windows/token condition and now directly retains whole
+#7694 there, without moving runtime or guidance ownership. Reviewed plan
+#12374, complete actual receiving readback and separate source judgment verify
+#7694's `NOT_PLANNED` tracking retirement. The
+[terminal-reservation sublane](terminal-reservation-receiving.md) now directly
+retains complete #7805 receiving under open #7116's actual AS-A9 authority.
+#7805 remains OPEN under its literal matching-source-acceptance condition and
+continuing bounded recovery claim; receiving is not technical fulfillment. The
 [stamp-acceptance checkpoint](journal/2026/11.12-stamp-acceptance-and-protected-receiving-direction.md)
-records verified #7247 tracking retirement, fourteen qualified source unions
-and a current Git-object discriminator retaining #7606; no native result,
+records verified #7247 and #7694 tracking retirement, fourteen qualified source
+unions, the separate #7805 retention and a Git-object discriminator retaining
+#7606; no native result,
 claim release or source/resource transfer is inferred.
 
 The [real stamp-consumer receiving contract](stamp-consumer-receiving.md)
