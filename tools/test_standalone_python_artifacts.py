@@ -706,6 +706,9 @@ def test_operational_assets_survive_wheel_and_source_distribution(tmp_path, rela
         ).items()
     }
     assert expected
+    if package == "agent_worktrees":
+        for name in ("native-seed-boundary.ps1", "native-seed-process.ps1", "native-seed-process.cs"):
+            assert f"{package}/_runtime_assets/scripts/{name}" in expected
     if package == "worktree_manager":
         canonical = ROOT / "libs" / "bootstrap-killswitch"
         for name in ("bootstrap-killswitch-guard.sh", "bootstrap-killswitch-guard.ps1", "killswitch_mutation.py"):

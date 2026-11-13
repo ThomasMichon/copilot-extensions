@@ -1,0 +1,9 @@
+{
+  "comment": "Provide an opt-in in-process suspended native creation seam without changing production caller selection",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
