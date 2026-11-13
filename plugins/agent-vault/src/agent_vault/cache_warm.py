@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Iterator
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
+import contextlib
 from dataclasses import dataclass, field, replace
 import threading
 import time
@@ -46,11 +48,37 @@ class CacheWarmQueue:
         self.service = service
         self.closed = False
         self._lock = threading.Lock()
+        self._foreground = threading.Condition()
+        self._foreground_count = 0
         self._records: OrderedDict[tuple[str, str], WarmRequest] = OrderedDict()
         self._pending: OrderedDict[tuple[str, str], WarmRequest] = OrderedDict()
         self._epochs: dict[str, object] = {}
         self._default_groups: dict[str, str] = {}
         self._refused: tuple[tuple[str, str], WarmState] | None = None
+
+    @contextlib.contextmanager
+    def foreground(self) -> Iterator[None]:
+        with self._foreground:
+            self._foreground_count += 1
+        try:
+            yield
+        finally:
+            with self._foreground:
+                self._foreground_count -= 1
+                self._foreground.notify_all()
+
+    def wait_for_foreground(self, deadline: float) -> bool:
+        with self._foreground:
+            while self._foreground_count and not self.closed:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return False
+                self._foreground.wait(remaining)
+            return not self.closed
+
+    def foreground_pending(self) -> bool:
+        with self._foreground:
+            return self._foreground_count > 0
 
     def enqueue(self, kpdb: str, group: str | None, *, confirmed: bool = False) -> WarmState:
         with self._lock:
@@ -170,6 +198,8 @@ class CacheWarmQueue:
                 request.progress = WarmState("cancelled", "service-closing")
                 request.sources = ()
             self._pending.clear()
+        with self._foreground:
+            self._foreground.notify_all()
 
 
 class CacheWarmRuntime:
@@ -223,6 +253,19 @@ class CacheWarmRuntime:
             return "unlock-generation-changed"
         return ""
 
+    def _acquire_custody(self, request: WarmRequest) -> bool:
+        deadline = min(request.deadline, time.monotonic() + 2.0)
+        while self.queue.wait_for_foreground(deadline):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0 or self._stopped(request):
+                return False
+            if not self.service._credential_lock.acquire(timeout=remaining):
+                return False
+            if not self.queue.foreground_pending():
+                return True
+            self.service._credential_lock.release()
+        return False
+
     def _run(self, request: WarmRequest) -> None:
         progress = WarmState("running")
         self.queue.update(request, progress)
@@ -265,9 +308,8 @@ class CacheWarmRuntime:
                 if reason:
                     progress.reason = reason
                     break
-                timeout = max(0.0, min(2.0, request.deadline - time.monotonic()))
-                if not self.service._credential_lock.acquire(timeout=timeout):
-                    progress.reason = "credential-custody-busy"
+                if not self._acquire_custody(request):
+                    progress.reason = self._stopped(request) or "credential-custody-busy"
                     break
                 try:
                     self.service._check_password_ttl()

@@ -38,6 +38,11 @@ custody or a protected-store lookup. It does not extend password lifetime or an
 inherited handoff deadline.
 The same internal deadline reaches the protected read owner, which checks it
 again immediately before admitting a KeePass entry read after custody waits.
+Waiting or active foreground requests take priority before the next warm target
+is admitted, rather than relying on the operating system lock's fairness.
+Foreground completion or failure wakes the worker. Its existing two-second
+custody wait and total admission deadline still apply; sustained foreground
+work produces a partial `credential-custody-busy` outcome instead of starvation.
 
 ## Protected results and failures
 

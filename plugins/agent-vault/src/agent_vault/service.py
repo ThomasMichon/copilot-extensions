@@ -583,17 +583,18 @@ class VaultService:
     def _handle_admitted_request(self, request: dict, peer: str = "?",
                                  transport: str = "unknown") -> dict:
         """Dispatch work whose lifecycle admission was decided by the server."""
-        try:
-            if request.get("action") in _DISPATCH_WITHOUT_CREDENTIAL_LOCK:
-                return self._dispatch_request(request, peer, transport)
-            with self._credential_lock, contextlib.ExitStack() as custody:
-                self._check_password_ttl()
-                if request.get("action") in {"add", "set-username", "remove", "rm", "move", "mv"}:
-                    kpdb = request.get("kpdb") or resolve_kpdb(required=False)
-                    custody.enter_context(service_cache.backend_custody(get_cache(), kpdb))
-                return self._dispatch_request(request, peer, transport)
-        except service_cache.ServiceCacheUnavailable:
-            return {"ok": False, "error": service_cache.UNAVAILABLE}
+        with self._cache_warm.foreground():
+            try:
+                if request.get("action") in _DISPATCH_WITHOUT_CREDENTIAL_LOCK:
+                    return self._dispatch_request(request, peer, transport)
+                with self._credential_lock, contextlib.ExitStack() as custody:
+                    self._check_password_ttl()
+                    if request.get("action") in {"add", "set-username", "remove", "rm", "move", "mv"}:
+                        kpdb = request.get("kpdb") or resolve_kpdb(required=False)
+                        custody.enter_context(service_cache.backend_custody(get_cache(), kpdb))
+                    return self._dispatch_request(request, peer, transport)
+            except service_cache.ServiceCacheUnavailable:
+                return {"ok": False, "error": service_cache.UNAVAILABLE}
 
     def _dispatch_request(self, request: dict, peer: str,
                           transport: str) -> dict:
