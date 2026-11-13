@@ -248,6 +248,36 @@ def native_runtime_source(tmp_path_factory: pytest.TempPathFactory) -> Iterator[
     yield from _frozen_native_runtime_source(plugin, owned)
 
 
+def test_installed_identity_uses_the_retained_interpreter(tmp_path, driver):
+    import venv
+    from types import SimpleNamespace
+    import runtime_install_driver as installation
+
+    slot = tmp_path / "slot"
+    venv.EnvBuilder(with_pip=False).create(slot)
+    python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    site = subprocess.check_output(
+        [str(python), "-I", "-B", "-c", "import sysconfig;print(sysconfig.get_path('purelib'))"],
+        text=True, timeout=30, **no_window_kwargs(),
+    ).strip()
+    package = Path(site) / "agent_worktrees"
+    package.mkdir()
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (package / "_build_info.py").write_text("BUILD_INFO={'source':'retained'}\n", encoding="utf-8")
+    metadata = Path(site) / "agent_worktrees-1.2.3.dist-info"
+    metadata.mkdir()
+    (metadata / "METADATA").write_text(
+        "Metadata-Version: 2.1\nName: agent-worktrees\nVersion: 1.2.3\n", encoding="utf-8",
+    )
+    runtime = SimpleNamespace(slot_python=lambda root, version: python)
+    assert installation.installed_identity(slot, runtime, ValueError) == {
+        "package_version": "1.2.3", "build_info": {"source": "retained"},
+    }
+    runtime.slot_python = lambda root, version: None
+    with pytest.raises(ValueError, match="no interpreter"):
+        installation.installed_identity(slot, runtime, ValueError)
+
+
 def _frozen_native_runtime_source(plugin: Path, owned: Path) -> Iterator[tuple[Path, str]]:
     repository = Path(__file__).resolve().parents[3]
     root = owned / "repository"

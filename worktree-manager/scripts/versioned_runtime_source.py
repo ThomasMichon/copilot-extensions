@@ -701,12 +701,9 @@ def fingerprint_source(
 ) -> str:
     """Return a stable sha256 fingerprint over a frozen set of source paths.
 
-    Covers the FULL attributable runtime install input, not just one
-    manifest file -- an adopter must pass every path whose content changing
-    should be treated as "this version's payload changed" (e.g. a plugin's
-    whole ``src/`` tree plus its ``pyproject.toml``, not ``pyproject.toml``
-    alone -- a prior audit on this effort found exactly that narrower scope
-    on one adopter, #5472). Hashes each regular file's path (relative to
+    Callers supply every attributable runtime input, including the complete
+    source tree and project manifest, not just metadata (see #5472).
+    Hashes each regular file's path (relative to
     whichever declared root most specifically contains it, labeled by that
     root's own path relative to the common ancestor of every declared root
     -- never the root's bare basename, which is not unique across declared

@@ -44,7 +44,6 @@ import os
 import subprocess
 import sys
 import tempfile
-import time
 import types
 from pathlib import Path
 from promotion_candidate import (

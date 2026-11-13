@@ -462,12 +462,7 @@ def _query_toolchain_versions(
 
 
 def _toml_escape(value: str) -> str:
-    """Escapes ``value`` for embedding in a TOML basic string (``"..."``)
-    -- backslash and double-quote are the only characters a basic string
-    must escape for this module's own use (index URLs/names never
-    legitimately contain control characters or newlines). No stdlib TOML
-    WRITER exists (only `tomllib`, a reader), so this is a tiny, scoped
-    helper rather than a dependency."""
+    """Escape backslashes and quotes in index URLs/names, which contain no controls."""
     return value.replace("\\", "\\\\").replace('"', '\\"')
 
 
