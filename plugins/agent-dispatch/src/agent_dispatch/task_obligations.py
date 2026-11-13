@@ -47,6 +47,8 @@ def read_snapshot(
         task = conn.execute(
             "SELECT id, status, generation, owner, owner_session_id, target_worktree, requires,"
             " hold_reason, hold_actor, hold_at,"
+            " (SELECT readiness FROM task_relevance_closeouts WHERE task_id=tasks.id)"
+            " AS closeout_readiness,"
             " (SELECT identity FROM workspace_queue_identity WHERE singleton=1) AS queue_identity"
             " FROM tasks WHERE id=?", (task_id,),
         ).fetchone()
@@ -105,6 +107,9 @@ def read_snapshot(
         }
         if assigned is not None and assigned["task_relationship"] is not None:
             result["relationship"] = json.loads(assigned["task_relationship"])["request"]
+        if task["closeout_readiness"] is not None:
+            from .queue_relevance_readiness import release_evidence
+            result["closeout"] = release_evidence(queue, conn, task["closeout_readiness"])
         return {**result, "release_outcome": _release_outcome(result)}
     finally:
         conn.rollback()
@@ -120,7 +125,32 @@ def _release_outcome(value: dict) -> str | None:
         and value["unassignment"] is not None
     ):
         return "unassigned_queued"
+    if _closeout_ready(value):
+        return "relevance_closeout_ready"
     return None
+
+
+def _closeout_ready(value: dict) -> bool:
+    proof = value.get("closeout")
+    assignment, request = value.get("assignment"), value.get("relationship")
+    return bool(
+        isinstance(proof, dict) and set(proof) == {
+            "request_id", "generation", "assignment_event_id", "relationship_request_id",
+            "worker_id", "native_id",
+        }
+        and not value["held"]
+        and value["state"] in {Status.PROPOSED, Status.QUEUED, *Status.OWNED, Status.SUBMITTED}
+        and type(proof["generation"]) is int and proof["generation"] == value["generation"]
+        and type(proof["assignment_event_id"]) is int
+        and isinstance(assignment, dict)
+        and assignment == {"event_id": proof["assignment_event_id"], "worker_id": proof["worker_id"]}
+        and isinstance(request, dict)
+        and request.get("request_id") == proof["relationship_request_id"]
+        and request.get("event_id") == proof["assignment_event_id"]
+        and all(isinstance(proof[key], str) and bool(proof[key]) for key in (
+            "request_id", "relationship_request_id", "worker_id", "native_id",
+        ))
+    )
 
 
 def enrich_task_detail(

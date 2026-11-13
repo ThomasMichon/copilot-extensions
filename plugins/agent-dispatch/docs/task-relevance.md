@@ -137,6 +137,47 @@ Session conclusion, workspace disposition, recovery of previously uncaptured
 owners and externally registered relevance callers remain pending. This slice
 does not release reservations or delete files.
 
+## Original-claim readiness
+
+The internal queue provider `prepare_relevance_closeout` prepares settlement
+of the captured original task relationship. It has no HTTP/CLI route or automatic
+caller yet. A caller identifies the accepted closeout request, worker, native
+and generation; it cannot supply a readiness observation.
+
+The provider reads the captured relationship and exact execution reservation,
+then asks the selected local Worktrees runtime for its existing
+`agent-worktrees.dispatch-worker-readiness` version-1 observation. That owner
+independently checks the current workspace/head, original managed allocation,
+landing, holds and foreign obligations while excepting only this exact task
+claim. Unsupported, remote, unattributed or conflicting resources retain
+custody. External observation runs outside the SQLite transaction; the queue
+rechecks the original state under a write lock before retaining the first
+readiness on the existing closeout row.
+
+Only that retained, currently valid readiness allows the existing relationship
+owner to reconcile the captured assignment claim. The claim callback verifies
+the queue and original request/event, not just the task id. A lost close reply
+stays visibly retained and can converge through the original request after
+restart, without another readiness observation. Holds, changed generations,
+changed natives/reservations, cooling or pending retirement still refuse.
+The receipt is not a transferable readiness permission.
+
+Preparation changes neither task status nor native, placement or reservation
+release flags. In particular it does not yield/requeue or abandon the task:
+those transitions could let the supervisor end the original conversation before
+its agent finalizes. The agent's actual own-workspace finalization, independent
+finalized observation, terminal task disposition and native conclusion remain
+unimplemented integration gates. This provider never deletes a checkout.
+
+Existing detail and `claim-status` syntax carry the additive
+`relevance_closeout_ready` evidence described in
+[task obligations](task-obligations.md#snapshot-and-outcomes). Older callbacks
+do not recognize that release outcome and retain the claim rather than treating
+it as ordinary completion. A prior queue without retained readiness cannot
+produce this proof; no fallback to abandonment exists. Baseline operations remain
+unchanged, with no old surface retirement. Upgrade the receiver and callback
+before enabling any caller; source qualification is not running adoption.
+
 ## Registered receiver and compatibility
 
 The actual coordinator's `/health.task_relevance` advertises

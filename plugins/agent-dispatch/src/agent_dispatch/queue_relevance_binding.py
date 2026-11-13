@@ -17,8 +17,9 @@ def closeout_detail(row: sqlite3.Row | None) -> dict | None:
     if row is None:
         return None
     result = dict(row)
-    raw = result.get("resource_binding")
-    result["resource_binding"] = json.loads(raw) if raw is not None else None
+    for column in ("resource_binding", "readiness"):
+        raw = result.get(column)
+        result[column] = json.loads(raw) if raw is not None else None
     return result
 
 

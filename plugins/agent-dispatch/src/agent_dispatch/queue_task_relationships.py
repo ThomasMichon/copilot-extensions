@@ -336,7 +336,9 @@ class QueueTaskRelationshipsMixin:
         if value["state"] in {"closed", "absent"}:
             return value
         snapshot = self._admit_original_relationship_request(request)
-        retiring = snapshot["release_outcome"] in {"completed", "unassigned_queued"}
+        retiring = snapshot["release_outcome"] in {
+            "completed", "unassigned_queued", "relevance_closeout_ready",
+        }
         if retiring and snapshot["release_outcome"] == "unassigned_queued":
             retiring = (
                 same_assignment_worker(snapshot["unassignment"]["worker_id"], workspace.worker_id)
