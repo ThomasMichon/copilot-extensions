@@ -11,7 +11,7 @@ import pytest
 from agent_bridge import hosting_policy
 from agent_bridge.models import SessionStatus
 from agent_bridge.native_send_admission import NativeSendPrompt, submit
-from agent_bridge.session_host.host_index import HostRecord
+from agent_bridge.session_host.host_index import HostIndex, HostRecord
 from agent_bridge.session_manager import SessionManager
 from test_native_bound_prompt import prepare
 
@@ -39,10 +39,10 @@ async def test_keyed_send_waits_for_old_client_exit_settlement(
         session_id=session.session_id, port=4321, host_pid=os.getpid(), child_pid=333,
     )
 
-    def reap(captured, _reason):
+    def reap(captured, _reason, *, remove_index):
         assert captured == rec
         assert session.client is old
-        manager._host_index.remove(session.session_id)
+        assert remove_index is False
 
     async def reattach(retained):
         assert retained is session
@@ -74,7 +74,7 @@ async def test_keyed_send_waits_for_old_client_exit_settlement(
     await session._prompt_task
     assert results[1]["native_session_id"] == "native-a"
     assert session.client is replacement
-    assert manager._host_index.get(session.session_id) == new_rec
+    assert HostIndex(manager._host_index._path).get(session.session_id) == new_rec
     assert tmp_db.get_session(session.session_id)["status"] != "stopped"
     manager._reap_host_record.assert_called_once()
     assert len(tmp_db.get_turns(session.session_id)) == 1
@@ -82,8 +82,9 @@ async def test_keyed_send_waits_for_old_client_exit_settlement(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("replace_client", [False, True])
+@pytest.mark.parametrize("independent_index", [False, True])
 async def test_exit_settlement_rechecks_captured_custody_after_shutdown(
-    session_manager, tmp_db, mock_acp_client, replace_client,
+    session_manager, tmp_db, mock_acp_client, replace_client, independent_index,
 ):
     manager = session_manager
     session = prepare(manager, tmp_db, mock_acp_client)
@@ -96,11 +97,15 @@ async def test_exit_settlement_rechecks_captured_custody_after_shutdown(
         session_id=session.session_id, port=4321, host_pid=os.getpid(), child_pid=333,
     )
     replacement = Mock(is_running=True, host_child_exit_code=None)
+    writer = (
+        HostIndex(manager._host_index._path)
+        if independent_index else manager._host_index
+    )
 
     async def shutdown():
         if replace_client:
             session.client = replacement
-        manager._host_index.register(new_rec)
+        writer.register(new_rec)
 
     old.shutdown.side_effect = shutdown
     manager._reap_host_record = Mock()
@@ -108,6 +113,6 @@ async def test_exit_settlement_rechecks_captured_custody_after_shutdown(
     assert session.client is (replacement if replace_client else old)
     assert session.status == SessionStatus.IDLE
     assert tmp_db.get_session(session.session_id)["status"] == "idle"
-    assert manager._host_index.get(session.session_id) == new_rec
+    assert HostIndex(manager._host_index._path).get(session.session_id) == new_rec
     manager._reap_host_record.assert_not_called()
     old.shutdown.assert_awaited_once()

@@ -40,19 +40,24 @@ class _HostLivenessMixin:
                 await client.shutdown()
             if not still_current():
                 return
-            self._reap_host_record(rec, "Session Host child exit observed by attached client")
-            session.client = None
-            session.status = SessionStatus.STOPPED
-            self._db.update_session_status(
-                session.session_id, SessionStatus.STOPPED.value, time.time(),
-            )
-            if session.event_log:
-                session.event_log.append("session_state_changed", {
-                    "status": SessionStatus.STOPPED.value,
-                    "host_child_exited": True,
-                    "exit_code": client.host_child_exit_code,
-                })
-            self._clear_disconnected_reattach_retry_state(session.session_id)
+            with self._host_index.retiring_current(rec) as admitted:
+                if not admitted:
+                    return
+                self._reap_host_record(
+                    rec, "Session Host child exit observed by attached client", remove_index=False,
+                )
+                session.client = None
+                session.status = SessionStatus.STOPPED
+                self._db.update_session_status(
+                    session.session_id, SessionStatus.STOPPED.value, time.time(),
+                )
+                if session.event_log:
+                    session.event_log.append("session_state_changed", {
+                        "status": SessionStatus.STOPPED.value,
+                        "host_child_exited": True,
+                        "exit_code": client.host_child_exit_code,
+                    })
+                self._clear_disconnected_reattach_retry_state(session.session_id)
 
     def _rec_host_alive(self, rec: Any) -> bool:
         """Is a Session Host still alive? Boundary-aware.
