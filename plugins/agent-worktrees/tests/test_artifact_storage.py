@@ -166,3 +166,19 @@ def test_repository_cannot_smuggle_machine_paths_into_storage_policy(context, tm
     with pytest.raises(ConfigurationError):
         load_storage({"schema": "agent-worktrees.configuration", "version": 1, "context": context},
                      environment={})
+
+
+def test_shared_machine_document_accepts_foreign_platform_paths(context, tmp_path):
+    import os
+    foreign = "/var/tmp/private-scratch" if os.name == "nt" else r"C:\Scratch\private"
+    selected = str(tmp_path / "native-scratch")
+    write_document(context["knowledge_root"], DOCUMENT, {
+        "version": 1, "machines": {
+            "other-machine": {"scratch_root": foreign},
+            "test-machine": {"scratch_root": selected},
+        },
+    })
+    result = load_storage({"schema": "agent-worktrees.configuration", "version": 1, "context": context},
+                          environment={})
+    assert result["scratch_root"] == selected
+    assert not Path(selected).exists()

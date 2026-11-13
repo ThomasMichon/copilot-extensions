@@ -17,8 +17,10 @@ base and, when explicitly bound, knowledge roots. The base document accepts:
 The knowledge document additionally accepts a `machines` mapping. Each key is
 the exact execution-machine identity supplied by the configuration owner; its
 value can override `failure_evidence` and supply an absolute native
-`scratch_root`. Physical paths are not portable fields. Other machine entries
-are validated but never selected for this execution.
+`scratch_root`. Physical paths are not portable fields. Other machine entries receive
+structural validation but are never selected for this execution. Native absolute
+path syntax is checked only for the executing machine, so one document may
+contain both Windows and POSIX machine paths.
 
 An existing-owner `repository_machine_root` may contain `artifact-storage.json`:
 

@@ -7,7 +7,7 @@ from pathlib import Path
 import secrets
 import sys
 
-from plugin_test_containment import ContainmentError, UnreapedProcessError
+from plugin_test_containment import ContainmentError, Limits, UnreapedProcessError, run_contained
 
 
 def test_sandbox(owner, repository, fallback, *, stage: str, **options):
@@ -19,6 +19,30 @@ def add_cli_argument(parser):
         "--owned-scratch-owner", metavar="MACHINE/PROJECT/WORKTREE",
         help="opt-in source pilot using an already-available compatible Worktrees Python owner; no rollout",
     )
+
+
+def admit_owned_root(owner, repository):
+    OwnedTestSandbox(owner, repository, stage="admission")
+
+
+def prepare_owned(name, uv, reinstall, *, retained, environment, sandbox, limits=None, wall_seconds=None):
+    import subprocess
+    from dataclasses import replace
+    selected = limits or Limits()
+    if wall_seconds is not None:
+        if wall_seconds <= 0:
+            raise ContainmentError("preparation exhausted the plugin deadline before worker launch")
+        selected = replace(selected, wall_seconds=min(selected.wall_seconds, wall_seconds))
+    command = [
+        sys.executable, str(Path(__file__).with_name("plugin_test_preparation_worker.py")),
+        name, uv, str(retained), "reinstall" if reinstall else "reuse",
+    ]
+    result = run_contained(
+        command, cwd=Path(__file__).resolve().parents[1], env=environment,
+        sandbox=Path(sandbox), limits=selected,
+    )
+    if result:
+        raise subprocess.CalledProcessError(result, command)
 
 
 class OwnedTestSandbox:
@@ -57,10 +81,18 @@ class OwnedTestSandbox:
             if key in {"base_root", "knowledge_root"}
         )
         self.forbidden += artifact_scratch.protected_git_paths(repository)
+        from agent_worktrees.artifact_root import admit_root
+        record = artifact_scratch._record(path, owner, mutable=True)
+        with admit_root(
+            Path(self.policy["scratch_root"]),
+            forbidden=(*self.forbidden, *artifact_scratch._boundaries(record)), create=True,
+        ):
+            pass
         self.provider, self.owner, self.ledger = artifact_scratch, owner, path
         self.stage, self.operation_id = stage, secrets.token_urlsafe(24)
         self.results: list[dict] = []
         self.group_count = 0
+        self.failed = False
         self.allocation: dict | None = None
 
     def __enter__(self) -> str:
@@ -76,6 +108,7 @@ class OwnedTestSandbox:
         # Keep a bounded tail in memory even before the configured byte bound.
         self.results = [*self.results[-15:], {"group": group, "exit_code": code}]
         self.group_count += 1
+        self.failed |= code != 0
 
     def __exit__(self, exc_type, exc_value, traceback):
         allocation = self.allocation
@@ -86,7 +119,7 @@ class OwnedTestSandbox:
                 file=sys.stderr,
             )
             return False
-        failed = exc_value is not None or any(result["exit_code"] != 0 for result in self.results)
+        failed = exc_value is not None or self.failed
         diagnostic = None
         if failed:
             diagnostic = json.dumps({

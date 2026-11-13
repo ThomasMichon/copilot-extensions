@@ -16,6 +16,10 @@ capabilities, owner authority, malformed configuration or unsafe roots fail
 visibly; this option neither bootstraps a runtime nor silently downgrades to
 unclaimed scratch. No default setting enables it.
 
+The real `main()` entry admits/creates that private root before the legacy
+cache initializer can create it with inherited permissions. The same admission
+runs for direct sandbox callers; unsafe existing roots are never repaired.
+
 ## Physical and ledger ownership
 
 `artifact_root` admits only absolute local directories outside selected
@@ -48,12 +52,22 @@ An active allocation after a lost reply/crash requires process-owner
 reconciliation; missing paths, released locks or elapsed time are not proof of
 process settlement.
 
+A never-started `allocated` marker proves allocation completion for bind
+recovery only, not work settlement for retention. Native scratch handoff is
+explicitly refused at both offer and receiving admission until receiving-owner
+settlement and callback support exists.
+
 ## Disposition and cleanup
 
 Only the integrated containment owner calls `settle_after_cleanup`, after its
 descendants and cleanup workers have joined. Unknown descendant cleanup retains
 the entire allocation and active ledger responsibility. There is deliberately
 no CLI accepting a caller's `work_settled` assertion.
+
+Opt-in environment preparation executes the original preparation function in a
+separate worker under that same verified process-tree owner. UV and build
+descendants must settle before its scratch can be pruned. Unknown preparation
+cleanup propagates the ownership error and preserves the original allocation.
 
 After known cleanup, the provider removes disposable payload without following
 links. A failed run keeps only the producer-owned `runner-diagnostic.txt` summary
@@ -62,6 +76,7 @@ and explicit omission information, not arbitrary logs or recursive file guesses.
 The configured byte bound is enforced and truncation recorded; at most one
 diagnostic file is retained. External caller-selected reports stay caller-owned.
 Incomplete payload pruning remains unsettled, not a purported bounded bundle.
+An aggregate failure flag survives eviction from the bounded diagnostic tail.
 
 The provider publishes settled physical state, then requests `retain` through
 the normal exact-subject ledger transaction. Successful consumed output may be
@@ -74,6 +89,12 @@ owner/incarnation, handoffs, private root, allocation identity, quiescence and
 allowlisted diagnostic contents at removal. Unknown close replies reconcile the
 same token; no replacement allocation is created. There is no sweep, scheduler,
 legacy adoption or cache eviction, and this API does not grant effect authority.
+
+Before removing settled bytes, the provider durably marks the exact allocation
+`reclaiming`. Its original diagnostic may then be absent after a partial removal;
+undeclared or changed remaining contents still refuse. A failed final directory
+removal preserves this progress in the restored marker, allowing an explicit
+retry without pretending the allocation disappeared.
 
 ## Qualification
 

@@ -20,7 +20,7 @@ _EVIDENCE_KEYS = {"max_files", "max_bytes"}
 DOCUMENT = ".copilot-extensions/artifact-storage.json"
 
 
-def validate_values(values: object, *, machine_paths: bool) -> dict[str, Any]:
+def validate_values(values: object, *, machine_paths: bool, native_paths: bool = True) -> dict[str, Any]:
     """Validate each contributing policy, not just its surviving merged fields."""
     if not isinstance(values, dict) or set(values) - _POLICY_KEYS:
         raise ConfigurationError("unknown artifact storage policy field")
@@ -28,7 +28,10 @@ def validate_values(values: object, *, machine_paths: bool) -> dict[str, Any]:
         root = values["scratch_root"]
         if not machine_paths:
             raise ConfigurationError("physical scratch roots require a machine-scoped source")
-        if not isinstance(root, str) or not root or "\x00" in root or not Path(root).is_absolute():
+        if (
+            not isinstance(root, str) or not root or "\x00" in root
+            or native_paths and not Path(root).is_absolute()
+        ):
             raise ConfigurationError("scratch_root must name an absolute native directory")
     if "failure_evidence" in values:
         limits = values["failure_evidence"]
@@ -62,6 +65,7 @@ def resolve_storage(
         values = validate_values(
             layer.get("values"),
             machine_paths=layer.get("tier") in {"machine", "repository_machine"},
+            native_paths=layer.get("execution_machine", context["execution_machine"]) == context["execution_machine"],
         )
         selected.append({**layer, "values": values})
     defaults = {
@@ -141,7 +145,9 @@ def load_storage(report: dict[str, Any], **options: Any) -> dict[str, Any]:
         for machine, values in machines.items():
             if not isinstance(machine, str) or not machine:
                 raise ConfigurationError("storage machine name must be nonempty text")
-            validated = validate_values(values, machine_paths=True)
+            validated = validate_values(
+                values, machine_paths=True, native_paths=machine == context["execution_machine"],
+            )
             layers.append({
                 "id": f"artifact-storage-machine:{machine}", "tier": "machine",
                 "origin": "named_machine", "execution_machine": machine,

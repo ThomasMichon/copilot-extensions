@@ -119,7 +119,7 @@ def valid_metadata(value: object) -> bool:
         return False
     if (
         type(value["version"]) is not int or value["version"] != VERSION
-        or value["lifetime"] not in {"disposable-owned", ARTIFACT_LIFETIME}
+        or value["lifetime"] not in ("disposable-owned", ARTIFACT_LIFETIME)
     ):
         return False
     if not is_valid_token(value["token"]):

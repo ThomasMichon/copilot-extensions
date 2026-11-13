@@ -13,6 +13,16 @@ from test_resource_producer import absence, bind, call, reserve
 from test_resource_producer import owner as owner
 
 
+@pytest.mark.parametrize("lifetime", [[], {}])
+def test_unhashable_lifetime_remains_invalid_and_unsettled(owner, lifetime):
+    path, _ = owner
+    bound = bind(path, reserve(path))
+    metadata = {**bound["producer"], "lifetime": lifetime}
+    claim = tracking.ResourceClaim(kind="artifact", ref=bound["ref"], producer=metadata, producer_present=True)
+    assert producer.valid_metadata(metadata) is False
+    assert claim.is_unsettled
+
+
 def artifact(path):
     reservation = call(path, "reserve", {
         "kind": "artifact", "namespace": "scratch",

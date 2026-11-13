@@ -19,6 +19,86 @@ pytestmark = [
 ]
 
 
+@pytest.fixture
+def runner_owner(final_owner, tmp_path_factory, monkeypatch):
+    root, ledger, config = final_owner
+    initial = tracking.load_record(ledger)
+    initial.creation_nonce = secrets.token_hex(16)
+    tracking.save_record(initial, ledger)
+    repo = Path(__file__).resolve().parents[3]
+    monkeypatch.syspath_prepend(str(repo / "tools"))
+    spec = importlib.util.spec_from_file_location("preparation_runner", repo / "tools" / "run-plugin-tests.py")
+    runner = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(runner)
+    owner = tracking.format_claim_ref(config.machine, config.repo_name, "owner")
+    selected = tmp_path_factory.mktemp("runner-root-admission") / "private"
+    monkeypatch.setenv("AGENT_SCRATCH_ROOT", str(selected))
+    monkeypatch.setattr(project_state, "canonical_repository_id", lambda *a: "repo-fixture")
+    monkeypatch.setattr(runner, "OWNED_SCRATCH_OWNER", owner)
+    return runner, owner, selected, root, ledger
+
+
+@pytest.mark.timeout(180)
+def test_preparation_uses_real_contained_worker_and_preserves_cached_environment(runner_owner, monkeypatch):
+    import plugin_test_environment
+    runner, _, _, root, ledger = runner_owner
+    monkeypatch.setattr(runner, "VENV_ROOT", root / "cache")
+    py = runner._venv_python("agent-worktrees")
+    py.parent.mkdir(parents=True)
+    py.write_bytes(b"warm-cache sentinel; never executed")
+    venv = root / "cache" / "agent-worktrees"
+    (venv / ".bootstrap-uv-cache").mkdir()
+    (venv / ".dep-fingerprint").write_text(runner._dep_fingerprint("agent-worktrees"))
+    monkeypatch.setattr(
+        plugin_test_environment, "preparation_environment",
+        lambda base, sandbox, *a, **k: runner.isolated_environment(base, Path(sandbox)),
+    )
+    assert runner._ensure_venv("agent-worktrees", "unused-warm-cache", reinstall=False) == py
+    assert py.read_bytes() == b"warm-cache sentinel; never executed"
+    claim = tracking.load_record(ledger).resources[0]
+    assert claim.producer["phase"] == "closed"
+
+
+def test_real_main_admits_fresh_root_before_legacy_cache_initialization(runner_owner, monkeypatch):
+    from agent_worktrees.artifact_root import admit_root
+    runner, owner, selected, _, ledger = runner_owner
+    seen = []
+    def cache_root():
+        with admit_root(selected, forbidden=()):
+            seen.append("private-before-cache")
+        return selected / "cache"
+    which = runner.shutil.which
+    monkeypatch.setattr(runner.shutil, "which", lambda name: "fixture-uv" if name == "uv" else which(name))
+    monkeypatch.setattr(runner, "_venv_root", cache_root)
+    monkeypatch.setattr(runner, "_acquire_admission", lambda *a: None)
+    monkeypatch.setattr(runner, "run_plugin", lambda *a, **k: 0)
+    assert not selected.exists()
+    assert runner.main(["agent-worktrees", "--owned-scratch-owner", owner]) == 0
+    assert seen == ["private-before-cache"]
+    assert tracking.load_record(ledger).resources == []
+
+
+def test_unknown_preparation_cleanup_retains_the_original_allocation(runner_owner, monkeypatch):
+    import plugin_test_environment
+    import plugin_test_owned_scratch
+    from plugin_test_containment import UnreapedProcessError
+    runner, _, selected, root, ledger = runner_owner
+    monkeypatch.setattr(runner, "VENV_ROOT", root / "cache")
+    monkeypatch.setattr(
+        plugin_test_environment, "preparation_environment",
+        lambda base, sandbox, *a, **k: runner.isolated_environment(base, Path(sandbox)),
+    )
+    def unknown(*a, **k):
+        raise UnreapedProcessError("fixture preparation cleanup unknown")
+    monkeypatch.setattr(plugin_test_owned_scratch, "run_contained", unknown)
+    with pytest.raises(UnreapedProcessError):
+        runner._ensure_venv("agent-worktrees", "unused", reinstall=False)
+    claim = tracking.load_record(ledger).resources[0]
+    allocation = selected / artifact_scratch._name(claim.producer["recovery"])
+    assert claim.producer["phase"] == "bound" and claim.is_unsettled
+    assert allocation.exists() and not (allocation / "runner-diagnostic.txt").exists()
+
+
 @pytest.mark.timeout(90)
 @pytest.mark.parametrize("fails", [False, True])
 def test_real_runner_retains_only_bounded_evidence_then_finalizes_and_cleans(

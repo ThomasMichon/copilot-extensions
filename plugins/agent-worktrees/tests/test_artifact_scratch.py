@@ -228,3 +228,65 @@ def test_removed_bytes_and_unknown_close_reconcile_the_same_token(allocation, mo
     monkeypatch.setattr(scratch, "_invoke", original)
     assert scratch.dispose_consumed(path, "m/p/owner", result["token"], forbidden=())["phase"] == "closed"
     assert len(tracking.load_record(path).resources) == 1
+
+
+def test_recovery_binding_window_cannot_settle_never_started_work(allocation, monkeypatch):
+    path, _, _ = allocation
+    result = create(allocation)
+    metadata = result["producer"]
+    with scratch._root(metadata["recovery"], ()) as root:
+        with root.child(scratch._name(metadata["recovery"])) as (fd, child):
+            marker = scratch._read_marker(fd, child, metadata)
+            scratch._write_marker(fd, child, {**marker, "state": "allocated"})
+    original = scratch._invoke
+    def raced(path, owner, operation, payload):
+        bound = original(path, owner, operation, payload)
+        if operation == "bind":
+            with pytest.raises(ValueError):
+                original(path, owner, "retain", {"token": result["token"]})
+        return bound
+    monkeypatch.setattr(scratch, "_invoke", raced)
+    recovered = scratch.recover(path, "m/p/owner", result["token"], forbidden=())
+    assert recovered["phase"] == "bound"
+    assert tracking.load_record(path).resources[0].is_unsettled
+
+
+def test_final_rmdir_failure_retains_reclaimable_progress(allocation, monkeypatch):
+    path, _, _ = allocation
+    result = create(allocation)
+    location = Path(result["path"])
+    scratch.settle_after_cleanup(path, "m/p/owner", result["token"], forbidden=(), diagnostic=b"fixture")
+    rmdir = scratch.os.rmdir
+    def refuse_root(target, *args, **kwargs):
+        if Path(target).name == location.name:
+            raise PermissionError("fixture final directory held")
+        return rmdir(target, *args, **kwargs)
+    with monkeypatch.context() as patch:
+        patch.setattr(scratch.os, "rmdir", refuse_root)
+        assert scratch.dispose_consumed(path, "m/p/owner", result["token"], forbidden=())["outcome"] == "partial"
+    assert location.exists() and not (location / "runner-diagnostic.txt").exists()
+    claim = tracking.load_record(path).resources[0]
+    assert claim_providers.resolve_claim_status(claim.ref)["available"]
+    assert scratch.dispose_consumed(path, "m/p/owner", result["token"], forbidden=())["outcome"] == "removed"
+
+
+def test_native_scratch_refuses_both_handoff_admission_paths(allocation):
+    from types import SimpleNamespace
+    from agent_worktrees import claim_handoff_admission
+    path, _, _ = allocation
+    create(allocation)
+    before = path.read_bytes()
+    claim = tracking.load_record(path).resources[0]
+    source, consumer = map(tracking.parse_claim_ref, ("m/p/owner", "m/p/consumer"))
+    with pytest.raises(ValueError, match="native scratch handoff"):
+        claim_handoff_admission.validate_producer_offer(
+            [claim], source, consumer, machine="m", error_type=ValueError,
+        )
+    bundle = SimpleNamespace(claims=(claim.to_dict(),))
+    with pytest.raises(ValueError, match="native scratch handoff"):
+        claim_handoff_admission.validate_supported_claims(
+            bundle, supported_kinds=frozenset({"artifact"}),
+            qualified_ref=lambda *a: pytest.fail("unsupported transfer reached authority resolution"),
+            error_type=ValueError,
+        )
+    assert path.read_bytes() == before

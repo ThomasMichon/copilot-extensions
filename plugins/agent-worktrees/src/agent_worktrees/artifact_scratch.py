@@ -178,13 +178,13 @@ def _read_marker(fd: int, path: Path, metadata: dict) -> dict:
     }
     if (
         set(value) != set(expected) | {"state", "diagnostics"}
-        or value["state"] not in {"allocated", "active", "settled"}
+        or value["state"] not in {"allocated", "active", "settled", "reclaiming"}
         or producer.canonical_json({
             **expected, "state": value["state"], "diagnostics": value["diagnostics"],
         }).encode("ascii") != raw
     ):
         raise ValueError("scratch allocation marker identity does not match")
-    if value["state"] == "settled":
+    if value["state"] in {"settled", "reclaiming"}:
         _verify_evidence(fd, path, value)
     elif value["diagnostics"] is not None:
         raise ValueError("unfinished scratch cannot assert bounded evidence")
@@ -214,7 +214,8 @@ def _verify_evidence(fd: int, path: Path, marker: dict) -> None:
                 raise ValueError("retained scratch contains undeclared output")
             observed["files"] += 1
             observed["bytes"] += info.st_size
-    if observed != {key: evidence[key] for key in ("files", "bytes")}:
+    removed_diagnostic = marker["state"] == "reclaiming" and observed == {"files": 0, "bytes": 0}
+    if not removed_diagnostic and observed != {key: evidence[key] for key in ("files", "bytes")}:
         raise ValueError("scratch diagnostic contents changed")
 
 
@@ -368,7 +369,7 @@ def status(path: Path, owner: str, ref: str, *, forbidden: tuple[Path, ...]) -> 
                     raise ValueError("scratch allocation identity changed")
                 proof.update(
                     identity=identity, allocation_finished=True,
-                    work_settled=marker["state"] in {"allocated", "settled"},
+                    work_settled=marker["state"] in {"settled", "reclaiming"},
                     retention=copy.deepcopy(_RETENTION),
                 )
                 return {"available": True, "exists": True, "producer_verification": proof}
@@ -466,8 +467,10 @@ def _remove_settled(path: Path, owner: str, token: str, *, forbidden: tuple[Path
         try:
             with root.child(_name(metadata["recovery"])) as (fd, child):
                 marker = _read_marker(fd, child, metadata)
-                if marker["state"] != "settled" or _identity(root, fd, metadata) != metadata["identity"]:
+                if marker["state"] not in {"settled", "reclaiming"} or _identity(root, fd, metadata) != metadata["identity"]:
                     raise ValueError("scratch process settlement or physical identity changed")
+                if marker["state"] == "settled":
+                    _write_marker(fd, child, {**marker, "state": "reclaiming"})
             root.verify()
             if directory_identity(child.lstat()) != metadata["identity"]["directory"]:
                 raise ValueError("scratch directory changed at removal boundary")

@@ -1,12 +1,9 @@
 #!/usr/bin/env python3
 """Turn-key plugin test runner (on-demand local development).
 
-Runs a plugin's ``pytest`` suite in a managed, cached dev virtualenv so the
-suites that guard the marketplace (the picker's overlay-registry / palette /
-keyboard-harness guards, the shipped-manifest contract, each plugin's unit
-tests) can be run with ONE command instead of a hand-rolled ``uv venv`` +
-editable-install dance. There is intentionally no automatic push/PR gate wired
-to it yet -- run it yourself before pushing a runtime change.
+Runs plugin ``pytest`` suites in managed, cached development environments.
+Use it explicitly before publishing a runtime change; it is not an automatic
+push/PR gate. See TESTING.md for qualification lanes and source-pilot boundaries.
 
 Usage::
 
@@ -18,28 +15,12 @@ Usage::
 
 Design notes:
 
-* **uv-based.** Uses ``uv`` for the venv + editable install so plugins that
-  vendor path dependencies via ``[tool.uv.sources]`` (agent-containers,
-  agent-codespaces, ...) resolve correctly -- plain ``pip`` cannot.
-* **Cached venvs** live in external scratch, isolated by checkout, platform
-  and plugin, and are reused across runs; ``--reinstall`` rebuilds one.
-* **Environment exclusion.** Preparation and use share one lease per resolved
-  cached venv. Independent environments run concurrently with per-job bounds.
-* **State isolation.** Default suites receive runner-owned home, XDG, Copilot,
-  plugin-state, and temporary roots. Credential-dependent end-to-end checks
-  must opt into host state explicitly.
-* **Discovery.** Default file expansion honors the project's existing pytest
-  ``norecursedirs`` declaration; explicitly selected files remain available.
-* **Windows-safe temp.** Passes a randomized ``--basetemp`` so pytest's tmp
-  cleanup does not trip the ``pytest-current`` junction ``PermissionError`` on
-  Windows (teardown noise that would otherwise mask a green run).
-* **Time-bounded at every level.** Individual tests use ``pytest-timeout``;
-  large suites run as sequential file groups with their own wall limit; and a
-  plugin-wide deadline bounds the aggregate.
-* **Fail-closed on test failures**, but in ``--pre-push`` mode it degrades
-  gracefully (warn + skip, exit 0) only when the *tooling* (uv) is genuinely
-  absent -- never blocking a push just because a dev box lacks uv, while still
-  enforcing real failures wherever it can run.
+* Source-bound UV caches are reused under one environment lease across preparation/use.
+* Test state is isolated; host-state access requires an explicit opt-in.
+* Discovery honors ``norecursedirs``; explicit files remain selectable.
+* Randomized ``--basetemp`` avoids Windows pytest-current cleanup traversal.
+* Test, group and aggregate deadlines bound execution.
+* **Fail-closed on test failures.** ``--pre-push`` skips only missing UV tooling.
 """
 
 from __future__ import annotations
@@ -87,7 +68,7 @@ from plugin_test_containment import (
     run_contained,
 )
 from plugin_test_command_safety import UnsafeTestCommand, check_test_sources
-from plugin_test_owned_scratch import add_cli_argument, test_sandbox
+from plugin_test_owned_scratch import add_cli_argument, admit_owned_root, prepare_owned, test_sandbox
 
 REPO = Path(__file__).resolve().parents[1]
 PLUGINS = REPO / "plugins"
@@ -299,8 +280,9 @@ def declared_test_tooling_requirements(name: str) -> tuple[str, ...]:
     )
 
 
-def _ensure_venv(name: str, uv: str, *, reinstall: bool) -> Path:
+def _ensure_venv(name: str, uv: str, *, reinstall: bool, limits=None, wall_seconds=None) -> Path:
     """Detach build children before preparation, not only before pytest."""
+    started = time.monotonic() if OWNED_SCRATCH_OWNER is not None else 0
     parent = runs_root(REPO) if OWNED_SCRATCH_OWNER is None else None
     with test_sandbox(OWNED_SCRATCH_OWNER, REPO, _TestSandbox, stage="preparation", prefix="ce-prep-", dir=parent) as private:
         retained = _venv_root()
@@ -314,6 +296,13 @@ def _ensure_venv(name: str, uv: str, *, reinstall: bool) -> Path:
         interpreters = retained / ".python"
         interpreters.mkdir(parents=True, exist_ok=True)
         environment["UV_PYTHON_INSTALL_DIR"] = str(interpreters.resolve())
+        if OWNED_SCRATCH_OWNER is not None:
+            budget = wall_seconds - (time.monotonic() - started) if wall_seconds is not None else None
+            prepare_owned(
+                name, uv, reinstall, retained=retained, environment=environment,
+                sandbox=private, limits=limits, wall_seconds=budget,
+            )
+            return _venv_python(name)
         return _prepare_venv(name, uv, reinstall=reinstall, environment=environment)
 
 
@@ -555,7 +544,10 @@ def run_plugin(
         # "dependency preparation" pass can safely run before network
         # access is removed for the real test pass.
         print(f"[RUN ] {name}: preparing venv only (--prepare-only) ...")
-        _ensure_venv(name, uv, reinstall=reinstall)
+        _ensure_venv(name, uv, reinstall=reinstall, **(
+            {"limits": limits, "wall_seconds": plugin_timeout}
+            if OWNED_SCRATCH_OWNER is not None else {}
+        ))
         print(f"[PASS] {name} (prepared)")
         return 0
     plugin_started = time.monotonic()
@@ -575,7 +567,10 @@ def run_plugin(
         report_directory = junit_dir.expanduser().resolve() / name
         # A fresh plugin directory prevents retries from overwriting prior evidence.
         report_directory.mkdir(mode=0o700, parents=True, exist_ok=False)
-    py = _ensure_venv(name, uv, reinstall=reinstall)
+    preparation = {}
+    if OWNED_SCRATCH_OWNER is not None:
+        preparation = {"limits": limits, "wall_seconds": plugin_timeout - (time.monotonic() - plugin_started)}
+    py = _ensure_venv(name, uv, reinstall=reinstall, **preparation)
     sandbox_scope = test_sandbox(OWNED_SCRATCH_OWNER, REPO, _TestSandbox, stage="tests",
         prefix=run_prefix(name), dir=runs_root(REPO) if OWNED_SCRATCH_OWNER is None else None,
     )
@@ -884,6 +879,8 @@ def main(argv: list[str] | None = None) -> int:
     for name in targets:
         lease: SingleInstance | None = None
         try:
+            if OWNED_SCRATCH_OWNER is not None:
+                admit_owned_root(OWNED_SCRATCH_OWNER, REPO)
             environment_root = ordinary_cache_root(_venv_root() / name)
             environment_root.mkdir(parents=True, exist_ok=True)
             if args.admission_wait:
