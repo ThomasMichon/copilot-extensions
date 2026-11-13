@@ -3171,3 +3171,27 @@ newer Dev changes make the PR conflicting. Those changes include the existing
 owner's canonical wheel-application installer integration; reconcile their
 actual contracts before publishing another head. Neither native nor HTTP-52
 evidence may be silently carried onto changed complete execution inputs.
+
+### Current Dev integration after the qualified positive
+
+The owned source branch is rebased onto Dev
+`ce3a3c1a3db4e5012154d2b0f069fb1e311a3cde`. Actual conflicts were limited to
+generated unit-manifest data, MCP producer fingerprints and the module-size
+baseline. Current Dev declarations and ceilings are preserved; the only
+owned ceiling reduction remains the extracted Index configuration reader.
+The canonical footprint refresher regenerates MCP's complete producer hashes
+without changing revision 36 or its footprint semantics. Unit-manifest
+reconciliation retains current parameterized test nodes, adds the readiness
+source and refreshes the complete admitted source hashes.
+
+The integrated source passes 109 contained Manager suite-closure/readiness
+controls, the changed sparse-candidate materialization control, complete unit
+source admission (765 sources, 4,912 nodes), all 13 install contracts and the
+changed-file module-size check. These are source checks, not a second
+installed-suite or frozen-candidate pass. Dev changed the installed-TTY
+candidate snapshot helper and canonical installer inputs, so run 43352995266
+remains evidence for its original `40f1e6c4bd` source only. Complete HTTP-52
+input comparison, any required recapture, current-head CI and new installed
+qualification remain prerequisites before this changed head can be accepted.
+No constructor/publication ownership, baseline admission, rollout or Main
+authority is transferred by this integration.
