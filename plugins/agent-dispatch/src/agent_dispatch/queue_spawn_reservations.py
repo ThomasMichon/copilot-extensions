@@ -57,6 +57,7 @@ from .queue_spawn_cooling import validate_cooling_publication
 from .queue_standing_schema import require_finite_execution_admission
 from .queue_execution_custody import require_execution_send_reconciliation
 from .queue_execution_wakes import require_no_wake_for_release
+from . import queue_session_origin
 
 log = logging.getLogger("agent-dispatch.queue")
 
@@ -117,7 +118,7 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
     def reserve_spawn(
         self, task_id: str, *, reserved_by: str | None = None, now: float | None = None,
         allow_suspended_reembodiment: bool = False,
-        driver: str | None = None,
+        driver: str | None = None, session_origin_transport: str | None = None,
         allocation_revision: int | None = None,
         pool_catalog_revision: int | None = None,
     ) -> tuple[SpawnReservation, bool]:
@@ -126,19 +127,19 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
             task_id, reserved_by=reserved_by, now=now,
             allow_suspended_reembodiment=allow_suspended_reembodiment,
             driver=driver, allocation_revision=allocation_revision,
-            pool_catalog_revision=pool_catalog_revision,
+            pool_catalog_revision=pool_catalog_revision, session_origin_transport=session_origin_transport,
         )
         return reservation, reserved
 
     def place_pool_task(
         self, task_id: str, *, reserved_by: str, catalog_revision: int, driver: str = "cli",
-        startup_timeout: float = 600, expected_instance: tuple[str, str, str] | None = None,
+        startup_timeout: float = 600, expected_instance: tuple[str, str, str] | None = None, session_origin_transport: str | None = None,
     ) -> PoolPlacement:
         """Return the reservation and matching assignment captured under one lock."""
         reservation, reserved, assignment = self._reserve_spawn(
             task_id, reserved_by=reserved_by, driver=driver,
             pool_catalog_revision=catalog_revision, pool_startup_timeout=startup_timeout,
-            expected_instance=expected_instance,
+            expected_instance=expected_instance, session_origin_transport=session_origin_transport,
         )
         if assignment is None or assignment.reservation_key != reservation.key:
             raise TaskError("pool placement has no matching transactional assignment")
@@ -148,7 +149,7 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
         self, task_id: str, *, reserved_by: str | None = None, now: float | None = None,
         allow_suspended_reembodiment: bool = False, driver: str | None = None,
         allocation_revision: int | None = None, pool_catalog_revision: int | None = None,
-        pool_startup_timeout: float = 600,
+        pool_startup_timeout: float = 600, session_origin_transport: str | None = None,
         expected_instance: tuple[str, str, str] | None = None,
     ) -> tuple[SpawnReservation, bool, PoolAssignment | None]:
         """Atomically reserve the right to spawn an embody worker for ``task_id``.
@@ -247,7 +248,7 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
                     require_selected_instance(expected_instance, assigned_pool)
                     if allocation_revision is not None and allocation_revision != current["allocation_revision"]:
                         raise TaskError("active reservation conflicts with requested allocation revision")
-                    return SpawnReservation._from_row(current), False, assigned_pool
+                    return queue_session_origin.reservation_record(current, session_origin_transport), False, assigned_pool
             identity = conn.execute(
                 "SELECT identity FROM workspace_queue_identity WHERE singleton = 1",
             ).fetchone()["identity"]
@@ -297,14 +298,14 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
                     if active["task_id"] == task_id and active["allocation_revision"] != revision:
                         raise TaskError("active reservation conflicts with requested allocation revision")
                     conn.execute("COMMIT")
-                    return SpawnReservation._from_row(active), False, assigned_pool
+                    return queue_session_origin.reservation_record(active, session_origin_transport), False, assigned_pool
             else:
                 for row in rows:
                     if row["state"] in SpawnState.ACTIVE:
                         if row["allocation_revision"] != revision:
                             raise TaskError("active reservation conflicts with requested allocation revision")
                         conn.execute("COMMIT")
-                        return SpawnReservation._from_row(row), False, assigned_pool
+                        return queue_session_origin.reservation_record(row, session_origin_transport), False, assigned_pool
             from .queue_pool_placement import require_historical_exclusivity, require_legacy_pool_admission
             require_historical_exclusivity(conn, task)
             require_execution_send_reconciliation(
@@ -567,8 +568,8 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
                 "session_handle, worktree, inherited_worktree, "
                 "worktree_ownership, conversation_retired, allocation_project, worktree_path, "
                 "creating_host, driver, reserved_at, updated_at, allocation_revision, "
-                "creation_key, allocation_reservation_key, agent_info, execution_machine, allocation_cohort_transport) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)",
+                "creation_key, allocation_reservation_key, agent_info, execution_machine, allocation_cohort_transport, session_origin_transport) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)",
                 (
                     key,
                     task_id,
@@ -630,6 +631,7 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
                 )
             from .queue_assignment_cohort import retain_allocation_cohort
             retain_allocation_cohort(conn, task, key=key, original_key=allocation_reservation_key)
+            queue_session_origin.retain(conn, task, key=key, requested=session_origin_transport)
             row = conn.execute("SELECT * FROM spawn_reservations WHERE key = ?", (key,)).fetchone()
             assigned_pool = pool_assignment(conn, task_id)
             conn.execute("COMMIT")

@@ -319,6 +319,8 @@ class TaskQueue(
             migrate_relationships(conn)
             from .queue_assignment_cohort import migrate_allocation_cohorts
             migrate_allocation_cohorts(conn)
+            from .queue_session_origin import migrate as migrate_session_origins
+            migrate_session_origins(conn)
             from .queue_submission_preparation import migrate_submission_preparation
             migrate_submission_preparation(conn)
             from .queue_standing_schema import migrate_standing_charters

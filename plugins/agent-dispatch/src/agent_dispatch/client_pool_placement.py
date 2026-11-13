@@ -120,6 +120,7 @@ class PoolPlacementClientMixin:
         self, task_id: str, *, reserved_by: str, catalog_revision: int,
         driver: str = "cli", expected_instance: tuple[str, str, str] | None = None,
         startup_timeout: float | None = None,
+        session_origin_transport: str | None = None,
     ) -> dict:
         """Claim before startup; only a validated fresh result permits a spawn.
 
@@ -141,6 +142,10 @@ class PoolPlacementClientMixin:
             initial_start=driver == "cli" and expected_instance is not None,
         )
         extra: dict[str, object] = {}
+        if session_origin_transport is not None:
+            from .client_spawn_reservations import require_session_origin_support
+            require_session_origin_support(contract)
+            extra["session_origin_transport"] = session_origin_transport
         if expected_instance is not None or startup_timeout is not None:
             versions = contract.get("instance_bound_placement_versions")
             if not isinstance(versions, list) or not any(type(v) is int and v == 1 for v in versions):
@@ -176,7 +181,8 @@ class PoolPlacementClientMixin:
             placed["assignment"][name] for name in ("registration_id", "machine", "env")
         ) != expected_instance:
             raise DispatchError(502, "pool placement outcome is unknown: launch instance changed")
-        return placed
+        from .client_spawn_reservations import selected_session_origin
+        return selected_session_origin(placed, session_origin_transport)
 
     def start_pool_task(
         self, task_id: str, worker_id: str, *, owner_session_id: str,
