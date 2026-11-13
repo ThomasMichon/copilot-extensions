@@ -451,14 +451,24 @@ handover. Preserve held sessions and the separate pre-feature adoption hold.
       current-head Copilot approval, required CI and hosted Windows/Linux
       qualification. This closes the in-process creation/callback boundary,
       not productive MCP publication or retained-executable caller adoption.
-    - [ ] **Explicit retained headed MCP producer:** join the section publisher,
+    - [x] **Explicit retained headed MCP producer:** join the section publisher,
       actual suspended native-child owner and fixed copied executable with
       session-only private configuration transport. Qualify actual MCP startup
       attribution, wrong-reader refusal, original wait and exact cleanup;
-      retain old-core refusal and unchanged default/auth behavior. Source
-      controls are prepared; review and hosted qualification remain open.
+      retain old-core refusal and unchanged default/auth behavior.
+      #12423 merged at `ae8c1d537beafd23ff0c5d0327b1fdf79d486f0c` after
+      genuine current-head approval, required CI and hosted Windows/Linux
+      qualification, including actual copied-receiver MCP startup and
+      native-owned protected-name lifetime after publisher handles close.
       Installed handover, release and productive/default enrollment are
       independent remaining gates.
+    - [ ] **Joined retained headed physical receiver:** compose this copied
+      producer with the real optional physical receiver/custody through
+      replacement, rollback, accepted/in-flight/unknown outcomes and exact
+      settlement. Keep actual native/client/conduit/keeper/upstream attribution
+      and the existing pre-effect context barrier; a synthetic configuration
+      provider or a separately qualified creation/wait packet is not this
+      composition. Default and installed adoption remain separate.
   - [x] **Explicit Linux exec caller:** capture the exec owner's native pair
     and pass a sealed, session-only overlay for explicitly named configured
     entries, with actual-start discovery bound to a physical optional receiver.

@@ -127,14 +127,19 @@ finally:
 
 @pytest.mark.timeout(180)
 @pytest.mark.parametrize(
-    "controlled_wait", [False, True] if sys.platform == "win32" else [False],
-    ids=["publisher-exit", "existing-wait-owner"] if sys.platform == "win32" else ["exec-client"],
+    "launch_mode",
+    ["publisher-exit", "existing-wait-owner", "retained-headed"]
+    if sys.platform == "win32" else ["exec-client"],
 )
 async def test_actual_native_client_responds_through_replacement_and_rollback(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     record_testsuite_property: Callable[[str, object], None],
-    controlled_wait: bool,
+    launch_mode: str,
 ) -> None:
+    controlled_wait = launch_mode == "existing-wait-owner"
+    headed = launch_mode == "retained-headed"
+    if headed and os.environ.get("COPILOT_DRIVER_HEADED_MUX_E2E") != "1":
+        pytest.skip("Explicitly select the isolated native headed mux lane")
     executable = os.environ.get("COPILOT_NATIVE_TEST_EXECUTABLE")
     if not executable:
         pytest.skip("Select the pinned native Copilot asset on a disposable runner")
@@ -305,7 +310,14 @@ async def test_actual_native_client_responds_through_replacement_and_rollback(
                     "args": ["-I", "-m", "agent_mcp", "bridge", "--config", str(config)],
                     "tools": ["*"],
                 }}}
-                if windows:
+                if headed:
+                    monkeypatch.syspath_prepend(str(Path(__file__).parent))
+                    from generation_headed_transport import HeadedClient
+
+                    client = HeadedClient(tmp_path, workspace, environment, monkeypatch)
+                    stderr = asyncio.create_task(client.stderr.read())
+                    published = await client.start(executable, configuration)
+                elif windows:
                     from agent_mcp.owner_exec import windows_overlay
 
                     script = windows_client._publisher(
@@ -326,17 +338,20 @@ async def test_actual_native_client_responds_through_replacement_and_rollback(
                         "--allow-tool=physical-fixture(fixture_0)",
                         "--log-dir", str(tmp_path / "logs"),
                     ]
-                client = await asyncio.create_subprocess_exec(
-                    *command,
-                    cwd=workspace, env=environment, stdin=asyncio.subprocess.PIPE,
-                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-                    **no_window_kwargs(),
-                )
-                stderr = asyncio.create_task(client.stderr.read())
+                if not headed:
+                    client = await asyncio.create_subprocess_exec(
+                        *command,
+                        cwd=workspace, env=environment, stdin=asyncio.subprocess.PIPE,
+                        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                        **no_window_kwargs(),
+                    )
+                    stderr = asyncio.create_task(client.stderr.read())
                 if windows:
                     producer_handle = native.require(native.k.OpenProcess(0x101000, False, client.pid))
                     retained.callback(native.close, producer_handle)
-                    if controlled_wait:
+                    if headed:
+                        pass
+                    elif controlled_wait:
                         publication = tmp_path / "launch-owner.json"
                         published = None
                         for _ in range(600):
@@ -356,35 +371,46 @@ async def test_actual_native_client_responds_through_replacement_and_rollback(
                     client_pid, client_birth = published["pid"], published["birth"]
                     client_handle = windows_client._pin(native, client_pid, client_birth, 0x101001)
                     retained.callback(native.close, client_handle)
-                    if controlled_wait:
+                    if controlled_wait or headed:
                         assert client_pid != client.pid
                         assert native.k.WaitForSingleObject(producer_handle, 0) == 258
                     else:
                         assert await asyncio.to_thread(native.k.WaitForSingleObject, producer_handle, 10000) == 0
-                    assert not caller_context.exists()
-                    assert not observations.with_suffix(".owner.json").exists()
+                    if not headed:
+                        assert not caller_context.exists()
+                        assert not observations.with_suffix(".owner.json").exists()
                 else:
                     client_pid, client_birth = client.pid, birth_identity(client.pid)
-                initialized, _ = await provider.rpc(client, stderr, 1, "initialize", {
-                    "protocolVersion": 1, "clientCapabilities": {},
-                    "clientInfo": {"name": "physical-owner-fixture", "version": "1"},
-                })
-                assert initialized["protocolVersion"] == 1
-                session = asyncio.create_task(provider.rpc(
-                    client, stderr, 2, "session/new", {"cwd": str(workspace), "mcpServers": []},
-                ))
-
                 async def prepared_context() -> dict:
                     if not caller_context.is_file():
                         return {}
                     return json.loads(caller_context.read_text(encoding="utf-8"))
 
+                if headed:
+                    backend_environment = await fixture.eventually(prepared_context)
+                    old, old_handle, old_pid = await backend("old")
+                    caller_context.with_suffix(".ready").write_text("ready", encoding="utf-8")
+                    await client.connect()
+                initialized, _ = await provider.rpc(client, stderr, 1, "initialize", {
+                    "protocolVersion": 1, "clientCapabilities": {},
+                    "clientInfo": {"name": "physical-owner-fixture", "version": "1"},
+                })
+                assert initialized["protocolVersion"] == 1
+                if headed:
+                    assert initialized["_meta"]["nativeSessionId"] == client.session_id
+                    opened = {"sessionId": client.session_id}
+                else:
+                    session = asyncio.create_task(provider.rpc(
+                        client, stderr, 2, "session/new", {"cwd": str(workspace), "mcpServers": []},
+                    ))
+
                 # The native client adds its own semantic environment before MCP exec.
                 # Prepare the private backend from that exact pre-effect caller context.
-                backend_environment = await fixture.eventually(prepared_context)
-                old, old_handle, old_pid = await backend("old")
-                caller_context.with_suffix(".ready").write_text("ready", encoding="utf-8")
-                opened, _ = await session
+                if not headed:
+                    backend_environment = await fixture.eventually(prepared_context)
+                    old, old_handle, old_pid = await backend("old")
+                    caller_context.with_suffix(".ready").write_text("ready", encoding="utf-8")
+                    opened, _ = await session
                 first = await exchange("old", old_pid, refresh=False)
                 upstream_identity = first["pid"], birth_identity(first["pid"])
                 owner = json.loads(observations.with_suffix(".owner.json").read_text(encoding="utf-8"))
@@ -401,8 +427,10 @@ async def test_actual_native_client_responds_through_replacement_and_rollback(
                 def retained_identities() -> None:
                     if windows:
                         assert native.k.WaitForSingleObject(client_handle, 0) == 258
-                        if controlled_wait:
+                        if controlled_wait or headed:
                             assert native.k.WaitForSingleObject(producer_handle, 0) == 258
+                        if headed:
+                            assert all(identity_state(*pair) == "matching" for pair in client.owned)
                     else:
                         assert client.returncode is None
                     assert identity_state(client_pid, client_birth) == "matching"
@@ -419,6 +447,8 @@ async def test_actual_native_client_responds_through_replacement_and_rollback(
                     })
                     assert not model.errors, model.errors
                     assert result["stopReason"] == "end_turn", result
+                    if headed:
+                        text = await client.completed_text("fixture-complete:" + nonce)
                     assert "fixture-complete:" + nonce in text
                     assert nonce in model.results
                     accepted = list(map(json.loads, calls.read_text().splitlines()))
@@ -548,8 +578,7 @@ async def test_actual_native_client_responds_through_replacement_and_rollback(
                 record_testsuite_property("unknown_delivery_conduit_exit", "dead")
                 record_testsuite_property("actual_native_client", str(executable.name))
                 record_testsuite_property(
-                    "actual_native_launch_owner",
-                    "existing-wait-owner" if controlled_wait else "publisher-exit" if windows else "exec-client",
+                    "actual_native_launch_owner", launch_mode,
                 )
                 record_testsuite_property("physical_generations", json.dumps({
                     label: generation for label, (generation, _) in slots.items()
@@ -561,9 +590,11 @@ async def test_actual_native_client_responds_through_replacement_and_rollback(
                 failed = sys.exc_info()[0] is not None
                 try:
                     if client is not None:
-                        if windows or client.returncode is None:
+                        if headed:
+                            await client.stop()
+                        elif windows or client.returncode is None:
                             client.stdin.close()
-                        if windows:
+                        if windows and not headed:
                             await windows_client._settle_client(native, client_handle)
                         await asyncio.wait_for(client.wait(), 10)
                         if controlled_wait:
@@ -577,6 +608,8 @@ async def test_actual_native_client_responds_through_replacement_and_rollback(
                                 outcome = "caller-eof"
                             else:
                                 assert result["stopReason"] == "end_turn", result
+                                if headed:
+                                    text = await client.completed_text("fixture-unknown:" + nonce)
                                 assert "fixture-unknown:" + nonce in text
                                 assert "fixture-complete:" + nonce not in text
                                 assert nonce in model.unknown_results
@@ -634,4 +667,8 @@ async def test_actual_native_client_responds_through_replacement_and_rollback(
         assert all(row["pid"] == upstream_identity[0] for row in accepted)
         assert model.calls.count("native-fixture-unknown") == 1
         assert "native-fixture-unknown" not in model.results
+        if headed:
+            client.assert_conversation(model.calls)
+            record_testsuite_property("headed_conversations", 1)
+            record_testsuite_property("headed_final_text_evidence", "original-native-event-journal")
         record_testsuite_property("contained_native_upstream_exit", exit_receipt["boundary"])
