@@ -244,6 +244,16 @@ is not an installed operator runtime or fresh-OS/native SDK qualification.
 
 ## Owner-only hosted Windows escape hatch
 
+The separate `Installation context full` workflow's manual
+`manager-engine-routing` portfolio runs the canonical
+`tools/run-manager-runtime-acceptance.py --contract engine-routing` on disposable
+Windows. Dispatch at the published commit and supply that same full commit as
+`source_sha`; missing/mismatched sources and retained results refuse before
+construction. The existing 300-second preparation, 600-second routing group,
+900-second plugin and 240-second item limits remain unchanged. Both installed
+candidates and the timed consumers must pass. This is prepared-routing evidence,
+not cold-first-touch, productive-host lifecycle or deployment qualification.
+
 `windows-qualification.yml` is an explicit manual lane on a disposable
 GitHub-hosted Windows image. Only the individual repository owner may submit
 or rerun it, and its controller must run from the protected GitHub default
