@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=83.0.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agent-copilot-driver-core"
+version = "0.1.7-dev1"
+description = "Independent Copilot execution core and reattachable Session Host"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+dependencies = [
+    "agent-procutil",
+    "agent-repository-policy",
+    "agent-zdd",
+    "agent-single-instance-lease",
+    "websockets>=15,<16",
+]
+
+[project.optional-dependencies]
+sdk = [
+    "github-copilot-sdk>=1.0.27,<1.0.28; python_version >= '3.11'",
+]
+
+[tool.uv]
+exclude-newer = "7 days"
+
+[tool.uv.sources]
+agent-procutil = { path = "../agent-procutil" }
+agent-repository-policy = { path = "../repository-policy" }
+agent-zdd = { path = "../zdd" }
+agent-single-instance-lease = { path = "../single-instance-lease" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"agent_remote_driver.headed" = ["*.mjs"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 99

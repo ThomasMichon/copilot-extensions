@@ -150,7 +150,12 @@ def test_connected_sid_reverts_before_token_read() -> None:
     assert calls == ["impersonate", "open", "revert", "sid", "close"]
 
 
-def test_explicit_dacl_and_native_listener_flags() -> None:
+@pytest.mark.parametrize("options,flags,instances", [
+    ({}, 3 | 0x40000000 | 0x80000, 1),
+    ({"max_instances": 2}, 3 | 0x40000000 | 0x80000, 2),
+    ({"max_instances": 2, "first_instance": False}, 3 | 0x40000000, 2),
+])
+def test_explicit_dacl_and_native_listener_flags(options, flags, instances) -> None:
     api = object.__new__(win.Native)
     captured: dict[str, Any] = {}
     api.current_sid = lambda: PEER.principal
@@ -168,12 +173,22 @@ def test_explicit_dacl_and_native_listener_flags() -> None:
 
     api.a = SimpleNamespace(ConvertStringSecurityDescriptorToSecurityDescriptorW=descriptor)
     api.k = SimpleNamespace(CreateNamedPipeW=pipe)
-    assert api.listener(PATH) == 11
+    assert api.listener(PATH, **options) == 11
     assert captured["sddl"] == f"O:{PEER.principal}D:P(A;;GA;;;{PEER.principal})"
-    assert captured["flags"] == 3 | 0x40000000 | 0x80000
+    assert captured["flags"] == flags
     assert captured["mode"] == 8
-    assert captured["instances"] == 1
+    assert captured["instances"] == instances
     assert captured["freed"]
+
+
+@pytest.mark.parametrize("options", [
+    {"max_instances": 0}, {"max_instances": True},
+    {"max_instances": 255}, {"first_instance": 1},
+])
+def test_invalid_listener_reservation_refuses_before_native_effects(options) -> None:
+    api = object.__new__(win.Native)
+    with pytest.raises(PrivateIPCError):
+        api.listener(PATH, **options)
 
 
 def test_client_identification_sqos_and_authentication(monkeypatch: pytest.MonkeyPatch) -> None:

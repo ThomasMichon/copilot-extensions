@@ -38,6 +38,17 @@ See the [optional provider contract](../../plugins/agent-remote-driver/README.md
 for supported ACP operations, permission limits and separate activity snapshots.
 Inventory availability does not enable automatic idle retirement.
 
+The Session Host Python `main(..., headed_run=...)` seam accepts an explicitly
+supplied in-process headed receiver while retaining the ordinary parser,
+repository policy and native creation/wait owners. Headless execution rejects
+that override rather than silently ignoring it. `--support-json` additively
+declares `headed_receivers: ["explicit-inprocess-v1"]` when headed execution
+is present. It is not a serialized-code or environment hook; a consumer owns
+any fixed retained executable and additional dependencies. The optional
+[MCP headed receiver](../../plugins/agent-mcp/docs/session-generation.md#opt-in-retained-windows-headed-receiver)
+is one explicit consumer. Ordinary core bundles have no MCP dependency or
+automatic originating-owner enrollment.
+
 Worktrees' mux-creation adapter also consumes this core. The core owns its
 short native check/create lease, neutral client working directory, nesting
 scrub and uncertain-creation handling. Workspace allocation, pane argument

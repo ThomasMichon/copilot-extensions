@@ -82,6 +82,7 @@ def offline_cli(tmp_path):
     home, workspace = (tmp_path / name for name in ("home", "workspace"))
     for path in (home, workspace):
         path.mkdir(parents=True)
+    (home / "settings.json").write_text(json.dumps({"screenReader": True}), encoding="utf-8")
     environment = {
         key: value for key, value in os.environ.items()
         if (key.startswith("COPILOT_EXTENSIONS_")
