@@ -16,7 +16,7 @@ from . import config, launch, rendezvous
 from .cache_manifests import read_cache_manifest as _read_cache_manifest
 from .cache_recovery import status_command as cmd_cache_status
 from .config import IS_WINDOWS, SOCKET_PATH, ResolvedVault
-from .credential_reads import cmd_get
+from .credential_reads import cmd_get, legacy_cache_entry
 from .prompt import prompt_password as gui_prompt_password
 from .winpipe import pipe_send
 
@@ -1489,7 +1489,7 @@ def cmd_cache_verify(args):
         cache_entry = config.normalize_entry(entry, config.resolve_context().group)
         if cache.get(
             cache_entry, field, readonly=True, legacy_field=attribute_name(field),
-            legacy_entry=None if config.PINNED_CONTEXT_ENV in os.environ else entry,
+            legacy_entry=legacy_cache_entry(entry, cache_entry),
         ) is not None:
             present += 1
         else:

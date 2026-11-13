@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import json
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -766,20 +767,24 @@ def test_add_at_an_existing_path_cannot_leave_the_prior_service_value_cached(
 
 
 @pytest.mark.parametrize("refresh", [False, True])
+@pytest.mark.parametrize("blocked", ["unlock", "entry-read"])
 def test_inflight_backend_read_cannot_repopulate_the_service_cache_after_clear(
-    cached_service, monkeypatch: pytest.MonkeyPatch, refresh: bool,
+    cached_service, monkeypatch: pytest.MonkeyPatch, refresh: bool, blocked: str,
 ) -> None:
     vault, persistent, kpdb, _clock = cached_service
     if refresh:
         assert _get(vault)["ok"]
     entered, release = threading.Event(), threading.Event()
 
-    def paused(*_args: object) -> str:
+    def paused(*_args: object) -> str | bool:
         entered.set()
         assert release.wait(4)
-        return "pre-clear-read-value"
+        return True if blocked == "unlock" else "pre-clear-read-value"
 
-    monkeypatch.setattr(vault.cli, "get_entry", paused)
+    if blocked == "unlock":
+        monkeypatch.setattr(vault, "ensure_unlocked", paused)
+    else:
+        monkeypatch.setattr(vault.cli, "get_entry", paused)
     with ThreadPoolExecutor(max_workers=1) as workers:
         pending = workers.submit(_get, vault, refresh=refresh)
         try:
@@ -877,7 +882,7 @@ def test_service_store_rejects_malformed_journals_without_revoking_or_writing(
 
 
 def test_direct_client_cannot_reuse_a_root_credential_for_a_group_relative_lookup(
-    cached_service, monkeypatch: pytest.MonkeyPatch,
+    cached_service, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
 ) -> None:
     vault, persistent, _kpdb, _clock = cached_service
     monkeypatch.setattr(cache, "get_cache", lambda: persistent)
@@ -893,6 +898,12 @@ def test_direct_client_cannot_reuse_a_root_credential_for_a_group_relative_looku
     with monkeypatch.context() as context:
         context.setattr(cli, "ensure_service", lambda: pytest.fail("cache-only contacted service"))
         refused = credential_reads.read_credential(grouped)
+        before = persistent._cache_file.read_bytes()
+        assert cli.cmd_cache_verify(SimpleNamespace(entry=["token"], json=True)) == 2
+        assert json.loads(capsys.readouterr().out)["present"] == 0
+        assert cli.cmd_cache_verify(SimpleNamespace(entry=["/token"], json=True)) == 0
+        assert json.loads(capsys.readouterr().out)["present"] == 1
+        assert persistent._cache_file.read_bytes() == before
     assert refused.code == 1 and refused.value is None
 
     relative = credential_reads.read_credential(SimpleNamespace(entry="token", field="password"))

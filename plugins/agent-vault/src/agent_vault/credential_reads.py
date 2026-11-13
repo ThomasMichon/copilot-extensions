@@ -26,6 +26,12 @@ class CredentialRead:
     warning: str | None = None
 
 
+def legacy_cache_entry(entry: str, normalized: str) -> str | None:
+    if config.PINNED_CONTEXT_ENV in os.environ or normalized != config.normalize_entry(entry, ""):
+        return None
+    return entry
+
+
 def read_credential(args) -> CredentialRead:
     from . import cli
     from .cache import get_cache
@@ -46,9 +52,7 @@ def read_credential(args) -> CredentialRead:
     max_cache_age = getattr(args, "max_cache_age", None)
     cache = get_cache()
     pinned = config.PINNED_CONTEXT_ENV in os.environ
-    legacy_entry = (
-        None if pinned or cache_entry != config.normalize_entry(entry, "") else entry
-    )
+    legacy_entry = legacy_cache_entry(entry, cache_entry)
     strict_cache = getattr(args, "strict_cache", False)
     readonly_cache = pinned or strict_cache or cache_only
     cache_decryption_failed = False

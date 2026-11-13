@@ -80,6 +80,13 @@ def read(
             if key in service.cache:
                 return service.cache[key]
 
+        try:
+            revocation = (
+                selected.revocation_state(entry, field, canonical=True)
+                if selected is not None else None
+            )
+        except (OSError, RuntimeError, ValueError, ImportError) as exc:
+            raise ServiceCacheUnavailable(UNAVAILABLE) from exc
         with backend_custody(persistent, kpdb):
             service._check_password_ttl()
             if selected is not None:
@@ -93,13 +100,6 @@ def read(
                     return record["value"]
             if not service.ensure_unlocked(kpdb):
                 return None
-            try:
-                revocation = (
-                    selected.revocation_state(entry, field, canonical=True)
-                    if selected is not None else None
-                )
-            except (OSError, RuntimeError, ValueError, ImportError) as exc:
-                raise ServiceCacheUnavailable(UNAVAILABLE) from exc
             value = service.cli.get_entry(kpdb, entry, field)
             if value is not None:
                 generation = max(time.time_ns(), service._credential_generations.get(key, 0) + 1)

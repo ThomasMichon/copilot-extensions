@@ -615,6 +615,8 @@ Direct clients do not reuse an unqualified legacy entry as a group-relative
 credential: a root `token` cannot satisfy `Allowed/token`. Such an ambiguous
 legacy record is a miss until the selected grouped entry is populated
 authoritatively; cache-only requests still never contact the service.
+`cache-verify` uses the same subject selection, so its readiness result cannot
+count an ambiguous root credential as a grouped cache hit.
 
 Authoritative refresh never returns a cached value or deletes the caller's
 existing recovery record before trying the backend. A successful read updates
