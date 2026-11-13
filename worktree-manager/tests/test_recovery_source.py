@@ -84,6 +84,20 @@ def upstream(tmp_path):
     return root, older, git(root, "rev-parse", "HEAD")
 
 
+@pytest.fixture
+def declared_upstream(upstream, tmp_path, monkeypatch):
+    root, older, current = upstream
+    uri = "https://suite.example.invalid/source.git"
+    configuration = tmp_path / "trusted-gitconfig"
+    configuration.write_text(
+        "[url " + json.dumps(str(root)) + "]\n    insteadOf = " + json.dumps(uri) + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(configuration))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    return root, older, current, uri
+
+
 @pytest.mark.parametrize("changes", [
     {"version": True}, {"operation": "cleanup"}, {"unexpected": True},
     {"manager_root": "relative"}, {"project": False},
@@ -408,13 +422,13 @@ def test_repository_request_keeps_revision_and_operation_boundaries(tmp_path, ch
         recovery.read_request(path)
 
 
-def test_actual_cold_repository_preview_selects_adopter_not_cwd_or_object_source(tmp_path, upstream):
-    root, older, _ = upstream
+def test_actual_cold_repository_preview_selects_adopter_not_cwd_or_object_source(tmp_path, declared_upstream):
+    root, older, _, uri = declared_upstream
     adopter = tmp_path / "unregistered-adopter"
     policy = adopter / ".copilot-extensions" / "config.yaml"
     policy.parent.mkdir(parents=True)
     policy.write_text(
-        f"current_version: {older}\nrepository: {json.dumps(str(root))}\n"
+        f"current_version: {older}\nrepository: {json.dumps(uri)}\n"
         "last_known_good: ['previous']\n",
         encoding="utf-8",
     )
@@ -444,7 +458,7 @@ def test_actual_cold_repository_preview_selects_adopter_not_cwd_or_object_source
     report = json.loads(result.stdout)
     assert report["selection"]["source_commit"] == older
     assert report["selection"]["source_tree"] == git(root, "rev-parse", older + "^{tree}")
-    assert report["repository"] == str(root)
+    assert report["repository"] == uri
     assert report["repository_policy"]["repository_root"] == str(adopter)
     assert report["repository_policy"]["declaration"] == str(policy)
     assert report["repository_policy"]["requested_reference"] == older
@@ -455,7 +469,10 @@ def test_actual_cold_repository_preview_selects_adopter_not_cwd_or_object_source
     assert {item.name for item in manager.iterdir()} == {"config.toml"}
 
 
-@pytest.mark.parametrize("kind", ["locator", "invalid-locator", "malformed-yaml", "duplicate-key"])
+@pytest.mark.parametrize("kind", [
+    "locator", "invalid-locator", "malformed-yaml", "duplicate-key",
+    "invalid-integer", "invalid-float",
+])
 def test_rejected_repository_credentials_are_not_serialized_in_preview_result(tmp_path, kind):
     from urllib.parse import urlsplit
 
@@ -474,6 +491,9 @@ def test_rejected_repository_credentials_are_not_serialized_in_preview_result(tm
         text = 'repository: "' + repository + "\n"
     elif kind == "duplicate-key":
         text = (json.dumps(repository) + ": one\n") + (json.dumps(repository) + ": two\n")
+    elif kind in {"invalid-integer", "invalid-float"}:
+        tag = "int" if kind == "invalid-integer" else "float"
+        text = "unrelated: !!" + tag + " " + json.dumps(password) + "\n"
     policy.write_text(text, encoding="utf-8")
     assert password.encode() in policy.read_bytes()
     manager = tmp_path / "untouched-manager"
@@ -560,8 +580,8 @@ def test_repository_selection_preserves_independent_runtime_policy(tmp_path):
     assert config.read_bytes() == before
 
 
-def test_cold_repository_preview_does_not_retry_main_after_admitted_source_failure(tmp_path, upstream):
-    root, _, _ = upstream
+def test_cold_repository_preview_does_not_retry_main_after_admitted_source_failure(tmp_path, declared_upstream):
+    root, _, _, uri = declared_upstream
     git(root, "checkout", "-qb", "unmerged")
     (root / "unmerged.txt").write_text("not on main", encoding="utf-8")
     git(root, "add", ".")
@@ -572,7 +592,7 @@ def test_cold_repository_preview_does_not_retry_main_after_admitted_source_failu
     policy = adopter / ".copilot-extensions" / "config.yaml"
     policy.parent.mkdir(parents=True)
     policy.write_text(
-        f"current_version: {candidate}\nrepository: {json.dumps(str(root))}\n", encoding="utf-8",
+        f"current_version: {candidate}\nrepository: {json.dumps(uri)}\n", encoding="utf-8",
     )
     before = policy.read_bytes()
     manager = tmp_path / "untouched-manager"
@@ -594,16 +614,16 @@ def test_cold_repository_preview_does_not_retry_main_after_admitted_source_failu
     assert not manager.exists()
 
 
-def test_repository_tag_preview_keeps_one_resolved_identity(tmp_path, monkeypatch, upstream):
+def test_repository_tag_preview_keeps_one_resolved_identity(tmp_path, monkeypatch, declared_upstream):
     from worktree_manager import runtime_source_repository
 
-    root, older, current = upstream
+    root, older, current, uri = declared_upstream
     git(root, "tag", "selected", older)
     adopter = tmp_path / "adopter"
     policy = adopter / ".copilot-extensions" / "config.yaml"
     policy.parent.mkdir(parents=True)
     policy.write_text(
-        f"current_version: refs/tags/selected\nrepository: {json.dumps(str(root))}\n", encoding="utf-8",
+        f"current_version: refs/tags/selected\nrepository: {json.dumps(uri)}\n", encoding="utf-8",
     )
     reads = []
 
@@ -630,11 +650,11 @@ def test_repository_tag_preview_keeps_one_resolved_identity(tmp_path, monkeypatc
 
 @pytest.mark.parametrize("object_tag", ["different", "missing"])
 def test_repository_tag_comes_from_declared_authority_not_object_checkout(
-    tmp_path, monkeypatch, upstream, object_tag,
+    tmp_path, monkeypatch, declared_upstream, object_tag,
 ):
     from worktree_manager import runtime_source_repository
 
-    root, older, current = upstream
+    root, older, current, uri = declared_upstream
     git(root, "tag", "selected", older)
     objects = tmp_path / "objects"
     git(tmp_path, "clone", "--quiet", str(root), str(objects))
@@ -646,7 +666,7 @@ def test_repository_tag_comes_from_declared_authority_not_object_checkout(
     policy = adopter / ".copilot-extensions" / "config.yaml"
     policy.parent.mkdir(parents=True)
     policy.write_text(
-        f"current_version: refs/tags/selected\nrepository: {json.dumps(str(root))}\n", encoding="utf-8",
+        f"current_version: refs/tags/selected\nrepository: {json.dumps(uri)}\n", encoding="utf-8",
     )
     monkeypatch.setattr(
         recovery, "repository_declaration",
@@ -660,7 +680,7 @@ def test_repository_tag_comes_from_declared_authority_not_object_checkout(
     assert recovery.recover(value, tmp_path / "work", report) == 0
     assert report["selection"]["source_commit"] == older
     assert report["selection"]["source_tree"] == git(root, "rev-parse", older + "^{tree}")
-    assert report["repository_policy"]["repository"] == str(root)
+    assert report["repository_policy"]["repository"] == uri
 
 
 def test_main_does_not_override_existing_exact_policy(tmp_path):

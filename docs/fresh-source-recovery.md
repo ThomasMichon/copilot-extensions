@@ -156,12 +156,18 @@ symbolic expressions refuse explicitly; they are not guessed to be tags,
 mapped to Dev or retried as Main. A repository override alone explicitly
 selects its Main. With neither selection field, or with an unavailable
 repository, preview reports the Main-foundation fallback.
-Repository declarations cannot select UNC-style network filesystem paths or
-`file:` URLs; ordinary absolute local repository paths remain supported. These passive
-declarations do not authorize network-filesystem authentication. An object-source
-checkout supplies objects only: selected tags are fetched from the declared
-repository, not from potentially different or missing local tags.
-Declaration and local-source path components are checked root-first with
+The declaration's repository override must be a remote Git locator. It cannot
+select local repository paths, UNC-style paths or `file:` URLs. This prevents
+passive data from sending native Git into an untrusted local repository's
+configuration includes, alternates or storage links. An available local
+**adopter** still works without registration; this restriction concerns the
+suite source selected by its data, not the addressed adopter.
+Schema 1 and an explicit caller-owned `selection.checkout` retain their existing
+local-object source contract. Host Git configuration and those explicit inputs
+remain caller authority, not declaration authority. An object-source checkout
+supplies objects only: selected tags are fetched from the declared repository,
+not from potentially different or missing local tags.
+Declaration path components are checked root-first with
 non-following metadata before existence probes or native normalization.
 Parent components are invalid; symlink/reparse components refuse before their
 targets are accessed.
@@ -185,7 +191,8 @@ The result's `repository_policy` records the addressed root, declaration path,
 source repository, requested reference, effective reference and fallback reason.
 Only admitted selections attach that document. Rejected declaration locators use
 value-free diagnostics; malformed YAML and duplicate-key diagnostics report
-positions rather than source snippets or key values.
+available positions rather than source snippets or key values. Scalar
+constructor failures receive the same value-free invalid-YAML result.
 The existing `selection` records the one materialized immutable commit/tree.
 A conflicting independent runtime-source policy refuses; a matching one is
 preserved. Preview never creates an installation association or changes Manager

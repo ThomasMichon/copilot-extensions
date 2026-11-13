@@ -210,5 +210,34 @@ def test_linked_components_refuse_before_any_target_metadata_read(tmp_path, monk
         return original(candidate, follow_symlinks=follow_symlinks)
 
     monkeypatch.setattr(Path, "stat", guarded)
-    with pytest.raises(ValueError, match="linked"):
+    with pytest.raises(ValueError, match="remote Git" if linked_part == "source" else "linked"):
+        policy.read(root, default_repository=UPSTREAM)
+
+
+@pytest.mark.parametrize("tag", ["int", "float", "bool", "timestamp"])
+def test_invalid_scalar_constructor_never_exposes_its_value(tmp_path, tag):
+    marker = "redaction-sentinel"
+    declaration(tmp_path, 'unrelated: !!' + tag + ' "' + marker + '"\n')
+    with pytest.raises(ValueError, match="Invalid repository suite YAML") as caught:
+        policy.read(tmp_path, default_repository=UPSTREAM)
+    assert marker not in str(caught.value)
+
+
+def test_declaration_local_git_source_refuses_before_reading_repository_configuration(tmp_path, monkeypatch):
+    root = tmp_path / "adopter"
+    source = tmp_path / "untrusted-source"
+    (source / ".git").mkdir(parents=True)
+    (source / ".git" / "config").write_text(
+        '[include]\n    path = "//example.invalid/fixture-config"\n', encoding="utf-8",
+    )
+    declaration(root, "repository: " + json.dumps(str(source)) + "\n")
+    original = Path.stat
+
+    def guarded(candidate, *args, **kwargs):
+        if candidate == source or candidate.is_relative_to(source):
+            pytest.fail("declaration-selected repository was inspected before source admission")
+        return original(candidate, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "stat", guarded)
+    with pytest.raises(ValueError, match="remote Git"):
         policy.read(root, default_repository=UPSTREAM)

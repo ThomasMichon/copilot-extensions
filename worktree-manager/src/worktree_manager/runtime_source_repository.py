@@ -40,15 +40,18 @@ def _yaml(text: str, parser_root: Path | None) -> dict:
     ):
         raise ValueError("Repository suite YAML parser is not from the prepared toolkit inputs")
 
+    class PolicyError(ValueError):
+        pass
+
     class UniqueLoader(yaml.SafeLoader):
         def construct_mapping(self, node, deep=False):
             if any(key.tag == "tag:yaml.org,2002:merge" for key, _value in node.value):
-                raise ValueError("Repository suite YAML merge keys are unsupported")
+                raise PolicyError("Repository suite YAML merge keys are unsupported")
             result = {}
             for key_node, value_node in node.value:
                 key = self.construct_object(key_node, deep=deep)
                 if key in result:
-                    raise ValueError(
+                    raise PolicyError(
                         f"Duplicate repository suite configuration key at line {key_node.start_mark.line + 1}"
                     )
                 result[key] = self.construct_object(value_node, deep=deep)
@@ -61,11 +64,15 @@ def _yaml(text: str, parser_root: Path | None) -> dict:
             if node is None:
                 return {}
             if not isinstance(node, yaml.MappingNode):
-                raise ValueError("Repository suite configuration must be a mapping")
+                raise PolicyError("Repository suite configuration must be a mapping")
             value = loader.construct_document(node)
         finally:
             loader.dispose()
-    except (yaml.YAMLError, TypeError, RecursionError) as error:
+    except PolicyError:
+        raise
+    except (
+        yaml.YAMLError, ValueError, TypeError, KeyError, AttributeError, OverflowError, RecursionError,
+    ) as error:
         mark = getattr(error, "problem_mark", None)
         position = f" at line {mark.line + 1}, column {mark.column + 1}" if mark is not None else ""
         raise ValueError("Invalid repository suite YAML" + position) from None
@@ -132,7 +139,9 @@ def read(
         if repository.replace("\\", "/").startswith("//") or repository.lower().startswith("file:"):
             raise ValueError("Repository suite declarations do not admit network filesystem or file: sources")
         if Path(repository).is_absolute():
-            _ordinary(Path(repository))
+            raise ValueError(
+                "Repository suite declarations require a remote Git source; local object sources are caller-owned"
+            )
         result["repository"] = repository
     if "current_version" in data:
         reference = _string(data["current_version"], "current_version")
