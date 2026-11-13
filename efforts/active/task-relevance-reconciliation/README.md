@@ -143,7 +143,7 @@ merged plan does not establish running adoption.
       propagation and running qualification remain open.
       Worktrees provider expansion retains optional original cohort metadata in
       first-save records and replay. Dispatch discovers the selected provider
-      before sealing its immutable wire choice; Bridge callers remain unmodified.
+      before sealing its immutable wire choice.
       The reservation owner retains allocation-cohort evidence before body
       preparation, separately from later assignment audit evidence.
       The [ACP session-origin provider](../../../plugins/agent-bridge/docs/dispatch-session-origin.md)
@@ -155,8 +155,8 @@ merged plan does not establish running adoption.
       existing reservation/placement transaction; source merged in #12398.
       Ordinary keyed retries retain their original session request; acquisition
       deliveries retain their own attempt. Conditional CLI acquisition migration
-      is in the current source slice; ordinary keyed callers and running
-      qualification remain open.
+      merged in #12405. Managed ordinary keyed migration is in the current
+      source slice; running qualification remains open.
 - [ ] Expose forward and reverse correlation through existing owner APIs.
       Pool identity must identify the actual registration/assignment, not just
       a display name; opaque legacy records remain explicitly unattributed.

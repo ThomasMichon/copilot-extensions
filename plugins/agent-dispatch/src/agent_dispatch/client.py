@@ -685,7 +685,7 @@ class DispatchClient(RelevanceClientMixin, PoolDeclineClientMixin, PoolStartupCl
         """
         from .client_spawn_reservations import require_session_origin_support, selected_session_origin
         if session_origin_transport is not None:
-            require_session_origin_support(self.pool_placement_contract())
+            require_session_origin_support(self.pool_placement_contract(), session_origin_transport)
         return selected_session_origin(self._unwrap(
             self._http.post(
                 "/spawn-reservations/revisions" if allocation_revision is not None else "/spawn-reservations",

@@ -50,6 +50,7 @@ def ordinary(
     client = controls.connected(api, requests)
     placed = client.place_pool_task(
         requested.id, reserved_by="allocator", catalog_revision=revision, driver="ordinary-bridge",
+        **({"session_origin_transport": "prefer-origin-v1"} if getattr(request, "param", False) == "origin-v1" else {}),
     )
     snapshot = {**asdict(q.get(requested.id)), "spawn_reservation_key": placed["reservation"]["key"]}
     install_root = tmp_path / "dispatch-install"
@@ -139,7 +140,7 @@ def ordinary(
             if governed:
                 retained = q.get_reservation(placed["reservation"]["key"])
                 assert json.loads(kwargs["input"]) == retained.worktree_writer_requirement
-                assert argv[-2:] == ["--worktree-writer-file", "-"]
+                assert argv[argv.index("--worktree-writer-file") + 1] == "-"
                 assert q.task_relationship(requested.id)["state"] == "bound"
             else:
                 assert not kwargs.get("input")
@@ -194,6 +195,32 @@ def launch(ordinary: SimpleNamespace) -> dict:
     return ordinary_bridge.start(
         ordinary.task, client=ordinary.client, agent="local", project="example", prompt=seed,
     )
+
+
+@pytest.mark.parametrize("ordinary", ["origin-v1"], indirect=True)
+def test_governed_create_composes_sealed_origin_file_with_writer_stdin(ordinary, monkeypatch):
+    from agent_dispatch import session_origin
+
+    monkeypatch.setattr(session_origin, "retained_selection", lambda: ("bridge",))
+    monkeypatch.setattr(session_origin, "require_support", lambda _prefix, **kwargs: None)
+    original = ordinary_bridge.subprocess.run
+    seen = []
+
+    def run(argv, **kwargs):
+        if argv[2] == "create":
+            path = Path(argv[argv.index("--dispatch-origin-file") + 1])
+            origin = json.loads(path.read_text(encoding="utf-8"))
+            stored = ordinary.q.get_reservation(ordinary.placed["reservation"]["key"])
+            assert origin == stored.session_origin
+            assert json.loads(kwargs["input"]) == stored.worktree_writer_requirement
+            seen.append(path)
+        return original(argv, **kwargs)
+
+    monkeypatch.setattr(ordinary_bridge.subprocess, "run", run)
+    result = launch(ordinary)
+    assert result["native_session_id"] == "native-a"
+    assert len(seen) == 1 and not seen[0].exists()
+    assert any(argv[2] == "send" for argv, _ in ordinary.calls)
 
 
 def test_original_cohort_receipt_reaches_ordinary_initial_prompt(ordinary, monkeypatch):
