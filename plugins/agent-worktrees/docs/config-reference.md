@@ -716,6 +716,15 @@ another health database or an executable found on PATH. It is caller-contained
 and bounded to one 60-second selection/observation/cleanup budget, reserving five
 seconds for settlement. A refused, interrupted, changed, unsupported or
 not-ready result cannot pass. A fully observed empty required set can pass.
+Machines payload lookup uses the explicitly addressed checkout's effective
+marketplace declarations, not the ambient working directory. An authored local
+directory source is read in place without requiring a copied installed payload.
+A missing or invalid local source refuses rather than selecting a stale copy;
+without a local declaration, the canonical copied-payload path is unchanged.
+Explicit installation context still takes precedence through its same-cell
+owner. The installed peer's completed interpreter and capability descriptor
+remain required. This read-only lookup, also used for accepted knowledge
+defaults, neither enables a Copilot plugin nor installs or starts its runtime.
 The caller-owned observation qualifies readiness inputs only, not a repair
 plan or every unrelated file in an enabled payload. Its digest cannot authorize
 an installer apply. Required-owner qualification and inventory completeness

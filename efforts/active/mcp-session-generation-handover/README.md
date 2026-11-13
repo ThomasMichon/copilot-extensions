@@ -377,12 +377,22 @@ handover. Preserve held sessions and the separate pre-feature adoption hold.
       [source result](journal/2026/11.10-explicit-owner-cli.md#windows-independent-publication-and-snapshot-source-controls).
       Production caller selection and actual-client/installed acceptance
       remain open.
-    - [ ] **Windows anonymous actual-start bootstrap:** qualify the embedded
+    - [x] **Windows anonymous actual-start bootstrap:** qualify the embedded
       native snapshot before installed-provider discovery, physical receiver
       selection and untouched stdio/context. Only pre-creation failure may
       fall back; accepted-child exits and wait errors must never replay.
       Controlled source packages are not actual-client or installed acceptance;
       advertisement and production caller selection remain disabled.
+      #12350 merged at `ce3a3c1a3db4e5012154d2b0f069fb1e311a3cde`
+      after current-head approval, required CI and Windows/Linux source
+      controls. Actual native-client creation-bound consumption is next.
+    - [ ] **Windows native-client consumption source:** qualify actual offline
+      native Copilot through the existing suspended-creation owner and
+      anonymous bootstrap after publisher exit. Require the exact native
+      PID/birth, physical receiver, real upstream/client round trip, ordinary
+      context/settlement parity and owned cleanup. Distinguish client-owned
+      abrupt MCP settlement from graceful upstream EOF; neither this packet
+      nor its source merge is installed or productive caller adoption.
   - [x] **Explicit Linux exec caller:** capture the exec owner's native pair
     and pass a sealed, session-only overlay for explicitly named configured
     entries, with actual-start discovery bound to a physical optional receiver.

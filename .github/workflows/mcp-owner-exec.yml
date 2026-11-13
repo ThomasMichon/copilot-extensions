@@ -47,6 +47,7 @@ on:
       - "plugins/agent-mcp/tests/test_generation_handover.py"
       - "plugins/agent-mcp/tests/generation_native_fixture.py"
       - "plugins/agent-mcp/tests/native/test_owner_exec_copilot.py"
+      - "plugins/agent-mcp/tests/native/test_owner_bootstrap_copilot_windows.py"
       - "plugins/agent-mcp/tests/native/test_generation_handover_copilot.py"
       - "plugins/agent-mcp/tests/native/generation_copilot_provider.py"
 
@@ -185,5 +186,51 @@ jobs:
         with:
           name: mcp-owner-native-publication
           path: ${{ runner.temp }}/mcp-owner-publication-${{ github.run_id }}
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Prepare pinned Windows client in disposable runner storage
+        shell: python
+        env:
+          COPILOT_ASSET_URL: https://github.com/github/copilot-cli/releases/download/v1.0.105/copilot-win32-x64.zip
+          COPILOT_ASSET_SHA256: 34e16e9cf47de0e1534920171d6f39fa246638bddbb6ece820870b382bcc061a
+        run: |
+          import hashlib
+          import os
+          from pathlib import Path
+          import shutil
+          import urllib.request
+          import zipfile
+          root = Path(os.environ["RUNNER_TEMP"]) / (
+              "mcp-owner-native-" + os.environ["GITHUB_RUN_ID"] + "-" + os.environ["GITHUB_RUN_ATTEMPT"]
+          )
+          root.mkdir()
+          archive = root / "copilot.zip"
+          with urllib.request.urlopen(os.environ["COPILOT_ASSET_URL"], timeout=60) as source:
+              with archive.open("xb") as target:
+                  shutil.copyfileobj(source, target)
+          if hashlib.sha256(archive.read_bytes()).hexdigest() != os.environ["COPILOT_ASSET_SHA256"]:
+              raise SystemExit("Native client digest mismatch")
+          target = root / "copilot.exe"
+          with zipfile.ZipFile(archive) as contents:
+              members = [member for member in contents.infolist()
+                         if not member.is_dir() and Path(member.filename).name == "copilot.exe"]
+              if len(members) != 1:
+                  raise SystemExit("Expected one native client executable")
+              with contents.open(members[0]) as source, target.open("xb") as output:
+                  shutil.copyfileobj(source, output)
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as output:
+              output.write("COPILOT_NATIVE_TEST_EXECUTABLE=" + str(target) + "\n")
+      - name: Exercise actual Windows client after publisher exit
+        run: >-
+          python tools/run-plugin-tests.py agent-mcp
+          --test-file tests/native/test_owner_bootstrap_copilot_windows.py
+          --allow-explicit-tiers --test-timeout 120 --timeout 180 --plugin-timeout 200
+          --junit-dir "${{ runner.temp }}/mcp-owner-windows-client-${{ github.run_id }}"
+      - name: Retain actual Windows client source controls
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mcp-owner-windows-client
+          path: ${{ runner.temp }}/mcp-owner-windows-client-${{ github.run_id }}
           if-no-files-found: warn
           retention-days: 7
