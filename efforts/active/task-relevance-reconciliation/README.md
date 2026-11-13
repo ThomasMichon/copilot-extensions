@@ -110,6 +110,9 @@ merged plan does not establish running adoption.
 - [ ] Preserve closeout intent through restart, owner recovery and requeue.
       Recovering an obsolete task must not restart its original work.
       Unknown or unavailable owner state remains visible for recovery.
+      Accepted original-owner wake and steering now survive same-generation
+      unassignment and requeue in source controls. Generation-advancing recovery,
+      uncaptured owners and actual lifecycle closeout remain open.
 
 ### Phase 3 - Source and periodic evaluation integration
 
