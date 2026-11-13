@@ -80,7 +80,7 @@ def _record(
             continue
         rows.append(ObservedClaim(
             owner, raw["kind"], ref, raw.get("state", "active"),
-            raw.get("handoff_bundle", ""), raw["producer"],
+            raw.get("handoff_bundle", ""), raw["producer"], (project, path.stem),
         ))
     return rows
 

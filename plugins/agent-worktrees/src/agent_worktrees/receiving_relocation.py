@@ -19,7 +19,7 @@ def _receipt_digest(record) -> str:
 
 
 def _retained_revision(record, original: allocation.AllocationIdentity) -> dict | None:
-    from .checkout_relocation import _identity
+    from .checkout_relocation import _identity_matches
 
     revision = location.read(record.yaml_path)
     if revision is None:
@@ -40,7 +40,7 @@ def _retained_revision(record, original: allocation.AllocationIdentity) -> dict 
         or proof["original_identity"] != original.to_dict()
         or proof["receipt_sha256"] != _receipt_digest(record)
         or not allocation.verified_conclusion(proof["origin_closeout"], metadata)
-        or revision["identity"] != _identity(record)
+        or not _identity_matches(record, revision["identity"])
         or revision["source"] != original.path
     ):
         raise ValueError("receiving current-location revision conflicts with original provenance")
@@ -132,8 +132,8 @@ def _original_row(path: Path, key: str) -> dict:
 
 
 def _settled_origin(record, admission, original: allocation.AllocationIdentity) -> dict:
+    from . import claim_handoffs
     from .checkout_relocation_plan import read_record
-    from .tracking import claim_handoff_reservation
 
     machine, project, worktree_id = allocation.qualified_ref(admission.origin)
     if (
@@ -142,7 +142,7 @@ def _settled_origin(record, admission, original: allocation.AllocationIdentity) 
     ):
         raise ValueError("receiving relocation requires locally retained same-project origin settlement")
     origin = read_record(record.yaml_path.with_name(worktree_id + ".yaml"))
-    if (origin.execution_machine, origin.repo, origin.worktree_id) != (machine, project, worktree_id):
+    if (origin.repo, origin.worktree_id) != (project, worktree_id):
         raise ValueError("receiving origin settlement belongs to another creator")
     matches = [
         claim for claim in origin.resources
@@ -163,7 +163,8 @@ def _settled_origin(record, admission, original: allocation.AllocationIdentity) 
         or metadata.get("identity") != original.to_dict() or claim.ref != original.ref
         or producer.canonical_json(metadata["recovery"]) != producer.canonical_json(admission.target)
         or any(item.metadata_opaque for item in origin.resources)
-        or claim_handoff_reservation(origin, claim)
+        or claim.handoff_bundle
+        or claim_handoffs.active_bundle_for_claim(admission.origin, claim.ref)
     ):
         raise ValueError("receiving origin responsibility is not exactly settled")
     return metadata["closeout"]

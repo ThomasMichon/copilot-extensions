@@ -154,3 +154,106 @@ def test_repair_cannot_continue_against_a_replaced_retained_allocation(
     assert code == 1 and "allocation identity changed" in report["error"]
     assert not creation.roots["knowledge"].exists()
     assert launch_seed_state.state_path(path).read_bytes() == seed_before
+
+
+@pytest.mark.parametrize("tuple_identity", [False, True])
+def test_existing_custom_pair_survives_rename_through_repair_and_guarded_entry(
+    tmp_path, monkeypatch, capsys, tuple_identity,
+):
+    from agent_worktrees import execution_spaces, terminal_conclusion
+
+    creation = _creation_fixture(tmp_path, monkeypatch, native_git=True, tuple_identity=tuple_identity)
+    code, report = _run(creation, capsys, fix=True)
+    assert code == 0, report
+    parent = tracking.load_record(creation.record.yaml_path)
+    child_path = creation.projects["knowledge"] / "worktrees" / f"{parent.worktree_id}-k.yaml"
+    before = {path: path.read_bytes() for path in (parent.yaml_path, child_path)}
+    for name in creation.configs:
+        (creation.anchors[name] / "machines.yaml").write_text(yaml.safe_dump({"machines": {
+            "renamed": {"hostname": cfg.socket.gethostname(), "execution_platform": cfg.detect_platform()},
+        }}), encoding="utf-8")
+        creation.configs[name] = replace(creation.configs[name], machine="renamed")
+    code, report = _run(creation, capsys, fix=True)
+    assert code == 0 and report["prepared"] and not report["repaired"], report
+    parent, child = tracking.load_record(parent.yaml_path), tracking.load_record(child_path)
+    execution_spaces.require_record_mutation(child, creation.configs["knowledge"])
+    sibling = terminal_conclusion._resolve_pair_sibling(parent)
+    assert sibling is not None and sibling[1] == child_path
+    assert {path: path.read_bytes() for path in before} == before
+
+
+@pytest.mark.parametrize("interrupted", [False, True])
+def test_terminal_pair_conclusion_uses_original_receipts_after_rename(
+    tmp_path, monkeypatch, capsys, interrupted,
+):
+    from types import SimpleNamespace
+    from agent_worktrees import git_ops, sessions, terminal_conclusion as terminal
+    from agent_worktrees import terminal_pair_progress
+
+    creation = _creation_fixture(tmp_path, monkeypatch, native_git=True, tuple_identity=True)
+    code, report = _run(creation, capsys, fix=True)
+    assert code == 0, report
+    parent = tracking.load_record(creation.record.yaml_path)
+    child_path = creation.projects["knowledge"] / "worktrees" / f"{parent.worktree_id}-k.yaml"
+    child = tracking.load_record(child_path)
+    child.status = "finalized"
+    tracking.save_record(child)
+    assert tracking.settle_resource_claim(parent, parent.pair_ref, save=False).is_at_rest
+    parent.origin = "delegate"
+    parent.dispatch_attempt = tracking.DispatchAttempt(
+        task_id="task", reservation_key="reservation", attempt=1,
+        driver="dispatcher", supervisor="supervisor", creator_machine=parent.execution_machine,
+    )
+    parent.sessions = [tracking.SessionEntry(
+        session_id="worker-session", started_at="2026-10-13T10:00:00Z",
+    )]
+    parent.head_session = "worker-session"
+    parent.resources.append(tracking.ResourceClaim(
+        kind="session", ref=tracking.format_claim_ref(
+            parent.execution_machine, parent.repo, parent.worktree_id, session="worker-session",
+        ),
+    ))
+    tracking.save_record(parent)
+    for anchor in creation.anchors.values():
+        (anchor / ".git" / "info" / "exclude").write_text(
+            ".github/copilot/settings.local.json\n", encoding="utf-8",
+        )
+        git_ops.git("update-ref", "refs/remotes/origin/main", "HEAD", cwd=anchor)
+    monkeypatch.setattr(sessions, "has_mux_session", lambda _: False)
+    monkeypatch.setattr(sessions, "scan_sessions_fast", lambda _: SimpleNamespace(active_sessions={}))
+
+    def conclude():
+        result = terminal.conclude_disposable_worktree(
+            parent.yaml_path, creation.configs["harness"].default_repo,
+            session_id="worker-session", owner="dispatcher", policy=terminal.DISPATCH_ATTEMPT_POLICY,
+            reservation_key="reservation",
+        )
+        assert result["action"] != "skipped", json.dumps(result)
+        return result
+
+    if interrupted:
+        save = tracking.save_record
+
+        def crash(record, path=None, **kwargs):
+            if path == parent.yaml_path and not record.is_paired:
+                raise RuntimeError("fixture interrupted primary unlink")
+            return save(record, path, **kwargs)
+
+        with monkeypatch.context() as injection:
+            injection.setattr(tracking, "save_record", crash)
+            with pytest.raises(RuntimeError, match="fixture interrupted"):
+                conclude()
+        receipt_path = terminal_pair_progress.receipt_path(child_path)
+        receipt = json.loads(receipt_path.read_text())
+        receipt["primary"].update(parent.machine_fields)
+        receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+    for name in creation.configs:
+        (creation.anchors[name] / "machines.yaml").write_text(yaml.safe_dump({"machines": {
+            "renamed": {"hostname": cfg.socket.gethostname(), "execution_platform": cfg.detect_platform()},
+        }}), encoding="utf-8")
+        creation.configs[name] = replace(creation.configs[name], machine="renamed")
+    result = conclude()
+    assert result["managed_gc_eligible"], result
+    assert not tracking.load_record(parent.yaml_path).is_paired
+    assert not tracking.load_record(child_path).is_paired
+    assert terminal_pair_progress.gc_preservation_reason(child_path) is None

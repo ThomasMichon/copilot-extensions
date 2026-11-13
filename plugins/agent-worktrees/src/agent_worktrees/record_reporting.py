@@ -151,5 +151,9 @@ def require_receiving_subject(record: WorktreeRecord, config: cfg.Config) -> Non
                 local_parent = execution_spaces.require_owner_identity(owner.machine, config)
             except error:
                 local_parent = False
+            if not local_parent:
+                from .retained_checkout import resolve_owner
+
+                local_parent = resolve_owner(owner, config, child=record) is not None
             if not local_parent and resolve_legacy_wsl_owner_ref(owner, config) is None:
                 raise error("cross-space parent ownership remains unsupported; settlement is blocked")

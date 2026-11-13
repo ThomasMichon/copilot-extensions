@@ -179,7 +179,7 @@ def matches(record, config) -> bool:
         return False
 
 
-def resolve_owner(ref, config) -> Path | None:
+def resolve_owner(ref, config, *, child=None) -> Path | None:
     """Resolve an original qualified owner through its actual local ledger."""
     from . import execution_spaces, tracking
 
@@ -197,7 +197,13 @@ def resolve_owner(ref, config) -> Path | None:
             return None
         record = tracking.load_record(path)
         if ref.machine != record.execution_machine:
-            return None
+            from .tracking_lookup import local_pair_subjects
+
+            if (
+                child is None or child.owner_ref != child.pair_ref
+                or child.pair_claim_ref != ref or not local_pair_subjects(child, record)
+            ):
+                return None
         receiving = config if config.repo_name == ref.project else execution_spaces.project_record_config(record)
         if is_local(record, receiving):
             return path

@@ -18,6 +18,7 @@ class ObservedClaim:
     state: str
     handoff_bundle: str
     metadata: object
+    receiving_subject: tuple[str, str] | None = None
 
 
 def qualified_owner(value: object) -> bool:
@@ -64,6 +65,28 @@ def _resolve_group(
     ):
         issues.append(issue("token-mismatch", subject, "token entries disagree on immutable metadata"))
         return None
+    historical: dict[tuple[str, str], set[str]] = defaultdict(set)
+    for metadata in metadata_by_owner.values():
+        references = [metadata["creator"]]
+        if metadata["phase"] == "transferred":
+            references.extend(metadata["transfer"][field] for field in ("source", "consumer"))
+        for value in references:
+            ref = tracking.parse_claim_ref(value) if qualified_owner(value) else None
+            if ref is not None:
+                historical[(ref.project, ref.worktree_id)].add(value)
+
+    def resolve(value: str) -> str | None:
+        if value in by_owner:
+            return value
+        ref = tracking.parse_claim_ref(value) if qualified_owner(value) else None
+        if ref is None:
+            return None
+        key = ref.project, ref.worktree_id
+        candidates = [row.owner for row in group if row.receiving_subject == key]
+        if len(candidates) == 1 and historical[key] == {value}:
+            return candidates[0]
+        return None
+
     incoming: dict[str, int] = defaultdict(int)
     for row in group:
         if row.handoff_bundle:
@@ -72,15 +95,16 @@ def _resolve_group(
         if metadata["phase"] != "transferred":
             continue
         receipt = metadata["transfer"]
+        consumer = resolve(receipt["consumer"])
         if (
-            receipt["source"] != row.owner
+            resolve(receipt["source"]) != row.owner
             or not qualified_owner(receipt["consumer"])
-            or receipt["consumer"] not in by_owner
+            or consumer is None
         ):
             issues.append(issue("transfer-unresolved", row.owner, "accepted transfer recipient/source is missing or invalid"))
             return None
-        incoming[receipt["consumer"]] += 1
-    creator = metadata_by_owner[first.owner]["creator"]
+        incoming[consumer] += 1
+    creator = resolve(metadata_by_owner[first.owner]["creator"])
     roots = [owner for owner in by_owner if not incoming[owner]]
     if roots != [creator] or any(count > 1 for count in incoming.values()):
         issues.append(issue("transfer-ambiguous", subject, "ownership is not a single creator-rooted chain"))
@@ -94,7 +118,7 @@ def _resolve_group(
             if len(seen) != len(group):
                 break
             return owner
-        owner = metadata["transfer"]["consumer"]
+        owner = resolve(metadata["transfer"]["consumer"])
     issues.append(issue("transfer-ambiguous", subject, "transfer chain is cyclic or disconnected"))
     return None
 

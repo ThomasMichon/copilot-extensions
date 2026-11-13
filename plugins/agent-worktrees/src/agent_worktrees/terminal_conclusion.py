@@ -25,6 +25,7 @@ from .terminal_ownership import (  # noqa: F401 -- re-exported policy names
     _bridge_creation_reason,
     _creator_ownership_confirmed,
     _dispatch_ownership_confirmed,
+    dispatch_creator_matches,
 )
 
 
@@ -132,17 +133,18 @@ def _release_dispatch_session_claims(
     """
     if not session_id:
         return []
-    # Mirrors `deregister_session`'s own `self_session_ref` construction
-    # exactly (tracking.py) -- an exact-string match on the fully qualified
-    # ref, not merely the parsed session fragment, so a claim is only ever
-    # released when its machine, project, AND worktree id all match this
-    # record too, not just an incidental session-id substring collision.
-    expected_ref = tracking.format_claim_ref(
-        record.execution_machine, record.repo, record.worktree_id, session=session_id,
-    )
+    # Keep exact qualified refs, including an independently verified original
+    # dispatch creator after a rename; a session-id substring is never enough.
+    owners = {record.execution_machine}
+    if record.dispatch_attempt is not None and dispatch_creator_matches(record):
+        owners.add(record.dispatch_attempt.creator_machine)
+    expected_refs = {
+        tracking.format_claim_ref(machine, record.repo, record.worktree_id, session=session_id)
+        for machine in owners
+    }
     released = [
         claim for claim in record.resources
-        if claim.is_live and claim.kind == "session" and claim.ref == expected_ref
+        if claim.is_live and claim.kind == "session" and claim.ref in expected_refs
     ]
     for claim in released:
         tracking.release_resource_claim(record, claim.ref, save=False)
@@ -195,11 +197,12 @@ def _sibling_preservation_reason(
         return "pair-sibling-pending-handoff"
     if sibling.follow_up or sibling.active_effort is not None:
         return "pair-sibling-follow-up"
+    reciprocal = terminal_pair_progress.reciprocal_snapshot(
+        record, sibling, sibling.yaml_path,
+    ) or sibling
     creator_link = (
         record.pair_role == "harness" and sibling.status == "finalized"
-        and sibling.owner_ref == tracking.format_claim_ref(
-            record.execution_machine, record.repo, record.worktree_id,
-        )
+        and sibling.owner_ref == reciprocal.pair_ref
         and _pair_progress_valid(record, sibling, sibling.yaml_path)
     )
     if sibling.live_resources or (sibling.owner_ref and not creator_link):
@@ -246,6 +249,13 @@ def _reciprocal_pair_valid(
     """
     if sibling.worktree_id != sibling_path.stem:
         return False
+    from .tracking_lookup import local_pair_subjects
+
+    refs = (record.pair_claim_ref, sibling.pair_claim_ref)
+    if any(ref is not None and ref.machine != member.execution_machine
+           for ref, member in zip(refs, (sibling, record))):
+        if not local_pair_subjects(record, sibling):
+            return False
     return terminal_pair_progress.reciprocal_identity_valid(
         terminal_pair_progress.primary_identity(record),
         terminal_pair_progress.primary_identity(sibling),
@@ -263,7 +273,7 @@ def _resolve_pair_sibling(
     and persist the sibling.
     """
     ref = record.pair_claim_ref
-    if ref is None or not ref.is_qualified or ref.machine != record.execution_machine or not ref.project:
+    if ref is None or not ref.is_qualified or not ref.project:
         return None
     path = cfg.project_dir(ref.project) / "worktrees" / f"{ref.worktree_id}.yaml"
     if not path.exists():
@@ -631,7 +641,7 @@ def conclude_disposable_worktree(
                         reason="reservation-mismatch",
                     )
                     return result
-                if allocation.creator_machine.casefold() != record.execution_machine.casefold():
+                if not dispatch_creator_matches(record):
                     result.update(
                         action="skipped",
                         reason="creator-machine-mismatch",

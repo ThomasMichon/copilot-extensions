@@ -13,6 +13,28 @@ BRIDGE_CREATION_POLICY = "bridge-creation"
 CONCLUSION_POLICIES = (DISPOSABLE_CLI_POLICY, DISPATCH_ATTEMPT_POLICY, BRIDGE_CREATION_POLICY)
 
 
+def dispatch_creator_matches(record: tracking.WorktreeRecord) -> bool:
+    """Retain a paired attempt's original creator across a verified local rename."""
+    allocation = record.dispatch_attempt
+    if allocation is None:
+        return False
+    if allocation.creator_machine.casefold() == record.execution_machine.casefold():
+        return True
+    ref = record.pair_claim_ref
+    if ref is None or ref.machine.casefold() != allocation.creator_machine.casefold():
+        return False
+    from . import terminal_pair_progress
+    from .terminal_conclusion import _resolve_pair_sibling
+    from .tracking_lookup import local_pair_subjects
+
+    resolved = _resolve_pair_sibling(record)
+    if resolved is None:
+        return False
+    sibling, path = resolved
+    snapshot = terminal_pair_progress.reciprocal_snapshot(record, sibling, path)
+    return local_pair_subjects(record, snapshot or sibling)
+
+
 def _bridge_creation_reason(
     record: tracking.WorktreeRecord, creation_nonce: str | None,
 ) -> str | None:
@@ -48,7 +70,7 @@ def _dispatch_ownership_confirmed(
         allocation is not None
         and reservation_key is not None
         and allocation.reservation_key == reservation_key
-        and allocation.creator_machine.casefold() == record.execution_machine.casefold()
+        and dispatch_creator_matches(record)
         and allocation.driver == owner
     )
 

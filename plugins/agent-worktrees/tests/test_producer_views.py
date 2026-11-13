@@ -156,6 +156,29 @@ def test_real_transfer_chain_preserves_creator_and_current_owner(ledgers: Path) 
     assert only_creator["entries"][0]["current_owner"] == "m/p/last"
 
 
+@pytest.mark.parametrize("transferred", [False, True])
+def test_rename_projects_current_owner_without_rewriting_producer_history(
+    ledgers: Path, transferred: bool,
+) -> None:
+    bound = reserve(ledgers, bound=True)
+    if transferred:
+        bundle, _ = claim_handoffs.offer("m/p/owner", "m/p/consumer", [bound["ref"]], machine="m")
+        claim_handoffs.accept(bundle.bundle_id, actor="m/p/consumer", machine="m")
+    (ledgers / "machines.yaml").write_text(
+        "machines:\n  renamed: {hostname: m, execution_platform: linux}\n", encoding="utf-8",
+    )
+    before = {path: path.read_bytes() for path in ledgers.rglob("*.yaml")}
+    current = "consumer" if transferred else "owner"
+    snapshot = scan_ownership(owner=f"renamed/p/{current}")
+    assert snapshot["complete"], snapshot["issues"]
+    assert len(snapshot["entries"]) == 1
+    row = snapshot["entries"][0]
+    assert row["creator"] == row["producer"]["creator"] == "m/p/owner"
+    assert row["record_owner"] == row["current_owner"] == f"renamed/p/{current}"
+    assert row["resolution"] == "current"
+    assert {path: path.read_bytes() for path in before} == before
+
+
 @pytest.mark.parametrize("damage", ["missing", "marker", "source", "mismatch", "cycle"])
 def test_interrupted_or_invalid_transfer_is_unknown(ledgers: Path, damage: str) -> None:
     bound = reserve(ledgers, bound=True)

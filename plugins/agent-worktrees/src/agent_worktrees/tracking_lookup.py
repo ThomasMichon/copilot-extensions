@@ -56,8 +56,15 @@ def find_paired_record(record: WorktreeRecord) -> WorktreeRecord | None:
     )
     if ref.machine == record.execution_machine:
         return sibling
-    if sibling is None or not reciprocal_pair_subjects(record, sibling):
-        return None
+    return sibling if sibling is not None and local_pair_subjects(record, sibling) else None
+
+
+def local_pair_subjects(record: WorktreeRecord, sibling: WorktreeRecord) -> bool:
+    """Verify reciprocal allocation subjects on the same actual reporting host."""
+    from . import config as cfg
+
+    if not reciprocal_pair_subjects(record, sibling):
+        return False
     from . import execution_spaces
     from .record_reporting import same_reporter
     from .legacy_wsl_record_locality import record_namespace_matches
@@ -74,12 +81,12 @@ def find_paired_record(record: WorktreeRecord) -> WorktreeRecord | None:
                 or receiving.platform != cfg.detect_platform()
                 or not record_namespace_matches(member, receiving)
             ):
-                return None
+                return False
         if not same_reporter(record, sibling):
-            return None
+            return False
     except (OSError, ValueError, RuntimeError):
-        return None
-    return sibling
+        return False
+    return True
 
 
 def reciprocal_pair_subjects(record: WorktreeRecord, sibling: WorktreeRecord) -> bool:

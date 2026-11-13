@@ -178,7 +178,9 @@ No identity migration is necessary. IDs, sessions, pairs, claims and qualified
 historical references remain intact. Qualified owner lookup uses the retained
 record's current reporter execution owner; a guest's physical host is not an
 alias for that execution owner. An unrelated native or remote owner does not
-select a coincident local ID.
+select a coincident local ID. An original reciprocal companion reference can
+also resolve through both receiving ledgers, namespaces, pair subjects and
+matching actual reporter observations, without retaining its old custom key.
 Receipt-backed ownership continues to require its original receiving creation
 journal, incarnation, relationships and finality. Locality neither releases a
 claim nor waives live process, launch, handoff or lifecycle ownership.
@@ -214,10 +216,15 @@ A detected name alone is not a receiving-record grant. Cleanup, including forced
 removal, cannot substitute reporter naming for those checks.
 Resolved controller navigation and strict resource-owner scans use the reporting
 host's execution owner; ignored legacy naming fields cannot hide a valid claim
-behind a malformed tuple or an owner filter.
-Publication privacy guards check both physical and execution names. Terminal
-pair receipts preserve the exact legacy identity shape; versioned receipts
-retain the full tuple while reciprocal references use the execution owner.
+behind a malformed tuple or an owner filter. Producer scans reconcile an
+unchanged creator/transfer chain against its exact local receiving subjects
+before projecting current owner names; they preserve historical metadata and
+report ambiguous chains as unknown.
+Publication privacy guards check both physical and execution names. New terminal
+pair receipts and move-journal subjects omit reporter names; old receipts and
+journals compare their remaining allocation and reciprocal evidence without
+requiring a naming migration. Receipt digests, original nonces, receiving
+provenance, closeout and interrupted-operation fences remain independent.
 The `run` JSON recognizer also uses that owner; invalid explicit tuple output
 is reported and leaves the pending resource claim unsettled.
 

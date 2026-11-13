@@ -25,9 +25,9 @@ def paired_ref(record: WorktreeRecord | None) -> str | None:
 
 def reciprocal_sibling(record: WorktreeRecord) -> WorktreeRecord | None:
     """Resolve an exact reciprocal worktree pair in either direction."""
-    from . import tracking
+    from . import config as cfg, tracking
     from .record_reporting import same_reporter
-    from .tracking_lookup import reciprocal_pair_subjects
+    from .tracking_lookup import local_pair_subjects, reciprocal_pair_subjects
 
     try:
         ref = record.pair_claim_ref
@@ -38,6 +38,10 @@ def reciprocal_sibling(record: WorktreeRecord) -> WorktreeRecord | None:
         ):
             return None
         sibling = tracking.find_paired_record(record)
+        if sibling is None:
+            sibling = tracking.load_record_by_id(
+                ref.worktree_id, tracking_path=cfg.project_dir(ref.project) / "worktrees",
+            )
         if sibling is not None and sibling.status == "finalized" and not sibling.is_paired:
             from . import terminal_pair_progress
             sibling = terminal_pair_progress.reciprocal_snapshot(
@@ -52,6 +56,9 @@ def reciprocal_sibling(record: WorktreeRecord) -> WorktreeRecord | None:
             and {record.pair_role, sibling.pair_role} == {"harness", "knowledge"}
             and sibling.pair_kind == "worktree"
             and reciprocal_pair_subjects(record, sibling)
+            and (
+                ref.machine == record.execution_machine or local_pair_subjects(record, sibling)
+            )
         )
         return sibling if valid else None
     except (OSError, ValueError, TypeError, AttributeError):

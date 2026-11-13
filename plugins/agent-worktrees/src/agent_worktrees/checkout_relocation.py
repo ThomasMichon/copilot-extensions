@@ -80,15 +80,19 @@ def _require_retirement_copy(record, original: Path, target: Path, *, allow_part
 
 def _identity(record) -> dict:
     return {
-        "machine_identity": record.machine_identity.to_record_fields() if record.machine_identity else None,
-        **{
         key: getattr(record, key)
         for key in (
-            "worktree_id", "repo", "branch", "creation_nonce", "machine", "platform",
-            "execution_machine", "owner_ref",
+            "worktree_id", "repo", "branch", "creation_nonce", "owner_ref",
         )
-        },
     }
+
+
+def _identity_matches(record, retained: object) -> bool:
+    """Keep old move journals readable without treating old names as authority."""
+    if not isinstance(retained, dict):
+        return False
+    names = {"machine_identity", "machine", "platform", "execution_machine"}
+    return {key: value for key, value in retained.items() if key not in names} == _identity(record)
 
 
 def _stopped(record, checkout: Path) -> None:
@@ -361,7 +365,7 @@ def _action_plan(worktree_id: str, destination: str, config) -> dict:
     previous = state.read(ledger)
     if previous is not None:
         target = Path(destination).expanduser()
-        if previous.get("identity") != _identity(record):
+        if not _identity_matches(record, previous.get("identity")):
             raise ValueError("retained move identity or destination conflicts; inspect the original operation")
         _require_receiver(record, previous, config)
         if previous["phase"] not in {"complete", "cancelled"}:
@@ -489,7 +493,7 @@ def move(worktree_id: str, destination: str, config) -> dict:
             report["phase"] = "prepared"
             with tracking._RecordLock(ledger, require_sidecar=True):
                 if (
-                    _identity(tracking.load_record(ledger)) != report["identity"]
+                    not _identity_matches(tracking.load_record(ledger), report["identity"])
                     or hashlib.sha256(ledger.read_bytes()).hexdigest() != report["ledger_sha256"]
                 ):
                     raise ValueError("relocation identity changed before admission")
@@ -550,7 +554,7 @@ def move(worktree_id: str, destination: str, config) -> dict:
             permission_paths.apply(str(source), str(target), report["permissions"])
             with tracking._RecordLock(ledger, require_sidecar=True):
                 record = tracking.load_record(ledger)
-                if _identity(record) != report["identity"] or record.worktree_path not in {str(source), str(target)}:
+                if not _identity_matches(record, report["identity"]) or record.worktree_path not in {str(source), str(target)}:
                     raise ValueError("relocation ledger changed; original operation remains unsettled")
                 record.worktree_path = str(target)
                 tracking.save_record(record)
@@ -620,7 +624,7 @@ def abort(worktree_id: str, destination: str, config) -> dict:
     ), launch_admission.guard(ledger), state.owner(ledger):
         report = state.read(ledger)
         record = tracking.load_record(ledger)
-        if report is None or report["destination"] != str(Path(destination).expanduser()) or report["identity"] != _identity(record):
+        if report is None or report["destination"] != str(Path(destination).expanduser()) or not _identity_matches(record, report["identity"]):
             raise ValueError("abort requires the original relocation identity and destination")
         _require_receiver(record, report, config)
         if report["phase"] == "cancelled":

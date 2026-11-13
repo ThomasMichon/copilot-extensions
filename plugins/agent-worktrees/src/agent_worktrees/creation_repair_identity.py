@@ -122,11 +122,16 @@ def require_retained_record(record: tracking.WorktreeRecord, config: cfg.Config)
                 raise ValueError("retained creation parent owner is not local")
             parent = tracking.load_record(parent_path)
             parent_config = execution_spaces.project_record_config(parent)
+            from .tracking_lookup import local_pair_subjects
+
             if (
                 parent.worktree_id != owner.worktree_id or parent.repo != owner.project
                 or parent_config.platform != cfg.detect_platform()
                 or not _repair_namespace_matches(parent, parent_config)
-                or not retained_owner_is_current(owner.machine, parent_config)
+                or not (
+                    retained_owner_is_current(owner.machine, parent_config)
+                    or record.owner_ref == record.pair_ref and local_pair_subjects(record, parent)
+                )
             ):
                 raise ValueError("retained creation parent conflicts with its receiving authority")
             creation_identity.require_same_machine_identity(parent_config, parent.machine_identity)

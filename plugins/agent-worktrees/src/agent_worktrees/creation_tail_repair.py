@@ -181,11 +181,16 @@ def _retained_sibling(
         if path.is_symlink():
             raise ValueError("retained paired record symlink refused")
         child = tracking.load_record(path)
+        from .tracking_lookup import local_pair_subjects
+
         parent_ref = child.pair_claim_ref
         matches_parent = (
             parent_ref is not None and parent_ref.is_qualified
             and (parent_ref.project, parent_ref.worktree_id) == (record.repo, record.worktree_id)
-            and creation_repair_identity.retained_owner_is_current(parent_ref.machine, config)
+            and (
+                creation_repair_identity.retained_owner_is_current(parent_ref.machine, config)
+                or local_pair_subjects(record, child)
+            )
         )
         if child.pair_ref != harness_ref and not matches_parent:
             if name == root.repo:
