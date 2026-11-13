@@ -342,6 +342,14 @@ the non-public approval conversation.
 
 ## Plan
 
+The [producer, recovery and installer study](producer-recovery-and-installer-contracts.md)
+retains thirteen complete own-source unions and rejects three interface-only
+whole-source folds. Fresh complete #8403 qualification resolves an obsolete
+snapshot mismatch without releasing actual provenance or resource holds;
+its original-token and later compiler-free conditions remain. A current
+metadata-only check finds #8552's four original runs still queued. No closure,
+technical completion, native result or source/resource transfer follows.
+
 The [protected launch/content receiver](launch-content-runtime-receiving.md)
 keeps #7943's explicit Windows/token condition and now directly retains whole
 #7694 there, without moving runtime or guidance ownership. Reviewed plan
