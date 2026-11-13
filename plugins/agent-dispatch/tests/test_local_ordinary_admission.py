@@ -33,7 +33,7 @@ def local(ordinary, monkeypatch):
     monkeypatch.setattr(
         worktree_owner_launch, "retained_selection", lambda: ("selected-worktrees",)
     )
-    o.ground["checkout_managed"] = True
+    o.ground["checkout_managed"] = None
     o.owner_calls = []
     o.resident_available = True
 
@@ -57,7 +57,15 @@ def local(ordinary, monkeypatch):
                 "resident_inspect": 1,
             }
         elif "record" in argv:
-            result = {"ok": True, "worktree": copy.deepcopy(o.ground)}
+            record = copy.deepcopy(o.ground)
+            record["session_ids"] = (
+                ["native-a", "other-native"]
+                if record["session_count"] == 2
+                else ["native-a"]
+                if record["session_count"]
+                else []
+            )
+            result = {"ok": True, "worktree": record}
         else:
             payload = json.loads(kwargs["input_text"])
             request = o.q.task_relationship(o.task["id"])["request"]
@@ -178,6 +186,34 @@ def test_request_mutation_and_additional_native_keep_original_claim(local):
         )
     assert local.relationship_owner.claims == original_claims
     assert local.q.task_relationship(local.task["id"])["state"] == "bound"
+
+
+@pytest.mark.parametrize("ordinary", [True], indirect=True)
+@pytest.mark.parametrize("native_id", ["native-a", "foreign-yielded-native", None])
+def test_null_head_never_substitutes_for_the_indexed_session_identity(local, native_id):
+    launch(local)
+    request = local.q.task_relationship(local.task["id"])["request"]
+    before = copy.deepcopy(local.relationship_owner.claims)
+    original = local.q._ordinary_relationship_writer._record
+
+    def yielded(workspace, reservation, record):
+        record["last_session_id"] = None
+        if native_id is None:
+            record.pop("session_ids")
+        else:
+            record["session_ids"] = [native_id]
+        original(workspace, reservation, record)
+
+    local.q._ordinary_relationship_writer._record = yielded
+    writer = local.q._ordinary_relationship_writer.bind_request(request)
+    workspace = native.AssignmentWorkspace.from_dict(request["workspace"])
+    payload = {"request_id": request["request_id"], "allow_missing": True}
+    if native_id == "native-a":
+        assert writer(workspace, "inspect", payload)["phase"] == "bound"
+    else:
+        with pytest.raises(TaskError, match="native"):
+            writer(workspace, "inspect", payload)
+    assert local.relationship_owner.claims == before
 
 
 @pytest.mark.parametrize("ordinary", [True], indirect=True)

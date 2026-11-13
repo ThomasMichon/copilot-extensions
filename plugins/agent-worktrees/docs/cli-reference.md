@@ -385,8 +385,8 @@ returns the configured execution identifier.
 tracking YAML from the receiving project's configured tracking namespace.
 Use the repository's binstub, its current directory, or explicit `--project`
 to select that project. IDs are exact filename components, not suffixes or
-codenames; the command never searches another project, enumerates records or
-sessions, asks the resident, or computes live facts. A newly created record
+codenames; the command never searches another project, enumerates other records,
+discovers sessions, asks the resident, or computes live facts. A newly created record
 is readable even before the resident publishes it. Ordinary `list` projection
 authority and failure behavior are unchanged.
 Membership is read from the selected project's machine-local repository
@@ -404,6 +404,15 @@ unreadable selection metadata returns `project-unavailable` JSON with the
 underlying diagnostic, not an unstructured traceback.
 Registered bare anchors and their linked worktrees resolve the common Git
 directory itself before considering a non-bare checkout's parent.
+
+The additive `session_ids` field projects the identities already indexed in that
+same durable record: an array when indexed, including `[]` for known empty
+history, or null for unknown history. It is independent of `last_session_id`,
+which can be null for yielded or concluded sessions that remain in history.
+Consumers requiring exact native identity must treat a missing field from an
+older provider as unknown support, not derive identity from the count or head.
+`checkout_managed` retains its existing raw representation: null means the
+stored default-managed field was omitted; explicit false remains unmanaged.
 
 ### Trusted initialization directory
 

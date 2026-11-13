@@ -101,12 +101,21 @@ class LocalOrdinaryRelationshipWriter:
             or record.get("session_backend_opaque") is not False
             or record.get("execution_leg") is not None
             or record.get("session_backend") is not None
-            or record.get("checkout_managed") is not True
+            or "checkout_managed" not in record
+            or (record["checkout_managed"] is not None and record["checkout_managed"] is not True)
         ):
             raise TaskError("ordinary workspace has unaccounted allocation or writer participants")
+        session_ids = record.get("session_ids")
+        if (
+            not isinstance(session_ids, list)
+            or any(not isinstance(value, str) or not value.strip() for value in session_ids)
+            or type(record.get("session_count")) is not int
+            or len(session_ids) != record["session_count"]
+        ):
+            raise TaskError("ordinary workspace lacks exact indexed native identities")
         info = reservation.get("agent_info")
         if info is None:
-            if reservation.get("session_handle") or not sessionless(record):
+            if reservation.get("session_handle") or session_ids or not sessionless(record):
                 raise TaskError("ordinary workspace has an uncaptured native participant")
         else:
             actual = identity(info)
@@ -114,8 +123,7 @@ class LocalOrdinaryRelationshipWriter:
                 actual.worktree != workspace.worktree
                 or actual.project != workspace.project
                 or actual.path != workspace.path
-                or type(record.get("session_count")) is not int
-                or record["session_count"] != 1
+                or session_ids != [actual.native]
                 or record.get("last_session_id") not in {None, actual.native}
             ):
                 raise TaskError("ordinary workspace has an unaccounted native participant")

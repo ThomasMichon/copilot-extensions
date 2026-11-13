@@ -76,8 +76,12 @@ Before each relationship operation the assembly rechecks the exact original
 queue request and reservation, actual execution/creation machine, created
 workspace ownership, creation key and retained writer requirement. The exact
 Worktrees record must match the original allocation stamp and incarnation,
-with indexed native history, no opaque/alternate execution binding and no
-additional native participant. Carried/targeted workspaces, uncaptured natives
+with exact indexed `session_ids`, no opaque/alternate execution binding and no
+additional native participant. A null head never identifies a yielded session;
+the original native must still be the sole indexed identity. Missing identity
+projection from an older Worktrees provider refuses without falling back to a
+count. The owner's null/default-managed checkout representation is accepted;
+explicit unmanaged checkouts refuse. Carried/targeted workspaces, uncaptured natives
 and historical requests without the original evidence refuse; current labels
 or an idle process list cannot retrofit them.
 
