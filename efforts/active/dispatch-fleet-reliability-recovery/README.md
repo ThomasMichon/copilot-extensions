@@ -87,6 +87,17 @@ rearm/replay permission or owner release; no new watchdog or generic ACK.
   follows from plan approval.
 
 
+### Continuing #4774 emitter-receipt recovery custody
+
+The finite receipt family below keeps existing emitter, generic receipt and
+domain custodians; it does not appoint the recipe-taxonomy owner or introduce
+domain-specific polling. Credit #4790 and the archived Done emitter-receipts
+baseline without reopening them or folding the canonical token into itself.
+Normal reviewed direct Plan/local AND global Validation/Coordination/Journal
+delivery and complete current receiving readback precede separate source
+judgment. Existing owner-fenced recovery and strict annex duties remain
+independent; no replay, reassignment, cleanup or resource release is authorized.
+
 <!-- backlog-reconciliation:7556:qualified-fifteen:2877:Coordination -->
 
 ### Continuing #2877 custody
@@ -240,6 +251,31 @@ startup path first; it does not claim every suite entry point already conforms.
   [typed registry-to-reservation Plan rows](retained-registry-deferrals.md#plan),
   preserving finite transient versus definitive-absence classification,
   distinct task/reservation accounting and original caller uncertainty.
+
+#### Direct retained #4774 generic receipt recovery
+
+- [ ] **P4774-A:** Preserve the delivered generic dedup-key to actual task
+  ID/status primitive and its later-tick retrieval. Retain stable declared
+  emitter identity, bounded/rotated logs and cursor retrieval through CLI
+  AND environment paths, including ordinary tick and side-load parity.
+  Credit #4790 rather than claiming the completed baseline is missing.
+- [ ] **P4774-B:** Establish an admitted usable result channel BEFORE authoring
+  effects AND retain a generic recoverable accepted/uncertain result if
+  receipt publication subsequently fails. Channel availability is not proof
+  that the authored effect failed or permission to replay it.
+- [ ] **P4774-C:** Retain created AND dedup-existing task identities and
+  partial success through the failure/recovery path. Preserve cursor/bounds,
+  concurrency, CLI/environment and side-load behavior; an empty success
+  envelope must not erase known results or license blind resubmission.
+- [ ] **V4774-A:** Qualify actual later-tick dedup-key/task-ID/status linkage,
+  stable emitter identity, bounded/rotated logs and both cursor surfaces,
+  with normal tick/side-load controls.
+- [ ] **V4774-B:** Cover pre-effect result-channel refusal and post-effect
+  publication failure, retaining recoverable accepted/uncertain outcomes
+  without domain polling or duplicate business effects.
+- [ ] **V4774-C:** Exercise created and dedup-existing results, partial
+  publication failure, empty-envelope and concurrent/cursor-boundary cases
+  while preserving all original CLI/environment/side-load controls.
 
 ### Phase 3a - Startup progress and timeout adoption
 
@@ -735,6 +771,16 @@ _(Agent-recommended direct Phase3/Phase7 consumer case; all rows unchecked.)_
   is not incident diagnosis, reproduction, technical/whole-fleet completion
   or resource release; no every-host/unrelated whole-parent gate is added.
 
+### Global validation for #4774
+
+- [ ] **G4774:** Resolve EVERY P4774-A through C and V4774-A through C:
+  completed generic receipt credit, usable channel before effects AND
+  recoverable results after publication failure, created/dedup-existing IDs,
+  later reads and all retained cursor/bounds/concurrency/entry controls.
+  Keep actual emitter/receipt/domain and recovery custodians. No new
+  every-host programme, recipe-taxonomy appointment, polling loop, ownership
+  reset or replay authority is introduced; incumbent parent/annex gates remain.
+
 ## Proposal
 
 The initial proposal changes no runtime or deployment configuration. Category is
@@ -748,6 +794,16 @@ named-resource resolution so an older peer cannot silently accept but ignore a
 requested contract.
 
 ## Journal
+
+### 2026-11-13 - Proposed finite #4774 receipt-recovery intake
+
+Added unchecked A-C Plan/local Validation, actual global Validation and
+continuing receipt custody for before-effect channel availability and
+after-effect recoverability. The completed generic primitive and archived
+Done baseline retain their credit. This is a proposed distinct planned
+receiver, not accepted whole-family transfer, implementation or source
+retirement. Complete current ROOT/strict-annex readback and separate source
+judgment remain; no operation replay, executor appointment or resource release.
 
 ### 2026-11-05 - Proposed owner-fenced recovery and CLI tracking intake
 
