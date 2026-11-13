@@ -137,6 +137,7 @@ def test_windows_bootstrap_never_replays_a_created_receiver(monkeypatch, outcome
     owner = Mock(pid=73, birth="windows:123")
     monkeypatch.setattr(owner_bootstrap.sys, "platform", "win32")
     monkeypatch.setattr(owner_bootstrap, "WINDOWS_ORIGIN", lambda _binding: nullcontext(owner))
+    monkeypatch.setattr(owner_bootstrap, "_windows_argv", lambda command: command)
     monkeypatch.setattr(owner_bootstrap.subprocess, "CREATE_NO_WINDOW", 0x08000000, raising=False)
     monkeypatch.setattr(owner_bootstrap.subprocess, "run", Mock(
         return_value=subprocess.CompletedProcess([], 0, json.dumps(report), ""),
