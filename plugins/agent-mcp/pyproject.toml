@@ -63,7 +63,7 @@ agent-mcp = "agent_mcp.__main__:console_entry"
 where = ["src"]
 
 [tool.setuptools.package-data]
-"agent_mcp" = ["incoming-contract.json"]
+"agent_mcp" = ["incoming-contract.json", "owner_section.cs"]
 # The code-mode decorator ships a Node harness alongside the Python package.
 "agent_mcp.decorators" = ["*.js"]
 
