@@ -342,12 +342,23 @@ the non-public approval conversation.
 
 ## Plan
 
-The [faithful-fixture receiving proposal](fixture-isolation-receiving.md)
-selects existing #7075 for the complete #7076 fixture-validity lane, preserving
-separate inventories, actual owners and comparable hosted acceptance. The
+The [real stamp-consumer receiving proposal](stamp-consumer-receiving.md)
+selects existing #7433 for #7247's two real Windows stamp cases, with distinct
+diagnostic lanes, original bounds and retained claim/source-hunk ownership.
+#7256's recording fixture and #7251's resolver remain independent. Review and
+whole direct receiving readback precede any separate tracking retirement;
+no cause, native pass, new writer or resource release is inferred.
+
+The [faithful-fixture receiving contract](fixture-isolation-receiving.md)
+retains the complete #7076 fixture-validity lane directly in existing #7075,
+preserving separate inventories, actual owners and comparable hosted acceptance. The
 fifteen-source study also rejects forced managed-runner, runtime and protocol
-folds. Review and complete direct issue readback precede any separate tracking
-retirement; no technical completion, new executor or resource release follows.
+folds. Reviewed plan #12359, complete direct issue readback and a separate
+source-specific judgment verify #7076's `NOT_PLANNED` tracking retirement.
+No technical completion, new executor or resource release follows. The
+[tracking and token-boundary checkpoint](journal/2026/11.12-fixture-tracking-and-retained-token-boundaries.md)
+records that actual retirement, #7052's explicit retained original-token
+condition and the next coherent receiving choice.
 
 The [admission-boundary correction](journal/2026/11.12-admission-failure-and-citation-boundary.md)
 records a failed eighteen-primary delegation without contract or closure
