@@ -60,10 +60,12 @@ def test_offline_scenarios_have_distinct_evidence_and_explicit_modes() -> None:
     for case in cases:
         assert case["mode"] in {
             "read-only", "steering-authorized", "dormant-correction",
+            "repair-authorized",
         }
         assert case["facts"].strip() and case["expected"].strip()
     assert {case["mode"] for case in cases} == {
         "read-only", "steering-authorized", "dormant-correction",
+        "repair-authorized",
     }
 
 
@@ -283,15 +285,15 @@ def test_enforced_goals_require_evidence_and_scope_g5_to_recurring() -> None:
         "## Enforced goals",
         "**A sweep report that lacks evidence for an applicable goal is "
         "incomplete**",
-        "reported against G1-G4 only",
+        "reported against G1-G4 and G6 only",
         "**G5 applies only to a recorded recurring assignment**",
         "**a fleet that stays on-charter without a monitor**",
         "**never self-declare an open-ended assignment done**",
-        "never widen the charter's mode, steering, answer or source-change "
-        "authority",
+        "never widen the charter's mode, steering, answer, repair or "
+        "source-change authority",
     ):
         assert requirement in skill, requirement
-    for goal in ("| G1 |", "| G2 |", "| G3 |", "| G4 |", "| G5 |"):
+    for goal in ("| G1 |", "| G2 |", "| G3 |", "| G4 |", "| G5 |", "| G6 |"):
         assert goal in skill, goal
     assert skill.index("## Enforced goals") < skill.index(
         "## 1. Establish the charter"
@@ -417,4 +419,93 @@ def test_fleet_run_learnings_keep_reads_passive_and_receipts_exact() -> None:
         "receipt-binding-conflict-not-failure",
         "constituent-model-notice",
         "adaptive-cadence-single-schedule",
+    } <= {case["id"] for case in scenarios["cases"]}
+
+
+def test_repair_is_graduated_delegated_and_separately_granted() -> None:
+    skill = " ".join(_read(SKILL / "SKILL.md").split())
+    text = " ".join(_read(SKILL / "references" / "repair-escalation.md").split())
+    charter = " ".join(_read(SKILL / "assets" / "CHARTER.md").split())
+    steering = " ".join(_read(SKILL / "references" / "steering.md").split())
+    assert "(references/repair-escalation.md)" in skill
+    assert "only a repair scope authorizes repair" in skill
+    for requirement in (
+        "**repairs applied: none**",
+        "A read-only, steering, answer or dormant-correction grant does not "
+        "authorize repair",
+        "Climb one rung at a time",
+        "Capture evidence before any mutation",
+        "Wait at least one reobservation interval between rungs",
+        "A command that self-heals, resumes or restarts is not a diagnostic",
+        "Resume it; never reseed it",
+        "requires the grant to name that service",
+        "Never skip to a higher rung",
+        "Those records are the evidence",
+        "A delegate never messages, steers or answers the target",
+        "so that two delegates never repair the same shared service",
+        "A delegate inherits no more authority than the current rung",
+        "send at most one redelivery",
+        "Without it, never resend",
+    ):
+        assert requirement in text, requirement
+    for rung in ("R0 Observe", "R1 Diagnose directly", "R2 Doctor records",
+                 "R3 Recover transport or session", "R4 Disruptive"):
+        assert rung in text, rung
+    assert text.index("## Classify the blocker first") < text.index(
+        "## The ladder"
+    )
+    for requirement in (
+        "Repair scope (only if explicitly granted; else \"none\"",
+        "Rung ceiling:",
+        "Host-shared services:",
+        "| repair",
+    ):
+        assert requirement in charter, requirement
+    assert "[graduated repair](repair-escalation.md)" in steering
+    scenarios = json.loads(_read(SKILL / "assets" / "scenarios.json"))
+    assert {
+        "repair-undelivered-transport",
+        "repair-identity-fault-ceiling",
+        "repair-without-grant",
+    } <= {case["id"] for case in scenarios["cases"]}
+
+
+def test_agent_charters_drive_resolution_with_light_touch() -> None:
+    skill = " ".join(_read(SKILL / "SKILL.md").split())
+    text = " ".join(_read(SKILL / "references" / "agent-charters.md").split())
+    template = _read(SKILL / "assets" / "AGENT-CHARTER.md")
+    charter = " ".join(_read(SKILL / "assets" / "CHARTER.md").split())
+    assert "(references/agent-charters.md)" in skill
+    assert "**Handle exploratory agents with a light touch**" in skill
+    assert "Once an agent is set to work with a goal, stay on its case" in skill
+    for requirement in (
+        "**The agent's own charter is authoritative; the monitor's copy is a "
+        "summary.**",
+        "Never overwrite a live agent's record",
+        "**charter backfill**",
+        "not the reverse",
+        "Waiting on the operator is a required wait, not waste",
+        "treat the agent as exploratory",
+        "**set to work with a goal**",
+        "The monitor never finalizes, abandons or retires a worker itself",
+        "Changing the root objective still requires its operator",
+        "Never steer it toward completion",
+        "Never push a premature finalization",
+        "## Report churn",
+    ):
+        assert requirement in text, requirement
+    for kind in ("**Completion**", "**Standing**", "**Exploratory**"):
+        assert kind in text, kind
+    for field in ("Kind: completion | standing | exploratory",
+                  "Finalization criterion:", "Agent's own charter:",
+                  "Divergence:"):
+        assert field in template, field
+    assert "Agent charter maintenance" in charter
+    assert "exploratory targets received no completion pressure" in charter
+    scenarios = json.loads(_read(SKILL / "assets" / "scenarios.json"))
+    assert {
+        "exploratory-light-touch",
+        "completion-finish-line",
+        "standing-charter-no-completion-push",
+        "charter-backfill-and-rework",
     } <= {case["id"] for case in scenarios["cases"]}

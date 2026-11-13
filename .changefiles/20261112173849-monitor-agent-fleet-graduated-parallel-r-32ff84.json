@@ -1,0 +1,9 @@
+{
+  "comment": "monitor-agent-fleet: graduated parallel repair of blocked agents, per-agent charter upkeep with backfill, drive-to-resolution and light-touch guidance; README distinguishes monitor vs maintain roles",
+  "changes": [
+    {
+      "plugin": "agent-roles",
+      "type": "minor"
+    }
+  ]
+}
