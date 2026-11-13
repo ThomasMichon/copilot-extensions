@@ -8,17 +8,37 @@ export async function executionObservation({
   isFile = async (path) => stat(path).then((info) => info.isFile()).catch(() => false),
 } = {}) {
   let environment = "linux";
+  let legacyFallbackAllowed;
   if (platform === "win32") environment = "windows";
   else if (platform === "linux") {
     const markers = await Promise.all(["/.dockerenv", "/run/.containerenv"].map(isFile));
     const cgroup = await read("/proc/1/cgroup").catch(() => "");
     if (!markers.some(Boolean) && !["/docker", "/kubepods", "containerd", "/lxc", "libpod"]
       .some((tag) => cgroup.includes(tag))) {
-      const version = await read("/proc/version").catch(() => "");
-      if (/microsoft/i.test(`${kernel}\n${version}`)) environment = "wsl";
+      const mounts = await read("/proc/self/mountinfo").catch(() => "");
+      const containerRoot = mounts.split("\n").some((line) => {
+        const [mount, filesystem] = line.split(" - ");
+        return mount?.split(" ")[4] === "/"
+          && /^(overlay|fuse(?:\.fuse)?[.-]overlayfs)\s/.test(filesystem || "");
+      });
+      if (containerRoot) {
+        // An older CLI may still classify this execution root by its WSL kernel.
+        legacyFallbackAllowed = false;
+      } else {
+        const version = await read("/proc/version").catch(() => "");
+        if (/microsoft/i.test(`${kernel}\n${version}`)) {
+          const privateOrMissingCgroup = !cgroup.trim()
+            || cgroup.trim().split("\n").every((line) => line.split(":").at(-1) === "/");
+          if (privateOrMissingCgroup && !await isFile("/proc/sys/fs/binfmt_misc/WSLInterop")) return null;
+          environment = "wsl";
+        }
+      }
     }
   } else return null;
-  return { hostname: host, environment };
+  return {
+    hostname: host, environment,
+    ...(legacyFallbackAllowed === false ? { legacyFallbackAllowed } : {}),
+  };
 }
 
 export function machineLookup(request, { observe = executionObservation } = {}) {
@@ -26,10 +46,12 @@ export function machineLookup(request, { observe = executionObservation } = {}) 
     try {
       const observation = await observe();
       if (!observation) return null;
-      const query = new URLSearchParams(observation);
+      const query = new URLSearchParams({
+        hostname: observation.hostname, environment: observation.environment,
+      });
       const response = await request("GET", `/api/v1/execution-context?${query}`);
       // Only an older provider's absent route permits the legacy CLI adapter.
-      if (response.status === 404) return undefined;
+      if (response.status === 404) return observation.legacyFallbackAllowed === false ? null : undefined;
       if (!response.ok) return null;
       const body = await response.json();
       const context = body?.context;

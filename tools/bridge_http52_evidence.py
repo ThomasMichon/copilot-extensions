@@ -86,6 +86,7 @@ AFFECTED = (
     "plugins/agent-remote-driver/extensions/agent-remote-driver/control-client.mjs",
     "plugins/agent-remote-driver/extensions/agent-remote-driver/startup-client.mjs",
     "libs/venue-copilot/src/venue_copilot/portable_mux.py",
+    "libs/machine-transport/src/machine_transport/local_execution.py",
 )
 EXTRA_PATHS = (
     *retained.EXTRA_PATHS, INPUT, CAPTURE, "tools/bridge_http52_evidence.py",
@@ -125,6 +126,7 @@ EXTRA_PATHS = (
     "plugins/agent-bridge/tests/test_execution_context.py",
     "plugins/agent-bridge/tests/metadata.test.mjs",
     "plugins/agent-bridge/tests/bridge-endpoint.test.mjs",
+    "libs/machine-transport/tests/test_local_execution.py",
     "plugins/agent-bridge/docs/live-question-answers.md",
     "plugins/agent-bridge/tests/test_workspace_creation.py",
     "plugins/agent-bridge/tests/test_dispatch_session_origin.py",
@@ -183,6 +185,9 @@ PROBES = {
     "test_unavailable_or_ambiguous_config_never_uses_the_daemons_cached_roster": 1,
     "test_current_context_route_retains_bridge_authentication": 1,
     "test_execution_context_extension_controls": 1,
+    "test_explicit_hostname_conflict_is_not_resolved_by_the_machine_key": 2,
+    "test_legacy_profiles_without_ssh_aliases_keep_native_guest_naming": 2,
+    "test_machine_rename_rollover_retains_alias_and_cli_claim": 1,
     "test_accepted_behind_question_is_explicit_not_failed_and_keyed_retry_is_one_row": 1,
     "test_consumption_releases_wait_without_turn_end_or_reply": 1,
     "test_missing_partial_stale_or_reincarnated_observer_is_unknown": 1,

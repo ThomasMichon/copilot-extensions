@@ -29,7 +29,10 @@ A successful response declares `schema: agent-bridge.execution-context/v1`
 and a `context` containing the reporter's observations plus the shared
 resolver's `machine`, `execution_machine` and optional `customization_key`.
 This is naming information, not permission to allocate or mutate a worktree.
-Container roots remain Linux even when their host kernel is WSL.
+Known container roots remain Linux even when their host kernel is WSL.
+Root overlay/fuse-overlayfs mount evidence covers private cgroup namespaces
+that expose only `0::/` and carry no Docker/Podman marker. An ambiguous private
+root on a WSL kernel remains unresolved without additional WSL interop evidence.
 
 The provider reads the configured profiles' machine files on every lookup
 and uses `machine-transport.resolve_local_execution_context`. No cached roster
@@ -40,6 +43,18 @@ current lookup clears advertised worktree targeting instead of retaining a
 previous machine name. Binding association and process-incarnation protections
 remain independent.
 
+An explicit configured hostname cannot be overridden by a matching logical
+key, alias or another platform's physical-family association. Legacy native/WSL
+profiles without SSH aliases remain valid naming declarations; this adapter
+does not invent a shared SSH alias for them.
+
+On an in-process session-ID rollover, registration first refreshes the last
+successfully registered predecessor using the same fresh metadata snapshot as
+the successor. Existing PID/start-time checks still apply to both writes.
+Unknown naming or a failed predecessor refresh defers the successor rather
+than stranding its alias/CLI reservation; a foreign incarnation is never
+refreshed or later deregistered as this process's row.
+
 This additive endpoint supports new callers against current providers and
 leaves older registration callers unchanged. Only HTTP 404 from an older
 provider permits the existing asynchronous `agent-worktrees get machine`
@@ -49,6 +64,10 @@ that same 404 path; the legacy adapter remains supported with no retirement
 scheduled. Current-provider heartbeats do not spawn the Worktrees CLI for
 machine naming. Native composed latency remains a separate measurement from
 the deterministic no-spawn and fresh-configuration regressions.
+Execution roots identified only by the additional mount evidence do not use
+the older CLI fallback, whose substrate classifier may not recognize them.
+They remain unresolved against an older provider rather than advertise its
+potentially incorrect WSL name.
 
 ## Overview
 

@@ -157,6 +157,12 @@ from test_execution_context import (
     as test_unavailable_or_ambiguous_config_never_uses_the_daemons_cached_roster,
     test_current_context_route_retains_bridge_authentication
     as test_current_context_route_retains_bridge_authentication,
+    test_explicit_hostname_conflict_is_not_resolved_by_the_machine_key
+    as test_explicit_hostname_conflict_is_not_resolved_by_the_machine_key,
+    test_legacy_profiles_without_ssh_aliases_keep_native_guest_naming
+    as test_legacy_profiles_without_ssh_aliases_keep_native_guest_naming,
+    test_machine_rename_rollover_retains_alias_and_cli_claim
+    as test_machine_rename_rollover_retains_alias_and_cli_claim,
 )
 from bridge_http_retained_probes import capture_request, record_observations
 from http51_receipt_probes import observe as observe_receipt
@@ -170,7 +176,8 @@ def test_execution_context_extension_controls():
     assert node is not None, "execution-context capture requires Node"
     tests = Path(__file__).parent
     result = run_caller_owned(
-        [node, "--test", str(tests / "metadata.test.mjs"), str(tests / "bridge-endpoint.test.mjs")],
+        [node, "--test", str(tests / "metadata.test.mjs"), str(tests / "bridge-endpoint.test.mjs"),
+         str(tests / "delivery.test.mjs")],
         timeout=60, max_stdout_bytes=256 * 1024, max_stderr_bytes=64 * 1024,
     )
     assert result.returncode == 0, result.stdout + result.stderr

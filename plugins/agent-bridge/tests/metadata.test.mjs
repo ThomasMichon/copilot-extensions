@@ -483,7 +483,8 @@ test("an identity still incomplete after a few lookups is logged once", async ()
 
 test("reporter observations distinguish native, guest and container substrates", async () => {
   const observed = (options) => executionObservation({
-    host: "observed-host", kernel: "Microsoft WSL2", read: async () => "",
+    host: "observed-host", kernel: "Microsoft WSL2",
+    read: async (path) => path.endsWith("cgroup") ? "0::/init.scope" : "",
     isFile: async () => false, ...options,
   });
   assert.deepEqual(await observed({ platform: "win32" }), {
@@ -495,6 +496,39 @@ test("reporter observations distinguish native, guest and container substrates",
   assert.equal((await observed({
     platform: "linux", read: async (path) => path.endsWith("cgroup") ? "/docker/id" : "",
   })).environment, "linux");
+});
+
+test("private-cgroup container roots cannot inherit WSL naming or an unsafe legacy lookup", async (t) => {
+  const cli = useHangingAgentWorktrees(t);
+  for (const filesystem of ["overlay", "fuse.fuse-overlayfs"]) {
+    const observation = await executionObservation({
+      platform: "linux", host: "host", kernel: "Microsoft WSL2", isFile: async () => false,
+      read: async (path) => {
+        if (path.endsWith("cgroup")) return "0::/";
+        if (path.endsWith("mountinfo")) return `29 23 0:25 / / rw - ${filesystem} root rw`;
+        return "Microsoft WSL2";
+      },
+    });
+    assert.equal(observation.environment, "linux");
+    const lookup = machineLookup(async (_method, path) => {
+      assert.equal(path, "/api/v1/execution-context?hostname=host&environment=linux");
+      return { status: 404, ok: false };
+    }, { observe: async () => observation });
+    assert.equal(await resolveMachineAsync({ cwd: cli.cwd, lookup }), null);
+    assert.equal(cli.called(), false);
+  }
+});
+
+test("ambiguous private roots remain unresolved unless additional WSL evidence is present", async () => {
+  const options = {
+    platform: "linux", host: "host", kernel: "Microsoft WSL2",
+    read: async (path) => path.endsWith("cgroup") ? "0::/" : "",
+    isFile: async () => false,
+  };
+  assert.equal(await executionObservation(options), null);
+  assert.equal((await executionObservation({
+    ...options, isFile: async (path) => path.endsWith("/WSLInterop"),
+  })).environment, "wsl");
 });
 
 test("live naming uses the reporter and permits CLI fallback only for an absent provider route", async (t) => {

@@ -33,7 +33,7 @@ def _machine_entries(path: Path) -> dict[str, MachineEntry]:
             ):
                 raise ValueError("configured SSH environments must be a list of mappings")
     return parse_machines_yaml(
-        raw, default_ssh_alias_to_key=True, default_ssh_shell="bash",
+        raw, default_ssh_alias_to_key=False, default_ssh_shell="bash",
         keep_unnamed_environments=True, preserve_environment_values=True,
     )
 

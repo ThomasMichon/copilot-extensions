@@ -248,10 +248,9 @@ async function heartbeat() {
 
 const register = serializedRegister(
   state,
-  async (id) => {
+  async (id, metadata) => {
     if (!state.base || !state.token) return false;
     try {
-      const metadata = await refreshRegistrationMetadata(state, resolveCurrentMachine);
       const body = { session_id: id, ...processIdentity(), ...metadata };
       const res = await fetchBridge("POST", "/api/v1/live-sessions", body);
       if (res.ok) return true;
@@ -268,7 +267,7 @@ const register = serializedRegister(
     }
   },
   (id) => extLog(`registered live session ${id} with local bridge`),
-  { ready: metadataReady },
+  { ready: metadataReady, prepare: () => refreshRegistrationMetadata(state, resolveCurrentMachine) },
 );
 
 async function deregister() {

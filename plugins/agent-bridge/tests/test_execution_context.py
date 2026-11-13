@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
+import shutil
+import time
 
 import pytest
 from fastapi.testclient import TestClient
 
 from agent_bridge.app_routes import configure_serving_app
+from agent_bridge.db import Database
 from agent_bridge.models import ServiceConfig, TopologyProfile
 from agent_bridge.routes import execution_context
 
@@ -100,3 +104,86 @@ def test_current_context_route_retains_bridge_authentication() -> None:
     assert client.get(
         "/api/v1/execution-context", params={"hostname": "host", "environment": "linux"},
     ).status_code == 401
+
+
+@pytest.mark.parametrize("family_sibling", [False, True])
+def test_explicit_hostname_conflict_is_not_resolved_by_the_machine_key(
+    tmp_path: Path, family_sibling: bool,
+) -> None:
+    path = tmp_path / "machines.yaml"
+    path.write_text(
+        "machines:\n  victim:\n    hostname: real-host\n"
+        "    physical_host: shared-root\n    execution_platform: linux\n"
+        + ("  shared-root:\n    hostname: observed-host\n    physical_host: shared-root\n"
+           "    execution_platform: windows\n" if family_sibling else ""),
+        encoding="utf-8",
+    )
+    client = client_for(ServiceConfig(topologies={"example": TopologyProfile(machines_yaml=str(path))}))
+    response = client.get(
+        "/api/v1/execution-context",
+        params={"hostname": "observed-host" if family_sibling else "victim", "environment": "linux"},
+    )
+    assert response.status_code == 503
+
+
+@pytest.mark.parametrize("environment, expected", [("windows", "legacy"), ("wsl", "legacy-wsl")])
+def test_legacy_profiles_without_ssh_aliases_keep_native_guest_naming(
+    tmp_path: Path, environment: str, expected: str,
+) -> None:
+    path = tmp_path / "machines.yaml"
+    path.write_text(
+        "machines:\n  legacy:\n    hostname: observed-host\n"
+        "    ssh:\n      environments:\n        - {name: windows}\n        - {name: wsl}\n",
+        encoding="utf-8",
+    )
+    client = client_for(ServiceConfig(topologies={"example": TopologyProfile(machines_yaml=str(path))}))
+    response = client.get(
+        "/api/v1/execution-context", params={"hostname": "observed-host", "environment": environment},
+    )
+    assert response.status_code == 200
+    assert response.json()["context"]["execution_machine"] == expected
+
+
+def test_machine_rename_rollover_retains_alias_and_cli_claim(tmp_db: Database) -> None:
+    from agent_procutil.owned_process import run_caller_owned
+
+    node = shutil.which("node")
+    assert node is not None, "execution-context rollover control requires Node"
+    modules = Path(__file__).resolve().parents[1] / "extensions" / "agent-bridge"
+    script = """
+import {serializedRegister, adoptSessionId} from __DELIVERY__;
+import {refreshRegistrationMetadata, processIdentity} from __METADATA__;
+let machine = "old-machine";
+const state = {sessionId: "predecessor", registered: false, meta: {
+  machine, cwd: "/fixture", worktree_id: "rollover-worktree", repo: "example",
+  branch: null, role: null,
+}};
+const packets = [];
+const register = serializedRegister(state, async (id, metadata) => {
+  packets.push({session_id: id, ...processIdentity(), ...metadata});
+  if (id === "predecessor" && machine === "renamed-machine") machine = "changed-again";
+  return true;
+}, () => {}, {prepare: () => refreshRegistrationMetadata(state, async () => machine)});
+await register();
+machine = "renamed-machine";
+adoptSessionId(state, "successor");
+await register();
+await register.close();
+console.log(JSON.stringify(packets));
+""".replace("__DELIVERY__", json.dumps((modules / "delivery.mjs").as_uri())).replace(
+        "__METADATA__", json.dumps((modules / "metadata.mjs").as_uri()),
+    )
+    result = run_caller_owned(
+        [node, "--input-type=module", "--eval", script],
+        timeout=60, max_stdout_bytes=64 * 1024, max_stderr_bytes=64 * 1024,
+    )
+    assert result.returncode == 0, result.stderr
+    packets = json.loads(result.stdout)
+    assert [packet["session_id"] for packet in packets] == ["predecessor", "predecessor", "successor"]
+    assert [packet["machine"] for packet in packets] == ["old-machine", "renamed-machine", "renamed-machine"]
+    now = time.time()
+    tmp_db.create_cli_mode_reservation("rollover-worktree", now=now)
+    for offset, packet in enumerate(packets, 1):
+        assert tmp_db.register_live_session(**packet, now=now + offset) == "live"
+    assert tmp_db.get_live_session("predecessor")["session_id"] == "successor"
+    assert tmp_db.get_cli_mode_reservation("rollover-worktree")["claimed_by_session_id"] == "successor"
