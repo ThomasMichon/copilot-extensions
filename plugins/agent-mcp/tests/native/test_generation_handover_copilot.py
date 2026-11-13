@@ -180,7 +180,6 @@ async def test_actual_native_client_responds_through_replacement_and_rollback(
     with contextlib.ExitStack() as retained:
         root, slots = fixture.build_runtimes(
             tmp_path, retained, observations=observations, caller_context=caller_context,
-            windows_owner_entry=windows,
         )
         with daemon_test_lifecycle(
             owner="native-copilot-mcp-handover", registry_root=tmp_path / "instances",

@@ -87,7 +87,7 @@ def test_changed_selection_is_a_failure_not_supported_or_ordinary_readiness(
 
 
 @pytest.mark.parametrize("platform", ["linux", "windows"])
-def test_optional_receiver_is_advertised_only_on_its_supported_platform(
+def test_optional_receiver_is_advertised_on_both_supported_platforms(
     monkeypatch: pytest.MonkeyPatch, selected: tuple, capsys: pytest.CaptureFixture,
     platform: str,
 ) -> None:
@@ -98,11 +98,11 @@ def test_optional_receiver_is_advertised_only_on_its_supported_platform(
     assert result["platform"] == platform
     capabilities = result["contract"]["capabilities"]
     assert "explicit-native-owner-pair" in capabilities
-    assert (ENTRY_CAPABILITY in capabilities) is (platform == "linux")
+    assert ENTRY_CAPABILITY in capabilities
     result["entry"]["module"] = str(
         Path(result["entry"]["prefix"]) / "lib" / "agent_mcp" / "owner_entry.py",
     )
-    assert (receiver(result) is not None) is (platform == "linux")
+    assert receiver(result) is not None
     incoming.ensure_current.assert_not_called()
 
 

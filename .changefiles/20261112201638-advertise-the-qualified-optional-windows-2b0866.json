@@ -1,0 +1,9 @@
+{
+  "comment": "Advertise the qualified optional Windows physical owner receiver without enrolling callers",
+  "changes": [
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    }
+  ]
+}

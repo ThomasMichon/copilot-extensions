@@ -398,14 +398,21 @@ handover. Preserve held sessions and the separate pre-feature adoption hold.
       after current-head approval, required CI, both source platform lanes
       and the actual pinned Windows native packet passed. See the
       [source result](journal/2026/11.10-explicit-owner-cli.md#windows-native-client-consumption-reviewed-and-merged).
-    - [ ] **Joined Windows native handover source:** compose the actual native
+    - [x] **Joined Windows native handover source:** compose the actual native
       caller and anonymous snapshot with private physical receiver/custody
       replacement, rollback and same-slot replacement. Require accepted
       in-flight calls, original client/conduit/keeper/upstream identity,
       actual client ping replies, unknown-delivery fencing without replay
-      and exact settlement. Local qualification passes; current-head review,
-      required CI and hosted Linux/Windows qualification remain open.
-      Production capability advertisement and caller enrollment stay off.
+      and exact settlement. #12365 merged at
+      `5360651a6b065aaa54c4e0b44577aa816fe0a19f` after current-head approval,
+      required CI and hosted Linux/Windows qualification. Production capability
+      advertisement and caller enrollment remain separate next steps.
+    - [ ] **Windows receiver capability expansion:** advertise the qualified
+      optional physical receiver from the selected Windows executable, remove
+      the native packet's copied-capability override and rerun that actual
+      source composition. Keep unsupported/native/selection refusals,
+      invocation opt-outs and production caller enrollment unchanged. Require
+      reviewed source, hosted qualification and release before installed use.
   - [x] **Explicit Linux exec caller:** capture the exec owner's native pair
     and pass a sealed, session-only overlay for explicitly named configured
     entries, with actual-start discovery bound to a physical optional receiver.
