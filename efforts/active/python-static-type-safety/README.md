@@ -13,6 +13,8 @@
 - **Latest fixture prerequisite:** The post-acquisition policy-recheck wrapper correction merged in #12133 after the original regression, Ruff, both declared Python 3.11 strict analysis targets, exact-head approval and required source CI passed. Return to the remaining original Invocation test/program corpus; no pending-project admission, coverage advance or existing native/minimum-runtime gate is closed by this fixture-only fix.
 - **Latest scoped unit qualification:** All 32 original private-file management cases now have ordinary three-phase passes, with original function/helper definitions and module markers preserved. Focused multi-case cohorts avoid repeating startup for every case. This closes that fixture family only; the original full corpus, executed/emitted programs, native/minimum-runtime and strict-admission gates remain open.
 - **Independent test-source admission:** #12324 merged strict enforcement of the complete 27-file `lib-payload-invocation-tests` project on its declared Python 3.11 Linux/win32 analysis targets, with no exclusions, after exact-head approval and required source CI. The bounded owner journal records both normal positive checks and real negative controls. This completes static test-source admission only; the separate production/catalog project remains pending, and the original full-corpus, emitted-program, native/minimum-runtime, source/frozen/candidate and final #10371 gates remain open.
+- **Current production/program boundary:** The merged checker selects four physical production files and four catalog witnesses. The bootstrap-only prerequisite restores a ninth target, with focused-control and checker-analysis evidence; production and real source/frozen qualification retain separate validation records. Two shim-embedded Python cache selectors remain outside those witnesses. This preparation is not production admission or complete emitted-program qualification.
+- **Bootstrap prerequisite qualification:** All four declared strict production probes and twenty real source/frozen catalog/bootstrap cases pass. The copied-fixture startup closure includes the bootstrap view module, and all four original version-matrix cases pass, including the three additional-version cases under their separate approved limits. Required exact-head CI, review and merge remain open for #12498; production and the parent campaign are not admitted by this prerequisite.
 - **Sub-issues:** #9831 (P1 checker foundation, complete); #9853 (P2 required source CI, complete); #9862 (P3 exact-candidate qualification, complete); #9916 (P4a canonical Installation Context source view, complete); #9924 (L1 Config Migrate strict admission, complete); #9930 (L1 Dropin Registry strict admission, complete); #9933 (L1 Endpoint Rendezvous strict admission, complete); #9941 (L1 initial leaf-library test/helper completion, complete); #9951 (L1 Lazy CLI Dispatch strict admission, complete); #9964 (L1 Bootstrap Killswitch strict admission, complete); #9967 (L1 Peer Launch strict admission, complete); #9971 (P2a Installation Context native typing preparation, complete); #9975 (P2b validation-decorator signature preservation, complete); #9980 (P2c production result and flow contracts, complete); #9983 (P2d native platform API contracts, complete); #9986 (P2e cleanup and worker contracts, complete); #9993 (P2f shared receipt-fixture typing, complete); #9996 (P2g slot-release test contracts); #10400 (shared real-import-root/additional-version checker prerequisite, merged #10553); #10331, #10362 and #10371 (independent consumer admissions, open). Create/reuse later scoped issues as selected. #9177 remains separately owned.
 
 ## Guiding Intent
@@ -121,6 +123,39 @@ Confirmed operator responses:
   Production, emitted-program, original full-corpus, native/minimum-runtime
   and release obligations remain tracked under #10371 and are not waived by
   the static test-source policy change.
+- A separate bootstrap-only checker prerequisite may integrate the retained
+  source view and proceed through normal reviewed publication while leaving
+  production pending and runtime bytes unchanged. Its focused catalog/bootstrap
+  controls and affected MyPy/source/frozen checks have at most two fresh
+  600-second qualification batches, each with a 510-second work boundary and
+  ninety-second cleanup reserve. Cohorts contain at most four cases with a
+  120-second outer limit; individual test/helper limits stay thirty seconds,
+  with existing analyzer, resource and protected-retention limits unchanged.
+  No blanket original-corpus replay, SDK rebuild/borrowing, native IPC,
+  installed rollout or production activation is authorized.
+- After those two bounded batches, a separate residual-only qualification
+  budget permits one fresh 1,800-second aggregate, with 1,710 seconds for work
+  and ninety seconds for cleanup. It covers only the four remaining declared
+  production analysis cells and twenty preflight-collected source/frozen cases.
+  Keep cohorts at most four, outer limits at most 120 seconds, individual
+  test/helper limits thirty seconds, and existing analyzer/resource/retention
+  limits unchanged. Do not replay closed clocks or rerun passing checks on
+  identical inputs. This does not authorize SDK rebuild/borrowing, production
+  activation, native IPC or installed rollout; normal publication authority
+  and review gates are unchanged.
+- For the separate copied-fixture review correction, only the three remaining
+  additional-version matrix cases may use a ninety-second test limit. Run one
+  case per 120-second cohort within one fresh 600-second aggregate, retaining
+  a 510-second work boundary and ninety-second cleanup reserve. Helpers stay
+  capped at thirty seconds and analyzers at 120 seconds; existing resource and
+  protected-allocation limits are unchanged. Do not replay the passing baseline
+  or prior twenty-case packet. No SDK changes, native IPC, production activation
+  or installed rollout is authorized.
+- If still required to preserve commit provenance for that prerequisite PR,
+  one backup and tree-preserving soft squash of only the owning worktree's
+  unpublished commits is authorized, retaining all authors and both standard
+  trailers. No hard reset, amendment, discarded changes, deployed-runtime
+  patch/update or review/CI bypass is authorized.
 - No blanket ignores, unchecked first-party substitutes or permanent pending/basic cohorts count as completion.
 - Plugin self-provisioning is being retired, with service implementations
   ultimately distributed outside Copilot plugin payloads. Qualification must
@@ -293,7 +328,10 @@ rewrite.
   all 73 declared projects and 8,681 physical files at `b2b52122`, including the
   zero-physical-file pending vendored-library project. Remeasure against the
   current merged tree rather than treating a historical denominator as fixed.
-  This recurring and final portfolio gate remains open.
+  The 2026-11-13 merged snapshot at `12294924` reconciles all 74 projects and
+  9,196 physical files: 43 strict projects, 477 strict files, 31 pending,
+  zero basic and zero unclassified. This recurring and final portfolio gate
+  remains open.
 - [x] Actual MyPy subprocess controls prove an incompatible argument/return fails basic mode and missing annotations/bare generics fail strict mode.
 - [ ] Local and CI use identical pinned checker, dependencies, project config and interpreter/platform targets; unknown source/setup errors fail visibly.
 - [x] Changed-scope checks include working-tree edits and affected activated consumers; changes to checker/config/workflows cannot skip enforcement.
