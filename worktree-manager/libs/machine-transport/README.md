@@ -90,6 +90,12 @@ facts: observed `hostname`, physical `machine`, actual `environment`, one-term
 `execution_machine` and optional `customization_key`. The caller supplies the
 current OS/substrate observations and, when applicable, its existing configured
 binding. Missing-file handling and configuration provenance remain caller-owned.
+With no explicit configured binding, a registry entry's declared hostname is
+authoritative for observation matching. A logical key, alias or physical-family
+sibling cannot override a different explicit hostname. An otherwise-derived
+name that collides with that foreign entry is rejected, not registered under
+the entry's identity. Explicit installation bindings retain their separate
+selection semantics.
 An empty map or a map containing only other machines does not deny this local
 context. A matching map can customize physical and execution names. An observed
 physical hostname resembling `-wsl`, `-win` or a parenthesized environment label

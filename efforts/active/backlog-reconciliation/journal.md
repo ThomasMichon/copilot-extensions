@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-13 - Finite source completions and existing receivers](journal/2026/11.13-finite-source-and-existing-receivers.md)
+
 - [2026-11-13 - Current contracts and exact-dedup proposal](journal/2026/11.13-current-contracts-and-dedup-proposal.md)
 
 - [2026-11-13 - Loader/report source and accountability proposal](journal/2026/11.13-loader-report-source-and-accountability-proposal.md)

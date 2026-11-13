@@ -10,7 +10,7 @@ exclude-newer = "7 days"
 # dependency-confusion; the import module is ``machine_transport``.
 # Mirrors agent-remote-login-shell / agent-procutil.
 name = "agent-machine-transport"
-version = "0.1.3-dev1"
+version = "0.1.4-dev1"
 description = "Shared machines.yaml registry parsing, canonicalized local-machine identity, and local-vs-SSH transport resolution across Copilot CLI plugins"
 readme = "README.md"
 license = "MIT"
