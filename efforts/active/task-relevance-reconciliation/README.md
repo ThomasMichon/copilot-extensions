@@ -193,8 +193,11 @@ merged plan does not establish running adoption.
       merged in #12453. A fresh synthetic original-owner composition now
       qualifies busy refusal/retry, guarded finalization, abandonment and
       independent native/workspace conclusion through that assembly.
-      Production cohorts, other owner states and recovered-owner qualification
-      remain open; source/native credit does not close the aggregate item.
+      Local exited-client recovery and cross-generation stale-host settlement
+      source merged in #12472; its journal preserves frozen-source recovered-owner
+      composition separately from the concurrent index controls. Production
+      cohorts and the remaining owner/recovery states stay open; this source/native
+      credit does not close the aggregate item.
       Whole-container timing is not isolated admission-latency or concurrent
       running acceptance, and no production activation is implied.
 - [ ] Publish receiver support before enabling new callers; document baseline,
@@ -246,6 +249,9 @@ operator's explicit bulk reset; it must not inherit that reset's broad discard
 authority. Add no universal attestation layer or duplicate lifecycle engine.
 
 ## Journal
+
+- [POSIX retained-owner construction](journal/2026/11.13-shell-retention.md):
+  qualify fresh pinned Bridge builds without changing historical completed slots.
 
 - [2026-11-12 - Receiver delivery](journal/2026/11.12-receiver-delivery.md):
   architecture, internal ownership, original-owner delivery and effective-source
