@@ -127,22 +127,24 @@ class QueueRelevanceMixin:
 
     def prepare_relevance_closeout(
         self, task_id: str, *, request_id: str, worker_id: str, native_id: str,
-        expected_generation: int,
+        expected_generation: int, authority_guard: Callable[[], None] | None = None,
     ) -> dict:
         from .queue_relevance_readiness import prepare
         return prepare(
             self, task_id, request_id=request_id, worker_id=worker_id, native_id=native_id,
             expected_generation=expected_generation,
+            authority_guard=authority_guard,
         )
 
     def finish_relevance_closeout(
         self, task_id: str, *, request_id: str, worker_id: str, native_id: str,
-        expected_generation: int,
+        expected_generation: int, authority_guard: Callable[[], None] | None = None,
     ) -> CompletionOutcome:
         from .queue_relevance_acknowledgement import finish
         return finish(
             self, task_id, request_id=request_id, worker_id=worker_id, native_id=native_id,
             expected_generation=expected_generation,
+            authority_guard=authority_guard,
         )
 
     def relevance_snapshot(

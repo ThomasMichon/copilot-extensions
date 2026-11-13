@@ -218,7 +218,9 @@ class WorktreeRelationshipWriter:
             raise TaskError("original relationship request is inconsistent; assignment retained")
         return workspace, original
 
-    def bind_request(self, request: dict) -> RelationshipWriter:
+    def bind_request(
+        self, request: dict, *, authority_guard: Callable[[], None] | None = None,
+    ) -> RelationshipWriter:
         """Bind one audited request without sharing mutable callback state."""
         workspace, original = self._validated_request(request)
         admission = self._admit_request
@@ -251,7 +253,10 @@ class WorktreeRelationshipWriter:
             ):
                 raise TaskError("relationship operation conflicts with its original request")
             admission(workspace, dict(self._writer_identity), copy.deepcopy(original))
-            result = self._write(workspace, operation, copy.deepcopy(payload))
+            result = self._write(
+                workspace, operation, copy.deepcopy(payload),
+                **({"authority_guard": authority_guard} if authority_guard is not None else {}),
+            )
             phase = (
                 "absent" if operation == "inspect" and result.get("absent") is True
                 else {"bind": "bound", "close": "closed"}.get(operation)
@@ -364,6 +369,7 @@ class WorktreeRelationshipWriter:
     def _run(
         self, arguments: list[str], payload: dict | None = None, *,
         prefix: Sequence[str] | None = None, owner: str = "Worktrees",
+        authority_guard: Callable[[], None] | None = None,
     ) -> dict:
         deadline = time.monotonic() + self.timeout
         if not _cleanup_lock.acquire(timeout=max(0.0, deadline - time.monotonic())):
@@ -380,6 +386,8 @@ class WorktreeRelationshipWriter:
             try:
                 input_text = json.dumps(payload) if payload is not None else ""
                 env = agent_worktrees_environment()
+                if authority_guard is not None:
+                    authority_guard()
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     raise TaskError(f"selected {owner} request budget expired during cleanup")
@@ -425,7 +433,10 @@ class WorktreeRelationshipWriter:
             raise TaskError("relationship writer requires its bound original request")
         return self._write(workspace, operation, payload)
 
-    def _write(self, workspace: AssignmentWorkspace, operation: str, payload: dict) -> dict:
+    def _write(
+        self, workspace: AssignmentWorkspace, operation: str, payload: dict, *,
+        authority_guard: Callable[[], None] | None = None,
+    ) -> dict:
         self.admit_workspace(workspace, dict(self._writer_identity))
         if operation not in {"reserve", "bind", "inspect", "close"}:
             raise TaskError("unsupported task relationship operation")
@@ -476,6 +487,7 @@ class WorktreeRelationshipWriter:
                 "--json",
             ],
             {**payload, **expected},
+            **({"authority_guard": authority_guard} if authority_guard is not None else {}),
         )
         if not (
             result.get("ok") is True

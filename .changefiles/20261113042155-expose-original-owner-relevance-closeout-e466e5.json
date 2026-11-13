@@ -1,0 +1,9 @@
+{
+  "comment": "Expose original-owner relevance closeout with scoped retry authorization and independent finalization checks",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}
