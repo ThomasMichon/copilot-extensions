@@ -134,6 +134,12 @@ def test_original_snapshot_survives_restart_heartbeat_alias_and_mutable_targetin
             assert response.json()["dispatch_origin"] == origin()
             rows = client.get("/api/v1/live-sessions").json()["live_sessions"]
             assert len(rows) == 1 and rows[0]["dispatch_origin"] == origin()
+            cold.execute_write("UPDATE live_sessions SET status='expired' WHERE session_id='native'")
+            retained = client.get(
+                "/api/v1/live-sessions", params={"include_dead": True},
+            ).json()["live_sessions"]
+            assert len(retained) == 1 and retained[0]["dispatch_origin"] == origin()
+            assert client.get("/api/v1/live-sessions/native").json()["dispatch_origin"] == origin()
     finally:
         cold.close()
 

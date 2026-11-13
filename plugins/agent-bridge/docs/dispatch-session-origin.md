@@ -3,6 +3,9 @@
 The [session acquisition](session-acquisition.md) receiver accepts optional
 `dispatch_origin` metadata for local ACP and CLI-native sessions. This is a provider expansion,
 not automatic Dispatch enrollment or permission to retire a session.
+The [correlation guide](../../agent-dispatch/docs/cohort-correlation.md)
+maps these views to Dispatch attachment history and Worktrees' original
+allocation record.
 
 ## Contract and scope
 
