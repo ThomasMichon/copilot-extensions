@@ -69,7 +69,7 @@ AFFECTED = (
         "restored_app.py", "app.py", "runtime_transfer.py",
         "dispatch_origin.py", "persisted_session_views.py", "acquisition_plugins.py",
         "acquisition_local_launch.py", "creation_local_launch.py",
-        "worktree_native_resume.py", "singleton_resume.py", "routes/dispatch_tasks.py",
+        "worktree_native_resume.py", "singleton_resume.py", "agent_registry_resolver.py", "routes/dispatch_tasks.py",
         "routes/worktrees.py",
     )),
     *("plugins/agent-worktrees/src/agent_worktrees/" + name for name in (
@@ -155,6 +155,7 @@ PROBES = {
     "test_unsupported_target_refuses_before_worktree_effects": 1,
     "test_acquisition_venue_refusal_is_terminal_before_launch_gating": 3,
     "test_worktree_resume_responses_keep_known_origin": 4,
+    "test_real_resolver_refuses_elevation_before_relay_start": 10,
     "test_accepted_behind_question_is_explicit_not_failed_and_keyed_retry_is_one_row": 1,
     "test_consumption_releases_wait_without_turn_end_or_reply": 1,
     "test_missing_partial_stale_or_reincarnated_observer_is_unknown": 1,

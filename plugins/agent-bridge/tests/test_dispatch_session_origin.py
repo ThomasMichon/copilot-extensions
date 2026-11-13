@@ -300,3 +300,63 @@ def test_worktree_resume_responses_keep_known_origin(
         assert response.json()["dispatch_origin"] == origin()
     assert inspect(fixture.db.get_session(session.session_id)) == origin()
     fixture.manager.start_session.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("entry", ["acquisition", "creation"])
+@pytest.mark.parametrize("name", [
+    "task-worker", "worker-alias", "admin:task-worker",
+    "example@task-worker", "example@admin:task-worker",
+])
+async def test_real_resolver_refuses_elevation_before_relay_start(
+    creation_rig, monkeypatch, entry, name,
+):
+    from unittest.mock import AsyncMock, Mock
+
+    from agent_bridge import agent_registry, elevated, hosting_policy
+    from agent_bridge.admin_resolver import AdminResolver
+    from agent_bridge.agent_registry import AgentConfig, AgentResolver
+
+    rig = creation_rig
+    resolver = AgentResolver({
+        "task-worker": AgentConfig(
+            name="task-worker", aliases=["worker-alias"], requires_admin=True,
+            project="test-project", cwd=rig.target.cwd,
+        ),
+    }, {})
+    resolver.register_namespace_resolver(AdminResolver(resolver))
+    monkeypatch.setattr(resolver, "refresh_provider_resolvers", lambda: None)
+    monkeypatch.setattr(agent_registry, "resolve_repo_remote", lambda _repo: "https://example.com/project")
+    monkeypatch.setattr(hosting_policy, "require_target_hosting", AsyncMock())
+    monkeypatch.setattr(elevated, "relay_applicable", lambda _required: True)
+    relay = Mock(side_effect=AssertionError("unsupported origin must not start a privileged relay"))
+    monkeypatch.setattr(elevated, "ensure_running", relay)
+    if entry == "acquisition":
+        original_resolve = rig.resolver.resolve_async
+
+        async def resolve(target, **kwargs):
+            if target == "dispatch:task-a":
+                return await original_resolve(target, **kwargs)
+            return await resolver.resolve_async(target, **kwargs)
+
+        rig.resolver.resolve_async = resolve
+        with pytest.raises(AcquisitionRefused) as refused:
+            await rig.runtime.acquire(req(target=name, dispatch_origin=origin()))
+        assert refused.value.code == "dispatch_origin_unsupported"
+        assert refused.value.effect == "not_started"
+    else:
+        app = FastAPI()
+        app.include_router(router)
+        app.state.session_manager = rig.manager
+        app.state.resolver = resolver
+        with TestClient(app) as client:
+            response = client.post("/api/v1/sessions", json={
+                "agent": name, "worktree_id": "worktree-a", "creation_key": "logical-work",
+                "dispatch_origin": origin(),
+            })
+        assert response.status_code == 400, response.text
+        assert "elevated targets" in response.json()["detail"]
+    relay.assert_not_called()
+    assert not rig.db.list_sessions()
+    assert not rig.db.execute_read("SELECT 1 FROM acquisition_launch_gates")
+    assert not rig.db.execute_read("SELECT 1 FROM workspace_embodiments")

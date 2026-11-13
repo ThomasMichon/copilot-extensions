@@ -40,6 +40,8 @@ from test_dispatch_session_origin import (
     as test_acquisition_venue_refusal_is_terminal_before_launch_gating,
     test_worktree_resume_responses_keep_known_origin
     as test_worktree_resume_responses_keep_known_origin,
+    test_real_resolver_refuses_elevation_before_relay_start
+    as test_real_resolver_refuses_elevation_before_relay_start,
 )
 from fastapi.testclient import TestClient
 

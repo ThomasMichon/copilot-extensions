@@ -29,12 +29,19 @@ async def prepare_target(runtime, req, row, *, target_factory, bound_charter, ap
         return await runtime._local_preparation_target(req, row, target), {}
     try:
         target = await runtime.resolver.resolve_async(
-            req.target, **({"activate": False} if req.dispatch_origin is not None else {}),
+            req.target, **(
+                {"activate": False, "allow_elevation": False}
+                if req.dispatch_origin is not None else {}
+            ),
         )
     except KeyError as exc:
         raise AcquisitionRefused(
             "target_unavailable", f"Acquisition target '{req.target}' is not registered",
         ) from exc
+    except ValueError as exc:
+        if req.dispatch_origin is None:
+            raise
+        raise AcquisitionRefused("dispatch_origin_unsupported", str(exc)) from exc
     if target.type != "local":
         raise AcquisitionRefused("venue_unsupported", "this acquisition adapter is local only")
     bound = (row.get("bound_agent") or "").strip()

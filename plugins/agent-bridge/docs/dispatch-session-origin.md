@@ -34,6 +34,9 @@ sessions endpoint) requires an agent, creation key and prepared worktree ID.
 Provider-native, remote, elevated, explicit-directory and parity-fault forms
 are not supported. Metadata-bearing named-target resolution does not activate
 a provider before local admission.
+The resolver also refuses explicit `admin:` venues and bare or aliased
+`requires_admin` targets before privileged relay startup, including repo-bound
+forms. Ordinary requests retain the resolver's existing elevation behavior.
 
 Only a newly created ACP session receives the annotation. Session start
 validates and detaches it before preparation, then persists it in the existing
@@ -64,6 +67,8 @@ equivalent metadata-enforcing fallback. No baseline form is retired here.
 `tests/test_dispatch_session_origin.py` exercises strict nested input,
 original request persistence, HTTP keyed creation, changed/dropped replay facts,
 restart, mutable targeting, reused legacy sessions and pre-effect venue refusal.
+Real-resolver controls exercise both HTTP creation and acquisition without
+calling the privileged startup owner.
 Run it with the existing contained plugin runner alongside
 `test_acquisition_runtime.py` and `test_workspace_creation.py`.
 These are synthetic native/owner source controls, not installed-runtime,

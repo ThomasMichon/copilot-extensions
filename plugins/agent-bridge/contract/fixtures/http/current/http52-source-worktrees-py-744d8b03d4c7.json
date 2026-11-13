@@ -1,20 +1,16 @@
 {
-  "evidence_family": "http52-unchanged-source-link-v1",
-  "preserved_from": {
-    "path": "plugins/agent-bridge/contract/fixtures/http/current/http51-source-worktrees-py-744d8b03d4c7.json",
-    "sha256": "eed3f52bd00cbeb9c0d043f8b1e1352caa109cb422c6c80ee65db1502963714f"
-  },
-  "advertisement_evidence": {
+  "evidence_family": "http52-shared-asgi-v1",
+  "shared_operation_evidence": {
     "path": "plugins/agent-bridge/contract/fixtures/http/current/http52-owner-membership.json",
-    "sha256": "f8eaf556864b4e262f4341690f22de0c7c2976081b89cfad9a126d2e20ea91cf"
+    "sha256": "5291b4b7d9fdb8d0dd352839a6c7de29257ba96a10d5d663d9771470bb656a73"
   },
-  "scope": "unchanged source and immutable prior operation; no new runtime observation",
+  "scope": "shared named ASGI portfolio, not an independent capture",
   "captured_from": {
-    "commit": "64d5c35ed8e9dc9a2d1c500a5b970648697d5a73",
+    "commit": "189b5b3aceed8941444cac47edec3ce9a5a0d9ce",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 52,
     "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktrees.py",
-    "source_git_blob": "7fa33c55151c13a6f093cf829298a3c66e3e2616",
-    "source_sha256": "a07369bc24b429039e36cc8af0fb58d696918aeb7248ec4fc75d2125779fd408"
+    "source_git_blob": "0f1c4515ab4181525ff47471599f60d057f8eca9",
+    "source_sha256": "b6df19c8001c23c0b99b58b3827d9524b939d38915ea60b0a347f50910dab3ce"
   }
 }

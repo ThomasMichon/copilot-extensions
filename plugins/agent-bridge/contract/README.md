@@ -23,10 +23,11 @@ historical binary rollback or native SDK evidence.
 
 ## Current HTTP-52 owner-membership evidence
 
-The optional `dispatch_acp_session_origin: 1` expansion adds 29 source controls
+The optional `dispatch_acp_session_origin: 1` expansion adds 39 source controls
 for strict original assignment metadata, pre-native first-save persistence,
 keyed HTTP replay, legacy omission, native-reuse preservation, unsupported
-venue refusal before launch gating and ordinary/singleton resume responses.
+venue refusal before launch gating, real-resolver refusal before privileged
+relay startup and ordinary/singleton resume responses.
 The current independent vector observes the actual daemon capability. The
 owning declaration includes the origin codec, immutable-config projection and
 affected creation/acquisition/resume seams; HTTP generation 52 and historical

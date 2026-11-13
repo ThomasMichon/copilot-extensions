@@ -635,6 +635,7 @@ async def _start_session_admitted(req: StartSessionRequest, request: Request):
             target = await resolver.resolve_async(
                 agent_name, sender_repo=req.sender_repo,
                 activate=req.worktree_writer is None and req.dispatch_origin is None,
+                **({"allow_elevation": False} if req.dispatch_origin is not None else {}),
             )
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc))
