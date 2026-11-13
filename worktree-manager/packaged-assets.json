@@ -184,6 +184,7 @@
         "agent-procutil/src/agent_procutil/owned_process.py",
         "agent-procutil/src/agent_procutil/process_retirement.py",
         "agent-procutil/src/agent_procutil/python_cache.py",
+        "agent-procutil/src/agent_procutil/python_cache_permissions.py",
         "agent-procutil/src/agent_procutil/retirement_custody.py",
         "agent-procutil/src/agent_procutil/startup.py",
         "agent-procutil/src/agent_procutil/streaming.py",

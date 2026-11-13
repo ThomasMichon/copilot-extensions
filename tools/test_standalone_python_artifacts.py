@@ -753,6 +753,10 @@ def test_manager_source_materializer_imports_from_isolated_wheel_resources(tmp_p
 import pathlib, sys
 tools = pathlib.Path(sys.argv[1])
 sys.path.insert(0, str(tools))
+sys.path.insert(0, str(tools / "tools"))
+from source_preparation_process import procutil_module
+permissions = procutil_module("python_cache_permissions")
+assert pathlib.Path(permissions.__file__).is_relative_to(tools / "libs" / "agent-procutil")
 import materialize_main
 root = pathlib.Path(sys.argv[2])
 log = materialize_main.materialize(root, canonical_root=root)
