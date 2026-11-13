@@ -1,0 +1,9 @@
+{
+  "comment": "Carry original Dispatch assignments through ordinary keyed creation with selected-peer negotiation.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}
