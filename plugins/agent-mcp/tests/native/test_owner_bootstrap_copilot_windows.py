@@ -53,7 +53,7 @@ def _pin(native, pid, birth, rights):
     return handle
 
 
-async def _settle_client(native, client):
+async def _settle_client(native, client, stderr=None):
     if client is None:
         return
     natural = await asyncio.to_thread(native.k.WaitForSingleObject, client, 15000) == 0
@@ -63,7 +63,11 @@ async def _settle_client(native, client):
         native.require(terminate(client, 91))
         assert await asyncio.to_thread(native.k.WaitForSingleObject, client, 10000) == 0
     assert natural, "Exact-owned cleanup succeeded only after forced native exit"
-    assert _exit_code(native, client) == 0
+    code = _exit_code(native, client)
+    diagnostic = ""
+    if code != 0 and stderr is not None:
+        diagnostic = (await asyncio.wait_for(asyncio.shield(stderr), 10)).decode(errors="replace")
+    assert code == 0, diagnostic
 
 
 def _environment(home):
@@ -140,7 +144,7 @@ def _provider(root):
 
 def _publisher(
     root, workspace, executable, configuration, environment, adopted,
-    *, server="owner-fixture", tools=(),
+    *, server="owner-fixture", tools=(), controlled_wait=False,
 ):
     source = Path(owner_exec.__file__)
     scripts = source.resolve().parents[3] / "agent-worktrees" / "scripts"
@@ -149,6 +153,44 @@ def _publisher(
         "configuration": configuration, "environment": environment,
     }), encoding="utf-8")
     script = root / "publisher.ps1"
+    launch = (
+        " $child=New-AwNativeSeedSuspendedProcess $info -InheritedHandles @($publisher.InheritedHandle)\n"
+        " if(-not $publisher.Publish($child.CreationHandle,$child.Process.Id,$child.Birth))"
+        "{throw 'publication unconfirmed'}\n"
+        " $receipt=@{pid=$child.Process.Id;birth=$child.Birth;binding=$publisher.Binding}\n"
+        " $publisher.Dispose()\n"
+        " if(-not $child.Resume()){throw 'resume unconfirmed'}\n"
+        " ConvertTo-Json -InputObject $receipt -Compress | Write-Output\n"
+    )
+    if controlled_wait:
+        launch = (
+            f" . {_literal(scripts / 'native-seed-boundary.ps1')}\n"
+            " function Get-AwNativeSeedRuntime {param([string]$Root) return @{Python='fixture';Bootstrap='fixture'}}\n"
+            " function Test-AwHeadedPreparation {return $false}\n"
+            " $script:FixtureArgv=@($info.FileName)+@($info.ArgumentList)\n"
+            # Only finite admission is substituted; native creation, publication,
+            # standard streams and the original wait all use the real owner.
+            " function Invoke-AwNativeSeedPhase {\n"
+            "  param([string]$Root,[string[]]$Arguments)\n"
+            "  if($Arguments[1] -eq 'prepare'){return @{\n"
+            "   version=1;argv=$script:FixtureArgv;environment=[pscustomobject]$plan.environment;\n"
+            "   attempt_id=('a'*32);resolution_id=('b'*32);operation_id=('c'*32);parent_id=$null\n"
+            "  }}\n"
+            "  return @{recorded=$true}\n"
+            " }\n"
+            " $capture={param($handle,$createdPid,$birth)\n"
+            "  if(-not $publisher.Publish($handle,$createdPid,$birth)){return $false}\n"
+            "  $receipt=@{pid=$createdPid;birth=$birth;binding=$publisher.Binding}\n"
+            f"  [IO.File]::WriteAllText({_literal(root / 'launch-owner.json')},"
+            "(ConvertTo-Json -InputObject $receipt -Compress))\n"
+            "  $publisher.Dispose()\n"
+            "  return $true\n"
+            " }.GetNewClosure()\n"
+            f" exit (Invoke-AwNativeSeedBackend -Root {_literal(root)} "
+            f"-Record {_literal(root / 'record.yaml')} -SeedId fixture "
+            "-Command $script:FixtureArgv -RequireDirectClient -BeforeResume $capture "
+            "-InheritedHandles @($publisher.InheritedHandle))\n"
+        )
     script.write_text(
         "$ErrorActionPreference='Stop'\n"
         f". {_literal(scripts / 'native-seed-process.ps1')}\n"
@@ -174,14 +216,8 @@ def _publisher(
         + ",'--additional-mcp-config')){$info.ArgumentList.Add($arg)}\n"
         " $info.ArgumentList.Add((ConvertTo-Json -InputObject $plan.configuration -Depth 20 -Compress))\n"
         + "".join(f" $info.ArgumentList.Add({_literal('--allow-tool=' + tool)})\n" for tool in tools)
-        + " $child=New-AwNativeSeedSuspendedProcess $info -InheritedHandles @($publisher.InheritedHandle)\n"
-        " if(-not $publisher.Publish($child.CreationHandle,$child.Process.Id,$child.Birth))"
-        "{throw 'publication unconfirmed'}\n"
-        " $receipt=@{pid=$child.Process.Id;birth=$child.Birth;binding=$publisher.Binding}\n"
-        " $publisher.Dispose()\n"
-        " if(-not $child.Resume()){throw 'resume unconfirmed'}\n"
-        " ConvertTo-Json -InputObject $receipt -Compress | Write-Output\n"
-        "} finally {if($child){$child.Dispose()};$publisher.Dispose()}\n",
+        + launch
+        + "} finally {if($child){$child.Dispose()};$publisher.Dispose()}\n",
         encoding="utf-8",
     )
     return script
@@ -240,8 +276,9 @@ async def test_mismatched_identity_is_closed_without_becoming_a_cleanup_target()
 
 
 @pytest.mark.asyncio
-async def test_offline_native_client_consumes_delayed_snapshot_after_publisher_exit(
-    tmp_path, record_testsuite_property,
+@pytest.mark.parametrize("controlled_wait", [False, True], ids=["publisher-exit", "existing-wait-owner"])
+async def test_offline_native_client_consumes_creation_bound_snapshot(
+    tmp_path, record_testsuite_property, controlled_wait,
 ):
     executable = os.environ.get("COPILOT_NATIVE_TEST_EXECUTABLE")
     if not executable or not shutil.which("pwsh"):
@@ -269,7 +306,11 @@ async def test_offline_native_client_consumes_delayed_snapshot_after_publisher_e
             configuration = owner_exec.windows_overlay(
                 configuration, ["owner-fixture"], binding="a" * 64,
             )
-        script = _publisher(root, workspace, executable, configuration, environment, adopted)
+        retained_owner = controlled_wait and adopted
+        script = _publisher(
+            root, workspace, executable, configuration, environment, adopted,
+            controlled_wait=retained_owner,
+        )
         started = time.monotonic()
         process = await asyncio.create_subprocess_exec(
             shutil.which("pwsh"), "-NoLogo", "-NoProfile", "-File", str(script),
@@ -281,11 +322,29 @@ async def test_offline_native_client_consumes_delayed_snapshot_after_publisher_e
         client = server = None
         stderr = asyncio.create_task(process.stderr.read())
         try:
-            line = await asyncio.wait_for(process.stdout.readline(), 30)
-            assert line, (await asyncio.wait_for(stderr, 5)).decode(errors="replace")
-            published = json.loads(line)
+            if retained_owner:
+                publication = root / "launch-owner.json"
+                published = None
+                for _ in range(600):
+                    try:
+                        published = json.loads(publication.read_text(encoding="utf-8"))
+                    except (OSError, ValueError):
+                        pass
+                    if published is not None:
+                        break
+                    assert process.returncode is None, (await stderr).decode(errors="replace")
+                    await asyncio.sleep(.05)
+                assert published is not None, "Existing native owner never published its actual child"
+            else:
+                line = await asyncio.wait_for(process.stdout.readline(), 30)
+                assert line, (await asyncio.wait_for(stderr, 5)).decode(errors="replace")
+                published = json.loads(line)
             client = _pin(native, published["pid"], published["birth"], 0x101001)
-            assert await asyncio.to_thread(native.k.WaitForSingleObject, producer, 10000) == 0
+            if retained_owner:
+                assert native.k.WaitForSingleObject(producer, 0) == 258
+                assert published["pid"] != process.pid
+            else:
+                assert await asyncio.to_thread(native.k.WaitForSingleObject, producer, 10000) == 0
             assert not receipt_file.exists()
             with owner_snapshot.WindowsOrigin(published["binding"]) as owner:
                 assert (owner.pid, owner.birth) == (published["pid"], published["birth"])
@@ -294,7 +353,9 @@ async def test_offline_native_client_consumes_delayed_snapshot_after_publisher_e
                 "clientInfo": {"name": "owner-bootstrap-fixture", "version": "1"},
             })
             assert initialized["protocolVersion"] == 1
-            mode = "adopted" if adopted else "ordinary"
+            mode = ("existing_wait_" if controlled_wait else "publisher_exit_") + (
+                "adopted" if adopted else "ordinary"
+            )
             record_testsuite_property(
                 "windows_" + mode + "_acp_ready_ms", (time.monotonic() - started) * 1000,
             )
@@ -325,7 +386,7 @@ async def test_offline_native_client_consumes_delayed_snapshot_after_publisher_e
         finally:
             process.stdin.close()
             try:
-                await _settle_client(native, client)
+                await _settle_client(native, client, stderr)
                 assert await asyncio.wait_for(process.wait(), 10) == 0
                 remaining = await asyncio.wait_for(process.stdout.read(), 5)
                 for line in remaining.splitlines():
@@ -342,7 +403,7 @@ async def test_offline_native_client_consumes_delayed_snapshot_after_publisher_e
                         "finalizer": json.loads(finalizer.read_text()) if finalizer.exists() else None,
                     }
                     record_testsuite_property(
-                        "windows_" + ("adopted" if adopted else "ordinary") + "_mcp_settlement",
+                        "windows_" + mode + "_mcp_settlement",
                         json.dumps(settlement, sort_keys=True),
                     )
                     if settlement["finalizer"] is not None:
