@@ -368,8 +368,21 @@ handover. Preserve held sessions and the separate pre-feature adoption hold.
       [provider controls](journal/2026/11.10-explicit-owner-cli.md#windows-native-owner-section-provider).
       #12330 adds the opt-in, in-process pre-execution seam to the existing
       native creation/wait owner, including actual native refusal and packaged
-      companion controls. Section publication, anonymous bootstrap integration,
-      production caller selection and actual-client acceptance remain separate.
+      companion controls.
+    - [x] **Windows independent section snapshot:** #12345 qualifies the
+      in-process native publisher and stdlib-only pinned reader through
+      publisher-process exit, protected principal boundary, read-only
+      inheritance, malformed/owner refusal and exact cleanup, including actual
+      wheel/source-distribution preservation. See the
+      [source result](journal/2026/11.10-explicit-owner-cli.md#windows-independent-publication-and-snapshot-source-controls).
+      Production caller selection and actual-client/installed acceptance
+      remain open.
+    - [ ] **Windows anonymous actual-start bootstrap:** qualify the embedded
+      native snapshot before installed-provider discovery, physical receiver
+      selection and untouched stdio/context. Only pre-creation failure may
+      fall back; accepted-child exits and wait errors must never replay.
+      Controlled source packages are not actual-client or installed acceptance;
+      advertisement and production caller selection remain disabled.
   - [x] **Explicit Linux exec caller:** capture the exec owner's native pair
     and pass a sealed, session-only overlay for explicitly named configured
     entries, with actual-start discovery bound to a physical optional receiver.
