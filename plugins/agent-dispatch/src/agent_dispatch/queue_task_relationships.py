@@ -229,6 +229,8 @@ class QueueTaskRelationshipsMixin:
         )
         event_id = cursor.lastrowid
         identity = {"assignment_event_id": event_id, "worker_id": worker_id}
+        from .queue_assignment_cohort import capture_cohort
+
         request = {
             "request_id": secrets.token_hex(16),
             "event_id": event_id,
@@ -239,6 +241,7 @@ class QueueTaskRelationshipsMixin:
             "authority": authority,
             "namespace": f"dispatch-{authority}-task",
             "identity": identity,
+            "cohort": capture_cohort(conn, task, reservation_key=reservation_key),
             "recovery": {
                 "schema": "dispatch-task-assignment",
                 "version": 2,

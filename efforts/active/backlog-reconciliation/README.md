@@ -342,6 +342,13 @@ the non-public approval conversation.
 
 ## Plan
 
+The [claim-kind and eighteen-contract study](journal/2026/11.12-claim-kind-credit-and-current-contracts.md)
+retains 83 requirement/admission groups, fourteen whole unfinished outcomes
+and four whole-source provenance gaps. #5963's fixed `derived` admission is
+actual source credit, not general contributed-kind journaling. Current
+#5873-chain metadata confirms substantive provenance boundaries; no closure,
+transfer or custody release follows. The full queue remains 904 open.
+
 The [approved-source and eighteen-contract checkpoint](journal/2026/11.12-approved-source-retirement-and-contract-study.md)
 records 94 requirement groups, thirteen retained whole outcomes, four
 whole-source qualification gaps and #5910's independently verified
@@ -3249,6 +3256,13 @@ sources, transferring owners or turning partial/planning gains into completion.
   normal publication flow.
 
 ## Validation Plan
+
+The [current-contract audit](journal/2026/11.12-claim-kind-credit-and-current-contracts.md)
+records whole originals/discussions, source-range versus whole-ROOT coverage,
+actual receipt limits and #5963's exact live nonterminal correction. Literal
+source-token conditions, later accepted supersessions, unknown effects and
+current provenance holds remain; no synthetic/native or whole-request pass
+is inferred from source credit.
 
 The [approved-source receiving audit](journal/2026/11.12-approved-source-retirement-and-contract-study.md)
 distinguishes actual reviewed #10370 delivery and complete current ROOT
