@@ -131,26 +131,28 @@ The following implementation decomposition is **agent-recommended**.
   seams with #11377 and #3336; preserve their active PRs and source custody.
   Proceed independently on the assigned new witness/profile files rather than
   make Main-PR completion or a blanket acknowledgement a prerequisite.
-- [ ] Select the representative generic harness and its complete declared suite
+- [x] Select the representative generic harness and its complete declared suite
   installation recipe from canonical owners. Enumerate what is installed and
   enabled; a manually assembled Manager/engine pair cannot be called a suite
   installation without proving the selected suite closure.
   Frozen payload delivery is verified by #11972 and exact-source run
   42933306312 for all 24 declared payloads. Run 43014684583 additionally
   verifies complete fresh runtime construction and actual Machines readiness.
-  Full fresh lifecycle acceptance remains unverified; this item stays open.
+  Run 43352995266 at `40f1e6c4bd` completes the fresh selected-suite lifecycle
+  with all 24 payloads and 13 installed runtime origins. This closes source
+  profile selection, not authentic-baseline upgrade or promotion admission.
 
 ### Phase 2 - Extend the authentic installed consumer
 
-- [ ] Reuse the canonical candidate installation, provenance and native
+- [x] Reuse the canonical candidate installation, provenance and native
   terminal owners in fresh private HOME, config, registry and mux state.
   Keep configured feed/security policy; do not borrow selected host runtimes.
 - [x] Invoke generated project entry points, observe the installed Manager,
   and use normal UI controls for Create. Prove an actual Git worktree,
   installed launch resolution, real Copilot readiness and a deterministic
   request/response through the local inference endpoint.
-  Installed-core proof: #11864, exact-source run 42892225611. Complete selected
-  suite installation remains a separate open item above.
+  Installed-core proof: #11864, exact-source run 42892225611. Selected-suite
+  source proof: run 43352995266 at `40f1e6c4bd`; promotion remains separate.
 - [x] Exit Copilot through its normal user flow, close and reopen Manager,
   select Resume, and prove the same worktree and durable conversation with a
   further endpoint-backed turn. Do not repair tracking or rewrite session IDs.
@@ -160,8 +162,10 @@ The following implementation decomposition is **agent-recommended**.
   Closing Manager or detaching its view preserves the original owner and its
   ability to complete another turn; no duplicate Copilot is admitted.
   The same installed-core run verifies native birth/lock ownership and detach.
-- [ ] Exercise the relevant cold and retained/warm backend states without
+- [x] Exercise the relevant cold and retained/warm backend states without
   allowing accidental reuse of a host server to supply success.
+  The same source-qualified fresh run covers cold Create and warm Open/Resume;
+  its normal/repair cases separately cover retained resident replacement.
 
 ### Phase 3 - Bind the complete result before publication
 
@@ -198,10 +202,10 @@ The following implementation decomposition is **agent-recommended**.
 
 ## Validation Plan
 
-- [ ] Fresh representative harness and authentic selected-suite installation:
+- [x] Fresh representative harness and authentic selected-suite installation:
   no source imports, preexisting completion state, hand-injected launch plan,
   direct low-level Create/Resume replacement or production-policy bypass.
-- [ ] Native Windows entry points traverse installed path resolution, actual
+- [x] Native Windows entry points traverse installed path resolution, actual
   admission, generated launch assets, real terminal and private PSMux. A Linux
   scenario alone cannot qualify the reported Windows failure classes.
 - [x] Real Manager Create yields the expected Git worktree and real Copilot
@@ -213,8 +217,9 @@ The following implementation decomposition is **agent-recommended**.
 - [x] A second Manager's Open attaches to the exact active owner rather than
   creating a replacement. Original process birth, session and pane identity
   remain consistent; detach/Manager exit leaves that session usable.
-  These three action/continuity items are verified by #11864's installed-core
-  run 42892225611; they do not close selected-suite or promotion acceptance.
+  These three action/continuity items were verified by #11864's installed-core
+  run 42892225611 and now by selected-suite source run 43352995266 at
+  `40f1e6c4bd`. They do not close frozen-candidate or promotion acceptance.
 - [ ] Install-success/entry-launch failure, launch/path-resolution refusal and
   fixture-scoped mux connection failure each fail the appropriate lifecycle
   phase. Expected-negative classification requires its specific observed
@@ -3116,3 +3121,53 @@ No current passing review, thread waiver or Windows qualification is inferred
 from the capture or unit/control results. Publish the coherent evidence and
 reconciliation fixes, then obtain actual required green CI before the one
 changed-query Windows attempt.
+
+### Source-qualified Windows positive at the approved query budget
+
+Run 43352995266, attempt 1, succeeds at exact source
+`40f1e6c4bd5576140cbdd1ce4fd66782ed3b636e` and candidate tree
+`a2b855f1812fa51f3e679b5b194220c1489fb99a`. Normal job 131648282804 takes
+17m10s, fresh 131648283254 takes 19m21s and repair 131648283478 takes 28m00s.
+All prepare, exercise, assertion and settlement stages return zero.
+This is the new query-five qualification, not a relabel of an earlier failure.
+
+Canonical artifacts 14005836320 (normal), 14005691626 (fresh) and
+14005613642 (repair) bind the actual run/source. Fresh setup and result
+identities agree. The installed Manager records verified candidate bytes and
+305 module observations; its selected profile enumerates 24 payloads and 13
+installed runtime origins. Machines observes all nine selected required
+outcomes with `requiredSatisfied: true`, no refused owners, no interruption
+and no apply operation. The result explicitly retains `source_admission:
+not-granted` and `upgrade: not-exercised`.
+
+The authentic Create/Open/detach/normal-exit/Resume outcomes all pass with one
+durable conversation and the expected distinct post-exit resumed native owner.
+The cleanup projection records seven settled daemon instances, all with
+`process-exit-observed`, zero unsettled and zero omitted. Independent final
+settlement reports no errors or remaining scheduled registrations.
+
+Normal and repair preserve all 14 sealed component slots through update and
+settlement: each has 28 unchanged full-file snapshot comparisons, zero added,
+removed or changed entries, and durable data/schema continuity. All seven
+resident successor transitions retain their old-before-new readiness ordering
+and normal old-process exit. The separate Index engine correctly remains
+alive with the same birth/version/generation during update; its retained
+observation is not misrepresented as a final exit result. Normal shutdown and
+fixture settlement are separately checked.
+
+The strict traces complete 3,097 normal, 2,053 fresh and 5,203 repair queries
+with zero scan failures or close errors. Each observes its armed window and
+stop marker and closes its owned CIM session. Maximum pipeline times are
+1,737 ms, 1,076 ms and 2,946 ms respectively. The 512-record diagnostic samples
+are truncated in all three cases; they remain bounded samples, not a claim
+of an untruncated process census. Fatal error policy is unchanged.
+
+This closes the source-profile and positive installed-consumer items above.
+Expected-negative consumer cases, authentic admitted-baseline upgrade,
+mandatory frozen-candidate enforcement and separate Main adoption remain open.
+The earlier native failures remain failures. Current-head CI 43351872835 also
+passes all three required jobs, but actual review still needs assessment and
+newer Dev changes make the PR conflicting. Those changes include the existing
+owner's canonical wheel-application installer integration; reconcile their
+actual contracts before publishing another head. Neither native nor HTTP-52
+evidence may be silently carried onto changed complete execution inputs.
