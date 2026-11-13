@@ -86,6 +86,20 @@ class SpawnReservationClientMixin:
             **options,
         ))
 
+    def bind_spawn_session_origin(
+        self, key: str, *, startup_revision: int, transport: str,
+    ) -> dict:
+        """Seal optional birth metadata through the selected reservation owner."""
+        from .client_errors import DispatchError
+
+        versions = self.pool_placement_contract().get("session_origin_binding_versions")
+        if not isinstance(versions, list) or not any(type(v) is int and v == 1 for v in versions):
+            raise DispatchError(426, "coordinator lacks session origin binding version 1")
+        return self._unwrap(self._http.post(
+            f"/spawn-reservations/{key}/session-origin",
+            json={"startup_revision": startup_revision, "transport": transport},
+        ))
+
     def record_created_agent(
         self, key: str, *, task_generation: int, agent_info: dict,
         worktree_record: dict | None = None, startup_invocation: dict | None = None,

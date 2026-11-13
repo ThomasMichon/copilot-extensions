@@ -167,6 +167,52 @@ matches the retained allocation evidence, and requires it for a cohort-v1
 creation. All original sessionless task, reservation, attempt, driver,
 supervisor, creating-machine and ownership checks still apply before prompting.
 
+## Original session-origin reservation
+
+The reservation owner independently retains `session_origin` in the Bridge
+`DispatchSessionOrigin` version-1 shape: original `task_id`, `reservation_key`
+and `cohort` (`dispatch-assignment-cohort`, version `1`). It captures the actual
+producer receipt and matching pool claim inside the original reservation
+transaction, before any body preparation. Failure rolls back the claim.
+This is a candidate birth input, not evidence that a native was created:
+Bridge's first-save session record alone identifies the actual session origin.
+Resuming an older session never backfills its origin.
+
+Session and workspace keys have different lifetimes. A new acquisition delivery
+belongs to its current reservation, even when its workspace retains an earlier
+allocation or task episode. Ordinary keyed creation instead retains the first
+ordinary reservation for that `creation_key`; retrying a lost creation response
+cannot substitute a later task's origin. `session_origin_reservation_key`
+identifies that original reservation. Driver changes do not borrow an acquisition
+request as the original ordinary creation. A new allocation key gets its own
+snapshot; an existing targeted/reused workspace is never restamped.
+
+New reservations start with unselected `session_origin_transport`. The additive
+`POST /spawn-reservations/{key}/session-origin` accepts exactly
+`{"startup_revision": 1, "transport": "baseline"}` or the `origin-v1` transport.
+It binds the choice on the original and current reservation under one write lock,
+requiring the current reserving startup and a representable snapshot for
+`origin-v1`. Concurrent conflicting choices cannot both commit. Evidence and
+original-reservation references are immutable; a selected baseline cannot gain
+origin metadata after upgrade, and an origin-v1 retry cannot silently downgrade.
+Lost responses are reconciled by reading/repeating that same binding, not by
+sending another native creation form.
+
+The running coordinator advertises `session_origin_binding_versions: [1]`
+through its existing pool-placement contract. The explicit client checks that
+selected peer before sending the new request. An older caller still uses its
+unchanged operations; an older, invalid or rolled-back provider receives no new
+binding request. Historical rows migrate to baseline with null evidence and
+remain unattributed on restart/retry. The old form has no scheduled retirement.
+This expansion does not yet migrate automatic session callers, qualify Bridge
+adoption, change startup admission or confer cleanup authority.
+
+Capture adds bounded indexed reservation/creation-key reads plus the existing
+producer and exact-assignment point reads, once per newly committed reservation.
+Reads do not enrich or recapture it. No process, network request, registrar scan,
+background flow or additional ownership registry is introduced. Binding uses one
+existing coordinator transaction and updates at most two reservation rows.
+
 ## Original assignment cohort
 
 New protected assignment requests retain an additive `cohort` object with

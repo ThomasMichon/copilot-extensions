@@ -567,8 +567,8 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
                 "session_handle, worktree, inherited_worktree, "
                 "worktree_ownership, conversation_retired, allocation_project, worktree_path, "
                 "creating_host, driver, reserved_at, updated_at, allocation_revision, "
-                "creation_key, allocation_reservation_key, agent_info, execution_machine, allocation_cohort_transport) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)",
+                "creation_key, allocation_reservation_key, agent_info, execution_machine, allocation_cohort_transport, session_origin_transport) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)",
                 (
                     key,
                     task_id,
@@ -630,6 +630,8 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
                 )
             from .queue_assignment_cohort import retain_allocation_cohort
             retain_allocation_cohort(conn, task, key=key, original_key=allocation_reservation_key)
+            from .queue_session_origin import retain as retain_session_origin
+            retain_session_origin(conn, task, key=key)
             row = conn.execute("SELECT * FROM spawn_reservations WHERE key = ?", (key,)).fetchone()
             assigned_pool = pool_assignment(conn, task_id)
             conn.execute("COMMIT")

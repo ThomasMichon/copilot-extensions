@@ -149,8 +149,12 @@ merged plan does not establish running adoption.
       The [ACP session-origin provider](../../../plugins/agent-bridge/docs/dispatch-session-origin.md)
       merged in #12373; CLI-native first-save registration and selected-daemon
       acquisition negotiation merged in #12387. The ordinary keyed-creation
-      CLI/client carrier, Dispatch caller migration and running qualification
-      remain open.
+      CLI/client carrier and executing-CLI declarations merged in #12396.
+      The reservation owner now captures session-origin candidates separately
+      from reusable allocation evidence and exposes optional immutable wire binding.
+      Ordinary keyed retries retain their original session request; acquisition
+      deliveries retain their own attempt. Automatic callers remain unmodified.
+      Dispatch session-origin caller migration and running qualification remain open.
 - [ ] Expose forward and reverse correlation through existing owner APIs.
       Pool identity must identify the actual registration/assignment, not just
       a display name; opaque legacy records remain explicitly unattributed.

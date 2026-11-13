@@ -241,6 +241,8 @@ def register_spawn_routes(
     control_auth = _make_control_auth(control_token, rejected)
     from .coordinator_cleanup_recovery import register as register_cleanup_recovery
     register_cleanup_recovery(app, queue, bus, control_auth)
+    from .queue_session_origin import register_routes as register_session_origin_routes
+    register_session_origin_routes(app, queue, bus)
 
     @app.post(
         "/spawn-reservations/tasks/{task_id}/authorize-fresh",
