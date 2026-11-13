@@ -136,10 +136,15 @@ def _archive(source: Path, commit: str, archive: Path, *, deadline: float | None
     permissions.check_ancestors(archive.parent)
     file_owner = procutil_module("_daemon_instance_owner")
     descriptor = file_owner.open_private(archive, os.O_WRONLY | os.O_CREAT | os.O_EXCL)
+    output_name = str(archive)
+    if os.name == "nt" and output_name.startswith("\\\\?\\"):
+        output_name = output_name[4:]
+        if output_name.startswith("UNC\\"):
+            output_name = "\\\\" + output_name[4:]
     with os.fdopen(descriptor, "wb"):
         _git(
             source, "-c", "tar.umask=0022", "-c", "core.eol=lf",
-            "archive", "--format=tar", "--output=" + str(archive), commit, deadline=deadline,
+            "archive", "--format=tar", "--output=" + output_name, commit, deadline=deadline,
         )
 
 
@@ -329,7 +334,8 @@ def prepare(
         output = Path(os.path._getfinalpathname(output))
     prefix = f".prepare-{plugin}-{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}-"
     with tempfile.TemporaryDirectory(prefix=prefix, dir=output) as temporary:
-        work = Path(temporary)
+        work = Path(temporary) / "owned"
+        _private_output_directory(work)
         archive = work / "source.tar"
         _archive(source, commit, archive, deadline=deadline)
         snapshot = work / "source"

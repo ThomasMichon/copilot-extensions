@@ -617,19 +617,35 @@ def test_main_snapshot_uses_portable_archive_eol_and_keeps_explicit_crlf(reposit
     assert (output / "source" / "binary.bin").read_bytes() == bytes(range(256))
 
 
-@pytest.mark.parametrize("relative", [False, True])
+@pytest.mark.parametrize("spelling", [
+    "absolute", "relative",
+    pytest.param("extended", marks=pytest.mark.skipif(os.name != "nt", reason="Windows namespace")),
+])
 def test_native_archive_writes_owned_file_without_captured_binary(
-    repository, tmp_path, monkeypatch, relative,
+    repository, tmp_path, monkeypatch, spelling,
 ):
+    from native_test_paths import native_test_path
+
     repo, commit = repository
     monkeypatch.chdir(tmp_path)
-    archive = Path("native.tar") if relative else tmp_path / "native.tar"
+    directory = tmp_path / "owned"
+    if spelling == "extended":
+        while len(str(directory / "native.tar")) < 280:
+            directory /= "native-archive-output"
+        directory = native_test_path(directory)
+    local.preparation._private_output_directory(directory)
+    archive = (
+        Path("owned/native.tar") if spelling == "relative"
+        else directory / "native.tar"
+    )
     original = local.preparation_process.run
     observed = []
     deadline = time.monotonic() + 30
 
     def run(argv, **options):
-        assert "--output=" + str(archive.absolute()) in argv
+        output = next(argument.removeprefix("--output=") for argument in argv
+                      if argument.startswith("--output="))
+        assert Path(output).samefile(archive)
         assert "stdout" not in options and options["capture_output"] is True
         assert options["deadline"] == deadline
         result = original(argv, **options)

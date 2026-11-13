@@ -1996,6 +1996,7 @@ jobs:
           python -m pytest -q
           tools/test_runtime_admission_toolkit.py
           tools/test_runtime_packaged_artifacts.py
+          tools/test_local_install_source.py::test_native_archive_writes_owned_file_without_captured_binary
           libs/payload-invocation/tests/test_runtime_admission.py
       - name: Bounded library overlap and serial application construction
         if: ${{ matrix.suite == 'overlap' }}
