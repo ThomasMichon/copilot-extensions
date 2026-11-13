@@ -6,14 +6,17 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import uuid
 
 import pytest
+from agent_procutil import no_window_kwargs
 
 from agent_vault import cache
 
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows protection")
 def test_native_windows_protected_cache_supports_synthetic_unreadable_caller(tmp_path: Path) -> None:
+    receipt = "native-cache-qualified:" + uuid.uuid4().hex
     env = dict(os.environ)
     env.update(
         AGENT_VAULT_CACHE="1",
@@ -71,9 +74,11 @@ with ThreadPoolExecutor(max_workers=1) as owner:
     response = credential_reads.read_credential(SimpleNamespace(entry="entry", field="password"))
 assert response.code == 0 and response.value == first["value"], response
 assert not vault.cli.has_password(kpdb)
-""", str(tmp_path)],
-        env=env, capture_output=True, text=True, timeout=20,
+print(sys.argv[2])
+""", str(tmp_path), receipt],
+        env=env, capture_output=True, text=True, timeout=20, **no_window_kwargs(),
     )
     if result.returncode == 77:
         pytest.skip(f"native DPAPI unavailable in this logon: {result.stdout.strip()}")
     assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.strip() == receipt, "native child did not return its unique qualification receipt"

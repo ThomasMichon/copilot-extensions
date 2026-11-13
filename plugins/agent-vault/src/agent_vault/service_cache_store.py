@@ -23,6 +23,10 @@ PREFIX = "agent-vault.service-cache.v1:"
 COLLECTION = "service_entries"
 
 
+class RevocationChanged(CacheProtectionError):
+    """A read cannot publish through a later credential-cache revocation."""
+
+
 def database_binding(kpdb: str) -> str:
     database = os.path.normcase(str(Path(kpdb).resolve())).encode()
     return PREFIX + hashlib.sha256(database).hexdigest() + ":"
@@ -105,6 +109,15 @@ class ServiceCacheStore:
                 changed = True
         return changed
 
+    def revocation_state(
+        self, entry: str, field: str, *, canonical: bool = False,
+    ) -> tuple[str, ...]:
+        _binding, entry, field = self._identity(entry, field, canonical)
+        with service_cache_epochs.guard(self.persistent):
+            return tuple(service_cache_epochs.snapshot(
+                service_cache_epochs.read(self.persistent._root_dir), self.database, entry, field,
+            ))
+
     def record(
         self, entry: str, field: str = "password", *, max_age_seconds: int | None = None,
         canonical: bool = False,
@@ -148,6 +161,7 @@ class ServiceCacheStore:
     def put(
         self, entry: str, field: str, value: str, generation: int, *, operation: int | None = None,
         canonical: bool = False,
+        expected_revocation: tuple[str, ...] | None = None,
     ) -> int | None:
         if not cache_enabled():
             return None
@@ -155,6 +169,11 @@ class ServiceCacheStore:
             _available(self.persistent)
             binding, entry, field = self._identity(entry, field, canonical)
             with service_cache_epochs.guard(self.persistent):
+                epoch_state = service_cache_epochs.read(self.persistent._root_dir)
+                if expected_revocation is not None and expected_revocation != tuple(
+                    service_cache_epochs.snapshot(epoch_state, self.database, entry, field)
+                ):
+                    raise RevocationChanged("Credential-cache revocation changed during the read")
                 store = self.persistent._read_store(readonly=True, strict=True)
                 records = _records(store)
                 legacy = self.persistent._field_record(store, entry, field, strict=True)
@@ -204,6 +223,8 @@ class ServiceCacheStore:
                 }
                 store["service_generation"] = generation
                 return generation if self.persistent._write_store_unlocked(store) else None
+        except RevocationChanged:
+            raise
         except (OSError, RuntimeError, ValueError, ImportError):
             return None
 

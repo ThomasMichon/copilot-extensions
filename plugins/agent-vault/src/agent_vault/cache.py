@@ -33,6 +33,8 @@ import time
 from pathlib import Path
 
 from .config import IS_WINDOWS, default_config_path, home_dir
+from .config import normalize_entry
+from .credential_fields import canonical_field
 
 # Enablement / location env vars.
 CACHE_ENABLE_ENV = "AGENT_VAULT_CACHE"
@@ -476,6 +478,20 @@ class PersistentCache:
             entries[entry] = fields
         return entries, fields
 
+    @staticmethod
+    def _pending_alias(store: dict, entry: str, field: str) -> bool:
+        identity = normalize_entry(entry, "")
+        for path, fields in store["entries"].items():
+            if normalize_entry(path, "") != identity or not isinstance(fields, dict):
+                continue
+            for attribute, record in fields.items():
+                if (
+                    canonical_field(attribute) == canonical_field(field)
+                    and isinstance(record, dict) and "rotation" in record
+                ):
+                    return True
+        return False
+
     def get(
         self,
         entry: str,
@@ -510,6 +526,8 @@ class PersistentCache:
             self._read_store(readonly=True, strict=True)
             if readonly else self._read_store()
         )
+        if self._pending_alias(store, entry, field):
+            return None
         if not readonly and _path_exists(self._key_file):
             from . import kek
 
@@ -524,6 +542,8 @@ class PersistentCache:
                                 self._write_key(blob.strip())
         rec = self._field_record(store, entry, field, strict=readonly)
         if rec is None and legacy_entry and legacy_entry != entry:
+            if self._pending_alias(store, legacy_entry, field):
+                return None
             rec = self._field_record(store, legacy_entry, field, strict=readonly)
             if rec is not None and not readonly:
                 self.migrate_entry(legacy_entry, entry, field)

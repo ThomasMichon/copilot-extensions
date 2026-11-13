@@ -11,7 +11,7 @@ from . import config
 from .cache import PersistentCache, cache_enabled, get_cache as _raw_get_cache
 from .credential_fields import canonical_field
 from .service_cache_store import (
-    PREFIX as PREFIX, ServiceCacheStore, binding_for as binding_for,
+    PREFIX as PREFIX, RevocationChanged, ServiceCacheStore, binding_for as binding_for,
     database_binding as database_binding, revoke_records,
 )
 from . import service_cache_epochs
@@ -93,11 +93,24 @@ def read(
                     return record["value"]
             if not service.ensure_unlocked(kpdb):
                 return None
+            try:
+                revocation = (
+                    selected.revocation_state(entry, field, canonical=True)
+                    if selected is not None else None
+                )
+            except (OSError, RuntimeError, ValueError, ImportError) as exc:
+                raise ServiceCacheUnavailable(UNAVAILABLE) from exc
             value = service.cli.get_entry(kpdb, entry, field)
             if value is not None:
                 generation = max(time.time_ns(), service._credential_generations.get(key, 0) + 1)
                 if selected is not None:
-                    written = selected.put(entry, field, value, generation, canonical=True)
+                    try:
+                        written = selected.put(
+                            entry, field, value, generation, canonical=True,
+                            expected_revocation=revocation,
+                        )
+                    except RevocationChanged as exc:
+                        raise ServiceCacheUnavailable(UNAVAILABLE) from exc
                     if type(written) is int:
                         generation = written
                         service._blocked_service_cache.discard(binding)
@@ -147,9 +160,10 @@ def update_password_cache(
 
 
 def clear_memory(service: VaultService, kpdb: str, *entries: str) -> int:
+    targets = {config.normalize_entry(entry, "") for entry in entries}
     keys = [
         key for key in service.cache
-        if key[0] == kpdb and config.normalize_entry(key[1], "") in entries
+        if key[0] == kpdb and config.normalize_entry(key[1], "") in targets
     ]
     for key in keys:
         del service.cache[key]

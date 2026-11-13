@@ -609,6 +609,8 @@ remain case-sensitive. Existing alias-keyed direct records remain readable
 without migration only when no canonical record or pending journal owns the
 field. Ordinary client
 writeback and entry migration do not rewrite service records or renew their age.
+Pending equivalent entry/field journals are checked even when a canonical value
+is present, rather than only when trying an alias fallback.
 
 Authoritative refresh never returns a cached value or deletes the caller's
 existing recovery record before trying the backend. A successful read updates
@@ -617,6 +619,9 @@ insertion into its ordinary collection. Explicit locking and mutations revoke
 the relevant service records. Pending password journals remain intact, but
 observing a pending replacement revokes earlier service values so rolling it
 back cannot resurrect a revoked value.
+A backend read captures the revocation state before fetching its value.
+Publication through a later clear/revocation is refused, so an in-flight read
+cannot recreate a valid service record after `cache-clear` has completed.
 
 A root-metadata lock and the selected store lock protect a small non-secret
 revocation-epoch file at the original cache root.

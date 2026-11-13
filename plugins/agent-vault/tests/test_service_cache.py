@@ -763,3 +763,68 @@ def test_add_at_an_existing_path_cannot_leave_the_prior_service_value_cached(
     monkeypatch.setattr(vault.cli, "add_entry", add)
     assert vault.handle_request({"action": "add", "entry": "entry", "group": "Allowed"})["ok"]
     assert _get(vault)["value"] == "added-value"
+
+
+@pytest.mark.parametrize("refresh", [False, True])
+def test_inflight_backend_read_cannot_repopulate_the_service_cache_after_clear(
+    cached_service, monkeypatch: pytest.MonkeyPatch, refresh: bool,
+) -> None:
+    vault, persistent, kpdb, _clock = cached_service
+    if refresh:
+        assert _get(vault)["ok"]
+    entered, release = threading.Event(), threading.Event()
+
+    def paused(*_args: object) -> str:
+        entered.set()
+        assert release.wait(4)
+        return "pre-clear-read-value"
+
+    monkeypatch.setattr(vault.cli, "get_entry", paused)
+    with ThreadPoolExecutor(max_workers=1) as workers:
+        pending = workers.submit(_get, vault, refresh=refresh)
+        try:
+            assert entered.wait(2)
+            assert persistent.clear()
+        finally:
+            release.set()
+        response = pending.result(timeout=4)
+    assert response == {"ok": False, "error": service_cache.UNAVAILABLE}
+    assert not persistent._cache_file.exists()
+    assert _store(persistent, kpdb).record("entry") is None
+
+
+@pytest.mark.parametrize("journal_entry", ["Allowed/entry", "/Allowed/entry", "entry"])
+def test_alias_pending_journal_blocks_an_existing_canonical_value_or_legacy_fallback(
+    cached_service, monkeypatch: pytest.MonkeyPatch, journal_entry: str,
+) -> None:
+    _vault, persistent, _kpdb, _clock = cached_service
+    canonical_entry = "entry" if journal_entry == "entry" else "Allowed/entry"
+    assert persistent.put(canonical_entry, "password", "old-canonical", 1)
+    assert persistent.put(journal_entry, "Password", "old-alias", 1)
+    assert persistent.begin_replace(journal_entry, "Password", "unknown-candidate", 2)
+    monkeypatch.setattr(cache, "get_cache", lambda: persistent)
+    monkeypatch.setattr(cli, "ensure_service", lambda: pytest.fail("cache-only contacted service"))
+    for field in ("password", "Password"):
+        response = credential_reads.read_credential(
+            SimpleNamespace(entry="entry", field=field, cache_only=True),
+        )
+        assert response.code == 1 and response.value is None
+    assert persistent.pending_replace(journal_entry, "Password")["operation"] == 2
+
+
+def test_absolute_move_destination_invalidates_memory_when_persistent_caching_is_disabled(
+    cached_service, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    vault, _persistent, kpdb, _clock = cached_service
+    monkeypatch.delenv(cache.CACHE_ENABLE_ENV, raising=False)
+    monkeypatch.delenv(cache.CACHE_DIR_ENV, raising=False)
+    vault.cache[(kpdb, "Allowed/New/entry", "password")] = "prior-destination"
+    monkeypatch.setattr(vault.cli, "move_entry", lambda *_args: (True, "moved"))
+    monkeypatch.setattr(vault.cli, "get_entry", lambda *_args: "moved-value")
+    response = vault.handle_request({
+        "action": "move", "entry": "Allowed/Old/entry", "group": "Allowed",
+        "dest": "/Allowed/New",
+    })
+    assert response["ok"]
+    assert (kpdb, "Allowed/New/entry", "password") not in vault.cache
+    assert _get(vault, entry="Allowed/New/entry")["value"] == "moved-value"
