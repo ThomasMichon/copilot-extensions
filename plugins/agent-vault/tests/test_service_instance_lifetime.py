@@ -39,6 +39,8 @@ class Vault:
         self.cli = types.SimpleNamespace(status=lambda _: "fixture")
     def initialize(self):
         admitted("initialize")
+    def _check_password_ttl(self):
+        pass
 
 def startup(vault, context):
     admitted("ready")
