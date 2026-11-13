@@ -33,7 +33,8 @@ The object contains:
 | `bindings` | Boolean presence of task owner, native owner, explicit target worktree, hard worktree requirement, unreleased pool assignment and unresolved spawn binding |
 | `held` | Any retained task hold field |
 | `unassignment` | Latest transition from claimed, started or suspended to queued, with its event id, separately recorded former worker id and prior state; otherwise null |
-| `release_outcome` | `completed`, `unassigned_queued`, or null |
+| `closeout` | Optional, currently revalidated original-assignment readiness evidence; otherwise null or absent |
+| `release_outcome` | `completed`, `unassigned_queued`, `relevance_closeout_ready`, or null |
 
 `completed` reports the existing authoritative `COMPLETED` state. This preserves
 the current behavior of tasks without required verification, whose completion
@@ -64,6 +65,17 @@ unassignment outcome even when that reservation is releasing. The existing
 decline closeout can therefore report logical unassignment without pretending
 that its original native process has stopped.
 
+`relevance_closeout_ready` is narrower than task abandonment. The internal
+[relevance readiness provider](task-relevance.md#original-claim-readiness)
+obtains independent managed-workspace readiness and retains it on the accepted
+closeout row. The snapshot rechecks its captured queue, relationship request,
+assignment event, generation, worker, native and reservation before exposing
+this outcome. It permits settlement of that protected assignment claim only;
+task status, native, pool assignment and reservation remain retained. A different
+assignment selection, hold, changed binding or pending native retirement removes
+the outcome. No bare abandoned task or legacy relationship gains release proof.
+Actual workspace finalization and native conclusion remain separate.
+
 This object is current evidence, not a transferable release grant. The
 claim-owner consumer retains the original task authority, task/worktree
 assignment identity and relevant incarnation/event continuity, then reconcile
@@ -88,9 +100,12 @@ references or retarget them through the current default. Ordinary
 construction does not enable the qualified writer; upgrade and
 rollback must continue to treat missing support explicitly.
 
-Each detail read adds one connection/read transaction and five point-scoped
+An ordinary detail read adds one connection/read transaction and five point-scoped
 SELECTs, with no child process, network request, scan of repository files or
-per-call schema migration. Task-event lookup uses partial `(task_id, id)`
+per-call schema migration. The task read also performs an indexed closeout-row
+lookup. A retained closeout readiness adds bounded, original-resource lookups
+inside that same snapshot; it never re-runs external readiness.
+Task-event lookup uses partial `(task_id, id)`
 transition and worker-assignment indexes; pool assignment and
 spawn queries use existing task indexes.
 This is bounded source/transport qualification, not an installed/native latency
