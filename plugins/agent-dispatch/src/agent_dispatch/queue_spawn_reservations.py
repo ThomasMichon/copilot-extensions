@@ -605,20 +605,7 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
                     (key, creation_key, carried_worktree, carried_path, key),
                 )
             if selected_pool is not None:
-                from .queue_task_relationships import latest_relationship
-                governed = latest_relationship(conn, task.id) is not None
-                if governed and self._relationship_writer is None:
-                    raise TaskError("governed allocator assignment requires its original relationship writer")
-                if governed:
-                    from .queue_relationship_continuation import continue_pool_startup
-
-                    continue_pool_startup(conn, task, key, authority=self._relationship_authority)
-                if self._relationship_writer is not None or governed:
-                    conn.execute(
-                        "UPDATE spawn_reservations SET task_relationship_required=1,"
-                        " task_relationship_generation=? WHERE key=?",
-                        (task.generation + 1, key),
-                    )
+                self._retain_pool_relationship_requirement(conn, task, key, driver)
                 from .queue_pool_placement import record_pool_claim
                 assert pool_catalog_revision is not None and reserved_by is not None
                 record_pool_claim(
