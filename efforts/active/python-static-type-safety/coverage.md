@@ -131,7 +131,7 @@ Admission decisions and validation details are retained in the
 | `lib-lazy-cli-dispatch` | 3 | **Locked** | #9951 |
 | `lib-machine-transport` | 20 | **Locked** | #10107; five consumer contracts and native qualification |
 | `lib-payload-invocation` | 4 | Pending | #10371; source/catalog/copy preparation merged #11165, not strict admission; complete executed/emitted and consumer gates remain |
-| `lib-payload-invocation-tests` | 27 | Pending | #10371; independently approved static test-source admission awaits fresh Python 3.11 Linux/win32 checks, negative controls, review and CI; production/program/native/minimum/candidate gates remain separate and open |
+| `lib-payload-invocation-tests` | 27 | Strict | #12324; complete test-source scope, both Python 3.11 analysis targets, actual negative controls, exact-head approval and required source CI are complete; production/program/full-corpus/native/minimum/candidate gates under #10371 remain separate and open |
 | `lib-peer-launch` | 3 | **Locked** | #9967 |
 | `lib-plugin-activation` | 23 | **Locked** | #10108 / merged #10150; both targets, native fixtures and nine consumer contracts |
 | `lib-plugin-resolve` | 25 | **Locked** | #10141 / merged #10165; both targets, native fixtures and ten consumer contracts |
