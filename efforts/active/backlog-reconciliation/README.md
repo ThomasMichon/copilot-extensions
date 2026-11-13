@@ -342,6 +342,15 @@ the non-public approval conversation.
 
 ## Plan
 
+The [Companion/admission study and finite source judgment](companion-admission-and-source-completion.md)
+retains fifteen qualified unions, corrects unsupported receiver/ROOT inferences
+and independently verifies #9097's finite source completion. Actual source,
+review/CI and released-content parity precede its `COMPLETED` disposition;
+the separate effort stays Draft and ownership is unchanged. Fourteen other
+originals remain open, including #8796's explicit same-claim condition.
+Eligible inflow offsets the closure; no parent gate, native result,
+installed activation or source/resource transfer is inferred.
+
 The [producer, recovery and installer study](producer-recovery-and-installer-contracts.md)
 retains thirteen complete own-source unions and rejects three interface-only
 whole-source folds. Fresh complete #8403 qualification resolves an obsolete

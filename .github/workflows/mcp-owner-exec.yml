@@ -236,11 +236,11 @@ jobs:
           --test-file tests/native/test_owner_bootstrap_copilot_windows.py
           --allow-explicit-tiers --test-timeout 120 --timeout 180 --plugin-timeout 200
           --junit-dir "${{ runner.temp }}/mcp-owner-windows-client-${{ github.run_id }}"
-      - name: Exercise actual Windows client physical replacement and rollback
+      - name: Exercise physical handover after publisher exit and through the retained wait owner
         run: >-
           python tools/run-plugin-tests.py agent-mcp
           --test-file tests/native/test_generation_handover_copilot.py
-          --allow-explicit-tiers --test-timeout 180 --timeout 240 --plugin-timeout 260
+          --allow-explicit-tiers --test-timeout 180 --timeout 420 --plugin-timeout 450
           --junit-dir "${{ runner.temp }}/mcp-owner-windows-handover-${{ github.run_id }}"
       - name: Retain actual Windows client source controls
         if: always()

@@ -417,13 +417,23 @@ handover. Preserve held sessions and the separate pre-feature adoption hold.
         `c807f2e8d051ff6152deefb0f71755eaf17d827e` after current-head approval,
         required CI and hosted Windows/Linux qualification using the real
         provider declaration. Release and installed acceptance remain open.
-    - [ ] **Direct Windows creation/wait fixture-provider source:** qualify the
+    - [x] **Direct Windows creation/wait fixture-provider source:** qualify the
       section publisher inside the existing native seed owner, with actual-client
       attribution before execution, coordinator/substitution refusal, delayed
       MCP startup and original streams/fixture-provider context/settlement.
-      Local source controls pass; review and hosted qualification remain pending. This does not
-      qualify retained-wait composition with the production physical receiver,
-      enroll a headed or default caller or close installed acceptance.
+      #12372 merged at `4446cb40685750e0552cd2a1b1340ee91e743cc6` after
+      current-head approval, required CI and hosted Windows/Linux qualification.
+      This does not qualify retained-wait composition with the production
+      physical receiver, enroll a headed or default caller or close installed
+      acceptance.
+    - [ ] **Retained-wait physical receiver composition:** independently run the
+      complete native-client physical receiver/custody handover packet through
+      the existing native creation/wait owner and after publisher exit. Keep
+      finite preparation/admission/execution receipt substitutions explicit;
+      require original streams, actual client attribution, accepted in-flight
+      and unknown outcomes, retained native lifetimes and exact settlement.
+      Review and hosted qualification remain required; headed/default caller
+      adoption, release and installed acceptance remain separate.
   - [x] **Explicit Linux exec caller:** capture the exec owner's native pair
     and pass a sealed, session-only overlay for explicitly named configured
     entries, with actual-start discovery bound to a physical optional receiver.

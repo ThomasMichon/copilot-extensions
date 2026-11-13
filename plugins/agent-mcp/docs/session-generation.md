@@ -615,8 +615,7 @@ client, not its waiting parent. Original ACP streams, fixture-provider context
 and settlement match the ordinary baseline. Preparation, admission and execution
 receipt responses are substituted, and this synthetic provider is not the
 production optional receiver. The independent publisher-exit control remains
-separate; the physical-receiver/custody handover packet below still uses that
-publisher-exit path, not the retained wait owner. These controls are not
+separate. These controls are not
 installed-runtime acceptance and enroll no default or headed production caller.
 
 The separate `tests/native/test_generation_handover_copilot.py` packet now
@@ -625,7 +624,12 @@ custody. Replacement, rollback and same-slot replacement retain the original
 native client, conduit, keeper and upstream, including accepted in-flight
 tool calls, actual client ping replies and terminal unknown-delivery fencing
 without replay. Its private runtime uses the real provider declaration, not a
-test-only capability override. The pinned Windows and Linux source lanes remain
+test-only capability override. Windows independently runs that complete physical
+packet after publisher exit and through the retained native creation/wait owner.
+The latter still substitutes preparation, admission and execution receipt
+responses, not the physical receiver or custody protocol. The wait owner must
+remain alive through the physical transitions and exit naturally after its
+actual client settles. The pinned Windows and Linux source lanes remain
 separate from installed acceptance and productive caller enrollment.
 
 ### Hosted originating-owner qualification
