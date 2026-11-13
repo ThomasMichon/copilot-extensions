@@ -6,7 +6,7 @@ can resume a partial discharge. It never authorizes removal or guesses ownership
 """
 from __future__ import annotations
 
-from dataclasses import asdict, replace
+from dataclasses import replace
 import hashlib
 import json
 from pathlib import Path
@@ -57,7 +57,7 @@ def primary_identity(record):
         "repo": record.repo,
         "worktree_id": record.worktree_id, "worktree_path": record.worktree_path,
         "branch": record.branch, "pair": {name: getattr(record, name) for name in _PAIR_FIELDS},
-        "dispatch_attempt": asdict(record.dispatch_attempt) if record.dispatch_attempt else None,
+        "dispatch_attempt": record.dispatch_attempt.to_dict() if record.dispatch_attempt else None,
     }
 
 

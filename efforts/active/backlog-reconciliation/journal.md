@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-12 - Admission failure and citation boundary](journal/2026/11.12-admission-failure-and-citation-boundary.md)
+
 - [2026-11-12 - Dispatch and Bridge retained contracts](journal/2026/11.12-dispatch-and-bridge-retained-contracts.md)
 
 - [2026-11-12 - Lifetime and current receiving boundaries](journal/2026/11.12-lifetime-and-current-receiving-boundaries.md)

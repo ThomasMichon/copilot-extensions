@@ -7,7 +7,7 @@ from pathlib import Path
 
 from . import config as cfg, creation_requests, execution_spaces, owned_worktree as allocation
 from . import receiving_allocation as receiving, receiving_creation_journal as journal
-from . import resource_producer as producer, tracking, worktree_creation
+from . import dispatch_cohort, resource_producer as producer, tracking, worktree_creation
 
 
 def _request(payload: object, config: cfg.Config) -> tuple[receiving.ReceivingAllocation, allocation.AllocationIdentity | None]:
@@ -55,11 +55,13 @@ def _options(admission: receiving.ReceivingAllocation) -> dict:
         attempt = options["dispatch_attempt"]
         fields = {"task_id", "reservation_key", "attempt", "driver", "supervisor"}
         if (
-            not isinstance(attempt, dict) or set(attempt) != fields
+            not isinstance(attempt, dict) or not fields.issubset(attempt) or set(attempt) - fields - {"cohort"}
             or type(attempt["attempt"]) is not int or attempt["attempt"] < 1
             or any(not isinstance(attempt[key], str) or not attempt[key] for key in fields - {"attempt"})
         ):
             raise ValueError("invalid receiving dispatch attempt")
+        if "cohort" in attempt:
+            dispatch_cohort.DispatchCohort.from_attempt(attempt)
     return options
 
 
@@ -89,6 +91,7 @@ def _record(row: dict, admission: receiving.ReceivingAllocation, config: cfg.Con
         return None
     record = tracking.load_record(path)
     execution_spaces.require_record_mutation(record, config)
+    dispatch_cohort.require_record(record, row["facts"])
     if producer.canonical_json(receiving.parsed_receipt(record).to_fields()) != producer.canonical_json(admission.to_fields()):
         raise ValueError("receiving operation does not own this child")
     return record
