@@ -1268,7 +1268,7 @@ with no prohibited effects; this is not a successful execution/coverage proof
 packet. All current Python files have a declared typecheck owner. The changed
 strict installation-context scope passes MyPy for both Linux and Windows;
 pending scopes are not thereby qualified. All **196** changed Python files pass
-the existing Ruff checks. The install-contract gate passes for all **13**
+the existing Ruff checks. The install-contract gate passes for the declared
 runtime plugins after the owning footprint generator refreshed MCP's two
 producer digests without changing contract revision or semantics.
 
