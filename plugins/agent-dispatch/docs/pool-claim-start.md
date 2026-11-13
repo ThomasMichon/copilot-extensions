@@ -220,6 +220,13 @@ These optional fields preserve existing explicit callers' request shape and
 600-second default. An old strict provider refuses the new body; missing live
 support refuses before POST, with no legacy reservation fallback.
 
+Selected Bridge executable/daemon origin discovery completes before the caller
+refreshes the catalog revision it will submit. Discovery may span a publication
+renewal; the earlier catalog used to recognize configured mode is not retained
+as the later placement snapshot. Loss of catalog readiness during discovery
+refuses before POST. The provider still revalidates the submitted revision;
+this adds no automatic replay of a refused or unknown placement.
+
 The provider still selects globally across the complete priority-ordered set,
 including actual routing and accountable capacity. The expected instance is
 **not** a candidate filter: if another instance wins, the transaction refuses
