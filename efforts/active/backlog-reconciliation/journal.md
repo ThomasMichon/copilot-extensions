@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-13 - Onboarding, conclusion and key-consumer intake](journal/2026/11.13-onboarding-conclusion-and-key-intake.md)
+
 - [2026-11-13 - Distinct decision, consumer and transfer intake](journal/2026/11.13-distinct-decisions-and-transfer-intake.md)
 
 - [2026-11-13 - Named scheduled-configuration intake](journal/2026/11.13-named-scheduled-configuration-intake.md)

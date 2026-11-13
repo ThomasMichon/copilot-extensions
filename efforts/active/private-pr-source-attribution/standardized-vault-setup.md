@@ -67,6 +67,21 @@ guessed PATH commands or direct database manipulation.
   Existing file-key adopters remain compatible. No key rotation, old-key
   deletion, remote key transfer or automatic vault installation is introduced.
 
+### Source credit and continuing acceptance
+
+#6782 supplies the reviewed standardized local setup source. Earlier
+implementation/review-progress statements in this document's Journal remain
+historical; they do not make that source absent. The existing mixed
+source/release/installed acceptance rows stay unchecked until their remaining
+tiers are reconciled. This does not claim promotion, authorized installed
+readiness, remote adoption or completion of the parent effort.
+
+Exact configured-vault selection, normal fresh-process cache-only consumption,
+separately confirmed authoritative-absence initialization, serialized
+create-only/reuse-only behavior and original unknown-outcome custody remain
+unchanged. No key, cache, database, transport or credential operation is
+authorized by this clarification.
+
 ## Plan
 
 - [x] Review and merge this amendment before implementing new behavior (#6744).
