@@ -5695,7 +5695,7 @@
         "tools/promotion_unit_tests/test_release_helper_decisions.py": "ac64dc4928031f649da7132f716fe4a508788f8c6321304902cfbf29d01c8817",
         "tools/promotion_unit_tests/test_release_helper_loaders.py": "20b0d0453e193a6ad94a5bd4ab4c8f16db8f5dcb526e52f81113b3f0f16644d6",
         "tools/promotion_unit_tests/test_remote_login_shell.py": "41030272e7d66953e8ce740aac239228d0c75ba7de9a18e48f9a57b9e9f10da0",
-        "tools/promotion_unit_tests/test_resume_cli_contract.py": "8881aaaad3f0349e87cde549d0fefd8ef70d59aa8330a590f374c9b29e303080",
+        "tools/promotion_unit_tests/test_resume_cli_contract.py": "e9b3dbcfc8f841fc12812e740d4050284cc8735048f00670a97ff6c95053325d",
         "tools/promotion_unit_tests/test_runtime_profile_intent.py": "3acf18c4310d56d92c43b0c8e5f46a076b928ae301bf3dfc7ae828ed55cb630a",
         "tools/promotion_unit_tests/test_runtime_profile_wheels.py": "dde756c3daf489b30e10aa74ffc3a1a15e613ec46bad29ae60f55b43e7456141",
         "tools/promotion_unit_tests/test_runtime_regressions.py": "66807c6f66306c6b6c4c14944660808ef8a8f0cca4186945a45202777f92549b",
