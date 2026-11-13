@@ -327,3 +327,50 @@ def test_lost_allocation_binding_reply_never_reaches_creation(provider, tmp_path
         )
     assert queue.get_reservation(reservation.key).allocation_cohort_transport == "cohort-v1"
     assert calls() == [["worktree-allocation", "capabilities", "--json"]]
+
+
+def test_legacy_caller_cannot_drop_sealed_cohort_before_workspace_record(tmp_path):
+    queue = TaskQueue(tmp_path / "queue.db")
+    task = queue.create(title="work", repo="example")
+    reserved, _ = queue.reserve_spawn(task.id)
+    queue.record_spawn_allocation(reserved.key, "example", cohort_transport="cohort-v1")
+    queue.defer_spawn(reserved.key, detail="binding or creation reply lost")
+    restarted = TaskQueue(queue.db_path)
+    retry, _ = restarted.reserve_spawn(task.id)
+    with pytest.raises(TaskError, match="explicit transport confirmation"):
+        restarted.record_spawn_allocation(retry.key, "example")
+    assert restarted.get_reservation(retry.key).allocation_cohort_transport == "cohort-v1"
+    restarted.record_spawn_allocation(retry.key, "example", cohort_transport="cohort-v1")
+    restarted.record_spawn_worktree(
+        retry.key, "workspace", ownership="created", allocation_project="example",
+        worktree_path="/fixture/workspace", driver="agent-dispatch",
+    )
+    # Metadata-only writer binding after workspace publication needs no new create.
+    assert restarted.record_spawn_allocation(retry.key, "example").worktree == "workspace"
+
+
+@pytest.mark.parametrize("invalid", ["reference", "encoded", "fields", "counter", "nul"])
+def test_unrepresentable_new_cohort_uses_baseline_but_sealed_cohort_refuses(
+    provider, invalid, caplog,
+):
+    create, calls, _, _, _ = provider
+    value = cohort()
+    if invalid == "reference":
+        value["pool"]["registration_id"] = "x" * 513
+    elif invalid == "encoded":
+        for ref in (value["emitter"], value["pool"]):
+            for key, item in ref.items():
+                if isinstance(item, str):
+                    ref[key] = "\u4e00" * 512
+    elif invalid == "fields":
+        value["emitter"]["unsupported"] = "extra"
+    elif invalid == "counter":
+        value["pool"]["catalog_revision"] = 2**63
+    else:
+        value["emitter"]["producer_id"] = "bad\0reference"
+    assert create(allocation_cohort=value)["worktree"] == "workspace"
+    assert len(calls()) == 1 and "--dispatch-cohort" not in calls()[0]
+    assert "unrepresentable" in caplog.text
+    with pytest.raises(SpawnPreparationRetained, match="preserve its wire form"):
+        create(allocation_cohort=value, cohort_transport="cohort-v1")
+    assert len(calls()) == 1

@@ -141,6 +141,13 @@ the original selection. A lost binding response holds creation until the
 coordinator confirms the same choice. A baseline attempt never gains a cohort
 on upgrade; a cohort-bearing attempt requires a capable provider after rollback,
 rather than dropping immutable facts. Migration does not guess legacy evidence.
+An older caller omitting the choice cannot re-bind an unrecorded cohort-v1
+allocation; it must upgrade and confirm the transport. Metadata-only binding
+after a workspace has been recorded remains compatible.
+Before selecting cohort-v1, Dispatch checks the complete v1 reference fields,
+512-character string and counter limits, and 16-KiB encoded JSON bound. An
+unrepresentable new snapshot warns and selects baseline; an already-sealed
+cohort-v1 request refuses rather than changing facts.
 An effectful creation failure is never replayed using a second syntax.
 Creation-key recovery remains with the original owner. Prior callers still work
 with upgraded receivers on the baseline. The old form has no scheduled retirement.

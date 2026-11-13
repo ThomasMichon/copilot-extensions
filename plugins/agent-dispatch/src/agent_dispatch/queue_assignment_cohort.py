@@ -74,6 +74,8 @@ def bind_transport(conn: sqlite3.Connection, row: sqlite3.Row, requested: str | 
     if original is None:
         raise TaskError("original allocation transport is unavailable")
     retained = original["allocation_cohort_transport"]
+    if requested is None and retained == "cohort-v1" and not row["worktree"]:
+        raise TaskError("unrecorded cohort creation requires explicit transport confirmation")
     choice = requested if requested is not None else retained or "baseline"
     if retained is not None and retained != choice:
         raise TaskError("original allocation cohort transport cannot change")
