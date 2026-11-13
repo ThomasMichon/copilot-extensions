@@ -2,6 +2,29 @@
 
 Back to [Backlog Reconciliation](README.md).
 
+## Accepted tracking effect
+
+The proposal below cleared review and merged in #12455 as `27cc5028b0`.
+Fresh complete source/receiver metadata, originals/discussions, collaborator
+qualification and the receiver's retained renamed-title history preceded
+publication. The complete actual #6394 body was read back and matched only
+the reviewed append. Every incumbent byte, fourteen original checkbox
+rows/states and complete discussion/edit history remain preserved, including
+the original mixed line endings. #6394 stays OPEN with **sixteen unchecked
+rows**.
+
+Only after that acceptance, the
+[source-specific explanation](https://github.com/ThomasMichon/copilot-extensions/issues/12057#issuecomment-6858094271)
+was published and #12057 separately verified `CLOSED` / `NOT_PLANNED`,
+with its exact original unchanged. The actual receiving predicate, ordered
+replay, attention and warning remain planned work; no live delivery, nudge
+phase decision, implementation appointment, claim/resource release or
+release/adoption acceptance follows.
+
+The proposal and sequence below remain the reviewed historical contract,
+not pending issue effects. See the
+[actual-effect journal](journal/2026/11.13-finite-source-and-existing-receivers.md#actual-receiving-and-separate-tracking-retirements).
+
 ## Proposed route and effect boundary
 
 Receive #12057's complete re-registration/no-consumption contract in existing
