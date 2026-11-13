@@ -18,7 +18,7 @@ from agent_dispatch.queue import TaskError, TaskQueue
 from agent_dispatch.queue_pool_placement import pool_placement_contract
 from agent_dispatch.queue_session_origin import migrate
 from tests.test_assignment_cohort import managed_task
-from tests.test_pool_placement import place, pool, publish
+from tests.test_pool_placement import place, pool, publish, record_native
 
 
 @pytest.mark.parametrize("transport", [None, "origin-v1"])
@@ -76,6 +76,50 @@ def test_new_acquisition_attempt_in_reused_allocation_has_its_own_origin(tmp_pat
         "task_id": later_task.id, "reservation_key": later.key,
         "cohort": {"schema": "dispatch-assignment-cohort", "version": 1, "emitter": None, "pool": None},
     }
+
+
+def test_http_correlation_retains_original_pool_and_detached_native_after_reassignment(tmp_path):
+    queue = TaskQueue(tmp_path / "queue.db")
+    task, _ = managed_task(queue, "original")
+    publish(queue, pool(capacity=2))
+    first, _ = place(queue, task, session_origin_transport="origin-v1")
+    record_native(queue, first, native="original-native")
+    queue.start(
+        task.id, "host-a/worktree", owner_session_id="original-native",
+        expected_generation=queue.get(task.id).generation,
+    )
+    queue.fail_spawn(first.key, detail="retained original native")
+    queue.yield_task(task.id, "host-a/worktree")
+    queue.request_spawn_release(first.key, finished_startup_revision=1)
+    queue.retire_spawn(first.key, exact_absence=True, conclusion_state="skipped")
+    second, _ = place(queue, queue.get(task.id), session_origin_transport="origin-v1")
+    record_native(queue, second, native="later-native")
+    queue.start(
+        task.id, "host-a/worktree", owner_session_id="later-native",
+        expected_generation=queue.get(task.id).generation,
+    )
+    assert second.allocation_cohort == first.allocation_cohort
+    assert second.session_origin["cohort"]["pool"]["reservation_key"] == second.key
+    restarted = TaskQueue(queue.db_path)
+    with TestClient(create_app(restarted, enable_mcp=False, verification_interval=0)) as api:
+        before = restarted.events(task.id)
+        originals = api.get(f"/spawn-reservations/{first.key}").json()
+        current = api.get(f"/spawn-reservations/{second.key}").json()
+        detail = api.get(f"/tasks/{task.id}").json()
+        history = api.get(f"/tasks/{task.id}/attachments").json()
+        reverse = api.get("/sessions/original-native/tasks").json()
+        assert originals["session_origin"] == first.session_origin
+        assert originals["session_origin"]["cohort"]["pool"]["reservation_key"] == first.key
+        assert current["allocation_cohort"] == originals["allocation_cohort"]
+        assert current["session_origin"] == second.session_origin
+        assert detail["owner_session_id"] == "later-native"
+        by_native = {entry["session_id"]: entry for entry in history}
+        assert by_native["original-native"]["detached_at"] is not None
+        assert by_native["later-native"]["detached_at"] is None
+        assert len(reverse) == 1 and reverse[0]["task_id"] == task.id
+        assert reverse[0]["worktree_id"] == "worktree"
+        assert reverse[0]["detached_at"] == by_native["original-native"]["detached_at"]
+        assert restarted.events(task.id) == before
 
 
 @pytest.mark.parametrize("transport", ["baseline", "origin-v1"])

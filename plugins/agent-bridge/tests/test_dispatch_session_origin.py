@@ -127,6 +127,20 @@ async def test_acquisition_first_save_replay_restart_and_reassignment_keep_birth
     )
     cold = SessionManager(rig.db)
     assert _session_info(cold.get_session(result.session_id), cold).dispatch_origin == origin()
+    rig.db.update_session_status(result.session_id, "stopped", time.time())
+    cold = SessionManager(rig.db)
+    monkeypatch.setattr("agent_bridge.elevated.persisted_session_rows", lambda: [])
+    app = FastAPI()
+    app.include_router(router)
+    app.state.session_manager = cold
+    with TestClient(app) as client:
+        detail = client.get(f"/api/v1/sessions/{result.session_id}")
+        listing = client.get("/api/v1/sessions", params={"status": "stopped"})
+        assert detail.status_code == listing.status_code == 200
+        assert detail.json()["dispatch_origin"] == origin()
+        [retained] = listing.json()["sessions"]
+        assert retained["session_id"] == result.session_id
+        assert retained["dispatch_origin"] == origin()
     assert len(rig.db.list_sessions()) == 1
     await asyncio.sleep(0)
 
