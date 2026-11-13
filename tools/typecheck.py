@@ -32,6 +32,9 @@ from tools.typecheck_source_views import (  # noqa: E402
 from tools.typecheck_catalog_views import (  # noqa: E402
     MEMBERS as CATALOG_MEMBERS, catalog_inputs, catalog_views,
 )
+from tools.typecheck_bootstrap_views import (  # noqa: E402
+    INPUTS as BOOTSTRAP_INPUTS, bootstrap_view, require_bootstrap_version,
+)
 from installer_dependency_policy import DependencyPolicyError, run_uv_install  # noqa: E402
 from single_instance_lease import AlreadyRunningError  # noqa: E402
 
@@ -615,6 +618,10 @@ def check_project(
     """Check one declared scope; never execute product or test code."""
     if not files:
         raise TypecheckError(f"{project.name}: selected scope has no Python files")
+    if project.name == "lib-payload-invocation":
+        require_bootstrap_version(
+            project.level, (project.python_version, *project.additional_python_versions),
+        )
     physical_count = len(files)
     path, digest = environment_path(root, project)
     python = environment_python(path)
@@ -657,8 +664,11 @@ def check_project(
             if set(files) != set(CATALOG_MEMBERS) or len(files) != len(CATALOG_MEMBERS):
                 raise TypecheckError("Catalog witnesses require the complete canonical project")
             emitted_catalogs = views.add_catalog(all_paths)
-            supplemental += len(emitted_catalogs)
-            files = (*files, *(str(view.output) for view in emitted_catalogs))
+            bootstrap = views.add(
+                bootstrap_view, all_paths, BOOTSTRAP_INPUTS, "catalog_binding_bootstrap.py",
+            )
+            supplemental += len(emitted_catalogs) + 1
+            files = (*files, *(str(view.output) for view in emitted_catalogs), str(bootstrap.output))
         if guard and HARNESS_PREFIX.rstrip("/") in project.include:
             if "libs/agent-procutil/src" not in project.import_roots:
                 raise TypecheckError("Harness emitted imports require the declared ordinary procutil root")
@@ -736,6 +746,8 @@ def check_project(
             print(f"[{project.level}] {project.name} (Python {version}, {platform}, {physical_count} physical files, {len(files)} targets)")
             if supplemental:
                 print(f"Supplemental portable emitted programs: {supplemental}; no native execution qualification")
+            if project.name == "lib-payload-invocation" and version == "3.10":
+                print("Bootstrap: Python 3.10 checks its exit guard only; full body requires Python 3.11.")
             print(views.diagnostics(result.stdout), end="")
             print(views.diagnostics(result.stderr), end="", file=sys.stderr)
             if result.returncode:

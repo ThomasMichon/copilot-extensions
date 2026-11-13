@@ -2,13 +2,17 @@
 from __future__ import annotations
 
 import ast
+from dataclasses import replace
+import importlib.util
 import json
 from pathlib import Path
+import sys
 
 import pytest
 
 from tools import typecheck
 from tools import typecheck_catalog_views as catalog
+from tools import typecheck_bootstrap_views as bootstrap
 from tools.typecheck_source_views import SourceViewError, _shape
 
 
@@ -145,3 +149,192 @@ def test_catalog_frozen_inputs_do_not_follow_host_source(tmp_path: Path) -> None
     candidate.write_bytes(candidate.read_bytes() + b"\n# candidate change\n")
     with pytest.raises(SourceViewError, match="source changed"):
         views[0].verify(tmp_path / "candidate")
+
+
+def _bootstrap_source_fixture(root: Path) -> tuple[str, ...]:
+    paths = _fixture(root)
+    target = root / bootstrap.MANIFEST
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes((typecheck.ROOT / bootstrap.MANIFEST).read_bytes())
+    return paths
+
+
+def _render_bootstrap_consumer(root: Path) -> str:
+    manifest = root / bootstrap.MANIFEST
+    record = json.loads(manifest.read_bytes())
+    source_consumer = (typecheck.ROOT / bootstrap.MANIFEST).parent
+    for platform in ("posix", "windows"):
+        relative = Path(record["payloadDispatcher"][platform])
+        assert not relative.is_absolute() and not relative.drive and ".." not in relative.parts
+        target = manifest.parent / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes((source_consumer / relative).read_bytes())
+    primitive = manifest.parent / "scripts/installation-context/installation_context.py"
+    primitive.parent.mkdir(parents=True, exist_ok=True)
+    primitive.write_bytes((typecheck.ROOT / "libs/installation-context/installation_context.py").read_bytes())
+    spec = importlib.util.spec_from_file_location(
+        "_bootstrap_fixture_producer", typecheck.ROOT / catalog.PRODUCER,
+    )
+    assert spec and spec.loader
+    generator = importlib.util.module_from_spec(spec)
+    previous = sys.dont_write_bytecode
+    try:
+        sys.dont_write_bytecode = True
+        spec.loader.exec_module(generator)
+    finally:
+        sys.dont_write_bytecode = previous
+    data = generator.load_manifest(manifest, canonical_root=typecheck.ROOT)
+    rendered: object = generator.render((root / bootstrap.TEMPLATE).read_text(encoding="utf-8"), data)
+    if not isinstance(rendered, str):
+        raise TypeError("Canonical bootstrap renderer must return text")
+    return rendered
+
+
+def _bootstrap_fixture(root: Path) -> tuple[str, ...]:
+    paths = _bootstrap_source_fixture(root)
+    consumer = root / bootstrap.CONSUMER
+    consumer.parent.mkdir(parents=True, exist_ok=True)
+    consumer.write_text(_render_bootstrap_consumer(root), encoding="utf-8", newline="\n")
+    (root / bootstrap.HELPER).write_bytes((root / catalog.MEMBERS[0]).read_bytes())
+    return (*paths, bootstrap.HELPER)
+
+
+def test_bootstrap_view_preserves_real_program_transport_and_floor(tmp_path: Path) -> None:
+    paths = _bootstrap_fixture(tmp_path)
+    manifest = tmp_path / bootstrap.MANIFEST
+    dispatchers = json.loads(manifest.read_bytes())["payloadDispatcher"]
+    for relative in (dispatchers["posix"], dispatchers["windows"]):
+        assert (manifest.parent / relative).read_bytes() == (
+            (typecheck.ROOT / bootstrap.MANIFEST).parent / relative
+        ).read_bytes()
+    assert (manifest.parent / "scripts/installation-context/installation_context.py").read_bytes() == (
+        typecheck.ROOT / "libs/installation-context/installation_context.py"
+    ).read_bytes()
+    view = bootstrap.materialized_bootstrap_view(tmp_path, paths, tmp_path / "stage/bootstrap.py")
+    consumer = (tmp_path / bootstrap.CONSUMER).read_text()
+    quoted = next(line.split(" = ", 1)[1] for line in consumer.splitlines()
+                  if line.startswith("$bindingBootstrap = "))
+    assert view.content == (bootstrap._literal(quoted) + "\n").encode()
+    assert consumer.count("-c $bindingBootstrap ") == 2
+    diagnostic = view.diagnostics(f"{view.output}:1: error: assignment [assignment]\n", tmp_path)
+    assert diagnostic.startswith(bootstrap.CONSUMER + ":43:")
+    assert "bootstrap materialized consumer" in diagnostic
+    assert f"producer {catalog.PRODUCER}:{view.producer_range[0]}-{view.producer_range[1]}" in diagnostic
+    assert "full body requires Python 3.11" in diagnostic
+    bootstrap.require_bootstrap_version("strict", ("3.10", "3.11"))
+    bootstrap.require_bootstrap_version("pending", ("3.10",))
+    with pytest.raises(SourceViewError, match="persistent Python 3.11"):
+        bootstrap.require_bootstrap_version("strict", ("3.10",))
+
+
+def test_bootstrap_wrong_assignment_is_actual_mapped_source(tmp_path: Path) -> None:
+    paths = _bootstrap_source_fixture(tmp_path)
+    path = tmp_path / catalog.PRODUCER
+    original = path.read_text()
+    changed = original.replace(
+        "print(sys.executable,flush=True); ",
+        "probe: int = ''wrong''; print(sys.executable,flush=True); ", 1,
+    )
+    assert changed != original
+    path.write_text(changed, encoding="utf-8")
+    _refresh_reviewed_shapes(tmp_path)
+    view = bootstrap.bootstrap_view(tmp_path, paths, tmp_path / "stage/bootstrap.py")
+    assignment = next(n for n in ast.parse(view.content).body if isinstance(n, ast.AnnAssign))
+    assert isinstance(assignment.value, ast.Constant) and assignment.value.value == "wrong"
+    assert view.diagnostics(
+        f"{view.output}:{assignment.lineno}: error: wrong assignment [assignment]\n", tmp_path,
+    ).startswith(catalog.PRODUCER + ":")
+    assert not view.materialized
+
+
+@pytest.mark.parametrize("stale", [False, True])
+def test_bootstrap_canonical_source_does_not_read_dev_mirrors(tmp_path: Path, stale: bool) -> None:
+    paths = _bootstrap_source_fixture(tmp_path)
+    expected = _render_bootstrap_consumer(tmp_path)
+    quoted = next(line.split(" = ", 1)[1] for line in expected.splitlines()
+                  if line.startswith("$bindingBootstrap = "))
+    if stale:
+        for name in (bootstrap.CONSUMER, bootstrap.HELPER):
+            target = tmp_path / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(b"unusable Dev mirror\n")
+    view = bootstrap.bootstrap_view(tmp_path, paths, tmp_path / "stage/bootstrap.py")
+    assert view.content == (bootstrap._literal(quoted) + "\n").encode()
+    assert not {bootstrap.CONSUMER, bootstrap.HELPER} & {name for name, _raw in view.inputs}
+    assert view.lines[0].path == catalog.PRODUCER and not view.materialized
+    assert "canonical source" in view.diagnostics(f"{view.output}:1: error: assignment\n", tmp_path)
+    view.verify(tmp_path)
+
+
+def test_bootstrap_canonical_source_refuses_changed_launch(tmp_path: Path) -> None:
+    paths = _bootstrap_source_fixture(tmp_path)
+    path = tmp_path / catalog.PRODUCER
+    text = path.read_text()
+    text = text.replace("Source -3 -I -B -E -X utf8 -c ", "Source -I -B -E -X utf8 -c ", 1)
+    path.write_text(text, encoding="utf-8")
+    _refresh_reviewed_shapes(tmp_path)
+    with pytest.raises(SourceViewError, match="argv/helper"):
+        bootstrap.bootstrap_view(tmp_path, paths, tmp_path / "stage/bootstrap.py")
+
+
+def test_bootstrap_strict_floor_refuses_before_sdk(monkeypatch: pytest.MonkeyPatch) -> None:
+    project = next(p for p in typecheck.load_projects() if p.name == "lib-payload-invocation")
+    assert project.python_version == "3.10" and project.additional_python_versions == ("3.11",)
+
+    def forbidden(*_args: object) -> None:
+        raise AssertionError("Missing full-body floor must refuse before SDK lookup")
+
+    monkeypatch.setattr(typecheck, "environment_path", forbidden)
+    with pytest.raises(SourceViewError, match="persistent Python 3.11"):
+        typecheck.check_project(
+            typecheck.ROOT, replace(project, level="strict", additional_python_versions=()),
+            catalog.MEMBERS, all_paths=catalog.MEMBERS, strict=True,
+        )
+
+
+@pytest.mark.parametrize("change", [
+    "conversion", "format", "unknown-slot", "quote", "launch", "helper", "member", "template-slot",
+])
+def test_bootstrap_refuses_unreviewed_composition(tmp_path: Path, change: str) -> None:
+    paths = _bootstrap_fixture(tmp_path)
+    if change in {"conversion", "format", "unknown-slot"}:
+        path = tmp_path / catalog.PRODUCER
+        prefix, body = path.read_text().split('"CATALOG_BINDING_POWERSHELL": (', 1)
+        replacement = {
+            "conversion": "{data['plugin']!r}", "format": "{data['plugin']:s}",
+            "unknown-slot": "{data['command']}",
+        }[change]
+        body = body.replace("{data['plugin']}", replacement, 1)
+        path.write_text(prefix + '"CATALOG_BINDING_POWERSHELL": (' + body, encoding="utf-8")
+        _refresh_reviewed_shapes(tmp_path)
+    elif change in {"quote", "launch"}:
+        path = tmp_path / bootstrap.CONSUMER
+        old, new = (
+            ("run_name=''__main__''", "run_name='__main__'")
+            if change == "quote" else ("-I -B -E -X utf8 -c $bindingBootstrap", "-B -c $bindingBootstrap")
+        )
+        path.write_text(path.read_text().replace(old, new, 1), encoding="utf-8")
+    elif change == "helper":
+        path = tmp_path / bootstrap.HELPER
+        path.write_bytes(path.read_bytes() + b"\n# changed helper\n")
+    elif change == "member":
+        (tmp_path / catalog.PREFIX / "unreviewed.py").write_text("pass\n", encoding="utf-8")
+    else:
+        path = tmp_path / bootstrap.TEMPLATE
+        path.write_bytes(path.read_bytes() + b"\n@@CATALOG_BINDING_POWERSHELL@@\n")
+    with pytest.raises(SourceViewError):
+        bootstrap.materialized_bootstrap_view(tmp_path, paths, tmp_path / "stage/bootstrap.py")
+
+
+def test_bootstrap_custody_is_candidate_local(tmp_path: Path) -> None:
+    paths = _bootstrap_fixture(tmp_path / "candidate")
+    _bootstrap_fixture(tmp_path / "host")
+    owner = typecheck._SourceViews(tmp_path / "candidate", tmp_path / "stage")
+    owner.add_catalog(paths)
+    owner.add(bootstrap.materialized_bootstrap_view, paths, bootstrap.MATERIALIZED_INPUTS, "bootstrap.py")
+    (tmp_path / "host" / bootstrap.CONSUMER).write_text("foreign host\n", encoding="utf-8")
+    owner.verify()
+    path = tmp_path / "candidate" / bootstrap.CONSUMER
+    path.write_bytes(path.read_bytes() + b"\n# drift\n")
+    with pytest.raises((SourceViewError, typecheck.TypecheckError)):
+        owner.verify()

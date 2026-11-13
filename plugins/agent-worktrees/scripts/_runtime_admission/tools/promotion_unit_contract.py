@@ -40,7 +40,9 @@ BUILD_SOURCE_DATA: frozenset[str] = frozenset({
     "libs/payload-invocation/templates/posix-shim.tmpl",
     "libs/payload-invocation/templates/powershell-shim.tmpl",
     "libs/versioned-runtime/versioned_runtime_native.ps1",
+    "plugins/agent-worktrees/payload-invocation.json",
     "tools/manager_application_provider.json",
+    "tools/typecheck-projects.json",
 })
 
 
