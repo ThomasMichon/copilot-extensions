@@ -68,8 +68,8 @@ def _newer_progress(predecessor: Any, successor: Any) -> Any:
 
 _REGISTER_SQL = (
     "INSERT INTO live_sessions (session_id, machine, cwd, worktree_id, repo, branch, "
-    "pid, role, driven_by, venue, process_started_at, status, registered_at, updated_at) "
-    f"SELECT {CANONICAL_SESSION_SQL}, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'live', ?, ? "
+    "pid, role, driven_by, venue, process_started_at, dispatch_origin_json, status, registered_at, updated_at) "
+    f"SELECT {CANONICAL_SESSION_SQL}, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'live', ?, ? "
     "WHERE NOT EXISTS ("
     "  SELECT 1 FROM worktree_ownership wo "
     "  JOIN sessions s ON s.id = wo.session_id "
@@ -186,6 +186,11 @@ def register_live_session_atomic(
             if mismatch:
                 conn.rollback()
                 return "incarnation_mismatch"
+            from .dispatch_cli_origin import first_save
+
+            origin = first_save(
+                conn, worktree_id=worktree_id, driven_by=driven_by,
+            ) if existing is None else None
             membership_changed = (
                 existing is None
                 or existing["status"] != "live"
@@ -197,7 +202,7 @@ def register_live_session_atomic(
             cur = conn.execute(
                 _REGISTER_SQL,
                 (session_id, session_id, machine, cwd, worktree_id, repo, branch, pid,
-                 role, driven_by, venue, process_started_at, now, now, worktree_id,
+                 role, driven_by, venue, process_started_at, origin, now, now, worktree_id,
                  worktree_id),
             )
             session_id = db.resolve_live_session_id(session_id)  # the id actually written
@@ -233,7 +238,9 @@ def register_live_session_atomic(
                         "WHERE session_id=?",
                         (worktree_id, session_id, session_id),
                     )
-                predecessor = _fold_in_predecessor(conn, worktree_id, session_id, now=now)
+                predecessor = _fold_in_predecessor(
+                    conn, worktree_id, session_id, now=now, existing_conversation=existing is not None,
+                )
                 membership_changed = membership_changed or predecessor is not None
             commit(conn, membership=membership_changed)
             return "live"
@@ -260,7 +267,8 @@ def _report_unprovable_legacy_predecessor(conn: Any, worktree_id: str, session_i
 
 
 def _fold_in_predecessor(
-    conn: Any, worktree_id: str, session_id: str, *, now: float
+    conn: Any, worktree_id: str, session_id: str, *, now: float,
+    existing_conversation: bool = False,
 ) -> str | None:
     """Move a CLI-mode session's handle and claim to ``session_id`` when the
     same process re-registers under a new conversation id (a resume). Runs
@@ -336,9 +344,11 @@ def _fold_in_predecessor(
     conn.execute(
         "UPDATE live_sessions SET cli_mode=1, venue=?, driven_by=?, "
         "registered_at=?, updated_at=?, turn_state=?, last_activity_at=?, "
-        "latest_progress=? WHERE session_id=?",
+        "latest_progress=?, dispatch_origin_json=? WHERE session_id=?",
         (venue, driven_by, predecessor["registered_at"], now, turn_state,
-         last_activity_at, _newer_progress(predecessor, successor), session_id),
+         last_activity_at, _newer_progress(predecessor, successor),
+         successor["dispatch_origin_json"] if existing_conversation
+         else predecessor["dispatch_origin_json"], session_id),
     )
     conn.execute(
         "INSERT INTO live_session_aliases "

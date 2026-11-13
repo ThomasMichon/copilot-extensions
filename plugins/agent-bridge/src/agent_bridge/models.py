@@ -467,6 +467,7 @@ class LiveSessionInfo(BaseModel):
     pid: int | None = None
     role: str | None = None
     driven_by: str | None = None
+    dispatch_origin: dict[str, Any] | None = None
     status: str = "live"
     #: Coarse turn-state from the represented event tail: "running" | "idle" | None.
     turn_state: str | None = None

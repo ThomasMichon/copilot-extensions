@@ -10,6 +10,8 @@ from .mux_question_schema import ensure_schema as ensure_mux_question_schema
 from .mux_question_schema import validate_schema as validate_mux_question_schema
 from .status_schema import ensure_schema as ensure_status_schema
 from .status_schema import validate_schema as validate_status_schema
+from .dispatch_cli_origin import ensure_schema as ensure_cli_origin_schema
+from .dispatch_cli_origin import validate_schema as validate_cli_origin_schema
 
 
 def validate_cold_recovery_schema(conn: sqlite3.Connection) -> None:
@@ -91,6 +93,8 @@ class _SchemaMixin:
                     validate_mux_question_schema(conn)
                 if recorded is not None and recorded["version"] >= 44:
                     validate_status_schema(conn)
+                if recorded is not None and recorded["version"] >= 46:
+                    validate_cli_origin_schema(conn)
             conn.executescript(_SCHEMA_SQL)
             # Check/set schema version
             row = conn.execute("SELECT version FROM schema_version").fetchone()
@@ -139,6 +143,7 @@ class _SchemaMixin:
             validate_creation_writer_schema(conn)
             validate_mux_question_schema(conn)
             validate_exact_live_schema(conn)
+            validate_cli_origin_schema(conn)
             conn.commit()
 
     def _ensure_current_columns(self, conn: sqlite3.Connection) -> None:
@@ -181,6 +186,7 @@ class _SchemaMixin:
             " WHERE idempotency_key IS NOT NULL"
         )
         self._ensure_live_session_aliases(conn)
+        ensure_cli_origin_schema(conn)
         ensure_membership_indexes(conn)
 
     def _ensure_live_session_aliases(self, conn: sqlite3.Connection) -> None:
@@ -935,3 +941,10 @@ class _SchemaMixin:
                 validate_schema(conn)
                 conn.execute("UPDATE schema_version SET version=?", (45,))
             log.info("Schema migrated to version 45: retained native recovery journals")
+
+        if from_version < 46:
+            ensure_cli_origin_schema(conn)
+            validate_cli_origin_schema(conn)
+            conn.execute("UPDATE schema_version SET version=?", (46,))
+            conn.commit()
+            log.info("Schema migrated to version 46: original CLI session assignment")
