@@ -342,6 +342,16 @@ the non-public approval conversation.
 
 ## Plan
 
+The [finite leaf and guidance completion audit](journal/2026/11.13-finite-leaf-and-guidance-completions.md)
+retains eighteen whole contracts and verifies nine finite source completions,
+with separate public acknowledgments/provider readbacks and honest historical
+execution grades. Later code differences are not new original gates;
+#9971's later body/provenance boundary remains unread and unresolved.
+Nine other sources retain exact native, original-token, review or installed
+conditions; proposed #9939-to-#10064 receiving is not accepted or published.
+The complete 889-open queue remains 160 above target; no owner/resource
+transfer or whole typing/campaign completion is inferred.
+
 The [type-candidate and fragment receiving plan](type-candidate-and-fragment-receiving.md)
 retains the reviewed #12392 alternative, then records independently verified
 whole finite #9862/#9916 source fulfillment and their actual `COMPLETED`
@@ -3353,6 +3363,14 @@ sources, transferring owners or turning partial/planning gains into completion.
   normal publication flow.
 
 ## Validation Plan
+
+The [nine-completion audit](journal/2026/11.13-finite-leaf-and-guidance-completions.md)
+separates actual historical review acceptance, owner-recorded execution,
+independently verified source/admission/path evidence and fresh terminal
+tracker effects. Original scopes/alternatives, title/body bytes, current
+source-object holds and all source/resource custodians remain unchanged.
+Generic green CI, metadata identity or missing current receipt is not
+substituted for whole original fulfillment, failure or new permission.
 
 The [type receiving audit](type-candidate-and-fragment-receiving.md)
 preserves the unselected receiving route's whole-parent readback condition.
