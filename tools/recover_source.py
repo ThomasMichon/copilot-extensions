@@ -53,15 +53,25 @@ def read_request(path: Path) -> dict:
     value = json.loads(path.read_text(encoding="utf-8-sig"), object_pairs_hook=_unique)
     if (
         not isinstance(value, dict)
-        or set(value) != {"schema", "version", "operation", "selection", "manager_root", "project"}
-        or value["schema"] != REQUEST_SCHEMA or type(value["version"]) is not int
-        or value["version"] != 1 or value["operation"] not in ("preview", "install")
+        or value.get("schema") != REQUEST_SCHEMA or type(value.get("version")) is not int
+        or value["version"] not in (1, 2)
     ):
         raise ValueError("Unsupported recovery request")
+    fields = {"schema", "version", "operation", "selection", "manager_root", "project"}
+    if value["version"] == 2:
+        fields.add("repository_root")
+    if set(value) != fields or value["operation"] not in ("preview", "install"):
+        raise ValueError("Unsupported recovery request")
+    modes = ("main", "commit", "configured-main-pin")
+    if value["version"] == 2:
+        if value["operation"] != "preview":
+            raise ValueError("Repository suite recovery currently supports preview only")
+        _absolute(value["repository_root"], "repository_root")
+        modes = ("repository",)
     choice = value["selection"]
     if (
         not isinstance(choice, dict) or set(choice) != {"mode", "commit", "checkout"}
-        or choice["mode"] not in ("main", "commit", "configured-main-pin")
+        or choice["mode"] not in modes
     ):
         raise ValueError("Unsupported recovery source selection")
     if choice["mode"] == "commit":
@@ -112,12 +122,116 @@ def build_dependencies() -> None:
             sys.path.append(path)
 
 
-def selection(request: dict, manager_root: Path):
+def repository_declaration(repository_root: Path | None, workspace: Path) -> dict:
+    """Interpret adopter data using only the current toolkit's declared parser."""
+    from worktree_manager import runtime_source_repository
+
+    if repository_root is None:
+        return runtime_source_repository.read(repository_root, default_repository=UPSTREAM)
+    path = repository_root / ".copilot-extensions" / "config.yaml"
+    runtime_source_repository._ordinary(path)
+    if not path.exists():
+        return runtime_source_repository.read(repository_root, default_repository=UPSTREAM)
+
+    import tomllib
+    import agent_procutil
+    from installer_dependency_policy import retain_uv_install
+    from installer_engine_process import run_owned
+
+    manifest = REPOSITORY / "worktree-manager" / "pyproject.toml"
+    requirements = tomllib.loads(manifest.read_text(encoding="utf-8"))["project"]["dependencies"]
+    yaml_requirements = [
+        requirement for requirement in requirements
+        if re.match(r"(?i)^pyyaml(?:\s|[<>=!~;\[]|$)", requirement)
+    ]
+    if not yaml_requirements:
+        raise ValueError("Trusted recovery toolkit does not declare its YAML parser")
+    uv = None
+    current_directory = Path.cwd()
+    runtime_source_repository._ordinary(current_directory)
+    for location in os.get_exec_path():
+        directory = Path(location.strip('"'))
+        if (
+            not directory.is_absolute() or ".." in directory.parts
+            or str(directory).replace("\\", "/").startswith("//")
+        ):
+            continue
+        try:
+            runtime_source_repository._ordinary(directory)
+            if directory.samefile(current_directory) or any(
+                parent.samefile(repository_root) for parent in (directory, *directory.parents)
+            ):
+                continue
+            candidate = directory / ("uv.exe" if os.name == "nt" else "uv")
+            runtime_source_repository._ordinary(candidate)
+        except (OSError, ValueError):
+            continue
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            uv = str(candidate)
+            break
+    if uv is None:
+        raise ValueError("Repository suite interpretation requires UV on an absolute host tool path")
+    parser_root = workspace / "repository-parser"
+    parser_root.mkdir(parents=True, exist_ok=False)
+    python = Path(getattr(sys, "_base_executable", sys.executable))
+    deadline = time.monotonic() + 120
+    with retain_uv_install(
+        uv, ["--python", str(python), "--target", str(parser_root),
+             "--only-binary=:all:", *yaml_requirements],
+        cwd=REPOSITORY / "worktree-manager", trusted_source_roots=(REPOSITORY,),
+        deadline=deadline,
+    ) as transaction:
+        run_owned(
+            list(transaction.argv), cwd=transaction.cwd, env=transaction.environment,
+            timeout=120, deadline=deadline, procutil=agent_procutil, construction_fd=None,
+        )
+        try:
+            result = run_owned(
+                [str(python), "-I", "-S", "-B", str(Path(runtime_source_repository.__file__)),
+                 "--repository-root", str(repository_root), "--default-repository", UPSTREAM,
+                 "--parser-root", str(parser_root)],
+                cwd=workspace, env=dict(os.environ), timeout=120, deadline=deadline,
+                procutil=agent_procutil, construction_fd=None,
+            )
+        except subprocess.CalledProcessError as error:
+            try:
+                failure = json.loads(error.stdout, object_pairs_hook=_unique)["error"]
+            except (ValueError, KeyError, TypeError):
+                raise ValueError("Trusted repository suite reader failed") from error
+            raise ValueError(str(failure)) from error
+    return json.loads(result.stdout, object_pairs_hook=_unique)
+
+
+def selection(request: dict, manager_root: Path, *, declaration: dict | None = None):
     from worktree_manager.runtime_source_config import RuntimeSource, configured_source
 
     policy = configured_source(manager_root)
     choice = request["selection"]
-    if choice["mode"] == "configured-main-pin":
+    if choice["mode"] == "repository":
+        if declaration is None:
+            raise ValueError("Repository suite recovery requires an interpreted declaration")
+        reference = declaration["reference"]
+        repository = declaration["repository"]
+        if reference in ("main", "refs/heads/main"):
+            channel, native_ref = "main", ""
+        elif re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", reference):
+            channel, native_ref = "exact", reference
+        elif reference.startswith("refs/tags/"):
+            channel, native_ref = "stable", reference[len("refs/tags/"):]
+        else:
+            raise ValueError(
+                "Repository suite recovery supports Main, full commit IDs and refs/tags/<tag>; "
+                "other symbolic selections require native source support"
+            )
+        try:
+            selected = RuntimeSource(channel, repo=repository, ref=native_ref)
+        except ValueError:
+            raise ValueError(
+                "Repository suite source requires a credential-free locator and valid native reference"
+            ) from None
+        if policy.channel != "marketplace" and policy != selected:
+            raise ValueError("Repository suite recovery would override an independent runtime source policy")
+    elif choice["mode"] == "configured-main-pin":
         if policy.channel != "exact":
             raise ValueError("Configured Main pin recovery requires an existing exact runtime-source policy")
         selected = policy
@@ -533,7 +647,17 @@ def recover(request: dict, workspace: Path, report: dict) -> int:
     manager_root = Path(request["manager_root"]) if request["manager_root"] else default_root().absolute()
     report["manager_root"] = str(manager_root)
     report["stage"] = "source-selection"
-    selected, repository = selection(request, manager_root)
+    declaration = None
+    if request["version"] == 2:
+        report["stage"] = "repository-interpretation"
+        repository_root = request["repository_root"]
+        declaration = repository_declaration(
+            Path(repository_root) if repository_root is not None else None, workspace,
+        )
+    report["stage"] = "source-selection"
+    selected, repository = selection(request, manager_root, declaration=declaration)
+    if declaration is not None:
+        report["repository_policy"] = declaration
     report["repository"] = repository
     report["stage"] = "source-acquisition"
     with acquire(selected, root=workspace / "acquisition", branch_repository=repository) as resolved:

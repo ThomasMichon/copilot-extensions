@@ -343,14 +343,16 @@ the non-public approval conversation.
 ## Plan
 
 The [type-candidate and fragment receiving plan](type-candidate-and-fragment-receiving.md)
-proposes complete direct intake of #9862/#9916 into existing #9807, preserving
-the P4a narrowing, separately pending copies and strict-all terminal gate.
-The existing owner's recorded P3/Main/candidate-regression and P4a completion
-remain credited; campaign delivery verification does not reopen those slices.
+retains the reviewed #12392 alternative, then records independently verified
+whole finite #9862/#9916 source fulfillment and their actual `COMPLETED`
+closures. No direct #9807 receiving amendment was needed or claimed.
+The P4a narrowing, separately pending copies and strict-all terminal gate
+remain; the owner's completed slices are not reopened.
 The [seventeen-source study](journal/2026/11.12-type-receiving-and-lifecycle-boundaries.md)
 rejects interface-only task/installer folds and retains exact claim,
-uncertainty and source-versus-installed conditions. No receiving acceptance,
-technical completion, source retirement or custody transfer is claimed.
+uncertainty and source-versus-installed conditions. Historical local execution
+remains owner-recorded; source/provider corroboration does not claim a fresh
+test run, installed result, full typing completion or custody transfer.
 
 The [retained-foundation receiving plan](retained-foundation-receiving.md)
 directly retains three complete additions in existing OPEN #9448: the five-module
@@ -3353,9 +3355,10 @@ sources, transferring owners or turning partial/planning gains into completion.
 ## Validation Plan
 
 The [type receiving audit](type-candidate-and-fragment-receiving.md)
-requires whole current #9807 readback before separate source judgments,
-preserving all incumbent content, exact-candidate controls and checker-only
-fragment negatives. The
+preserves the unselected receiving route's whole-parent readback condition.
+The selected finite completion route instead verifies actual delivery against
+both whole original source bars, acknowledges fulfillment and reads back
+CLOSED/COMPLETED state; no planned transfer or custody release is inferred. The
 [seventeen-source audit](journal/2026/11.12-type-receiving-and-lifecycle-boundaries.md)
 retains complete qualified histories, actual owner/claim conditions and
 provenance holds. Source-only child acceptance is not strengthened into a
