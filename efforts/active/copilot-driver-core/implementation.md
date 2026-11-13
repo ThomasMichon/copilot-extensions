@@ -490,6 +490,9 @@ references, not credentials or copied approvals.
 The execution-admission owner advances a monotonic permit revision only as part
 of a real, durably committed authorization change, including revocation. A
 revision orders that owner's decisions; it is not permission by itself.
+Restoration requires a current action-specific decision newer than the original
+execution decision, at exactly the permit revision bound to the durable
+`resume_intent`. A larger counter without that authorized decision is insufficient.
 Reconciliation preserves the original operation and permit identity after a
 lost acknowledgement. Observer restart cannot mint a replacement permit or
 reset the revision. Current action admission rechecks the actual decision and
