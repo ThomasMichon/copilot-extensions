@@ -210,7 +210,7 @@
         "libs/payload-invocation/tests"
       ],
       "exclude": [],
-      "level": "pending",
+      "level": "strict",
       "import_roots": [
         "tools",
         "plugins/agent-worktrees/scripts"

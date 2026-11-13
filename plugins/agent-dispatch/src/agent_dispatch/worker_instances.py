@@ -242,21 +242,22 @@ def _validate_dependencies(
             _validate_command_dependency(
                 command, directory, explicit_cwd=bool(declaration.spec.get("cwd")),
             )
-        if declaration.kind == RegistrationKind.EMITTER and isinstance(
-            declaration.spec.get("side_load"), dict,
-        ):
+        for companion_key in ("side_load", "relevance"):
+            companion = declaration.spec.get(companion_key)
+            if declaration.kind != RegistrationKind.EMITTER or not isinstance(companion, dict):
+                continue
             from .producers.emitter import _render_command
 
             side_command = _render_command(
-                declaration.spec["side_load"]["command"], change_ref="{change_ref}",
+                companion["command"], change_ref="{change_ref}" if companion_key == "side_load" else None,
             )
-            if any(
+            if companion_key == "side_load" and any(
                 "{change_ref}" in side_command[index]
                 for index in execution_operand_indices(side_command)
             ):
                 raise RegistrarError("dynamic side-load execution dependencies cannot be validated safely")
             side_command = [
-                part if "{change_ref}" in part else resources.resolve(part)
+                part if companion_key == "side_load" and "{change_ref}" in part else resources.resolve(part)
                 for part in side_command
             ]
             directory = Path(resources.resolve(

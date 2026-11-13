@@ -2,11 +2,12 @@
 
 The queue has a **receiver-first** relevance operation:
 `reconcile_task_relevance`, with control-authorized HTTP admission for effective
-local command emitters and their registrar-selected evaluators. No automatic emitter, evaluator or
-periodic source calls it yet. Source adapters, periodic selection
+local command emitters and their registrar-selected evaluators. Command emitters
+can opt into [retained-receipt source checks](emitter-relevance.md); existing
+emitters are unchanged without that configuration. Domain source adapters, periodic selection
 and actual session/workspace closeout remain tracked by
 the [active effort](../../../efforts/active/task-relevance-reconciliation/README.md).
-This is not an automatic task scrubber.
+There is no default automatic task scrubber.
 
 ## Existing owners and integration seams
 
@@ -32,10 +33,14 @@ task. This structural scope is not authentication or proof that a registered
 emitter owns a legacy recipe task. An external receiver must derive
 caller scope from the existing registration and attribution owners, not accept
 an arbitrary caller assertion. The registered receiver below resolves
-its effective source and evaluator scope in the queue transaction.
+its effective source and evaluator scope in the queue transaction, using the
+registrar declaration observation captured for that HTTP request before queue
+write locks are acquired.
 
 `relevance_snapshot` supplies the task generation and latest audit-event
-revision. The caller checks its authoritative backing object and reports
+revision. Registered snapshots also identify the effective emitter spec with
+`emitter_spec_revision`, so a stale running emitter cannot adopt a changed
+definition's fresh observation scope. The caller checks its authoritative backing object and reports
 `needed`, `obsolete` or `unknown`, with a stable request identity, reason and
 observation reference. The reference identifies the source observation; Dispatch
 does not interpret an opaque string as closure evidence. An incomplete listing
@@ -107,9 +112,9 @@ does not release reservations or delete files.
 The actual coordinator's `/health.task_relevance` advertises
 `task_relevance/v1`, supported version `1`, registration scopes
 `local-direct-command-emitter` and `local-effective-emitter-evaluator`,
-and whether control authority is configured.
+`bounded_batches: true`, and whether control authority is configured.
 This is additive health metadata; older clients keep their existing behavior.
-No CLI command or automatic source adapter is enabled by this capability.
+Receiver capability alone enables no source adapter or periodic evaluation.
 
 The control-authorized HTTP surface is:
 
@@ -118,6 +123,8 @@ The control-authorized HTTP surface is:
 | `GET /task-relevance/contract` | Current serving receiver's support |
 | `GET /task-relevance/tasks/{task_id}?registration_id=...` | Source-scoped task and registration revision snapshot |
 | `POST /task-relevance/tasks/{task_id}` | Strict version-1 relevance report |
+| `GET /task-relevance/snapshots?registration_id=...&task_ids=...` | Up to 100 source-scoped snapshots |
+| `POST /task-relevance/reports` | Up to 100 individually receipted reports |
 | `GET /task-relevance/tasks/{task_id}/receipts/{request_id}?registration_id=...` | Original acceptance and current delivery state |
 
 The POST body contains `version`, `registration_id`, `registration_revision`,
@@ -128,12 +135,23 @@ rejected. Callers cannot choose the reporter, source, origin, machine or
 environment. Ordinary data and task-scoped authority do not authorize this
 surface.
 
+Batch reports wrap a `reports` list; each item adds `task_id` to the individual
+report body. Batch results contain `items` keyed by task id and, for reports,
+request id. Acceptance and confirmed rejection are per task, not atomic across
+the whole list. Partial or malformed responses require original-request receipt
+recovery; absence of an item is not proof of no effects. Batches require the
+additional running-peer capability and never fall back to ordinary abandonment.
+
 The receiver resolves its own local machine/environment and holds the existing
 operator-override lock through the queue decision. Inside the same SQLite write
 as claim and registration mutation, it checks the observed registration revision,
 active local registration, command-emitter task output and the emitter-authored
 source/origin fields. Fresh admission also consults the configured registrar
-reader and existing direct/declaration merge owner. A declaration-superseded
+reader and existing direct/declaration merge owner. Each individual or batch
+HTTP request discovers declarations once before queue write locks, without
+cross-request caching. Direct registrations and their revision are reread in
+each task transaction; overrides are locked through each decision.
+A declaration-superseded
 direct row is refused even before its declaration is mirrored into SQLite;
 missing or incomplete discovery is not eligibility evidence. Declared sources
 are read from that current observation, never from their eventually mirrored

@@ -490,6 +490,44 @@ separately cover small frames before EOF, argument/context fidelity, exit status
 and rejected owner identities. Installed Windows optional entry and its launcher
 remain unqualified.
 
+### Windows native-owner section provider
+
+The internal `owner_section` provider prepares a 4 KiB pagefile-backed section
+before the existing caller creates its native client. The caller must put
+`inherited_handle` in its explicit inherited-handle list, supply the actual
+creation handle and PID to `publish`, then resume the still-suspended child.
+The provider creates, resumes and supervises no process. Publication captures
+birth and principal through a duplicated creation handle, not a numeric-PID
+lookup or ancestor/session-file discovery. Publication is one-shot, including
+an uncertain write failure; close the failed provider rather than retrying it.
+
+The protected DACL admits only the current Windows user. The inherited handle
+has section-read access only. Its retained native handle keeps the section
+available after all producer handles close; closing the final handle removes
+the section without filesystem cleanup. A 256-bit private binding determines
+the local object name and must match the record. It prevents accidental
+cross-wiring, not a hostile equally privileged Windows principal.
+
+Version 1 uses an `AMO1` frame, a little-endian 32-bit JSON byte count and zero
+padding. ASCII JSON has exactly `schema`, integer `version`, `binding`, native
+`pid` and `birth`; the schema is `agent-mcp.windows-native-owner`. Unknown,
+duplicate, missing, oversized, malformed or differently bound records refuse.
+The section carries no credentials or durable ownership claim.
+`acquire(binding)` opens read-only, verifies the living native identity and
+current principal, and returns the existing pinned `SessionOwner`; its caller
+must close that observation. Missing sections, birth mismatch and owner death
+never become an unowned ordinary call.
+
+The focused `tests/test_owner_section.py` packet covers suspended native
+creation-handle capture, protected DACL, read-only inheritance, delayed reading
+after publisher-handle closure, collision, malformed/binding refusal, owner
+death before and after acquisition, and final-handle cleanup. These are source
+provider controls, not actual-client or installed-launcher qualification.
+Windows advertisement, bootstrap adoption and production caller integration
+remain disabled. The section requires no new process, network request,
+filesystem scan or steady-state message work; installed launch/update latency
+remains unqualified until caller adoption.
+
 ### Hosted originating-owner qualification
 
 The explicit `mcp-caller-lifetime` hosted Windows qualification packet uses the

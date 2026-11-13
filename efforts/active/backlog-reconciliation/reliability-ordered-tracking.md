@@ -8,10 +8,11 @@ refinements. Diagnostic receiving home:
 
 ## Status and scope
 
-This is a complete **tracking/receiving proposal**, not accepted future issue
-publication, implementation or source retirement. #4231 stays OPEN until its
-ordered map is accepted and its additional concrete diagnostic lane is
-fulfilled or actually received in a complete named objective.
+This is the accepted **tracking map with planned diagnostic receiving**.
+#4231 is CLOSED/NOT_PLANNED after actual direct D4231 receiving in OPEN #2464,
+reviewed RD4231 ROOT delivery and separate whole-source judgment. The
+[public explanation](https://github.com/ThomasMichon/copilot-extensions/issues/4231#issuecomment-6839200603)
+distinguishes administrative retirement from implementation or resource release.
 
 The original TRACK task does not require every future implementation to be
 Done. Conversely, a five-row map cannot erase the separately inherited
@@ -28,7 +29,7 @@ does not create whole-programme serial prerequisites.
 |---|---|---|
 | 1 | **Process custody:** original-owner launch/recovery admission, exact Host/child/process-birth/generation registration, and a survivable Host owning its ACP child are real source. | OPEN #2464 retains local/provider/remote/privileged lifetime, active/unknown child, cancellation and safe-retirement consumers. #7237's explicit external-conversation relationship claim is not peer-process ownership. PID, endpoint or relationship presence is not complete custody. |
 | 2 | **Truthful turn continuity:** per-turn result/tool/error persistence and terminal publication exist; actual tool-progress streaming and represented non-aborting steering exist at different supported boundaries. | OPEN #2464 retains exactly-once terminal, dormancy/provider/native qualification. OPEN #4029 directly retains ongoing progress **and** durable attributed results **and** active-turn steering; hosted busy input still queues. CLOSED/NOT_PLANNED #4171 is historical provenance, not a required live token. |
-| 3 | **Cold-launch diagnostics:** classic child stderr has bounded rolling/event persistence; #547/#553/#559 supply finite same-conversation retry/exhaustion and permitted controlled fallback. | The actual supported ACP Host CHILD still has stderr=DEVNULL. The separate 4096-byte Host bootstrap tail is not that child's startup output; host-mode frontend stderr tail is explicitly empty. #4231 currently retains this full diagnostic lane. Proposed direct D4231 receiving in OPEN #2464 and RD4231 in its existing Draft ROOT must actually land before tracking retirement. |
+| 3 | **Cold-launch diagnostics:** classic child stderr has bounded rolling/event persistence; #547/#553/#559 supply finite same-conversation retry/exhaustion and permitted controlled fallback. | The actual supported ACP Host CHILD still has stderr=DEVNULL. The separate 4096-byte Host bootstrap tail is not that child's startup output; host-mode frontend stderr tail is explicitly empty. The whole diagnostic lane is now directly retained by D4231 in OPEN #2464 and RD4231 in its existing Draft ROOT; product acceptance remains unchecked. |
 | 4 | **Crash isolation:** separate Host/child/frame custody, child-exit/liveness publication and per-turn error settlement exist. Frontend disconnect and hard Host death are different cases. | OPEN #2464 retains child EOF/reader-loss terminal/no-duplicate/Host-survival cases and #9025's still-unexplained two-Host loss. Native isolation cannot be inferred from separate classes or one happy drill. #954 remains a venue-only validation interface with actual P3 reservations. |
 | 5 | **Durable connection ownership:** the separate Connection Owner has actual native channel-WORK exclusion and persistent legacy process-birth barriers, not only passive readiness/beacons. | OPEN #4309 remains the whole endpoint/credential/prefetch/tenant/idle-pin/mux-evaluation/cardinality/cold-demand/reboot keeper. New lock source is not proof every actual credential-consumer or remote-listener case is qualified. Its existing owners and nonexpiring custody remain. |
 
@@ -38,6 +39,8 @@ The inspected immutable source is
 [`9d194f7c20fdf2303bc5411396bb9d958cffbb3b`](https://github.com/ThomasMichon/copilot-extensions/tree/9d194f7c20fdf2303bc5411396bb9d958cffbb3b).
 All 25 selected paths matched the study's final Dev and Main correspondence;
 that establishes selected source applicability, not installed behavior.
+Those comparisons preceded the receiving amendment; they do not assert that
+the new RD4231 planning text was already released.
 
 - **Custody:** Bridge's
   [launch admission](https://github.com/ThomasMichon/copilot-extensions/blob/9d194f7c20fdf2303bc5411396bb9d958cffbb3b/plugins/agent-bridge/src/agent_bridge/session_host/launcher.py#L18-L48),
@@ -90,11 +93,11 @@ No bot-review body/diff or new operational result was acquired by this study.
 
 ## Complete diagnostic receiving contract
 
-The proposed final diagnostic keeper is **OPEN #2464**, under its existing
+The actual final diagnostic keeper is **OPEN #2464**, under its existing
 truthful-state, Host/shared-driver, process, provider, relay, native and
 source/resource custodians. Its related ROOT remains **Draft**.
 
-The direct issue D4231 Plan/local/global Validation and Coordination must retain:
+The direct issue D4231 Plan/local/global Validation and Coordination retain:
 
 - Authoritative actual supported Host CHILD startup-output relay through the
   Host and consumer persistence/query, bounded content, appropriate redaction
@@ -121,26 +124,33 @@ The complete original retained from #4223 is:
 > Persist child startup diagnostics and recover stalled resumed sessions through bounded retries followed by a controlled fresh-session fallback.
 
 The corresponding RD4231 Plan/local/global Validation and Coordination are
-proposed directly in the existing ROOT. Product rows remain unchecked after
-documentary receiving. No launch, resume, fallback, stream capture, native/test,
+directly retained in the existing ROOT through merged #12317,
+`489f990945c01d9ad3a194c40baf35e441909a14`. Product rows remain unchecked and
+the ROOT stays Draft. No launch, resume, fallback, stream capture, native/test,
 process, credential, service, runtime, venue, replay or cleanup is authorized.
 
-## Tracking acceptance and remaining publication gate
+## Tracking acceptance and actual publication
 
-The T4231 tracking map must preserve every original/refinement clause and
-literal alternative, not only the five area names. The whole source route is:
+The T4231 map preserves every original/refinement clause and literal
+alternative, not only the five area names. The source-specific route was
+separately verified:
 
-1. Normal reviewed actual merge of the additive existing-ROOT retention,
-   preserving Draft status, all incumbent rows, participants and history.
-2. Fresh complete qualification and actual append-only D4231 issue delivery
-   with the full original into OPEN #2464; whole current body, discussion,
-   custody and reviewed ROOT readback.
-3. Actual acceptance of all five ordered status/receipt/dependency/owner rows
-   in #4231, preserving its entire incumbent and both refinements.
-4. Separate whole-clause disposition judgment. If any real source condition,
-   clause, fit, owner, receiving or readback is missing, **KEEP #4231**.
+1. #12317 actually merged after current-head approval, successful required
+   checks and zero findings/threads. All five reviewed/merged/current document
+   blobs matched; the complete 245-line receiving ROOT was read back.
+2. The complete direct D4231 lane and full #4223 original were appended to
+   OPEN #2464. Its whole 50,418-character body and unchanged discussion were
+   read back; the entire 45,898-character incumbent prefix was preserved.
+3. The five ordered status/receipt/dependency/owner rows were accepted in
+   #4231's whole 9,646-character body, preserving its incumbent and both
+   refinements. Three new checked rows describe ADMINISTRATIVE TRACK
+   acceptance; all original product checkboxes remain unchanged.
+4. #4231 was separately closed NOT_PLANNED after fresh provenance/custody
+   checks and exact public explanation/provider-state readback. #2464
+   stays OPEN; its seven new diagnostic product rows and the ROOT's four
+   RD4231 rows remain unchecked. No physical or source claim was settled.
 
 This sequence is specific to the proposed changed ROOT and composite source,
 not a universal new review/ACK ceremony. No new personal ACK or numeric-live
 token condition was found. Acceptance of TRACK does not finish the operational
-keepers; a proposed map alone does not dispose of the concrete diagnostic lane.
+keepers; a map alone would not have disposed of the concrete diagnostic lane.

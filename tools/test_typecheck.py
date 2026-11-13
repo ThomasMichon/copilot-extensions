@@ -1395,6 +1395,42 @@ def test_pending_probe_never_certifies_admission(
     assert typecheck.main(["--inventory", "--require-complete"]) == 2
 
 
+def test_enforced_invocation_tests_preserve_the_independent_catalog_gate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    projects = tuple(
+        item for item in typecheck.load_projects()
+        if item.name in {"lib-payload-invocation", "lib-payload-invocation-tests"}
+    )
+    files = tuple(
+        path for path in typecheck.python_paths()
+        if any(item.owns(path) for item in projects)
+    )
+    expected = tuple(
+        path for path in files if path.startswith("libs/payload-invocation/tests/")
+    )
+    calls: list[tuple[str, tuple[str, ...]]] = []
+
+    def check(
+        root: Path, item: typecheck.Project, selected: tuple[str, ...], *,
+        all_paths: tuple[str, ...], strict: bool = False,
+    ) -> int:
+        assert root == typecheck.ROOT and all_paths == files
+        calls.append((item.name, selected))
+        return 0
+
+    monkeypatch.setattr(typecheck, "load_projects", lambda: projects)
+    monkeypatch.setattr(typecheck, "python_paths", lambda: files)
+    monkeypatch.setattr(typecheck, "check_project", check)
+    assert expected
+    assert typecheck.main(["--enforced"]) == 0
+    assert calls == [
+        (item.name, tuple(path for path in files if item.owns(path)))
+        for item in projects if item.level == "strict"
+    ]
+    assert ("lib-payload-invocation-tests", expected) in calls
+
+
 def test_dependency_policy_refusal_has_the_setup_error_contract(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
 ) -> None:

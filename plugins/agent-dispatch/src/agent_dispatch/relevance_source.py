@@ -6,10 +6,10 @@ import json
 import sqlite3
 from threading import Lock
 
-from .pool_source_snapshot import read_supervisor_declarations
+from .pool_source_snapshot import DeclarationRead, read_supervisor_declarations
 from .pool_source_snapshot import local_input_revision
 from .queue_records import TaskError
-from .queue_relevance_registration import EffectiveRelevanceSources, RelevanceRegistration
+from .queue_relevance_registration import EffectiveRelevanceSources, RelevanceAdmission, RelevanceRegistration
 from .registrar_discovery import RegistrarSources
 from .registrar_reconcile import declaration_to_registration, declared_registrations, runs_on_machine
 from .supervisor_registration import merge_registration_sources, registration_override_ids
@@ -23,13 +23,29 @@ class RelevanceSource:
     def resolve(
         self, conn: sqlite3.Connection, selector: RelevanceRegistration,
     ) -> EffectiveRelevanceSources:
+        return self.prepare()(conn, selector)
+
+    def prepare(self) -> RelevanceAdmission:
+        """Discover once per HTTP request, before taking any queue write lock."""
         try:
             with self._lock:
                 observation = read_supervisor_declarations(self.sources, legacy=True)
         except (OSError, ValueError, RuntimeError) as exc:
-            raise TaskError("relevance effective registrar source is unavailable") from exc
-        if not observation.complete:
-            raise TaskError("relevance effective registrar source is incomplete")
+            failure = f"relevance effective registrar source is unavailable: {exc}"
+        else:
+            failure = None if observation.complete else "relevance effective registrar source is incomplete"
+
+        def admit(conn: sqlite3.Connection, selector: RelevanceRegistration) -> EffectiveRelevanceSources:
+            if failure is not None:
+                raise TaskError(failure)
+            return self._resolve(conn, selector, observation)
+
+        return admit
+
+    @staticmethod
+    def _resolve(
+        conn: sqlite3.Connection, selector: RelevanceRegistration, observation: DeclarationRead,
+    ) -> EffectiveRelevanceSources:
         machine, env = selector.machine, selector.env
         declared = declared_registrations(observation, machine=machine, env=env)
         foreign_emitters = tuple(
