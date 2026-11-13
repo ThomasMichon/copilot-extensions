@@ -30,12 +30,15 @@ if "--contract" in args:
  "fields":["repo","from","assigned","age","tags","publication"],"groups":[],"age_fields":["created"]}},
  "credential":"observe/per-request","effects":"read-only","max_pages":20,"max_pulls":1000,
  "max_requests":64,"max_seconds":60,"max_capture_bytes":1048584,"max_json_bytes":1048576}
+ value["providers"]["azure-devops"]["acquisition"]={
+ "protocol":"agent-pull-requests.filter-acquisition/v1","user_ids":"uuid-lowercase",
+ "query_fields":{"from":"creatorId","assigned":"reviewerId"},"max_query_branches":64}
 else:
  data=json.loads(state.read_text())
  if data.get("unavailable"):raise SystemExit(3)
  path=Path(args[args.index("--filter-file")+1]);raw=path.read_bytes()
  selected=Expression.loads(raw);outcome=data.get("outcome","complete")
- pulls=[{"number":n,"facts":{"repo":identity["repo"],"from":["alice"],"assigned":["bob"],
+ pulls=[{"number":n,"facts":{"repo":identity["repo"],"from":["11111111-1111-1111-1111-111111111111"],"assigned":[],
  "created_at":data.get("created_at",100),"activity_at":None,"tags":data.get("tags",["ready"]),
  "publication":data.get("publication","published")}} for n in data.get("members",[7])]
  for pull in pulls:pull["match"]=selected.evaluate(pull["facts"],now=__import__("time").time())
@@ -60,7 +63,9 @@ def selected_config(tmp_path: Path, *, sponsor: bool) -> tuple[Path, dict[str, A
     cache["bindings"] = cache["bindings"][:1]
     cache["definitions"] = {
         "protocol": "agent-pull-requests.filters/v1",
-        "sets": {"team": {"protocol": "agent-pull-requests.filters/v1", "where": {"from": {"users": ["alice"]}}}},
+        "sets": {"team": {"protocol": "agent-pull-requests.filters/v1", "where": {"from": {
+            "users": ["11111111-1111-1111-1111-111111111111"],
+        }}}},
     }
     cache["sponsors"] = [{
         "principal": "reader-a", "target": "repo-github", "request_id": "startup",

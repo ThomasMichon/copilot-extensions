@@ -263,11 +263,19 @@ class ReplayObserver:
             def interested():
                 check()
                 current = demands_now().get(key)
-                if current is None or any(current["registrations"].get(registration) != revision
+                if current is None or not any(current["registrations"].get(registration) == revision
                                           for registration, revision in demand["registrations"].items()):
                     raise Withdrawn()
+            def starting():
+                check()
+                current = demands_now().get(key)
+                if current is None or current["registrations"] != demand["registrations"]:
+                    raise Withdrawn()
             try:
-                scan = population(binding, demand["filter"], root=self.store.root, checkpoint=interested)
+                scan = population(
+                    binding, demand["filter"], root=self.store.root,
+                    checkpoint=interested, start_checkpoint=starting,
+                )
             except Withdrawn:
                 continue
             except RepositoryNativeUnavailable:

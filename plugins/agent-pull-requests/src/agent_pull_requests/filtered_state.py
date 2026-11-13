@@ -1,5 +1,6 @@
 """Explicit generation-three population state in the existing ReplayStore envelope."""
 
+import hashlib
 import json
 import math
 import re
@@ -14,6 +15,26 @@ from .repository_state import _fields, _integer
 
 METADATA_RESERVE_BYTES = 1_048_576
 FACT_FIELDS = "repo from assigned created_at activity_at tags publication"
+
+def revision(value):
+    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()).hexdigest()
+
+
+def release_inactive(state, now):
+    released = {}
+    for row in state["registrations"]:
+        if row["cancelled"] or row["expires_at"] <= now:
+            released.setdefault(row["target"], set()).update(row["members"])
+            row["members"] = []
+            row["revisions"] = {}
+    for repository in state["repositories"]:
+        key = RepositoryIdentity.parse(repository["identity"]).key
+        active = [row for row in state["registrations"] if row["target"] == key
+                  and not row["cancelled"] and row["expires_at"] > now]
+        retained = {number for row in active for number in row["members"]}
+        repository["pulls"] = [pull for pull in repository["pulls"] if active and (
+            pull["number"] not in released.get(key, set()) or pull["number"] in retained
+        )]
 
 
 def text(value: object) -> str:
@@ -107,7 +128,7 @@ def validate(value, namespace, *, version=3):
     registrations, requests = {}, set()
     for row in value["registrations"]:
         _fields(row, "registration_id request_id consumer target expires_at acknowledged cancelled "
-                "request delivered acknowledged_event members coverage generation baseline")
+                "request delivered acknowledged_event members revisions coverage generation baseline")
         for name in ("registration_id", "request_id", "consumer", "target"):
             text(row[name])
         request_key = row["consumer"], row["request_id"]
@@ -129,6 +150,11 @@ def validate(value, namespace, *, version=3):
         if row["acknowledged_event"] is not None:
             event_id(row["acknowledged_event"])
         _members(row["members"])
+        if not isinstance(row["revisions"], dict) or set(row["revisions"]) != {
+            str(number) for number in row["members"]
+        } or any(not isinstance(value, str) or re.fullmatch(r"[a-f0-9]{64}", value) is None
+                 for value in row["revisions"].values()):
+            raise ValueError("invalid filtered per-registration revisions")
         coverage(row["coverage"])
         _integer(row["generation"], 1)
         if not isinstance(row["baseline"], dict) or len(json.dumps(row["baseline"]).encode()) > 1_000_000:

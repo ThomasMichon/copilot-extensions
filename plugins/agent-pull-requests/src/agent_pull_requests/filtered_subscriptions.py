@@ -6,7 +6,7 @@ import uuid
 
 from pr_filters import Expression, PROTOCOL as FILTER_PROTOCOL
 
-from .filtered_state import text, trim
+from .filtered_state import release_inactive, text, trim
 from .repository_contract import MAX_REGISTRATIONS
 from .repository_subscriptions import (
     RESPONSE_BYTES, RepositoryHistoryGap, RepositoryRequestConflict, _integer,
@@ -104,7 +104,7 @@ class FilteredSubscriptions:
                         self.projection.definitions.resolve(definition) if definition is not None
                         else Expression.parse(payload["filter"])
                     )
-                    selected.require(self.projection.capabilities[key], {identity.repo})
+                    self.projection.require(key, selected)
                     request = {"filter": selected.document(), "definition": definition, "ttl": ttl}
                     retired = {r["registration_id"] for r in state["registrations"]
                                if r["expires_at"] + 86400 < now and r["delivered"] <= r["acknowledged"]}
@@ -118,14 +118,14 @@ class FilteredSubscriptions:
                         "consumer": consumer, "target": key, "expires_at": now + request["ttl"],
                         "acknowledged": state["next_sequence"] - 1, "delivered": state["next_sequence"] - 1,
                         "acknowledged_event": None, "cancelled": False, "request": request,
-                        "members": [], "coverage": copy.deepcopy(repository["inventory"]),
+                        "members": [], "revisions": {}, "coverage": copy.deepcopy(repository["inventory"]),
                         "generation": 1, "baseline": {},
                     }
                     self.projection.seed(state, row, now)
-                    self.projection.union([*(
+                    self.projection.require(key, self.projection.union([*(
                         r for r in state["registrations"] if r["target"] == key
                         and not r["cancelled"] and r["expires_at"] > now
-                    ), row]).require(self.projection.capabilities[key], {identity.repo})
+                    ), row]))
                     row["baseline"] = page(state, row, identity)
                     state["registrations"].append(row)
                     changed = True
@@ -161,12 +161,18 @@ class FilteredSubscriptions:
                     if until > now + 86400:
                         raise ValueError("renewal exceeds finite horizon")
                     if until > row["expires_at"] and until > now:
-                        self.projection.union([*(
+                        self.projection.require(key, self.projection.union([*(
                             r for r in state["registrations"] if r["target"] == key
                             and r is not row and not r["cancelled"] and r["expires_at"] > now
-                        ), row]).require(self.projection.capabilities[key], {identity.repo})
+                        ), row]))
                         if row["expires_at"] <= now:
                             row["generation"] += 1
+                            row["members"] = []
+                            row["revisions"] = {}
+                            row["coverage"] = {
+                                "outcome": "unknown", "observed_at": None, "last_complete_at": None,
+                                "pages": 0, "error": "",
+                            }
                         row["expires_at"] = until
                         changed = True
                     result.update(status=status(row, now), expires_at=row["expires_at"])
@@ -205,6 +211,7 @@ class FilteredSubscriptions:
             if len(json.dumps(result, allow_nan=False).encode()) > RESPONSE_BYTES - 8192:
                 raise ValueError("filtered response exceeds its budget")
             if changed:
+                release_inactive(state, now)
                 trim(state, new_sequence=state["next_sequence"], now=now)
                 commit()
             return result
@@ -213,4 +220,4 @@ class FilteredSubscriptions:
     @staticmethod
     def receipt(row):
         return copy.deepcopy({name: value for name, value in row.items()
-                              if name not in ("members", "baseline")})
+                              if name not in ("members", "revisions", "baseline")})

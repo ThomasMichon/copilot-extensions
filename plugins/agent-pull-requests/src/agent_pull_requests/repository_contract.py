@@ -37,9 +37,13 @@ class RepositoryIdentity:
             r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", value,
         ) for value in (self.namespace, self.account)):
             raise ValueError("invalid repository namespace or account")
-        if not isinstance(self.repo, str) or not re.fullmatch(
+        if not isinstance(self.repo, str) or (
+            self.repo.count("/") != 1 or len(self.repo) > 256
+            or any(not part or part in (".", "..") for part in self.repo.split("/"))
+            or any(ord(char) < 32 or ord(char) == 127 for char in self.repo)
+        ) or self.provider != "azure-devops" and not re.fullmatch(
             r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", self.repo,
-        ) or any(part in (".", "..") for part in self.repo.split("/")):
+        ):
             raise ValueError("invalid exact repository")
         address = urlsplit(self.endpoint)
         if (

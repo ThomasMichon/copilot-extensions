@@ -22,6 +22,31 @@ def support(**overrides: Any) -> dict[str, Any]:
     }
 
 
+def test_acquisition_admission_shares_bounded_cover_and_checks_residual_identities() -> None:
+    from pr_filters.acquisition import PROTOCOL as ACQUISITION_PROTOCOL, plan
+
+    constraints = {
+        "protocol": ACQUISITION_PROTOCOL, "user_ids": "uuid-lowercase",
+        "query_fields": {"from": "creatorId", "assigned": "reviewerId"}, "max_query_branches": 1,
+    }
+    alice = "11111111-1111-1111-1111-111111111111"
+    bob = "22222222-2222-2222-2222-222222222222"
+    assert plan(expression({"all": [
+        {"from": {"users": [alice, bob]}}, {"assigned": {"users": [bob]}},
+    ]}), constraints) == [("reviewerId", bob)]
+    with pytest.raises(FilterError, match="branch limit"):
+        plan(expression({"from": {"users": [alice, bob]}}), constraints)
+    with pytest.raises(FilterError, match="canonical provider user"):
+        plan(expression({"all": [
+            {"repo": ["Project/repo"]}, {"from": {"users": ["invalid"]}},
+        ]}), constraints)
+    assert plan(expression({"any": [
+        {"repo": ["Project/repo"]}, {"from": {"users": [alice]}},
+    ]}), constraints) == [None]
+    with pytest.raises(FilterError, match="unsupported"):
+        plan(expression({"repo": ["Project/repo"]}), {})
+
+
 def test_six_fields_share_exact_conjunction_and_driver_identity() -> None:
     selected = expression({
         "repo": ["Project/repo"],

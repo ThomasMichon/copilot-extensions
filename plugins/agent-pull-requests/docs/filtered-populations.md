@@ -20,6 +20,12 @@ declaration decides which predicates it can support. Registration rejects
 unsupported required semantics and repository selections outside the configured
 target. Expressions narrow authority; they cannot choose an executable,
 credential command, endpoint, account or another configured repository.
+The driver's required `acquisition` declaration uses
+`agent-pull-requests.filter-acquisition/v1`: canonical user-ID syntax, native
+query selectors and a finite query-cover limit. The shared pure planner checks
+both native execution and the proposed aggregate live demand before subscription
+or renewal commits. An older descriptor without this declaration is unsupported;
+upgrade the native provider before selecting the filtered service profile.
 
 The initial native population driver is Azure DevOps. Its user IDs are native
 canonical lowercase IdentityRef UUIDs; assignment means reviewer users, not
@@ -36,9 +42,13 @@ An in-flight read retains native cleanup custody but cannot publish for withdraw
 or replaced acquisition generations. Finite native input files remain private
 until actual reader/cleanup settlement; unconfirmed cleanup retains the file
 and raises rather than silently discarding that evidence.
+Demand must still match before starting new native work. Once started, a shared
+read may finish for any remaining captured registration generation rather than
+discarding another owner's result when one participant withdraws.
 
 Each consumer has independent membership and entry/change/departure/coverage
-events. Unknown facts preserve previously accepted membership and report partial
+events and its own last-projected fact revisions, including when a new subscriber
+joins an acquisition already in flight. Unknown facts preserve previously accepted membership and report partial
 coverage. Partial/unavailable discovery never proves absence. Clock-only age
 changes are evaluated at a captured cycle instant. Departure is selection loss,
 not proof that a PR closed or merged. Population events do not confer permission
@@ -120,6 +130,9 @@ delivery; ACK takes the delivered `--event-id`. An expired/cancelled consumer
 can reconcile already delivered events, but cannot obtain later undelivered
 events. Backpressure retains unsettled delivery rather than evicting it.
 Original settled request receipts remain at least one day beyond expiry.
+Inactive registrations release current-membership cache pins independently of
+their immutable baseline and unsettled delivered event payloads. Reactivating
+expired demand starts membership reconciliation under its new generation.
 
 Renew takes `--registration-id --expires-at <absolute-epoch-second>`. It advances
 the finite expiry monotonically, at most one day into the future. Repeating an

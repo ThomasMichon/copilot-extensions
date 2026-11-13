@@ -7,6 +7,7 @@ import tempfile
 
 from agent_procutil.owned_process import OwnedCleanupError
 from pr_filters import Expression, PROTOCOL as FILTER_PROTOCOL
+from pr_filters.acquisition import plan
 
 from .filtered_state import facts as validate_facts
 from .repository_native import (
@@ -34,25 +35,28 @@ def qualify(binding, *, checkpoint):
             ("max_json_bytes", 1, 1_048_576),
         )):
             raise ValueError
-        Expression.parse({"protocol": FILTER_PROTOCOL, "where": {"repo": [identity.repo]}}).require(
-            support, {identity.repo},
-        )
+        selected = Expression.parse({"protocol": FILTER_PROTOCOL, "where": {"repo": [identity.repo]}})
+        selected.require(support, {identity.repo})
+        plan(selected, support.get("acquisition", {}))
     except (ValueError, KeyError, TypeError, UnicodeError, RecursionError):
         raise RepositoryNativeUnsupported("selected native population contract unsupported") from None
     checkpoint()
     return support
 
 
-def population(binding, expression, *, root, checkpoint):
+def population(binding, expression, *, root, checkpoint, start_checkpoint=None):
     """Keep immutable input until the actual native reader and cleanup settle."""
-    support = qualify(binding, checkpoint=checkpoint)
+    start_checkpoint = checkpoint if start_checkpoint is None else start_checkpoint
+    support = qualify(binding, checkpoint=start_checkpoint)
     identity = binding.repository_identity
     expression.require(support, {identity.repo})
+    plan(expression, support["acquisition"])
     descriptor, filename = tempfile.mkstemp(prefix=".population-", suffix=".json", dir=root)
     retained = False
     try:
         with os.fdopen(descriptor, "wb") as stream:
             stream.write(expression.canonical.encode("utf-8"))
+        start_checkpoint()
         result = _invoke([
             *(binding.prefix or (binding.command,)), "pr-watch", "population", identity.repo,
             "--config", binding.inventory_config,

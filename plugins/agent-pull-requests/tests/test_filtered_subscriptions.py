@@ -217,3 +217,85 @@ def test_unknown_facts_do_not_remove_previously_accepted_membership(selected):
     assert [p["number"] for p in result["baseline"]["pulls"]] == [7]
     assert result["baseline"]["inventory"]["outcome"] == "partial"
     assert not any(e["kind"] == "departure" for e in events(selected, "first", first))
+
+
+@pytest.mark.parametrize("available", [False, True])
+def test_warm_cache_join_during_acquisition_keeps_its_own_change_revision(selected, available):
+    first = subscribe(selected, "first", {"repo": ["owner/repo"]})
+    observe(selected, {7: facts()})
+    captured = selected[3].demands(expires_at=10000)[selected[2].key]
+    joined = subscribe(selected, "joined", {"repo": ["owner/repo"]})
+    assert joined["baseline"]["pulls"][0]["facts"]["tags"] == ["ready"]
+    observe(selected, {7: facts(tags=["changed"])}, demand=captured)
+    assert not events(selected, "joined", joined)
+    if available:
+        observe(selected, {7: facts(tags=["changed"])})
+    else:
+        observe(selected, outcome="unavailable", error="provider_unavailable")
+    assert [(e["kind"], e["number"]) for e in events(selected, "joined", joined)
+            if e["kind"] != "coverage"] == [("change", 7)]
+    assert len([e for e in events(selected, "first", first) if e["kind"] == "change"]) == 1
+
+
+@pytest.mark.parametrize("cancel", [False, True])
+def test_inactive_members_do_not_pin_cache_but_keep_delivered_evidence(selected, cancel):
+    first = subscribe(selected, "first", {"repo": ["owner/repo"]}, ttl=1)
+    observe(selected, {n: facts() for n in range(1, 201)})
+    pending = events(selected, "first", first)
+    if cancel:
+        execute(selected, "first", "cancel", registration(first))
+    else:
+        selected[0][0] = 102
+    second = subscribe(selected, "second", {"repo": ["owner/repo"]})
+    observe(selected, {n: facts() for n in range(201, 401)})
+    execute(selected, "second", "cancel", registration(second))
+    third = subscribe(selected, "third", {"repo": ["owner/repo"]})
+    observe(selected, {n: facts() for n in range(401, 601)})
+    assert execute(selected, "third", "query", {**registration(third), "limit": 16})["baseline"]["pulls"][0]["number"] == 401
+    assert events(selected, "first", first) == pending
+    assert subscribe(selected, "first", {"repo": ["owner/repo"]}, ttl=1)["baseline"] == first["baseline"]
+    execute(selected, "first", "acknowledge", {**registration(first), "event_id": pending[-1]["event_id"]})
+    if not cancel:
+        execute(selected, "first", "renew", {**registration(first), "expires_at": 200})
+        observe(selected, {500: facts()})
+        renewed = execute(selected, "first", "query", registration(first))["baseline"]
+        assert [p["number"] for p in renewed["pulls"]] == [500]
+        after = None
+        while True:
+            page = execute(selected, "first", "events", {
+                **registration(first), **({"after": after} if after is not None else {}),
+            })
+            if any(e["kind"] == "entry" and e["number"] == 500 for e in page["events"]):
+                break
+            assert page["more"]
+            after = page["events"][-1]["sequence"]
+
+
+def test_native_identity_and_aggregate_limits_refuse_before_mutating_demand(selected):
+    from pr_filters.acquisition import PROTOCOL as ACQUISITION_PROTOCOL
+
+    now, store, _identity, _projection, _registry = selected
+    identity = RepositoryIdentity("test", "azure-devops", "https://dev.azure.com/example", "reader", "owner/repo")
+    projection = FilteredProjection(store, (identity,), capabilities={identity.key: {
+        **CAPABILITIES, "acquisition": {
+            "protocol": ACQUISITION_PROTOCOL, "user_ids": "uuid-lowercase",
+            "query_fields": {"from": "creatorId", "assigned": "reviewerId"}, "max_query_branches": 64,
+        },
+    }})
+    selected = now, store, identity, projection, FilteredSubscriptions(projection)
+    before = store.path.read_bytes()
+    with pytest.raises(FilterError, match="canonical provider user"):
+        subscribe(selected, "bad", {"from": {"users": ["not-a-uuid"]}})
+    assert store.path.read_bytes() == before
+    users = [f"{number:08x}-1111-1111-1111-111111111111" for number in range(128)]
+    first = subscribe(selected, "first", {"from": {"users": users[:64]}}, ttl=1)
+    before = store.path.read_bytes()
+    with pytest.raises(FilterError, match="query branch limit"):
+        subscribe(selected, "second", {"from": {"users": users[64:]}})
+    assert store.path.read_bytes() == before
+    now[0] = 102
+    subscribe(selected, "second", {"from": {"users": users[64:]}})
+    before = store.path.read_bytes()
+    with pytest.raises(FilterError, match="query branch limit"):
+        execute(selected, "first", "renew", {**registration(first), "expires_at": 200})
+    assert store.path.read_bytes() == before

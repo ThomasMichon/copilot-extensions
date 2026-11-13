@@ -7,6 +7,7 @@ import sys
 import pytest
 
 from pr_filters import Expression, PROTOCOL
+from pr_filters.acquisition import PROTOCOL as ACQUISITION_PROTOCOL
 from agent_pull_requests.filtered_native import population, qualify
 from agent_pull_requests.repository_contract import RepositoryIdentity
 from agent_pull_requests.repository_native import RepositoryNativeUnavailable, RepositoryNativeUnsupported
@@ -15,7 +16,10 @@ from agent_pull_requests.watch_replay_store import ReplayStore
 from agent_pull_requests.filtered_subscriptions import FilteredSubscriptions
 
 SUPPORT = {"protocol": PROTOCOL, "fields": ["repo", "from", "age", "publication", "assigned", "tags"],
-           "groups": [], "age_fields": ["created"]}
+           "groups": [], "age_fields": ["created"], "acquisition": {
+               "protocol": ACQUISITION_PROTOCOL, "user_ids": "uuid-lowercase",
+               "query_fields": {"from": "creatorId", "assigned": "reviewerId"}, "max_query_branches": 64,
+           }}
 
 
 @pytest.fixture
@@ -36,6 +40,9 @@ if "--contract" in args:
  "fields":["repo","from","age","publication","assigned","tags"],"groups":[],"age_fields":["created"]}},
  "credential":"observe/per-request","effects":"read-only","max_pages":20,"max_pulls":1000,
  "max_requests":64,"max_seconds":60,"max_capture_bytes":1048584,"max_json_bytes":1048576}
+ value["providers"]["azure-devops"]["acquisition"]={
+ "protocol":"agent-pull-requests.filter-acquisition/v1","user_ids":"uuid-lowercase",
+ "query_fields":{"from":"creatorId","assigned":"reviewerId"},"max_query_branches":64}
  if settings.get("unsupported"):value["effects"]="unknown"
 else:
  assert args[2]=="Project/repo"
@@ -107,3 +114,44 @@ def test_observer_has_no_provider_reads_for_inert_definitions_and_coalesces_live
     assert observer.cycle(expires_at=10000)["observed"] == 1
     calls = [json.loads(line) for line in log.read_text().splitlines()]
     assert sum("--filter-file" in command for command in calls) == 1
+
+
+@pytest.mark.parametrize("withdraw_all", [False, True])
+def test_inflight_read_keeps_results_for_remaining_captured_demand(native, tmp_path, monkeypatch, withdraw_all):
+    from agent_pull_requests import filtered_native
+
+    binding, _log, _control = native
+    store = ReplayStore(tmp_path / "state", "test", clock=lambda: 100,
+                        repository_cache=True, repository_continuing=True, repository_filtered=True)
+    store.provision()
+    observer = ReplayObserver(store, bindings=(binding,))
+    observer.repositories.capabilities[binding.account] = SUPPORT
+    registry = FilteredSubscriptions(observer.repositories)
+    registrations = {}
+    for consumer in ("first", "second"):
+        result = registry.execute(binding.account, consumer, "subscribe", {
+            "request_id": "request", "ttl": 60,
+            "filter": {"protocol": PROTOCOL, "where": {"repo": ["Project/repo"]}},
+        }, expires_at=10000)
+        registrations[consumer] = result["subscription"]["registration_id"]
+    reads = []
+    def acquire(_binding, _expression, *, root, checkpoint, start_checkpoint):
+        start_checkpoint()
+        reads.append("once")
+        for consumer in ("first", "second") if withdraw_all else ("first",):
+            registry.execute(binding.account, consumer, "cancel", {
+                "registration_id": registrations[consumer],
+            }, expires_at=10000)
+        checkpoint()
+        return {"outcome": "complete", "error": "", "pages": 1, "pulls": [{
+            "number": 7, "facts": {"repo": "Project/repo", "from": None, "assigned": None, "tags": None,
+                                 "created_at": 95, "activity_at": None, "publication": "published"},
+        }]}
+    monkeypatch.setattr(filtered_native, "population", acquire)
+    assert observer.cycle(expires_at=10000)["observed"] == (0 if withdraw_all else 1)
+    assert reads == ["once"]
+    for consumer in ("first", "second"):
+        result = registry.execute(binding.account, consumer, "events", {
+            "registration_id": registrations[consumer],
+        }, expires_at=10000)
+        assert bool(result["events"]) is (consumer == "second" and not withdraw_all)

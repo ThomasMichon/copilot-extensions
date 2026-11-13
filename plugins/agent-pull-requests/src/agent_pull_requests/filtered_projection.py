@@ -4,8 +4,9 @@ import copy
 import uuid
 
 from pr_filters import Definitions, Expression, MATCH, NONMATCH, PROTOCOL as FILTER_PROTOCOL
+from pr_filters.acquisition import plan
 
-from .filtered_state import facts as validate_facts, trim
+from .filtered_state import facts as validate_facts, release_inactive, revision, trim
 from .repository_contract import MAX_PULLS, RepositoryBackpressure
 from .repository_projection import _new_repository
 
@@ -31,6 +32,13 @@ class FilteredProjection:
             state["repositories"].append(row)
         return row
 
+    def require(self, key, expression):
+        identity = self.identities[key]
+        support = self.capabilities[key]
+        expression.require(support, {identity.repo})
+        if identity.provider == "azure-devops":
+            plan(expression, support.get("acquisition", {}))
+
     @staticmethod
     def expression(row):
         return Expression.parse(row["request"]["filter"])
@@ -41,6 +49,8 @@ class FilteredProjection:
         row["members"] = [
             p["number"] for p in repository["pulls"] if selected.evaluate(p["facts"], now=now) == MATCH
         ]
+        row["revisions"] = {str(p["number"]): revision(p["facts"]) for p in repository["pulls"]
+                            if p["number"] in row["members"]}
         row["coverage"] = {
             "outcome": "unknown", "observed_at": None, "last_complete_at": None, "pages": 0, "error": "",
         }
@@ -56,7 +66,7 @@ class FilteredProjection:
                 if not rows:
                     continue
                 expression = self.union(rows)
-                expression.require(self.capabilities[key], {identity.repo})
+                self.require(key, expression)
                 result[key] = {
                     "filter": expression, "registrations": {
                         row["registration_id"]: (self.expression(row).revision, row["generation"]) for row in rows
@@ -101,6 +111,7 @@ class FilteredProjection:
             state, now = document["repository_cache"], int(self.store.clock())
             if type(observed_at) is not int or not 0 <= observed_at <= now:
                 raise ValueError("invalid population cycle instant")
+            release_inactive(state, now)
             rows = [r for r in state["registrations"] if r["target"] == key
                     and demand["registrations"].get(r["registration_id"]) == (
                         self.expression(r).revision, r["generation"],
@@ -133,8 +144,12 @@ class FilteredProjection:
                         self.event(state, row, number, "entry", facts)
                     elif number not in members and number in previous:
                         self.event(state, row, number, "departure", facts)
-                    elif number in members and number in prepared and old.get(number) != facts:
+                    elif number in members and row["revisions"].get(str(number)) != revision(facts):
                         self.event(state, row, number, "change", facts)
+                    if number in members:
+                        row["revisions"][str(number)] = revision(facts)
+                    else:
+                        row["revisions"].pop(str(number), None)
                 coverage = {
                     "outcome": "partial" if unknown and scan["outcome"] == "complete" else scan["outcome"],
                     "error": "facts_unknown" if unknown and scan["outcome"] == "complete" else scan["error"],
