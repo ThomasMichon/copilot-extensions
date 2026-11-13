@@ -65,7 +65,10 @@ admitted incarnation.
 `uncertain`, with typed per-source observations. Only an all-cache-miss result is
 `cache-exhausted`; failure, unsupported providers and stalls do not masquerade
 as misses or proof of MFA. A caller may shorten, never extend, the phase budget.
-No outcome starts interactive authentication or sends a device notice.
+Deadline exhaustion remains `uncertain`, including a valid token arriving too
+late or expiry during cleanup/final validation; it cannot become a known
+unavailable outcome. No outcome starts interactive authentication or sends a
+device notice.
 
 Losing or timed-out reads receive cancellation. Cancellation is not settlement:
 an uncooperative adapter remains owned and counted against the global probe

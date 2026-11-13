@@ -356,6 +356,49 @@ def test_expired_phase_never_starts_queued_or_policy_delayed_provider_work(monke
     asyncio.run(run())
 
 
+@pytest.mark.parametrize("expiry", ["provider", "final-policy", "loser-cleanup"])
+def test_late_completion_and_final_cleanup_expiry_remain_uncertain(monkeypatch, expiry):
+    async def run():
+        loop = asyncio.get_running_loop()
+        original_time = loop.time
+        offset, checks = [0.0], 0
+
+        async def ready(key):
+            await asyncio.sleep(0)
+            if expiry == "provider":
+                offset[0] = 31.0
+            return hit(key)
+
+        async def loser(key):
+            try:
+                await asyncio.Event().wait()
+            finally:
+                offset[0] = 31.0
+
+        sources = (source("ready", Provider(ready)),)
+        if expiry == "loser-cleanup":
+            sources += (source("loser", Provider(loser)),)
+
+        def snapshot(key):
+            nonlocal checks
+            checks += 1
+            if expiry == "final-policy" and checks == 4:
+                offset[0] = 31.0
+            return sources
+
+        with monkeypatch.context() as clock:
+            clock.setattr(loop, "time", lambda: original_time() + offset[0])
+            coordinator = AvailableTokenCoordinator(snapshot, budget=1)
+            result = await coordinator.lookup(KEY)
+            assert result.state == "uncertain"
+            assert result.token is None
+            assert any(item.state == "uncertain" for item in result.observations)
+            assert not coordinator._affinity
+            assert await coordinator.drain()
+
+    asyncio.run(run())
+
+
 def test_one_phase_deadline_retains_cancellation_resistant_probe_custody():
     async def run():
         release = asyncio.Event()

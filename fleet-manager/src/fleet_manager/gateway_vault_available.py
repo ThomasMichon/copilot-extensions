@@ -251,6 +251,9 @@ class AvailableTokenCoordinator:
                     elif token is not None and (
                             token.key != key or token.expires_at <= time.time()):
                         result = SourceAvailability("unavailable")
+                    elif result.state == "available" and (
+                            self._closed or loop.time() >= deadline):
+                        result = SourceAvailability("uncertain")
                     observations[source.identity] = SourceObservation(source.identity, result.state)
                     if (result.state == "available" and not self._closed
                             and loop.time() < deadline):
@@ -279,9 +282,11 @@ class AvailableTokenCoordinator:
                     self._affinity.popitem(last=False)
                 return AvailableLookup(
                     "available", token, source.identity, tuple(observations.values()))
-            observations[source.identity] = SourceObservation(source.identity, "unavailable")
+            observations[source.identity] = SourceObservation(
+                source.identity, "uncertain" if self._closed or loop.time() >= deadline
+                else "unavailable")
         states = {item.state for item in observations.values()}
-        state = ("uncertain" if "uncertain" in states else
+        state = ("uncertain" if self._closed or loop.time() >= deadline or "uncertain" in states else
                  "cache-exhausted" if states == {"cache-miss"} else "unavailable")
         return AvailableLookup(state, observations=tuple(observations.values()))
 
