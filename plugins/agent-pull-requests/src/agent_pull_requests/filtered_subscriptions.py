@@ -41,8 +41,7 @@ def status(row, now):
 def page(state, row, identity, *, after=0, limit=16):
     _integer(after)
     _integer(limit, 1, 16)
-    repository = next(r for r in state["repositories"] if r["identity"] == identity.document())
-    pulls = sorted((p for p in repository["pulls"] if p["number"] in row["members"] and p["number"] > after),
+    pulls = sorted((p for p in row["projected"].values() if p["number"] > after),
                    key=lambda p: p["number"])
     result = {
         "identity": identity.document(), "inventory": copy.deepcopy(row["coverage"]),
@@ -118,14 +117,14 @@ class FilteredSubscriptions:
                         "consumer": consumer, "target": key, "expires_at": now + request["ttl"],
                         "acknowledged": state["next_sequence"] - 1, "delivered": state["next_sequence"] - 1,
                         "acknowledged_event": None, "cancelled": False, "request": request,
-                        "members": [], "revisions": {}, "coverage": copy.deepcopy(repository["inventory"]),
+                        "members": [], "projected": {}, "coverage": copy.deepcopy(repository["inventory"]),
                         "generation": 1, "baseline": {},
                     }
                     self.projection.seed(state, row, now)
-                    self.projection.require(key, self.projection.union([*(
+                    self.projection.require_rows(key, [*(
                         r for r in state["registrations"] if r["target"] == key
                         and not r["cancelled"] and r["expires_at"] > now
-                    ), row]))
+                    ), row])
                     row["baseline"] = page(state, row, identity)
                     state["registrations"].append(row)
                     changed = True
@@ -161,14 +160,14 @@ class FilteredSubscriptions:
                     if until > now + 86400:
                         raise ValueError("renewal exceeds finite horizon")
                     if until > row["expires_at"] and until > now:
-                        self.projection.require(key, self.projection.union([*(
+                        self.projection.require_rows(key, [*(
                             r for r in state["registrations"] if r["target"] == key
                             and r is not row and not r["cancelled"] and r["expires_at"] > now
-                        ), row]))
+                        ), row])
                         if row["expires_at"] <= now:
                             row["generation"] += 1
                             row["members"] = []
-                            row["revisions"] = {}
+                            row["projected"] = {}
                             row["coverage"] = {
                                 "outcome": "unknown", "observed_at": None, "last_complete_at": None,
                                 "pages": 0, "error": "",
@@ -220,4 +219,4 @@ class FilteredSubscriptions:
     @staticmethod
     def receipt(row):
         return copy.deepcopy({name: value for name, value in row.items()
-                              if name not in ("members", "revisions", "baseline")})
+                              if name not in ("members", "projected", "baseline")})

@@ -181,6 +181,27 @@ The canonical parent remains Active until its own full Plan/Validation resolves.
 
 ## Journal
 
+### 2026-11-13 - Review corrections and bounded native validation
+
+The original five service findings are corrected: per-registration projection,
+inactive membership release, aggregate native admission, ADO repository names
+and surviving captured demand. A second review identified withdrawal-closed
+admission, initial fan-out progress and revision-consistent query pages; these
+now have focused controls, including 21 overlapping 200-PR populations.
+
+The operator approved one synthetic `pr_service=true` run at
+`1cdc09036e98b44e8dffd310931da5969bfcb20e`, two disposable jobs with existing
+10-minute caps and all other selectors off. No deployment, live-provider,
+credential or shared-service effects were authorized. Run 43520097792 used
+that exact source and selection. Windows exposed a transport test that did not
+reconcile the existing pre-transaction busy response; Linux's full standalone
+suite exhausted its 180-second runner limit. Neither job is claimed passing.
+The busy contract is now handled with bounded original-ID retry only for its
+explicit pre-entry response. A separate opt-in `pr_filtered` Linux lane selects
+the changed foreground consumers without dropping or relaxing the full lane.
+Any further workflow invocation needs its own authority; the original single
+run approval is consumed.
+
 ### 2026-11-11 - Native population merged; service qualification in progress
 
 #12184 merged the native ADO population driver after clean current-head review

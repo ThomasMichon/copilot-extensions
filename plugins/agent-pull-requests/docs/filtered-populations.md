@@ -26,6 +26,9 @@ query selectors and a finite query-cover limit. The shared pure planner checks
 both native execution and the proposed aggregate live demand before subscription
 or renewal commits. An older descriptor without this declaration is unsupported;
 upgrade the native provider before selecting the filtered service profile.
+Admission also checks each registration's bounded cover independently of broad
+repository-wide demand. Removing that broad demand cannot strand another owner's
+otherwise admitted subscriptions.
 
 The initial native population driver is Azure DevOps. Its user IDs are native
 canonical lowercase IdentityRef UUIDs; assignment means reviewer users, not
@@ -47,8 +50,12 @@ read may finish for any remaining captured registration generation rather than
 discarding another owner's result when one participant withdraws.
 
 Each consumer has independent membership and entry/change/departure/coverage
-events and its own last-projected fact revisions, including when a new subscriber
-joins an acquisition already in flight. Unknown facts preserve previously accepted membership and report partial
+events and its own last-projected fact snapshots, including when a new subscriber
+joins an acquisition already in flight. Queries return only that registration's
+projected facts, not newer shared-cache facts that bypass its generation fence.
+Large fan-out commits complete registration projections until the event/byte
+budget fills; remaining projections resume after consumers acknowledge retained
+events. Unknown facts preserve previously accepted membership and report partial
 coverage. Partial/unavailable discovery never proves absence. Clock-only age
 changes are evaluated at a captured cycle instant. Departure is selection loss,
 not proof that a PR closed or merged. Population events do not confer permission
