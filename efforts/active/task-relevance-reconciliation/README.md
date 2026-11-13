@@ -155,11 +155,15 @@ merged plan does not establish running adoption.
       existing reservation/placement transaction; source merged in #12398.
       Ordinary keyed retries retain their original session request; acquisition
       deliveries retain their own attempt. Conditional CLI acquisition migration
-      merged in #12405. Managed ordinary keyed migration is in the current
-      source slice; running qualification remains open.
-- [ ] Expose forward and reverse correlation through existing owner APIs.
+      merged in #12405; managed ordinary keyed migration merged in #12408.
+      Running qualification remains open.
+- [x] Expose forward and reverse correlation through existing owner APIs.
       Pool identity must identify the actual registration/assignment, not just
       a display name; opaque legacy records remain explicitly unattributed.
+      The [correlation guide](../../../plugins/agent-dispatch/docs/cohort-correlation.md)
+      maps existing attachment, reservation, workspace and session views.
+      Contained source controls cover original pool references after reassignment
+      and stopped/expired session discovery; installed qualification stays open.
 - [ ] Connect owner closeout acknowledgement to the existing terminal task,
       session and managed-workspace lifecycle. Preserve actual unlanded work,
       open PRs and foreign obligations rather than force-clearing them.

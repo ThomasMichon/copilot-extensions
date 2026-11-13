@@ -15,6 +15,8 @@ coordinator construction leaves it disabled. Neither this evidence nor an
 assignment claim finalizes a worktree or authorizes physical cleanup.
 Writer-cohort activation, submission readiness and same-worker rejection
 recovery remain separate qualification gates.
+The [correlation guide](cohort-correlation.md) maps existing forward/reverse
+inspection surfaces without adding cleanup authority.
 
 ## Snapshot and outcomes
 
