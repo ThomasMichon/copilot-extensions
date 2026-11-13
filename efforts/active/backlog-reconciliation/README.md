@@ -3170,12 +3170,21 @@ sources, transferring owners or turning partial/planning gains into completion.
   Four unchecked Plan/local/global rows and five source-specific canonical
   keepers remain; documentary delivery is not a runtime fix or source
   disposition. The current census is 861 whole open, 132 above target.
+  Complete current ROOT/strict-annex readback after #12491 now supports
+  #5941's [separate redundant-tracking retirement](journal/2026/11.13-named-scheduled-configuration-intake.md#separate-post-merge-receiving-and-tracking-judgment),
+  not technical completion. Its four technical rows remain unchecked;
+  the later full census records 858 whole open, 129 above target.
   The [recurrence/source-accounting intake](journal/2026/11.13-recurrence-and-source-accounting-intake.md)
   proposes two complete finite families in promotion Phase 3 and progressive
   Phase 6, preserving undecided policy and normal reviewed domain acceptance.
   Four canonical keepers, all thirteen unchecked Plan/local/global rows and
   separate receiving/source/resource judgments remain; no new disposition
   or closure credit is claimed.
+  Subsequent complete current receiving readback after #12489 supports
+  #5890/#5896's separate redundant-tracking retirements, not technical
+  completion. All thirteen rows remain unchecked; the
+  [post-merge judgment](journal/2026/11.13-recurrence-and-source-accounting-intake.md#separate-post-merge-receiving-and-tracking-judgments)
+  records 859 whole open, still 130 above target.
   Complete current ROOT/strict-annex receiving readback after #12478 supports
   #5675's separate redundant-tracking retirement, not technical completion.
   All original D/R/W witness rows and custodians remain; #5791's complete
