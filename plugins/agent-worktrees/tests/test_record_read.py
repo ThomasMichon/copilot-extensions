@@ -328,7 +328,10 @@ def test_record_read_exact_unpublished_record_and_unchanged_list(record_fixture,
 
 
 @pytest.mark.parametrize("task_id", ["assigned-task", "foreign-task"])
-def test_record_read_preserves_canonical_dispatch_attribution(record_fixture, task_id, monkeypatch):
+@pytest.mark.parametrize("with_cohort", [False, True])
+def test_record_read_preserves_canonical_dispatch_attribution(
+    record_fixture, task_id, monkeypatch, with_cohort,
+):
     data, path = record_fixture
     attribution = {
         "task_id": task_id,
@@ -339,6 +342,20 @@ def test_record_read_preserves_canonical_dispatch_attribution(record_fixture, ta
         "creator_machine": "example-owner",
         "ownership": "created",
     }
+    if with_cohort:
+        attribution["cohort"] = {
+            "schema": "dispatch-assignment-cohort", "version": 1,
+            "emitter": {
+                "repo": data["repo"], "source": "emitter", "producer_id": "source-reader",
+                "generation": 2, "request_id": "original-request", "task_id": task_id,
+            },
+            "pool": {
+                "task_id": task_id, "registration_id": "original-pool",
+                "machine": "example-owner", "env": "linux",
+                "reservation_key": attribution["reservation_key"],
+                "task_generation": 3, "catalog_revision": 7,
+            },
+        }
     data["dispatch_attempt"] = attribution
     path.write_text(yaml.safe_dump(data), encoding="utf-8")
     before = path.read_bytes()
