@@ -86,6 +86,20 @@ def test_service_cache_retains_attributed_hit_and_generation_after_password_expi
     assert kpdb not in vault._password_set_at
 
 
+def test_replacement_service_reuses_protected_record_without_master_or_memory_cache(
+    cached_service, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    vault, _persistent, kpdb, _clock = cached_service
+    expected = _get(vault)
+    replacement = service.VaultService()
+    replacement._default_kpdb = kpdb
+    monkeypatch.setattr(
+        replacement, "ensure_unlocked", lambda *_a, **_kw: pytest.fail("replacement tried to unlock"),
+    )
+    assert not replacement.cache and not replacement.cli.has_password(kpdb)
+    assert _get(replacement) == expected
+
+
 @pytest.mark.parametrize("mismatch", ["database", "group", "field", "installation", "unattributed"])
 def test_cache_binding_mismatch_is_not_relabelled_or_served(
     cached_service, monkeypatch: pytest.MonkeyPatch, mismatch: str,
