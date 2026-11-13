@@ -1093,22 +1093,6 @@ def cmd_remove(args):
     return 1
 
 
-def cmd_move(args):
-    if not _ensure_unlocked_service():
-        return 1
-
-    request = {"action": "move", "entry": args.entry, "dest": args.dest}
-    if args.force:
-        request["force"] = True
-    resp = send_command(request, timeout=10.0)
-    if resp and resp.get("ok"):
-        print(resp.get("message", "Entry moved"))
-        return 0
-    error = resp.get("error", "unknown") if resp else "service unreachable"
-    print(f"Error: {error}", file=sys.stderr)
-    return 1
-
-
 def cmd_git_credential(args):
     """git credential helper: delegate an allowlisted host's credential to GCM.
 
@@ -1760,12 +1744,9 @@ def _main(argv: list[str] | None = None):
                    help="Allow removing an entry outside the vault group")
     p.set_defaults(func=cmd_remove)
 
-    p = sub.add_parser("move", aliases=["mv"], help="Move an entry to another group")
-    p.add_argument("entry", help="Entry path")
-    p.add_argument("dest", help="Destination group")
-    p.add_argument("-f", "--force", action="store_true",
-                   help="Allow moving an entry outside the vault group")
-    p.set_defaults(func=cmd_move)
+    from .relocate_commands import add_relocate_parsers
+
+    add_relocate_parsers(sub)
 
     p = sub.add_parser("git-credential",
                        help="git credential helper (delegates allowlisted hosts to GCM)")

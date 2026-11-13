@@ -39,6 +39,9 @@ CACHE_ENABLE_ENV = "AGENT_VAULT_CACHE"
 CACHE_DIR_ENV = "AGENT_VAULT_CACHE_DIR"
 
 _TRUTHY = {"1", "true", "yes", "on"}
+# Per-entry generation floors written when a move/copy changes an entry.
+_FLOORS_KEY = "generation_floors"
+_FLOOR_RETENTION_NS = 24 * 3600 * 1_000_000_000
 
 
 def _truthy(value: str | None) -> bool:
@@ -551,6 +554,8 @@ class PersistentCache:
                         legacy = self._field_record(store, legacy_entry, field, strict=True)
                         if legacy is not None:
                             entry = legacy_entry
+                if self._below_floor(store, entry, generation):
+                    return True
                 _, fields = self._fields_for_write(store, entry)
                 current = fields.get(field)
                 if isinstance(current, dict) and "rotation" in current:
@@ -727,6 +732,8 @@ class PersistentCache:
                         legacy = self._field_record(store, legacy_entry, field, strict=True)
                         if legacy is not None:
                             entry = legacy_entry
+                if generation is not None and self._below_floor(store, entry, generation):
+                    return True
                 _, fields = self._fields_for_write(store, entry)
                 current = fields.get(field)
                 if (
@@ -838,6 +845,44 @@ class PersistentCache:
                 return self._write_store_unlocked(store)
         except Exception:
             return False
+
+    def fence(self, entry: str, generation: int) -> bool:
+        """Drop an entry and refuse later writes at or below ``generation``.
+
+        A client that read the old value before the entry changed would
+        otherwise repopulate the cache with it after a plain invalidation.
+        """
+        if not self.enabled:
+            return False
+        try:
+            with self._store_lock():
+                store = self._read_store()
+                entries = store.get("entries")
+                if isinstance(entries, dict):
+                    entries.pop(entry, None)
+                floors = store.get(_FLOORS_KEY)
+                if not isinstance(floors, dict):
+                    floors = {}
+                horizon = time.time_ns() - _FLOOR_RETENTION_NS
+                floors = {
+                    name: value for name, value in floors.items()
+                    if type(value) is int and value > horizon
+                }
+                floors[entry] = max(generation, int(floors.get(entry, 0)))
+                store[_FLOORS_KEY] = floors
+                return self._write_store_unlocked(store)
+        except Exception:
+            return False
+
+    @staticmethod
+    def _below_floor(store: dict, entry: str, generation: int | None) -> bool:
+        floors = store.get(_FLOORS_KEY)
+        if not isinstance(floors, dict):
+            return False
+        floor = floors.get(entry)
+        if type(floor) is not int:
+            return False
+        return generation is None or generation <= floor
 
     def clear(self) -> bool:
         """Wipe the entire cache file. Safe when the file is absent."""

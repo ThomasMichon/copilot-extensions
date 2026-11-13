@@ -73,7 +73,7 @@ PASSWORD_MUTATION_MAX_QUEUE_SECONDS = 30.0
 UNLOCK_REQUIRED_ACTIONS = frozenset({
     "get", "has", "search", "add", "set-password", "set-username",
     "import-key", "export-key", "list", "ls", "show", "remove", "rm",
-    "move", "mv", "identity-key-setup", "ssh-key-prepare", "ssh-key-read",
+    "move", "mv", "copy", "cp", "identity-key-setup", "ssh-key-prepare", "ssh-key-read",
 })
 
 log = logging.getLogger("agent-vault.service")  # marketplace-isolation: allow logger-namespace
@@ -537,6 +537,85 @@ class VaultService:
             return None
         return self.cli.has_entry(kpdb, entry)
 
+    # -- move / copy ---------------------------------------------------------
+
+    def _resolve_destination(
+        self, kpdb: str, source: str, dest: str, group: str | None,
+    ) -> str:
+        """Return the full destination entry path for a move or copy.
+
+        A destination ending in ``/`` or naming an existing group keeps the
+        source title inside that group. Anything else is a full entry path
+        (rename); a bare name lands in the configured group like any other
+        bare entry name.
+        """
+        dest = dest.strip()
+        title = source.rstrip("/").rsplit("/", 1)[-1]
+        if dest.endswith("/") or self.cli.group_exists(kpdb, dest):
+            return dest.rstrip("/") + "/" + title
+        return normalize_entry(dest, group)
+
+    def _invalidate_entry_caches(self, kpdb: str, *entries: str) -> None:
+        targets = {entry.lstrip("/") for entry in entries if entry}
+        for key in [k for k in self.cache if k[0] == kpdb and k[1].lstrip("/") in targets]:
+            del self.cache[key]
+            self._credential_generations.pop(key, None)
+        # Fence rather than drop so a client that read the old value before
+        # this change cannot write it back with an older generation.
+        fence = time.time_ns()
+        persistent = get_cache()
+        for entry in targets:
+            persistent.fence(entry, fence)
+            persistent.fence("/" + entry, fence)
+
+    def _relocate_entry(
+        self, kpdb: str, group: str | None, vault_name: str, reason: str,
+        request: dict, *, copy: bool,
+    ) -> dict:
+        """Move or copy one entry to a destination group or full entry path.
+
+        Explicit paths may address any group in the database. Replacing an
+        existing destination entry requires ``overwrite``; the replacement is
+        staged first and the old entry goes to the recycle bin when enabled.
+        ``force`` is ignored here: older clients sent it to bypass the former
+        group-scope guard, and it must not silently become an overwrite.
+        """
+        verb = "copy" if copy else "move"
+        entry = normalize_entry(request.get("entry", ""), group)
+        dest = request.get("dest") or request.get("dest_group") or ""
+        if not entry:
+            return {"ok": False, "error": "No entry path provided"}
+        if not dest.strip():
+            return {"ok": False, "error": "No destination group or entry path provided"}
+        overwrite = request.get("overwrite") is True
+        if not self.ensure_unlocked(kpdb, vault_name, reason):
+            error_msg = self._last_error(kpdb) or self._last_error("") or "Vault locked"
+            return {"ok": False, "error": error_msg, "needs_unlock": True}
+        with self._credential_lock:
+            dest_path = self._resolve_destination(kpdb, entry, dest, group)
+            if dest_path.lstrip("/") == entry.lstrip("/"):
+                return {"ok": False, "error": f"Source and destination are the same entry: {entry}"}
+            if not self.cli.has_entry(kpdb, entry):
+                return {"ok": False, "error": f"Entry not found: {entry}"}
+            replace = self.cli.has_entry(kpdb, dest_path)
+            if replace and not overwrite:
+                return {"ok": False, "error": (
+                    f"Destination entry '{dest_path}' already exists. "
+                    "Send overwrite=true to replace it.")}
+            if copy:
+                ok, msg = self.cli.copy_entry(
+                    kpdb, entry, dest_path, replace=replace,
+                    skip_notes=request.get("skip_notes") is True,
+                )
+                self._invalidate_entry_caches(kpdb, dest_path)
+            else:
+                ok, msg = self.cli.move_entry(kpdb, entry, dest_path, replace=replace)
+                self._invalidate_entry_caches(kpdb, entry, dest_path)
+        if not ok:
+            return {"ok": False, "error": msg, "dest": dest_path}
+        log.info("%s entry %s -> %s", "Copied" if copy else "Moved", entry, dest_path)
+        return {"ok": True, "message": msg, "source": entry, "dest": dest_path, "action": verb}
+
     # -- request handler -----------------------------------------------------
 
     def handle_request(self, request: dict, peer: str = "?",
@@ -876,35 +955,11 @@ class VaultService:
                          entry, len(keys_to_remove))
             return {"ok": ok, "message": msg} if ok else {"ok": False, "error": msg}
 
-        if action in ("move", "mv"):
-            entry = normalize_entry(request.get("entry", ""), group)
-            dest_group = request.get("dest") or request.get("dest_group") or ""
-            if not entry:
-                return {"ok": False, "error": "No entry path provided"}
-            if not dest_group:
-                return {"ok": False, "error": "No destination group provided"}
-            force = bool(request.get("force", False))
-            effective_group = group or load_config().group
-            if not force and not _within_group(entry, effective_group):
-                return {"ok": False, "error": (
-                    f"Entry '{entry}' is outside the '{effective_group}' group "
-                    "scope. Send force=true to override.")}
-            if not self.ensure_unlocked(kpdb, vault_name, reason):
-                error_msg = self._last_error(kpdb) or self._last_error("") or "Vault locked"
-                return {"ok": False, "error": error_msg, "needs_unlock": True}
-            ok, msg = self.cli.move_entry(kpdb, entry, dest_group)
-            if ok:
-                # Invalidate cache for the old path and any stale cache at the new path.
-                entry_name = entry.rsplit("/", 1)[-1]
-                new_path = dest_group.rstrip("/") + "/" + entry_name
-                keys_to_remove = [
-                    k for k in self.cache
-                    if k[0] == kpdb and k[1] in (entry, new_path)
-                ]
-                for key in keys_to_remove:
-                    del self.cache[key]
-                log.info("Moved entry %s -> %s", entry, dest_group)
-            return {"ok": ok, "message": msg} if ok else {"ok": False, "error": msg}
+        if action in ("move", "mv", "copy", "cp"):
+            return self._relocate_entry(
+                kpdb, group, vault_name, reason, request,
+                copy=action in ("copy", "cp"),
+            )
 
         if action == "stop":
             self._shutdown = True

@@ -129,9 +129,20 @@ redirect/echo refusals, exit codes and version-skew behavior.
 <agent-vault catalog argv[0]> set-password "API/OpenAI"
 <agent-vault catalog argv[0]> set-username "API/OpenAI" alice
 <agent-vault catalog argv[0]> remove "API/OpenAI" -f
-<agent-vault catalog argv[0]> move "API/OpenAI" Archive -f
+<agent-vault catalog argv[0]> move "API/OpenAI" Archive/
+<agent-vault catalog argv[0]> move "API/OpenAI" "API/OpenAI-old"
+<agent-vault catalog argv[0]> copy "API/OpenAI" "Team/Shared/OpenAI"
 <agent-vault catalog argv[0]> lock
 ```
+
+Bare entry names (no `/`) resolve under the configured vault group, the default
+provisioning location. A path containing `/` (or starting with `/` for the
+KeePass root) addresses any group, so `add`, `move` and `copy` work anywhere
+without `-f`. `move`/`copy` accept a destination group (existing, or ending in
+`/`) or a full entry path to rename; `-f` overwrites an existing destination.
+`copy` does not carry custom attributes, TOTP, tags, expiry or history, and
+refuses a source with notes unless `--skip-notes` is passed.
+`remove` still requires `-f` outside the configured group.
 
 ### SSH keys
 
