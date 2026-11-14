@@ -387,8 +387,13 @@ def test_byte_backpressure_accounts_for_shared_cache_before_partial_projection(s
     observe(selected, population)
     assert execute(selected, "consumer-0", "query", registration(registrations[0]))["baseline"]["pulls"]
     assert not execute(selected, "consumer-1", "query", registration(registrations[1]))["baseline"]["pulls"]
-    for consumer, registration_value in enumerate(registrations):
+    before = selected[1].path.read_bytes()
+    with pytest.raises(RepositoryBackpressure):
         observe(selected, population)
+    assert selected[1].path.read_bytes() == before
+    for consumer, registration_value in enumerate(registrations):
+        if consumer:
+            observe(selected, population)
         pending = events(selected, f"consumer-{consumer}", registration_value)
         assert pending
         execute(selected, f"consumer-{consumer}", "acknowledge", {
@@ -436,3 +441,17 @@ def test_cached_pr_enters_and_leaves_age_window_without_fresh_acquisition(select
     observe(selected, outcome=outcome, error=error)
     assert not execute(selected, "age", "query", registration(watched))["baseline"]["pulls"]
     assert any(e["kind"] == "departure" and e["number"] == 7 for e in events(selected, "age", watched))
+
+
+def test_hot_first_subscriber_cannot_starve_later_projection_after_ack(selected, monkeypatch):
+    from agent_pull_requests import filtered_state
+
+    first = subscribe(selected, "first", {"repo": ["owner/repo"]})
+    later = subscribe(selected, "later", {"repo": ["owner/repo"]})
+    monkeypatch.setattr(filtered_state, "MAX_EVENTS", 2)
+    observe(selected, {7: facts()})
+    pending = events(selected, "first", first)
+    assert not execute(selected, "later", "query", registration(later))["baseline"]["pulls"]
+    execute(selected, "first", "acknowledge", {**registration(first), "event_id": pending[-1]["event_id"]})
+    observe(selected, {7: facts(tags=["changed"])})
+    assert execute(selected, "later", "query", registration(later))["baseline"]["pulls"]
