@@ -8,7 +8,7 @@
 - **Status:** Active
 - **Vision:** vision-extending against [`visions/mux-companion`](../../../visions/mux-companion/README.md)
 - **Umbrella issue:** [#4369](https://github.com/ThomasMichon/copilot-extensions/issues/4369)
-- **Current Sidecar coordination:** [#8811](https://github.com/ThomasMichon/copilot-extensions/issues/8811)
+- **Sidecar continuation:** Step 7 below; [#8811](https://github.com/ThomasMichon/copilot-extensions/issues/8811) retains the requirement and coordination history
 - **Sub-issues:** filed per-step as each step is scoped for execution
 
 ## Guiding Intent
@@ -708,8 +708,8 @@ Local action and attribution validation:
 #### Direct represented-session creator and lifecycle source (#8776)
 
 - [ ] LR1. Carry an optional `caller_session_id`/`parent_session_id` or
-  owner-approved creator equivalent through live registration, persistence,
-  list/detail and launchers, populated only from actually known launch
+  owner-approved worktree-level creator equivalent through live registration,
+  persistence, list/detail and launchers, populated only from actually known launch
   metadata. Preserve absent, invalid and unknown values and old clients;
   never guess from timestamps, names or Dispatch records.
 - [ ] LR2. Identify the link as caller-asserted, not proof of origin,
@@ -717,7 +717,8 @@ Local action and attribution validation:
   #5361/#4119/#2530 owners distinct; preserve #4196 and all existing claims
   and holds. Bridge remains producer/source owner and Companion consumer.
 - [ ] LR3. Forward supported subagent started/completed/failed events and
-  configured metadata through existing ACP-compatible normalization.
+  configured name/model metadata where supported through existing ACP-compatible
+  normalization, preserving tool attribution.
   Preserve background lifetime beyond task-tool completion/end-of-turn;
   tool completion is not subagent completion.
 - [ ] LR4. Forward `system.notification` or a selected narrow background
