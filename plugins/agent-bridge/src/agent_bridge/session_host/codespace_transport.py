@@ -374,7 +374,9 @@ async def _refresh_checkout_metadata(target: dict) -> None:
         isinstance(part, str) and part for part in provider
     ):
         raise RuntimeError("Legacy checkout target requires fresh provider metadata")
-    argv = [*provider, "namespace-resolve", target["name"]]
+    from ..transport import _reresolve_stale_interpreter
+
+    argv = [*_reresolve_stale_interpreter(list(provider)), "namespace-resolve", target["name"]]
     requested = target.get("requested_repo") or target.get("repo")
     if requested:
         argv += ["--repo", requested]

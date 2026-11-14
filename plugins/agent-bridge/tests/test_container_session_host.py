@@ -168,6 +168,51 @@ def test_build_container_spawner_uses_generic_remote_spawner():
 
 
 @pytest.mark.asyncio
+async def test_existing_session_state_probe_survives_removed_install_stage(
+    monkeypatch, tmp_path,
+):
+    runtime = tmp_path / ".agent-containers"
+    stable = tmp_path / "installed" / "agent-containers"
+    shim = stable / "bin" / "agent-containers.cmd"
+    shim.parent.mkdir(parents=True)
+    shim.write_text("")
+    runtime.mkdir()
+    (runtime / "payload-dir").write_text(f"{stable}\n", encoding="utf-8")
+    recorded = str(
+        runtime / ".install-stage" / "20260101T000000-1" / "agent-containers"
+        / "bin" / "agent-containers.cmd"
+    )
+    seen = []
+
+    async def fake_provider(command, *, timeout):
+        seen.append(command)
+        return 0, (
+            b'{"name":"odsp-web-1","state":"running","running":true,'
+            b'"container_id":"a1b2c3d4e5f6000011112222"}'
+        ), b""
+
+    monkeypatch.setattr(
+        "agent_bridge.session_host.container_transport._run_provider",
+        fake_provider,
+    )
+    target = {
+        "name": "odsp-web-1",
+        "ssh": {"host_alias": "agent-container-odsp-web-1-a1b2c3d4e5f6"},
+        "provider_command": [recorded],
+    }
+    spawner = build_container_spawner(
+        target,
+        prepared={
+            **target,
+            "state_command": [recorded, "session-host-state", "odsp-web-1"],
+        },
+    )
+
+    assert await spawner._transport.is_running() is True
+    assert seen == [[str(shim), "session-host-state", "odsp-web-1"]]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("running", "container_id", "expected"),
     [

@@ -1,0 +1,9 @@
+{
+  "comment": "Repoint stored provider commands under a removed install stage or pruned payload snapshot onto the runtime's stable payload-dir, so existing container and CodeSpace sessions keep working after an update",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}
