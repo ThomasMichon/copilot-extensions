@@ -248,7 +248,7 @@ def test_new_knowledge_refusal_does_not_reserve_or_poison_the_request(
     from agent_worktrees import state_root
     from agent_worktrees.launch_preflight import LaunchPreflightError
 
-    config = _create_config(tmp_path)
+    config = replace(_create_config(tmp_path), knowledge_repo="knowledge")
     _stub_create_worktree_core_internals(monkeypatch, tmp_path, config)
     intent = _intent("new")
     if version == 2:
@@ -257,7 +257,7 @@ def test_new_knowledge_refusal_does_not_reserve_or_poison_the_request(
         blocked.setattr(
             state_root, "resolve_state_root",
             lambda *_a, **_k: state_root.StateRoot(
-                None, "knowledge_repo", "", True, True, False, error="Knowledge unavailable",
+                None, "knowledge_repo", "knowledge", True, True, False, error="Knowledge unavailable",
             ),
         )
         with pytest.raises(LaunchPreflightError, match="knowledge readiness"):
@@ -277,7 +277,7 @@ def test_creation_time_knowledge_refusal_preserves_admitted_retry(
     from agent_worktrees import state_root
     from agent_worktrees.launch_preflight import LaunchPreflightError
 
-    config = _create_config(tmp_path)
+    config = replace(_create_config(tmp_path), knowledge_repo="knowledge")
     _stub_create_worktree_core_internals(monkeypatch, tmp_path, config)
     intent = _intent("new")
     if version == 2:
@@ -290,7 +290,7 @@ def test_creation_time_knowledge_refusal_preserves_admitted_retry(
         if len(reads) == 1:
             return healthy_root(*args, **kwargs)
         return state_root.StateRoot(
-            None, "knowledge_repo", "", True, True, False, error="Knowledge withdrawn",
+            None, "knowledge_repo", "knowledge", True, True, False, error="Knowledge withdrawn",
         )
 
     with monkeypatch.context() as blocked:

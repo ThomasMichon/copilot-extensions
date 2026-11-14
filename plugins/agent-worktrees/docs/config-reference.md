@@ -702,7 +702,9 @@ agent-worktrees ≥ 1.5.3-dev113.)
 ### Required applications before New authoring
 
 `require_application_readiness: true` opts this repository into required-module
-observation after the existing knowledge prerequisite. The native New planner
+observation after validating any configured knowledge binding. An absent binding
+does not block basic local New; personal storage and coordination requirements
+remain independent. The native New planner
 and initial structured New admission enforce it; creation-time rechecking keeps
 an admitted-but-unstarted request's original allocation recoverable. Source-only
 allocation, existing sessions and recovery do not acquire this New-only gate.

@@ -102,11 +102,10 @@ def _create_args(
     )
 
 
-@pytest.mark.parametrize("configured", [False, True], ids=["unbound", "unresolved"])
 def test_new_authoring_refuses_required_knowledge_before_allocation(
-    tmp_path, monkeypatch, capfd, configured,
+    tmp_path, monkeypatch, capfd,
 ):
-    config = replace(_config(tmp_path), knowledge_repo="knowledge" if configured else None)
+    config = replace(_config(tmp_path), knowledge_repo="knowledge")
     monkeypatch.setattr(m.cfg, "load_config", lambda *a, **k: config)
     monkeypatch.setattr(
         state_root, "resolve_state_root",
@@ -123,6 +122,63 @@ def test_new_authoring_refuses_required_knowledge_before_allocation(
     assert rc != 0
     assert "knowledge" in json.loads(captured.out)["error"].lower()
     assert "Traceback" not in captured.out + captured.err
+    assert not (tmp_path / "worktrees").exists()
+
+
+@pytest.mark.parametrize("requirement", ["stateless", "requires_external_state_root"])
+def test_unbound_new_keeps_storage_and_coordination_unavailable(
+    tmp_path, monkeypatch, requirement,
+):
+    from agent_worktrees import application_admission, launch_preflight
+
+    base = _config(tmp_path)
+    config = replace(base, repos={
+        base.repo_name: replace(base.default_repo, **{requirement: True}),
+    })
+    checked = launch_preflight.LaunchPreflight(checked_profile="selected-profile")
+    observed = []
+
+    def applications(config_arg, *, source):
+        observed.append((config_arg, source))
+        return checked
+
+    monkeypatch.setattr(application_admission, "new_application_preflight", applications)
+    result = launch_preflight.new_authoring_preflight(
+        config, source=config.default_repo.anchor,
+    )
+
+    assert result is checked
+    assert observed == [(config, config.default_repo.anchor)]
+    root = state_root.resolve_state_root(config)
+    assert root.requires_external and not root.bound and root.path is None
+    readiness = state_root.coordination_readiness(config)
+    assert not readiness.ready and readiness.code == "knowledge_binding_required"
+
+
+def test_unbound_new_still_refuses_unready_required_applications(
+    tmp_path, monkeypatch, capfd,
+):
+    from agent_worktrees import application_admission
+
+    base = _config(tmp_path)
+    config = replace(base, repos={
+        base.repo_name: replace(
+            base.default_repo, stateless=True, require_application_readiness=True,
+        ),
+    })
+    monkeypatch.setattr(m.cfg, "load_config", lambda *a, **k: config)
+
+    def unavailable(**kwargs):
+        raise ValueError("owner unavailable")
+
+    monkeypatch.setattr(application_admission, "_selected_runtime", unavailable)
+    _forbid_create_mutations(monkeypatch)
+
+    rc = m.cmd_resolve(m.build_parser().parse_args(["resolve", "--json", "--new"]))
+
+    assert rc != 0
+    error = json.loads(capfd.readouterr().out)["error"]
+    assert "requires application readiness" in error
     assert not (tmp_path / "worktrees").exists()
 
 
