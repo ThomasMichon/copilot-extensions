@@ -86,6 +86,11 @@ rearm/replay permission or owner release; no new watchdog or generic ACK.
   #6812 updater observability. No production rollout or uncertain-turn resend
   follows from plan approval.
 
+- **Ambient routing intent:** Preserve the existing worktree-provisioner and
+  dispatch-client custodians for the separate #1414 family below. No implementer,
+  source, claim, resource, credential or operational authority is transferred.
+  Keep headless/no-worktree prompt and label routing, repository-resource
+  resolution and #2793's whole configuration outcome separate.
 
 ### Continuing #5675 pinned-emitter recovery custody
 
@@ -507,6 +512,28 @@ contract within Phase 3, not as another supervisor or automatic failover.
   pointers or repository-owned declarations.
 - [ ] Preserve standalone queue use and stage adopter migration deliberately;
   old peers must fail explicitly when required resolution support is unavailable.
+
+### Cross-plugin family - Ambient per-worktree coordinator-routing intent
+
+- [ ] **P1414-A:** Add stable dispatch-routing intent written by the existing
+  worktree provisioner at embody. Represent the supported default-local,
+  shared OR machine-moniker choice in worktree state, not a transient URL;
+  these are alternative choices, not simultaneous activation requirements.
+- [ ] **P1414-B:** Make the dispatch client discover that intent from CWD by
+  walking to the applicable worktree state and resolve the selected route to
+  its current endpoint at use time. Compose with existing rendezvous/routing
+  discovery and delivered dynamic endpoint resolution; neither alone supplies
+  the provisioner-written, CWD-discovered outcome.
+- [ ] **P1414-C:** Specify and implement precedence with explicit operator/task
+  authority strongest. Decide ambient intent's relative precedence against
+  rendezvous deliberately rather than inheriting an accidental ordering.
+  Worktree context selects a route only: it supplies no credentials, task
+  authorization, source authority or remote mutation authority.
+- [ ] **P1414-D:** Preserve existing prompt/label routing for headless/no-worktree
+  embodiments. Keep raw coordinator URLs refused and add no URL fallback.
+  Retain existing contributors, assignments, reservations, source/release and
+  isolated/native/installed distinctions. This planned intake neither releases
+  custody nor declares implementation or source retirement.
 
 ### Phase 5 - Recover held cleanup through existing ground-layer gates
 
@@ -1012,6 +1039,33 @@ _(Agent-recommended direct Phase3/Phase7 consumer case; all rows unchecked.)_
   original OR/AND, unknown-operation identity, explicit OPEN token, incumbent
   check state/first gate and custodian; no universal ACK, every-host or unrelated
   whole-parent prerequisite.
+
+### Ambient routing-intent validation
+
+- [ ] **V1414-A:** Exercise the actual provisioner embody writer for each
+  supported stable intent (default-local, shared, machine moniker), then the
+  actual dispatch-client CWD discovery path. Verify the intended route is
+  selected without unrelated worktree changes. A field alone or client-only
+  parser test does not establish this cross-plugin integration.
+- [ ] **V1414-B:** Change the coordinator endpoint after writing intent; verify
+  the client resolves the current endpoint when it acts. Inspect persisted
+  state for stable intent rather than a transient URL and verify raw-URL
+  fallback remains refused.
+- [ ] **V1414-C:** Exercise conflicting explicit operator/task and ambient
+  choices; assert explicit authority remains strongest. Exercise the chosen
+  rendezvous/ambient precedence, and verify intent confers no credentials,
+  task authorization, source authority or remote mutation authority.
+- [ ] **V1414-D:** Exercise a headless/no-worktree embodiment; verify existing
+  prompt/label routing is unchanged and does not depend on worktree state.
+- [ ] **G1414:** Resolve EVERY P1414-A-D AND V1414-A-D against the complete
+  #1414 original and eligible discussion. Preserve provisioner write, CWD
+  discovery, current-endpoint resolution, explicit-authority/rendezvous
+  precedence, stable-intent/no-URL behavior, no-worktree routing and every
+  credential/task/source-authority boundary. Preserve all incumbent Plan,
+  Validation, check states, owners and holds. Reviewed plan delivery records
+  unfinished work, not implementation completion, source retirement or resource
+  transfer; introduce no blanket native, installed, all-host or unrelated-parent
+  gate.
 
 ## Proposal
 
