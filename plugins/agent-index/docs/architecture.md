@@ -562,6 +562,11 @@ the pure `ContentStore.repo_filter_sql` method. The shared FTS/currentness path
 still executes that escaped prefilter before limiting candidates; the consumer
 migration recipe covers matching its vector-side policy.
 
+Full-text file-path filters use full-path shell globs (`*`, `?` and bracket
+classes), with SQL `%` and `_` treated as literal path characters. The path
+predicate runs with the other metadata predicates before the FTS candidate
+limit; it does not depend on filtering an already-truncated result list.
+
 ```mermaid
 flowchart LR
   Agent[Any Copilot agent] --> CLI[agent-index read CLI]
