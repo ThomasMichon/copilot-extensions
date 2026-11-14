@@ -102,6 +102,10 @@ and final-send wiring; complete runtime qualification remains false.
 
 ## Internal inbox handoff owner
 
+The installation-bound owners in this section retain their existing contract.
+The independently selected [native SDK mode](#compatible-native-sdk-receiving)
+uses the same queue and original handoff ledger without installation admission.
+
 Schema 30 adds custody fields to the existing `live_messages` rows. The writable
 migration prepares the fields and exact guards before publishing the version.
 Read-only preparation, existing-only writable adoption and an already-current
@@ -277,6 +281,52 @@ Unassociated legacy inbox rows remain unqualified and
 refuse a retained batch without partial handoff commits. No SDK event,
 consumption evidence, automatic replay, proxy implementation or native behavior
 is inferred from these ASGI/installation/real-SQLite controls.
+
+## Compatible native SDK receiving
+
+The independently advertised `compatible_native_inbox: 1` capability expands
+`retained-inbox-v1` with optional `receiving_api: "native-sdk-v1"`. Current Core
+consumers require that capability on the serving daemon before sending the
+selector; an old or rolled-back provider refuses before enrollment or begin.
+Selector omission preserves the installation-bound adapter, including its
+required process observations. Unknown selectors remain strict errors.
+There is no retirement of the legacy form or package-version equality gate.
+
+The native SDK variant retains shared-token authentication, admitted loopback
+ingress, exact fresh native registration, prepared writable storage and serving
+frontend checks. Negotiation observes the current receiver without creating an
+installation epoch. Enrollment uses an opaque mode binding and predecessor CAS,
+not installation identity or process-birth custody. Process observations are
+optional metadata; exact registration can refresh them after extension reload.
+Alias forwarding and identity-bound late deregistration retain their separate
+guards. Diagnostic PID, birth, machine or venue refresh does not retire this
+mode's current receiver. Actual native-ID/status changes and deregistration
+still do.
+
+Admission and polling retain an original immutable handoff on the existing
+`live_messages` row. A reload can finish an unbegun offer with its original
+consumer/envelope, never substitute a new receipt or resend a begun, accepted or
+unknown attempt. Recovery observes original outcomes independently of fresh
+input; older uncertain work does not veto an unrelated new message. Legacy
+claimed/uncertain rows remain unchanged and are not offered again.
+
+Schema 47 changes only the ordinary unassociated message admission guard.
+An unrelated closed installation epoch does not block ordinary queue/steer
+admission, including additive nonreserved kinds, without a legacy retained enrollment.
+Installation-associated
+operations and lifecycle/mutation-control guards remain unchanged. Writable
+migration accepts the known previous guards and preserves original rows,
+enrollments and outcomes; passive readers do not migrate or repair storage.
+Pre-47 cold readers refuse the new guards: storage rollback requires compatible
+code and preserved state, not a forced schema downgrade or erased handoffs.
+Typed startup retains its original successful readiness/input checks, and
+interrupt/mutation controls remain unsupported.
+
+The existing one-shot begin and original outcome primitives still distinguish
+SDK acceptance, attributed root consumption and unknown state. A lost true
+begin reply cannot authorize another invocation. Original outcome reporting
+remains available after closure/draining without new enrollment or replay.
+These source/API guarantees are not native SDK or installed-adoption evidence.
 
 ## Ordinary producer admission
 

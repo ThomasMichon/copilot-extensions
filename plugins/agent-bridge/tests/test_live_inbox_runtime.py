@@ -53,6 +53,13 @@ def request(consumer: InboxConsumer) -> dict[str, object]:
     return {"contract": CONTRACT, "consumer": consumer.document()}
 
 
+def test_legacy_request_serialization_does_not_send_a_new_selector() -> None:
+    from agent_bridge.live_inbox_models import InboxNegotiateRequest
+
+    original = request(InboxConsumer("native-a", "consumer-a", 102, 1.0))
+    assert InboxNegotiateRequest.model_validate(original).model_dump() == original
+
+
 def enroll(client: TestClient, consumer: InboxConsumer) -> dict[str, Any]:
     observation = client.post(PREFIX + "/negotiate", json=request(consumer))
     assert observation.status_code == 200, observation.text
@@ -90,6 +97,202 @@ def report(body: dict[str, Any], row: dict[str, Any], outcome: str) -> dict[str,
     payload = attempt(body, row)
     payload.pop("binding")
     return {**payload, "outcome": outcome}
+
+
+def native_enroll(client: TestClient, consumer: InboxConsumer) -> dict[str, Any]:
+    owner = {**request(consumer), "receiving_api": "native-sdk-v1"}
+    observation = client.post(PREFIX + "/negotiate", json=owner)
+    assert observation.status_code == 200, observation.text
+    body = {**owner, **observation.json()}
+    response = client.post(PREFIX + "/enroll", json=body)
+    assert response.status_code == 200, response.text
+    return body
+
+
+def test_native_sdk_receiving_needs_no_installation_or_process_custody(serving) -> None:
+    app, client, db, consumer = serving
+    app.state.loop_governance = None
+    app.state.live_inbox_runtime = None
+    consumer = replace(consumer, pid=None, process_started_at=None)
+    original = db.enqueue_live_message(consumer.session_id, "peer", "original", time.time())
+    body = native_enroll(client, consumer)
+    row = poll(client, body)
+    assert row["id"] == original and row["body"] == "original"
+    assert row["consumer"] == consumer.document()
+    assert poll(client, body) == row
+    assert client.post(PREFIX + "/begin", json=attempt(body, row)).json() == {"begin": True}
+    assert client.post(PREFIX + "/begin", json=attempt(body, row)).json() == {"begin": False}
+    assert client.post(PREFIX + "/outcome", json=report(body, row, "unknown")).json() == {
+        "stage": "unknown",
+    }
+    successor = native_enroll(client, replace(consumer, incarnation="reloaded"))
+    assert client.post(PREFIX + "/poll", json=current(successor)).json()["messages"] == []
+    assert client.get(PREFIX + f"/recovery/{original}").json()["stage"] == "unknown"
+    assert client.post(PREFIX + "/begin", json=attempt(body, row)).json() == {"begin": False}
+    assert client.post(PREFIX + "/outcome", json=report(body, row, "consumed")).json() == {
+        "stage": "consumed",
+    }
+    fresh = client.post("/api/v1/live-sessions/native-a/messages", json={
+        "sender": "peer", "body": "fresh", "delivery": "steer",
+    })
+    assert fresh.status_code == 200, fresh.text
+    assert poll(client, successor)["body"] == "fresh"
+    assert db.execute_read("SELECT * FROM bridge_runtime_epoch") == []
+    assert db.execute_read("SELECT * FROM bridge_runtime_producers") == []
+
+
+def test_native_reload_keeps_offered_original_consumer_and_never_resends_begun_work(serving) -> None:
+    _, client, db, consumer = serving
+    first = native_enroll(client, consumer)
+    message_id = db.enqueue_live_message(consumer.session_id, "peer", "retained", time.time())
+    offered = poll(client, first)
+    successor = native_enroll(client, replace(consumer, incarnation="reloaded"))
+    assert poll(client, successor) == offered
+    original = {**attempt(successor, offered), "consumer": offered["consumer"]}
+    assert client.post(PREFIX + "/begin", json=original).json() == {"begin": True}
+    assert client.post(PREFIX + "/begin", json=original).json() == {"begin": False}
+    assert offered["id"] == message_id
+    assert client.post(PREFIX + "/begin", json=attempt(successor, offered)).status_code == 409
+
+
+@pytest.mark.parametrize("change", ["no-auth", "proxy", "dormant", "wrong-session", "read-only"])
+def test_native_inbox_preserves_real_target_and_ingress_boundaries(serving, change) -> None:
+    app, client, db, consumer = serving
+    other = None
+    if change == "no-auth":
+        client.headers.pop("authorization")
+    elif change == "proxy":
+        client.headers["Forwarded"] = "127.0.0.1"
+    elif change == "dormant":
+        db.deregister_live_session(consumer.session_id)
+    elif change == "wrong-session":
+        consumer = replace(consumer, session_id="foreign")
+    else:
+        other = Database(db.db_path, read_only=True)
+        app.state.db = other
+    try:
+        response = client.post(PREFIX + "/negotiate", json={
+            **request(consumer), "receiving_api": "native-sdk-v1",
+        })
+        assert response.status_code == (
+            401 if change == "no-auth" else 503 if change == "read-only" else 409
+        )
+        assert db.execute_read("SELECT * FROM bridge_inbox_consumers") == []
+        assert db.execute_read("SELECT * FROM bridge_runtime_epoch") == []
+    finally:
+        if other is not None:
+            other.close()
+
+
+def test_native_mode_is_explicit_and_unknown_selectors_cannot_downgrade(serving) -> None:
+    app, client, _, consumer = serving
+    app.state.loop_governance = None
+    assert client.post(PREFIX + "/negotiate", json=request(consumer)).status_code == 503
+    assert client.post(PREFIX + "/negotiate", json={
+        **request(consumer), "receiving_api": "unknown",
+    }).status_code == 422
+    assert client.post(PREFIX + "/negotiate", json=request(
+        replace(consumer, pid=None, process_started_at=None),
+    )).status_code == 422
+
+
+def test_native_inbox_survives_closed_installation_epoch_without_relaxing_controls(serving) -> None:
+    app, client, db, consumer = serving
+    enroll(client, consumer)
+    runtime = app.state.live_inbox_runtime
+    owner = app.state.loop_governance.runtime_installation(db)
+    db.close_runtime_epoch(
+        owner, db.runtime_epoch(owner), transition_id="transition-a",
+        target_assembly="retained-a", predecessor=runtime._producer,
+    )
+    body = native_enroll(client, replace(consumer, incarnation="native-sdk"))
+    response = client.post("/api/v1/live-sessions/native-a/messages", json={
+        "sender": "peer", "body": "ordinary", "delivery": "steer", "idempotency_key": "ordinary",
+    })
+    assert response.status_code == 200, response.text
+    row = poll(client, body)
+    assert row["body"] == "ordinary"
+    assert client.post(PREFIX + "/begin", json=attempt(body, row)).json() == {"begin": True}
+    assert client.post(PREFIX + "/begin", json=attempt(body, row)).json() == {"begin": False}
+    additive = client.post("/api/v1/live-sessions/native-a/messages", json={
+        "sender": "peer", "body": "ordinary additive kind", "kind": "reply", "delivery": "queue",
+    })
+    assert additive.status_code == 200, additive.text
+    assert poll(client, body)["kind"] == "reply"
+    for changes in ({"delivery": "interrupt"}, {"kind": "control:set-mode"}, {"kind": "startup:prompt:1"}):
+        response = client.post("/api/v1/live-sessions/native-a/messages", json={
+            "sender": "peer", "body": "unsupported", "delivery": "steer",
+            "idempotency_key": str(changes), **changes,
+        })
+        assert response.status_code == (409 if "delivery" in changes else 400), response.text
+    assert len(db.execute_read("SELECT * FROM live_messages")) == 2
+    app.state.ready = False
+    assert client.post(PREFIX + "/poll", json=current(body)).status_code == 503
+    assert client.post("/api/v1/live-sessions/native-a/messages", json={
+        "sender": "peer", "body": "not serving", "delivery": "steer",
+    }).status_code == 503
+
+
+def test_native_poll_does_not_promote_unverified_legacy_startup_input(serving) -> None:
+    _, client, db, consumer = serving
+    db.enqueue_live_message(
+        consumer.session_id, "peer", "unverified startup", time.time(),
+        kind="startup:prompt:1",
+    )
+    body = native_enroll(client, consumer)
+    assert client.post(PREFIX + "/poll", json=current(body)).status_code == 409
+    assert db.execute_read("SELECT handoff_json FROM live_messages")[0][0] is None
+
+
+@pytest.mark.parametrize("old_state", ["claimed", "unknown", "begun"])
+def test_native_receiving_does_not_replay_or_block_on_older_unconfirmed_work(serving, old_state) -> None:
+    _, client, db, consumer = serving
+    old = db.enqueue_live_message(consumer.session_id, "peer", "old input", time.time())
+    if old_state in ("claimed", "unknown"):
+        db.execute_write(
+            "UPDATE live_messages SET claimed_at=?,outcome=? WHERE id=?",
+            (time.time(), "unknown" if old_state == "unknown" else None, old),
+        )
+    body = native_enroll(client, consumer)
+    if old_state == "begun":
+        offered = poll(client, body)
+        assert client.post(PREFIX + "/begin", json=attempt(body, offered)).json()["begin"]
+    before = dict(db.execute_read("SELECT * FROM live_messages WHERE id=?", (old,))[0])
+    fresh = client.post("/api/v1/live-sessions/native-a/messages", json={
+        "sender": "peer", "body": "new input", "delivery": "steer",
+    })
+    assert fresh.status_code == 200, fresh.text
+    assert poll(client, body)["body"] == "new input"
+    assert dict(db.execute_read("SELECT * FROM live_messages WHERE id=?", (old,))[0]) == before
+
+
+@pytest.mark.parametrize("metadata", [
+    {"pid": 300}, {"process_started_at": 2.0}, {"machine": "renamed-host"},
+])
+def test_native_receiving_does_not_reacquire_custody_after_metadata_refresh(serving, metadata) -> None:
+    _, client, db, consumer = serving
+    body = native_enroll(client, consumer)
+    refreshed = client.post("/api/v1/live-sessions", json={
+        "session_id": consumer.session_id, **metadata,
+    })
+    assert refreshed.status_code == 200, refreshed.text
+    assert db.execute_read("SELECT current FROM bridge_inbox_consumers")[0][0] == 1
+    body = {**body, "consumer": {
+        **body["consumer"],
+        **{key: value for key, value in metadata.items() if key != "machine"},
+    }}
+    assert client.post(PREFIX + "/enroll", json=body).status_code == 200
+    fresh = client.post("/api/v1/live-sessions/native-a/messages", json={
+        "sender": "peer", "body": "after metadata refresh", "delivery": "steer",
+    })
+    assert fresh.status_code == 200, fresh.text
+    offered = poll(client, body)
+    assert offered["body"] == "after metadata refresh"
+    assert client.post(PREFIX + "/begin", json=attempt(body, offered)).json() == {"begin": True}
+    assert client.post(PREFIX + "/outcome", json=report(body, offered, "sdk_accepted")).json() == {
+        "stage": "sdk_accepted",
+    }
+    assert offered["consumer"] == consumer.document()
 
 
 def test_explicit_negotiation_only_enrolls_actual_frontend_and_cas_consumer(serving) -> None:

@@ -2,15 +2,15 @@
   "evidence_family": "http52-shared-asgi-v1",
   "shared_operation_evidence": {
     "path": "plugins/agent-bridge/contract/fixtures/http/current/http52-owner-membership.json",
-    "sha256": "0ec33067d662907d481f08d96c3d8d34f0eb672612e943f757a99f12aeb588ee"
+    "sha256": "644713edcf650b2fceea1ca213be2c5e9c455e4c99a0d4e5a2f49c3253475d06"
   },
   "scope": "shared named ASGI portfolio, not an independent capture",
   "captured_from": {
-    "commit": "b805f08c62e396feb364f217630e4f2a033052a9",
+    "commit": "0c68ae3529a88afcdadc52b3a0fd31f84fa25a01",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 52,
     "source_path": "libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/extension.mjs",
-    "source_git_blob": "ca05ca62421709409e53ae67aa89777dc8dc53f2",
-    "source_sha256": "f4c62d7bc4b3c5885599d367a92f8c81f561424d9789bc7247fdf8976ba76abb"
+    "source_git_blob": "8268f135b1dbcb463f0b530a6417ef622a86ea89",
+    "source_sha256": "9339fc08a294144f260c6b9fbeedaa4a0a28a35593f89f7b731e1e6af83307f4"
   }
 }

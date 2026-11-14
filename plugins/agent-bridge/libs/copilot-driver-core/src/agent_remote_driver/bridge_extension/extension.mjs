@@ -36,7 +36,7 @@ import {
 } from "./metadata.mjs";
 import { machineLookup } from "./machine-context.mjs";
 import { createRetainedInbox, retainedDeliverySelected } from "./retained-delivery.mjs";
-import { createHeadedDriverSession, createRemoteDriverSession, isRemoteDriverSource } from "./remote-driver.mjs";
+import { isRemoteDriverSource, selectedLoadout } from "./remote-driver.mjs";
 import { PendingQuestions, QUESTION_TYPES, pollQuestions } from "./questions.mjs";
 import { DeliveryAttention, publishDeliveryAttention } from "./delivery-state.mjs";
 
@@ -171,7 +171,6 @@ export async function activateBridgeExtension({ joinSession, pluginRoot }) {
   // bridge-endpoint.mjs); state.base/state.token mirror it for the guards below.
   let endpoint = null;
   let retainedInbox = null;
-  let headedControl = null;
 
   function ensureBridgeEndpoint() {
     endpoint ??= makeBridgeEndpoint({
@@ -477,33 +476,25 @@ export async function activateBridgeExtension({ joinSession, pluginRoot }) {
   });
 
   if (RETAINED_INBOX) {
-    const driverRoot = process.env.AGENT_BRIDGE_REMOTE_DRIVER_ROOT;
-    const deliverySession = HEADED_CLIENT !== undefined ? await createHeadedDriverSession(session, {
-      declaration: HEADED_CLIENT, cwd: process.cwd(), nativePid: process.ppid, extensionPluginRoot: pluginRoot,
-      ...(driverRoot ? {
-        pluginRoot: driverRoot, bridgePluginRoot: process.env.AGENT_BRIDGE_RECEIVING_PLUGIN_ROOT,
-        expectedSessionId: process.env.AGENT_BRIDGE_NATIVE_SESSION_ID,
-      } : {}),
-    }) : driverRoot ? createRemoteDriverSession(session, {
-      extensionPluginRoot: pluginRoot,
-      pluginRoot: driverRoot,
-      descriptorDirectory: join(process.env.AGENT_REMOTE_DRIVER_CONFIG_DIR
-        || join(homedir(), ".copilot", "remote-driver"), "sessions"),
-      expectedSessionId: process.env.AGENT_BRIDGE_NATIVE_SESSION_ID,
-      cwd: process.cwd(),
-      ownerId: process.env.AGENT_BRIDGE_DRIVER_OWNER,
-      bridgePluginRoot: process.env.AGENT_BRIDGE_RECEIVING_PLUGIN_ROOT,
-    }) : session;
-    if (HEADED_CLIENT !== undefined) headedControl = deliverySession;
     retainedInbox = createRetainedInbox({
-      session: deliverySession, request: retainedBridgeRequest, processIdentity: processIdentity(),
+      session, request: retainedBridgeRequest,
+      receivingApi: "native-sdk-v1",
       cwd: () => state.meta?.cwd, isCurrent: (sid) => state.sessionId === sid,
       canSend: () => state.deliveryEnabled && state.registered, log: extLog,
       onPending: (sid, messages) => state.pendingInput.offered(sid, messages),
       onConsumed: (sid, id) => state.pendingInput.confirmed(sid, id),
-      ...(driverRoot || HEADED_CLIENT !== undefined ? { sourceAllowed: isRemoteDriverSource } : {}),
+      sourceAllowed: (source) => source === "agent-bridge" || isRemoteDriverSource(source),
       ...(process.env.AGENT_BRIDGE_RECEIVING_PLUGIN_ROOT
-        ? { portableLaunch: process.env.AGENT_BRIDGE_PORTABLE_ATTEMPT || null } : {}),
+        ? {
+          portableLaunch: process.env.AGENT_BRIDGE_PORTABLE_ATTEMPT || null,
+          validateSendContext: () => selectedLoadout(session, {
+            pluginRoot: process.env.AGENT_BRIDGE_REMOTE_DRIVER_ROOT,
+            expectedSessionId: process.env.AGENT_BRIDGE_NATIVE_SESSION_ID,
+            cwd: process.cwd(),
+            bridgePluginRoot: process.env.AGENT_BRIDGE_RECEIVING_PLUGIN_ROOT,
+            extensionPluginRoot: pluginRoot,
+          }),
+        } : {}),
     });
     extLog("retained inbox selected explicitly; legacy message ACKs and control effects disabled");
   }
@@ -622,7 +613,6 @@ export async function activateBridgeExtension({ joinSession, pluginRoot }) {
   function shutdown() {
     try {
       retainedInbox?.close();
-      headedControl?.close();
       if (state.heartbeat) {
         clearInterval(state.heartbeat);
         state.heartbeat = null;

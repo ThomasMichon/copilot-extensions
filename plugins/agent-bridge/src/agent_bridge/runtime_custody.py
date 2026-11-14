@@ -145,14 +145,27 @@ def _schema_definitions() -> tuple[dict[str, str], dict[str, tuple[str, str]]]:
     return tables, operation_triggers(("sessions", "turns"))
 
 
-def operation_triggers(tables: tuple[str, ...]) -> dict[str, tuple[str, str]]:
+def operation_triggers(
+    tables: tuple[str, ...], *, compatible_messages: bool = False,
+) -> dict[str, tuple[str, str]]:
     """Canonical admission, association and history guards for DB-owned operations."""
     triggers = {}
     for table in tables:
+        closed_guard = ""
+        if compatible_messages and table == "live_messages":
+            closed_guard = (
+                "AND NOT (NEW.runtime_custody_json IS NULL "
+                "AND NEW.kind NOT LIKE 'control:%' AND NEW.kind NOT LIKE 'startup:%' "
+                "AND NEW.delivery IN ('queue','steer') "
+                "AND NOT EXISTS (SELECT 1 FROM bridge_inbox_consumers "
+                "WHERE session_id=NEW.session_id AND current=1 "
+                "AND installation!='compatible-inbox-v1')) "
+            )
         triggers[f"{table}_runtime_admission"] = (table,
             f"CREATE TRIGGER IF NOT EXISTS {table}_runtime_admission "
             f"BEFORE INSERT ON {table} BEGIN "
             "SELECT CASE WHEN EXISTS (SELECT 1 FROM bridge_runtime_epoch WHERE state='closed') "
+            + closed_guard +
             "THEN RAISE(ABORT,'bridge_runtime_admission_closed') END;"
             "SELECT CASE WHEN NEW.runtime_custody_json IS NOT NULL "
             "AND NOT json_valid(NEW.runtime_custody_json) "

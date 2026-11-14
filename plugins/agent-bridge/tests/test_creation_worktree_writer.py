@@ -44,6 +44,9 @@ def test_creation_writer_preparation_preserves_unpinned_rows_and_readonly_refuse
         for name in creation_writer_schema.COLUMNS:
             conn.execute(f"ALTER TABLE workspace_embodiments DROP COLUMN {name}")
         conn.execute("UPDATE schema_version SET version=40")
+        from legacy_inbox_schema import restore_prior_inbox_guards
+
+        restore_prior_inbox_guards(conn, version=40)
     before = path.read_bytes()
     with pytest.raises(ValueError, match="current schema"):
         Database(path, read_only=True)
