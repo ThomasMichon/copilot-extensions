@@ -50,6 +50,10 @@ The Goal and complete Request remain unchanged. Implementation is frozen for an
 assigned ownership transfer, not declared complete. The current source is WIP:
 no implementation PR, release or runtime adoption has occurred.
 
+- **Shared source branch:** `feature/compatible-agent-messaging-transfer`.
+- **Frozen implementation checkpoint:** `52697fedf8d4ecbc82d75fb18271296a85dd2f12`.
+  The remote branch was read back at that commit before this handoff metadata
+  was added. Subsequent metadata commits do not qualify or complete the code.
 - Preserve the shared source checkpoint, original queue/handoff identity and all
   unfulfilled Plan and Validation Plan items. Do not treat source publication
   as merge, acceptance or permission to update a running installation.
