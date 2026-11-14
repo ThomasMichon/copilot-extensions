@@ -154,6 +154,14 @@ no-build and hash-required. The existing native owner retains the candidate
 through health, activation, command/manifest publication and settlement;
 service cutover, task policy, disabled holds, data and recovery keep their
 existing owners. MCP keeps its nested environment; Manager remains independent.
+The closed-wheel invocation retains only `UV_CONCURRENT_INSTALLS`,
+`UV_CONCURRENT_DOWNLOADS` and `UV_CONCURRENT_BUILDS` from UV's ambient settings,
+so callers can bound resource parallelism without changing the retained input
+closure. Other UV settings, pip/Python overrides and active-environment routing
+are removed; the fixed offline, hash-required invocation remains authoritative.
+The existing single-command transaction remains unchanged. Resource controls
+do not bound every UV blocking worker, and splitting installation requires
+separate qualification of interpreter startup hooks in incomplete environments.
 Bootstrap readiness recognizes the completed profile generation rather than
 mistaking it for package-version drift. Package comparisons strip the generated
 profile suffix; recovery still requires an exact current/last-known-good

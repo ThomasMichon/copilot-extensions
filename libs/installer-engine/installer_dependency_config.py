@@ -275,7 +275,8 @@ def retain_closed_wheels(
         uv = select_uv(os.path.abspath(selected))
     environment = {
         key: value for key, value in captured_environment(env).items()
-        if not key.upper().startswith(("UV_", "PIP_", "PYTHON"))
+        if (key in ("UV_CONCURRENT_INSTALLS", "UV_CONCURRENT_DOWNLOADS", "UV_CONCURRENT_BUILDS")
+            or not key.upper().startswith(("UV_", "PIP_", "PYTHON")))
         and key.upper() not in ("VIRTUAL_ENV", "CONDA_PREFIX", "__PYVENV_LAUNCHER__")
     }
     with temporary_inputs(None) as temporary:

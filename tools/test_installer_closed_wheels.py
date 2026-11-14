@@ -55,6 +55,35 @@ def plugin(tmp_path, engine):
     return plugin
 
 
+@pytest.mark.parametrize("fresh", [False, True])
+@pytest.mark.parametrize("failure_kind", ["launch", "timeout", "health"])
+def test_health_classifier_does_not_turn_transient_probe_failure_into_repair(
+    tmp_path, engine, fresh, failure_kind,
+):
+    from installer_engine_process import ChildLaunchError, ChildTimeoutExpired
+
+    failure = {
+        "launch": ChildLaunchError("fixture permission denied"),
+        "timeout": ChildTimeoutExpired(["fixture-health"], 1),
+        "health": subprocess.CalledProcessError(1, ["fixture-health"]),
+    }[failure_kind]
+
+    def run(_argv):
+        raise failure
+
+    expected = engine.HealthRepairRequired if failure_kind == "health" and not fresh else type(failure)
+    with pytest.raises(expected) as caught:
+        engine.verify_installed_inputs(
+            tmp_path, Path(sys.executable), "fixture_app", origins={}, extras=(),
+            local_packages=None, excluded_packages=[], wheel_inputs=None,
+            require_frozen_origin=fresh, run=run,
+        )
+    if expected is engine.HealthRepairRequired:
+        assert caught.value.__cause__ is failure
+    else:
+        assert caught.value is failure
+
+
 @pytest.fixture
 def negative_source_plugin(tmp_path):
     root = tmp_path / "negative-sources"
@@ -520,14 +549,21 @@ def test_closed_transaction_is_canonical_and_cleans_owned_inputs(tmp_path, execu
     uv = shutil.which("uv")
     assert uv, "native UV required"
     target = tmp_path / "candidate" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    concurrency = {
+        "UV_CONCURRENT_INSTALLS": "2", "UV_CONCURRENT_DOWNLOADS": "3", "UV_CONCURRENT_BUILDS": "1",
+    }
     with snapshot(tmp_path) as retained:
         with policy.retain_closed_wheel_install(
             uv if executable == "path" else "uv", retained, python=target,
             env={"UV_INDEX": "poison", "PIP_REQUIREMENT": "poison", "PYTHONPATH": "poison",
+                 "UV_UNKNOWN_SETTING": "poison", **concurrency,
                  "VIRTUAL_ENV": "poison", "CONDA_PREFIX": "poison", "PATH": os.environ["PATH"]},
         ) as transaction:
             assert isinstance(transaction, policy.RetainedUVInstall)
-            assert not any(key.startswith(("UV_", "PIP_", "PYTHON")) for key in transaction.environment)
+            assert {
+                key: value for key, value in transaction.environment.items()
+                if key.startswith(("UV_", "PIP_", "PYTHON"))
+            } == concurrency
             assert "VIRTUAL_ENV" not in transaction.environment
             assert "CONDA_PREFIX" not in transaction.environment
             assert transaction.sources == transaction.source_hashes == {}
@@ -585,6 +621,7 @@ def test_native_closed_transaction_ignores_poisoned_config_and_cache(tmp_path):
         "UV_INDEX_URL": "http://127.0.0.1:1/unavailable", "UV_CACHE_DIR": str(poison / "cache"),
         "UV_CONSTRAINT": str(poison / "missing"), "UV_PYTHON": "missing",
         "UV_TARGET": str(poison / "target"), "UV_BREAK_SYSTEM_PACKAGES": "true",
+        "UV_CONCURRENT_INSTALLS": "2", "UV_CONCURRENT_DOWNLOADS": "2", "UV_CONCURRENT_BUILDS": "2",
         "PIP_REQUIREMENT": str(poison / "missing"), "PYTHONPATH": str(poison),
     })
     with snapshot(tmp_path) as retained:
@@ -756,12 +793,19 @@ def test_changed_closed_binding_cannot_reuse_numbered_identity(tmp_path, engine,
                     pytest.fail("changed exact binding reused a published runtime")
 
 
+@pytest.mark.parametrize("startup_hook", [None, "site-hook", "sitecustomize"])
 def test_large_closed_receipt_does_not_cross_native_command_line_limit(
-    tmp_path, engine, plugin, monkeypatch,
+    tmp_path, engine, plugin, monkeypatch, startup_hook,
 ):
     archives = {}
     entries = []
     dependencies = []
+    premature_site_hook = tmp_path / "premature-site-hook"
+    site_hook = (
+        "import importlib.metadata as m,pathlib; "
+        f"pathlib.Path({str(premature_site_hook)!r}).write_text('partial closure') "
+        "if len(list(m.distributions())) < 97 else None\n"
+    ).encode()
     for number in range(96):
         name = f"part{number}"
         filename = f"{name}-1.0-py3-none-any.whl"
@@ -769,6 +813,10 @@ def test_large_closed_receipt_does_not_cross_native_command_line_limit(
         path.write_bytes(wheel_bytes(
             name=name, prefix=f"{name}-1.0.dist-info/",
             metadata=f"Metadata-Version: 2.4\nName: {name}\nVersion: 1.0\n\n".encode(),
+            extra=(
+                {"partial_closure.pth": site_hook} if startup_hook == "site-hook"
+                else {"sitecustomize.py": site_hook} if startup_hook == "sitecustomize" else None
+            ) if number == 0 else None,
         ))
         archives[filename] = path
         dependencies.append(f"{name}==1.0")
@@ -808,8 +856,19 @@ def test_large_closed_receipt_does_not_cross_native_command_line_limit(
 
         monkeypatch.setattr(engine, "_child", bounded)
         root = tmp_path / "runtime"
+        if startup_hook == "site-hook":
+            with pytest.raises(engine.runtime.RuntimeEnvironmentError, match="Unverified executable"):
+                with candidate(engine, root, plugin, wheels):
+                    pytest.fail("unverified installed site hook became a candidate")
+            assert not premature_site_hook.exists(), "installation executed a partially installed closure"
+            assert not engine.runtime.is_complete(root, "1.0.0")
+            assert engine.runtime.current_version(root) is None
+            retained.verify()
+            return
         with candidate(engine, root, plugin, wheels) as built:
             assert not built.reused
+        if startup_hook == "sitecustomize":
+            assert not premature_site_hook.exists(), "installation executed a partially installed closure"
         with candidate(engine, root, plugin, wheels) as reused:
             assert reused.reused
         assert len(probes) == 2
