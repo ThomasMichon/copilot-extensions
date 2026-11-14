@@ -166,12 +166,18 @@ def current_link(root: Path, link_name: str = CURRENT_LINK) -> Path:
     return root / link_name
 
 
-def list_versions(root: Path) -> list[str]:
+def list_versions(root: Path, *, check=None) -> list[str]:
     """Installed version directory names, sorted (newest-looking last)."""
     vroot = _leases._native_path(versions_root(root))
-    if not vroot.is_dir():
+    if not _leases.checked(check, vroot.is_dir):
         return []
-    names = [p.name for p in vroot.iterdir() if p.is_dir()]
+    names = []
+    if check:
+        check()
+    with os.scandir(vroot) as entries:
+        while (entry := _leases.checked(check, next, entries, None)) is not None:
+            if _leases.checked(check, entry.is_dir):
+                names.append(entry.name)
     return sorted(names, key=_version_key)
 
 
@@ -584,8 +590,8 @@ def _slot(root: Path, version: str, *, clean_incomplete: bool = False,
 # GC
 # --------------------------------------------------------------------------
 
-def _running_pids(root: Path) -> set[int]:
-    return _leases.running_pids(root, filename=RUNNING_VERSION_FILE, alive=_pid_alive)
+def _running_pids(root: Path, *, check=None) -> set[int]:
+    return _leases.running_pids(root, filename=RUNNING_VERSION_FILE, alive=_pid_alive, check=check)
 
 
 def _pid_alive(pid: int) -> bool:
@@ -662,7 +668,7 @@ def _pid_image_path(pid: int) -> str | None:
         return None
 
 
-def _iter_all_pids() -> list[int]:
+def _iter_all_pids(*, check=None) -> list[int]:
     """Best-effort list of live process ids on this machine (``[]`` if we cannot
     enumerate). Windows: psapi ``EnumProcesses``. POSIX: numeric ``/proc`` dirs.
     """
@@ -674,6 +680,8 @@ def _iter_all_pids() -> list[int]:
             psapi = ctypes.windll.psapi
             n = 4096
             while True:
+                if check:
+                    check()
                 arr = (wintypes.DWORD * n)()
                 needed = wintypes.DWORD()
                 if not psapi.EnumProcesses(ctypes.byref(arr), ctypes.sizeof(arr),
@@ -684,6 +692,8 @@ def _iter_all_pids() -> list[int]:
                     return [int(arr[i]) for i in range(got)]
                 n *= 2  # buffer was full -- grow and re-enumerate
         except Exception:
+            if check:
+                check()
             return []
     try:
         return [int(e) for e in os.listdir("/proc") if e.isdigit()]
@@ -767,7 +777,7 @@ def _slot_of_path(path: str | None, versions_abs: str, versions: set[str]) -> st
     return next((version for version in versions if os.path.normcase(version) == first), None)
 
 
-def _recorded_live_versions(root: Path, versions: set[str]) -> set[str]:
+def _recorded_live_versions(root: Path, versions: set[str], *, check=None) -> set[str]:
     """Versions explicitly recorded live in ``running-version.json`` -- the
     symlink-proof signal a daemon writes about itself (``{version, pid}``). The
     recorded PEP 440 string is matched to the actual dir name via
@@ -781,6 +791,8 @@ def _recorded_live_versions(root: Path, versions: set[str]) -> set[str]:
     entries = data if isinstance(data, list) else [data]
     out: set[str] = set()
     for e in entries:
+        if check:
+            check()
         if isinstance(e, dict) and isinstance(e.get("pid"), int) and _pid_alive(e["pid"]):
             rec = e.get("version")
             if isinstance(rec, str):
@@ -790,33 +802,14 @@ def _recorded_live_versions(root: Path, versions: set[str]) -> set[str]:
     return out
 
 
-def _versions_with_live_process(root: Path) -> set[str]:
-    """Version names a **live process is currently running from** -- the precise
-    "in use" set that GC must never reap.
-
-    Three complementary, best-effort signals (a version is in use if ANY fires):
-
-    1. ``running-version.json`` -- the version a daemon explicitly recorded for
-       its live pid (symlink-proof; matched dir<-record via :func:`_norm_version`).
-    2. argv[0] (``/proc/<pid>/cmdline``) resolving under ``versions/<v>/`` -- the
-       un-resolved launch path, correct even when the venv interpreter SYMLINKS a
-       shared base interpreter (``python -m venv`` / ``uv venv`` on Linux), where
-       signal 3 would resolve outside the slot.
-    3. the process image path (``QueryFullProcessImageNameW`` / ``/proc/<pid>/exe``)
-       under ``versions/<v>/`` -- a COPIED venv python (Windows; ``uv --copies``)
-       lands here directly.
-
-    Candidate pids are the machine's live processes plus any recorded pids.
-    """
-    versions_abs = os.path.abspath(str(root / VERSIONS_DIR))
-    versions = set(list_versions(root))
-    in_use: set[str] = _recorded_live_versions(root, versions)
-    for pid in set(_iter_all_pids()) | _running_pids(root):
-        for cand in (_pid_cmdline_argv0(pid), _pid_image_path(pid)):
-            v = _slot_of_path(cand, versions_abs, versions)
-            if v:
-                in_use.add(v)
-    return in_use
+def _versions_with_live_process(root: Path, *, check=None) -> set[str]:
+    """Live slots from recorded ownership, lexical argv[0] and native images."""
+    return _leases.versions_with_live_process(
+        root, versions=list_versions, recorded=_recorded_live_versions,
+        pids=_iter_all_pids, running=_running_pids,
+        probes=(_pid_cmdline_argv0, _pid_image_path), slot_of_path=_slot_of_path,
+        versions_abs=os.path.abspath(str(root / VERSIONS_DIR)), check=check,
+    )
 
 
 _AV_RETRY_ATTEMPTS = 4
@@ -988,26 +981,26 @@ def gc(root: Path, keep: list[str] | None = None,
     traversing the junction target.
     """
     root = _leases._native_path(root)
-    removed: list[str] = []
-    for v in _gc_candidate_versions(root):
-        with _cleanup_lease(root, v) as admitted:
-            if not admitted or v.lower() in _gc_protected_versions(root, keep, protect_pids, link_name):
-                continue
-            d = version_dir(root, v)
-            # A junction's age describes its target, not the removable entry.
-            if min_age_days > 0 and not _is_link(d) and _slot_age_days(root, v) < min_age_days:
-                continue
-            if _remove_slot(d, label="gc"):
-                removed.append(v)
-    return removed
+    return _runtime_component("versioned_runtime_cache").gc(
+        root, candidates=_gc_candidate_versions, cleanup_lease=_cleanup_lease,
+        protected=lambda **kwargs: _gc_protected_versions(root, keep, protect_pids, link_name, **kwargs),
+        version_dir=version_dir, is_link=_is_link, slot_age_days=_slot_age_days,
+        remove_slot=_remove_slot, min_age_days=min_age_days,
+        windows_owned_file=_leases.windows_owned_file,
+    )
 
 
-def _gc_protected_versions(root: Path, keep, protect_pids: bool, link_name: str) -> set[str]:
+def _gc_protected_versions(root: Path, keep, protect_pids: bool, link_name: str, *, check=None) -> set[str]:
     return _leases.gc_protected_versions(
         root, keep, protect_pids, link_name,
         selectors=(CURRENT_VERSION_FILE, LAST_KNOWN_GOOD_FILE), current_version=current_version,
         dev_claim=read_dev_claim, dev_version=DEV_VERSION,
-        live_versions=_versions_with_live_process, running=_running_pids, versions=list_versions,
+        live_versions=(
+            (lambda root: _versions_with_live_process(root, check=check))
+            if check else _versions_with_live_process
+        ),
+        running=(lambda root: _running_pids(root, check=check)) if check else _running_pids,
+        versions=list_versions, check=check,
     )
 
 
