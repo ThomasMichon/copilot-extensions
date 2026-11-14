@@ -857,3 +857,29 @@ and one-time qualification costs are separated, not hidden in a savings claim.
 Any missing coverage/context, unauthorized runner exposure, dual writer or
 broken recovery aborts the slice; restore the affected old path before disabling
 the replacement. Parent completion remains open until its whole gate resolves.
+
+## Source-attribution server failure - #7906
+
+Direct parent: [A7906-P and A7906-G](README.md). Preserve the existing
+source-attribution, promotion and #6909/#7900 owners; no implementation or
+runtime ownership is reassigned.
+
+- [ ] **P7906:** Only association HTTP 500/502/503/504 may select a complete
+  paginated open-Dev census. Authentication, rate, unclassified, incomplete,
+  duplicate-head and moving-snapshot failures remain closed. Preserve the
+  existing request budgets and final stable-snapshot fence. Attribute #7907's
+  source37/Main-helper delivery without substituting it for the actual trusted
+  affected-current-head failure-path result.
+- [ ] **V7906:** At the original consumer tier, retain the exact
+  affected-current-head result for the eligible server failures and all
+  fail-closed classes, pagination, request limits and final snapshot fence.
+  Until the existing owner completes that qualification, it remains
+  technically unverified. This text authorizes no invocation, CI rerun,
+  injected failure, probe, renewed attempt, release change or owner transfer.
+
+This planned receiver can preserve unfinished work without declaring a source
+fix. The source has no separately identified explicit issue-OPEN, exclusive
+claim-transfer or ACK condition; technical incompletion alone is not a veto
+on later requirement-preserving tracking consolidation. Normal reviewed
+delivery and complete current receiver/source readback still precede any
+separate source judgment. No source disposition occurs in this proposal.

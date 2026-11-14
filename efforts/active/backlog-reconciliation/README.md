@@ -3164,16 +3164,28 @@ sources, transferring owners or turning partial/planning gains into completion.
   receiving objective or a retained gap; investigate actual implementation
   evidence when claiming completion, rather than making that the prerequisite
   for discovering thematic alignment.
+  The [runner/entry/attribution intake](journal/2026/11.13-runner-entry-and-attribution-receiving.md)
+  proposes three finite direct unions under existing Active homes: separate
+  #7643 runner intake, complete #7743 U1 boundaries and planned #7906 attribution.
+  Seventeen new checkbox rows and one local matrix entry remain unchecked;
+  incumbent bytes, 76 checked domain rows, first Plan/global gates and owners
+  remain. #7805 already has semantic AS7116 receiving; duplicate rows are
+  withdrawn while its explicit OPEN condition remains. Nine other sources
+  retain complete positive gaps or current conditions, including #7500's
+  unresolved fit after withdrawal of an out-of-scope candidate read.
+  No source effect follows; the complete 06:26:59 UTC census remains
+  855 whole open, 126 above fixed 729, with no arrival or departure.
   The [fixture/startup/hook intake](journal/2026/11.13-fixture-startup-and-hook-receiving.md)
-  proposes three complete finite direct unions under existing Active homes,
+  records three complete finite direct unions merged in #12567 under existing Active homes,
   with 32 unchecked Plan/local/actual-global Validation rows and unchanged
-  first gates/custodians. Ten other source outcomes retain their distinct
-  canonical, physical-OPEN, held-source or actual owner/resource conditions.
+  first gates/custodians. Complete postmerge receiving readback and thirteen
+  separate KEEP judgments retain distinct canonical, physical-OPEN, held-source
+  or actual owner/resource conditions; no source closure follows.
   The complete #7433 receiver excludes resolver/recording-fixture intake;
   its older three-lane suggestion is not accepted receiving. Newly qualified
   #12542 remains an independent unfinished request. No source effect follows;
-  the complete 04:26:41 UTC census is 854 whole open, 125 above fixed 729,
-  after one excluded metadata-only arrival and no departure.
+  the complete 05:04:07 UTC census is 855 whole open, 126 above fixed 729,
+  after another excluded metadata-only arrival and no departure.
   The [canonical-lifecycle/source-boundary study](journal/2026/11.13-canonical-lifecycle-and-source-boundaries.md)
   retains six further complete sources and forty clauses after seven complete
   permitted documentary reads. No amendment or source effect is proposed.

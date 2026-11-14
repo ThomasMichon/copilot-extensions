@@ -272,6 +272,32 @@ a new recovery/provenance veto on explicit incoming replacement.
   or ACK. #7117 stays OPEN pending its actual acceptance/custody conditions;
   source/review/release/installed/native remain distinct.
 
+#### Existing-entry boundaries - #7743
+
+- [ ] **P7743-U1:** Retain the complete #7743 fresh-entry contract in
+  [U1-7743](acceptance.md): attributable incoming code before installed
+  Python/venv/package/Manager probes; ordinary command/source/ref/project/argv
+  and foreign protections; CMD/PowerShell/POSIX and headless/captured
+  wait/stream parity. Preserve NullString selector absence/restoration,
+  schema-3 candidate validation, read-only/revalidated legacy capture,
+  automatic-cell precedence, registered provider/package/root authority,
+  race snapshots and no redundant cross-component helper-byte admission.
+  Keep Windows execv replacement wait/stdio, `update_bootstrap._wait`,
+  Manager `engine_client.run_engine_passthrough` and
+  `runtime_install --settle-slot` as separate hops. Preserve confirmed
+  no-launch settlement, the primary error, fresh predecessor/routing and
+  custody of unknown partial effects. Native16 target success is not the
+  later consumer result; #6812 presentation/single-pass/missing-bin and
+  30-second item/300-second group controls, and #8370 logging, stay separate.
+  Marker-only POSIX selected-generation readiness is not broad lifetime,
+  reconcile or broker takeover. Do not presume `same_kernel_boot` after
+  reboot or renew quarantined results. The recorded 575.016-second exit-1
+  and 140.0-second stale-lock experiment remains unsettled: no quarantine
+  or replay before its original owner AND descendants meet the original
+  settlement condition. That experiment's hold is not a veto on independently
+  authorized incoming replacement. Preserve the existing source claim,
+  owners, alternatives and evidence tiers; no new ACK or rollout follows.
+
 ### Phase 3 - Release and completion
 
 - [ ] Drive each source PR through review, required CI, merge and containing
@@ -338,6 +364,16 @@ a new recovery/provenance veto on explicit incoming replacement.
   condition and every real source/resource hold. No generic acknowledgement,
   whole-parent/every-host completion, new deployment or source-only-to-installed
   inference is added.
+
+- [ ] **V7743-U1:** Resolve the complete P7743-U1 and local U1/U1-7743 union
+  through the real latest entry at the original finite tier. Distinguish all
+  ten entry/platform/selector/authority/helper/settlement/venue/adjacent-owner/
+  marker/reboot boundaries, source/release credit and actual consumer results.
+  Preserve original alternatives, primary failures, unknown partial effects
+  and the exact still-gated owner/descendant experiment. Existing incoming
+  readiness and complete selection remain the replacement bar; old recovery
+  or cleanup is not an incoming veto. No retry, quarantine, native invocation,
+  generic ACK, every-host or whole-parent prerequisite is authorized here.
 
 ## Proposal
 
@@ -3057,3 +3093,12 @@ check the exact selected payload's advertised capability before migration.
 Caller fresh/prior-state policy preservation and whole-flow recovery remain
 under #11178, #5852 and the active #10377 acceptance matrix. No shared runtime,
 service, credentials, registration or installation is changed.
+
+### 2026-11-14 UTC - Proposed complete #7743 existing-entry receiving
+
+P7743-U1, the local U1-7743 matrix and actual global V7743-U1 retain the
+complete finite fresh-entry/refinement union under its existing recovery,
+entry, stdio and settlement owners. All new acceptance remains unchecked.
+The historical unsettled native experiment remains held without becoming a
+general incoming-replacement veto. No source-owner release, retry, execution,
+implementation, installed acceptance or resource transfer is claimed.
