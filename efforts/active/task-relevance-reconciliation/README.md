@@ -116,6 +116,9 @@ merged plan does not establish running adoption.
       The [strict recovery correction](journal/2026/11.14-recovery-generation.md)
       preserves a pending closeout's generation rather than orphaning its owner
       through reset or detachment; this does not qualify broader recovery.
+      The [before-start body correction](journal/2026/11.14-before-start-owner.md)
+      targets a proved, fully prepared original pool body without manufacturing
+      affirmative start; incomplete startup and legacy uncaptured owners remain open.
 
 ### Phase 3 - Source and periodic evaluation integration
 
@@ -278,6 +281,8 @@ authority. Add no universal attestation layer or duplicate lifecycle engine.
 
 ## Journal
 
+- [Original body closeout before affirmative start](journal/2026/11.14-before-start-owner.md)
+  - proved original-body targeting without accepting an obsolete goal; broader recovery retained.
 - [Native owner-state acceptance reconciliation](journal/2026/11.14-native-owner-state-acceptance.md)
   - bounded suspended/unavailable closeout and preservation evidence; broader gates retained.
 - [Strict recovery retains closeout generation](journal/2026/11.14-recovery-generation.md)

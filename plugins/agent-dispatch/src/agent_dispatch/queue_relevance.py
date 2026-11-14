@@ -16,7 +16,7 @@ import sqlite3
 
 from .queue_common import CompletionOutcome, Task
 from .queue_records import Status, TaskError
-from .queue_relevance_binding import capture_binding, closeout_detail
+from .queue_relevance_binding import capture_target, closeout_detail
 from .queue_relevance_registration import (
     RelevanceAdmission, RelevanceRegistration, registration_revision, resolve_registration,
 )
@@ -291,14 +291,17 @@ class QueueRelevanceMixin:
                         (task_id, ts, _encoded(fields), reporter),
                     )
                     steer_id = inserted.lastrowid
+                    target, binding = capture_target(conn, task)
                     conn.execute(
                         "INSERT INTO task_relevance_closeouts"
                         " (task_id, request_id, generation, owner, owner_session_id, steer_id,"
                         " created_at, resource_binding) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                         (task_id, request_id, task.generation, (
-                            task.owner or (task.completed_by if task.status == Status.SUBMITTED else None)
+                            target.owner or (
+                                target.completed_by if target.status == Status.SUBMITTED else None
+                            )
                         ),
-                         task.owner_session_id, steer_id, ts, _encoded(capture_binding(conn, task))),
+                         target.owner_session_id, steer_id, ts, _encoded(binding)),
                     )
             wake = None
             if decision == "closeout_pending":

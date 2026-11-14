@@ -748,6 +748,7 @@ class QueueLifecycleMixin(QueueProgressMixin):
         require_pool_assignment: bool = False,
         pool_recovery_revision: int | None = None,
         transaction_guard: Callable[[sqlite3.Connection], None] | None = None,
+        unaccepted_closeout: bool = False,
     ) -> Task | tuple[Task, bool]:
         """Generic fenced transition helper.
 
@@ -773,6 +774,10 @@ class QueueLifecycleMixin(QueueProgressMixin):
             if (
                 note != "start" and task.status == Status.CLAIMED and task.owner is None
                 and worker_id is not None and pool_assignment(conn, task_id) is not None
+                and not (
+                    unaccepted_closeout and to == Status.ABANDONED
+                    and not require_owner and transaction_guard is not None
+                )
             ):
                 raise TaskError("allocator claim has no accepted worker to perform this transition")
             if note == "start":

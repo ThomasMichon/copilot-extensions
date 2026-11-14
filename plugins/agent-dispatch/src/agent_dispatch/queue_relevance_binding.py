@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict
+from dataclasses import asdict, replace
 import json
 import sqlite3
 
 from .assignment_workspace import AssignmentWorkspace, same_assignment_worker
 from .queue_common import Task
-from .queue_records import TaskError
+from .queue_records import SpawnState, Status, TaskError
 from .queue_relevance_delivery import closeout_owner
 
 
@@ -34,7 +34,48 @@ def capture_binding(conn: sqlite3.Connection, task: Task) -> dict:
         return {"state": "unconfirmed", "reason": str(exc)}
 
 
-def _capture(conn: sqlite3.Connection, task: Task) -> dict:
+def capture_target(conn: sqlite3.Connection, task: Task) -> tuple[Task, dict]:
+    """Capture a currently proved pool body without assigning or starting its task."""
+    if task.owner is not None or task.owner_session_id is not None or task.status != Status.CLAIMED:
+        return task, capture_binding(conn, task)
+    assignment = conn.execute(
+        "SELECT * FROM task_pool_assignments WHERE task_id=?", (task.id,),
+    ).fetchone()
+    if assignment is None:
+        return task, capture_binding(conn, task)
+    try:
+        from .ordinary_native_bindings import reservation_native_identity
+        from .queue_pool_placement import require_pool_start
+        row = conn.execute(
+            "SELECT * FROM spawn_reservations WHERE key=?", (assignment["reservation_key"],),
+        ).fetchone()
+        if (
+            row is None or row["task_id"] != task.id
+            or row["state"] != SpawnState.SPAWNED or not row["startup_complete"]
+            or row["worktree_ownership"] != "created"
+            or row["conclusion_state"] not in (None, "")
+            or assignment["assignment_released"] or assignment["exhausted_at"] is not None
+        ):
+            raise TaskError("unaccepted_pool_body_unconfirmed")
+        event = conn.execute(
+            "SELECT task_relationship FROM task_events WHERE task_id=? AND id=?",
+            (task.id, row["task_relationship_event_id"]),
+        ).fetchone()
+        if event is None or event["task_relationship"] is None:
+            raise TaskError("original_relationship_unavailable")
+        relationship = json.loads(event["task_relationship"])
+        workspace = AssignmentWorkspace.from_dict(relationship["request"]["workspace"])
+        native = reservation_native_identity(conn, row)
+        if not require_pool_start(conn, task, workspace.worker_id, native, task.generation):
+            raise TaskError("unaccepted_pool_body_unconfirmed")
+        target = replace(task, owner=workspace.worker_id, owner_session_id=native)
+        binding = _capture(conn, target, before_start=True)
+    except TaskError as exc:
+        return task, {"state": "unconfirmed", "reason": str(exc)}
+    return target, {**binding, "owner_phase": "before_start"}
+
+
+def _capture(conn: sqlite3.Connection, task: Task, *, before_start: bool = False) -> dict:
     from .queue_relationship_continuation import current_binding
     from .queue_task_relationships import _matches_receipt, latest_relationship, require_relationship
 
@@ -71,7 +112,10 @@ def _capture(conn: sqlite3.Connection, task: Task) -> dict:
         or request["recovery"]["queue_identity"] != queue_identity
         or not same_assignment_worker(event["worker"], workspace.worker_id)
         or not same_assignment_worker(closeout_owner(task), workspace.worker_id)
-        or binding.get("owner_session_id", task.owner_session_id) != task.owner_session_id
+        or (
+            binding.get("owner_session_id", task.owner_session_id) != task.owner_session_id
+            and not (before_start and binding.get("owner_session_id") is None)
+        )
         or not _matches_receipt(value["receipt"], request, phase="bound")
     ):
         raise TaskError("original_relationship_binding_unconfirmed")
