@@ -193,6 +193,10 @@ during a locality read.
 Failed or absent receipt recovery cannot authorize a foreign-owned child:
 without a validated receipt, an owned local record requires an independently
 proven retained local parent.
+The explicit [retired-owner finalization](retired-owner-finalization.md) operation
+can instead qualify an archived parent's original receiving ledger and settled
+reciprocal claim for that invocation. It does not change ordinary mutation
+authority, ownership or any independent finalization/removal gate.
 Claimant absence is confirmed dead only after execution locality is validated;
 an unvalidated configured name retained after topology failure is not proof.
 Actual retained owner records remain locally observable, but an invalid current
