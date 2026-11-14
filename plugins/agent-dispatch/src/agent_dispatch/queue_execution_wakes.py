@@ -36,7 +36,7 @@ class WakeSendAdmission:
     send_required: bool
 
 
-def _known_busy_retry(row: sqlite3.Row, wake: Wake, task: Task) -> bool:
+def _known_native_retry(row: sqlite3.Row, wake: Wake, task: Task) -> bool:
     if row["execution_send_state"] != "not_sent":
         return False
     try:
@@ -57,7 +57,14 @@ def _known_busy_retry(row: sqlite3.Row, wake: Wake, task: Task) -> bool:
         and previous["delivery_token"] != wake.delivery_token
         and refusal.get("schema") == "dispatch-native-prompt-refusal"
         and type(refusal.get("version")) is int and refusal["version"] == 1
-        and refusal.get("outcome") == "refused_busy" and refusal.get("reason") == "busy"
+        and (
+            refusal.get("outcome") == "refused_busy" and refusal.get("reason") == "busy"
+            or refusal.get("outcome") == "refused_unavailable"
+            and refusal.get("reason") == "native_send_not_attempted"
+            and type(refusal.get("native_send_refusal_version")) is int
+            and refusal["native_send_refusal_version"] == 1
+            and refusal.get("admission_status") == "not_attempted"
+        )
         and refusal.get("retryable") is True
         and refusal.get("invocation_key") == wake.id
         and refusal.get("native_session_id") == wake.owner_session_id
@@ -340,7 +347,7 @@ class QueueExecutionWakesMixin:
                 raise TaskError("wake reservation release or retirement advanced")
             require_execution_send_reconciliation(conn, task.id, exclusive_key=task.exclusive_key)
             previous_send = row["execution_send"]
-            if previous_send is not None and not _known_busy_retry(row, current_wake, task):
+            if previous_send is not None and not _known_native_retry(row, current_wake, task):
                 raise TaskError("settled wake send is observation only; retain its transport history")
             if isinstance(wake, RunWaiterWakeOperation) and wake.sender == CLAIM_RELEASE_SENDER:
                 raise TaskError("claim-release bookkeeping must not request execution custody")
