@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-13 - Gateway availability and retained source conditions](journal/2026/11.13-gateway-availability-and-source-conditions.md)
+
 - [2026-11-13 - Status, recovery and reassignment intake](journal/2026/11.13-status-recovery-and-reassignment-intake.md)
 
 - [2026-11-13 - Link-capability and portable-timeout intake](journal/2026/11.13-link-capability-and-portable-timeout-intake.md)
