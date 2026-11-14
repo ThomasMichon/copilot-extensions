@@ -382,12 +382,11 @@ refused; review their provenance before any separate migration. Cross-space
 owned creation is still unsupported before allocation. This feature does not
 add reservation/receipt authority.
 
-Explicit [native machine-record repair](machine-record-repair.md) is available
-through `doctor --repair-machine-record <exact-id> --from-machine <old>`.
-`--to-machine <key>` optionally asserts the configured local target. Existing
-checkouts retain linked-Git proof; removed ones require canonical native
-registration and exact receiving-namespace evidence. Only the label changes:
-same-machine alias relationships remain intact, without automatic rebinding.
+Canonical records derive naming live rather than storing a machine label.
+The legacy [machine-record repair selector](machine-record-repair.md) returns a
+read-only retirement notice, including with `--fix`; old `--from-machine` and
+`--to-machine` values neither select execution authority nor rewrite metadata.
+Historical relationships and repair receipts remain unchanged.
 
 Claim and handoff transactions recheck each freshly loaded source, consumer,
 and child record while holding its sidecar lock. Authority comes from the

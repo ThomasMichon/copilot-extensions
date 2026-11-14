@@ -856,7 +856,8 @@ def _load_orphaned_obligations_strict_local(project: str | None = None) -> list[
     items = data.get("orphaned", [])
     if not isinstance(items, list) or not all(isinstance(item, dict) for item in items):
         raise ValueError(f"invalid orphanage entries: {path}")
-    return list(items)
+    naming = {"machine", "platform", "machine_identity_version", "environment", "execution_machine"}
+    return [{key: value for key, value in item.items() if key not in naming} for item in items]
 
 
 def load_orphaned_obligations_strict(project: str | None = None) -> list[dict]:
@@ -880,7 +881,6 @@ def rehome_abandoned_obligations(
         with tracking._RecordLock(path, require_sidecar=True):
             existing = tracking.load_orphaned_obligations_strict(project)
             by_key = {(entry.get("source_worktree"), entry.get("ref")): entry for entry in existing}
-            machine = getattr(config, "machine", None)
             proj = project or getattr(config, "repo_name", None)
             now = tracking._now_iso()
             target = (handoff_to or "").strip()
@@ -899,7 +899,6 @@ def rehome_abandoned_obligations(
                     "ref": claim.ref,
                     "note": claim.note or "",
                     "source_worktree": source_worktree,
-                    "machine": machine,
                     "project": proj,
                     "disposition": "abandoned",
                     "abandoned_at": now,

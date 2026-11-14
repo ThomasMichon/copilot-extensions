@@ -61,17 +61,16 @@ def add_parser(sub) -> None:
     add_doctor_arguments(sp)
     sp.add_argument(
         "--repair-machine-record", metavar="WORKTREE_ID",
-        help="Inspect one exact native record's legacy local machine label; "
-        "--fix normalizes only that label to the configured local identity.",
+        help="Read-only compatibility notice for retired machine-label repair; "
+        "canonical naming is derived live, including with --fix.",
     )
     sp.add_argument(
         "--from-machine", metavar="NAME",
-        help="Exact previous local machine label; requires --repair-machine-record.",
+        help="Legacy label accepted by --repair-machine-record; no longer used for identity or writes.",
     )
     sp.add_argument(
         "--to-machine", metavar="KEY",
-        help="With --repair-machine-record: assert the exact configured local target; "
-        "never selects a different execution space.",
+        help="Legacy target accepted by --repair-machine-record; never selects or relabels a record.",
     )
     sp.add_argument(
         "--repair-creation", metavar="WORKTREE_ID",

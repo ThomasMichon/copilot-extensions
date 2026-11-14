@@ -1,0 +1,9 @@
+{
+  "comment": "Retire machine-label restamping and omit naming snapshots from ordinary orphan-ledger writes.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
