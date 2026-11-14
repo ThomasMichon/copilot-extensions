@@ -477,7 +477,9 @@ def test_default_budget_reclaims_material_fixture_bytes_with_finite_progress(loc
     for number in range(4):
         path = compiled(root, number=number)
         source = root / "versions" / "1.0" / "module.py"
-        path.write_bytes(code_record(filename=str(source), consts=("x" * (1024 * 1024),)))
+        path.write_bytes(code_record(
+            native_format() or "313", filename=str(source), consts=("x" * (1024 * 1024),),
+        ))
         paths.append(path)
     expected = sum(path.stat().st_size for path in paths)
     reports = []
