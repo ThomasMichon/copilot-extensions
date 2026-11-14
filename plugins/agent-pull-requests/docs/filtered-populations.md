@@ -61,6 +61,9 @@ Large fan-out commits complete registration projections until the event/byte
 budget fills; remaining projections resume after consumers acknowledge retained
 events. A persisted last-projected sequence prioritizes older projections, so a
 hot first subscriber cannot repeatedly take the newly available event budget.
+Acknowledged or otherwise unprotected old events can be reclaimed independently
+of an earlier event retained for another consumer. Unsettled delivery and events
+created in the current transaction remain protected.
 Unknown facts preserve previously accepted membership and report partial
 coverage. Partial/unavailable discovery never proves absence. Clock-only age
 changes are evaluated at a captured cycle instant. Departure is selection loss,
