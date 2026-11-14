@@ -247,6 +247,8 @@ class ServiceRuntime:
         slot = self.authority.revalidate_service(channel.grant)
         selected = ControllerService(offer.service, offer.prefix)
         check(slot.principal == offer.principal
+              and selected in channel.services and type(offer.generation) is str
+              and bool(offer.generation)
               and channel.offer_epochs.get(selected) == offer.generation,
               "controller-service-unavailable", 503)
 

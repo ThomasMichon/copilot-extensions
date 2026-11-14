@@ -456,8 +456,10 @@ def test_maximum_inventory_has_one_authority_check_per_channel_and_constant_offe
 
 @asynccontextmanager
 async def gateway_owner(root, handle, *, allowed=("service-a", "service-b"),
-                        caller_sources=("service-a", "service-b")):
+                        caller_sources=("service-a", "service-b"), controller_routes=None):
     rig = Rig(root)
+    if controller_routes is not None:
+        rig.h.document["manifest"]["slots"][0]["routes"] = controller_routes
     slot = copy.deepcopy(rig.h.document["manifest"]["slots"][0])
     slot.update(name="vault", routes=[{
         "prefix": "/vault", "methods": ["GET", "POST"], "capabilities": ["http"],
@@ -545,6 +547,35 @@ def test_internal_dispatch_requires_independent_caller_source_and_binding_grants
             async with await rig.request("/vault/token") as response:
                 assert response.status == (403 if denial == "binding" else 503)
             assert not received and rig.state.pending == 0
+    asyncio.run(scenario())
+
+
+def test_unadvertised_service_with_missing_epoch_cannot_borrow_a_post_route(tmp_path):
+    async def scenario():
+        received = []
+
+        async def remote(request):
+            received.append(request)
+            return ServiceResponse(200)
+
+        async def local(request):
+            offer = request.service_offers(VAULT)[0]
+            return await request.call_service(
+                replace(offer, prefix="/tools", generation=None), target="/available")
+
+        routes = [
+            {"prefix": "/api", "methods": ["GET"], "capabilities": ["http"]},
+            {"prefix": "/tools", "methods": ["POST"], "capabilities": ["http"]},
+        ]
+        async with gateway_owner(
+            tmp_path, local, allowed=("service-a",), controller_routes=routes,
+        ) as rig:
+            await connect(rig, handle=remote, offers=(
+                ControllerService(VAULT, "/api"), ControllerService(NOTICE, "/tools")))
+            async with await rig.request("/vault/token", "POST") as response:
+                assert len(received) == 0
+                assert response.status == 503
+            assert received == [] and rig.state.pending == 0
     asyncio.run(scenario())
 
 
