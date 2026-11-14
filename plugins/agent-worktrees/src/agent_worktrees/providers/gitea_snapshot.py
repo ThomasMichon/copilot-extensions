@@ -16,6 +16,8 @@ def snapshot(owner, repo, number, *, api_base="", token=None, credential_source=
             api_base=owner.authority_endpoint(api_base), repository=repo,
             max_requests=MAX_SNAPSHOT_REQUESTS,
         )
+        from .gitea_observation_account import verify_account
+        verify_account(owner, token)
     if not token:
         raise ProviderError("Gitea provider needs a token to query a PR.")
     status, body = owner._curl(
