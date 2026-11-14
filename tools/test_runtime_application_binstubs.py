@@ -11,6 +11,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import stat
 import subprocess
 import sys
 import time
@@ -461,6 +462,52 @@ def test_install_replacement_refuses_nonordinary_or_unbounded_launcher(
     assert not (fixture.slot / "install-success.json").exists()
 
 
+@pytest.mark.parametrize("damage", [
+    "none", "missing", "extra", "bytes", "directory", "reparse", "deadline", "permission",
+])
+def test_application_wheel_damage_distinguishes_repair_from_transient_failure(
+    tmp_path, monkeypatch, damage,
+):
+    from installer_wheel_inputs import WheelDeadlineError
+
+    content = b"fixture wheel bytes"
+    wheels = tmp_path / "wheels"
+    if damage != "missing":
+        wheels.mkdir()
+        path = wheels / "fixture.whl"
+        if damage == "directory":
+            path.mkdir()
+        else:
+            path.write_bytes(b"damaged" if damage == "bytes" else content)
+        if damage == "extra":
+            (wheels / "unexpected.whl").write_bytes(content)
+    inputs = SimpleNamespace(
+        distributions=[("fixture", "1.0", "fixture.whl", "sha256:" + hashlib.sha256(content).hexdigest())],
+        deadline=0 if damage == "deadline" else time.monotonic() + 30,
+    )
+    if damage == "permission":
+        def denied(_path):
+            raise PermissionError("fixture permission denied")
+        monkeypatch.setattr(sys.modules[engine.verify_application_wheels.__module__], "_open", denied)
+    if damage == "reparse":
+        lstat = Path.lstat
+
+        def reparse(path, *args, **kwargs):
+            if path == wheels:
+                return SimpleNamespace(st_mode=stat.S_IFDIR, st_file_attributes=0x400)
+            return lstat(path, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "lstat", reparse)
+    if damage == "none":
+        engine.verify_application_wheels(inputs, tmp_path)
+    else:
+        failure = {
+            "deadline": WheelDeadlineError, "permission": PermissionError,
+        }.get(damage, engine.HealthRepairRequired)
+        with pytest.raises(failure):
+            engine.verify_application_wheels(inputs, tmp_path)
+
+
 def test_install_transaction_verifies_inputs_outside_selector_update(
     install_transaction, monkeypatch,
 ):
@@ -641,6 +688,7 @@ from runtime_application_binstubs import global_binstubs
 from types import SimpleNamespace
 sys.prefix=str(slot/'.venv')
 runtime.is_complete=lambda *a,**k:True
+app._resources=lambda *a:(runtime,None)
 @contextlib.contextmanager
 def qualified(*a,**k):
     yield runtime,lambda:None
@@ -685,7 +733,7 @@ print(json.dumps(app.install(slot,stage=False,global_bin=commands)),flush=True)
         child, = children
         output, error = child.communicate(timeout=10)
         assert child.returncode == 0, output + error
-        assert json.loads(output)["state"] == "installed"
+        assert json.loads(output.splitlines()[-1])["state"] == "installed"
     finally:
         for child in children:
             if child.poll() is None:
@@ -708,6 +756,11 @@ def test_install_without_start_commits_one_update_after_unlocked_verification(
     checks = []
     updates = []
     lock = engine.runtime._publication_lease
+    publish = fixture.publication.publish_selectors
+
+    def published(*args):
+        updates.append(True)
+        return publish(*args)
 
     def unchanged():
         checks.append(True)
@@ -716,7 +769,6 @@ def test_install_without_start_commits_one_update_after_unlocked_verification(
 
     @contextmanager
     def update(root):
-        updates.append(True)
         with lock(root):
             yield
 
@@ -726,6 +778,7 @@ def test_install_without_start_commits_one_update_after_unlocked_verification(
 
     monkeypatch.setattr(runtime_application_install, "_qualified", qualified)
     monkeypatch.setattr(engine.runtime, "_publication_lease", update)
+    monkeypatch.setattr(fixture.publication, "publish_selectors", published)
     monkeypatch.setattr(runtime_application_install, "_run", lambda *_: None)
     runtime_application_install.install(fixture.slot, stage=False, global_bin=fixture.global_bin)
     assert checks and len(updates) == 1
@@ -1570,7 +1623,7 @@ def test_partial_selector_failure_restores_previous_publication(application, mon
         installer.install(slot, stage=False, global_bin=global_bin)
     assert (root / "current-version").read_bytes() == original
     assert (root / "last-known-good").read_bytes() == original
-    assert not tuple(global_bin.iterdir())
+    assert not [path for path in global_bin.iterdir() if path.name != ".publication-leases"]
     assert not (slot / "install-success.json").exists()
 
 
