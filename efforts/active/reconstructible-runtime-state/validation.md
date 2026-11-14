@@ -55,6 +55,29 @@ Bridge `tests/test_db_adoption.py`; installation-context
 Component owners select exact lease/task fixture selectors after their fresh
 source trace; this proposal does not claim those adapters are already qualified.
 
+## Supplemental #7947 family acceptance
+
+These six local rows validate SG7947-P1 through P6 in the [ROOT Plan](README.md).
+Actual ROOT-global G7947 requires ALL rows AND the existing core matrix.
+Each eventual admitted component fixture must include positive missing-cache/
+older-current and negative real-conflict/newer-revoked cases; none was executed
+by this documentary intake. Existing effect custody, component admission and
+G2-before-G4 sequencing remain.
+
+| Local row | Required positive and negative evidence |
+|---|---|
+| V.SG7947-1 - SSH | Independently resolved target plus missing disposable provenance still allows verify/explore; contradictory aliases and unsafe syntax remain refused, hand-edited config survives and diagnostics cause no keeper/config mutation. |
+| V.SG7947-2 - Container birth | Recover the original physical ID using label, issuer assignment AND recipient evidence. Label-only, conflicting-owner or wrong-recipient cases cannot rebind another task; supported unknown fields survive an older current writer. |
+| V.SG7947-3 - MCP | Lost discovery/control sidecar produces protected same-owner re-advertisement/doctor, distinct from unsupported capability. Authenticated control/drain and direct-execution fallback remain; no missing-sidecar destruction/reset or unauthorized control. |
+| V.SG7947-4 - Index | Dirty/unmarked derived views retain authorized diagnostics and rebuild from canonical source under the current owner. Corpus authorization still blocks unauthorized reads/effects; unsupported endpoint publication remains protected rather than removed after parse failure. |
+| V.SG7947-5 - Bridge/Dispatch | Rebuild relationships/reservations/outbox from durable grant, original request/admission and recipient-ack facts while preserving invocation/delivery identity, withdrawal and epoch. Accepted-but-unacknowledged or missing-receipt outcomes stay UNKNOWN until reconciled and never redeliver blindly; genuine conflicting/revoked writers remain fenced. |
+| V.SG7947-6 - Keeper/updater | Exercise protocol/fallback reuse and rollback-symmetric, hold-preserving handover. An older legitimate writer and active validated fallback survive version/raw-pointer mismatch; an explicitly superseded incarnation cannot commit effects. Keep #7208 cause-unknown and #7250 rollback custody, not synthetic proof of either repair. |
+
+No live resource, claim, service, credential, cleanup or rollout action follows
+from this matrix. Recovery fixtures must preserve the existing no-loss,
+no-secret-disclosure, no-duplicate-effect and explicit uncertainty acceptance;
+missing metadata is neither owner release nor an empty obligation set.
+
 ## Ordinary-read bounded-I/O acceptance
 
 Hold active resource count and requested result size constant while adding
