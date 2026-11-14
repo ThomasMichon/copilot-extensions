@@ -140,8 +140,8 @@ def annotate_delegate_graph(
         if project_hint:
             caller_state["repo"] = project_hint
 
-        uncertainty = _UNNAMED_REASON if machine_hint and (
-            incomplete_unnamed_sources or any(
+        uncertainty = _UNNAMED_REASON if (
+            incomplete_unnamed_sources or machine_hint and any(
                 id(candidate) in unnamed_rows and candidate.get("repo") in (None, "", project_hint)
                 for candidate in id_index.get(caller_id, [])
             )
@@ -153,12 +153,12 @@ def annotate_delegate_graph(
             matches = id_index.get(caller_id, [])
 
         if (
-            uncertainty is None and machine_hint and len(matches) == 1
+            uncertainty is None and len(matches) == 1
             and authoritative_hosts is not None and row_hosts is not None
         ):
             observed = row_hosts.get(id(matches[0]), ())
             if any(
-                key[0] == machine_hint and key not in observed
+                (machine_hint is None or key[0] == machine_hint) and key not in observed
                 and (reachable is not True or key not in authoritative_hosts)
                 for key, reachable in (reachable_hosts or {}).items()
             ):

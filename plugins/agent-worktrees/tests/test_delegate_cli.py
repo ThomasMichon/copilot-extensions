@@ -321,7 +321,10 @@ def test_build_list_json_payload_adds_delegate_annotations(monkeypatch):
 
 
 def test_run_fleet_json_annotates_delegate_graph(monkeypatch):
-    current = {"quality": "current", "observed_at": 1.0, "freshness": _FRESH}
+    current = {
+        "quality": "current", "observed_at": 1.0, "freshness": _FRESH,
+        "roster_count": 1, "selected_count": 1,
+    }
     probed = {list_views_cli.PROBE_STARTED_KEY: time.monotonic()}
     hosts = [
         {
@@ -694,14 +697,17 @@ def test_run_delegates_execute_finalizes_only_eligible(monkeypatch):
         delegate_cli,
         "_fleet_snapshot",
         lambda **kwargs: [
-            {"machine": "atlas-core", "env": "wsl", "reachable": True, "projection": _CURRENT,
+            {"machine": "atlas-core", "env": "wsl", "reachable": True,
+             "projection": {**_CURRENT, "roster_count": 2, "selected_count": 2},
              list_views_cli.PROBE_STARTED_KEY: time.monotonic(), "worktrees": [
                  _row("atlas-core-wsl-20260101-host", machine="atlas-core", platform="wsl",
                       status="finalized"),
                  _row("atlas-core-wsl-20260101-live", machine="atlas-core", platform="wsl",
                       status="active"),
              ]},
-            {"machine": "ember", "env": "linux", "reachable": True, "worktrees": [eligible, blocked]},
+            {"machine": "ember", "env": "linux", "reachable": True,
+             "projection": {**_CURRENT, "roster_count": 2, "selected_count": 2},
+             list_views_cli.PROBE_STARTED_KEY: time.monotonic(), "worktrees": [eligible, blocked]},
         ],
     )
     monkeypatch.setattr(delegate_cli.cfg, "project_name", lambda: "agent-worktrees")

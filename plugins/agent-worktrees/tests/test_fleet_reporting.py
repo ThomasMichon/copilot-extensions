@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import json
+import subprocess
 import sys
 import time
 from types import SimpleNamespace
@@ -413,3 +414,35 @@ def test_competing_named_source_must_currently_exclude_a_qualified_caller(covera
     if coverage == "current":
         guest["projection"]["freshness"] = {"refreshed_age_s": 91.0, "bound_s": 90.0}
         assert delegates._still_finalizable(hosts, target, source_key=("worker", "wsl")) is False
+
+
+@pytest.mark.parametrize("failure", ["timeout", "nonzero"])
+@pytest.mark.parametrize("selector", ["qualified-missing", "qualified-terminal", "bare-terminal"])
+def test_failed_probe_is_unknown_coverage_not_a_known_legacy_reporter(monkeypatch, failure, selector):
+    def failed(*args, **kwargs):
+        if failure == "timeout":
+            raise subprocess.TimeoutExpired(args[0], 1)
+        return SimpleNamespace(returncode=1, stdout="", stderr="fixture unavailable")
+
+    monkeypatch.setattr(fleet.subprocess, "run", failed)
+    guest = fleet._probe_host(
+        "configured-guest", "wsl", "guest-alias", "bash", False,
+        project="example", extra_args=["--passive"], timeout=1,
+    )
+    assert guest["reachable"] is False
+    caller = "parent" if selector == "bare-terminal" else tracking.format_claim_ref(
+        "physical", "example", "parent",
+    )
+    child = {"id": "child", "repo": "example", "caller_worktree": caller}
+    native = host(
+        [] if selector == "qualified-missing" else [
+            {"id": "parent", "repo": "example", "status": "finalized"},
+        ],
+        context={**reporter("physical", "windows"), "execution_machine": "native-slot"},
+        machine="native-route", environment="windows",
+    )
+    hosts = delegates.annotate_fleet_hosts([native, guest, host([child], machine="worker")])
+    target = hosts[2]["worktrees"][0]
+    assert target["caller_state"]["state"] == "unknown"
+    assert target["delegate_finalizable"] is False
+    assert delegates._still_finalizable(hosts, target, source_key=("worker", "wsl")) is False

@@ -154,7 +154,7 @@ Host-level `machine` / `env` identify the configured source route. An optional
 version-1 `reporting_context` supplies the serving host's current descriptive
 naming for its worktree rows; a rename appears on the next read, while explicit
 unavailability withdraws row names without changing source freshness. Absence
-retains the older provider's row naming. Malformed reporting is a coverage gap,
+in a successful response retains the older provider's row naming. Malformed reporting is a coverage gap,
 not an authoritative empty inventory. The coordinator does not resolve its own
 hostname for remote rows. Other fields remain the host's `list --json` record:
 
@@ -1486,6 +1486,11 @@ or incomplete unnamed-source coverage, leaves a qualified caller `unknown`
 empty native roster prove the guest's active caller gone. Current complete
 unnamed inventories can still prove that an unrelated ID is absent, without
 restoring withdrawn names.
+Failed probes are incomplete unnamed coverage, never proof that their configured
+route is a current reporter name. They cannot establish a caller absent or a
+visible terminal caller unique. Bare caller IDs require current complete coverage
+from competing sources because their lookup is fleet-wide; successful legacy
+responses retain their naming fallback.
 Absence also requires complete cardinality: integer `selected_count` and
 `roster_count` must equal the number of unique returned IDs. A filtered current
 publication can prove an actually observed caller terminal, but cannot prove an

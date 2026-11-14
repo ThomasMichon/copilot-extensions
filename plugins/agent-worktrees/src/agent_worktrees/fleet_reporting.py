@@ -18,21 +18,25 @@ def reported_rows(host: dict) -> tuple[tuple[tuple[str, str], ...], list[dict]]:
     if host.get("reporting_context_error") is True:
         raise ValueError("malformed reporting context")
     rows = [dict(row) for row in host.get("worktrees") or [] if isinstance(row, dict)]
-    if "reporting_context" not in host:
-        return (source_key(host),), rows
-    context = host["reporting_context"]
-    worktrees_reporting.validate(context)
-    if context["status"] == "resolved":
-        identity = WorktreeMachineIdentity(
-            context["machine"], context["environment"], context["execution_machine"],
-        )
-        keys = tuple(dict.fromkeys(
-            (name, identity.environment) for name in (identity.execution_machine, identity.machine)
-        ))
-        fields = identity.to_record_fields()
-    else:
+    if host.get("reachable") is not True:
         keys = ()
         fields = {"machine": "", "platform": ""}
+    elif "reporting_context" not in host:
+        return (source_key(host),), rows
+    else:
+        context = host["reporting_context"]
+        worktrees_reporting.validate(context)
+        if context["status"] == "resolved":
+            identity = WorktreeMachineIdentity(
+                context["machine"], context["environment"], context["execution_machine"],
+            )
+            keys = tuple(dict.fromkeys(
+                (name, identity.environment) for name in (identity.execution_machine, identity.machine)
+            ))
+            fields = identity.to_record_fields()
+        else:
+            keys = ()
+            fields = {"machine": "", "platform": ""}
     for row in rows:
         for field in _NAMING:
             row.pop(field, None)
