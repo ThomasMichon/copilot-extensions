@@ -81,6 +81,16 @@ documentation or a completed package environment.
   only. Shared installations, credentials, services, queues, sessions and
   deployment are not changed by establishing this plan.
 
+The finite #7117 publication-lock/lifecycle/Manager/all-five caller-loss
+continuation retains the existing shared-lock source claimant and actual #5529
+conditional operation boundary, installation/queue/process/hook and original
+application/source/native custodians. Existing #6820, #7758, #10499, #9726, #9468
+and MCP-specific delivered reservations are not reassigned or reopened.
+Canonical construction/recovery remains under its existing owners; no held
+source-managed-runtime-installs ROOT/derived material is admitted through this
+amendment. No repair, source appointment, rollout, lock/request settlement or
+resource release is authorized.
+
 ## Context
 
 Existing issues already describe unsupported UV options, an update entry behind
@@ -193,6 +203,75 @@ a new recovery/provenance veto on explicit incoming replacement.
   Keep this witness distinct from rename/CWD fixtures and from #2395's
   separately open inhibition/expiry acceptance.
 
+#### Finite interrupted-installer recovery continuation - #7117
+
+- [ ] **IR7117-P1:** Retain a supported standalone inspect/repair operation OR
+  exact actionable invocation for interrupted publication locks: exact
+  installation/lock and demonstrably inactive owner, retained evidence, refusal
+  of live/foreign/concurrent/ambiguous ownership; fresh-process interruption/
+  repair/ordinary update and safe complete-slot reuse, including reboot/PID-reuse/
+  incomplete-write controls. Original cause remains unestablished. Credit
+  delivered #7814 source/release; safe old-slot reuse is an optional result,
+  never a veto of authentic fresh incoming replacement.
+- [ ] **IR7117-P2:** Retain read-only exact pending unattributed lifecycle
+  reservation inspection and evidence-bound recovery: exact manifest/payload/
+  source/environment/policy under existing publication lock, unrelated fields
+  preserved, changed/foreign/live refusal and pending/not-ready until authorized
+  ordinary update completes. Credit #9474/#9490 source/release without
+  transferring retained candidates.
+- [ ] **IR7117-P3:** Preserve fresh-Manager legacy registered source/profile
+  capture BEFORE replacement acquisition. Authenticate source/environment/owner
+  without depending on unavailable incumbent publication/uninstall inventory;
+  preserve mutation checks, no invented historical profile or weakened uninstall.
+  Paused #6820 and #9623 teardown custody remain separate.
+- [ ] **IR7117-P4:** Retain ALL FIVE MCP/Containers/Dispatch/Machines/budget
+  sessionStart paths and original Windows SSH caller-Job loss, with environment/
+  configuration/consumer/hook budgets and Python-free budget hook. Through
+  existing attributed lifetime owners survive ALL caller-owned cleanup
+  boundaries OR report truthful recoverable state without indefinite installer
+  fencing. One escape flag/Job is insufficient; preserve test containment and
+  reject default WMI/scheduler/service/queue-reset or replay of uncertain
+  attempts.
+- [ ] **IR7117-P5:** Preserve independently authorized fresh incoming replacement
+  despite stale incumbent lock/provenance/recovery/queue state: durable
+  configuration/user/application/session/repo/worktree data and connectivity,
+  every requested ready runtime and applicable selector/route/launcher/service/
+  task registration. Automatic inhibition remains automatic-only. Incoming
+  authenticity/addressed-install authority/build/state compatibility/permission/
+  I/O/health failures remain failures.
+- [ ] **IR7117-P6:** Keep outgoing retirement independently restricted to
+  eligible obsolete CENTRAL services/registrations, never session hosts/session
+  processes/clients/connectivity; identity/role/then-current selection
+  revalidated. Retain actual installation/queue/process/hook/MCP/source/native
+  custodians and original alternatives. #10700/#10825 qualify their actual MCP
+  source/release/native slice, not all-five, #7758 whole completion or installed
+  rollout.
+
+##### Local Validation - #7117
+
+- [ ] **IR7117-LV1:** Resolve EVERY original/refined IR1-IR9/IRV1-IRV5 clause
+  against the actual existing publication/lifecycle/Manager/hook/incoming/
+  retirement consumers. Preserve exact owner birth/descendant/mixed-generation,
+  changed-source/foreign/live/concurrent/ambiguous, termination/reboot/PID-reuse/
+  incomplete-write and ordinary-update controls, with safe reuse OR fresh
+  replacement honored at its own scope.
+- [ ] **IR7117-LV2:** Exercise all five actual caller-loss boundaries and
+  environment/config preservation, including Python-free budget hook and
+  original Windows SSH case; survival OR truthful recoverability, no indefinite
+  fence or weakening of caller-owned cleanup/test containment. MCP-only delivered
+  results are not an all-five pass.
+- [ ] **IR7117-LV3:** Pair ready/current incoming selection with stale-lock/
+  queue/provenance, live-old-keeper/unknown-census/occupied-home controls and
+  genuine incoming failures; preserve automatic-only inhibition, protected
+  state/clients/connectivity and independent central-only retirement.
+- [ ] **IR7117-LV4:** Preserve the existing shared-lock source claim and actual
+  #5529 conditional operation boundary. Its exact underlying wording is not
+  established by this intake: resolve it through the current owner before any
+  affected repair/source appointment/operation or transfer judgment. This is
+  not a ban on reading eligible outer #7117, no newly invented condition, expiry
+  or ACK. #7117 stays OPEN pending its actual acceptance/custody conditions;
+  source/review/release/installed/native remain distinct.
+
 ### Phase 3 - Release and completion
 
 - [ ] Drive each source PR through review, required CI, merge and containing
@@ -250,6 +329,16 @@ a new recovery/provenance veto on explicit incoming replacement.
 - [ ] Audit every issue, effort, test, example, PR and commit for public-safe
   scope. Do not attach private reports, raw logs or deployment identifiers.
 
+- [ ] **IR7117-G:** Resolve EVERY IR7117-P1-P6 AND IR7117-LV1-LV4 at the
+  original finite source/consumer/native tiers: standalone recovery OR actionable
+  invocation, exact pending lifecycle and fresh-Manager legacy-source/profile
+  safety, ALL FIVE caller-loss hooks with survival OR recoverability,
+  authoritative incoming selection and independent central-only retirement.
+  Preserve original custodians, delivered scope credit, existing #5529 operation
+  condition and every real source/resource hold. No generic acknowledgement,
+  whole-parent/every-host completion, new deployment or source-only-to-installed
+  inference is added.
+
 ## Proposal
 
 Start with update reachability and explicit/manual classification, followed by
@@ -259,6 +348,19 @@ is proposed. Select each concrete unit only after current owner and source
 reconciliation; the matrix is not a blanket reservation of those components.
 
 ## Journal
+
+### Proposed finite #7117 interrupted-installer receiving
+
+Proposed direct Phase 2 Plan, local Validation and actual ROOT-global Validation
+retain the full original/refined interrupted-publication, lifecycle,
+fresh-Manager and all-five caller-loss union alongside authoritative incoming
+replacement. Existing U12/U14/U15 and #7814/#9474/#9490 credits retain actual
+scope; no new missing-patch or all-five/installed claim follows. Every incumbent
+byte/check state/first gate/owner remains. The exact #5529 operational condition
+is unresolved, not waived or reconstructed; normal review, actual merge and
+whole-current receiving/source/custody readback precede any separately permitted
+judgment. No product/test/native, repair, queue, rollout or source/resource effect
+occurred.
 
 ### 2026-11-13 - Resident-companion lifecycle intake proposed
 

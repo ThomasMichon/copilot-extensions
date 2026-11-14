@@ -27,6 +27,7 @@ from ..session_manager import (
 )
 from .worktree_binstub import resolve_local_binstub as _resolve_local_binstub
 from .worktree_entry import WorktreeEntry as _WorktreeEntry
+from .worktree_reporting import reported_machine
 from .worktree_refresh import DiscoveryReadError, ObservedRows, WorktreeRefreshOwner, is_option_unsupported, validate_inventory
 from .worktree_refresh import is_classify_unsupported as _is_classify_unsupported
 from .worktree_probe import (
@@ -625,6 +626,10 @@ def _parse_worktree_list(raw: str, agent_name: str) -> list[_WorktreeEntry]:
     if not isinstance(items, list):
         return []
 
+    try:
+        reporter = reported_machine(data)
+    except ValueError as exc:
+        raise DiscoveryReadError("source-reporting-malformed") from exc
     entries: list[_WorktreeEntry] = []
     for w in items:
         if not isinstance(w, dict):
@@ -636,7 +641,7 @@ def _parse_worktree_list(raw: str, agent_name: str) -> list[_WorktreeEntry]:
         entries.append(_WorktreeEntry(
             id=wt_id,
             agent_name=agent_name,
-            machine=w.get("machine", agent_name),
+            machine=reporter if reporter is not None else w.get("machine", agent_name),
             path=w.get("path", ""),
             branch=w.get("branch", ""),
             status=w.get("status", "active" if w.get("active") else "ended"),

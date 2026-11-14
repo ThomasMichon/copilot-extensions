@@ -136,6 +136,24 @@ fail-closed and all in-flight readers settle before return or error. Each call
 reads current bytes again: there is no persistent content-hash cache or
 background reader. Single-entry fingerprints need no worker pool.
 
+On Windows, fingerprint I/O accepts ordinary and extended-length source paths
+through the existing native-path helper, without changing machine-wide settings.
+Relative digest labels and paths reported to file observers retain their logical
+spelling; staging depth and the extended-length prefix do not change the digest.
+Observer and file-hash collector keys preserve the matched declared root's
+ordinary or extended spelling, so consumers can look up their original resolved
+source paths. The most-specific root determines reporting; duplicate declarations
+of one root use its first spelling. Digest labels remain canonical and unchanged.
+Extended UNC namespace prefixes are recognized case-insensitively without
+changing server, share or filename spelling, so network inputs cannot become
+current-directory-relative aliases. POSIX symlink targets retain literal
+Windows-looking backslashes and prefixes.
+Directory roots ending in `..` are normalized after their parent is resolved,
+so equivalent paths and relocated trees retain their fingerprint without
+duplicating files declared under both spellings.
+Missing or unreadable inputs and the existing symlink restrictions still fail
+closed.
+
 ## Why this is vendored, not a package
 
 Unlike the other `libs/*` entries, this is **not** an installable package and has
