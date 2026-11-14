@@ -3164,6 +3164,12 @@ sources, transferring owners or turning partial/planning gains into completion.
   receiving objective or a retained gap; investigate actual implementation
   evidence when claiming completion, rather than making that the prerequisite
   for discovering thematic alignment.
+  The [conductor/native-condition intake](journal/2026/11.13-conductor-continuation-and-native-conditions.md)
+  proposes 21 unchecked direct Plan/local and actual global Validation rows
+  for #6464 under its existing receiver and strict OPEN-until-implementation-
+  AND-real-consumer condition. All ten source outcomes remain OPEN.
+  The complete 00:20:26 UTC census is 855 whole open, 126 above 729,
+  after one excluded metadata-only arrival and no departure or closure credit.
   The [Gateway availability/source-condition intake](journal/2026/11.13-gateway-availability-and-source-conditions.md)
   proposes eight unchecked local/parent Plan and actual global Validation
   rows for #6443's two finite source-only refinements in its existing Fleet
@@ -3171,6 +3177,10 @@ sources, transferring owners or turning partial/planning gains into completion.
   bounded queued-steering follow-up; no operational appointment or retirement
   is inferred. The complete 00:05:58 UTC census remains 854 whole open,
   125 above the fixed target; every existing custodian and first gate remains.
+  Reviewed #12529 actually merged; complete current ROOT/slice/retained-annex
+  readback confirms all eight rows remain unchecked and every original
+  acceptance condition survives. Six separate judgments retain all six OPEN;
+  no technical completion, source retirement or resource release follows.
   The [status/recovery/reassignment intake](journal/2026/11.13-status-recovery-and-reassignment-intake.md)
   proposes 36 unchecked Dispatch Phase 3 rows for four complete families,
   preserving literal OR/AND choices, each source's actual Open condition,
