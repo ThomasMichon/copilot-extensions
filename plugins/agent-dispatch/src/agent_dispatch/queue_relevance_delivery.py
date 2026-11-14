@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+import json
 from dataclasses import replace
 
 from .queue_common import Task, WakeOperation
@@ -23,6 +24,13 @@ def closeout_owner_matches(task: Task, closeout: sqlite3.Row) -> bool:
             task.owner is None and task.owner_session_id is None
             and closeout["owner"] and closeout["owner_session_id"]
         )
+    if task.status == Status.CLAIMED and task.owner is None and task.owner_session_id is None:
+        binding = json.loads(closeout["resource_binding"] or "null")
+        return bool(
+            isinstance(binding, dict) and binding.get("state") == "captured"
+            and binding.get("owner_phase") == "before_start"
+            and closeout["owner"] and closeout["owner_session_id"]
+        )
     return bool(
         task.status in CLOSEOUT_STATUSES and closeout_owner(task)
         and (task.generation, closeout_owner(task), task.owner_session_id) == (
@@ -36,7 +44,8 @@ def closeout_wake(conn: sqlite3.Connection, wake: WakeOperation) -> bool:
     if not isinstance(wake, WakeOperation) or wake.pool_recovery_revision is not None:
         return False
     row = conn.execute(
-        "SELECT c.generation, c.owner, c.owner_session_id FROM task_relevance_closeouts c"
+        "SELECT c.generation, c.owner, c.owner_session_id, c.resource_binding"
+        " FROM task_relevance_closeouts c"
         " JOIN task_steer s ON s.id=c.steer_id AND s.task_id=c.task_id"
         " JOIN wake_outbox w ON w.id=s.wake_operation_id AND w.task_id=c.task_id"
         " WHERE c.task_id=? AND w.id=?"
@@ -52,7 +61,7 @@ def closeout_wake(conn: sqlite3.Connection, wake: WakeOperation) -> bool:
 
 def enqueue_closeout(owner, conn: sqlite3.Connection, task: Task, closeout: sqlite3.Row,
                      *, ts: float) -> WakeOperation | None:
-    if not closeout_owner_matches(task, closeout) or not task.owner_session_id:
+    if not closeout_owner_matches(task, closeout) or not closeout["owner_session_id"]:
         return None
     steer = conn.execute(
         "SELECT wake_operation_id FROM task_steer WHERE id=?", (closeout["steer_id"],),
@@ -82,7 +91,9 @@ def enqueue_closeout(owner, conn: sqlite3.Connection, task: Task, closeout: sqli
         "If ownership or generation changed, stop and report the mismatch."
     )
     wake = owner._enqueue_wake(
-        conn, replace(task, owner=closeout["owner"]), message=prompt, ts=ts,
+        conn, replace(
+            task, owner=closeout["owner"], owner_session_id=closeout["owner_session_id"],
+        ), message=prompt, ts=ts,
     )
     conn.execute(
         "UPDATE task_steer SET wake_operation_id=? WHERE id=?", (wake.id, closeout["steer_id"]),

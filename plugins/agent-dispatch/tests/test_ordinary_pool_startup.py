@@ -197,6 +197,55 @@ def launch(ordinary: SimpleNamespace) -> dict:
     )
 
 
+@pytest.mark.parametrize("ordinary", [True], indirect=True)
+def test_before_start_source_closeout_targets_the_original_ordinary_native(
+    ordinary: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_dispatch import owner_wake_delivery
+    from agent_dispatch.queue_relevance import RelevanceScope
+    from tests.test_task_relevance import report
+
+    o = ordinary
+    result = launch(o)
+    assert result["native_session_id"] == "native-a"
+    key = o.placed["reservation"]["key"]
+    stored = o.q.get_reservation(key)
+    o.q.record_spawn(
+        key, session_handle=stored.session_handle, worktree=stored.worktree,
+        startup_complete=True, startup_revision=stored.startup_revision,
+    )
+    with o.q._connect() as conn:
+        conn.execute(
+            "UPDATE tasks SET source='emitter', origin_ref='review-source' WHERE id=?",
+            (o.task["id"],),
+        )
+    before = o.q.get(o.task["id"])
+    accepted = report(
+        o.q, before.id, scope=RelevanceScope(before.repo, before.source, before.origin_ref),
+    )
+    [wake] = o.q.list_wakes(before.id)
+    assert accepted["wake_operation_id"] == wake.id
+    assert (wake.owner, wake.owner_session_id) == ("host-a/worktree-a", "native-a")
+    calls = []
+
+    def send(bridge_id: str, native_id: str, prompt: str, **kwargs: Any) -> bool:
+        calls.append((bridge_id, native_id, prompt, kwargs))
+        return True
+
+    monkeypatch.setattr(bridge.remote_dispatch, "local_machine", lambda: "host-a")
+    monkeypatch.setattr(owner_wake_delivery, "native_prompt", send)
+    assert owner_wake_delivery.deliver_owner_wake(
+        o.q, wake.owner, wake.owner_session_id, before.id, wake.message, wake.id,
+    )
+    [sent] = calls
+    assert sent[:2] == ("bridge-a", "native-a")
+    assert "do not start or resume the goal" in sent[2]
+    assert sent[3]["idempotency_key"] == wake.id
+    assert o.q.get(before.id).status == "claimed"
+    assert o.q.get(before.id).owner is o.q.get(before.id).owner_session_id is None
+    assert not o.q.attachment_history(before.id)
+
+
 @pytest.mark.parametrize("ordinary", ["origin-v1"], indirect=True)
 def test_governed_create_composes_sealed_origin_file_with_writer_stdin(ordinary, monkeypatch):
     from agent_dispatch import session_origin

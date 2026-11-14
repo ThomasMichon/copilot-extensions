@@ -8,7 +8,7 @@ import sqlite3
 from typing import TYPE_CHECKING
 
 from .assignment_workspace import AssignmentWorkspace, same_assignment_worker
-from .queue_records import SpawnState, TaskError
+from .queue_records import SpawnState, Status, TaskError
 from .queue_relevance_delivery import closeout_owner_matches
 from .queue_task_relationships import _encoded, _matches_receipt
 
@@ -58,6 +58,10 @@ def _state(queue: TaskQueue, conn: sqlite3.Connection, task_id: str, arguments: 
     request = relationship["request"]
     workspace = AssignmentWorkspace.from_dict(request["workspace"])
     current = current_binding(relationship)
+    before_start = (
+        binding.get("owner_phase") == "before_start" and task.status == Status.CLAIMED
+        and task.owner is None and task.owner_session_id is None
+    )
     if (
         binding["queue_identity"] != identity
         or request["request_id"] != binding["relationship_request_id"]
@@ -69,7 +73,10 @@ def _state(queue: TaskQueue, conn: sqlite3.Connection, task_id: str, arguments: 
         or relationship["state"] not in {"bound", "closed"}
         or not _matches_receipt(relationship["receipt"], request, phase=relationship["state"])
         or current["generation"] != row["generation"]
-        or current.get("owner_session_id", row["owner_session_id"]) != row["owner_session_id"]
+        or (
+            current.get("owner_session_id", row["owner_session_id"]) != row["owner_session_id"]
+            and not (before_start and current.get("owner_session_id") is None)
+        )
         or current["reservation_key"] != reservation["key"]
         or reservation["task_id"] != task_id
         or reservation["startup_revision"] != binding["startup_revision"]
