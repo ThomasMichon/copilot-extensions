@@ -4,6 +4,10 @@
     {
       "plugin": "services/pr",
       "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
     }
   ]
 }
