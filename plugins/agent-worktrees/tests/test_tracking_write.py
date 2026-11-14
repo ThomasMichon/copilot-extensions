@@ -106,6 +106,7 @@ def test_rendezvous_fields_are_namespaced_and_parseable():
             "tracking_write_verbs",
             "tracking_write_verb_versions",
             "tracking_write_record_contract",
+            "tracking_write_recovery_intent_contract",
         }
         assert isinstance(fields["tracking_write_verbs"], list)
         assert isinstance(fields["tracking_write_verb_versions"], dict)

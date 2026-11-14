@@ -90,46 +90,36 @@ then use `doctor --repair-record <id> --bound-agent-end-field pair_id --json`
 (replace `pair_id` with the actual following field). A missing, repeated,
 unverifiable or later-than-first known field boundary refuses; no field boundary
 is guessed. The repair quotes
-only the delimited text, preserves surrounding fields, holds native record and
+only the delimited text, preserves other field values, holds native record and
 publication-authority locks, and retains the exact original bytes in a
 content-addressed `.yaml.repair-<digest>.bak` beside the record (created exclusively
 with mode `0600`; existing non-private POSIX backups refuse reuse). Contention or
 a changed record requires a fresh inspection. Never hand-edit tracking YAML.
 
-### Legacy native machine label
+Both targeted and general YAML repairs omit the five obsolete machine/environment
+naming fields when an actual corruption repair writes the record. A legacy
+mapping is re-encoded to preserve values referenced by YAML aliases, so its
+formatting/comments may change; its exact original remains in the backup.
+Records without legacy naming retain the repaired text's surrounding bytes.
+Valid legacy records are not proactively migrated. General scalar repair leaves
+explicit YAML aliases, anchors, tags and flow structures intact and refuses
+unverified or duplicate mappings; it uses the same guarded backup/write owner.
 
-After selecting a canonical local machine alias, an older record may still name
-the observed hostname. Inspect one exact record with:
+### Retired machine-label repair
 
-```text
-<agent-worktrees catalog argv[0]> doctor --repair-machine-record <full-worktree-id> --from-machine <previous-label> --json
-```
+Do not normalize machine labels in worktree records. Canonical naming is derived
+from current host/environment observations and configuration; legacy labels are
+ignored and ordinary canonical writes omit them without a migration.
 
-Add `--fix` only after reviewing `repairable: true`. This scope proves that the
-previous label, configured identity and observed host select the same native
-machine. Existing linked checkouts retain selected-repository Git proof. Removed
-checkouts instead require canonical native worktree/knowledge registration and
-exact receiving-namespace evidence; an existing non-Git directory never falls
-back to that historical proof. With no roster, only the actual observed hostname
-is an eligible previous label, and removed-checkout repair is unavailable.
-Foreign/ambiguous identities, native/guest crossings, wrong receiving stores,
-indirect paths and combined repair scopes refuse. Optionally assert the exact
-configured target with `--to-machine`; it cannot select another execution space.
+`doctor --repair-machine-record <id> --from-machine <previous-label>` remains a
+read-only compatibility notice, even with `--fix` or `--to-machine`. It does not
+inspect a record or checkout, write metadata or touch historical repair receipts.
+It cannot be combined with other repair passes. See
+[retirement and historical evidence](../../docs/machine-record-repair.md).
+Wrong-store integrity defects, ownership and interrupted operations still need
+their actual receiving-side recovery path, not label stamping or YAML edits.
 
-Only the top-level `machine` scalar changes. IDs, paths, branches, sessions,
-ownership references, claim ledgers and lifecycle state remain byte-preserved.
-Valid old same-machine references remain aliases; linked records are not rejected
-merely for being paired or controlled. See
-[native label proof, audit and resident-roster verification](../../docs/machine-record-repair.md).
-Wrong-store duplicates/orphans require the separate targeted integrity capability
-tracked by #7097, not YAML edits or broader lifecycle cleanup.
-This is not a machine transfer or a checkout rename. The normal exact-byte backup,
-record/publication locks and changed-record refusal apply. An already-normalized
-record is a no-op. Enumerate actual local record IDs before invoking this scope;
-do not infer IDs from a new machine prefix or normalize removed historical
-records without checkout proof.
-
-Run it per project (`dotfiles`, `test-chamber`, …) — the command scopes to the
+Run general doctor passes per project (`dotfiles`, `test-chamber`, …) — they scope to the
 current project's tracking store; the Copilot session-state/store it cleans is
 shared across projects, so the guards (current + registered session ids) protect
 live work regardless of which project you invoke it from. For a machine-wide

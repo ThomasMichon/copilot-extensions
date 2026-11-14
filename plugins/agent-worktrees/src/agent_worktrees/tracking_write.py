@@ -217,6 +217,7 @@ _VERB_MODULES: tuple[str, ...] = (
     "agent_worktrees.launch_native_observation",
     "agent_worktrees.launch_recovery_store",
     "agent_worktrees.launch_execution_permit",
+    "agent_worktrees.launch_permit_recovery_intent",
 )
 
 # Finite native boundaries need only their canonical writer, not every CLI verb.
@@ -224,6 +225,7 @@ _DIRECT_VERB_MODULES = {
     "launch_attempt_execution": "agent_worktrees.launch_execution",
     "launch_recovery_compare_and_swap": "agent_worktrees.launch_recovery_store",
     "launch_execution_decision_append": "agent_worktrees.launch_execution_permit",
+    "launch_permit_recovery_intent_record": "agent_worktrees.launch_permit_recovery_intent",
     **dict.fromkeys((
         "launch_seed_stage", "launch_seed_take", "launch_seed_restore",
         "launch_seed_finish", "launch_seed_remove",
@@ -397,7 +399,7 @@ def rendezvous_fields(server: CoalescingServer) -> dict:
     published list is always this process's FULL verb set, regardless of
     whether any request has been served yet.
     """
-    from . import resource_relationship
+    from . import launch_permit_recovery_intent, resource_relationship
 
     _ensure_verb_modules_loaded()
     rv = server.rendezvous()
@@ -408,6 +410,7 @@ def rendezvous_fields(server: CoalescingServer) -> dict:
         "tracking_write_generation": rv["generation"],
         "tracking_write_verbs": sorted(_VERBS),
         "tracking_write_record_contract": resource_relationship.writer_contract(),
+        "tracking_write_recovery_intent_contract": launch_permit_recovery_intent.writer_contract(),
         # Only published when at least one verb actually needs it -- keeps
         # this payload, and every existing consumer's exact-field
         # expectations, unchanged for the overwhelming majority of verbs

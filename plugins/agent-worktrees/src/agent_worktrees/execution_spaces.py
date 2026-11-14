@@ -142,6 +142,15 @@ def settle_parent_obligation(record: Any, config: Any, worktree_id: str, *, outp
                 return
         if not parent_path.exists():
             return
+        snapshot = tracking.load_record(parent_path)
+        closed_candidates = [
+            claim for claim in snapshot.resources
+            if claim.kind == "worktree" and (parsed := tracking.parse_claim_ref(claim.ref)) is not None
+            and (parsed.project, parsed.worktree_id) == (record.repo, worktree_id)
+        ]
+        if closed_candidates and all(not claim.is_live for claim in closed_candidates):
+            # A no-op needs no parent write hold, including during orphan disposal.
+            return
         with tracking._RecordLock(parent_path, require_sidecar=True):
             parent = tracking.load_record(parent_path)
             if legacy_parent and legacy_wsl_record_locality.resolve_legacy_wsl_owner_ref(
