@@ -138,6 +138,36 @@ def test_fingerprint_cli_preserves_parent_directory_root_labels(
         }
 
 
+@pytest.mark.skipif(os.name != "nt", reason="native Windows UNC path identity")
+@pytest.mark.parametrize("namespace", ["UNC", "unc", "UnC"])
+def test_fingerprint_preserves_extended_unc_input_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, namespace: str,
+) -> None:
+    network = tmp_path / "network"
+    local_alias = tmp_path / "unc" / "server" / "share"
+    for folder, content in ((network, b"network input\n"), (local_alias, b"local alias\n")):
+        folder.mkdir(parents=True)
+        (folder / "payload.py").write_bytes(content)
+    expected = runtime.fingerprint_source([network / "payload.py"])
+    monkeypatch.chdir(tmp_path)
+    unc = Path(r"\\server\share")
+
+    def native(path: Path) -> Path:
+        candidate = Path(path)
+        if candidate.drive.startswith("\\\\"):
+            # Keep all UNC I/O inside this owned fixture, never an actual SMB share.
+            candidate = network / candidate.relative_to(unc)
+        return runtime._leases._native_path(candidate)
+
+    value = "\\\\?\\" + namespace + "\\server\\share\\payload.py"
+    source = runtime._runtime_component("versioned_runtime_source")
+    assert source.fingerprint_source(
+        [value], _normalize_windows_extended_path=runtime._normalize_windows_extended_path,
+        _native_path=native,
+    ) == expected
+    assert runtime._normalize_windows_extended_path(value) == str(unc / "payload.py")
+
+
 def test_fingerprint_preserves_declared_input_outside_windows(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
