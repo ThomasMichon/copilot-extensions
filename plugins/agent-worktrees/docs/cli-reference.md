@@ -1486,6 +1486,15 @@ or incomplete unnamed-source coverage, leaves a qualified caller `unknown`
 empty native roster prove the guest's active caller gone. Current complete
 unnamed inventories can still prove that an unrelated ID is absent, without
 restoring withdrawn names.
+Absence also requires complete cardinality: integer `selected_count` and
+`roster_count` must equal the number of unique returned IDs. A filtered current
+publication can prove an actually observed caller terminal, but cannot prove an
+unobserved caller gone. Missing or malformed count proof remains non-authoritative.
+For a qualified selector spanning execution sources, every competing named
+source must currently exclude that caller before a terminal row can authorize
+inheritance. An advisory, expired or filtered guest source cannot disappear
+behind a current terminal native row; the execution freshness recheck applies
+the same rule.
 `fleet` and `delegates` accept a host's roster as proof that a caller is gone
 or terminal only when it is a current publication (`projection.quality:
 "current"` with no `availability` label) whose `projection.freshness` proves a

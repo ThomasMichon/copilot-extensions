@@ -397,7 +397,7 @@ _FLEET_CONFIG = SimpleNamespace(
 
 def _fleet_hosts(caller_host: dict, caller_rows: list[dict], *, probed: float | None = None) -> list[dict]:
     stamp = {list_views_cli.PROBE_STARTED_KEY: time.monotonic() if probed is None else probed}
-    return [
+    hosts = [
         {"machine": "atlas-core", "env": "wsl", "reachable": True,
          "worktrees": caller_rows, **stamp, **caller_host},
         {"machine": "ember", "env": "linux", "reachable": True, "projection": _CURRENT, **stamp,
@@ -406,6 +406,12 @@ def _fleet_hosts(caller_host: dict, caller_rows: list[dict], *, probed: float | 
              caller_worktree=tracking.format_claim_ref("atlas-core", "example", _CALLER_ID),
          )]},
     ]
+    for row in hosts:
+        if isinstance(row.get("projection"), dict):
+            row["projection"] = dict(row["projection"])
+            row["projection"].setdefault("roster_count", len(row["worktrees"]))
+            row["projection"].setdefault("selected_count", len(row["worktrees"]))
+    return hosts
 
 
 @pytest.mark.parametrize("caller_host,state,finalizable,reason", [
@@ -575,6 +581,10 @@ def test_slow_later_probe_expires_an_earlier_fresh_caller_roster(
         if cmd[0] == "ssh":
             clock[0] += later_probe_s
             reply = delegate_host
+        reply["projection"] = {
+            **reply["projection"],
+            "roster_count": len(reply["worktrees"]), "selected_count": len(reply["worktrees"]),
+        }
         return SimpleNamespace(returncode=0, stdout=json.dumps(reply), stderr="")
 
     monkeypatch.setattr(list_views_cli.subprocess, "run", _run)

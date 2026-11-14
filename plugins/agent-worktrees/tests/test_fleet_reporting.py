@@ -29,6 +29,7 @@ def host(rows, *, context=None, machine="configured", environment="wsl"):
         "projection": {
             "quality": "current",
             "freshness": {"refreshed_age_s": 0.0, "bound_s": 90.0},
+            "roster_count": len(rows), "selected_count": len(rows),
         },
         "worktrees": rows,
     }
@@ -326,3 +327,89 @@ def test_malformed_reporter_gap_remains_unnamed_during_graph_and_execution_reche
     assert target["caller_state"]["state"] == "unknown"
     assert target["delegate_finalizable"] is False
     assert delegates._still_finalizable(hosts, target, source_key=("worker", "wsl")) is False
+
+
+@pytest.mark.parametrize("unnamed", [False, True])
+def test_filtered_current_inventory_cannot_prove_an_unobserved_caller_gone(unnamed):
+    child = {
+        "id": "child", "repo": "example",
+        "caller_worktree": tracking.format_claim_ref("known-slot", "example", "parent"),
+    }
+    known = host([], context=reporter("known"))
+    partial = host(
+        [], context={"version": 1, "status": "unavailable"} if unnamed else reporter("known"),
+        machine="partial",
+    )
+    partial["projection"].update(roster_count=2, selected_count=0)
+    hosts = [known, partial] if unnamed else [partial]
+    hosts = delegates.annotate_fleet_hosts([*hosts, host([child], machine="worker")])
+    target = hosts[-1]["worktrees"][0]
+    assert target["caller_state"]["state"] == "unknown"
+    assert target["delegate_finalizable"] is False
+    assert delegates._still_finalizable(hosts, target, source_key=("worker", "wsl")) is False
+
+
+@pytest.mark.parametrize("counts", [
+    {"roster_count": None, "selected_count": 0},
+    {"roster_count": False, "selected_count": 0},
+    {"roster_count": 0, "selected_count": None},
+])
+def test_missing_or_malformed_cardinality_does_not_prove_a_caller_absent(counts):
+    child = {
+        "id": "child", "repo": "example",
+        "caller_worktree": tracking.format_claim_ref("known-slot", "example", "parent"),
+    }
+    known = host([], context=reporter("known"))
+    known["projection"].update(counts)
+    hosts = delegates.annotate_fleet_hosts([known, host([child], machine="worker")])
+    assert hosts[1]["worktrees"][0]["delegate_finalizable"] is False
+
+
+def test_filtered_current_inventory_can_still_prove_an_observed_caller_terminal():
+    child = {
+        "id": "child", "repo": "example",
+        "caller_worktree": tracking.format_claim_ref("known-slot", "example", "parent"),
+    }
+    known = host(
+        [{"id": "parent", "repo": "example", "status": "finalized"}],
+        context=reporter("known"),
+    )
+    known["projection"].update(roster_count=2, selected_count=1)
+    hosts = delegates.annotate_fleet_hosts([known, host([child], machine="worker")])
+    target = hosts[1]["worktrees"][0]
+    assert target["caller_state"]["state"] == "resolved"
+    assert target["delegate_finalizable"] is True
+    assert delegates._still_finalizable(hosts, target, source_key=("worker", "wsl")) is True
+
+
+@pytest.mark.parametrize("coverage", ["current", "advisory", "expired", "partial"])
+def test_competing_named_source_must_currently_exclude_a_qualified_caller(coverage):
+    child = {
+        "id": "child", "repo": "example",
+        "caller_worktree": tracking.format_claim_ref("physical", "example", "parent"),
+    }
+    native = host(
+        [{"id": "parent", "repo": "example", "status": "finalized"}],
+        context={**reporter("physical", "windows"), "execution_machine": "native-slot"},
+        machine="native-route", environment="windows",
+    )
+    guest = host(
+        [], context={**reporter("physical", "wsl"), "execution_machine": "guest-slot"},
+        machine="guest-route",
+    )
+    if coverage == "advisory":
+        guest["availability"] = {"status": "advisory", "reason": "saved roster"}
+    elif coverage == "expired":
+        guest["projection"]["freshness"] = {"refreshed_age_s": 91.0, "bound_s": 90.0}
+    elif coverage == "partial":
+        guest["projection"].update(roster_count=2, selected_count=0)
+    hosts = delegates.annotate_fleet_hosts([native, guest, host([child], machine="worker")])
+    target = hosts[2]["worktrees"][0]
+    assert target["caller_state"]["state"] == ("resolved" if coverage == "current" else "unknown")
+    assert target["delegate_finalizable"] is (coverage == "current")
+    assert delegates._still_finalizable(
+        hosts, target, source_key=("worker", "wsl"),
+    ) is (coverage == "current")
+    if coverage == "current":
+        guest["projection"]["freshness"] = {"refreshed_age_s": 91.0, "bound_s": 90.0}
+        assert delegates._still_finalizable(hosts, target, source_key=("worker", "wsl")) is False

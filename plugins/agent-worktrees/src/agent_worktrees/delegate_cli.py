@@ -86,11 +86,12 @@ def annotate_delegate_graph(
     advisory_rows: Collection[int] = frozenset(),
     unnamed_rows: Collection[int] = frozenset(),
     incomplete_unnamed_sources: bool = False,
+    row_hosts: dict[int, tuple[tuple[str, str], ...]] | None = None,
 ) -> list[dict[str, Any]]:
     """Annotate ``list``/``fleet`` rows with caller/host + delegate state.
 
     ``authoritative_hosts`` (fleet reads) names the reachable hosts whose
-    roster is a current publication; any other reachable host can omit a
+    roster is a complete current publication; any other reachable host can omit a
     caller that exists now, so a caller expected there is ``unknown``, never
     ``gone``. ``advisory_rows`` holds the ``id()`` of rows read from such a
     host; a terminal caller resolved to one never authorizes finalization."""
@@ -139,23 +140,35 @@ def annotate_delegate_graph(
         if project_hint:
             caller_state["repo"] = project_hint
 
-        if machine_hint and (
+        uncertainty = _UNNAMED_REASON if machine_hint and (
             incomplete_unnamed_sources or any(
                 id(candidate) in unnamed_rows and candidate.get("repo") in (None, "", project_hint)
                 for candidate in id_index.get(caller_id, [])
             )
-        ):
-            caller_state["state"] = "unknown"
-            row["caller_state"] = caller_state
-            row["delegate_finalizable"] = False
-            row["delegate_finalizable_reason"] = _UNNAMED_REASON
-            continue
-
+        ) else None
         matches: list[dict[str, Any]] = []
         if machine_hint and project_hint:
             matches = qualified_index.get((machine_hint, project_hint, caller_id), [])
         else:
             matches = id_index.get(caller_id, [])
+
+        if (
+            uncertainty is None and machine_hint and len(matches) == 1
+            and authoritative_hosts is not None and row_hosts is not None
+        ):
+            observed = row_hosts.get(id(matches[0]), ())
+            if any(
+                key[0] == machine_hint and key not in observed
+                and (reachable is not True or key not in authoritative_hosts)
+                for key, reachable in (reachable_hosts or {}).items()
+            ):
+                uncertainty = _ROSTER_ADVISORY_REASON
+        if uncertainty is not None:
+            caller_state["state"] = "unknown"
+            row["caller_state"] = caller_state
+            row["delegate_finalizable"] = False
+            row["delegate_finalizable_reason"] = uncertainty
+            continue
 
         if len(matches) == 1:
             host = matches[0]
@@ -303,14 +316,28 @@ def host_roster_is_current(host: dict[str, Any], *, now: float | None = None) ->
     return all(_finite_seconds(value) for value in (age, bound, elapsed)) and age + elapsed <= bound
 
 
+def _host_roster_is_complete(host: dict[str, Any]) -> bool:
+    """A filtered or malformed selection cannot prove a caller absent."""
+    projection, rows = host.get("projection"), host.get("worktrees")
+    if not isinstance(projection, dict) or not isinstance(rows, list) or not all(
+        isinstance(row, dict) and isinstance(row.get("id"), str) and row["id"] for row in rows
+    ):
+        return False
+    total, selected = projection.get("roster_count"), projection.get("selected_count")
+    return (
+        type(total) is int and type(selected) is int and total == selected == len(rows)
+        and len({row["id"] for row in rows}) == len(rows)
+    )
+
+
 def annotate_fleet_hosts(
     hosts: list[dict[str, Any]], *, now: float | None = None,
 ) -> list[dict[str, Any]]:
     """Annotate the delegate graph across fleet host rows, in place.
 
-    Only hosts whose roster is current at ``now`` (default: the monotonic
-    clock) are authoritative: elsewhere a missing caller is ``unknown`` and a
-    resolved caller cannot authorize finalization. A reachable roster that is
+    Only complete rosters current at ``now`` (default: the monotonic
+    clock) prove absence. Observed terminal callers also need current coverage
+    from competing qualified sources. A reachable roster that is
     not current and carries no ``availability`` label (unproven, or expired
     while later hosts were probed) is labeled stale here, so serialized rows
     -- which drop the local probe clock -- never pass it off as current."""
@@ -323,6 +350,7 @@ def annotate_fleet_hosts(
     reporter_rows: dict[tuple[str, str], list[int]] = defaultdict(list)
     unnamed_rows: set[int] = set()
     incomplete_unnamed_sources = False
+    row_hosts: dict[int, tuple[tuple[str, str], ...]] = {}
     for host in hosts:
         try:
             keys, copies = fleet_reporting.reported_rows(host)
@@ -335,13 +363,15 @@ def annotate_fleet_hosts(
                 duplicate_hosts.add(key)
             reachable_hosts[key] = bool(host.get("reachable"))
             reporter_rows[key].extend(id(row) for row in copies)
+        row_hosts.update((id(row), keys) for row in copies)
         current = host_roster_is_current(host, now=now)
+        complete = current and _host_roster_is_complete(host)
         if not keys:
             unnamed_rows.update(id(row) for row in copies)
-            incomplete_unnamed_sources |= not current
-        if current:
+            incomplete_unnamed_sources |= not complete
+        if complete:
             authoritative_hosts.update(keys)
-        elif host.get("reachable") is True and host.get("availability") is None:
+        if not current and host.get("reachable") is True and host.get("availability") is None:
             host["availability"] = {"status": "stale", "reason": _UNPROVEN_ROSTER_REASON}
         if not current:
             advisory_rows.update(id(row) for row in copies)
@@ -357,6 +387,7 @@ def annotate_fleet_hosts(
         advisory_rows=advisory_rows,
         unnamed_rows=unnamed_rows,
         incomplete_unnamed_sources=incomplete_unnamed_sources,
+        row_hosts=row_hosts,
     )
     return hosts
 
