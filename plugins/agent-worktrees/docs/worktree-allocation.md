@@ -101,6 +101,9 @@ destination is refused rather than silently performing local creation.
 When composed through `run`, its temporary pending wrapper is settled only
 after verifying this same protected responsibility in the actual origin ledger.
 The wrapper does not add a competing plain child claim while linkage is pending.
+For a completed result, it retains the original claim's verified destination
+rather than deriving that destination from optional row machine labels. The
+returned repository and bound child incarnation must still match.
 An uncertain creation response can retain that protected operation without
 leaking another unresolved wrapper; missing, changed or malformed responsibility
 keeps the wrapper visibly unresolved instead.
