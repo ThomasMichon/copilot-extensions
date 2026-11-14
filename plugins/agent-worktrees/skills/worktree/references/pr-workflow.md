@@ -1217,7 +1217,8 @@ Plain `push-changes` also accepts the owner's own rewrite when replay proof is
 unavailable: after the ordinary ownership checks pass it pushes under an exact
 lease, retains the prior heads under `refs/agent-worktrees/backup/<branch>/`
 (newest five stamps kept) and never overwrites a branch another tracked
-worktree's live PR uses or unpublished foreign commits. Owners therefore never
+worktree's live PR uses, or a remote head carrying changes beyond a clean
+provider refresh of the published head. Owners therefore never
 need an operator form to republish their own rebased PR. See
 [owner rewrite](../../../docs/cli-reference.md#owner-rewrite-of-a-private-pr-branch).
 

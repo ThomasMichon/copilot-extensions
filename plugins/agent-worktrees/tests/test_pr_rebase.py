@@ -619,6 +619,22 @@ def test_owner_rewrite_replaces_provider_refreshed_head_it_already_carries(pr_re
     assert retained["published"] == old and retained["remote"] == refreshed
 
 
+@pytest.mark.guard
+@pytest.mark.parametrize("edited", [False, True])
+def test_refreshed_only_rejects_merge_commits_hiding_unpublished_edits(pr_repo, edited):
+    config, _, path, _, _, old = _prepare(pr_repo)
+    upstream = _advance(config, path)
+    _git("checkout", "--detach", old, cwd=path)
+    _git("merge", "--no-ff", "--no-edit", upstream, cwd=path)
+    if edited:
+        (path / "upstream.txt").write_text("resolved by hand\n")
+        _git("add", "-A", cwd=path)
+        _git("commit", "--amend", "--no-edit", cwd=path)
+    tip = _git("rev-parse", "HEAD", cwd=path)
+    _git("checkout", "-", cwd=path)
+    assert pr_rebase.refreshed_only(tip, old, old, upstream, str(path)) is not edited
+
+
 def test_backup_refs_are_bounded_per_branch(pr_repo):
     _, _, path, _, branch, old = _prepare(pr_repo)
     prefixes = [

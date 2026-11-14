@@ -444,6 +444,10 @@ def push(record, repo, remote: str, refspec: str, expected: str, *, cwd: str,
                 )
             lease = reconcile_head
             proof = replace(proof, transport_expected_head=lease)
+        if not _require_objects(remote, proof.branch, (expected, lease, proof.source_head), cwd):
+            return git_ops.PushResult(
+                ok=False, stderr="Refusing PR rewrite: a replaced head is not available locally to back up.",
+            )
         _save(proof, cwd)
         backup(proof.branch, {
             "published": expected, "remote": lease, "source": proof.source_head,
@@ -511,53 +515,56 @@ def backup(branch: str, objects: dict[str, str], *, cwd: str,
     return prefix
 
 
-def _collision(record, pr, branch: str) -> str:
-    """Another tracked worktree with a live PR on the same branch, if any."""
-    from . import config as cfg
-    slug = (getattr(pr, "repo", "") or "").lower()
-    for other in tracking.list_records(cfg.tracking_dir(), copy_records=False):
-        if other.worktree_id == record.worktree_id:
-            continue
-        for candidate in other.prs:
-            if (
-                candidate.branch == branch and not tracking._pr_is_terminal(candidate)
-                and (not slug or not candidate.repo or candidate.repo.lower() == slug)
-            ):
-                return other.worktree_id
+def _collision(record, pr, branch: str, remote: str, cwd: str) -> str:
+    """Why another worktree may own this PR branch, or ``""`` when none does.
+
+    Scans every adopted project ledger (not just this project's) through the
+    shared PR authority check; the caller holds :func:`pr_authority.guard`."""
+    from . import config as cfg, pr_authority, pr_publish
+    from dataclasses import replace as _replace
+    try:
+        config = cfg.load_config(project=record.repo)
+        identity = pr_publish.push_identity(remote, cwd=cwd)
+        pr_authority.assert_exclusive(config, record, _replace(pr, branch=branch), identity=identity)
+    except (OSError, KeyError, TypeError, ValueError) as exc:
+        return str(exc) or type(exc).__name__
     return ""
 
 
-def _patch_ids(revs: list[str], cwd: str) -> dict[str, str]:
-    ids = {}
-    for rev in revs:
-        diff = _git_bytes("show", "--no-ext-diff", "--no-textconv", "--format=", rev, cwd=cwd)
-        out = _git_bytes("patch-id", "--stable", cwd=cwd, stdin=diff).split()
-        ids[rev] = out[0].decode("ascii") if out else ""
-    return ids
+def _missing(shas, cwd: str) -> list[str]:
+    return [sha for sha in shas if not _commit_exists(sha, cwd)]
 
 
-def _foreign_commits(tip: str, published: str, source: str, upstream: str, cwd: str) -> list[str] | None:
-    """Commits on the remote head that this worktree never published and whose
-    changes neither its source nor its published head carries (a provider-side
-    base refresh replays the published commits with the same patch ids);
-    ``None`` when the graph is unreadable."""
-    listed = git_ops.git(
-        "--no-replace-objects", "rev-list", "--no-merges", tip, f"^{source}", f"^{upstream}",
-        *([f"^{published}"] if published else []),
-        cwd=cwd, check=False, isolated_repository=True,
-    )
-    owned = git_ops.git(
-        "--no-replace-objects", "rev-list", "--no-merges", source,
-        *([published] if published and _commit_exists(published, cwd) else []), f"^{upstream}",
-        cwd=cwd, check=False, isolated_repository=True,
-    )
-    if listed.returncode or owned.returncode:
-        return None
-    candidates = listed.stdout.split()
-    if not candidates:
-        return []
-    carried = set(_patch_ids(owned.stdout.split(), cwd).values())
-    return [rev for rev, pid in _patch_ids(candidates, cwd).items() if pid and pid not in carried]
+def _require_objects(remote: str, branch: str, shas, cwd: str) -> bool:
+    """Fetch the PR branch when any head to retain is absent; all must exist."""
+    if _missing(shas, cwd):
+        try:
+            git_ops.fetch(remote, cwd=cwd, branch=branch)
+        except (OSError, git_ops.GitError):
+            return False
+    return not _missing(shas, cwd)
+
+
+def refreshed_only(tip: str, published: str, source: str, upstream: str, cwd: str) -> bool:
+    """True when replacing *tip* cannot drop content the source lacks.
+
+    Either the source already contains *tip*, or *tip* is exactly a clean
+    refresh of the published head onto newer upstream content: its tree equals
+    the three-way merge of the published head with the upstream point *tip*
+    incorporates. Any extra edit -- a conflict resolution, a merge commit's
+    manual change, or a pushed fixup -- changes the tree and is refused. This
+    costs a constant number of git calls regardless of PR size."""
+    if _ancestor(tip, source, cwd):
+        return True
+    if not (published and upstream and _commit_exists(published, cwd)):
+        return False
+    point = _git("merge-base", tip, upstream, cwd=cwd)
+    base = _git("merge-base", published, point, cwd=cwd) if point else ""
+    if not base:
+        return False
+    merged = _git("merge-tree", "--write-tree", f"--merge-base={base}", point, published, cwd=cwd)
+    tree = _git("rev-parse", "--verify", f"{tip}^{{tree}}", cwd=cwd)
+    return bool(tree) and merged.splitlines()[:1] == [tree]
 
 
 def _owner_rewrite(record, repo, remote: str, expected: str, owned: dict, reason: str, *,
@@ -566,21 +573,38 @@ def _owner_rewrite(record, repo, remote: str, expected: str, owned: dict, reason
 
     Replay proof is not required from the owner: every ownership check in
     :func:`verify` already passed. What remains guarded is the destination:
-    no other tracked worktree may claim the branch, the remote may only hold
-    this worktree's published head (or a provider-confirmed head whose changes
-    the source already carries), the push is leased on that exact observed
-    head, and every head the rewrite could orphan is retained under
+    no other worktree in any adopted project may claim the branch, the remote
+    may only hold this worktree's published head (or a provider-confirmed
+    clean refresh of it), the push is leased on that exact observed head, and
+    every head the rewrite could orphan is retained under
     :data:`BACKUP_NAMESPACE` first."""
-    from . import pr_publish
+    from . import pr_authority
 
     def refuse(message: str) -> git_ops.PushResult:
         return git_ops.PushResult(ok=False, stderr=f"Refusing PR rewrite: {message} ({reason})")
 
+    try:
+        # The caller already holds this worktree's publish lock, and other
+        # writers take the authority guard first; wait only briefly so the
+        # inverted order can never deadlock, then fail closed.
+        with pr_authority.guard(timeout=5):
+            return _owner_rewrite_locked(
+                record, repo, remote, expected, owned, refuse,
+                cwd=cwd, timeout=timeout, reconcile_head=reconcile_head,
+            )
+    except pr_authority.PublicationAuthorityBusy:
+        return refuse("PR ownership is being changed by another process; retry.")
+
+
+def _owner_rewrite_locked(record, repo, remote, expected, owned, refuse, *,
+                          cwd, timeout, reconcile_head) -> git_ops.PushResult:
+    from . import pr_publish
+
     pr, branch, source = owned["pr"], owned["dest"], owned["head"]
-    other = _collision(record, pr, branch)
+    other = _collision(record, pr, branch, remote, cwd)
     if other:
         return refuse(
-            f"branch '{branch}' is also tracked by worktree '{other}'; "
+            f"branch '{branch}' may be owned by another worktree ({other}); "
             "never overwrite another worktree's PR branch."
         )
     upstream = _git("rev-parse", "--verify", f"{repo.remote}/{repo.default_branch}^{{commit}}", cwd=cwd)
@@ -591,18 +615,15 @@ def _owner_rewrite(record, repo, remote: str, expected: str, owned: dict, reason
     tip = pr_publish._tip(remote, branch, cwd)
     if not tip:
         return refuse("the remote PR branch is missing or unreadable.")
+    if reconcile_head and tip != reconcile_head:
+        return refuse("the remote PR head moved during publication.")
+    if not _require_objects(remote, branch, (expected, tip, source), cwd):
+        return refuse("a head the rewrite would replace is not available locally to back up.")
     if tip != expected:
-        if reconcile_head and tip != reconcile_head:
-            return refuse("the remote PR head moved during publication.")
-        if not _commit_exists(tip, cwd):
-            git_ops.fetch(remote, cwd=cwd, branch=branch)
-        foreign = _foreign_commits(tip, expected, source, upstream, cwd)
-        if foreign is None:
-            return refuse("the remote PR head's history is unreadable.")
-        if foreign:
+        if not refreshed_only(tip, expected, source, upstream, cwd):
             return refuse(
-                f"the remote PR head carries {len(foreign)} commit(s) this worktree never "
-                "published and its source does not contain; integrate them first."
+                "the remote PR head carries changes this worktree never published "
+                "and its source does not contain; integrate them first."
             )
         if pr_publish._provider_head(
             repo, pr, expected_ref=branch,
