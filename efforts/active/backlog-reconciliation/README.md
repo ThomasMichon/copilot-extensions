@@ -3164,6 +3164,13 @@ sources, transferring owners or turning partial/planning gains into completion.
   receiving objective or a retained gap; investigate actual implementation
   evidence when claiming completion, rather than making that the prerequisite
   for discovering thematic alignment.
+  The [compiler-free and source-qualification checkpoint](journal/2026/11.14-compiler-free-and-source-qualification.md)
+  proposes direct CF8403-P1/P2, two local rows and actual ROOT-global CF8403-G
+  in the existing leased-instance home. It retains all current source-only
+  stages, compiler-free lifecycle acceptance and existing custodians; the
+  three new checkbox rows remain unchecked. Five other source outcomes retain
+  literal caller/claim conditions or concrete qualification gaps. No technical
+  completion, source retirement or resource transfer follows from this proposal.
   The [service-family recovery intake](journal/2026/11.14-service-family-receiving.md)
   records reviewed delivery in #12590 for six #7947 service/keeper families in its
   existing Active home: six Plan rows, six local matrix rows and actual
@@ -4534,6 +4541,12 @@ incumbent parent check state remains unchanged.
   substitutes for requirement preservation.
 - [ ] No implementation, rollout, private identifiers or unreviewed policy
   changes were introduced by this campaign.
+  The compiler-free intake keeps the original leased-instance Plan/global
+  gates and every incumbent checked/unchecked row. #8545's actual caller claim
+  and local no-close clause, #8715's explicit claim, #8552's unresolved event
+  linkage, #8645's unclassified cleanup boundary and #8679's withdrawn
+  consumer-completion evidence remain distinct. The 855-open observation is
+  126 above fixed 729, with no new campaign disposition.
   The thirteen-contract unit additionally preserves all five original
   finite evidence tiers, eight canonical/home retentions and #9532/#9535's
   source/receipt boundaries. Its historical 923-open starting census
