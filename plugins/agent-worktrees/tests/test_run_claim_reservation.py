@@ -18,6 +18,7 @@ def _seed_owner(tmp_path, monkeypatch):
     tracking_dir = project_dir / "worktrees"
     tracking_dir.mkdir(parents=True)
     monkeypatch.setattr(cfg, "project_dir", lambda name=None: project_dir)
+    monkeypatch.setattr(cfg, "tracking_dir", lambda name=None: tracking_dir)
     monkeypatch.setattr(cfg.socket, "gethostname", lambda: "m")
     monkeypatch.setattr(cfg, "detect_platform", lambda: "windows")
     monkeypatch.setattr(
@@ -86,7 +87,7 @@ def test_run_success_replaces_pending_with_real_claim(
     "machine_identity_version": "invalid",
 }])
 def test_run_reuses_protected_allocation_without_row_naming_authority(
-    tmp_path, monkeypatch, bound, mismatch, labels,
+    tmp_path, monkeypatch, bound, mismatch, labels, capsys,
 ):
     from agent_worktrees import owned_worktree as allocation, resource_producer
 
@@ -104,6 +105,7 @@ def test_run_reuses_protected_allocation_without_row_naming_authority(
         **({"identity": identity} if bound else {}),
     }
     ref = allocation.claim_ref(metadata)
+    responses = []
 
     def create(*args, **kwargs):
         record = tracking.load_record(path)
@@ -121,7 +123,7 @@ def test_run_reuses_protected_allocation_without_row_naming_authority(
         destination = {**metadata["recovery"]}
         if mismatch == "target":
             destination["machine"] = "other"
-        return types.SimpleNamespace(returncode=0, stdout=json.dumps({
+        responses.append(json.dumps({
             "worktree": {
                 "id": "child", "repo": "destination", "owner_ref": "m/p/owner",
                 **row_identity, **labels,
@@ -131,6 +133,7 @@ def test_run_reuses_protected_allocation_without_row_naming_authority(
                 "target": destination, "receiving_status": "allocated",
             },
         }))
+        return types.SimpleNamespace(returncode=0, stdout=responses[-1])
 
     monkeypatch.setattr(m.subprocess, "run", create)
     assert m.cmd_run(_args()) == (1 if mismatch else 0)
@@ -140,6 +143,9 @@ def test_run_reuses_protected_allocation_without_row_naming_authority(
     pending = [claim for claim in claims if claim.ref.startswith("pending-run:")]
     assert len(claims) == (2 if mismatch else 1)
     assert len(pending) == (1 if mismatch else 0)
+    if mismatch is None:
+        assert m._journal_run_claim("m/p/owner", responses[-1]).ref == ref
+        assert "invalid worktree identity" not in capsys.readouterr().out
 
 
 @pytest.mark.parametrize("wrapped", [False, True])
