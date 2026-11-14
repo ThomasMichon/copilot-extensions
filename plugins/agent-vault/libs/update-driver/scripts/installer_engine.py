@@ -930,6 +930,7 @@ def _candidate(
                             "versioned_runtime_leases.py", "versioned_runtime_source.py",
                             "versioned_runtime_construction.py",
                             "versioned_runtime_publication.py",
+                            "versioned_runtime_cache.py", "daemon_instance_runtime.pyz",
                         ):
                             source = (
                                 slot / "runtime" if inputs.application is not None

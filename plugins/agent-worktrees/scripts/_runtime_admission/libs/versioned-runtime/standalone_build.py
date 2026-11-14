@@ -14,6 +14,7 @@ RUNTIME_RESOURCES = {
     "versioned_runtime_construction.py": "versioned_runtime_construction.py",
     "versioned_runtime_publication.py": "versioned_runtime_publication.py",
     "versioned_runtime_source.py": "versioned_runtime_source.py",
+    "versioned_runtime_cache.py": "versioned_runtime_cache.py",
 }
 APPLICATION_RESOURCES = {
     "worktree_manager": (

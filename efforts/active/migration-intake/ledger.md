@@ -202,3 +202,20 @@ Budget waves; no new programme, runner or alternative domain owner is
 created. Existing claims, original alternatives, budgets and source/
 resource responsibilities remain. Reviewed planned receiving is not a
 fixture repair, causal timeout disposition, native PASS or source closure.
+
+## Finite classifier-startup investigation intake (2026-11-13)
+
+This proposes `routed`; it takes effect only when normal review merges the
+accompanying complete direct domain amendment. Ledger publication alone is
+not domain acceptance. Prior rows and unresolved residuals remain unchanged.
+
+| Candidate | Source | Disposition | Primary canonical owner | Tracker outcome |
+|-----------|--------|-------------|-------------------------|-----------------|
+| Exact PowerShell classifier-startup diagnosis, unchanged downgrade/rethrow acceptance and distinct related recovery observation | Public #6747, complete original and eligible refinements | routed | [test-portfolio-rationalization](../test-portfolio-rationalization/README.md), Phase 4 only | Retain #6747 pending reviewed delivery, full-current receiving/source/custody readback and separate judgment; retain OPEN #1303 and existing diagnosis custody; no new issue |
+
+Phase 7 supplies deduplication/domain review, not another primary owner.
+The complete #6662 family is already directly retained as N6662; no duplicate
+candidate or Plan row is created. #5245's broader tail, release consumers and
+source-install duties remain independent. Receiving planned unresolved work
+does not establish causal repair, flake acceptance, executed evidence or
+claim/resource transfer.

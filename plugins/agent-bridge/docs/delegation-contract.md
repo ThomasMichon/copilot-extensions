@@ -238,6 +238,24 @@ This guarded combination currently refuses a busy target and does not support
 their previous behavior. An older daemon refuses the new combination before
 effects; package or payload freshness alone is not support evidence.
 
+For keyed native sends, a failed daemon ensure or unavailable read-only
+client/target discovery can establish that this CLI never attempted native
+admission. The selected CLI then exits 69 with the existing
+`refused_unavailable` outcome, `reason: native_send_not_attempted`,
+`retryable: true`, and additive `native_send_refusal_version: 1`,
+`admission_status: not_attempted`, `native_session_id` and `invocation_key`
+fields. `target` retains the requested Bridge handle. This is a versioned
+no-send proof for that request, not evidence that an earlier unknown send
+was absent. No new daemon protocol, command option or preflight subprocess
+is required; the ordinary ensure and read-only discovery are reused.
+
+An older CLI's untyped failure, an interrupted CLI, timeout, malformed output,
+or a failure after the admission POST was attempted does not supply that
+proof. The existing unknown/receipt-recovery path remains authoritative.
+Upgraded consumers may recognize this optional refusal while retaining their
+old conservative behavior with earlier CLIs or a rollback. Existing busy
+refusals and all non-native commands keep their previous behavior.
+
 For a caller that must not resume a stopped context, `--no-resume` requires
 both the native fence and idempotency key. The receiving daemon must advertise
 `native_send_no_resume: 1`; the client freshly checks it before each send or

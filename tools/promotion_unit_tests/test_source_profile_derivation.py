@@ -575,6 +575,7 @@ def test_numbered_constructor_retains_the_selected_bootstrap_without_payload_fal
         "runtime_launcher.py", "versioned_runtime.py", "versioned_runtime_leases.py",
         "versioned_runtime_source.py", "versioned_runtime_construction.py",
         "versioned_runtime_publication.py",
+        "versioned_runtime_cache.py", "daemon_instance_runtime.pyz",
     )
     for name in helpers:
         (scripts / name).write_bytes(b"legacy payload: " + name.encode())

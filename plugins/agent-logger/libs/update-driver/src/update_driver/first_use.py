@@ -91,6 +91,7 @@ BRIDGE_HELPERS = (
     "versioned_runtime_native.ps1", "versioned_runtime.py",
     "versioned_runtime_construction.py", "versioned_runtime_source.py",
     "versioned_runtime_publication.py", "versioned_runtime_leases.py",
+    "versioned_runtime_cache.py", "daemon_instance_runtime.pyz",
 )
 MCP_HELPERS = (
     "init.ps1", "init.sh", "installer-engine.ps1", "installer-engine.sh",
@@ -105,6 +106,7 @@ MCP_HELPERS = (
     "versioned_runtime_native.ps1", "versioned_runtime.py",
     "versioned_runtime_construction.py", "versioned_runtime_source.py",
     "versioned_runtime_publication.py", "versioned_runtime_leases.py", "uninstall-profile.json",
+    "versioned_runtime_cache.py", "daemon_instance_runtime.pyz",
 )
 
 

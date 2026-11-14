@@ -3,6 +3,10 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-13 - Merged source and retained inflow conditions](journal/2026/11.13-merged-source-and-inflow-conditions.md)
+
+- [2026-11-13 - Prospective outer-contract reconciliation](journal/2026/11.13-prospective-outer-contracts.md)
+
 - [2026-11-13 - Conductor continuation and retained native conditions](journal/2026/11.13-conductor-continuation-and-native-conditions.md)
 
 - [2026-11-13 - Gateway availability and retained source conditions](journal/2026/11.13-gateway-availability-and-source-conditions.md)
