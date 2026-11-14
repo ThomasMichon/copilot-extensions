@@ -34,6 +34,7 @@ from tools.typecheck_catalog_views import (  # noqa: E402
 )
 from tools.typecheck_bootstrap_views import (  # noqa: E402
     INPUTS as BOOTSTRAP_INPUTS, bootstrap_view, require_bootstrap_version,
+    SELECTOR_INPUTS, powershell_selector_view, posix_selector_view,
 )
 from installer_dependency_policy import DependencyPolicyError, run_uv_install  # noqa: E402
 from single_instance_lease import AlreadyRunningError  # noqa: E402
@@ -663,12 +664,25 @@ def check_project(
         if project.name == "lib-payload-invocation":
             if set(files) != set(CATALOG_MEMBERS) or len(files) != len(CATALOG_MEMBERS):
                 raise TypecheckError("Catalog witnesses require the complete canonical project")
+            _harness_procutil_provider(root, ordered_imports)
+            views.procutil_search = tuple(ordered_imports)
+            import_inputs = _import_inputs(
+                root, tuple(dict.fromkeys((*project.import_roots, "libs/agent-procutil/src"))),
+                all_paths,
+            )
             emitted_catalogs = views.add_catalog(all_paths)
             bootstrap = views.add(
                 bootstrap_view, all_paths, BOOTSTRAP_INPUTS, "catalog_binding_bootstrap.py",
             )
-            supplemental += len(emitted_catalogs) + 1
-            files = (*files, *(str(view.output) for view in emitted_catalogs), str(bootstrap.output))
+            selectors = (
+                views.add(powershell_selector_view, all_paths, SELECTOR_INPUTS, "shim_cache_powershell.py"),
+                views.add(posix_selector_view, all_paths, SELECTOR_INPUTS, "shim_cache_posix.py"),
+            )
+            supplemental += len(emitted_catalogs) + 1 + len(selectors)
+            files = (
+                *files, *(str(view.output) for view in emitted_catalogs), str(bootstrap.output),
+                *(str(view.output) for view in selectors),
+            )
         if guard and HARNESS_PREFIX.rstrip("/") in project.include:
             if "libs/agent-procutil/src" not in project.import_roots:
                 raise TypecheckError("Harness emitted imports require the declared ordinary procutil root")
@@ -725,7 +739,7 @@ def check_project(
                 "--explicit-package-bases", "--follow-imports", "silent",
                 "--check-untyped-defs", "--show-error-codes", "--no-pretty",
                 "--cache-dir", (
-                    os.devnull if project.import_roots or guard
+                    os.devnull if import_inputs is not None or guard
                     else str(path / "mypy-cache" / platform / version)
                 ),
             ]
