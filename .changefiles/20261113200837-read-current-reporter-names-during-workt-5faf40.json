@@ -1,0 +1,9 @@
+{
+  "comment": "Read current reporter names during worktree discovery without changing routing",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}
