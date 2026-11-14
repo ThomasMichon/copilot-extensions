@@ -48,6 +48,7 @@ def _like_pattern(value: str) -> str:
 def path_glob_sql(pattern: str) -> str:
     """Build a full-path shell-glob predicate for Lance's regex engine."""
     parts: list[str] = []
+    last_closing_bracket = pattern.rfind("]")
     index = 0
     while index < len(pattern):
         char = pattern[index]
@@ -62,11 +63,11 @@ def path_glob_sql(pattern: str) -> str:
                 end += 1
             if end < len(pattern) and pattern[end] == "]":
                 end += 1
-            while end < len(pattern) and pattern[end] != "]":
-                end += 1
-            if end == len(pattern):
+            if end > last_closing_bracket:
                 parts.append(r"\[")
                 continue
+            while pattern[end] != "]":
+                end += 1
             # Class-only translation avoids version-dependent wildcard groups.
             fragment = fnmatch.translate(pattern[index - 1:end + 1])[4:-3]
             if fragment == "(?!)":

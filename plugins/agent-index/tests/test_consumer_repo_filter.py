@@ -8,7 +8,7 @@ import pytest
 
 from agent_index.chunking.base import Chunk
 from agent_index.store.content_store import ContentStore
-from agent_index.store.repo_filter import _like_pattern
+from agent_index.store.repo_filter import _like_pattern, path_glob_sql
 
 
 class CatalogStore(ContentStore):
@@ -56,6 +56,7 @@ def test_default_repo_filter_retains_generic_source_identity(tmp_path: Path) -> 
     ("docs/[(?>].md", "docs/>.md", "docs/:.md"),
     ("docs/[[]?.md", "docs/[a.md", "docs/a.md"),
     ("docs/[]]?.md", "docs/]a.md", "docs/a.md"),
+    ("docs/[[]unfinished[.md", "docs/[unfinished[.md", "docs/unfinished.md"),
     ("docs/100%_ready.md", "docs/100%_ready.md", "docs/100X_ready.md"),
     ("docs/a'b.md", "docs/a'b.md", "nested/docs/a'b.md"),
     (r"docs/end\Z.md", r"docs/end\Z.md", r"docs/end\z.md"),
@@ -80,3 +81,18 @@ def test_path_globs_filter_real_fts_candidates_before_limit(
             "searchable phrase", source="git:repo", file_path_glob=pattern, limit=limit,
         )
         assert [chunk_id for chunk_id, _score in hits] == [chunks[0].chunk_id]
+
+
+@pytest.mark.parametrize("prefix", ["", "[]", "[!]", "[a]"])
+def test_unmatched_bracket_globs_use_linear_character_scans(prefix: str) -> None:
+    class CountedPattern(str):
+        reads = 0
+
+        def __getitem__(self, key):
+            self.reads += 1
+            return super().__getitem__(key)
+
+    pattern = CountedPattern(prefix + "[" * 1024)
+    predicate = path_glob_sql(pattern)
+    assert predicate.startswith("regexp_like(file_path, ")
+    assert pattern.reads < 10 * len(pattern)
