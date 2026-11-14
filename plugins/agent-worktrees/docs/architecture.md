@@ -1949,7 +1949,8 @@ containers, bridge sessions) so finalizing never orphans unfinished work. (Effor
   from the fresh custody check through the bounded callback and per-entry orphan
   settlement, so claim reactivation cannot slip between them. This is a deliberate
   cleanup exclusion, not an ordinary metadata I/O hold or a persistent freeze.
-  Preview takes no write lock. Contended claim verbs reject before mutation
+  Preview takes no write lock. Contended claim verbs return the existing
+  version-4 `rejected` result before mutation, including to older callers,
   rather than reporting an unknown outcome; already-released parent settlement
   remains a non-mutating no-op without reacquiring that source's write hold.
   *(Phases 4–6 complete; effort `resource-obligation-settlement` closed.)*

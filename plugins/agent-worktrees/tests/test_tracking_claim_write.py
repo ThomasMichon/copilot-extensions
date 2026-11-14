@@ -11,6 +11,7 @@ live daemon.
 from __future__ import annotations
 
 import json
+import runpy
 from argparse import Namespace
 from pathlib import Path
 
@@ -79,13 +80,16 @@ def test_busy_claim_record_is_a_known_non_mutating_rejection(tmp_path, monkeypat
         "worktree_id": "owned", "yaml_path": str(tmp_path / "owned.yaml"),
         "kind": "codespace", "ref": "resource", "disposition": obligations.AT_REST,
     })
-    assert result["error"] == "frozen"
+    assert result["error"] == "rejected"
     assert "no claim mutation" in result["message"]
 
 
 @pytest.mark.parametrize("verb", ["release", "settle"])
 @pytest.mark.parametrize("json_mode", [False, True])
-def test_cli_contended_claim_never_reports_success(record_path, monkeypatch, capfd, verb, json_mode):
+@pytest.mark.parametrize("caller", ["current", "prior-v4"])
+def test_cli_contended_claim_never_reports_success(
+    record_path, monkeypatch, capfd, claim_transport, verb, json_mode, caller,
+):
     from agent_worktrees import claims_cli
 
     ref = "owned-resource"
@@ -97,7 +101,7 @@ def test_cli_contended_claim_never_reports_success(record_path, monkeypatch, cap
     monkeypatch.setattr(cfg, "load_config", lambda *args, **kwargs: config)
     monkeypatch.setattr(
         claims_cli, "_dispatch_claim",
-        lambda name, args: getattr(tracking_claim_write, f"apply_{name}")(args),
+        claim_transport,
     )
 
     class BusyLock:
@@ -112,7 +116,13 @@ def test_cli_contended_claim_never_reports_success(record_path, monkeypatch, cap
         json=json_mode, release_worktree="wt-claim", claim_owner_ref=None,
         remove=False, released=False,
     )
-    assert getattr(claims_cli, f"_claims_{verb}")(args, ref) == 1
+    handler = getattr(claims_cli, f"_claims_{verb}")
+    if caller == "prior-v4":
+        prior = runpy.run_path(
+            str(Path(__file__).parent / "fixtures" / "claims_cli_v4.py"),
+        )
+        handler = prior[f"_claims_{verb}"]
+    assert handler(args, ref) == 1
     captured = capfd.readouterr()
     if json_mode:
         report = json.loads(captured.out)
@@ -122,6 +132,19 @@ def test_cli_contended_claim_never_reports_success(record_path, monkeypatch, cap
         assert "busy" in captured.out + captured.err
         assert "outbound claim" not in captured.out + captured.err
     assert record_path.read_bytes() == before
+
+
+@pytest.fixture
+def claim_transport():
+    server = tracking_write.start_server(tracking_write.compute)
+    server.start()
+    try:
+        lock_data = tracking_write.rendezvous_fields(server)
+        yield lambda verb, args: tracking_write.dispatch(
+            verb, args, read_lock_data=lambda: lock_data, ensure_monitor=None,
+        )
+    finally:
+        server.close()
 
 
 @pytest.mark.parametrize("verb", ["claim_add", "claim_release", "claim_settle"])

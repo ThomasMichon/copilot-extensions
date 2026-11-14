@@ -57,7 +57,7 @@ def _enter_claim_record(stack: ExitStack, path: Path) -> dict | None:
         stack.enter_context(tracking._RecordLock(path, require_sidecar=True))
     except TimeoutError:
         return {
-            "error": "frozen",
+            "error": "rejected",
             "message": "owner worktree is busy; no claim mutation was applied",
         }
     return None
