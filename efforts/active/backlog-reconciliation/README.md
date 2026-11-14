@@ -350,6 +350,13 @@ alternative and existing credential/source custody remain distinct. The dated
 migration route is append-only; source-specific disposition and technical
 acceptance are separate. The complete queue remains 847 open, 118 above 729.
 
+Its [actual receiving and separate disposition](journal/2026/11.14-account-provider-intake.md#actual-receiving-and-separate-tracking-disposition)
+record reviewed merge #12639, complete current receiving acceptance and #69's
+audited `NOT_PLANNED` tracking retirement, not provider implementation.
+All four technical rows and every incumbent owner/gate remain unchanged.
+The subsequent complete census is 846 open, 117 above fixed 729, with one
+verified original-cohort departure and no arrival or unrelated departure.
+
 The [inherited-allocator and parked-review intake](journal/2026/11.13-inherited-allocator-and-parked-review-intake.md)
 records reviewed delivery of eighteen direct unchecked rows across two existing
 ROOTs in #12467 and three separate `NOT_PLANNED` tracking retirements for
