@@ -8,6 +8,7 @@ from collections import Counter
 from .worktrees_projection import MAX_COLLECTION_ITEMS
 from .worktrees_projection_index import ProjectionError
 from .worktrees_runtime import CONTRACT_VERSION, request_selection
+from . import worktrees_reporting
 
 FEED_ACTION = "worktrees-feed"
 FEED_CAPABILITY = "worktrees-feed-v1"
@@ -31,6 +32,8 @@ def publication_frames(result: dict, previous: dict | None = None):
         "availability": result.get("availability"),
         "selected_count": len(rows),
         **({"project": result["project"]} if result.get("contract_version") == 2 else {}),
+        **({"reporting_context": result["reporting_context"]}
+           if "reporting_context" in result else {}),
     }
     for row in rows:
         if old.get(row["id"]) != row:
@@ -210,6 +213,7 @@ class WorktreesFeed:
                         "type": "heartbeat",
                         "generation": previous["projection"]["generation"],
                         "cursor": previous["projection"]["revision"],
+                        "reporting_context": worktrees_reporting.current(project),
                     }
         finally:
             with self._condition:
