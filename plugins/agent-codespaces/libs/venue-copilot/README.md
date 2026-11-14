@@ -68,10 +68,19 @@ generic refusal with `reason: null`.
 
 The detached launch failure exposes that code as `refusal_reason` and includes
 it in the existing human-readable error. This is diagnostic information, not
-permission to retry or replace the session. A refusal after an uncertain earlier
-response remains `unknown`, with identical-input reconciliation and ownership
-retention unchanged. The typed/deferred/unconfirmed/lost pending-seed helper is
-unaffected.
+permission to replace the session or send a fresh prompt. A refusal after an
+uncertain earlier response remains `unknown`, with identical-input
+reconciliation and ownership retention unchanged. The
+typed/deferred/unconfirmed/lost pending-seed helper is unaffected.
+
+One refusal is not final: a cold guest can still be loading plugins when the
+Bridge readiness wait ends. When a confirmed `plugins_not_ready` refusal's
+diagnostic is `readiness-timeout` or `selected-loadout-pending`,
+`deliver_note` waits and re-sends the same operation key and input once per
+`READINESS_RETRY_DELAYS` entry (15 s, then 30 s). The Bridge admitted nothing
+for a refused attempt and reuses the original readiness intent, so a retry
+cannot duplicate the first turn. Every other readiness diagnostic, including a
+disabled selected plugin or a changed native session, is final immediately.
 
 Run parser/recovery controls through the contained runner with
 `python tools/run-plugin-tests.py venue-copilot --test-file tests/test_refs.py`.
