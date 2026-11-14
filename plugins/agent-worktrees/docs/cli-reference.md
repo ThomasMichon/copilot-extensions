@@ -1826,7 +1826,15 @@ disable writes.
 Older launchers used `<runtime-root>/cache/python/<namespace>` and could leave
 one `unsealed-*` directory per invocation. `python-cache prune` remains the
 explicit legacy inspection/removal command; it does not collect the new
-owned platform-cache namespaces:
+owned platform-cache namespaces.
+
+Normal updates additionally perform [bounded legacy relief](../../../libs/agent-procutil/README.md#legacy-update-relief)
+through the runtime owner's GC. Only bytecode affirmatively attributed to an
+exact, unprotected runtime slot that canonical GC has removed is eligible;
+base-interpreter, retained/current runtime and unknown content stays. The
+`gc: python-cache-legacy` report distinguishes actual removals, retained
+reasons and pending/budget-limited work. This never runs the manual age-only
+policy or deletes a whole prefix from process-visibility evidence alone.
 
 ```bash
 agent-worktrees python-cache prune                    # dry run: report eligible dirs/bytes

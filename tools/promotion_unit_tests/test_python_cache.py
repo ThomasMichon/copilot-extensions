@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import importlib.util
+import base64
 import json
+import marshal
 import os
 import sys
 from pathlib import Path
@@ -129,3 +131,89 @@ def test_minimal_loader_keeps_cache_and_cleanup_metadata_without_resident_module
     }
     assert spec.name + ".daemon" not in sys.modules
     assert spec.name + "._job_scopes" not in sys.modules
+
+
+def bytecode_reader():
+    spec = importlib.util.spec_from_file_location("unit_python_cache_pyc", SOURCE.with_name("python_cache_pyc.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.mark.parametrize("version", ["310", "311", "312", "313"])
+def test_legacy_provenance_reads_actual_nested_code_without_deserializing_or_executing(monkeypatch, version):
+    reader = bytecode_reader()
+    spec = importlib.util.spec_from_file_location(
+        "unit_python_cache_pyc_fixtures", SOURCE.parents[2] / "tests/python_cache_pyc_fixtures.py",
+    )
+    fixtures = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(fixtures)
+    data = base64.b64decode(fixtures.BYTECODE[version])
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("untrusted cache data must not be deserialized")
+
+    monkeypatch.setattr(marshal, "loads", forbidden)
+    assert reader.source(data) == fixtures.FILENAME
+    assert reader.cache_tag(data) == "cpython-" + version
+
+
+@pytest.mark.parametrize("kind", ["magic", "reference", "count", "trailing"])
+def test_legacy_provenance_refuses_unknown_and_bounded_malformed_objects(kind):
+    reader = bytecode_reader()
+    data = importlib.util.MAGIC_NUMBER + b"\0" * 12 + marshal.dumps(
+        compile("pass", "/fixture/versions/retired/module.py", "exec"),
+    )
+    if kind == "magic":
+        data = b"nope" + data[4:]
+    elif kind == "reference":
+        data = data[:16] + b"r\xff\xff\xff\xff"
+    elif kind == "count":
+        data = data[:16] + b"(\xff\xff\xff\x7f"
+    else:
+        data += b"extra"
+    with pytest.raises(ValueError):
+        reader.source(data)
+
+
+@pytest.mark.parametrize("version", ["310", "313"])
+def test_legacy_provenance_requires_typed_code_fields_and_name_members(version):
+    reader = bytecode_reader()
+    spec = importlib.util.spec_from_file_location(
+        "unit_python_cache_pyc_fields", SOURCE.parents[2] / "tests/python_cache_pyc_fixtures.py",
+    )
+    fixtures = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(fixtures)
+    assert reader.source(fixtures.code_record(version)) == fixtures.FILENAME
+    fields = ("code", "consts", "names", "locals", "free", "cells", "line") if version == "310" else (
+        "code", "consts", "names", "locals", "kinds", "line", "exception",
+    )
+    for field in fields:
+        with pytest.raises(ValueError):
+            reader.source(fixtures.code_record(version, **{field: None}))
+    for field in ("names", "locals"):
+        with pytest.raises(ValueError):
+            reader.source(fixtures.code_record(version, **{field: (1,)}))
+
+
+@pytest.mark.parametrize("private", [False, True])
+def test_macos_file_admission_rejects_file_only_acl_grants(monkeypatch, private):
+    spec = importlib.util.spec_from_file_location(
+        "unit_python_cache_permissions", SOURCE.with_name("python_cache_permissions.py"),
+    )
+    permissions = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(permissions)
+    permissions.os = SimpleNamespace(name="posix", getuid=lambda: 42)
+    permissions.sys = SimpleNamespace(platform="darwin")
+    info = SimpleNamespace(st_mode=0o100600 if private else 0o100644, st_uid=42)
+    path = SimpleNamespace(lstat=lambda: info)
+    seen = []
+
+    def deny(candidate):
+        seen.append(candidate)
+        raise PermissionError("fixture-only ACL grant")
+
+    monkeypatch.setattr(permissions, "_macos_check", deny)
+    with pytest.raises(PermissionError, match="ACL grant"):
+        permissions.check_file(path, private=private)
+    assert seen == [path]
