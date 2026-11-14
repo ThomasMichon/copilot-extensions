@@ -483,3 +483,19 @@ def test_warm_baseline_pages_within_the_persisted_baseline_limit(selected):
         **registration(joined), "after": pulls[-1]["number"],
     })["baseline"]
     assert [p["number"] for p in [*pulls, *remaining["pulls"]]] == list(range(1, 17))
+
+
+def test_slow_consumer_does_not_pin_other_consumers_acknowledged_event_space(selected, monkeypatch):
+    from agent_pull_requests import filtered_state
+
+    slow = subscribe(selected, "slow", {"repo": ["owner/repo"]})
+    fast = subscribe(selected, "fast", {"repo": ["owner/repo"]})
+    monkeypatch.setattr(filtered_state, "MAX_EVENTS", 4)
+    observe(selected, {7: facts()})
+    retained = events(selected, "slow", slow)
+    acknowledged = events(selected, "fast", fast)
+    execute(selected, "fast", "acknowledge", {**registration(fast), "event_id": acknowledged[-1]["event_id"]})
+    observe(selected, {7: facts(tags=["changed"])})
+    pending = events(selected, "slow", slow)
+    assert pending[:len(retained)] == retained
+    assert [event["kind"] for event in events(selected, "fast", fast)] == ["change"]

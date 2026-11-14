@@ -197,14 +197,19 @@ def trim(value, *, new_sequence, now, validate_only=False):
         return total <= MAX_CACHE_BYTES and payload <= MAX_CACHE_BYTES - METADATA_RESERVE_BYTES and (
             len(events) - removed <= MAX_EVENTS
         )
-    while not fits():
-        if validate_only or removed == len(events):
-            raise RepositoryBackpressure("filtered state byte capacity exceeded")
-        first = events[removed]
-        if first["sequence"] >= new_sequence or protected(first, value["registrations"], now):
-            raise RepositoryBackpressure("unsettled filtered delivery retained")
-        amount = len(json.dumps(first, allow_nan=False).encode()) + (2 if len(events) - removed > 1 else 0)
-        total, payload = total - amount, payload - amount
-        removed += 1
+    if fits():
+        return
+    if validate_only:
+        raise RepositoryBackpressure("filtered state byte capacity exceeded")
+    retained = []
+    for event in events:
+        if not fits() and event["sequence"] < new_sequence and not protected(event, value["registrations"], now):
+            amount = len(json.dumps(event, allow_nan=False).encode()) + (2 if len(events) - removed > 1 else 0)
+            total, payload = total - amount, payload - amount
+            removed += 1
+        else:
+            retained.append(event)
+    if not fits():
+        raise RepositoryBackpressure("unsettled filtered delivery retained")
     if removed:
-        value["events"] = events[removed:]
+        value["events"] = retained
