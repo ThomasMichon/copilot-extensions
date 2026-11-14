@@ -349,9 +349,17 @@ namespaces. A 32 KiB/64-level identity-bound stack with per-directory lexical
 positions resumes within a namespace, including past retained leaves.
 These positions are comparison-only strings, not paths to reopen. Windows
 basename matching follows native case rules; POSIX matching stays case-sensitive.
+The namespace rotation cursor uses a bounded, versioned ASCII JSON envelope,
+so POSIX surrogate-escaped filename bytes round-trip through SQLite. The prior
+raw cursor is still readable; malformed or oversized envelopes restart safe
+discovery rather than blocking rotation.
 Temporary aggregate exhaustion preserves the current frame for a fresh pass;
 an intrinsically oversized or fresh-pass time-unavailable subtree is retained
 and skipped so eligible siblings are not starved.
+If a serialized continuation exceeds its limit, it backs out of the refused
+subtree to the closest persistable ancestor, retaining the parent's comparison
+position. A local serialization refusal is reported without rolling back
+namespace rotation or starving other prefixes.
 Each file is at most 8 MiB; a file larger than a custom per-pass byte budget
 is retained rather than starving later files. Native calls are not preemptible.
 

@@ -268,6 +268,103 @@ def test_unknown_names_count_toward_namespace_budget_without_starvation(local):
     assert any("legacy-unknown-namespace" in report.reasons for report in reports)
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX filesystem names may contain non-UTF-8 bytes")
+def test_non_utf8_namespace_cursor_round_trips_without_starving_later_prefix(local):
+    root, _ = local
+    valid = compiled(root)
+    unknown = root / "cache" / "python" / os.fsdecode(b"a\xff")
+    unknown.mkdir()
+    sentinel = unknown / "evidence.txt"
+    sentinel.write_bytes(b"retain")
+    first = collect(root, namespaces=1)
+    assert first.files == 0 and not first.errors
+    with sqlite3.connect(store.installation_root(root) / "catalog.sqlite") as database:
+        encoded = database.execute(
+            "SELECT value FROM progress WHERE name = ?", (legacy._CURSOR_KEY,),
+        ).fetchone()[0]
+        assert encoded.isascii() and "\\udcff" in encoded
+    reports = [collect(root, namespaces=1) for _ in range(4)]
+    assert not valid.exists() and sentinel.read_bytes() == b"retain"
+    assert sum(report.files for report in reports) == 1
+    assert not any(report.errors for report in reports)
+
+
+@pytest.mark.parametrize("record", ["legacy", "corrupt", "oversized"])
+def test_cursor_compatibility_and_corruption_do_not_block_progress(local, record):
+    root, _ = local
+    retained = compiled(root, "1.0", number=1)
+    valid = compiled(root, "2.0", number=2)
+
+    @contextmanager
+    def eligibility(slot, *, check):
+        yield "runtime-present" if slot == "1.0" else ""
+
+    collect(root, eligibility, namespaces=1)
+    with sqlite3.connect(store.installation_root(root) / "catalog.sqlite") as database:
+        database.execute("DELETE FROM progress WHERE name = ?", (legacy._CURSOR_KEY,))
+        if record == "legacy":
+            database.execute(
+                "INSERT OR REPLACE INTO progress(name, value) VALUES ('legacy-collector', ?)",
+                (prefix(root).name,),
+            )
+        else:
+            data = "[" * 1000 + "0" + "]" * 1000 if record == "corrupt" else "x" * 9000
+            database.execute(
+                "INSERT OR REPLACE INTO progress(name, value) VALUES (?, ?)",
+                (legacy._CURSOR_KEY, data),
+            )
+    reports = [collect(root, eligibility, namespaces=1) for _ in range(5)]
+    assert retained.is_file() and not valid.exists()
+    if record != "legacy":
+        assert any("legacy-cursor-reset" in report.reasons for report in reports)
+
+
+def test_serialized_state_limit_backs_out_to_a_persistable_ancestor():
+    names = [str(number) + "\u754c" * 80 for number in range(40)]
+    stack = [["1.0", [5, 6], names[0]]]
+    stack.extend([
+        name, [number + 10, number + 20], names[number + 1] if number + 1 < len(names) else "",
+    ] for number, name in enumerate(names))
+    state = {"namespace": [1, 2], "versions": [3, 4], "after": "", "stack": stack}
+    original_depth = len(stack)
+    assert len(json.dumps(state).encode("utf-8")) > legacy._MAX_STATE
+    with sqlite3.connect(":memory:") as database:
+        database.execute("CREATE TABLE progress(name TEXT PRIMARY KEY, value TEXT NOT NULL)")
+        assert legacy._save(database, "fixture", state)
+        encoded = database.execute("SELECT value FROM progress").fetchone()[0]
+        restored = legacy._state(database, "fixture")
+    assert len(encoded.encode("utf-8")) <= legacy._MAX_STATE
+    assert 0 < len(restored["stack"]) < original_depth
+    assert restored["stack"][-1][2]  # The refused child remains the parent's comparison position.
+
+
+def test_oversized_interrupted_continuation_commits_rotation_to_later_prefix(local, monkeypatch):
+    root, _ = local
+    relative = "/".join(str(number) + "\u00e9" * 30 for number in range(10)) + "/deep.py"
+    first = compiled(root, "1.0", relative, number=1)
+    evidence = first.with_name("evidence.txt")
+    first.rename(evidence)
+    valid = compiled(root, "2.0", number=2)
+    protected = [True]
+    monkeypatch.setattr(legacy, "_MAX_STATE", 1024)
+
+    @contextmanager
+    def eligibility(slot, *, check):
+        yield "runtime-present" if slot == "2.0" and protected[0] else ""
+
+    for _ in range(40):
+        report = collect(root, eligibility, entries=2, namespaces=1)
+        if "legacy-continuation-oversized" in report.reasons:
+            break
+    else:
+        pytest.fail("fixture did not reach its bounded continuation refusal")
+    assert valid.is_file() and evidence.is_file()
+    protected[0] = False
+    reports = [collect(root, eligibility, entries=2, namespaces=1) for _ in range(12)]
+    assert not valid.exists() and evidence.is_file()
+    assert sum(report.files for report in reports) == 1
+
+
 @pytest.mark.parametrize("kind", ["file-link", "directory-link", "hardlink"])
 def test_links_are_preserved_and_do_not_block_later_bytecode(local, tmp_path, kind):
     root, _ = local

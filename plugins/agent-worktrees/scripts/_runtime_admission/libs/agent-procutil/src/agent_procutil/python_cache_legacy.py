@@ -21,6 +21,8 @@ from . import python_cache_store as store
 
 _NAMESPACE = re.compile(r"(?:unsealed-[0-9a-f]{32}|installed-[0-9a-f]{64})")
 _MAX_STATE = 32768
+_MAX_CURSOR = 8192
+_CURSOR_KEY = "legacy-collector:v1"
 
 
 @dataclass(frozen=True)
@@ -137,6 +139,42 @@ def _cursor(value):
     return isinstance(value, str) and len(value) <= 1024
 
 
+def _namespace_cursor(database, report):
+    row = database.execute(
+        "SELECT CASE WHEN length(value) <= ? THEN value END FROM progress WHERE name = ?",
+        (_MAX_CURSOR, _CURSOR_KEY),
+    ).fetchone()
+    if row is not None:
+        try:
+            record = json.loads(row[0])
+            if (
+                isinstance(record, dict) and set(record) == {"version", "after"}
+                and type(record["version"]) is int and record["version"] == 1
+                and _cursor(record["after"])
+            ):
+                return record["after"]
+        except (ValueError, TypeError, RecursionError):
+            pass
+        report.retain("legacy-cursor-reset")
+        return ""
+    row = database.execute(
+        "SELECT CASE WHEN length(value) <= 1024 THEN value END "
+        "FROM progress WHERE name = 'legacy-collector'",
+    ).fetchone()
+    if row is not None and not _cursor(row[0]):
+        report.retain("legacy-cursor-reset")
+    return row[0] if row is not None and _cursor(row[0]) else ""
+
+
+def _rotate(database, name):
+    encoded = json.dumps({"version": 1, "after": name}, ensure_ascii=True, separators=(",", ":"))
+    if not _cursor(name) or len(encoded) > _MAX_CURSOR:
+        raise ValueError("legacy namespace cursor is oversized")
+    database.execute(
+        "INSERT OR REPLACE INTO progress(name, value) VALUES (?, ?)", (_CURSOR_KEY, encoded),
+    )
+
+
 def _state(database, name):
     row = database.execute(
         "SELECT length(value), CASE WHEN length(value) <= ? THEN value END "
@@ -163,12 +201,21 @@ def _state(database, name):
 
 
 def _save(database, name, state):
-    encoded = json.dumps(state, separators=(",", ":"))
-    if len(encoded.encode("utf-8")) > _MAX_STATE:
-        raise ValueError("legacy continuation exceeds its byte budget")
+    refused = False
+    while True:
+        encoded = json.dumps(state, separators=(",", ":"))
+        if len(encoded.encode("utf-8")) <= _MAX_STATE:
+            break
+        refused = True
+        if not state["stack"]:
+            raise ValueError("legacy continuation exceeds its byte budget")
+        frame = state["stack"].pop()
+        if not state["stack"]:
+            state["after"] = frame[0]
     database.execute(
         "INSERT OR REPLACE INTO progress(name, value) VALUES (?, ?)", ("legacy:" + name, encoded),
     )
+    return refused
 
 
 def _checked(entry):
@@ -391,11 +438,7 @@ def collect(root: Path, *, retirement, budget: Budget | None = None) -> Report:
                     work.check()
                     return active_reason
 
-                row = database.execute(
-                    "SELECT CASE WHEN length(value) <= 256 THEN value ELSE '' END "
-                    "FROM progress WHERE name = 'legacy-collector'",
-                ).fetchone()
-                after = row[0] if row else ""
+                after = _namespace_cursor(database, report)
                 start = bisect_right(names, after)
                 count = min(len(names), budget.namespaces)
                 for offset in range(count):
@@ -406,10 +449,7 @@ def collect(root: Path, *, retirement, budget: Budget | None = None) -> Report:
                         break
                     name = names[(start + offset) % len(names)]
                     report.namespaces += 1
-                    database.execute(
-                        "INSERT OR REPLACE INTO progress(name, value) VALUES ('legacy-collector', ?)",
-                        (name,),
-                    )
+                    _rotate(database, name)
                     if not _NAMESPACE.fullmatch(name):
                         report.retain("legacy-unknown-namespace")
                         continue
@@ -434,7 +474,12 @@ def collect(root: Path, *, retirement, budget: Budget | None = None) -> Report:
                         report.error(error)
                     finally:
                         if work.state is not None:
-                            _save(database, name, work.state)
+                            try:
+                                if _save(database, name, work.state):
+                                    report.retain("legacy-continuation-oversized")
+                            except (ValueError, TypeError, RecursionError) as error:
+                                report.retain("legacy-continuation-unavailable")
+                                report.error(error)
                 report.pending = bool(names)
                 if count < len(names):
                     report.exhausted = True
