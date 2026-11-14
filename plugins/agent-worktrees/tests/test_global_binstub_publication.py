@@ -75,7 +75,7 @@ def test_global_frontdoor_reuses_only_the_recorded_installed_cache(
     env = {key: value for key, value in os.environ.items() if key.upper() not in {
         "PYTHONDONTWRITEBYTECODE", "PYTHONPYCACHEPREFIX", "PYTHONPATH", "PYTHONHOME",
     }}
-    cache_base = home / "os-cache"
+    cache_base = home / "Library" / "Caches" if sys.platform == "darwin" else home / "os-cache"
     env.update(HOME=str(home), USERPROFILE=str(home),
                LOCALAPPDATA=str(cache_base), XDG_CACHE_HOME=str(cache_base))
     entry = local_bin / ("agent-worktrees.ps1" if shell == "ps1" else "agent-worktrees")

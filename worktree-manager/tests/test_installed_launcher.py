@@ -449,8 +449,11 @@ def test_installed_evidence_reuses_sealed_cache(launcher, tmp_path):
     (slot / ".install-complete.json").write_text(json.dumps({
         "version": slot.name, "completed_at": "fixture", "pid": 0, "payload_hash": "a" * 64,
     }), encoding="utf-8")
-    cache_base = tmp_path / "user cache"
-    env.update(LOCALAPPDATA=str(cache_base), XDG_CACHE_HOME=str(cache_base))
+    home = tmp_path / "home"
+    home.mkdir()
+    cache_base = home / "Library" / "Caches" if sys.platform == "darwin" else tmp_path / "user cache"
+    env.update(HOME=str(home), USERPROFILE=str(home),
+               LOCALAPPDATA=str(cache_base), XDG_CACHE_HOME=str(cache_base))
     cache_root = cache_base / "copilot-extensions" / "python" / "v1"
     caches = []
     # CE_TERMINAL_LAUNCH forces the CMD launcher's native branch instead of

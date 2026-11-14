@@ -172,7 +172,10 @@ def test_generated_shim_external_cache_cold_and_warm(
         else:
             argv = ["sh", str(shim)]
     environment = dict(os.environ)
-    cache_base = profile / "user cache with spaces"
+    cache_base = (
+        profile / "Library" / "Caches" if sys.platform == "darwin"
+        else profile / "user cache with spaces"
+    )
     child_env = {
         **environment, "USERPROFILE": str(profile), "HOME": str(profile),
         "LOCALAPPDATA": str(cache_base), "XDG_CACHE_HOME": str(cache_base),

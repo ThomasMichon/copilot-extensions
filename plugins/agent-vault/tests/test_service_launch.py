@@ -461,9 +461,11 @@ def test_posix_service_entrypoint_consumes_complete_cache_policy(tmp_path, provi
     record = site / "fixture.dist-info" / "RECORD"
     record.parent.mkdir()
     record.write_text("fixture.py,sha256=" + "a" * 43 + ",1\n", encoding="utf-8")
-    cache_base = tmp_path / "user cache"
+    home = tmp_path / "home"
+    home.mkdir()
+    cache_base = home / "Library" / "Caches" if sys.platform == "darwin" else tmp_path / "user cache"
     env = {key: value for key, value in os.environ.items() if not key.upper().startswith("PYTHON")}
-    env["XDG_CACHE_HOME"] = str(cache_base)
+    env.update(HOME=str(home), USERPROFILE=str(home), XDG_CACHE_HOME=str(cache_base))
     launcher = Path(__file__).resolve().parents[1] / "scripts" / "vault-service.sh"
     caches = []
     for _ in range(2):
