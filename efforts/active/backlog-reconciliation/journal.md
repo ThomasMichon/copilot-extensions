@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-13 - Canonical lifecycle and retained source boundaries](journal/2026/11.13-canonical-lifecycle-and-source-boundaries.md)
+
 - [2026-11-13 - Prerequisite and installed-acceptance keepers](journal/2026/11.13-prerequisite-and-installed-keepers.md)
 
 - [2026-11-13 - Merged source and retained inflow conditions](journal/2026/11.13-merged-source-and-inflow-conditions.md)
