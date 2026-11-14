@@ -79,6 +79,14 @@ invocation store/readback. Subprocess errors keep their original exception and
 primary result; timeout records do not invent an exit code. Nonzero exits retain
 selected structured errors and bounded stderr, never arbitrary stdout envelopes.
 
+An unresolved cross-owner relationship write emits `task_relationship_write`
+with its original task/generation, assignment audit event, reservation when
+present, and reserve/bind/inspect/close operation. Its bounded, filtered causal
+exception stays in the existing application log rather than being erased by
+the generic unresolved-request reply. The API reply and retained request are
+unchanged: this diagnostic neither proves absence nor authorizes retry,
+release, replacement or native admission.
+
 Known credential values, credential assignments and supplied prompts are removed
 using the existing diagnostic-text owner. Raw task/environment/invocation
 envelopes are not copied into these records. These restrictions are not a reason

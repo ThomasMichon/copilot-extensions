@@ -416,6 +416,8 @@ class QueueTaskRelationshipsMixin:
             try:
                 result = writer(workspace, operation, {**payload, **common})
             except Exception as exc:
+                from .spawn_diagnostics import record_relationship_failure
+                record_relationship_failure(request, operation, exc)
                 raise TaskError(
                     "task relationship request is unresolved; reconcile its original assignment"
                 ) from exc

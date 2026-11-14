@@ -198,6 +198,8 @@ merged plan does not establish running adoption.
       composition separately from the concurrent index controls. Production
       cohorts and the remaining owner/recovery states stay open; this source/native
       credit does not close the aggregate item.
+      Request-bound proven-unavailable send refusal and guarded original-wake
+      retry merged in #12544; native unavailable-owner recovery remains open.
       Whole-container timing is not isolated admission-latency or concurrent
       running acceptance, and no production activation is implied.
 - [ ] Publish receiver support before enabling new callers; document baseline,
