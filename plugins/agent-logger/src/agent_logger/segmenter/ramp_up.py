@@ -31,7 +31,8 @@ WORKTREE may be a short worktree **suffix** (e.g. ``fbc5``), a full path, or
 the local session store by matching worktree directory names ending in
 ``-<suffix>``. With ``--machine NAME`` naming another host, the hunt is
 delegated over ``ssh <NAME>`` (a session's raw data lives on the machine that
-produced it); locally, ``--machine`` disambiguates a suffix reused across hosts.
+produced it). Local discovery treats directory names as opaque: an old machine
+prefix does not identify the host currently serving the session store.
 With ``--list`` the candidate sessions are enumerated (most recent first) and
 nothing is collated. With ``--session ID`` a specific session is ramped up.
 """
@@ -46,6 +47,8 @@ import sys
 from collections import deque
 from pathlib import Path
 from typing import Any
+
+from agent_procutil import no_window_kwargs
 
 from agent_logger import sessions
 from agent_logger.segmenter.collate import (
@@ -156,24 +159,19 @@ def discover_sessions(worktree_root: str) -> list[dict[str, Any]]:
     return _sort_recent(out)
 
 
-def discover_by_suffix(suffix: str, machine: str | None = None) -> list[dict[str, Any]]:
+def discover_by_suffix(suffix: str) -> list[dict[str, Any]]:
     """Find real sessions whose worktree directory ends with ``-<suffix>``.
 
     This is the "hunt it down from a short id" path: the operator passes just
     the 4-ish-char worktree suffix (e.g. ``fbc5``) instead of a full path.
-    When *machine* is given, candidates are additionally filtered to worktrees
-    whose directory name starts with that machine designation (worktree names
-    begin with ``<machine>-...``), disambiguating a suffix reused across hosts.
-    Sorted most recent first.
+    Search the selected local session store, regardless of historical machine
+    prefixes in directory names. Sorted most recent first.
     """
     suffix = suffix.lower().lstrip("-")
-    machine = machine.lower() if machine else None
     out: list[dict[str, Any]] = []
     for d, ws, cwd, events in _iter_sessions():
         base = Path(cwd).name.lower()
         if not (_worktree_suffix(cwd) == suffix or base.endswith("-" + suffix)):
-            continue
-        if machine and not base.startswith(machine):
             continue
         out.append(_session_record(d, ws, cwd, events))
     return _sort_recent(out)
@@ -235,7 +233,7 @@ def _delegate_remote(machine: str, ref: str, passthrough: list[str]) -> int:
     remote = ["ramp-up-session", ref, *passthrough]
     print(f"# Hunting worktree '{ref}' on {machine} via ssh...", file=sys.stderr)
     try:
-        proc = subprocess.run(["ssh", machine, *remote], check=False)
+        proc = subprocess.run(["ssh", machine, *remote], check=False, **no_window_kwargs())
     except FileNotFoundError:
         print("error: ssh not found on PATH (needed to reach another machine)", file=sys.stderr)
         return 1
@@ -419,7 +417,7 @@ def main() -> None:
         default=None,
         help="Machine the worktree lives on. When it names another host, the "
         "hunt is delegated over `ssh <machine>` (session data is local to the "
-        "machine that produced it). Locally, it filters suffix matches by host.",
+        "machine that produced it). Local directory prefixes are not host identity.",
     )
     parser.add_argument(
         "--output-dir",
@@ -458,7 +456,6 @@ def main() -> None:
         sys.exit(_delegate_remote(args.machine, ref, passthrough))
 
     machine = (args.machine or detect_machine()).lower()
-    local_filter = args.machine if (args.machine and _is_local_machine(args.machine)) else None
 
     # ── Resolve the target session(s) locally ──
     sessions: list[dict[str, Any]] = []
@@ -493,7 +490,7 @@ def main() -> None:
         sessions = discover_sessions(worktree_root)
     else:
         # A short worktree suffix -- hunt it down in the local session store.
-        sessions = discover_by_suffix(ref, local_filter)
+        sessions = discover_by_suffix(ref)
         if sessions:
             worktree_root = _normalize_cwd(sessions[0]["cwd"]) or None
 
