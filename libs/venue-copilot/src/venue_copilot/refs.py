@@ -21,6 +21,7 @@ import tarfile
 import time
 import uuid
 import json
+import re
 from dataclasses import dataclass
 from typing import Any, Literal, cast, overload
 from collections.abc import Callable
@@ -34,6 +35,11 @@ _OWNED_REFUSAL_REASONS = frozenset({
     "startup_input", "startup_target", "startup_protocol", "unsupported_protocol",
     "plugins_not_ready",
 })
+#: Bridge readiness diagnostics that mean guest plugins were still loading,
+#: not that the compiled selection was rejected.
+_TRANSIENT_READINESS = re.compile(r"(?<![\w-])(?:readiness-timeout|selected-loadout-pending)(?![\w-])")
+#: Waits before re-observing readiness for the same keyed operation.
+READINESS_RETRY_DELAYS = (15.0, 30.0)
 
 
 class RefFileError(ValueError):
@@ -175,6 +181,7 @@ def deliver_note(
     session_id: str, note: str, *, run: Callable[..., object] = subprocess.run,
     min_daemon_protocol: int | None = None, operation: str | None = None,
     prepared_context: dict[str, Any], admission_unknown: bool = False,
+    sleep: Callable[[float], None] = time.sleep,
 ) -> OwnedDelivery: ...
 
 
@@ -183,6 +190,7 @@ def deliver_note(
     session_id: str, note: str, *, run: Callable[..., object] = subprocess.run,
     min_daemon_protocol: int | None = None, operation: str | None = None,
     prepared_context: None = None, admission_unknown: bool = False,
+    sleep: Callable[[float], None] = time.sleep,
 ) -> bool: ...
 
 
@@ -191,6 +199,7 @@ def deliver_note(
     session_id: str, note: str, *, run: Callable[..., object] = subprocess.run,
     min_daemon_protocol: int | None = None, operation: str | None = None,
     prepared_context: dict[str, Any] | None, admission_unknown: bool = False,
+    sleep: Callable[[float], None] = time.sleep,
 ) -> bool | OwnedDelivery: ...
 
 
@@ -200,6 +209,7 @@ def deliver_note(
     operation: str | None = None,
     prepared_context: dict[str, Any] | None = None,
     admission_unknown: bool = False,
+    sleep: Callable[[float], None] = time.sleep,
 ) -> bool | OwnedDelivery:
     """Tell a running session about references; prepared sends return admission evidence.
 
@@ -219,7 +229,11 @@ def deliver_note(
 
     The raw path retains its Boolean API. The prepared path returns an
     ``OwnedDelivery`` and retries ambiguous transport once with identical input;
-    a bare exit status cannot authorize destructive launch cleanup.
+    a bare exit status cannot authorize destructive launch cleanup. A confirmed
+    ``plugins_not_ready`` refusal whose diagnostic says guest plugins were still
+    loading is re-observed after each ``READINESS_RETRY_DELAYS`` wait with the
+    same key and input; the Bridge admitted nothing for it, and any other
+    refusal is final.
     """
     _bin = "agent-bridge"  # marketplace-isolation: allow legacy-compatibility
     bridge = shutil.which(_bin) or _bin
@@ -246,7 +260,10 @@ def deliver_note(
         argv += ["--expected-session-id", session_id, "--sender", "venue-startup"]
         fingerprint = hashlib.sha256(stdin.encode()).hexdigest()
         unknown = admission_unknown
-        for _attempt in range(2):
+        readiness_delays = list(READINESS_RETRY_DELAYS)
+        attempts = 2
+        while attempts:
+            attempts -= 1
             try:
                 result = run(argv, input=stdin, capture_output=True, text=True, timeout=150, **options)
                 payload = json.loads(getattr(result, "stdout", "") or "{}")
@@ -274,6 +291,14 @@ def deliver_note(
                 reason = payload.get("reason")
                 if not isinstance(reason, str) or reason not in _OWNED_REFUSAL_REASONS:
                     reason = None
+                error = payload.get("error")
+                if (
+                    reason == "plugins_not_ready" and readiness_delays
+                    and isinstance(error, str) and _TRANSIENT_READINESS.search(error)
+                ):
+                    sleep(readiness_delays.pop(0))
+                    attempts = 2
+                    continue
                 return OwnedDelivery("refused", op, session_id, key, fingerprint, reason=reason)
             unknown = True
         return OwnedDelivery("unknown", op, session_id, key, fingerprint)
