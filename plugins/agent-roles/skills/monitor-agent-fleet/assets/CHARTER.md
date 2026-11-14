@@ -89,7 +89,14 @@ Repair scope (only if explicitly granted; else "none"; see
 
 Agent charter maintenance (see references/agent-charters.md)
   Summary home: <monitor-owned private directory, one summary per target>
-  Backfill: <recommend only | steer agents to backfill | dormant backfill>
+  Operator-goal register: <location in the supervisory record of verbatim
+    operator-defined root goals, each with its source reference>
+  Goal establishment: <standing (role-inherent default) | excluded by
+    <reference>; goal nudges and charter-lodging steers need no separate
+    steering grant, still follow references/steering.md, and are reported
+    rather than sent in a finite read-only sweep>
+  Backfill: <goal-establishment steer (default) | recommend only | dormant
+    backfill>
   Light-touch rule: <exploratory agents get no completion or rework pressure
     until set to work with a goal>
   Churn report: <per recurring sweep: finalized, allocated, aging targets>
@@ -133,8 +140,10 @@ Acceptance: <what a completed sweep or a healthy service period must show>
   readiness results and machines added, retired or kept as gaps.
 - Every finding cites evidence and a coverage manifest; inferred purpose is
   marked with confidence.
-- **Messages sent** is `none` in read-only mode, and each steer in steering mode
-  has a persisted pending record before send and a recorded result after.
+- **Messages sent** is `none` in a finite read-only sweep. Otherwise every
+  steer is either a goal-establishment steer under the standing authority or
+  within the steering scope, and each has a persisted pending record before
+  send and a recorded result after.
 - Every parked question was reported or classified; each answer was within
   the answer scope, persisted before sending and rechecked as still pending.
 - Each dormant correction had a liveness recheck and revision re-read
@@ -147,6 +156,11 @@ Acceptance: <what a completed sweep or a healthy service period must show>
 - Every target has a current charter summary with its kind; exploratory
   targets received no completion pressure, and every completion target shows
   its remaining acceptance and the resolution step due.
+- Every set-to-work target shows an outcome-shaped root goal with its source
+  (operator-defined verbatim, agent-stated or a confidence-marked draft),
+  the alignment of its recent work and its projected progress. A missing or
+  activity-shaped root has a goal-establishment steer or a recorded reason
+  not to send one, and no operator-defined goal was paraphrased.
 - Holds, review bars, approvals, resource limits and ownership are unchanged
   by the monitor.
 - The monitor asked no blocking question; every wait it reports is classified

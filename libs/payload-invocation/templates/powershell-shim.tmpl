@@ -17,6 +17,7 @@ $_mintedPythonCache = $_pythonCache
 function Select-PythonCache([string]$Python) {
     $selector = @'
 import json, os, sys
+prefix: str | None
 try:
     from agent_procutil.python_cache import cache_arguments
     prefix = cache_arguments(sys.argv[1], runtime=sys.executable)[1].split('=', 1)[1]

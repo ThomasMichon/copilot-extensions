@@ -2,14 +2,17 @@
 
 Back to [Monitor agent fleet](../SKILL.md).
 
-Use this only under the charter's explicit steering scope. Without it, report
-the proposed steer and **messages sent: none**.
+Use this under the charter's explicit steering scope, or for a
+goal-establishment steer (goal nudge or charter lodging) under the role's
+[standing goal-establishment authority](agent-charters.md#standing-goal-establishment-authority).
+Without either, report the proposed steer and **messages sent: none**.
 
 ## Before sending
 
 1. **Scope.** Confirm the recipient and purpose are inside the recorded
-   steering scope and its validity; reconcile any later hold, narrowing or
-   revocation. An all-work hold still means hold.
+   steering scope and its validity, or that the purpose is a
+   goal-establishment steer the charter does not exclude; reconcile any later
+   hold, narrowing or revocation. An all-work hold still means hold.
 2. **Current head.** Resolve the target workspace's current head session
    through its existing owner. A stale, ambiguous or changed head requires
    reconciliation; never fall back to a machine default, an alternate session

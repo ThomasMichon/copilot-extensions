@@ -338,3 +338,92 @@ def test_bootstrap_custody_is_candidate_local(tmp_path: Path) -> None:
     path.write_bytes(path.read_bytes() + b"\n# drift\n")
     with pytest.raises((SourceViewError, typecheck.TypecheckError)):
         owner.verify()
+
+
+def _selector_fixture(root: Path) -> tuple[str, ...]:
+    paths = _fixture(root)
+    for relative in (bootstrap.SELECTOR_HELPER, bootstrap.SELECTOR_PACKAGE):
+        target = root / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes((typecheck.ROOT / relative).read_bytes())
+    return (*paths, bootstrap.SELECTOR_HELPER, bootstrap.SELECTOR_PACKAGE)
+
+
+@pytest.mark.parametrize("index", [0, 1])
+def test_shim_selector_preserves_actual_argument_bytes_and_mapping(tmp_path: Path, index: int) -> None:
+    paths = _selector_fixture(tmp_path)
+    factory = (bootstrap.powershell_selector_view, bootstrap.posix_selector_view)[index]
+    owner = typecheck._SourceViews(tmp_path, tmp_path / "stage")
+    view = owner.add(factory, paths, bootstrap.SELECTOR_INPUTS, "selector.py")
+    template = (tmp_path / bootstrap.SELECTOR_TEMPLATES[index]).read_text(encoding="utf-8")
+    body = (
+        template.split("    $selector = @'\n", 1)[1].split("\n'@", 1)[0]
+        if index == 0 else
+        template.split(' -c \'', 1)[1].split('\' "$_selector_root"', 1)[0]
+    )
+    assert view.content == body.encode("utf-8")
+    if index == 1:
+        assert view.content.startswith(b"\n") and view.content.endswith(b"\n")
+    number = next(n for n, line in enumerate(body.splitlines(), 1) if "sys.pycache_prefix" in line)
+    physical = next(n for n, line in enumerate(template.splitlines(), 1) if "sys.pycache_prefix" in line)
+    assert owner.diagnostics(f"{view.output}:{number}: error: assignment [assignment]\n") == (
+        f"{bootstrap.SELECTOR_TEMPLATES[index]}:{physical}: error: assignment [assignment]\n"
+    )
+    owner.cleanup()
+
+
+@pytest.mark.parametrize("index", [0, 1])
+@pytest.mark.parametrize("change", [
+    "launch", "quote", "helper-call", "token", "duplicate", "directive", "embedded-terminator",
+])
+def test_shim_selector_rejects_changed_transport_or_helper(
+    tmp_path: Path, index: int, change: str,
+) -> None:
+    paths = _selector_fixture(tmp_path)
+    path = tmp_path / bootstrap.SELECTOR_TEMPLATES[index]
+    original = path.read_text(encoding="utf-8")
+    if change == "launch":
+        changed = original.replace("-I -B -X", "-B -X", 1)
+    elif change == "quote":
+        changed = original.replace("$selector = @'", '$selector = @"', 1) if index == 0 else (
+            original.replace(' -c \'', ' -c "', 1)
+        )
+    elif change == "helper-call":
+        changed = original.replace("runtime=sys.executable", "runtime=sys.prefix", 1)
+    elif change == "token":
+        changed = original.replace("try:\n", "# @@PLUGIN@@\ntry:\n", 1)
+    elif change == "duplicate":
+        changed = original + "\n" + original
+    elif change == "embedded-terminator":
+        changed = original.replace("try:\n", "probe = \"\"\"\n'@\n\"\"\"\ntry:\n", 1)
+    else:
+        changed = original.replace("try:\n", "# type: ignore\ntry:\n", 1)
+    assert changed != original
+    path.write_text(changed, encoding="utf-8")
+    factory = (bootstrap.powershell_selector_view, bootstrap.posix_selector_view)[index]
+    with pytest.raises(SourceViewError):
+        factory(tmp_path, paths, tmp_path / "stage/selector.py")
+
+
+@pytest.mark.parametrize("change", ["helper", "output", "member"])
+def test_shim_selector_custody_does_not_follow_host_drift(tmp_path: Path, change: str) -> None:
+    paths = _selector_fixture(tmp_path / "candidate")
+    _selector_fixture(tmp_path / "host")
+    owner = typecheck._SourceViews(tmp_path / "candidate", tmp_path / "stage")
+    view = owner.add(
+        bootstrap.powershell_selector_view, paths, bootstrap.SELECTOR_INPUTS, "selector.py",
+    )
+    host = tmp_path / "host" / bootstrap.SELECTOR_HELPER
+    host.write_bytes(host.read_bytes() + b"\n# unrelated host\n")
+    owner.verify()
+    if change == "member":
+        changed = tmp_path / "candidate" / catalog.PREFIX / "unreviewed.py"
+        changed.write_text("pass\n", encoding="utf-8")
+    else:
+        changed = (
+            tmp_path / "candidate" / bootstrap.SELECTOR_HELPER if change == "helper"
+            else view.output
+        )
+        changed.write_bytes(changed.read_bytes() + b"\n# candidate drift\n")
+    with pytest.raises((SourceViewError, typecheck.TypecheckError)):
+        owner.verify()
