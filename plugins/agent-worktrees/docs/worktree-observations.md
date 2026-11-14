@@ -66,6 +66,18 @@ heartbeat therefore does not create an event or advance the history cursor.
 `observed_at` describes the accepted roster observation; it is not the canonical
 record's commit time, proof of activity or a rigid freshness deadline.
 
+Selected facts also omit machine/environment naming snapshots. The selected
+record's observation incarnation uses project, exact worktree ID and its required
+creation nonce, not reporter names. Renaming or withdrawing row names therefore
+does not replace that incarnation or manufacture an observed change. Elected
+writer, resident generation, head qualification and both selection authority
+checks remain independent.
+
+An upgraded producer may open a new observation source because the former
+identifier included naming. Existing historical observations are not rewritten;
+their cursors remain scoped to their original source. No worktree migration is
+required.
+
 Sampled changes are labelled `observed-change`, with compact integrity
 references instead of duplicated large before/after facts. Claim-count
 differences do not manufacture `claim-added`, effort binding or disposition

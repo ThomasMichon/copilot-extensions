@@ -1,0 +1,9 @@
+{
+  "comment": "Keep selected observation facts and record incarnations independent of reporter naming while retaining nonce and source authority fences.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
