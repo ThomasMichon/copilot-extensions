@@ -147,8 +147,9 @@ merged plan does not establish running adoption.
       Distinguish original allocation from later assignment or reuse.
       The [original assignment audit](../../../plugins/agent-dispatch/docs/task-obligations.md#original-assignment-cohort)
       retains verified creation and exact pool-assignment facts. Conditional
-      Worktrees creation propagation merged in #12360; Bridge session-state
-      propagation and running qualification remain open.
+      Worktrees creation propagation merged in #12360; Bridge propagation
+      and bounded running observations are recorded below. Same-task
+      reassignment/reuse and production qualification remain open.
       Worktrees provider expansion retains optional original cohort metadata in
       first-save records and replay. Dispatch discovers the selected provider
       before sealing its immutable wire choice.
@@ -164,7 +165,9 @@ merged plan does not establish running adoption.
       Ordinary keyed retries retain their original session request; acquisition
       deliveries retain their own attempt. Conditional CLI acquisition migration
       merged in #12405; managed ordinary keyed migration merged in #12408.
-      Running qualification remains open.
+      The [native owner-state reconciliation](journal/2026/11.14-native-owner-state-acceptance.md)
+      records original-episode, session-exit, decline/cooldown and later-episode
+      joins. Actual later reassignment and retained-allocation reuse stay open.
 - [x] Expose forward and reverse correlation through existing owner APIs.
       Pool identity must identify the actual registration/assignment, not just
       a display name; opaque legacy records remain explicitly unattributed.
@@ -204,7 +207,10 @@ merged plan does not establish running adoption.
       cohorts and the remaining owner/recovery states stay open; this source/native
       credit does not close the aggregate item.
       Request-bound proven-unavailable send refusal and guarded original-wake
-      retry merged in #12544; native unavailable-owner recovery remains open.
+      retry merged in #12544. The native owner-state reconciliation records
+      its bounded unavailable-owner recovery, actual outbound-workdir
+      preservation and competing-process hold refusal; other variants and
+      production qualification remain open.
       Whole-container timing is not isolated admission-latency or concurrent
       running acceptance, and no production activation is implied.
 - [ ] Publish receiver support before enabling new callers; document baseline,
@@ -225,10 +231,13 @@ merged plan does not establish running adoption.
       never-claimed merely because its current owner field is empty.
       The source receiver checks durable assignment/resource history, including
       reset-cleared mutable fields; source controls merged in #12281.
-- [ ] Busy, idle, suspended and temporarily unreachable owners receive
+- [x] Busy, idle, suspended and temporarily unreachable owners receive
       durable closeout in the original conversation without duplicate work.
-      The bounded fresh busy/idle synthetic composition is qualified in #12453;
-      suspended/unreachable owners and production acceptance remain open.
+      The bounded fresh busy/idle composition is qualified in #12453.
+      The [native owner-state reconciliation](journal/2026/11.14-native-owner-state-acceptance.md)
+      adds actual suspended-task and proven-unavailable original-wake recovery.
+      This accepts those isolated synthetic owner-state compositions, not
+      production adoption or the remaining aggregate recovery/lifecycle gates.
 - [ ] Restart, duplicate reports and lost responses preserve a single accepted
       request, steer and closeout outcome; pending effects remain inspectable.
 - [x] A stale report, reopened source, changed task episode, foreign emitter
@@ -243,6 +252,9 @@ merged plan does not establish running adoption.
       qualify production registration adoption or native owner closeout.
 - [ ] Task, pool, emitter, native and workspace joins survive allocation,
       reassignment, session exit and a later task episode without guessed stamps.
+      Original and later-episode birth, stopped/suspended discovery and
+      decline/cooldown retention are qualified in the native reconciliation;
+      actual later reassignment and retained-allocation reuse remain open.
 - [ ] Actual session conclusion and workspace disposition are verified
       separately from task abandonment. Live use and genuine obligations hold.
       The [isolated original-owner composition](journal/2026/11.12-receiver-delivery.md#isolated-original-owner-composition)
@@ -250,8 +262,10 @@ merged plan does not establish running adoption.
       and a synthetic source/ACP actor. Its
       [dirty-work companion](journal/2026/11.12-receiver-delivery.md#isolated-dirty-work-preservation)
       proves actual readiness refusal while the original bound claim, checkout
-      bytes and open native hold survive. Foreign/live-use obligations, other
-      owner states and production qualification remain open.
+      bytes and open native hold survive. The native reconciliation adds a
+      real unsettled outbound-workdir claim and an independently observed
+      competing process hold. Other obligation/session variants and
+      production qualification remain open.
 - [ ] Exercise current/prior receiver compatibility and declared rollback;
       unsupported peers refuse new effects without breaking existing operations.
 
@@ -264,6 +278,8 @@ authority. Add no universal attestation layer or duplicate lifecycle engine.
 
 ## Journal
 
+- [Native owner-state acceptance reconciliation](journal/2026/11.14-native-owner-state-acceptance.md)
+  - bounded suspended/unavailable closeout and preservation evidence; broader gates retained.
 - [Strict recovery retains closeout generation](journal/2026/11.14-recovery-generation.md)
 
 - [November 14 - source fence acceptance reconciliation](journal/2026/11.14-source-fence-acceptance.md)
