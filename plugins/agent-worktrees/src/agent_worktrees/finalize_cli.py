@@ -449,7 +449,7 @@ def cmd_finalize(args: argparse.Namespace) -> int:
                     handoff_to=handoff_to or None,
                     force_open_pr=getattr(args, "force_open_pr", False),
                 )
-        except (ExecutionSpaceError, OSError, ValueError, TimeoutError) as exc:
+        except (ExecutionSpaceError, OSError, ValueError, KeyError, TimeoutError, cfg.yaml.YAMLError) as exc:
             if recovery_owner is None:
                 raise
             message = f"Retired-owner finalization refused: {exc}"

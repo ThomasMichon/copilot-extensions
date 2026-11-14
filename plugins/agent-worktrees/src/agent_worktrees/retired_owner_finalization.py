@@ -89,7 +89,7 @@ def _checked_proof(record: tracking.WorktreeRecord, config: cfg.Config, owner_re
         return _proof(record, config, owner_ref)
     except ExecutionSpaceError:
         raise
-    except (OSError, ValueError, RuntimeError, TypeError, cfg.yaml.YAMLError) as exc:
+    except (OSError, ValueError, KeyError, RuntimeError, TypeError, cfg.yaml.YAMLError) as exc:
         raise ExecutionSpaceError(f"retired-owner receiving proof is unavailable: {exc}") from exc
 
 
@@ -104,7 +104,7 @@ def scope(
     path = cfg.tracking_dir(config.repo_name) / f"{worktree_id}.yaml"
     try:
         record = tracking.load_record(path)
-    except (OSError, ValueError, RuntimeError, TypeError, cfg.yaml.YAMLError) as exc:
+    except (OSError, ValueError, KeyError, RuntimeError, TypeError, cfg.yaml.YAMLError) as exc:
         from .execution_spaces import ExecutionSpaceError
 
         raise ExecutionSpaceError(f"retired-owner child proof is unavailable: {exc}") from exc

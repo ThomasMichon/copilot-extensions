@@ -289,10 +289,25 @@ def test_recovery_checks_actual_parent_binding_probe(
     assert retired.checkout.exists()
 
 
-def test_recovery_malformed_child_is_a_json_refusal(retired: SimpleNamespace) -> None:
-    retired.ledger.write_text("resources: [\n", encoding="utf-8")
+@pytest.mark.parametrize("subject", ["child", "parent"])
+@pytest.mark.parametrize("damage", ["yaml", "list", "branch", "worktree_id"])
+def test_recovery_malformed_record_is_a_json_refusal(
+    retired: SimpleNamespace, subject: str, damage: str,
+) -> None:
+    path, data = (
+        (retired.ledger, retired.data) if subject == "child"
+        else (retired.parent, retired.parent_data)
+    )
+    if damage in {"branch", "worktree_id"}:
+        del data[damage]
+        text = yaml.safe_dump(data)
+    else:
+        text = "resources: [\n" if damage == "yaml" else "- incomplete\n"
+    path.write_text(text, encoding="utf-8")
+    before = retired.ledger.read_bytes(), retired.parent.read_bytes()
     with output.capture_json_output() as captured:
         assert _run(retired) == 1
     response = json.loads(captured.getvalue())
     assert response["error"]
+    assert (retired.ledger.read_bytes(), retired.parent.read_bytes()) == before
     assert retired.checkout.exists()
