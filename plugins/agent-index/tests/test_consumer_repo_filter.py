@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
+import numpy as np
 import pytest
 
 from agent_index.chunking.base import Chunk
 from agent_index.store.content_store import ContentStore
+from agent_index.store.multi_model_store import MultiModelStore
 from agent_index.store.repo_filter import _like_pattern, path_glob_sql
 
 
@@ -68,7 +71,8 @@ def test_path_globs_filter_real_fts_candidates_before_limit(
     pattern: str, selected: str, sibling: str,
 ) -> None:
     monkeypatch.delenv("AGENT_INDEX_STORE_LAYOUT", raising=False)
-    store = ContentStore(tmp_path / "lance")
+    multi = MultiModelStore(tmp_path / "lance")
+    store = multi.content_store
     chunks = [
         Chunk("searchable phrase primary", selected, "text", "text", 1, 1, source="git:repo"),
         Chunk("searchable phrase sibling different", sibling, "text", "text", 1, 1,
@@ -81,6 +85,16 @@ def test_path_globs_filter_real_fts_candidates_before_limit(
             "searchable phrase", source="git:repo", file_path_glob=pattern, limit=limit,
         )
         assert [chunk_id for chunk_id, _score in hits] == [chunks[0].chunk_id]
+    multi.register_model(SimpleNamespace(model_id="test", table_name="vectors_test", dim=2))
+    vectors = np.array([[1.0, 0.0], [0.0, 1.0]], dtype=np.float32)
+    multi.upsert_vectors("test", chunks, vectors)
+    assert multi.fts_available
+    for limit in (1, 10):
+        hits = multi.hybrid_search(
+            "test", vectors[0], "searchable phrase", source="git:repo", repo="repo",
+            file_path_glob=pattern, limit=limit,
+        )
+        assert [hit.chunk_id for hit in hits] == [chunks[0].chunk_id]
 
 
 @pytest.mark.parametrize("prefix", ["", "[]", "[!]", "[a]"])
@@ -96,3 +110,31 @@ def test_unmatched_bracket_globs_use_linear_character_scans(prefix: str) -> None
     predicate = path_glob_sql(pattern)
     assert predicate.startswith("regexp_like(file_path, ")
     assert pattern.reads < 10 * len(pattern)
+
+
+@pytest.mark.parametrize("limit", [1, 10])
+@pytest.mark.parametrize("inside_window", [True, False])
+def test_hybrid_glob_limits_preserve_the_finite_vector_window(
+    tmp_path: Path, limit: int, inside_window: bool,
+) -> None:
+    store = MultiModelStore(tmp_path / "lance")
+    store.register_model(SimpleNamespace(model_id="test", table_name="vectors_test", dim=2))
+    first_match = 50 - limit if inside_window else 50
+    chunks = [
+        Chunk(
+            f"unique document {index}",
+            f"{'selected' if first_match <= index < first_match + limit else 'other'}/{index}.md",
+            "text", "text", 1, 1, source="git:repo",
+        )
+        for index in range(60)
+    ]
+    angles = np.linspace(0.0, 1.0, len(chunks), dtype=np.float32)
+    vectors = np.column_stack((np.cos(angles), np.sin(angles)))
+    store.upsert("test", chunks, vectors)
+    assert not store.fts_available
+    hits = store.hybrid_search(
+        "test", np.array([1.0, 0.0], dtype=np.float32), "absent",
+        file_path_glob="selected/*.md", limit=limit,
+    )
+    expected = chunks[first_match:first_match + limit] if inside_window else []
+    assert {hit.chunk_id for hit in hits} == {chunk.chunk_id for chunk in expected}

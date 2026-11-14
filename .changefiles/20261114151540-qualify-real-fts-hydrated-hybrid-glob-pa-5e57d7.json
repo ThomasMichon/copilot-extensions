@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify real FTS/hydrated hybrid glob parity and finite candidate-window limits.",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}
