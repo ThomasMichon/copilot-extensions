@@ -142,6 +142,8 @@ class _Reader:
             self.take(4 if kind == "i" else 8)
         elif kind == "l":
             digits = self.take(abs(self.number()) * 2)
+            if len(digits) and digits[-2] == digits[-1] == 0:
+                raise ValueError("bytecode has an unnormalized long")
             for index in range(1, len(digits), 2):
                 if index % 8192 == 1:
                     self.check()

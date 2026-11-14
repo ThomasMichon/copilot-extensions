@@ -21,7 +21,7 @@ from agent_procutil import no_window_kwargs
 from agent_procutil import python_cache as policy
 from agent_procutil import python_cache_legacy as legacy
 from agent_procutil import python_cache_store as store
-from python_cache_pyc_fixtures import BYTECODE, FILENAME
+from python_cache_pyc_fixtures import BYTECODE, FILENAME, code_record, native_format
 
 
 @pytest.fixture
@@ -42,9 +42,14 @@ def compiled(root, slot="1.0", relative="module.py", *, number=1, filename=None,
     source = root / "versions" / slot / relative
     directory = namespace.joinpath(*legacy._mirror_parts(source.parent))
     directory.mkdir(parents=True, exist_ok=True)
-    path = directory / (source.stem + "." + str(sys.implementation.cache_tag) + ".pyc")
-    data = importlib.util.MAGIC_NUMBER + b"\0" * 12 + marshal.dumps(
-        compile("def nested(): return 42\n", filename or str(source), "exec"),
+    version = native_format()
+    tag = str(sys.implementation.cache_tag) if version else "cpython-313"
+    path = directory / (source.stem + "." + tag + ".pyc")
+    data = (
+        importlib.util.MAGIC_NUMBER + b"\0" * 12 + marshal.dumps(
+            compile("def nested(): return 42\n", filename or str(source), "exec"),
+        )
+        if version else code_record(filename=filename or str(source))
     )
     path.write_bytes(data)
     return path
@@ -472,8 +477,7 @@ def test_default_budget_reclaims_material_fixture_bytes_with_finite_progress(loc
     for number in range(4):
         path = compiled(root, number=number)
         source = root / "versions" / "1.0" / "module.py"
-        code = compile("payload = " + repr("x" * (1024 * 1024)), str(source), "exec")
-        path.write_bytes(importlib.util.MAGIC_NUMBER + b"\0" * 12 + marshal.dumps(code))
+        path.write_bytes(code_record(filename=str(source), consts=("x" * (1024 * 1024),)))
         paths.append(path)
     expected = sum(path.stat().st_size for path in paths)
     reports = []
@@ -636,6 +640,22 @@ def test_known_header_cannot_claim_a_different_interpreter_cache_tag(local):
     assert candidate.is_file() and report.files == 0 and report.reasons
 
 
+def test_unqualified_native_format_is_retained_while_historical_fixture_still_reclaims(
+    local, monkeypatch,
+):
+    root, _ = local
+    monkeypatch.setattr(importlib.util, "MAGIC_NUMBER", b"nope")
+    qualified = compiled(root)
+    unknown = qualified.with_name("unknown.cpython-399.pyc")
+    unknown.write_bytes(
+        b"nope" + b"\0" * 12
+        + marshal.dumps(compile("answer = 42", str(root / "versions" / "1.0" / "unknown.py"), "exec")),
+    )
+    report = collect(root)
+    assert not qualified.exists() and unknown.is_file() and report.files == 1
+    assert report.reasons["legacy-unsafe-or-unavailable"] == 1
+
+
 def test_relative_runtime_root_is_rejected_without_using_cwd():
     with pytest.raises(ValueError, match="absolute"):
         collect(Path("relative-runtime"))
@@ -785,7 +805,7 @@ def test_native_repeated_upgrade_flow_reclaims_old_leaves_under_a_live_shared_pr
         assert "1.0" in removed and not first.exists()
         for _ in range(4):
             runtime.gc(root, keep=["2.0"])
-        assert not any(path.exists() for path in old_leaves)
+        assert all(path.exists() == (native_format() is None) for path in old_leaves)
         assert live.poll() is None and live_leaves[0].is_file()
         assert all(path.is_dir() for path in legacy_prefixes)
         assert not Path(vectors[0][1].removeprefix("pycache_prefix=")).parent.exists()

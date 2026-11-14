@@ -6,12 +6,11 @@ import base64
 import marshal
 import struct
 import sys
-import types
 
 import pytest
 
 from agent_procutil import python_cache_pyc as pyc
-from python_cache_pyc_fixtures import BYTECODE, FILENAME, code_record
+from python_cache_pyc_fixtures import BYTECODE, FILENAME, code_record, native_format
 
 
 def encoded(code):
@@ -21,27 +20,32 @@ def encoded(code):
 @pytest.mark.parametrize("optimize", [0, 1, 2])
 @pytest.mark.parametrize("name", ["/fixture/versions/old/module.py",
                                   "C:\\fixture\\versions\\old\\module.py", "/fixture/caf\u00e9.py"])
-def test_real_compiled_nested_code_and_referenced_filenames(name, optimize):
+def test_native_compiled_nested_code_is_admitted_only_for_qualified_formats(name, optimize):
     code = compile(
         'class Example:\n def method(self):\n  return lambda: (1, 2.5, 3j, "text", b"bytes")\n',
         name, "exec", optimize=optimize,
     )
-    assert pyc.source(encoded(code)) == name
+    data = encoded(code)
+    if native_format() is None:
+        with pytest.raises(ValueError, match="unsupported"):
+            pyc.source(data)
+    else:
+        assert pyc.source(data) == name
 
 
 def test_nonexecuting_parser_never_calls_marshal_loads(monkeypatch):
-    data = encoded(compile("raise RuntimeError('must not execute')", "/fixture/module.py", "exec"))
+    data = base64.b64decode(BYTECODE["313"])
 
     def forbidden(*args, **kwargs):
         pytest.fail("the bytecode reader must not deserialize or execute code")
 
     monkeypatch.setattr(marshal, "loads", forbidden)
-    assert pyc.source(data) == "/fixture/module.py"
+    assert pyc.source(data) == FILENAME
 
 
 @pytest.mark.parametrize("mutation", ["magic", "flags", "trailing", "truncated", "noncode", "oversize"])
 def test_unknown_or_malformed_bytecode_is_refused(mutation):
-    data = encoded(compile("answer = 42", "/fixture/module.py", "exec"))
+    data = code_record()
     if mutation == "magic":
         data = b"nope" + data[4:]
     elif mutation == "flags":
@@ -51,7 +55,7 @@ def test_unknown_or_malformed_bytecode_is_refused(mutation):
     elif mutation == "truncated":
         data = data[:-1]
     elif mutation == "noncode":
-        data = encoded(("not", "code"))
+        data = data[:16] + marshal.dumps(("not", "code"), 0)
     else:
         data += b"x" * (8 * 1024 * 1024)
     with pytest.raises(ValueError):
@@ -59,7 +63,7 @@ def test_unknown_or_malformed_bytecode_is_refused(mutation):
 
 
 def test_every_truncation_and_invalid_reference_is_refused():
-    data = encoded(compile("def nested(): return 42", "/fixture/module.py", "exec"))
+    data = code_record()
     for end in range(len(data)):
         with pytest.raises((ValueError, UnicodeError)):
             pyc.source(data[:end])
@@ -68,13 +72,10 @@ def test_every_truncation_and_invalid_reference_is_refused():
 
 
 def test_nested_code_cannot_claim_a_different_source():
-    code = compile("def nested(): return 42", "/fixture/old.py", "exec")
-    consts = tuple(
-        item.replace(co_filename="/fixture/retained.py") if isinstance(item, types.CodeType) else item
-        for item in code.co_consts
-    )
+    nested = code_record(filename="/fixture/retained.py")[16:]
+    data = code_record(raw_fields={"consts": b")\x01" + nested})
     with pytest.raises(ValueError, match="ambiguous"):
-        pyc.source(encoded(code.replace(co_consts=consts)))
+        pyc.source(data)
 
 
 @pytest.mark.parametrize("payload", [
@@ -86,11 +87,11 @@ def test_nested_code_cannot_claim_a_different_source():
 ])
 def test_forged_lengths_depth_and_cycles_are_bounded(payload):
     with pytest.raises(ValueError):
-        pyc.source(importlib.util.MAGIC_NUMBER + b"\0" * 12 + payload)
+        pyc.source(code_record()[:16] + payload)
 
 
 def test_parser_checks_deadline_between_values():
-    data = encoded(compile("answer = 42", "/fixture/module.py", "exec"))
+    data = code_record()
     checks = []
 
     def expired():
@@ -139,6 +140,9 @@ def test_required_name_tuples_reject_non_string_members(version, field):
 @pytest.mark.parametrize("payload", [
     b"f\x04nope",
     b"l\x01\0\0\0\0\x80",
+    b"l\x01\0\0\0\0\0",
+    b"l\xff\xff\xff\xff\0\0",
+    b"l\x02\0\0\0\x01\0\0\0",
     b"u" + struct.pack("<i", 20000) + b"\xff" * 20000,
     b">" + struct.pack("<i", 1) + b"[" + struct.pack("<i", 0),
     b"{" + b"[" + struct.pack("<i", 0) + b"N0",
@@ -147,3 +151,8 @@ def test_malformed_scalar_and_container_constants_do_not_supply_provenance(paylo
     constants = b"(" + struct.pack("<i", 1) + payload
     with pytest.raises(ValueError):
         pyc.source(code_record(raw_fields={"consts": constants}))
+
+
+@pytest.mark.parametrize("value", [0, 1, -1, 2**15, -(2**15), 2**100, -(2**100)])
+def test_normalized_integer_constants_remain_admitted(value):
+    assert pyc.source(code_record(consts=(value,))) == FILENAME
