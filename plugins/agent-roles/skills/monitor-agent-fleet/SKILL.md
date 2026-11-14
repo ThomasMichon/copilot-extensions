@@ -86,7 +86,8 @@ supervisory record or current-owner checkpoint. Record the original operator
 source, requested machines/workspaces, exclusions, observation period, report
 home, mode and owner. Default to one **read-only** sweep. "Potentially nudge" or
 "design a watchdog" does not authorize messages now; only a recorded recurring
-assignment may send goal-establishment steers without a steering grant.
+observation or steering assignment may send goal-establishment steers without a
+steering grant.
 
 Recurring observation needs an explicit assignment with cadence, end condition
 and a named owner. Steering needs an explicit recipient scope, permitted message

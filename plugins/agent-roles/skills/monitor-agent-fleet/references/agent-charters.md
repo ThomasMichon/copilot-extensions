@@ -71,10 +71,11 @@ steering grant for them. The authority covers exactly two purposes:
 
 The authority is standing, not unbounded:
 
-- It applies in every mode of a recorded monitor assignment unless the charter
-  or a later operator instruction excludes it. A finite one-shot read-only
-  sweep reports the goal steers it would send and keeps **messages sent:
-  none**.
+- It applies only to a recorded recurring observation or steering assignment,
+  unless the charter or a later operator instruction excludes it. A finite
+  one-shot read-only sweep, dormant correction and repair modes send no goal
+  steers unless a steering grant already covers them; each reports the goal
+  steers it would send and keeps **messages sent: none**.
 - Every goal steer still follows the [steering protocol](steering.md): current
   head, recheck holds and exclusions, deduplicate (one outstanding goal steer
   per target), persist before sending and the peer-engagement rules. An
