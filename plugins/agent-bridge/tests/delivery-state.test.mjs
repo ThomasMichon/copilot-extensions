@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { DeliveryAttention, publishDeliveryAttention } from "../extensions/agent-bridge/delivery-state.mjs";
+import { DeliveryAttention, publishDeliveryAttention } from "../../../libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/delivery-state.mjs";
 
 const event = (type, requestId, extra = {}) => ({ type, data: { requestId }, ...extra });
 const identity = { pid: 123, process_started_at: 100 };

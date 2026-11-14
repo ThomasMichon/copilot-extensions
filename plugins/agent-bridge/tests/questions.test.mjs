@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { PendingQuestions, pollQuestions } from "../extensions/agent-bridge/questions.mjs";
+import { PendingQuestions, pollQuestions } from "../../../libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/questions.mjs";
 
 function fixture(family = "elicitation", extra = {}) {
   const questions = new PendingQuestions();

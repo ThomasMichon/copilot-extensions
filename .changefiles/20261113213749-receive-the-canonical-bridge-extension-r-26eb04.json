@@ -1,0 +1,17 @@
+{
+  "comment": "Receive the canonical Bridge extension resources in the shared Copilot Driver Core distribution.",
+  "changes": [
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

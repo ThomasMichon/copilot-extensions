@@ -17,6 +17,15 @@ import test_runtime_serving as serving_controls
 import test_live_inbox_runtime as inbox_controls
 import test_native_send_admission as native_controls
 import test_gc as gc_controls
+from test_receiving_bundle import (
+    test_actual_sdk_facade_loads_the_core_without_suite_services
+    as test_actual_sdk_facade_loads_the_core_without_suite_services,
+)
+from test_plugin_readiness_extension import (
+    test_core_extension_helper_contracts as test_core_extension_helper_contracts,
+    test_readiness_and_existing_delivery_node_contracts
+    as test_readiness_and_existing_delivery_node_contracts,
+)
 from test_native_send_unavailable import (
     test_real_cli_reports_unavailable_before_constructing_native_admission
     as test_real_cli_reports_unavailable_before_constructing_native_admission,

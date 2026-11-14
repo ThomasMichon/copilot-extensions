@@ -63,6 +63,8 @@ export function createRetainedInbox({
   log = () => {}, now = Date.now, incarnation = randomUUID, nativeTimeoutMs = 10_000,
   sourceAllowed,
   portableLaunch,
+  onPending = () => {},
+  onConsumed = () => {},
 }) {
   let busy = false;
   let stopped = false;
@@ -177,6 +179,7 @@ export function createRetainedInbox({
     }
     const receipts = response.messages;
     const attempts = receipts.filter((row) => row.handoff_started_at !== null && row.stage !== "consumed");
+    onPending(sid, attempts.map((row) => ({ id: row.message_id })));
     let events = [];
     // A page skipped during cooldown has not been reconciled. Advancing it
     // would phase-lock history reads to the first page of a persistent backlog.
@@ -191,6 +194,7 @@ export function createRetainedInbox({
     for (const receipt of receipts) {
       if (receipt.stage === "consumed") continue;
       if (events.some((event) => retainedConsumption(event, receipt, sourceAllowed))) {
+        onConsumed(sid, receipt.message_id);
         await report(receipt, "consumed");
       } else if (receipt.stage !== "offered" || !sameConsumer(receipt.consumer, context.consumer)) {
         held = true;
@@ -287,6 +291,7 @@ export function createRetainedInbox({
       note(`original handoff ${msg.id}/${msg.handoff_id} remains ${msg.handoff_stage}; no resend`);
       return;
     }
+    onPending(sid, [msg]);
     const receipt = {
       session_id: sid, message_id: msg.id, handoff_id: msg.handoff_id, consumer: context.consumer,
     };
