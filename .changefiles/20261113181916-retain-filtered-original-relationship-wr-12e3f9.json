@@ -1,0 +1,9 @@
+{
+  "comment": "Retain filtered original relationship-writer causes without changing unknown-effect custody",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}
