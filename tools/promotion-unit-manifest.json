@@ -5927,7 +5927,7 @@
         "plugins/agent-dispatch/src/agent_dispatch/coordinator_cli.py": "239a70e659bf25f34a7d31f905f5973b944ed41ec99aec94059a28a22072ff9b",
         "plugins/agent-dispatch/src/agent_dispatch/assignment_relationship_owner.py": "32cf4ea9ba9b8ec8ab0a065252bf3811ccb56bbdb8a2a73c654ca6d8bad496f4",
         "plugins/agent-dispatch/src/agent_dispatch/assignment_workspace.py": "9e1f96ca9bfaa8a3bbcdfe4dfcad33e86dcbe0051eb24779ddb9650df125e524",
-        "plugins/agent-dispatch/src/agent_dispatch/queue_task_relationships.py": "34767e59ae5bef190b69b6f13f59e8741440e60b6dc72dc620c8f274915f8dc6",
+        "plugins/agent-dispatch/src/agent_dispatch/queue_task_relationships.py": "62be37af06321bbd47077645d4ee0e3f3ea175ae0a4ed6fbdd083f5bf00b03af",
         "plugins/agent-dispatch/src/agent_dispatch/task_relationships.py": "8e0643ceac1313c70aef03a66704b9109b89662493ce69d3f7d4bec260a21303",
         "plugins/agent-dispatch/src/agent_dispatch/worktree_owner_launch.py": "ae30f2fba563d9b42a894243a497a41838246af681c098bc7fcc71e750e90f90",
         "plugins/agent-dispatch/src/agent_dispatch/ordinary_writer_admission.py": "b56178c15e073076dc228b3df113bf018699d0a205575cccb0b5faf81377bf58",
