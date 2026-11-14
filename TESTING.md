@@ -4012,8 +4012,12 @@ entrypoint with no repository library tree, including actual POSIX runtime
 deletion and preservation of configuration, unknown state and the lock inode.
 `tools/test_legacy_transaction_interop.py` verifies Machines/Containers
 publisher and removal admission against opposite native/Python lock backends,
-retained legacy receipts and release on failure/EOF. Its real Linux kernel
-controls also run under actual Bash 3.2 when that shell is selected on PATH.
+retained legacy receipts and release on failure/EOF. Its real Linux/macOS kernel
+controls include CodeSpaces native/Python contention and descriptor identity
+under both the PATH-selected Bash and `/bin/bash`, plus rejection of regular-file
+and symlink substitution after acquisition. Run it explicitly with
+`python -m pytest tools/test_legacy_transaction_interop.py`; it does not enlarge
+the required unit-only packet.
 The Windows `tests/native_uninstall/test_windows_uninstall_candidates.py`
 packet covers actual broken-PE launches, later candidates, physical/base
 closure, actual finite invokers and retained state on PowerShell 5/7.

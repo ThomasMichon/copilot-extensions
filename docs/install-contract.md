@@ -2883,6 +2883,13 @@ provisioning. Historical `.install.lock.pid` and `.install.lock.pid.reap`
 receipts refuse unchanged until explicitly settled; their presence does not
 authorize stale-owner deletion.
 
+On macOS, Machines, Containers and the CodeSpaces native-flock path compare
+the persistent pathname's device/inode with native BSD `stat` on the inherited
+descriptor (no pathname argument, hence `fstat` on stdin). Comparing against
+`/dev/fd/<n>` with Bash `-ef` instead observes the descriptor filesystem's device
+number and falsely refuses a valid lock. This does not change kernel exclusion,
+allow links or replacement inodes, or require provisioning an interpreter.
+
 The PID-bearing fallback entry `<install-dir>/.install.lock.pid` remains for
 other adopters without `flock`. In the matching
 agent-vault, agent-mcp and agent-ssh fallback blocks, every

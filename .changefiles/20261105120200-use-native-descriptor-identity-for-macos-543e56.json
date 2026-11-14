@@ -1,0 +1,17 @@
+{
+  "comment": "Use native descriptor identity for macOS installer transaction locks",
+  "changes": [
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    }
+  ]
+}
