@@ -198,14 +198,14 @@ def test_supplier_worker_allocates_paired_harness_through_owner_boundary(supplie
 
 
 def test_supplier_headless_worker_requests_harness_not_task_lane(supplier, monkeypatch, tmp_path):
-    from agent_dispatch import bridge_agent_registry, ordinary_bridge
+    from agent_dispatch import bridge_agent_registry, ordinary_bridge, hosting_policy
     from agent_dispatch.spawn_factories import make_headless_spawn
     from agent_dispatch.supervisor import Supervisor
     from tests._helpers import RepoDefaultingQueue
     from tests.test_repository_issue_loops import _config
     from tests.test_supervisor import QueueBackedClient
 
-    _, _, discover = supplier
+    roots, _, discover = supplier
     _, workers = discover(_config(
         execution_repo="control-harness",
         pool={"body": {"type": "headless", "agent": "control-harness"}},
@@ -213,6 +213,9 @@ def test_supplier_headless_worker_requests_harness_not_task_lane(supplier, monke
     monkeypatch.setattr(bridge_agent_registry, "_resolve_agent_record",
                         lambda *a, **k: {"project": "control-harness"})
     monkeypatch.setattr(ordinary_bridge, "agent_bridge_launch_prefix", lambda: ["fixture-bridge"])
+    monkeypatch.setattr(
+        hosting_policy, "agent_worktrees_launch_prefix", lambda: ["fixture-worktrees"],
+    )
     queue = RepoDefaultingQueue(tmp_path / "queue.db")
 
     class Client(QueueBackedClient):
@@ -223,8 +226,17 @@ def test_supplier_headless_worker_requests_harness_not_task_lane(supplier, monke
             return asdict(ordinary_bridge.record_created_agent(queue, key, **facts))
 
     calls = []
+    policy_calls = []
 
     def run(argv, **kwargs):
+        if argv[0] == "fixture-worktrees":
+            policy_calls.append(argv)
+            assert argv[1:] == [
+                "repos", "find", "control-harness", "--registered-only", "--json",
+            ]
+            return subprocess.CompletedProcess(
+                argv, 0, json.dumps({"path": str(roots["control-harness"])}), "",
+            )
         calls.append(argv)
         assert "--no-pair" not in argv
         if argv[2] == "create":
@@ -260,6 +272,7 @@ def test_supplier_headless_worker_requests_harness_not_task_lane(supplier, monke
     assert ok, result
     assert result["worktree"] == "worker-space"
     assert len(calls) == 2
+    assert len(policy_calls) == 1
 
 
 @pytest.mark.parametrize("repo_class", ["knowledge", "reference"])
