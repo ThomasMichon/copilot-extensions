@@ -3164,6 +3164,16 @@ sources, transferring owners or turning partial/planning gains into completion.
   receiving objective or a retained gap; investigate actual implementation
   evidence when claiming completion, rather than making that the prerequisite
   for discovering thematic alignment.
+  The [fixture/startup/hook intake](journal/2026/11.13-fixture-startup-and-hook-receiving.md)
+  proposes three complete finite direct unions under existing Active homes,
+  with 32 unchecked Plan/local/actual-global Validation rows and unchanged
+  first gates/custodians. Ten other source outcomes retain their distinct
+  canonical, physical-OPEN, held-source or actual owner/resource conditions.
+  The complete #7433 receiver excludes resolver/recording-fixture intake;
+  its older three-lane suggestion is not accepted receiving. Newly qualified
+  #12542 remains an independent unfinished request. No source effect follows;
+  the complete 04:26:41 UTC census is 854 whole open, 125 above fixed 729,
+  after one excluded metadata-only arrival and no departure.
   The [canonical-lifecycle/source-boundary study](journal/2026/11.13-canonical-lifecycle-and-source-boundaries.md)
   retains six further complete sources and forty clauses after seven complete
   permitted documentary reads. No amendment or source effect is proposed.
