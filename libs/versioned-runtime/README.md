@@ -118,7 +118,8 @@ Relative digest labels and paths reported to file observers retain their logical
 spelling; staging depth and the extended-length prefix do not change the digest.
 Extended UNC namespace prefixes are recognized case-insensitively without
 changing server, share or filename spelling, so network inputs cannot become
-current-directory-relative aliases.
+current-directory-relative aliases. POSIX symlink targets retain literal
+Windows-looking backslashes and prefixes.
 Directory roots ending in `..` are normalized after their parent is resolved,
 so equivalent paths and relocated trees retain their fingerprint without
 duplicating files declared under both spellings.

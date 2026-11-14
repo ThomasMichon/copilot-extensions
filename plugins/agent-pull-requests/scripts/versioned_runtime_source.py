@@ -992,7 +992,7 @@ def fingerprint_source(
 
     return fingerprint_entries(
         entries, label=_label, root_label=_root_label, roots=roots,
-        normalize_link=_normalize_windows_extended_path, path_type=Path,
-        io_path=_native_path,
+        normalize_link=_normalize_windows_extended_path if os.name == "nt" else str,
+        path_type=Path, io_path=_native_path,
         file_hashes=file_hashes, on_file=on_file, on_progress=on_progress,
     )

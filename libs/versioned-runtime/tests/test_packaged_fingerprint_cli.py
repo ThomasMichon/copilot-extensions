@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import posixpath
 import shutil
 import subprocess
 import sys
@@ -192,6 +193,47 @@ def test_fingerprint_preserves_declared_input_outside_windows(
     assert fingerprint() == expected
     declared.write_bytes(b"changed declared input\n")
     assert fingerprint() != expected
+
+
+def test_fingerprint_preserves_posix_link_target_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    declared = tmp_path / "link"
+    declared.write_bytes(b"boundary fixture\n")
+    target = [r"\\?\unc\server\share"]
+    source = runtime._runtime_component("versioned_runtime_source")
+    monkeypatch.setattr(source, "os", SimpleNamespace(
+        name="posix", fspath=os.fspath, path=posixpath, readlink=lambda _path: target[0],
+    ))
+    original = source.fingerprint_entries
+
+    def symlink_entries(entries, **kwargs):
+        return original(dict.fromkeys(entries, "symlink"), **kwargs)
+
+    monkeypatch.setattr(source, "fingerprint_entries", symlink_entries)
+    before = runtime.fingerprint_source([declared])
+    target[0] = r"\\server\share"
+    assert runtime.fingerprint_source([declared]) != before
+
+
+@pytest.mark.skipif(os.name == "nt", reason="literal backslashes are POSIX filename bytes")
+def test_fingerprint_cli_preserves_literal_posix_link_targets(
+    primitive: Path, tmp_path: Path,
+) -> None:
+    root = tmp_path / "source"
+    root.mkdir()
+    targets = [r"\\?\unc\server\share", r"\\server\share"]
+    for index, name in enumerate(targets):
+        (root / name).write_bytes(str(index).encode())
+    link = root / "link"
+    link.symlink_to(targets[0])
+    before = invoke(primitive, tmp_path / "runtime", ["fingerprint", str(root)])
+    assert before.returncode == 0, before.stdout + before.stderr
+    link.unlink()
+    link.symlink_to(targets[1])
+    after = invoke(primitive, tmp_path / "runtime", ["fingerprint", str(root)])
+    assert after.returncode == 0, after.stdout + after.stderr
+    assert after.stdout != before.stdout
 
 
 @pytest.mark.skipif(os.name == "nt", reason="literal backslashes are POSIX filename bytes")
