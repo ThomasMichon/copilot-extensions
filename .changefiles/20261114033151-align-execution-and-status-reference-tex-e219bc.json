@@ -1,0 +1,9 @@
+{
+  "comment": "Align execution and status reference text with live-derived worktree identity",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
