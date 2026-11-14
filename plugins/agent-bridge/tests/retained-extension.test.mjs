@@ -7,14 +7,14 @@ import * as delivery from "../../../libs/copilot-driver-core/src/agent_remote_dr
 import * as retained from "../../../libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/retained-delivery.mjs";
 import * as questions from "../../../libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/questions.mjs";
 import * as deliveryState from "../../../libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/delivery-state.mjs";
-import { isRemoteDriverSource } from "../../../libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/remote-driver.mjs";
+import { isRemoteDriverSource, selectedLoadout } from "../../../libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/remote-driver.mjs";
 
 const settle = () => new Promise((resolve) => setImmediate(resolve));
 const source = readFileSync(new URL("../../../libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/extension.mjs", import.meta.url), "utf8");
 
 async function load(selected, version = 50, {
   exact = false, nativeId = "native-a", driver = false, headed = false, headedRefused = false,
-  snapshot, send, muted = false, eventFailure,
+  snapshot, send, muted = false, eventFailure, compatible = true,
 } = {}) {
   const calls = [], sends = [], logs = [], timers = [], handlers = [], driverSends = [], headedSends = [];
   const shutdowns = new Map();
@@ -41,7 +41,9 @@ async function load(selected, version = 50, {
       return { ok: false, status: 503, json: async () => ({}) };
     }
     let result = {};
-    if (route === "/health") result = { protocol_version: version };
+    if (route === "/health") result = {
+      protocol_version: version, capabilities: compatible ? { compatible_native_inbox: 1 } : {},
+    };
     else if (route.includes("/recovery?")) result = { messages: [], next_after: null };
     else if (route.endsWith("/negotiate")) result = {
       contract: "retained-inbox-v1", binding, expected_incarnation: null,
@@ -52,7 +54,7 @@ async function load(selected, version = 50, {
     } else if (route.endsWith("/poll")) result = {
       contract: "retained-inbox-v1", binding, consumer, messages: [{
         id: 1, body: "synthetic message", sender: "peer", kind: "prompt",
-        delivery: "steer", handoff_id: "handoff-a", handoff_stage: "offered",
+        delivery: "steer", handoff_id: "handoff-a", handoff_stage: "offered", consumer,
       }],
     };
     else if (route.endsWith("/begin")) result = { begin: true };
@@ -99,6 +101,7 @@ async function load(selected, version = 50, {
     "./delivery-state.mjs": deliveryState,
     "./remote-driver.mjs": {
       isRemoteDriverSource,
+      selectedLoadout,
       createHeadedDriverSession: async (native, options) => {
         assert.equal(headed, true);
         assert.equal(options.declaration, "synthetic-selected-core");
@@ -379,10 +382,10 @@ test("actual selected extension holds on old protocol instead of silently downgr
   assert.ok(f.logs.some((line) => line.includes("protocol 50")));
 });
 
-test("launch-selected driver cannot fall through to legacy native delivery or controls", async () => {
+test("launch-selected receiving uses the public SDK without invoking private driver authority", async () => {
   const f = await load("0", 50, { driver: true });
-  assert.equal(f.sends.length, 0);
-  assert.equal(f.driverSends.length, 1);
+  assert.equal(f.sends.length, 1);
+  assert.equal(f.driverSends.length, 0);
   assert.equal(f.calls.some((call) => /\/messages|\/controls/.test(call.route)), false);
   const old = await load("0", 49, { driver: true });
   assert.equal(old.sends.length, 0);
@@ -390,25 +393,36 @@ test("launch-selected driver cannot fall through to legacy native delivery or co
   assert.equal(old.calls.some((call) => /\/messages|\/controls|\/enroll/.test(call.route)), false);
 });
 
-test("the actual extension selects launch-bound common delivery ahead of both legacy paths", async () => {
+test("headed receiving preserves one-shot receipts using the public native SDK", async () => {
   for (const driver of [false, true]) {
     const f = await load("0", 50, { headed: true, driver });
-    assert.equal(f.sends.length, 0);
+    assert.equal(f.sends.length, 1);
     assert.equal(f.driverSends.length, 0);
-    assert.equal(f.headedSends.length, 1);
-    assert.match(f.headedSends[0].prompt, /retained-handoff="handoff-a"/);
-    assert.equal(f.headedSends[0].mode, "immediate");
+    assert.equal(f.headedSends.length, 0);
+    assert.match(f.sends[0].prompt, /retained-handoff="handoff-a"/);
+    assert.equal(f.sends[0].mode, "immediate");
+    assert.ok(f.calls.filter((call) => /\/negotiate|\/enroll|\/begin|\/outcome/.test(call.route))
+      .every((call) => call.body.receiving_api === "native-sdk-v1"));
     assert.equal(f.calls.some((call) => /\/messages|\/controls/.test(call.route)), false);
     f.shutdowns.get("SIGTERM")();
-    assert.equal(f.closed(), 1);
+    assert.equal(f.closed(), 0);
   }
 });
 
-test("an unavailable selected headed client never falls through to the SDK or old driver", async () => {
-  await assert.rejects(load("0", 50, { headed: true, headedRefused: true }), /selected headed client unavailable/);
+test("revoked or missing private headed control cannot gate ordinary native delivery", async () => {
+  const f = await load("0", 50, { headed: true, headedRefused: true });
+  assert.equal(f.sends.length, 1);
+  assert.equal(f.headedSends.length, 0);
   const old = await load("0", 49, { headed: true });
   assert.equal(old.sends.length, 0);
   assert.equal(old.driverSends.length, 0);
   assert.equal(old.headedSends.length, 0);
   assert.equal(old.calls.some((call) => /\/messages|\/controls|\/enroll/.test(call.route)), false);
+});
+
+test("new native receiving refuses an old provider before enrollment or begin", async () => {
+  const f = await load("1", 52, { compatible: false, headed: true });
+  assert.equal(f.sends.length, 0);
+  assert.equal(f.calls.some((call) => /\/negotiate|\/enroll|\/begin/.test(call.route)), false);
+  assert.ok(f.logs.some((line) => line.includes("compatible native inbox support required")));
 });

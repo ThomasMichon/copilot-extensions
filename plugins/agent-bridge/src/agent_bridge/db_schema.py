@@ -67,7 +67,10 @@ class _SchemaMixin:
                 if recorded is not None and recorded["version"] >= 28:
                     validate_schema(conn)
                 if recorded is not None and recorded["version"] >= 30:
-                    validate_inbox_schema(conn, exact_native=recorded["version"] >= 40)
+                    validate_inbox_schema(
+                        conn, exact_native=recorded["version"] >= 40,
+                        compatible_messages=recorded["version"] >= 47,
+                    )
                 if recorded is not None and recorded["version"] >= 31:
                     validate_consumer_schema(
                         conn, require_history_indexes=recorded["version"] >= 32,
@@ -807,8 +810,8 @@ class _SchemaMixin:
         if from_version < 30:
             from .inbox_custody import ensure_schema, validate_schema
 
-            ensure_schema(conn, exact_native=False)
-            validate_schema(conn, exact_native=False)
+            ensure_schema(conn, exact_native=False, compatible_messages=False)
+            validate_schema(conn, exact_native=False, compatible_messages=False)
             conn.execute("UPDATE schema_version SET version=?", (30,))
             conn.commit()
             log.info("Schema migrated to version 30: retained inbox handoff storage")
@@ -948,3 +951,14 @@ class _SchemaMixin:
             conn.execute("UPDATE schema_version SET version=?", (46,))
             conn.commit()
             log.info("Schema migrated to version 46: original CLI session assignment")
+
+        if from_version < 47:
+            from .inbox_custody import migrate_compatible_messages
+            from .inbox_consumer_schema import migrate_compatible_receivers
+
+            conn.execute("BEGIN IMMEDIATE")
+            with conn:
+                migrate_compatible_messages(conn)
+                migrate_compatible_receivers(conn)
+                conn.execute("UPDATE schema_version SET version=?", (47,))
+            log.info("Schema migrated to version 47: compatible ordinary message admission")

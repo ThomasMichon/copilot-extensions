@@ -183,6 +183,7 @@
     }
   },
   "expected": {
+    "compatible_native_inbox": 1,
     "live_question_answers": 1,
     "mux_question_answers": 1,
     "dispatch_acp_session_origin": 1,

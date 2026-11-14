@@ -114,20 +114,13 @@ def _incarnation_mismatch(
     row: Any, *, machine: str | None, pid: int | None,
     process_started_at: float | None, aliased: bool, now: float,
 ) -> bool:
-    """Whether a registration's own identity contradicts the canonical row it
-    would update (inside the caller's transaction, after alias resolution).
+    """Keep retired aliases from updating a different live native destination.
 
-    Another process (pid, or a known start time outside the tolerance) never
-    updates a *live* row. Through an alias -- a heartbeat for a renamed id,
-    landing on its successor's row -- another machine doesn't either (a direct
-    re-registration may still move machines, as before). Omitted fields never
-    conflict -- an id-only heartbeat keeps the row's metadata -- and a
-    taken-over row is left to the write's own rejection. A dead row -- ``expired``,
-    or still ``live`` but past its heartbeat lease and not provably running
-    here (the reaper's own rule: a lapsed row whose local pid is alive is
-    ``wedged``, never dead) -- belongs to no running process, so the new
-    incarnation revives it: that is a conversation resumed in a new process
-    (after a restart, or its CodeSpace stopping), which keeps its session id."""
+    An exact native registration can refresh its process observations after an
+    extension reload. They are metadata, not ordinary messaging admission.
+    Alias forwarding retains its machine/process fence; late DELETE requests
+    independently retain their original process checks.
+    """
     if row is None:
         return False
     status = row["status"] or "live"
@@ -141,6 +134,8 @@ def _incarnation_mismatch(
     if (aliased and machine and row["machine"]
             and machine.casefold() != str(row["machine"]).casefold()):
         return True
+    if not aliased:
+        return False
     if pid is not None and row["pid"] is not None and int(pid) != int(row["pid"]):
         return True
     known = row["process_started_at"]

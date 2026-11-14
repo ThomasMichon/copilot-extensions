@@ -93,6 +93,7 @@ async def health(request: Request) -> dict:
             HOST_STATUS_CAPABILITY: 1,
             DISPATCH_ORIGIN_CAPABILITY: 1,
             DISPATCH_CLI_ORIGIN_CAPABILITY: 1,
+            "compatible_native_inbox": 1,
         },
         "drain_contract": {"minimum": DRAIN_CONTRACT_VERSION, "maximum": DRAIN_CONTRACT_VERSION},
         "ssh_carriers": get_default_manager().carrier_diagnostics(),

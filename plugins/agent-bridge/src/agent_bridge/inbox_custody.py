@@ -31,15 +31,17 @@ class InboxConsumer:
 
     session_id: str
     incarnation: str
-    pid: int
-    process_started_at: float
+    pid: int | None = None
+    process_started_at: float | None = None
     portable_launch: str | None = None
 
     def __post_init__(self) -> None:
         nonblank(self.session_id)
         nonblank(self.incarnation)
-        positive(self.pid)
-        observed_time(self.process_started_at)
+        if self.pid is not None:
+            positive(self.pid)
+        if self.process_started_at is not None:
+            observed_time(self.process_started_at)
         if self.portable_launch is not None:
             try:
                 if str(uuid.UUID(self.portable_launch)) != self.portable_launch:
@@ -72,7 +74,9 @@ def decode_handoff(raw: str) -> dict[str, object]:
             raise RuntimeCustodyError("Unsupported inbox handoff")
         nonblank(value["id"])
         positive(value["message_id"])
-        if type(value["consumer"]) is not dict or type(value["admission"]) is not str:
+        if type(value["consumer"]) is not dict or (
+            value["admission"] is not None and type(value["admission"]) is not str
+        ):
             raise RuntimeCustodyError("Unsupported inbox handoff observations")
         InboxConsumer(**value["consumer"])
         return value
@@ -104,8 +108,10 @@ def handoff_stage(row: sqlite3.Row | dict) -> str:
     return "sending" if row["handoff_started_at"] is not None else "offered"
 
 
-def schema_triggers(*, exact_native: bool = True) -> dict[str, tuple[str, str]]:
-    triggers = operation_triggers(("live_messages",))
+def schema_triggers(
+    *, exact_native: bool = True, compatible_messages: bool = True,
+) -> dict[str, tuple[str, str]]:
+    triggers = operation_triggers(("live_messages",), compatible_messages=compatible_messages)
     for operation in ("INSERT", "UPDATE"):
         name = f"live_messages_control_{operation.lower()}_unsupported"
         triggers[name] = (
@@ -164,24 +170,32 @@ def schema_triggers(*, exact_native: bool = True) -> dict[str, tuple[str, str]]:
     return triggers
 
 
-def ensure_schema(conn: sqlite3.Connection, *, exact_native: bool = True) -> None:
+def ensure_schema(
+    conn: sqlite3.Connection, *, exact_native: bool = True, compatible_messages: bool = True,
+) -> None:
     """Prepare additive inbox storage only through the writable migration owner."""
     columns = {row[1] for row in conn.execute("PRAGMA table_info(live_messages)")}
     for name, kind in COLUMNS.items():
         if name not in columns:
             conn.execute(f"ALTER TABLE live_messages ADD COLUMN {name} {kind}")
-    for _table, statement in schema_triggers(exact_native=exact_native).values():
+    for _table, statement in schema_triggers(
+        exact_native=exact_native, compatible_messages=compatible_messages,
+    ).values():
         conn.execute(statement)
 
 
-def validate_schema(conn: sqlite3.Connection, *, exact_native: bool = True) -> None:
+def validate_schema(
+    conn: sqlite3.Connection, *, exact_native: bool = True, compatible_messages: bool = True,
+) -> None:
     """Require exact prepared custody guards without creating or repairing them."""
     columns = {row[1]: row for row in conn.execute("PRAGMA table_info(live_messages)")}
     for name, kind in COLUMNS.items():
         row = columns.get(name)
         if row is None or row[2].upper() != kind or row[3] != 0 or row[5] != 0:
             raise RuntimeCustodyError(f"Inbox custody requires writable preparation: {name}")
-    for name, (table, statement) in schema_triggers(exact_native=exact_native).items():
+    for name, (table, statement) in schema_triggers(
+        exact_native=exact_native, compatible_messages=compatible_messages,
+    ).items():
         row = conn.execute(
             "SELECT type,tbl_name,sql FROM sqlite_master WHERE name=?", (name,),
         ).fetchone()
@@ -198,9 +212,18 @@ def migrate_exact_native_guard(conn: sqlite3.Connection) -> None:
     row = conn.execute("SELECT sql FROM sqlite_master WHERE name=?", (name,)).fetchone()
     current = schema_triggers()[name][1]
     if row is not None and _normalized_schema(row[0]) == _normalized_schema(current):
-        validate_schema(conn)
+        validate_schema(conn, compatible_messages=False)
         return
-    validate_schema(conn, exact_native=False)
+    validate_schema(conn, exact_native=False, compatible_messages=False)
     conn.execute(f"DROP TRIGGER {name}")
     conn.execute(current)
+    validate_schema(conn, compatible_messages=False)
+
+
+def migrate_compatible_messages(conn: sqlite3.Connection) -> None:
+    """Replace only the known admission guard, retaining all original records."""
+    validate_schema(conn, compatible_messages=False)
+    name = "live_messages_runtime_admission"
+    conn.execute(f"DROP TRIGGER {name}")
+    conn.execute(schema_triggers()[name][1])
     validate_schema(conn)

@@ -47,6 +47,10 @@ def deliver_notice(db, subscription_id: str, *, admission=None, refusal: str | N
                 )
                 return None
             message_id, error = _insert(db, request, selected, conn.execute)
+            if message_id is not None:
+                from .compatible_inbox import retain_message
+
+                retain_message(conn, message_id)
         conn.execute(
             "UPDATE bridge_status_subscriptions SET notice_id=?,notice_error=? WHERE id=?",
             (message_id, error, subscription_id),
