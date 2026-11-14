@@ -1,7 +1,8 @@
 # Shared Python bytecode cache
 
-Back to [the canonical effort](README.md). This is a proposed design, not
-implemented behavior or installation authority.
+Back to [the canonical effort](README.md). This records the reviewed design;
+the shared library and CLI documentation describe implemented behavior.
+Neither design nor source delivery grants installation authority.
 
 ## Decisions
 
@@ -244,7 +245,7 @@ No fixture pass authorizes deleting a real cache or installing a candidate.
 
 This closes a regenerable-cache lifecycle gap below the installer vision's
 standing product intent. It realizes
-[authoritative runtime replacement](../../../visions/installer/README.md#authoritative-runtime-replacement)
+[authoritative runtime replacement](../../../../visions/installer/README.md#authoritative-runtime-replacement)
 without expanding the installer into a periodic reaper. Incoming readiness and
 all applicable current selections remain success; outgoing retirement and
 bytecode cleanup remain independent. Preserved sessions, configuration,
