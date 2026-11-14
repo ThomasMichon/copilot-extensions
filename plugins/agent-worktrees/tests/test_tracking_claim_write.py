@@ -11,6 +11,7 @@ live daemon.
 from __future__ import annotations
 
 import json
+from argparse import Namespace
 from pathlib import Path
 
 import pytest
@@ -80,6 +81,47 @@ def test_busy_claim_record_is_a_known_non_mutating_rejection(tmp_path, monkeypat
     })
     assert result["error"] == "frozen"
     assert "no claim mutation" in result["message"]
+
+
+@pytest.mark.parametrize("verb", ["release", "settle"])
+@pytest.mark.parametrize("json_mode", [False, True])
+def test_cli_contended_claim_never_reports_success(record_path, monkeypatch, capfd, verb, json_mode):
+    from agent_worktrees import claims_cli
+
+    ref = "owned-resource"
+    assert tracking_claim_write.apply_claim_add({
+        "worktree_id": "wt-claim", "yaml_path": str(record_path), "kind": "codespace", "ref": ref,
+    })["ok"]
+    before = record_path.read_bytes()
+    config = cfg.load_project_config("example", include_control_plane_related_pr=False)
+    monkeypatch.setattr(cfg, "load_config", lambda *args, **kwargs: config)
+    monkeypatch.setattr(
+        claims_cli, "_dispatch_claim",
+        lambda name, args: getattr(tracking_claim_write, f"apply_{name}")(args),
+    )
+
+    class BusyLock:
+        def __enter__(self):
+            raise TimeoutError("fixture-owned reclamation is in progress")
+
+        def __exit__(self, *args):
+            pytest.fail("unentered lock must not be released")
+
+    monkeypatch.setattr(tracking, "_RecordLock", lambda *_args, **_kwargs: BusyLock())
+    args = Namespace(
+        json=json_mode, release_worktree="wt-claim", claim_owner_ref=None,
+        remove=False, released=False,
+    )
+    assert getattr(claims_cli, f"_claims_{verb}")(args, ref) == 1
+    captured = capfd.readouterr()
+    if json_mode:
+        report = json.loads(captured.out)
+        assert "busy" in report["error"]
+        assert "action" not in report and "disposition" not in report
+    else:
+        assert "busy" in captured.out + captured.err
+        assert "outbound claim" not in captured.out + captured.err
+    assert record_path.read_bytes() == before
 
 
 @pytest.mark.parametrize("verb", ["claim_add", "claim_release", "claim_settle"])
