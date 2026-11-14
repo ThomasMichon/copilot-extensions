@@ -13,6 +13,7 @@ import yaml
 
 from agent_worktrees import claimant, context_cli, execution_spaces, finalize, finalize_cli
 from agent_worktrees import git_ops, retired_owner_finalization as recovery, tracking
+from agent_worktrees import status_monitor_runtime, tracking_write
 from pr_test_helpers import _git
 from test_local_worktree_authority import local_worktree  # noqa: F401
 
@@ -51,7 +52,8 @@ def retired(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> 
     }
     fixture.parent.write_text(yaml.safe_dump(fixture.parent_data), encoding="utf-8")
     fixture.config = fixture.load()
-    monkeypatch.setattr(claimant, "local_claimant_alive", lambda ref: False)
+    fixture.claimant_death_probe = claimant._confirmed_record_death
+    monkeypatch.setattr(claimant, "_confirmed_record_death", lambda record, config: False)
     monkeypatch.setattr(finalize, "_has_live_session", lambda record: False)
     monkeypatch.setattr(finalize.procs, "checkout_retirement_blocker", lambda path: None)
     monkeypatch.setattr(finalize, "_warn_of_codespace_claims_for_worktree", lambda *a: None)
@@ -130,7 +132,7 @@ def test_recovery_refuses_unproven_original_custody_without_writes(
 def test_recovery_keeps_live_and_unknown_parent(
     retired: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, alive: bool | None,
 ) -> None:
-    monkeypatch.setattr(claimant, "local_claimant_alive", lambda ref: alive)
+    monkeypatch.setattr(claimant, "_confirmed_record_death", lambda record, config: alive)
     before = retired.ledger.read_bytes(), retired.parent.read_bytes()
     assert _run(retired) == 1
     assert (retired.ledger.read_bytes(), retired.parent.read_bytes()) == before
@@ -183,3 +185,73 @@ def test_selected_runtime_advertises_its_recovery_parser(retired: SimpleNamespac
         retired.data["owner_ref"], "--dry-run",
     ])
     assert finalize_cli.cmd_finalize(args) == 0
+
+
+def test_recovery_rechecks_absence_when_ordinary_custody_becomes_valid(
+    retired: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_worktrees import retained_checkout
+
+    record = tracking.load_record(retired.ledger)
+    with recovery.scope(record.worktree_id, retired.config, record.owner_ref):
+        Path(retired.parent_data["worktree_path"]).mkdir()
+        monkeypatch.setattr(retained_checkout, "resolve_owner", lambda *a, **k: retired.parent)
+        with pytest.raises(execution_spaces.ExecutionSpaceError):
+            execution_spaces.require_record_mutation(record, retired.config)
+
+
+@pytest.mark.parametrize("after_admission", [False, True])
+@pytest.mark.parametrize("metadata", [{"producer": {"namespace": "unknown"}}, {"future": "opaque"}])
+def test_recovery_rejects_mixed_duplicate_claims(
+    retired: SimpleNamespace, after_admission: bool, metadata: dict,
+) -> None:
+    from contextlib import nullcontext
+
+    record = tracking.load_record(retired.ledger)
+    scope = recovery.scope(record.worktree_id, retired.config, record.owner_ref)
+    with scope if after_admission else nullcontext():
+        retired.parent_data["resources"].append({
+            **retired.parent_data["resources"][0], **metadata, "state": "active",
+        })
+        retired.parent.write_text(yaml.safe_dump(retired.parent_data), encoding="utf-8")
+        if after_admission:
+            with pytest.raises(execution_spaces.ExecutionSpaceError):
+                execution_spaces.require_record_mutation(record, retired.config)
+        else:
+            assert _run(retired) == 1
+        assert retired.checkout.exists()
+
+
+@pytest.mark.parametrize("session_claim", [False, True])
+def test_recovery_keeps_session_settlement_inside_admitted_process(
+    retired: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, session_claim: bool,
+) -> None:
+    monkeypatch.setenv("COPILOT_AGENT_SESSION_ID", "recovery-session")
+    monkeypatch.setattr(status_monitor_runtime, "_status_monitor_enabled", lambda: True)
+    if session_claim:
+        record = tracking.load_record(retired.ledger)
+        retired.data["resources"].append({
+            "kind": "session", "state": "active",
+            "ref": tracking.format_claim_ref(
+                record.execution_machine, record.repo, record.worktree_id,
+                session="recovery-session",
+            ),
+        })
+        retired.ledger.write_text(yaml.safe_dump(retired.data), encoding="utf-8")
+
+    def daemon(*args, **kwargs):
+        pytest.fail("process-local recovery admission must not be sent to a resident daemon")
+
+    monkeypatch.setattr(tracking_write, "dispatch", daemon)
+    assert _run(retired) == 0
+    assert not retired.checkout.exists()
+    if session_claim:
+        assert tracking.load_record(retired.ledger).resources[0].state == "at-rest"
+
+
+def test_recovery_uses_the_qualified_retired_parent_for_inactivity(
+    retired: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(claimant, "_confirmed_record_death", retired.claimant_death_probe)
+    assert claimant.local_claimant_alive(retired.data["owner_ref"]) is None
+    assert _run(retired) == 0

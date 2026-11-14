@@ -1038,24 +1038,30 @@ def _settle_current_session_claim(
     from . import locks as _locks
     from . import status_monitor_runtime as _smr
     from . import tracking_write
+    from . import retired_owner_finalization
     from .execution_spaces import ExecutionSpaceError
 
     try:
-        result = tracking_write.dispatch(
-            "claim_settle",
-            {
-                "worktree_id": record.worktree_id,
-                "yaml_path": str(yaml_path),
-                "ref": current_session_ref,
-                "disposition": obligations.AT_REST,
-                "skip_if_released": True,
-            },
-            read_lock_data=lambda: _locks.read_lock(_smr._monitor_lock_path()),
-            ensure_monitor=(
-                _smr._ensure_status_monitor if _smr._status_monitor_enabled() else None
-            ),
-            min_version=3,
-        )
+        arguments = {
+            "worktree_id": record.worktree_id,
+            "yaml_path": str(yaml_path),
+            "ref": current_session_ref,
+            "disposition": obligations.AT_REST,
+            "skip_if_released": True,
+        }
+        if retired_owner_finalization.selected(record):
+            from .tracking_claim_write import apply_claim_settle
+
+            result = apply_claim_settle(arguments)
+        else:
+            result = tracking_write.dispatch(
+                "claim_settle", arguments,
+                read_lock_data=lambda: _locks.read_lock(_smr._monitor_lock_path()),
+                ensure_monitor=(
+                    _smr._ensure_status_monitor if _smr._status_monitor_enabled() else None
+                ),
+                min_version=3,
+            )
         if result.get("error") == "rejected":
             raise ExecutionSpaceError(result["message"])
         record = tracking.load_record(yaml_path)

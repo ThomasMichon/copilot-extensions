@@ -63,9 +63,10 @@ def _proof(record: tracking.WorktreeRecord, config: cfg.Config, owner_ref: str) 
     if (
         claim is None or claim.state not in {"abandoned", "released", "at-rest"}
         or claim.handoff_bundle
+        or sum(candidate.ref == claim.ref for candidate in parent.resources) != 1
     ):
         raise error("retired-owner recovery requires the unique settled original child claim")
-    if claimant.local_claimant_alive(owner_ref) is not False:
+    if claimant._confirmed_record_death(parent, receiving) is not False:
         raise error("retired-owner recovery requires positively inactive original ownership")
     return _Admission(
         record_machine_identity.subject_fence(record, record.yaml_path), record.creation_nonce, owner_ref,
@@ -103,13 +104,22 @@ def scope(
         _admitted.reset(token)
 
 
-def authorizes(record: tracking.WorktreeRecord, config: cfg.Config) -> bool:
+def selected(record: tracking.WorktreeRecord) -> bool:
     admission = _admitted.get()
-    if admission is None or (
-        record_machine_identity.subject_fence(record, record.yaml_path) != admission.child
-    ):
+    return admission is not None and (
+        os.path.normcase(os.path.abspath(record.yaml_path)) == admission.child[0]
+    )
+
+
+def authorizes(record: tracking.WorktreeRecord, config: cfg.Config) -> bool:
+    if not selected(record):
         return False
-    return _checked_proof(record, config, admission.owner_ref) == admission
+    admission = _admitted.get()
+    if _checked_proof(record, config, admission.owner_ref) != admission:
+        from .execution_spaces import ExecutionSpaceError
+
+        raise ExecutionSpaceError("retired-owner recovery admission changed")
+    return True
 
 
 @contextmanager

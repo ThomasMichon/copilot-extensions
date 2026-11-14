@@ -331,6 +331,9 @@ def require_record_mutation(record: Any, config: Any, *, recover_receiving: bool
 
     if record is None:
         return
+    from . import retired_owner_finalization
+
+    retired_owner_authorized = retired_owner_finalization.authorizes(record, config)
     reporting = getattr(record, "_reporting_context", None) is not None
     if reporting and record._reporting_context.environment != cfg.detect_platform():
         raise ExecutionSpaceError("reporter observations belong to another execution platform")
@@ -390,9 +393,7 @@ def require_record_mutation(record: Any, config: Any, *, recover_receiving: bool
             if owner is None or not owner.is_qualified:
                 raise ExecutionSpaceError("owned record has an unqualified owner reference")
             if not has_receiving_allocation and retained_checkout.resolve_owner(owner, config, child=record) is None:
-                from . import retired_owner_finalization
-
-                if not retired_owner_finalization.authorizes(record, config):
+                if not retired_owner_authorized:
                     raise ExecutionSpaceError(
                         "owned local record requires its original receiving allocation or proven local parent"
                     )
