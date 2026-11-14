@@ -141,9 +141,9 @@ Acceptance: <what a completed sweep or a healthy service period must show>
 - Every finding cites evidence and a coverage manifest; inferred purpose is
   marked with confidence.
 - **Messages sent** is `none` in a finite read-only sweep. Otherwise every
-  message is either a goal-establishment steer under the standing authority or
-  a steer within the steering scope, and each has a persisted pending record
-  before send and a recorded result after.
+  steer is either a goal-establishment steer under the standing authority or
+  within the steering scope, and each has a persisted pending record before
+  send and a recorded result after.
 - Every parked question was reported or classified; each answer was within
   the answer scope, persisted before sending and rechecked as still pending.
 - Each dormant correction had a liveness recheck and revision re-read
