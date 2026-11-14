@@ -85,7 +85,8 @@ Fill [the charter](assets/CHARTER.md) in the existing canonical effort,
 supervisory record or current-owner checkpoint. Record the original operator
 source, requested machines/workspaces, exclusions, observation period, report
 home, mode and owner. Default to one **read-only** sweep. "Potentially nudge" or
-"design a watchdog" does not authorize messages now.
+"design a watchdog" does not authorize messages now; only a recorded recurring
+assignment may send goal-establishment steers without a steering grant.
 
 Recurring observation needs an explicit assignment with cadence, end condition
 and a named owner. Steering needs an explicit recipient scope, permitted message
@@ -278,9 +279,11 @@ until the work itself was measured.
 
 ## 5. Report, or steer within explicit authority
 
-In read-only mode, return recommendations and **messages sent: none**.
-Goal-establishment steers under the standing authority are the one message
-class a recorded monitor assignment sends without a steering grant.
+In a finite read-only sweep, return recommendations and **messages sent:
+none**. A recorded recurring observation also returns recommendations, except
+that it may send goal-establishment steers under the standing authority, the
+one message class it sends without a steering grant; all other steers stay
+recommendations.
 In dormant correction mode, the intervention is an owner-written record
 correction with a pre-write liveness recheck and readback, never a message.
 In repair mode, the intervention is an owner-mediated repair on the lowest
