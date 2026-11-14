@@ -65,6 +65,10 @@ suites to fast PR CI or transfer the promotion writer.
 
 - **Topology:** independent per-slice PRs, serial landing.
 - **Host (owns PRs):** Campaign driver, explicitly appointed by the operator.
+- **Attribution intake:** A7906-P/G and the local P7906/V7906 receiver
+  preserve the existing attribution, #6909/#7900 and promotion owners.
+  Planned receiving neither appoints an implementer nor authorizes a CI
+  rerun, failure injection, probe, renewed attempt or resource operation.
 - **Delegates:** bounded read-only audit evidence may be partitioned by workflow
   family. Implementation ownership must be accepted for one non-overlapping
   slice before editing; no competing implementation is assigned by this plan.
@@ -691,6 +695,19 @@ authorizes critical main-path acceptance or a bounded administrative change.
   or recredited; this receiving amendment is not technical completion or
   claim/resource release.
 
+#### Source-attribution server-failure receiving - #7906
+
+- [ ] **A7906-P:** Retain the four-clause planned source-attribution union in
+  [P7906/V7906](workflow-portfolio-audit.md#source-attribution-server-failure---7906):
+  only association HTTP 500/502/503/504 admits a complete paginated open-Dev
+  census; auth/rate/unclassified/incomplete/duplicate-head/moving-snapshot
+  cases fail closed; existing request budgets and the final stable-snapshot
+  fence remain. Credit #7907 source37/Main-helper delivery only at its actual
+  tier; the trusted affected-current-head failure-path consumer result remains
+  unverified. Preserve existing source-attribution, #6909/#7900 and promotion
+  owners. This is planned tracking receipt, not implementation, CI retry,
+  injected failure, probe, attempt renewal or owner/resource transfer.
+
 ### Phase 5a - Opt-in Maintainer merge and rebase stewardship
 
 _(Agent-recommended implementation of the October 18 operator request;
@@ -881,6 +898,15 @@ regressions, retained-owner seams and the completion gate.
   is added; receiving review/merge/readback is not technical acceptance or
   resource release.
 
+- [ ] **A7906-G:** Resolve A7906-P AND the local P7906/V7906 union at its
+  original attribution-consumer tier, preserving every admitted/refused HTTP
+  class, complete pagination, request bound and final snapshot fence. Keep
+  source/Main delivery separate from the actual trusted affected-current-head
+  result; unperformed qualification remains unchecked. Planned receiving may
+  retain unfinished tracking without claiming technical completion or an
+  operational effect. No generic ACK, all-host, unrelated portfolio or new
+  issue-OPEN condition is added.
+
 ## Proposal
 
 See [design.md](design.md). This is proposed behavior, not an as-is claim.
@@ -892,6 +918,7 @@ credential changes, broad policy weakening or unreviewed releases.
 Historical entries are preserved verbatim in dated files; each links back to
 this contract. New evidence belongs in its date file, not another peer effort.
 
+- [2026-11-14 UTC - Source-attribution receiving](journal/2026/11.14-attribution-receiving.md)
 - [2026-11-14 UTC - Finite fixture receiving](journal/2026/11.14-fixture-receiving.md)
 - [2026-11-09 - Installed Manager lifecycle contract](journal/2026/11.09-installed-manager-lifecycle.md)
 - [2026-10-12](journal/2026/10.12.md)
