@@ -79,7 +79,7 @@ def adopted_repo(tmp_path: Path, monkeypatch, _context_repo_seed):
     )
     monkeypatch.setattr(
         "agent_worktrees.repos.read_registry",
-        lambda: types.SimpleNamespace(repos={}),
+        lambda **_kwargs: types.SimpleNamespace(repos={}),
     )
 
     tdir = tmp_path / "tracking"
@@ -805,7 +805,7 @@ def test_get_repo_dir_is_anchor(adopted_repo, active_myproj, monkeypatch, capsys
 
 
 @pytest.mark.parametrize("record_machine", ["friendly-host", "friendly-host-wsl"])
-def test_get_owner_ref_preserves_tracked_execution_identity(
+def test_get_owner_ref_uses_receiving_execution_identity(
     adopted_repo, monkeypatch, capsys, record_machine,
 ):
     from agent_worktrees import execution_spaces
@@ -819,10 +819,11 @@ def test_get_owner_ref_preserves_tracked_execution_identity(
     before = record_path.read_bytes()
     monkeypatch.chdir(wt_path)
     monkeypatch.setattr(cfg, "_ACTIVE_PROJECT", conf.repo_name)
+    monkeypatch.setattr(cfg.socket, "gethostname", lambda: "receiving-host")
     monkeypatch.setattr(execution_spaces, "require_current_execution_space", lambda config: None)
     assert conf.machine != record_machine
     assert m.cmd_get(types.SimpleNamespace(key="owner-ref")) == 0
-    assert capsys.readouterr().out.strip() == f"{record_machine}/{conf.repo_name}/{wt_id}"
+    assert capsys.readouterr().out.strip() == f"receiving-host/{conf.repo_name}/{wt_id}"
     assert record_path.read_bytes() == before
 
 

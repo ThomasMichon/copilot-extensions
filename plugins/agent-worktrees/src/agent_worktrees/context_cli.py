@@ -21,6 +21,7 @@ from . import git_ops, sessions, state_root as state_root_mod, tracking
 from . import installer as inst
 from . import installation_cli, machine_instructions, pr_config, session_binding_cli, status_updater_cli
 from . import worktree_identity
+from . import context_capabilities
 from .context_get_keys import GET_KEYS as _GET_KEYS, PR_GRAFT_DEPENDENT_KEYS as _PR_GRAFT_DEPENDENT_KEYS
 
 
@@ -353,10 +354,7 @@ def cmd_get(args: argparse.Namespace) -> int:
             session_cwd = None
             _core_helper("_activate_project_for_path", status_updater_cli._activate_project_for_path)(None)
 
-    if key == "checkout-relocation":
-        from .checkout_relocation import capabilities
-
-        print(json.dumps(capabilities()))
+    if context_capabilities.emit(key):
         return 0
     if key == "execution-identity":
         from .execution_identity_read import cmd_get_execution_identity

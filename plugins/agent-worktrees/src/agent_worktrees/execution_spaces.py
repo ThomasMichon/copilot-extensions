@@ -390,9 +390,12 @@ def require_record_mutation(record: Any, config: Any, *, recover_receiving: bool
             if owner is None or not owner.is_qualified:
                 raise ExecutionSpaceError("owned record has an unqualified owner reference")
             if not has_receiving_allocation and retained_checkout.resolve_owner(owner, config, child=record) is None:
-                raise ExecutionSpaceError(
-                    "owned local record requires its original receiving allocation or proven local parent"
-                )
+                from . import retired_owner_finalization
+
+                if not retired_owner_finalization.authorizes(record, config):
+                    raise ExecutionSpaceError(
+                        "owned local record requires its original receiving allocation or proven local parent"
+                    )
         return
     if reporting:
         from .record_reporting import require_receiving_subject

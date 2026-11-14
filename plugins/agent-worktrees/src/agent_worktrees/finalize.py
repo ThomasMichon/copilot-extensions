@@ -1542,8 +1542,9 @@ def validate_and_finalize(
 
     cleanup_records = ExitStack()
     try:
-        from . import worktree_lifecycle
+        from . import retired_owner_finalization, worktree_lifecycle
 
+        cleanup_records.enter_context(retired_owner_finalization.removal_guard(yaml_path))
         cleanup_records.enter_context(worktree_lifecycle.guard(yaml_path))
         # Cleanup -- remove worktree and branch
         if yaml_path.exists():

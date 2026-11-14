@@ -60,6 +60,11 @@ def add_parsers(sub) -> None:
     )
     p.add_argument("--dry-run", action="store_true")
     p.add_argument(
+        "--recover-retired-owner", metavar="OWNER",
+        help="Explicitly recover finalization of a legacy child with an absent archived "
+        "original parent; preserve normal source, ownership and cleanup gates",
+    )
+    p.add_argument(
         "--abandon",
         action="store_true",
         help="Finalize past the obligation gate even when the worktree "
@@ -362,6 +367,7 @@ def cmd_finalize(args: argparse.Namespace) -> int:
         if any(value is None for value in dispatch) or any(getattr(args, name, None) for name in (
             "worktree_id", "worktree_id_flag", "config", "dry_run", "abandon",
             "handoff_to", "force_open_pr", "explain_landing",
+            "recover_retired_owner",
         )):
             return output._json_error(
                 "Dispatch closeout requires task, reservation and native IDs without finalize overrides", 2,
@@ -404,6 +410,9 @@ def cmd_finalize(args: argparse.Namespace) -> int:
             return 1
         worktree_id = worktree_identity._resolve_worktree_id(worktree_id)
         if getattr(args, "explain_landing", False):
+            if getattr(args, "recover_retired_owner", None) is not None:
+                message = "Retired-owner recovery cannot be combined with --explain-landing"
+                return output._json_error(message, 2) if use_json else (output.err(message) or 2)
             return _explain_landing(worktree_id, config, use_json)
         abandon = getattr(args, "abandon", False)
         handoff_to = (getattr(args, "handoff_to", None) or "").strip()
@@ -423,14 +432,28 @@ def cmd_finalize(args: argparse.Namespace) -> int:
                 return output._json_error(msg, 2)
             output.err(msg)
             return 2
-        success = fin.validate_and_finalize(
-            worktree_id,
-            config,
-            dry_run=args.dry_run,
-            abandon=abandon,
-            handoff_to=handoff_to or None,
-            force_open_pr=getattr(args, "force_open_pr", False),
-        )
+        from . import retired_owner_finalization
+        from .execution_spaces import ExecutionSpaceError
+
+        recovery_owner = getattr(args, "recover_retired_owner", None)
+        if recovery_owner is not None and (abandon or getattr(args, "force_open_pr", False)):
+            message = "Retired-owner recovery cannot be combined with finalization overrides"
+            return output._json_error(message, 2) if use_json else (output.err(message) or 2)
+        try:
+            with retired_owner_finalization.scope(worktree_id, config, recovery_owner):
+                success = fin.validate_and_finalize(
+                    worktree_id,
+                    config,
+                    dry_run=args.dry_run,
+                    abandon=abandon,
+                    handoff_to=handoff_to or None,
+                    force_open_pr=getattr(args, "force_open_pr", False),
+                )
+        except (ExecutionSpaceError, OSError, ValueError, TimeoutError) as exc:
+            if recovery_owner is None:
+                raise
+            message = f"Retired-owner finalization refused: {exc}"
+            return output._json_error(message) if use_json else (output.err(message) or 1)
 
         if use_json:
             yaml_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
