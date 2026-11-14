@@ -383,9 +383,14 @@ def _remove_managed_worktree(
         return False, warns
     yaml_path = tracking_path / f"{rec.worktree_id}.yaml"
     from . import launch_seed_state, tracking_write
+    from .retirement_safety import retains_artifact_metadata
     try:
-        removed_state = launch_seed_state.remove(yaml_path, remove_record=True)
-        if removed_state.get("record_removed") is not True:
+        retained = retains_artifact_metadata(rec)
+        removed_state = launch_seed_state.remove(yaml_path, remove_record=not retained)
+        if retained:
+            if not tracking.retire_record(rec, tracking_path):
+                return False, ["retained artifact ledger retirement was not confirmed"]
+        elif removed_state.get("record_removed") is not True:
             return False, ["tracking/launch-seed removal was not confirmed"]
     except (ValueError, OSError, TimeoutError, tracking_write.AmbiguousWriteOutcome, tracking_write.ResidentRecoveryHeld) as exc:
         return False, [f"launch-seed remove failed: {exc}"]

@@ -3180,7 +3180,7 @@ def retire_record(record: WorktreeRecord, tracking_path: Path) -> bool:
     reap pass. Raises ``ValueError`` for unsettled responsibility.
     """
     from . import paired_claims, receiving_allocation
-    from .retirement_safety import delete_retired_pair, require_retirable, retirement_blocker, same_pair
+    from .retirement_safety import delete_retired_pair, require_retirable, retains_artifact_metadata, retirement_blocker, same_pair
 
     path = tracking_path / f"{record.worktree_id}.yaml"
     sibling_path: Path | None = None
@@ -3246,7 +3246,7 @@ def retire_record(record: WorktreeRecord, tracking_path: Path) -> bool:
                     save_record(record, path=path)
                     return True
                 except Exception as exc:
-                    if record.is_paired or record.receiving_allocation_present:
+                    if record.is_paired or record.receiving_allocation_present or retains_artifact_metadata(record):
                         logging.getLogger(__name__).warning("Record retirement deferred; record retained: %s", exc)
                         return False
                     path.unlink(missing_ok=True)
