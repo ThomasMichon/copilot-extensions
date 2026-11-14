@@ -73,6 +73,13 @@ does not replace that incarnation or manufacture an observed change. Elected
 writer, resident generation, head qualification and both selection authority
 checks remain independent.
 
+Native-save publication compares that same project/worktree/creation-nonce
+allocation with the qualified receipt, not naming fields absent from selected
+facts. Its original canonical-path, admitted producer/runtime epochs, elected
+writer and immutable receipt checks remain in force. A reporter rename cannot
+discard an already qualified queued save; a different record incarnation still
+cannot adopt it.
+
 An upgraded producer may open a new observation source because the former
 identifier included naming. Existing historical observations are not rewritten;
 their cursors remain scoped to their original source. No worktree migration is

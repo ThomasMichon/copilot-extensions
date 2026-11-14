@@ -18,6 +18,7 @@ from agent_worktrees import worktrees_feed as feed
 from agent_worktrees import worktrees_feed_client as client
 from agent_worktrees.worktrees_projection_index import ProjectionUnavailable
 from agent_worktrees.worktrees_runtime import WorktreesRuntime
+from agent_worktrees import config as cfg
 
 
 def _test_budget_factor():
@@ -203,7 +204,7 @@ def test_saved_feed_cutover_before_current_keeps_cached_rows_and_reconnect_polic
         assert notice["cursor"] is None
         assert notice["generation"] != receiver.current["projection"]["generation"]
         assert receiver.receive(notice) == [notice]
-        assert receiver.current["worktrees"] == [{"id": "saved"}]
+        assert receiver.current["worktrees"] == [{"id": "saved", "platform": cfg.detect_platform()}]
     finally:
         stream.close()
         owner.shutdown()
@@ -529,11 +530,15 @@ def test_worktrees_feed_barrier_replays_mutation_during_initial_snapshot(owner):
     initial = [next(stream)]
     owner.publish("project", [{"id": "two", "title": "after"}], observed_at=2)
     initial.extend(transaction(stream))
-    assert apply(receiver, initial)["worktrees"] == [{"id": "one", "title": "before"}]
+    assert apply(receiver, initial)["worktrees"] == [
+        {"id": "one", "title": "before", "platform": cfg.detect_platform()},
+    ]
     update = transaction(stream)
     assert update[0]["base_cursor"] == 1 and update[0]["cursor"] == 2
     assert [f["type"] for f in update] == ["update", "worktree", "delete", "order", "commit"]
-    assert apply(receiver, update)["worktrees"] == [{"id": "two", "title": "after"}]
+    assert apply(receiver, update)["worktrees"] == [
+        {"id": "two", "title": "after", "platform": cfg.detect_platform()},
+    ]
     stream.close()
     assert owner.feed.active_count() == 0
 
@@ -547,7 +552,9 @@ def test_worktrees_feed_coalesces_burst_without_queued_row_copies(owner):
     update = transaction(stream)
     assert update[0]["cursor"] == 101
     assert len(update) == 4
-    assert apply(receiver, update)["worktrees"] == [{"id": "one", "title": "99"}]
+    assert apply(receiver, update)["worktrees"] == [
+        {"id": "one", "title": "99", "platform": cfg.detect_platform()},
+    ]
     assert owner.feed._subscribers
     assert all(set(s) == {"project", "closed"} for s in owner.feed._subscribers.values())
     stream.close()
@@ -558,7 +565,9 @@ def test_worktrees_feed_filter_membership_and_deletes_are_committed(owner):
     receiver = client.FeedReceiver(request(status_filter="active"))
     assert apply(receiver, transaction(stream))["worktrees"] == []
     owner.publish("project", [{"id": "one", "status": "active"}], observed_at=2)
-    assert apply(receiver, transaction(stream))["worktrees"] == [{"id": "one", "status": "active"}]
+    assert apply(receiver, transaction(stream))["worktrees"] == [
+        {"id": "one", "status": "active", "platform": cfg.detect_platform()},
+    ]
     owner.publish("project", [{"id": "one", "status": "done"}], observed_at=3)
     assert apply(receiver, transaction(stream))["worktrees"] == []
     stream.close()
@@ -579,7 +588,9 @@ def test_semantic_archive_transition_leaves_default_socket_feed_but_not_explicit
     )
     receiver = client.FeedReceiver(payload)
     try:
-        assert apply(receiver, transaction(frames))["worktrees"] == [row]
+        assert apply(receiver, transaction(frames))["worktrees"] == [
+            {"platform": cfg.detect_platform(), **row},
+        ]
         archived = {**row, "status": "archived"}
         owner.publish("project", [archived], observed_at=3)
         update = transaction(frames)
@@ -588,9 +599,13 @@ def test_semantic_archive_transition_leaves_default_socket_feed_but_not_explicit
         assert result["worktrees"] == []
         assert result["projection"]["selected_count"] == 0
         assert result["projection"]["roster_count"] == 1
-        assert owner.handle(request(worktree_id="retained"))["worktrees"] == [archived]
+        assert owner.handle(request(worktree_id="retained"))["worktrees"] == [
+            {"platform": cfg.detect_platform(), **archived},
+        ]
         owner.publish("project", [row], observed_at=4)
-        assert apply(receiver, transaction(frames))["worktrees"] == [row]
+        assert apply(receiver, transaction(frames))["worktrees"] == [
+            {"platform": cfg.detect_platform(), **row},
+        ]
     finally:
         frames.close()
         owner.close_admission()
@@ -740,7 +755,9 @@ def test_worktrees_feed_real_transport_preserves_reorder_and_front_insertion(own
     stream = client.transport(reader, request())
     receiver = client.FeedReceiver(request())
     try:
-        assert apply(receiver, transaction(stream))["worktrees"] == initial
+        assert apply(receiver, transaction(stream))["worktrees"] == [
+            {"platform": cfg.detect_platform(), **row} for row in initial
+        ]
         for revision, rows in enumerate(
             [list(reversed(initial)), [{"id": "front"}, *initial]], start=3,
         ):

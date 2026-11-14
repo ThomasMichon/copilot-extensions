@@ -56,6 +56,7 @@ class Selection:
     include_missing: bool = True
     worktree_id: str | None = None
     codename: str | None = None
+    empty: bool = False
 
     def __post_init__(self) -> None:
         for name, value, bound in (
@@ -71,6 +72,8 @@ class Selection:
                 raise ProjectionError(f"invalid {name}")
         if type(self.include_missing) is not bool:
             raise ProjectionError("invalid checkout selection")
+        if type(self.empty) is not bool:
+            raise ProjectionError("invalid empty selection")
         if self.worktree_id is not None and (
             self.worktree_id in {".", ".."} or "/" in self.worktree_id or "\\" in self.worktree_id
         ):
@@ -161,6 +164,8 @@ class SelectionIndex:
         self.codenames = _aliases(codenames, short=False)
 
     def select(self, selection: Selection) -> tuple[str, ...]:
+        if selection.empty:
+            return ()
         wid = selection.worktree_id
         if wid is None and selection.codename is not None:
             alias = self.codenames.get(selection.codename)
@@ -222,6 +227,8 @@ def durable_selection(
     conn: sqlite3.Connection, project: str, selection: Selection,
 ) -> tuple[str | None, int]:
     """Return one indexed identity or a full selection and its expected count."""
+    if selection.empty:
+        return None, 0
     wid = selection.worktree_id
     if wid is None and selection.codename is not None:
         alias = _durable_alias(conn, project, _CODENAME_SCOPE, selection.codename)

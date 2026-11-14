@@ -30,6 +30,7 @@ from .worktrees_projection_index import (
 )
 
 SCHEMA_VERSION = 1
+NAMING_FREE_STORAGE_VERSION = 2
 MAX_ROW_BYTES = 64 * 1024
 MAX_TEXT_BYTES = 4096
 MAX_COLLECTION_ITEMS = 128
@@ -190,11 +191,14 @@ class _Publication:
     observations: dict | None = None
     semantic_revisions: dict | None = None
     semantic_rows: dict | None = None
+    wire_platform: str | None = None
 
     def read(self, ids: Iterable[str], *, quality: str, contract_version: int = 1) -> dict:
         rows, facts = [], []
         for wid in ids:
             row = _decode_row(wid, self.rows[wid])
+            if self.wire_platform is not None:
+                row = {"platform": self.wire_platform, **row}
             value = (
                 self.observations[wid] if self.observations is not None
                 else observations.observation(row, self.revision)
@@ -213,6 +217,7 @@ class _Publication:
                 facts.append(copy.deepcopy(value))
             else:
                 row = observations.with_observation(row, value)
+                _encode_row(row)
             rows.append(row)
         result = {
             "worktrees": rows,
@@ -234,8 +239,14 @@ class _Publication:
 class WorktreesProjection:
     """One resident publisher, atomic current roster replacement, no read compute."""
 
-    def __init__(self, db_path: Path, *, generation: str | None = None) -> None:
+    def __init__(
+        self, db_path: Path, *, generation: str | None = None,
+        wire_platform: str | None = None,
+    ) -> None:
         self.db_path = Path(db_path)
+        if wire_platform not in (None, "windows", "wsl", "linux"):
+            raise ProjectionError("invalid reporting process platform")
+        self.wire_platform = wire_platform
         self.generation = generation if generation is not None else uuid.uuid4().hex
         if (
             not isinstance(self.generation, str) or len(self.generation) != 32
@@ -350,8 +361,13 @@ class WorktreesProjection:
                     old_payload is not None and previous.semantic_rows[wid] == semantic_rows[wid]
                 )
                 versions[wid] = previous.semantic_revisions[wid] if same else revision
+                wire_row = (
+                    {"platform": self.wire_platform, **row}
+                    if self.wire_platform is not None else row
+                )
+                _encode_row(wire_row)
                 observations.validate_wire_row({
-                    **observations.semantic_row(row), "semantic_revision": versions[wid],
+                    **observations.semantic_row(wire_row), "semantic_revision": versions[wid],
                 })
                 facts[wid] = observations.observation(
                     row, revision,
@@ -363,7 +379,7 @@ class WorktreesProjection:
                     changed[wid] = payload
             publication = _Publication(
                 self.generation, revision, observed_at, len(encoded), encoded, index, index_key,
-                facts, versions, semantic_rows,
+                facts, versions, semantic_rows, self.wire_platform,
             )
             self.db_path.parent.mkdir(parents=True, exist_ok=True)
             with closing(sqlite3.connect(self.db_path, timeout=1.0)) as conn, conn:
@@ -402,7 +418,8 @@ class WorktreesProjection:
                 )
                 conn.execute(
                     "INSERT OR REPLACE INTO worktrees_projection_head VALUES (?, ?, ?, ?, ?, ?)",
-                    (project, SCHEMA_VERSION, self.generation, revision,
+                    (project, NAMING_FREE_STORAGE_VERSION if self.wire_platform is not None
+                     else SCHEMA_VERSION, self.generation, revision,
                      observed_at, len(encoded)),
                 )
                 if not reuse_index:
@@ -416,15 +433,19 @@ class WorktreesProjection:
         status_filter: str | None = None, platform_filter: str | None = None,
         include_missing: bool = True,
         contract_version: int = 1,
+        empty: bool = False,
+        wire_platform: str | None = None,
     ) -> dict:
         project = _identity(project, name="project")
         selection = Selection(
-            status_filter, platform_filter, include_missing, worktree_id, codename,
+            status_filter, platform_filter, include_missing, worktree_id, codename, empty,
         )
         with self._publication_lock:
             publication = None if self._closed else self._projects.get(project)
         if publication is None or publication.index is None:
             raise ProjectionUnavailable("resident current roster is not published")
+        if wire_platform is not None and wire_platform != publication.wire_platform:
+            raise ProjectionUnavailable("reporting process platform changed")
         return publication.read(
             publication.index.select(selection), quality="current", contract_version=contract_version,
         )
@@ -450,10 +471,14 @@ def read_advisory(
     status_filter: str | None = None, platform_filter: str | None = None,
     include_missing: bool = True,
     contract_version: int = 1,
+    empty: bool = False,
+    wire_platform: str | None = None,
 ) -> dict:
     """Read only independent current slots; never create or recover the store."""
     project = _identity(project, name="project")
-    selection = Selection(status_filter, platform_filter, include_missing, worktree_id, codename)
+    selection = Selection(
+        status_filter, platform_filter, include_missing, worktree_id, codename, empty,
+    )
     try:
         with closing(sqlite3.connect(
             Path(db_path).resolve().as_uri() + "?mode=ro", uri=True, timeout=0.1,
@@ -471,7 +496,8 @@ def read_advisory(
                 raise ProjectionUnavailable("no durable current roster")
             version, generation, revision, observed_at, row_count = head
             if (
-                version != SCHEMA_VERSION or not isinstance(generation, str)
+                version not in (SCHEMA_VERSION, NAMING_FREE_STORAGE_VERSION)
+                or not isinstance(generation, str)
                 or len(generation) != 32
                 or any(c not in "0123456789abcdef" for c in generation)
                 or type(revision) is not int or revision < 1
@@ -546,6 +572,7 @@ def read_advisory(
                 generation, revision, observed_at, row_count, encoded,
                 observations=facts if has_observations else None,
                 semantic_revisions=versions if has_observations else None,
+                wire_platform=wire_platform if version == NAMING_FREE_STORAGE_VERSION else None,
             )
             return publication.read(encoded, quality="advisory", contract_version=contract_version)
     except (sqlite3.Error, OSError) as exc:
