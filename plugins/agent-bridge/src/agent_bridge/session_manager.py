@@ -79,6 +79,11 @@ def _codespace_provider_command() -> list[str] | None:
     return [binstub] if binstub else None
 
 
+# The provider CLI's own launch chain can take several seconds on a loaded
+# host; share the 30-second deadline used by the other finite provider calls.
+RELAY_LAUNCH_ENV_TIMEOUT_SECONDS = 30
+
+
 def _resolve_relay_launch_env(
     codespace_name: str, relay_port: int | None
 ) -> tuple[str, int | None]:
@@ -105,7 +110,7 @@ def _resolve_relay_launch_env(
     if relay_port is not None:
         argv += ["--relay-port", str(relay_port)]
     try:
-        r = run_captured(argv, timeout=15)
+        r = run_captured(argv, timeout=RELAY_LAUNCH_ENV_TIMEOUT_SECONDS)
     except Exception as exc:
         raise RuntimeError(
             f"Required CodeSpace relay preparation failed ({type(exc).__name__})"

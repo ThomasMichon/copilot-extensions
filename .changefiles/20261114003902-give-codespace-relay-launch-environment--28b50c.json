@@ -1,0 +1,9 @@
+{
+  "comment": "Give CodeSpace relay launch-environment preparation the same 30-second provider deadline as admission, so a loaded host no longer fails the start at 15 seconds",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}
