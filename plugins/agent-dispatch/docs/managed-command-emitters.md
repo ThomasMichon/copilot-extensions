@@ -30,6 +30,9 @@ registered-resource owner before persistence, so moving a registered supplier
 relocates the grant reader along with discovery. Other command arguments retain
 their literal meaning; external credential-store paths remain their owner's
 configuration.
+Worker Save and activation validate the grant reader's executable and script
+dependencies without running it or reading a grant. Missing dependencies refuse
+before persistence with a redacted diagnostic.
 
 The grant's producer id must equal the emitter's `id`, and its scope source must
 equal the configured `source` (default `emitter`). Each task's canonical repo
