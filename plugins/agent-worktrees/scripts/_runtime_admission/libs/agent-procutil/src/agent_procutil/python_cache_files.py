@@ -164,7 +164,7 @@ def child(parent: Entry, name: str, *, expected=None, delete: bool = False, read
 
 
 @contextlib.contextmanager
-def installation(path: Path, *, check_budget=None):
+def installation(path: Path, *, check_budget=None, private: bool = True):
     """Keep ancestors anchored for the entire catalog transaction and pass."""
     check_budget = check_budget or (lambda: None)
     check_budget()
@@ -191,6 +191,6 @@ def installation(path: Path, *, check_budget=None):
             check_budget()
             permissions.check(current.path, ancestor=True)
         check_budget()
-        permissions.check(path, private=True)
+        permissions.check(path, private=private)
         check_budget()
         yield current

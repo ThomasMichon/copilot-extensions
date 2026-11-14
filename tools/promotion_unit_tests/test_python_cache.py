@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import importlib.util
+import base64
 import json
+import marshal
 import os
 import sys
 from pathlib import Path
@@ -129,3 +131,46 @@ def test_minimal_loader_keeps_cache_and_cleanup_metadata_without_resident_module
     }
     assert spec.name + ".daemon" not in sys.modules
     assert spec.name + "._job_scopes" not in sys.modules
+
+
+def bytecode_reader():
+    spec = importlib.util.spec_from_file_location("unit_python_cache_pyc", SOURCE.with_name("python_cache_pyc.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.mark.parametrize("version", ["310", "311", "312", "313"])
+def test_legacy_provenance_reads_actual_nested_code_without_deserializing_or_executing(monkeypatch, version):
+    reader = bytecode_reader()
+    spec = importlib.util.spec_from_file_location(
+        "unit_python_cache_pyc_fixtures", SOURCE.parents[2] / "tests/python_cache_pyc_fixtures.py",
+    )
+    fixtures = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(fixtures)
+    data = base64.b64decode(fixtures.BYTECODE[version])
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("untrusted cache data must not be deserialized")
+
+    monkeypatch.setattr(marshal, "loads", forbidden)
+    assert reader.source(data) == fixtures.FILENAME
+    assert reader.cache_tag(data) == "cpython-" + version
+
+
+@pytest.mark.parametrize("kind", ["magic", "reference", "count", "trailing"])
+def test_legacy_provenance_refuses_unknown_and_bounded_malformed_objects(kind):
+    reader = bytecode_reader()
+    data = importlib.util.MAGIC_NUMBER + b"\0" * 12 + marshal.dumps(
+        compile("pass", "/fixture/versions/retired/module.py", "exec"),
+    )
+    if kind == "magic":
+        data = b"nope" + data[4:]
+    elif kind == "reference":
+        data = data[:16] + b"r\xff\xff\xff\xff"
+    elif kind == "count":
+        data = data[:16] + b"(\xff\xff\xff\x7f"
+    else:
+        data += b"extra"
+    with pytest.raises(ValueError):
+        reader.source(data)

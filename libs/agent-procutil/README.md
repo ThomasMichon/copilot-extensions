@@ -280,12 +280,72 @@ value/JSON remains unchanged; a bounded `gc: python-cache` stderr report carries
 counts, retained reasons, sanitized error codes and continuation status.
 Unsupported providers and maintenance failures do not veto runtime GC or
 successful incoming selection. No service or scheduler is added. This collector
-does not discover or delete legacy `cache/python` namespaces.
+does not itself discover or delete legacy `cache/python` namespaces; the
+independent legacy pass below uses the same runtime owner's custody.
 Standalone maintenance imports its shipped source archive only after checking
 file protection. POSIX additionally validates the resolved archive ancestry
 with no-follow directory opens: current-user/root ownership, no shared writes
 (apart from sticky intermediate ancestors), and supported macOS ACLs. This
 protects the filename reopened by the importer, not merely an earlier descriptor.
+
+### Legacy update relief
+
+Normal runtime GC also calls `python_cache_collect.collect_legacy`. It examines
+only the addressed installation's `cache/python`, with a separate
+`gc: python-cache-legacy` report. The incoming installation/selection result
+and runtime GC return value remain independent of either collector's outcome.
+The existing explicit legacy inspection/prune command remains dry-run by
+default; its manual age-only option is not used by automatic maintenance.
+
+Only recognized `unsealed-<32 hex>` and `installed-<64 hex>` prefixes are
+examined. Within them the pass opens only the addressed runtime root's Python
+source mirror and its `versions` directory. The runtime owner must hold the
+exact absent slot's cleanup/construction lease and pass its normal protection
+checks. A held slot lease is reused across prefixes for that pass, not replaced
+by another process scan or an inferred retirement policy.
+
+An individual ordinary, current-user-owned, non-shared-writable `.pyc` must
+affirmatively match that exact retired source path before removal. A bounded,
+non-executing marshal-format reader checks known released CPython 3.10--3.13 magic,
+header and complete object framing; every nested code object must name the
+same absolute source. That source, the bytecode cache tag/name and the source
+mirror must agree. Windows drops drive letters from its bytecode mirror, so
+the mirrored directory alone is never sufficient ownership evidence. No
+`marshal.loads`, code execution or new collector subprocess is used.
+The file's admitted magic selects its layout and cache tag, not the updater's
+Python version; actual native captures qualify all four formats across hosts.
+Unknown interpreter formats, malformed/oversized bytecode, hard links,
+reparse/symbolic links, changed paths and unsupported permissions are retained.
+Legacy directories may be world-readable, unlike executable new-cache
+selection; neither directories nor files may permit other unprivileged writers.
+These cleanup checks never relax the provider's private-cache defaults.
+
+Only qualified leaves and now-empty retired-source directories are removed.
+Sibling base-interpreter, current, rollback, other-runtime and unknown content
+is untouched, including non-bytecode evidence inside a retired subtree.
+Whole-prefix collection remains explicitly refused as
+`legacy-whole-prefix-no-writer-custody`: even a complete process census plus
+age cannot exclude delayed/inherited-prefix writers. Maintenance does not
+silently promote that manual pruning policy into automatic deletion.
+
+The default legacy pass has independent caps of 128 namespace candidates,
+2,048 selected entry probes, 100,000 directory-enumeration probes, 16 MiB of
+enumerated names, 32 MiB each of inspected bytecode and successful removals,
+and two seconds checked between native calls. Skipped and unknown names count.
+The bounded complete name census is explicit: incomplete/oversized or changing
+inventories refuse rather than claim a fair truncated scan. After a complete
+census, a persistent per-installation lexical cursor advances past refused
+namespaces. A 32 KiB/64-level identity-bound stack with per-directory lexical
+positions resumes within a namespace, including past retained leaves.
+Each file is at most 8 MiB; a file larger than a custom per-pass byte budget
+is retained rather than starving later files. Native calls are not preemptible.
+
+Reports distinguish enumerated names/bytes, inspected bytecode, successful
+file removals/logical bytes, removed retired subtrees (`completed`), retained
+reasons, sanitized errors and unfinished/budget-limited work. A remaining
+prefix is still `pending`, even after its eligible retired leaves are gone;
+base/unknown bytecode is not claimed reclaimed. Repeated successful updates
+resume eligible work, not a promise to empty every historical prefix.
 
 ## Windows bootstrap and shell admission
 

@@ -158,7 +158,7 @@
     }
   },
   "producers": {
-    "scripts": "cd074b488a3c9087f5d685cf6dfe687bbe3dc0b953d4ab19074e7ab5c1320173",
+    "scripts": "3b9ee838b8eddb8f9bb7a1947647412030ac0f12931c842b7b836823fc377d4f",
     "src": "d011f264b3d3950f6ad5d56097d1566c9b069e58269eae7e03219331ab5a0bc9"
   },
   "change": null
