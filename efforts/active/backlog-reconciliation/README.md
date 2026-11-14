@@ -342,6 +342,16 @@ the non-public approval conversation.
 
 ## Plan
 
+The [owner-scoped contract receiving study](journal/2026/11.14-owner-contract-receiving.md)
+retains twelve distinct unfinished outcomes and proposes complete #1460
+per-owner support-window tracking in its existing Draft effort: ten Plan rows,
+five behavior Validation rows, one ROOT-global crosswalk and unchanged
+Coordination custody. All sixteen new rows remain unchecked; no source is
+closed or reassigned. #1266's existing supported-content/refusal contract
+already covers attachments semantically and receives no duplicate clause.
+The complete 20:39:56Z census remains 846 open, 117 above fixed 729, with no
+new disposition credit.
+
 The [oldest command-contract source refresh](journal/2026/11.14-command-contract-source-refresh.md)
 retains #78's exact ID-first fleet naming contract as a current source-proof
 gap and #870's ordinary early-failure normalization as a demonstrated source
