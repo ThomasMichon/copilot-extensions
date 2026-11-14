@@ -6,13 +6,44 @@ import struct
 _OTHER = object()
 _PENDING = object()
 _NULL = object()
-_CODE = object()
+_UNHASHABLE = object()
 _FORMATS = {
     b"o\r\r\n": 10,
     b"\xa7\r\r\n": 11,
     b"\xcb\r\r\n": 12,
     b"\xf3\r\r\n": 13,
 }
+
+
+class _Binary:
+    __slots__ = ("data",)
+
+    def __init__(self, data):
+        self.data = data
+
+
+class _Tuple:
+    __slots__ = ("size", "strings", "hashable")
+
+    def __init__(self, size, strings, hashable):
+        self.size, self.strings, self.hashable = size, strings, hashable
+
+
+class _Code:
+    __slots__ = ("hashable",)
+
+    def __init__(self, hashable):
+        self.hashable = hashable
+
+
+def _hashable(value):
+    return value is not _UNHASHABLE and (
+        not isinstance(value, (_Tuple, _Code)) or value.hashable
+    )
+
+
+def _strings(value):
+    return isinstance(value, _Tuple) and value.strings
 
 
 class _Reader:
@@ -34,6 +65,51 @@ class _Reader:
 
     def number(self) -> int:
         return struct.unpack("<i", self.take(4))[0]
+
+    def code(self, depth):
+        numbers = [self.number() for _ in range(6 if self.old_code else 5)]
+        if any(value < 0 for value in numbers) or numbers[1] > numbers[0]:
+            raise ValueError("bytecode has invalid code counts")
+        bytecode, constants, names = (self.value(depth + 1) for _ in range(3))
+        if not isinstance(bytecode, _Binary) or len(bytecode.data) % 2:
+            raise ValueError("bytecode has an invalid code bytes field")
+        if not isinstance(constants, _Tuple) or not _strings(names):
+            raise ValueError("bytecode has invalid constants or names")
+        if self.old_code:
+            variables, free, cells = (self.value(depth + 1) for _ in range(3))
+            if not all(_strings(value) for value in (variables, free, cells)):
+                raise ValueError("bytecode has invalid local/free/cell names")
+            locals_count = variables.size
+            if numbers[3] != locals_count:
+                raise ValueError("bytecode local count differs")
+        else:
+            variables, kinds = self.value(depth + 1), self.value(depth + 1)
+            if (
+                not _strings(variables) or not isinstance(kinds, _Binary)
+                or variables.size != len(kinds.data)
+            ):
+                raise ValueError("bytecode has invalid local names or kinds")
+            locals_count = sum(bool(kind & 0x20) for kind in kinds.data)
+        flags = numbers[-1]
+        arguments = numbers[0] + numbers[2] + bool(flags & 4) + bool(flags & 8)
+        if arguments > locals_count:
+            raise ValueError("bytecode arguments exceed its locals")
+        filename = self.value(depth + 1)
+        if (
+            not isinstance(filename, str) or not filename or len(filename) > 16384
+            or "\0" in filename
+        ):
+            raise ValueError("bytecode has no supported source filename")
+        self.filenames.add(filename)
+        for _ in range(1 if self.old_code else 2):
+            if not isinstance(self.value(depth + 1), str):
+                raise ValueError("bytecode has an unsupported code name")
+        if self.number() < 0:
+            raise ValueError("bytecode has an invalid first line")
+        for _ in range(1 if self.old_code else 2):
+            if not isinstance(self.value(depth + 1), _Binary):
+                raise ValueError("bytecode has an invalid line or exception field")
+        return _Code(constants.hashable)
 
     def value(self, depth: int = 0):
         self.check()
@@ -65,46 +141,55 @@ class _Reader:
         elif kind in "iI":
             self.take(4 if kind == "i" else 8)
         elif kind == "l":
-            self.take(abs(self.number()) * 2)
+            digits = self.take(abs(self.number()) * 2)
+            for index in range(1, len(digits), 2):
+                if index % 8192 == 1:
+                    self.check()
+                if digits[index] & 0x80:
+                    raise ValueError("bytecode has an invalid long digit")
         elif kind in "gy":
             self.take(8 if kind == "g" else 16)
         elif kind in "fx":
             for _ in range(1 if kind == "f" else 2):
-                self.take(self.take(1)[0])
+                text = bytes(self.take(self.take(1)[0])).decode("ascii")
+                if not text or text.strip() != text or "\0" in text or "_" in text:
+                    raise ValueError("bytecode has an invalid float encoding")
+                try:
+                    float(text)
+                except ValueError:
+                    raise ValueError("bytecode has an invalid float encoding") from None
         elif kind in "sutaAzZ":
             size = self.take(1)[0] if kind in "zZ" else self.number()
             encoded = self.take(size)
-            if kind != "s" and size <= 16384:
-                result = bytes(encoded).decode("ascii" if kind in "aAzZ" else "utf-8")
+            result = _Binary(encoded) if kind == "s" else bytes(encoded).decode(
+                "ascii" if kind in "aAzZ" else "utf-8",
+            )
         elif kind in "([<>)":
             count = self.take(1)[0] if kind == ")" else self.number()
             if not 0 <= count <= 65536 - self.objects:
                 raise ValueError("bytecode exceeds its container budget")
+            strings, hashable = True, True
             for _ in range(count):
-                if self.value(depth + 1) is _NULL:
+                value = self.value(depth + 1)
+                if value is _NULL:
                     raise ValueError("bytecode has a null container member")
+                strings &= isinstance(value, str)
+                hashable &= _hashable(value)
+                if kind in "<>" and not _hashable(value):
+                    raise ValueError("bytecode has an unhashable set member")
+            if kind in "()":
+                result = _Tuple(count, strings, hashable)
+            elif kind in "[<":
+                result = _UNHASHABLE
         elif kind == "{":
-            while self.value(depth + 1) is not _NULL:
+            while (key := self.value(depth + 1)) is not _NULL:
+                if not _hashable(key):
+                    raise ValueError("bytecode has an unhashable dictionary key")
                 if self.value(depth + 1) is _NULL:
                     raise ValueError("bytecode has a null dictionary value")
+            result = _UNHASHABLE
         elif kind == "c":
-            self.take(24 if self.old_code else 20)
-            # code, consts, names, then the version's local/free/cell fields.
-            for _ in range(6 if self.old_code else 5):
-                if self.value(depth + 1) is _NULL:
-                    raise ValueError("bytecode has a null code field")
-            filename = self.value(depth + 1)
-            if not isinstance(filename, str) or not filename or "\0" in filename:
-                raise ValueError("bytecode has no supported source filename")
-            self.filenames.add(filename)
-            for _ in range(1 if self.old_code else 2):
-                if not isinstance(self.value(depth + 1), str):
-                    raise ValueError("bytecode has an unsupported code name")
-            self.take(4)
-            for _ in range(1 if self.old_code else 2):
-                if self.value(depth + 1) is _NULL:
-                    raise ValueError("bytecode has a null line or exception field")
-            result = _CODE
+            result = self.code(depth)
         else:
             raise ValueError("bytecode has an unsupported marshal tag")
         if reference is not None:
@@ -135,7 +220,7 @@ def source(data: bytes, *, check=lambda: None) -> str:
         raise ValueError("bytecode magic, header or size is unsupported")
     reader = _Reader(data, check)
     if (
-        reader.value() is not _CODE or reader.offset != len(data)
+        not isinstance(reader.value(), _Code) or reader.offset != len(data)
         or len(reader.filenames) != 1
     ):
         raise ValueError("bytecode source attribution is ambiguous")

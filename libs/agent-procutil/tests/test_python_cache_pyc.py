@@ -11,7 +11,7 @@ import types
 import pytest
 
 from agent_procutil import python_cache_pyc as pyc
-from python_cache_pyc_fixtures import BYTECODE, FILENAME
+from python_cache_pyc_fixtures import BYTECODE, FILENAME, code_record
 
 
 def encoded(code):
@@ -109,3 +109,41 @@ def test_actual_historical_formats_do_not_depend_on_the_running_interpreter(vers
     monkeypatch.setattr(sys, "version_info", (3, 14))
     assert pyc.source(data) == FILENAME
     assert pyc.cache_tag(data) == "cpython-" + version
+
+
+@pytest.mark.parametrize("version", ["310", "313"])
+def test_minimal_code_field_controls_have_valid_framing(version):
+    assert pyc.source(code_record(version)) == FILENAME
+
+
+@pytest.mark.parametrize("version,field", [
+    (version, field)
+    for version, fields in (
+        ("310", ("code", "consts", "names", "locals", "free", "cells", "line")),
+        ("313", ("code", "consts", "names", "locals", "kinds", "line", "exception")),
+    )
+    for field in fields
+])
+def test_required_code_fields_reject_none_in_every_supported_layout(version, field):
+    with pytest.raises(ValueError):
+        pyc.source(code_record(version, **{field: None}))
+
+
+@pytest.mark.parametrize("version", ["310", "313"])
+@pytest.mark.parametrize("field", ["names", "locals"])
+def test_required_name_tuples_reject_non_string_members(version, field):
+    with pytest.raises(ValueError):
+        pyc.source(code_record(version, **{field: (1,)}))
+
+
+@pytest.mark.parametrize("payload", [
+    b"f\x04nope",
+    b"l\x01\0\0\0\0\x80",
+    b"u" + struct.pack("<i", 20000) + b"\xff" * 20000,
+    b">" + struct.pack("<i", 1) + b"[" + struct.pack("<i", 0),
+    b"{" + b"[" + struct.pack("<i", 0) + b"N0",
+])
+def test_malformed_scalar_and_container_constants_do_not_supply_provenance(payload):
+    constants = b"(" + struct.pack("<i", 1) + payload
+    with pytest.raises(ValueError):
+        pyc.source(code_record(raw_fields={"consts": constants}))

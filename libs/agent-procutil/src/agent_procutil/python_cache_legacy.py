@@ -42,6 +42,12 @@ class Report(indexed.Report):
     discovered: int = 0
     names_bytes: int = 0
     inspected_bytes: int = 0
+    namespace_discovered: int = 0
+    namespace_names_bytes: int = 0
+
+
+class _InventoryUnavailable(Exception):
+    pass
 
 
 class _Pass(indexed._Pass):
@@ -49,7 +55,7 @@ class _Pass(indexed._Pass):
         super().__init__(budget, report)
         self.inventories = {}
 
-    def names(self, directory):
+    def names(self, directory, *, namespace=False):
         """Only a complete bounded census may supply a lexical continuation."""
         key = (str(directory.path), files.identity(directory.info))
         if key in self.inventories:
@@ -57,29 +63,50 @@ class _Pass(indexed._Pass):
         self.check()
         before = directory.path.lstat()
         names = []
-        with directory.names() as iterator:
-            while True:
-                self.check()
-                if self.report.discovered >= self.budget.discovery:
-                    self.report.retain("inventory-incomplete")
-                    raise indexed._Exhausted
-                entry = next(iterator, None)
-                self.report.discovered += 1
-                if entry is None:
-                    break
-                size = len(os.fsencode(entry.name))
-                if size > self.budget.names_bytes - self.report.names_bytes:
-                    self.report.retain("inventory-incomplete")
-                    raise indexed._Exhausted
-                self.report.names_bytes += size
-                names.append(entry.name)
-        self.check()
-        directory.verify()
-        after = directory.path.lstat()
-        if before.st_mtime_ns != after.st_mtime_ns or before.st_ctime_ns != after.st_ctime_ns:
-            raise ValueError("legacy inventory changed")
-        names.sort()
-        self.check()
+        probes, encoded_bytes = 0, 0
+        fresh = self.report.discovered == 0
+        probe_limit = self.budget.discovery if namespace else max(2, self.budget.discovery // 4)
+        byte_limit = self.budget.names_bytes if namespace else max(1, self.budget.names_bytes // 4)
+        try:
+            with directory.names() as iterator:
+                while True:
+                    self.check()
+                    if probes >= probe_limit:
+                        self.report.retain("inventory-oversized")
+                        self.report.exhausted = True
+                        raise _InventoryUnavailable
+                    if self.report.discovered >= self.budget.discovery:
+                        self.report.retain("inventory-incomplete")
+                        raise indexed._Exhausted
+                    entry = next(iterator, None)
+                    self.report.discovered += 1
+                    probes += 1
+                    if entry is None:
+                        break
+                    size = len(os.fsencode(entry.name))
+                    if size > byte_limit - encoded_bytes:
+                        self.report.retain("inventory-oversized")
+                        self.report.exhausted = True
+                        raise _InventoryUnavailable
+                    if size > self.budget.names_bytes - self.report.names_bytes:
+                        self.report.retain("inventory-incomplete")
+                        raise indexed._Exhausted
+                    self.report.names_bytes += size
+                    encoded_bytes += size
+                    names.append(entry.name)
+            self.check()
+            directory.verify()
+            after = directory.path.lstat()
+            if before.st_mtime_ns != after.st_mtime_ns or before.st_ctime_ns != after.st_ctime_ns:
+                raise ValueError("legacy inventory changed")
+            names.sort()
+            self.check()
+        except indexed._Exhausted:
+            if fresh and probes:
+                self.report.retain("inventory-time-unavailable")
+                self.report.exhausted = True
+                raise _InventoryUnavailable from None
+            raise
         self.inventories[key] = names
         return names
 
@@ -105,6 +132,11 @@ def _identity(value):
     )
 
 
+def _cursor(value):
+    """Comparison-only positions are never used as child paths."""
+    return isinstance(value, str) and len(value) <= 1024
+
+
 def _state(database, name):
     row = database.execute(
         "SELECT length(value), CASE WHEN length(value) <= ? THEN value END "
@@ -118,11 +150,11 @@ def _state(database, name):
     if (
         not isinstance(state, dict) or set(state) != {"namespace", "versions", "after", "stack"}
         or not _identity(state["namespace"]) or not _identity(state["versions"])
-        or not (state["after"] == "" or _name(state["after"]))
+        or not _cursor(state["after"])
         or not isinstance(state["stack"], list) or len(state["stack"]) > 64
         or any(
             not isinstance(frame, list) or len(frame) != 3 or not _name(frame[0])
-            or not _identity(frame[1]) or not (frame[2] == "" or _name(frame[2]))
+            or not _identity(frame[1]) or not _cursor(frame[2])
             for frame in state["stack"]
         )
     ):
@@ -152,9 +184,10 @@ def _checked(entry):
 def _remove_bytecode(namespace, entry, root, slot, work):
     report = work.report
     size = entry.info.st_size
+    name = os.path.normcase(entry.path.name)
     if (
         entry.info.st_nlink != 1
-        or not re.fullmatch(r".+\.cpython-[0-9]{2,3}(?:\.opt-[0-9]+)?\.pyc", entry.path.name)
+        or not re.fullmatch(r".+\.cpython-[0-9]{2,3}(?:\.opt-[0-9]+)?\.pyc", name)
     ):
         report.retain("legacy-not-bytecode")
         return
@@ -171,9 +204,11 @@ def _remove_bytecode(namespace, entry, root, slot, work):
     filename = pyc.source(data, check=work.check)
     tag = pyc.cache_tag(data)
     source = Path(filename)
-    if not source.is_absolute() or source.suffix not in (".py", ".pyw"):
+    if not source.is_absolute():
         raise ValueError("legacy source filename is not an absolute Python source")
     source = Path(store.normalized(source))
+    if source.suffix not in (".py", ".pyw"):
+        raise ValueError("legacy source filename is not an absolute Python source")
     target = Path(store.normalized(root / "versions" / slot))
     if not source.is_relative_to(target) or source == target:
         raise ValueError("legacy bytecode belongs to another runtime")
@@ -182,7 +217,7 @@ def _remove_bytecode(namespace, entry, root, slot, work):
         store.normalized(mirror) != store.normalized(entry.path.parent)
         or not re.fullmatch(
             re.escape(source.stem + "." + tag)
-            + r"(?:\.opt-[0-9]+)?\.pyc", entry.path.name,
+            + r"(?:\.opt-[0-9]+)?\.pyc", name,
         )
     ):
         raise ValueError("legacy source and bytecode mirror differ")
@@ -213,7 +248,11 @@ def _tree(namespace, versions, state, root, slot, work):
                 _checked(parent)
             else:
                 frame = state["stack"][-1]
-                names = work.names(parent)
+                try:
+                    names = work.names(parent)
+                except _InventoryUnavailable:
+                    state["stack"].pop()
+                    continue
                 index = bisect_right(names, frame[2])
                 if index == len(names):
                     work.entry()
@@ -319,7 +358,17 @@ def collect(root: Path, *, retirement, budget: Budget | None = None) -> Report:
         if not files.present(legacy):
             return report
         with files.installation(legacy, private=False, check_budget=work.check) as anchor:
-            names = work.names(anchor)
+            census_report = Report()
+            census = _Pass(budget, census_report)
+            census.deadline = work.deadline
+            try:
+                names = census.names(anchor, namespace=True)
+            finally:
+                report.namespace_discovered = census_report.discovered
+                report.namespace_names_bytes = census_report.names_bytes
+                report.exhausted |= census_report.exhausted
+                for reason, count in census_report.reasons.items():
+                    report.reasons[reason] = report.reasons.get(reason, 0) + count
             if not names:
                 return report
             location = store.installation_root(root, create=True, check_budget=work.check)
@@ -327,13 +376,20 @@ def collect(root: Path, *, retirement, budget: Budget | None = None) -> Report:
             with files.installation(location, check_budget=work.check), catalog.connection(
                 location, private_owner=private_owner, check_budget=work.check,
             ) as database, contextlib.ExitStack() as leases:
-                held = {}
+                active_slot, active_reason = None, ""
 
                 def retired(slot):
-                    if slot not in held:
-                        held[slot] = leases.enter_context(retirement(slot, check=work.check))
+                    nonlocal active_slot, active_reason
+                    if slot != active_slot:
+                        active_slot, active_reason = None, ""
+                        leases.close()
+                        reason = leases.enter_context(retirement(slot, check=work.check))
+                        if reason:
+                            leases.close()
+                        active_reason = reason
+                        active_slot = slot
                     work.check()
-                    return held[slot]
+                    return active_reason
 
                 row = database.execute(
                     "SELECT CASE WHEN length(value) <= 256 THEN value ELSE '' END "
@@ -371,6 +427,8 @@ def collect(root: Path, *, retirement, budget: Budget | None = None) -> Report:
                     except indexed._Exhausted:
                         report.exhausted = True
                         break
+                    except _InventoryUnavailable:
+                        pass
                     except (OSError, ValueError, TypeError, KeyError, RecursionError) as error:
                         report.retain("legacy-unsafe-or-unavailable")
                         report.error(error)
@@ -380,7 +438,7 @@ def collect(root: Path, *, retirement, budget: Budget | None = None) -> Report:
                 report.pending = bool(names)
                 if count < len(names):
                     report.exhausted = True
-    except indexed._Exhausted:
+    except (indexed._Exhausted, _InventoryUnavailable):
         report.exhausted = report.pending = True
     except (OSError, ValueError, TypeError, RecursionError) as error:
         report.retain("legacy-inventory-unavailable")

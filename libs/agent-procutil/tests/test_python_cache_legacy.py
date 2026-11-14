@@ -12,6 +12,7 @@ import sqlite3
 import struct
 import subprocess
 import sys
+from types import SimpleNamespace
 
 import pytest
 
@@ -137,10 +138,121 @@ def test_incomplete_name_inventory_never_claims_fairness_or_deletes(local, budge
     result = collect(root, **budget)
     assert all(path.is_file() for path in paths)
     assert result.exhausted and result.pending and result.files == 0
-    assert "inventory-incomplete" in result.reasons
+    assert "inventory-incomplete" in result.reasons or "inventory-oversized" in result.reasons
     assert result.discovered <= budget.get("discovery", 100000)
     assert result.names_bytes <= budget.get("names_bytes", 16 * 1024 * 1024)
+    assert result.namespace_discovered <= budget.get("discovery", 100000)
+    assert result.namespace_names_bytes <= budget.get("names_bytes", 16 * 1024 * 1024)
     assert not store.installation_root(root).exists()
+
+
+@pytest.mark.parametrize("budget", [{"discovery": 64}, {"names_bytes": 128}])
+def test_oversized_subtree_does_not_starve_eligible_sibling_across_updates(local, budget):
+    root, _ = local
+    valid = compiled(root, relative="z_valid.py")
+    oversized = valid.parent / "a_unknown"
+    oversized.mkdir()
+    for number in range(40):
+        (oversized / str(number)).write_bytes(b"retain")
+    reports = [collect(root, entries=4, namespaces=1, **budget) for _ in range(12)]
+    assert not valid.exists() and len(list(oversized.iterdir())) == 40
+    assert sum(report.files for report in reports) == 1
+    assert any("inventory-oversized" in report.reasons for report in reports)
+    assert all(
+        report.discovered <= budget.get("discovery", 100000)
+        and report.namespace_discovered <= budget.get("discovery", 100000)
+        for report in reports
+    )
+
+
+def test_fresh_pass_time_unavailable_inventory_does_not_starve_a_sibling(local, monkeypatch):
+    root, _ = local
+    valid = compiled(root, relative="z_valid.py")
+    slow = valid.parent / "a_slow"
+    slow.mkdir()
+    for number in range(4):
+        (slow / str(number)).write_bytes(b"retain")
+    clock = [0.0]
+    original = files.Entry.names
+
+    @contextmanager
+    def names(entry):
+        with original(entry) as iterator:
+            def delayed():
+                for value in iterator:
+                    yield value
+                    clock[0] = 2.0
+
+            yield delayed() if entry.path == slow else iterator
+
+    monkeypatch.setattr(files.Entry, "names", names)
+    monkeypatch.setattr(legacy.indexed, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    reports = []
+    for _ in range(4):
+        clock[0] = 0.0
+        reports.append(collect(root, seconds=1, namespaces=1))
+    assert not valid.exists() and len(list(slow.iterdir())) == 4
+    assert any("inventory-time-unavailable" in report.reasons for report in reports)
+
+
+def test_aggregate_inventory_exhaustion_resumes_a_subtree_that_fits_a_fresh_pass(local):
+    root, _ = local
+    paths = [compiled(root, relative=f"package{group}/module{number}.py")
+             for group in range(4) for number in range(8)]
+    reports = []
+    for _ in range(40):
+        reports.append(collect(root, entries=100, discovery=40, namespaces=1))
+        if not any(path.exists() for path in paths):
+            break
+    assert not any(path.exists() for path in paths)
+    assert sum(report.files for report in reports) == 32
+    assert not any("inventory-oversized" in report.reasons for report in reports)
+    assert any("inventory-incomplete" in report.reasons for report in reports)
+
+
+def test_oversized_slot_inventory_does_not_starve_a_later_namespace(local):
+    root, _ = local
+    retained = compiled(root, number=1)
+    valid = compiled(root, number=2)
+    versions = retained.parent.parent
+    for number in range(8):
+        (versions / f"slot{number}").mkdir()
+    reports = [collect(root, entries=8, discovery=16, namespaces=1) for _ in range(4)]
+    assert retained.is_file() and not valid.exists()
+    assert sum(report.files for report in reports) == 1
+    assert any("inventory-oversized" in report.reasons for report in reports)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX comparison positions can contain colons")
+@pytest.mark.parametrize("location", ["leaf", "slot"])
+def test_refused_names_remain_comparison_only_cursors_after_interruption(local, location):
+    root, _ = local
+    valid = compiled(root, "1.0" if location == "leaf" else "z.0", "z_valid.py")
+    parent = valid.parent if location == "leaf" else valid.parent.parent
+    unwanted = parent / "a:unknown"
+    if location == "leaf":
+        unwanted.write_bytes(b"retain")
+    else:
+        unwanted.mkdir()
+    first = collect(root, entries=3, namespaces=1)
+    assert first.exhausted and valid.exists()
+    reports = [collect(root, entries=3, namespaces=1) for _ in range(8)]
+    assert not valid.exists() and unwanted.exists()
+    assert sum(report.files for report in reports) == 1
+
+
+@pytest.mark.parametrize("case", ["original", "swapped"])
+def test_platform_case_rules_apply_to_the_complete_cache_basename(local, case):
+    root, _ = local
+    victim = compiled(root, relative="CamelCase.PY" if os.name == "nt" else "CamelCase.py")
+    if case == "swapped":
+        candidate = victim.with_name(victim.name.swapcase())
+        victim.rename(candidate)
+        victim = candidate
+    report = collect(root)
+    removed = case == "original" or os.name == "nt"
+    assert victim.exists() != removed
+    assert report.files == int(removed)
 
 
 def test_unknown_names_count_toward_namespace_budget_without_starvation(local):
@@ -222,6 +334,39 @@ def test_native_windows_readable_legacy_is_allowed_but_foreign_writes_are_refuse
         assert result.files == (0 if grant == "FA" else 1)
     finally:
         kernel.LocalFree(descriptor)
+
+
+@pytest.mark.parametrize("private", [False, True])
+def test_macos_file_only_acl_is_checked_without_weakening_mode_requirements(monkeypatch, private):
+    permissions = legacy.permissions
+    info = SimpleNamespace(st_mode=0o100600 if private else 0o100644, st_uid=42)
+    candidate = SimpleNamespace(lstat=lambda: info)
+    monkeypatch.setattr(permissions, "os", SimpleNamespace(name="posix", getuid=lambda: 42))
+    monkeypatch.setattr(permissions, "sys", SimpleNamespace(platform="darwin"))
+    seen = []
+
+    def shared_file(path):
+        seen.append(path)
+        raise PermissionError("fixture-only extended ACL grant")
+
+    monkeypatch.setattr(permissions, "_macos_check", shared_file)
+    with pytest.raises(PermissionError, match="extended ACL"):
+        permissions.check_file(candidate, private=private)
+    assert seen == [candidate]
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="native macOS file-only extended ACL")
+def test_native_macos_file_acl_preserves_otherwise_ordinary_legacy_bytecode(local):
+    root, _ = local
+    victim = compiled(root)
+    victim.chmod(0o644)
+    result = subprocess.run(
+        ["/bin/chmod", "+a", "user:nobody allow write", str(victim)],
+        capture_output=True, timeout=15,
+    )
+    assert result.returncode == 0, result.stderr
+    report = collect(root)
+    assert victim.is_file() and report.files == 0 and report.reasons
 
 
 def test_default_budget_reclaims_material_fixture_bytes_with_finite_progress(local, record_property):
@@ -435,6 +580,22 @@ def test_absent_slot_construction_protects_legacy_bytecode(local, runtime):
         assert victim.is_file()
     runtime.gc(root)
     assert not victim.exists()
+
+
+@pytest.mark.parametrize("first", ["protected", "unknown"])
+def test_real_publication_lease_does_not_starve_later_retired_slots(local, runtime, first):
+    root, _ = local
+    paths = {}
+    for slot in ("1.0", "2.0", "3.0"):
+        (root / "versions" / slot).mkdir(parents=True)
+        paths[slot] = compiled(root, slot)
+    runtime.activate(root, "1.0" if first == "protected" else "3.0")
+    if first == "unknown":
+        paths["1.0"].write_bytes(b"retain unknown content")
+    for _ in range(5):
+        runtime.gc(root)
+    assert paths["1.0"].is_file() and not paths["2.0"].exists()
+    assert paths["3.0"].exists() == (first == "unknown")
 
 
 def test_unknown_whole_prefix_has_no_automatic_age_or_process_scan_path(local):
