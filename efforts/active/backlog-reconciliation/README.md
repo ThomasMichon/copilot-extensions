@@ -3165,16 +3165,22 @@ sources, transferring owners or turning partial/planning gains into completion.
   evidence when claiming completion, rather than making that the prerequisite
   for discovering thematic alignment.
   The [runner/entry/attribution intake](journal/2026/11.13-runner-entry-and-attribution-receiving.md)
-  proposes three finite direct unions under existing Active homes: separate
+  records three finite direct unions merged in #12573 under existing Active
+  homes: separate
   #7643 runner intake, complete #7743 U1 boundaries and planned #7906 attribution.
-  Seventeen new checkbox rows and one local matrix entry remain unchecked;
-  incumbent bytes, 76 checked domain rows, first Plan/global gates and owners
-  remain. #7805 already has semantic AS7116 receiving; duplicate rows are
+  All sixteen technical checkbox rows and one local matrix entry remain unfinished;
+  only I7643's administrative route is checked in the append-only intake
+  follow-through. Incumbent bytes, 76 checked domain rows, first Plan/global
+  gates and owners were preserved on receiving delivery. #7805 already has
+  semantic AS7116 receiving; duplicate rows are
   withdrawn while its explicit OPEN condition remains. Nine other sources
   retain complete positive gaps or current conditions, including #7500's
   unresolved fit after withdrawal of an out-of-scope candidate read.
-  No source effect follows; the complete 06:26:59 UTC census remains
-  855 whole open, 126 above fixed 729, with no arrival or departure.
+  Complete current postmerge receiving and fresh source readback support
+  #7906's separate NOT_PLANNED tracking retirement; its technical work
+  remains planned.
+  The complete 07:23:56 UTC census is 854 whole open, 125 above fixed 729,
+  with that one verified campaign departure and no arrival.
   The [fixture/startup/hook intake](journal/2026/11.13-fixture-startup-and-hook-receiving.md)
   records three complete finite direct unions merged in #12567 under existing Active homes,
   with 32 unchecked Plan/local/actual-global Validation rows and unchanged
