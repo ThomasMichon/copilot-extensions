@@ -32,7 +32,8 @@ def has_released_local_claim(entry: dict, config: cfg.Config) -> bool:
         )
         if (
             record is None or record.repo != entry["project"] or record.worktree_id != entry["source_worktree"]
-            or record.status != "finalized" or not record_reporting.locally_proven_subject(record)
+            or record.status not in {"finalized", "archived"}
+            or not record_reporting.locally_proven_subject(record)
         ):
             return False
         claims = [

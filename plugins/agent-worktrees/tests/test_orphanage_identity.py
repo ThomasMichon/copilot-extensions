@@ -111,15 +111,19 @@ def _receiving_cleanup_fixture(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("retired_checkout", [False, True])
+@pytest.mark.parametrize("apply", [False, True])
 def test_loader_to_cleanup_uses_receiving_custody_after_rename(
-    tmp_path, monkeypatch, retired_checkout,
+    tmp_path, monkeypatch, retired_checkout, apply,
 ):
     from test_identity_rename_ownership import rename
 
     creation, record, path = _receiving_cleanup_fixture(tmp_path, monkeypatch)
     if retired_checkout:
         git_ops.git("worktree", "remove", record.worktree_path, cwd=creation.anchors["harness"])
+        assert tracking.retire_record(record, record.yaml_path.parent)
+        assert tracking.load_record(record.yaml_path).status == "archived"
     rename(creation)
+    original = path.read_bytes()
     calls = []
 
     def reclaim(ref, apply, config):
@@ -127,17 +131,27 @@ def test_loader_to_cleanup_uses_receiving_custody_after_rename(
         return cleanup.ReclaimResult("reclaimed", "synthetic callback")
 
     monkeypatch.setitem(cleanup._RECLAIMERS, "codespace", reclaim)
-    rows = cleanup.cleanup_orphanage(creation.configs["harness"], apply=True, project="harness")
+    rows = cleanup.cleanup_orphanage(creation.configs["harness"], apply=apply, project="harness")
     assert rows[0]["status"] == "reclaimed", rows
-    assert calls == [("owned-resource", True)]
-    assert tracking.load_orphaned_obligations("harness") == []
+    assert calls == [("owned-resource", apply)]
+    if apply:
+        assert tracking.load_orphaned_obligations("harness") == []
+    else:
+        assert path.read_bytes() == original
 
 
 @pytest.mark.parametrize("case", [
     "missing-source", "active-source", "live-claim", "different-ref", "handoff", "foreign-project",
 ])
-def test_loader_to_cleanup_never_reclaims_uncertain_or_live_custody(tmp_path, monkeypatch, case):
+@pytest.mark.parametrize("retired_source", [False, True])
+def test_loader_to_cleanup_never_reclaims_uncertain_or_live_custody(
+    tmp_path, monkeypatch, case, retired_source,
+):
     creation, record, path = _receiving_cleanup_fixture(tmp_path, monkeypatch)
+    if retired_source:
+        git_ops.git("worktree", "remove", record.worktree_path, cwd=creation.anchors["harness"])
+        assert tracking.retire_record(record, record.yaml_path.parent)
+        record = tracking.load_record(record.yaml_path)
     if case == "missing-source":
         record.yaml_path.unlink()
     elif case == "foreign-project":
