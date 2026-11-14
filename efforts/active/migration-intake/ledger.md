@@ -271,3 +271,17 @@ Draft status, temporary-token implementation restriction, #5791/#810 scope
 and all prior Plan/Validation rows remain. Direct reviewed Plan acceptance
 does not appoint an executor, authorize authentication/test/update/provider
 effects or release a source/resource claim.
+
+## Finite #69 account-to-provider integration intake (2026-11-14 UTC)
+
+| Candidate | Source | Disposition | Primary canonical owner | Tracker outcome |
+|-----------|--------|-------------|-------------------------|-----------------|
+| Deferred Phase 2 account-to-auth-provider abstraction AND actual account-to-provider-to-credential resolver/integration for the original non-CLI scope; delivered GitHub repo-to-account Phase 1 remains credit | Public #69, complete original and four comments | routed (proposed; effective after normal reviewed direct Plan acceptance) | account-aware-operations, P69-C/P69-I/V69/G69 only | Retain #69 pending direct receiving review/readback and a separate source-specific judgment; technical work remains planned; no new issue, executor, credential/provider effect or source/resource transfer |
+
+P69-C retains the contract/placement decision; P69-I and V69 retain unchecked
+technical delivery and behavior acceptance. Preserve the exact `accounts.yaml`
+and/or moving credential ownership into `agent-vault` alternative, with
+Worktrees, agent-vault/trust and venue-parity custody unchanged. This appends
+one primary route without changing any prior ledger entry. Ledger publication
+or reviewed Plan intake is not technical completion or issue disposition;
+future technical acceptance is not a new physical-OPEN condition on #69.
