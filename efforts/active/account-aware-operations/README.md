@@ -59,6 +59,31 @@ switch or leaking one operation's credentials into another.
   reviewed direct Plan acceptance does not activate this Draft effort, waive
   the temporary-token implementation restriction or authorize an auth ceremony.
 
+- **Finite #69 intake (proposed):** P69-C records the contract and owner
+  boundary; P69-I and V69 retain the actual account-to-provider-to-credential
+  implementation, integration and behavior validation as unchecked work.
+  This is one account-aware family, not a second plan or executor assignment.
+  Credit the delivered GitHub-only source Phase 1 without reopening it:
+  optional repo `account:` overrides GitHub-remote-owner derivation;
+  underivable, non-GitHub and absent cases resolve to none. Precedence stays
+  explicit account, derived owner, then none. The related-repository index can
+  surface or override the account, and `repos`/`related` output exposes it.
+  The credited command set is `create-pr`, `push-changes`, `pr-merge`,
+  `pr-ready`, `pr-status`, `pr-watch`, `pr-complete`, `set-pr` and `finalize`.
+  Preserve token injection, explicit-token override and per-invocation Git
+  `extraheader` with no global switch. The historical `extraheader` versus
+  credential-helper-after-switch alternative remains context, reconciled to
+  that delivered no-global-switch route, not a reopened decision. Existing
+  Phase 4 concurrency/global-auth validation remains applicable; no new
+  switch/restore or concurrency program is introduced. Original Q3 remains
+  the follow-on question whether ad-hoc non-agent-worktrees CLI calls should
+  share the resolver, not an OR alternative or a new P69 requirement.
+  Keep the original `accounts.yaml` and/or moving credential ownership into
+  `agent-vault` alternative unresolved. Worktrees, Vault/trust and venue-parity
+  retain their respective custody. Draft status and the temporary-token
+  implementation restriction remain; this intake establishes no execution,
+  credential movement or resource transfer.
+
 ## Context
 
 Repository tools often inherit whichever account happens to be active in a
@@ -86,6 +111,15 @@ degradation without global identity mutation.
   execution so providers remain replaceable and testable.
 - [ ] Return structured provenance and errors without returning credentials.
 
+- [ ] **P69-C:** Specify the account-to-auth-provider abstraction for #69's
+  deferred Phase 2 non-CLI identity scope. Preserve the unresolved alternative
+  "an `accounts.yaml` and/or moving credential ownership into `agent-vault`";
+  do not force exclusive-or or choose placement for its existing owners.
+  Keep agent-worktrees responsible for repository-to-account selection and
+  the trust/Vault layer responsible for account-to-credential ownership, with
+  no duplicate credential owner. This contract row alone is not delivery;
+  this effort's Phase 1 does not reopen #69's credited source Phase 1.
+
 ### Phase 2 - Add scoped command execution
 
 - [ ] Resolve the intended account before launching a repository-facing
@@ -93,6 +127,17 @@ degradation without global identity mutation.
 - [ ] Reject mismatched or unavailable identities before mutation.
 - [ ] Preserve interactive fallback only when explicitly requested by a human,
   never as an agent-side success-shaped fallback.
+
+- [ ] **P69-I:** Implement and integrate the selected account-to-provider and
+  provider-to-credential resolution so #69's deferred non-CLI identity scope
+  fits the existing repository/account model. Retain the source-named
+  Entra/GCM for Azure DevOps and Gitea PAT examples, not a new exhaustive
+  support floor. The account-aware contract and scoped-command path must
+  consume provider resolution while preserving repository-to-account
+  selection and a single credential owner. Existing Worktrees,
+  agent-vault/trust and venue-parity owners retain source, credential and
+  transport/launch-auth custody. This unchecked Plan row appoints no executor
+  and authorizes no credential operation, provider write or ownership transfer.
 
 #### Direct retained #5791 intended-account execution
 
@@ -163,6 +208,19 @@ lookup; neither is a fresh missing implementation or whole-family proof.
   identity capability. Keep source/release/installed evidence distinct,
   credit #8921/#3050 and retain all actual owners, claims, activation and
   temporary-token gates without weakening #810's separate alternative.
+
+#### Local Validation - #69
+
+- [ ] **V69:** Validate actual P69-I account-to-provider-to-credential resolver
+  behavior and its integration after the P69-C contract/placement decision
+  clears its existing owning review. Use synthetic, non-secret fixtures for
+  the original non-CLI scope, distinguishing account selection, provider
+  resolution, credential ownership and consumption. Preserve the source-named
+  examples without an exhaustive provider-support floor; prove no duplicate
+  owner, secret return/leak, ambient/global-account substitution or regression
+  of the credited Phase 1 behavior. Contract prose alone is insufficient.
+  This intake authorizes no real credentials, auth ceremony, provider write,
+  native experiment or launch-auth change.
 
 ### Phase 3 - Adopt across repository workflows
 
@@ -279,6 +337,15 @@ _Correlated via a facility-driven sweep of open `bug`-labeled issues against act
   temporary-token restriction, #5791/#810 acceptance and separate source,
   release and installed evidence. Planned receiving is not a technical fix.
 
+- [ ] **G69:** Retain P69-C, P69-I and V69 as distinct unchecked obligations.
+  Reviewed Plan acceptance records the deferred work; it does not complete
+  integration or behavior validation. Technical acceptance requires the
+  existing owners' review of any boundary/placement change, actual resolver
+  integration and V69's synthetic behavior evidence. Keep source, release and
+  install/live evidence distinct where applicable. This intake does not
+  activate the Draft effort, appoint an executor, move credential ownership,
+  authorize provider/credential effects or release source/resource custody.
+
 ## Proposal
 
 Establish repository-scoped identity resolution as a shared primitive, then
@@ -286,6 +353,15 @@ adopt it incrementally across commands that currently inherit ambient account
 state.
 
 ## Journal
+
+### 2026-11-14 - #69 account-to-provider receiving proposal
+
+- Proposed P69-C contract and P69-I technical integration, V69 behavior
+  validation and G69's separate technical acceptance. All four new rows remain
+  unchecked. Coordination directly retains delivered source Phase 1 credit,
+  its complete command set, literal alternatives and existing owners.
+  This is planned tracking, not implementation, issue disposition, execution
+  assignment or custody transfer.
 
 ### 2026-11-14 - Finite provider-appropriate update-guidance intake
 

@@ -342,6 +342,14 @@ the non-public approval conversation.
 
 ## Plan
 
+The [deferred account/provider proposal](journal/2026/11.14-account-provider-intake.md)
+retains #69's actual provider abstraction AND resolver/integration in one
+existing account-aware family, with four unchecked contract, implementation,
+behavior and global-acceptance rows. Credited GitHub Phase 1, every literal
+alternative and existing credential/source custody remain distinct. The dated
+migration route is append-only; source-specific disposition and technical
+acceptance are separate. The complete queue remains 847 open, 118 above 729.
+
 The [inherited-allocator and parked-review intake](journal/2026/11.13-inherited-allocator-and-parked-review-intake.md)
 records reviewed delivery of eighteen direct unchecked rows across two existing
 ROOTs in #12467 and three separate `NOT_PLANNED` tracking retirements for
