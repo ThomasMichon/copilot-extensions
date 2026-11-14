@@ -331,6 +331,59 @@ def test_current_feed_actual_loader_subprocess_commits_both_sources_and_cancels(
     assert loader._procs == [] and loader._held_sources == set()
 
 
+@pytest.mark.parametrize("local", [True, False])
+def test_actual_loader_repaints_reporter_heartbeat_without_row_or_source_change(
+    monkeypatch, tmp_path, local,
+):
+    from worktree_manager.production_picker.picker_tui.worktree_action_context import (
+        build_worktree_action_context,
+    )
+
+    marker = tmp_path / "next-heartbeat"
+    initial = snapshot([{"id": "one", "machine": "stamped", "status": "active"}])
+    context = {
+        "version": 1, "status": "resolved", "hostname": "reporter-host",
+        "machine": "first", "environment": "wsl", "execution_machine": "first-guest",
+    }
+    initial[0]["reporting_context"] = context
+    heartbeat = {
+        "type": "heartbeat", "generation": "a" * 32, "cursor": 1,
+        "reporting_context": {**context, "machine": "renamed", "execution_machine": "new-guest"},
+    }
+    script = (
+        "import json,time,pathlib\n"
+        f"marker=pathlib.Path({str(marker)!r})\n"
+        f"for frame in {initial!r}: print(json.dumps(frame),flush=True)\n"
+        "while not marker.exists(): time.sleep(.01)\n"
+        f"print(json.dumps({heartbeat!r}),flush=True)\n"
+        "time.sleep(10)\n"
+    )
+    monkeypatch.setattr(loader_feed, "feed_argv", lambda source: [sys.executable, "-u", "-c", script])
+    source = data_ssh.Source("configured-route", "WSL", None, local=local)
+    loader = data_ssh.LiveLoader([source])
+    worker = threading.Thread(target=loader._load_one, args=(source, 0))
+    worker.start()
+    try:
+        wait_until(lambda: bool(loader.records()))
+        before = loader.records()[0]
+        assert before["machine_identity"]["execution_machine"] == "first-guest"
+        marker.write_text("continue", encoding="utf-8")
+        wait_until(
+            lambda: loader.records()[0]["machine_identity"]["execution_machine"] == "new-guest",
+        )
+        after = loader.records()[0]
+        assert after["raw"]["_projection"] == before["raw"]["_projection"]
+        assert after["machine"] == before["machine"] == "configured-route"
+        assert after["selection_id"] == before["selection_id"]
+        assert build_worktree_action_context(after)["machine"] == "configured-route"
+        assert after["raw"]["machine"] == "stamped"
+    finally:
+        loader.cancel()
+        worker.join(timeout=3)
+    assert not worker.is_alive()
+    assert loader._procs == [] and loader._held_sources == set()
+
+
 @pytest.mark.parametrize("graceful", [True, False])
 def test_current_feed_loader_reconnect_resolves_new_generation_without_empty_overwrite(
     monkeypatch, tmp_path, graceful,

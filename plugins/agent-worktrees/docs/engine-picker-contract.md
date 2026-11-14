@@ -534,12 +534,23 @@ Saved local responses retain their advisory rows and add the reading host's
 current context. Remote consumers preserve the reporting host's envelope;
 they must not derive remote names from the coordinator's local hostname.
 
-This is provider expansion, not row-field retirement. Existing row naming and
-selection semantics remain during consumer migration. Older receivers ignore
-the additive envelope; a provider rollback may omit it. Missing context means
-that live reporter naming is unsupported, not that the reader should invent
-it. Consumer migration and durable row/index naming removal follow separately;
-this capability alone does not certify those later changes.
+Existing row naming and selection semantics remain during consumer migration.
+Older receivers ignore the additive envelope; a provider rollback may omit it.
+Missing context means that live reporter naming is unsupported, not that the
+reader should invent it. This capability does not certify durable row/index
+naming removal.
+
+Manager's production readers admit the envelope separately as receiver-only
+`_reporting_context`, stripping it before semantic-row validation or comparison.
+When present it supersedes row naming tuples; `unavailable` withdraws those
+names rather than reviving a stored tuple. An absent envelope retains the legacy
+baseline. A changed heartbeat context repaints admitted naming without changing
+row revisions, observation times, freshness or source/transport selection.
+Availability-only frames and legacy heartbeats without the optional property
+retain the last admitted context until a new complete publication replaces it.
+Malformed context or a wire row injecting receiver-only reporting metadata is
+rejected before replacing committed rows. These facts cannot retarget actions:
+configured source identity and transport authority remain separate.
 
 ### Current publication and selection
 

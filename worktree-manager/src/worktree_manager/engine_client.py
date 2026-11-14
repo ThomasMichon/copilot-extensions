@@ -13,7 +13,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from worktree_identity import parse_machine_identity
+from .worktree_reporting_contract import row_execution_machine
 
 from . import agent_plugin_runtime, picker_review
 from .engine_sessions import list_worktree_session_snapshot as list_worktree_session_snapshot
@@ -460,8 +460,8 @@ class Worktree:
     Only the fields the Manager renders are lifted into typed attributes; the
     raw dict is kept on ``raw`` so a newer contract field is reachable without a
     code change here (additive-only evolution).
-    ``machine`` is the execution owner of an explicit tuple; its physical host
-    and environment remain unchanged on ``raw``.
+    ``machine`` uses admitted live reporter naming when supported, otherwise
+    the legacy row tuple. Neither naming form establishes transport authority.
     """
 
     id: str
@@ -494,13 +494,10 @@ class Worktree:
 
 def worktree_from_dict(d: dict) -> Worktree:
     """Build the Manager's cross-cutting worktree model from a contract row."""
-    identity = parse_machine_identity(d)
     return Worktree(
         id=str(d.get("id") or ""),
         repo=str(d.get("repo", "") or ""),
-        machine=(
-            identity.execution_machine if identity is not None else str(d.get("machine", "") or "")
-        ),
+        machine=row_execution_machine(d),
         branch=str(d.get("branch", "") or ""),
         title=(d.get("title") if d.get("title") not in (None, "null") else None),
         state=d.get("state"),
