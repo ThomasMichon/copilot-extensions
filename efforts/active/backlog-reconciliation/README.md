@@ -3164,6 +3164,13 @@ sources, transferring owners or turning partial/planning gains into completion.
   receiving objective or a retained gap; investigate actual implementation
   evidence when claiming completion, rather than making that the prerequisite
   for discovering thematic alignment.
+  The [first-use and messaging-handoff research](journal/2026/11.14-first-use-and-message-handoff-research.md)
+  distinguishes #9177/#9238's specific nonmatching receivers, #9281's plausible
+  but unaccepted doctor/readiness intake, #12487's existing canonical owner and
+  frozen transfer, and #12393/#12514's finite source-provenance gaps. The original
+  alternatives, positive source credit, actual reservations and all custodians
+  remain. Its complete 15:41:00 UTC census is 850 whole open, 121 above fixed
+  729, with no new disposition or technical-completion credit.
   The [compiler-free and source-qualification checkpoint](journal/2026/11.14-compiler-free-and-source-qualification.md)
   records reviewed delivery in #12606 of CF8403-P1/P2, two local rows and actual
   ROOT-global CF8403-G in the existing leased-instance home. It retains all
