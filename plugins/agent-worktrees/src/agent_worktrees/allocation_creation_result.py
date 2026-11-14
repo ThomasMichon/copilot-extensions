@@ -128,11 +128,10 @@ def validate(value: object, metadata: dict) -> dict | None:
     ):
         raise ValueError("invalid original sessionless creation result")
     identity = allocation.AllocationIdentity.from_dict(proof["identity"])
-    machine, project, worktree_id = allocation.qualified_ref(identity.ref)
+    _, project, worktree_id = allocation.qualified_ref(identity.ref)
     worktree = result["worktree"]
     if (
         worktree.get("id") != worktree_id or worktree.get("repo") != project
-        or worktree.get("execution_machine", worktree.get("machine")) != machine
         or worktree.get("creation_nonce") != identity.creation_nonce
         or worktree.get("path") != identity.path or worktree.get("branch") != identity.branch
         or worktree.get("owner_ref") != metadata["creator"]
