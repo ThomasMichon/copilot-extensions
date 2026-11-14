@@ -116,6 +116,10 @@ On Windows, fingerprint I/O accepts ordinary and extended-length source paths
 through the existing native-path helper, without changing machine-wide settings.
 Relative digest labels and paths reported to file observers retain their logical
 spelling; staging depth and the extended-length prefix do not change the digest.
+Observer and file-hash collector keys preserve the matched declared root's
+ordinary or extended spelling, so consumers can look up their original resolved
+source paths. The most-specific root determines reporting; duplicate declarations
+of one root use its first spelling. Digest labels remain canonical and unchanged.
 Extended UNC namespace prefixes are recognized case-insensitively without
 changing server, share or filename spelling, so network inputs cannot become
 current-directory-relative aliases. POSIX symlink targets retain literal

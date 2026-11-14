@@ -126,6 +126,28 @@ def test_negative_source_graph_freezes_complete_transitive_resources(
     ).read_bytes() == leaf_resource.read_bytes()
 
 
+@pytest.mark.skipif(os.name != "nt", reason="native Windows extended-path consumer identity")
+@pytest.mark.parametrize("deep", [False, True])
+def test_freeze_inputs_preserves_extended_source_lookup_keys(tmp_path, engine, deep):
+    source = tmp_path / "source"
+    if deep:
+        while len(str(source)) < 290:
+            source /= "extended-source-" + "x" * 24
+    native = engine.runtime._runtime_component("versioned_runtime_construction").native_path
+    source = native(source)
+    source.mkdir(parents=True)
+    (source / "pyproject.toml").write_text(
+        '[project]\nname="source-fixture"\nversion="1.0"\ndependencies=[]\n',
+        encoding="utf-8",
+    )
+    (source / "module.py").write_bytes(b"VALUE = 7\n")
+
+    frozen = engine.freeze_inputs(source, tmp_path / "frozen")
+
+    assert (native(frozen.plugin) / "module.py").read_bytes() == b"VALUE = 7\n"
+    assert engine._package_roots(frozen.plugin) == frozen.packages
+
+
 def inspected(retained, **changes):
     from packaging.markers import default_environment
     from runtime_profile import SCHEMA, validate_profile

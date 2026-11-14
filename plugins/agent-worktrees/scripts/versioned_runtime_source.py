@@ -33,7 +33,7 @@ _GENERATED = {
 
 def fingerprint_entries(
     entries, *, label, root_label, roots, normalize_link, path_type, file_hashes, on_file,
-    on_progress=None, io_path=lambda path: path,
+    on_progress=None, io_path=lambda path: path, reported_path=lambda path: path,
 ):
     """Hash validated entries with the unchanged ordered, length-framed format."""
     import hashlib
@@ -78,10 +78,12 @@ def fingerprint_entries(
                         )
                     except OSError as exc:
                         raise OSError(f"fingerprint_source: could not read {entry}: {exc}") from exc
-                    if file_hashes is not None:
-                        file_hashes[entry] = hashlib.sha256(data).hexdigest()
-                    if on_file is not None:
-                        on_file(entry, data)
+                    if file_hashes is not None or on_file is not None:
+                        observed = reported_path(entry)
+                        if file_hashes is not None:
+                            file_hashes[observed] = hashlib.sha256(data).hexdigest()
+                        if on_file is not None:
+                            on_file(observed, data)
                 digest.update(frame(label(entry).encode("utf-8")))
                 digest.update(frame(kind.encode("utf-8")))
                 digest.update(frame(data))
@@ -732,55 +734,20 @@ def fingerprint_source(
     was validated". A caller that genuinely needs to fingerprint a
     partially-staged tree must check for that itself before calling this.
 
-    Symlinks are never silently resolved away: a discovered symlink (to a
-    file OR a directory) is hashed as ITS OWN entry -- its label, plus a
-    record of what it points to -- never collapsed with whatever it
-    happens to point at. Resolving a path and deduplicating by the
-    resolved path would let a symlink alias (``alias.py -> real.py``, both
-    under a declared root) vanish from the digest entirely once both paths
-    resolved the same way. A NESTED symlinked DIRECTORY (one discovered
-    mid-walk, not itself a declared root) is deliberately never
-    followed/walked into (cycle-unsafe, and ambiguous which identity --
-    the link or its target -- would own the nested names); instead the
-    link itself is hashed as a single entry recording where it points, so
-    re-pointing or adding/removing it still changes the digest even though
-    its nested contents, if any, are not separately walked.
+    A discovered symlink is its OWN entry: label, target and framed kind,
+    never deduplicated away into its target. Nested symlink directories are
+    not followed (cycle-unsafe); their pointer identity still detects
+    adding, removing or repointing the link. A nested target must lie inside
+    a DECLARED root whose separate walk covers its actual bytes, not merely
+    inside all roots' common ancestor. Undeclared targets raise; dangling
+    targets alone are allowed as identity-only. Lookup errors fail closed.
 
-    A NESTED symlink's target must itself fall inside one of the DECLARED
-    roots (so its actual bytes are already covered by that root's own,
-    separate walk) -- this raises otherwise, exactly like a symlinked
-    DECLARED ROOT does (below): hashing only a symlink's identity/pointer
-    is only safe when the content it points at is attributable some other
-    way, never when it is an undeclared external target whose bytes could
-    change invisibly to this digest. A DANGLING target (resolves to
-    nothing at all) is the one exception -- allowed through as identity-
-    only, since there is no actual content it could be hiding.
-
-    A symlink target is recorded as-is when relative (already stable under
-    whole-tree relocation, since it is interpreted relative to the
-    symlink's own location, which moves together with everything else).
-    An ABSOLUTE target is made relocation-invariant the same way a file
-    label is -- relative to the common ancestor of every declared root --
-    but ONLY when it actually falls inside one of the declared roots
-    themselves (never merely under their common ancestor, which can
-    include undeclared sibling paths); an absolute target outside every
-    declared root is rejected per the previous paragraph, so this
-    normalization step only ever runs for a target already known to be
-    covered.
-
-    A DECLARED ROOT that is itself a symlink is treated differently from a
-    nested one, and deliberately raises instead of silently succeeding: a
-    root is the caller's own attributable content declaration, so reducing
-    it to mere link-target identity -- never hashing what is actually read
-    through that path -- would recreate exactly the content-drift blind
-    spot this function exists to close (#5472: fingerprinting too little
-    of the real install input). The caller must declare the real resolved
-    content path (or the symlink's target) instead of a symlinked root.
-
-    Each entry's kind ("file" vs "symlink") is itself framed as its own
-    length-prefixed record alongside the label and content/target, so a
-    regular file can never hash identically to a symlink merely because
-    its raw bytes happen to equal some symlink's encoded target text.
+    Relative targets retain their platform-native text. Covered absolute
+    targets are labeled relative to the declared roots' common ancestor
+    for relocation invariance. A DECLARED root that is itself a symlink
+    always raises: the caller must declare its real resolved content path,
+    not just its pointer (#5472). Framed entry kinds keep a file distinct
+    from a symlink even when their content and encoded target bytes match.
     """
     import os as _os
 
@@ -798,6 +765,7 @@ def fingerprint_source(
             raise OSError(f"fingerprint_source: could not stat {p} ({context})") from exc
 
     resolved_parents: dict[Path, Path] = {}
+    reported_roots: dict[Path, Path] = {}
 
     def _declared_root_path(p) -> Path:
         # Resolve the PARENT chain (handles relative paths, intermediate
@@ -816,9 +784,12 @@ def fingerprint_source(
                 _native_path(parent).resolve(),
             )))
         # Unlike a symlink name, '..' must match the root normalized by native I/O.
+        root = resolved_parents[parent] / raw.name
         if os.name == "nt" and raw.name == "..":
-            return resolved_parents[parent].parent
-        return resolved_parents[parent] / raw.name
+            root = resolved_parents[parent].parent
+        spelling = _native_path(root) if os.name == "nt" and value.startswith("\\\\?\\") else root
+        reported_roots.setdefault(root, spelling)
+        return root
 
     roots = [_declared_root_path(p) for p in paths]
     root_modes: dict[Path, int] = {}
@@ -977,6 +948,14 @@ def fingerprint_source(
                 f"directory, or symlink)"
             )
 
+    def _reported_path(entry: Path) -> Path:
+        if entry in reported_roots:
+            return reported_roots[entry]
+        for root_path in ordered_roots:
+            if entry.is_relative_to(root_path):
+                return reported_roots[root_path] / entry.relative_to(root_path)
+        return entry
+
     def _label(f: Path) -> str:
         # The root's path relative to the common ancestor of every declared
         # root (see `_root_label`), never the root's bare basename (not
@@ -993,6 +972,6 @@ def fingerprint_source(
     return fingerprint_entries(
         entries, label=_label, root_label=_root_label, roots=roots,
         normalize_link=_normalize_windows_extended_path if os.name == "nt" else str,
-        path_type=Path, io_path=_native_path,
+        path_type=Path, io_path=_native_path, reported_path=_reported_path,
         file_hashes=file_hashes, on_file=on_file, on_progress=on_progress,
     )

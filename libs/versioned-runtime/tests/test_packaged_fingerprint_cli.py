@@ -107,7 +107,14 @@ def test_fingerprint_cli_preserves_deep_ordinary_source_paths(
         **({deep / "nested" / "other.py": b"OTHER = 9\n"} if directory else {}),
     }
     extended = native(deep_input)
-    assert runtime.fingerprint_source([extended]) == expected
+    extended_observed, file_hashes = {}, {}
+    assert runtime.fingerprint_source(
+        [extended], file_hashes=file_hashes,
+        on_file=lambda path, content: extended_observed.update({path: content}),
+    ) == expected
+    assert extended_observed == {native(path): content for path, content in observed.items()}
+    for path, content in extended_observed.items():
+        assert file_hashes[path] == hashlib.sha256(content).hexdigest()
 
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows walk-path normalization")
@@ -133,10 +140,20 @@ def test_fingerprint_cli_preserves_parent_directory_root_labels(
             [selected], on_file=lambda path, content: observed.update({path: content}),
         ) == expected
         assert runtime.fingerprint_source([root, selected]) == expected
+        reported_root = native(root) if native_spelling else root
         assert observed == {
-            root / "module.py": b"VALUE = 7\n",
-            root / "child" / "other.py": b"OTHER = 9\n",
+            reported_root / "module.py": b"VALUE = 7\n",
+            reported_root / "child" / "other.py": b"OTHER = 9\n",
         }
+        for declared, first_root in (([root, selected], root), ([selected, root], reported_root)):
+            duplicate_observed = {}
+            assert runtime.fingerprint_source(
+                declared, on_file=lambda path, content: duplicate_observed.update({path: content}),
+            ) == expected
+            assert duplicate_observed == {
+                first_root / "module.py": b"VALUE = 7\n",
+                first_root / "child" / "other.py": b"OTHER = 9\n",
+            }
 
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows UNC path identity")
