@@ -62,13 +62,14 @@ class Entry:
         self.fd, self.parent, self.windows = fd, parent, windows
         self.check_budget = check_budget or (lambda: None)
 
-    def verify(self) -> None:
+    def verify(self) -> os.stat_result:
         self.check_budget()
         named = self.path.lstat() if self.windows else os.stat(
             self.path.name, dir_fd=self.parent.fd, follow_symlinks=False,
         ) if self.parent else self.path.lstat()
         if not ordinary(named) or identity(named) != identity(self.info):
             raise ValueError("cache entry changed")
+        return named
 
     def names(self):
         self.check_budget()
@@ -110,7 +111,9 @@ class Entry:
         return data
 
     def remove(self) -> None:
-        self.verify()
+        current = self.verify()
+        if stat.S_ISREG(current.st_mode) and current.st_nlink != 1:
+            raise ValueError("cache entry acquired another hard link")
         self.check_budget()
         if self.windows:
             import ctypes

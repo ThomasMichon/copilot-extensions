@@ -1825,7 +1825,7 @@ disable writes.
 Older launchers used `<runtime-root>/cache/python/<namespace>` and could leave
 one `unsealed-*` directory per invocation. `python-cache prune` remains the
 explicit legacy inspection/removal command; it does not collect the new
-owned platform-cache namespaces:
+owned platform-cache namespaces.
 
 Normal updates additionally perform [bounded legacy relief](../../../libs/agent-procutil/README.md#legacy-update-relief)
 through the runtime owner's GC. Only bytecode affirmatively attributed to an
