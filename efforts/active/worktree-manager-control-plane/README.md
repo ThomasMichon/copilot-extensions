@@ -58,6 +58,14 @@
   [`plugins/agent-worktrees/docs/picker.md`](../../../plugins/agent-worktrees/docs/picker.md) ·
   [`plugins/agent-worktrees/docs/architecture.md`](../../../plugins/agent-worktrees/docs/architecture.md)
 
+## Goal
+
+Deliver the complete standalone installer/configurator and optional control
+plane described in the unchanged Guiding Intent below. Its ordinary update
+entry must also satisfy the [foreground-update/service-startup contract](../source-managed-runtime-installs/update-service-lifetimes.md):
+caller cancellation stops updater-owned work, not independently accepted
+service operations or their daemon/retention trees.
+
 ## Guiding Intent
 
 For installation and update, the
@@ -170,6 +178,9 @@ in-plugin Picker once the extracted one reaches parity — this is the
 operator-visible end-state, not an indefinite dual-implementation state.
 
 ## Plan
+
+- [ ] Align the actual Manager update/control boundary with the shared
+  lifetime amendment; preserve existing UI, source, phase owners and holds.
 
 Phases are ordered by dependency, not calendar. Checked items are already
 realized in `main`; unchecked items are the remaining delta.
@@ -2584,6 +2595,10 @@ _(Agent-recommended direct tracking under existing Phase 7; all rows unchecked.)
   release.
 
 ## Validation Plan
+
+- [ ] Qualify the scope-applicable [L1-L6 lifetime controls](../source-managed-runtime-installs/update-service-lifetimes.md#validation-and-completion)
+  through the real Manager entry, including update cancellation versus accepted
+  service work, without treating a surviving observer as durable execution.
 
 - [x] **VSSTD:** Qualify every local
   [stream-drain control](stream-stderr-drain.md#validation-plan), preserving

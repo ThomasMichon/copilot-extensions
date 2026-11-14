@@ -5,7 +5,7 @@
   lightweight Copilot plugins reach them.
 - **Scope:** branch (links cross-cutting and per-plugin child visions)
 - **Status:** Active
-- **Last revised:** 2026-11-09
+- **Last revised:** 2026-11-13
 - **Reality docs:** [`docs/architecture.md`](../../docs/architecture.md) ·
   [`docs/install-contract.md`](../../docs/install-contract.md) · each plugin's
   `docs/architecture.md`
@@ -48,6 +48,22 @@ the one live daemon it needs, and exits — it is never itself the long-running
 thing, and it never spawns one just to be sure.
 
 ## Concepts & Components
+
+### Independent service startup lifetime
+
+Ordinary updater execution remains caller-controlled, but accepted service
+setup/start and the persistent service tree have their own lifecycle owner.
+Updater cancellation, ancestor termination or cleanup cannot kill that work,
+its required host/wrappers or its retained runtime. A cancellable control
+client may observe an independent operation; it must not be that operation's
+unacknowledged lifetime owner.
+
+The [Installer lifetime boundary](../installer/README.md#foreground-update-and-independent-service-startup)
+governs integrated updates and each application's standalone setup/start.
+Single-writer, data compatibility, activation/recovery and protected-session
+contracts still apply. A service-supervisor-owned Job or equivalent scope is
+valid; production startup never claims durability from caller-contained
+fallback or by weakening bounded helper/test cleanup.
 
 ### Reversible automatic-update inhibition
 

@@ -10,6 +10,14 @@
 - **Umbrella issue:** _TBD — file once this effort's plan clears review_
 - **Sub-issues:** #6389 (build/serving convergence); #6390 (Index installer result boundary); existing adopter and cutover owners remain in the linked audit.
 
+## Goal
+
+Converge the shared installer mechanics and admitted adopters on the complete,
+self-contained incoming-installation outcome in the unchanged Guiding Intent
+below. Implement the [current lifetime boundary](../source-managed-runtime-installs/update-service-lifetimes.md)
+through those owners, retaining Worktrees' permanent exception, Budget's
+audit-only scope and all paused-adopter gates.
+
 ## Guiding Intent
 
 The shared engine and every adopting installer must converge on
@@ -249,6 +257,10 @@ This follow-up requests durable tracking and effort integration, not immediate
 implementation of every recommendation or takeover of another participant's work.
 
 ## Plan
+
+- [ ] Reconcile the shared activation/handoff mechanics with caller-owned
+  ordinary updates and independent accepted service startup; migrate only
+  admitted adopters, not a new portfolio or a resumed paused lane.
 
 ### Phase 0 — Audit the real shared surface (no code changes)
 - [x] Diff `New-SignedVenv` / `Ensure-Uv` / `Invoke-UvVenvResilient` /
@@ -753,6 +765,10 @@ state, pause, participant, exception and Journal entry remains binding._
   new framework, actual runtime execution or rollout is authorized by intake.
 
 ## Validation Plan
+
+- [ ] Qualify the applicable [L1-L4 lifetime controls](../source-managed-runtime-installs/update-service-lifetimes.md#validation-and-completion)
+  for each selected adopter, including service/runtime retention after updater
+  cleanup and unchanged containment for bounded tools and tests.
 
 - [ ] **G5955:** Resolve the complete P5955/local V5955 and continuing
   Coordination contract at its finite original tier, under the same custodians.

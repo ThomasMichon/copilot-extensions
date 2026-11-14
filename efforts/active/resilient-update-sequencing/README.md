@@ -11,6 +11,14 @@
 - **Umbrella issue:** #6820
 - **Related issues:** #6812, #1238, #1110, #6234, #4876, #6476
 
+## Goal
+
+Reach the verified good/current installation and resilient, low-repetition
+sequence in the unchanged Guiding Intent below. Apply the
+[current lifetime contract](../source-managed-runtime-installs/update-service-lifetimes.md):
+foreground cancellation stops finite update work, while already accepted
+service setup/start survives through its own lifecycle owner.
+
 ## Guiding Intent
 
 This effort's objective and completion gate follow
@@ -109,6 +117,10 @@ slice boundaries and validation details below are agent-recommended means of
 fulfilling that direction, not additional operator requirements.
 
 ## Plan
+
+- [ ] Integrate cancellation and service-owner handoff into the existing staged
+  sequence, without activating an un-staged required set or starting unaccepted
+  remaining services after cancellation. Existing implementation custody stays.
 
 ### Phase 1 - Reviewed design and coordination
 - [x] Land this effort, design and standing intent through review before code.
@@ -259,6 +271,10 @@ Plan/Validation/Coordination clauses and current best-effort
 cold-recovery/candidate-health/verified-retained-good-generation semantics.
 
 ## Validation Plan
+
+- [ ] Qualify the relevant [L1-L6 boundaries](../source-managed-runtime-installs/update-service-lifetimes.md#validation-and-completion)
+  before/during/after accepted activation, including caller/ancestor cleanup,
+  retained daemon/runtime survival and truthful partial/recovery outcomes.
 
 - [ ] Qualify that target through ordinary explicit update with automatic holds,
   missing old monitor support, stale fences and failed old recovery. Prove all

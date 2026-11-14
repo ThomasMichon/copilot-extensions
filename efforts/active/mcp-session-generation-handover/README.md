@@ -23,6 +23,16 @@ Current operator reaffirmation:
 fresh physical-generation execution and preserved session reattachment. It does
 not replace the original Request or waive release and installed-consumer gates.
 
+### Updater and service lifetime
+
+The [current lifetime amendment](../source-managed-runtime-installs/update-service-lifetimes.md)
+supplements this Goal without replacing any original request, client-session
+preservation or incoming-generation gate. Foreground updater cancellation must
+not kill accepted MCP service startup or its retained host/runtime tree.
+Client-owned stdio/session keepers remain with their actual client, not the
+updater's cleanup scope. This does not reintroduce a whole-SDK, desktop observer
+or unrelated portfolio prerequisite.
+
 ### Selected originating-owner design
 
 > explicit-launcher-handoff
@@ -209,6 +219,10 @@ owned-process cleanup remain this effort's requirements. Debugger conditions
 are also withdrawn; no original calibration approval is transferred or consumed.
 
 ## Plan
+
+- [ ] Apply the shared lifetime amendment at the actual MCP service handoff,
+  retaining all existing implementation owners and withdrawn-observer
+  boundaries; do not make a client wrapper a detached production service.
 
 The decomposition and implementation choices below are **agent-recommended**.
 Land and qualify incoming publication as the first implementation slice.
@@ -630,6 +644,10 @@ withdrawal authorizes no GUI effect or change to the SDK's own admission rules.
   milestone, unchecked item, owner and actual hold.
 
 ## Validation Plan
+
+- [ ] Prove the applicable [L1-L4 controls](../source-managed-runtime-installs/update-service-lifetimes.md#validation-and-completion)
+  through the actual MCP entry/stdio consumer while preserving original client
+  sessions and keeper identity. No desktop or whole-SDK matrix is imported.
 
 - [ ] First-slice incoming publication succeeds with a live old keeper,
   unfinished handover, unavailable outgoing census/provenance or occupied old

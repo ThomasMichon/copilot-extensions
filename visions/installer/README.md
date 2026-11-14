@@ -705,12 +705,44 @@ running it nor proving historical cleanup is required for an ordinary update.
 The [historical cleanup pattern](../../docs/patterns/historical-installation-cleanup.md)
 keeps detector support, current resource authority and observed outcomes separate.
 
+### foreground-update-and-independent-service-startup
+
+An ordinary attended update follows its caller through completion. Cancellation,
+caller termination and ancestor cleanup stop the update and its finite
+acquisition, construction and control work; the normal path does not silently
+delegate the whole installation to a detached worker. Explicit background
+execution remains a separate, visible choice, independent of automatic/manual
+update classification.
+
+Service setup/start crosses a different ownership boundary. Once the service's
+lifecycle owner accepts that operation, it owns startup, readiness, activation
+and recovery independently of the updater. Aborting the updater or its ancestors
+cannot kill accepted service work or a now-started daemon, including the host,
+wrappers and retained runtime needed for its lifetime. Cancelling a short-lived
+start client or readiness observer is not cancellation of the accepted service
+operation. Unaccepted remaining services do not start after update cancellation.
+
+The handoff is attributable and cannot leave unowned running work or claim
+acceptance before an independent owner exists. Accepted service operations
+retain their actual write/data custody until a stable result; a cancelled
+foreground request does not license overlapping installation writes. A
+production service never silently falls back to the updater's shorter lifetime.
+
+Independence is from caller-owned termination and cleanup, including process
+trees, console cancellation and platform containment scopes. A Job or equivalent
+scope owned by the service's supervisor is legitimate. Neither visibility,
+immediate-parent exit nor a blanket no-Job predicate establishes the contract.
+Qualification must prove service survival after caller cleanup while bounded
+controls terminate, preserving real unsupported-boundary diagnostics.
+
 ### single-installation-execution-owner
-An installation has one background execution owner for its complete update
-transaction: acquisition, runtime construction, activation and integration.
-Ordinary CLI, agent, hook and maintenance callers submit durable requests rather
-than becoming independent installers. Waiting observes that same operation;
-closing a caller does not abandon its execution or result.
+An installation has one admitted execution owner for its update transaction:
+acquisition, runtime construction, coordinated activation and integration.
+Ordinary foreground calls can hold that authority directly and remain
+caller-controlled; explicit background requests can select independent
+execution. Durable request/result history and single-writer coordination do
+not require ordinary callers to be mere observers of a background installer.
+Accepted service setup/start retains the independent lifetime defined above.
 
 Exclusivity means one active installation operation for the same installation,
 including its subordinate installer work, not ownership of unrelated services
@@ -764,15 +796,15 @@ failure and continue through an explicit recovery path without disrupting
 unrelated services. Uncertain execution is never relabeled success or replayed
 merely to avoid a reboot.
 
-Explicitly supervised debugging can execute directly only while holding the
-same exclusive authority. Recurring scheduling is a separate, consented
-responsibility: a maintenance trigger submits to the execution owner rather
-than introducing another installation driver. Standalone components retain their
-independent installation and recovery paths; adopting this suite-level owner
+Foreground, explicitly detached and supervised-debug execution use the same
+exclusive authority. Recurring scheduling is a separate, consented
+responsibility: a maintenance trigger uses that owner with its declared
+lifetime rather than introducing another installation driver. Standalone
+components retain their independent installation and recovery paths; adopting this suite-level owner
 does not make Manager a mandatory plugin dependency.
 
 ### normal-and-repair-installation
-Normal background installation limits trigger fan-out and converges on the
+Normal installation limits trigger fan-out and converges on the
 authoritative desired version. Same-version requests debounce; a different
 version waits or queues behind the active installation. Fresh installation is
 the default convergence path; recognizers enable incremental/ZDD optimization.
