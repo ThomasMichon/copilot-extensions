@@ -9,6 +9,14 @@
 - **Related issues:** #9489, #7743, #9448, #7758, #10180, #6820, #7028, #7947, #6389, #5472, #10451, #9716, #10054, #10499, #10486, #10652, #10653, #10996
 - **Vision:** [authoritative runtime replacement](../../../visions/installer/README.md#authoritative-runtime-replacement)
 
+## Goal
+
+Recover affected older installations to the complete usable incoming state
+required by the unchanged Guiding Intent below. The
+[foreground-update/service-startup amendment](../source-managed-runtime-installs/update-service-lifetimes.md)
+adds caller-loss recovery that stops finite updater work without killing
+accepted service operations, keepers or protected connectivity.
+
 ## Guiding Intent
 
 Drive high-impact installer/update compatibility failures to a verified usable
@@ -127,6 +135,10 @@ Implementation decomposition below is agent-recommended. The request does not
 authorize production updates, recovery mutations or new access.
 
 ## Plan
+
+- [ ] Add the scoped foreground-cancellation and independent-startup cases to
+  the existing upgrade-acceptance owner, preserving all prior failure evidence,
+  source claims, operational holds and the no-parallel-writer boundary.
 
 ### Phase 1 - Reviewed scope and issue ownership
 
@@ -311,6 +323,10 @@ a new recovery/provenance veto on explicit incoming replacement.
   only when this parent gate is satisfied.
 
 ## Validation Plan
+
+- [ ] Exercise the relevant [L1-L5 caller-loss/handoff cases](../source-managed-runtime-installs/update-service-lifetimes.md#validation-and-completion)
+  through the latest normal entry with affected old footprints and same-boot
+  recovery. Do not equate cancelled observation or queue release with recovery.
 
 - [ ] For each selected incompatibility, start from representative broken or
   incompatible prior state and exercise the real latest entry, not only a

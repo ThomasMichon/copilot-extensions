@@ -12,6 +12,15 @@
 - **Umbrella issue:** #6234
 - **Related issues:** #5768, #5873, #4876, #6143
 
+## Goal
+
+Reduce repeated installation, footprint and cold-start cost without losing
+capabilities or independently installable services, as the unchanged Guiding
+Intent below requires. The [current lifetime amendment](../source-managed-runtime-installs/update-service-lifetimes.md)
+also governs shared process helpers: foreground update work is cancellable;
+accepted service startup has independent, qualified lifetime. Preserve the
+compiler-free and setup-owned Python requirements.
+
 ## Guiding Intent
 
 Reduce repeated installation, package footprint and cold-start work without
@@ -137,6 +146,10 @@ remain separate requirements. The [amendment](compiler-free-execution.md#python-
 owns the revised implementation and validation boundary.
 
 ## Plan
+
+- [ ] Carry the updater/service lifetime distinction through the existing
+  shared-helper owners and compiler-free execution work, without selecting a
+  new mandatory global broker or changing prerequisite/deployment authority.
 
 ### Phase 1 - Reviewed intent and dependency baseline
 - [x] Land this proposal, the audit motivation and vision amendments through review (#6235).
@@ -267,6 +280,10 @@ whole-campaign acceptance, release attribution and authorized rollout remain
 open.
 
 ## Validation Plan
+
+- [ ] Preserve the applicable [L1-L4 native lifetime and negative controls](../source-managed-runtime-installs/update-service-lifetimes.md#validation-and-completion)
+  while qualifying the shared helper boundary; source reuse or fewer processes
+  cannot substitute for survival after actual caller cleanup.
 
 - [x] Unit and dependency-contract tests cover each changed declaration,
   optional extra, import boundary and helper compatibility rule.

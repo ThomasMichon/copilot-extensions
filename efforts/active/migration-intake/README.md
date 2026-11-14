@@ -47,14 +47,14 @@ The canonical domain plans are:
 - [`agent-machines-declarative-control-plane`](../agent-machines-declarative-control-plane/README.md)
 - [`marketplace-scoped-installations`](../marketplace-scoped-installations/README.md)
 - [`native-construct-convergence`](../native-construct-convergence/README.md)
-- [`plugin-process-hygiene`](../plugin-process-hygiene/README.md)
+- [`plugin-process-hygiene`](../../2026/09/13%20plugin-process-hygiene/README.md)
 - [`restricted-venue-targets`](../restricted-venue-targets/README.md)
 - [`review-automation-reliability`](../review-automation-reliability/README.md)
 - [`session-context-aggregation`](../../2026/08/31%20session-context-aggregation/README.md)
 - [`test-portfolio-rationalization`](../test-portfolio-rationalization/README.md)
 - [`venue-parity`](../venue-parity/README.md)
 - [`windows-launch-hardening`](../windows-launch-hardening/README.md)
-- [`worktree-finality-and-obligations`](../worktree-finality-and-obligations/README.md)
+- [`worktree-finality-and-obligations`](../../2026/08/28%20worktree-finality-and-obligations/README.md)
 - [`worktree-manager-control-plane`](../worktree-manager-control-plane/README.md)
 
 `agent-index-engine-daemon` and `uniform-runtime-resolution` are completed
@@ -306,4 +306,17 @@ retain only genuinely unclassified general-purpose work here.
 
 - Established the neutral intake contract and indexed the canonical domain
   plans without importing any originating context.
+
+### 2026-11-14 UTC - Existing runner-mapping domain acceptance recorded
+
+The append-only [candidate ledger](ledger.md#finite-external-image-mapping-cleanup-intake-2026-11-14-utc)
+records #7643 as `routed` to the existing test-portfolio Phase 5 family.
+#12573 already merged the complete owning Plan, local and actual global
+Validation, Coordination and dated Journal; whole-current readback confirms
+the accepted domain route. Phase 7 is the intake path, not another owner.
+The existing public tracker remains OPEN pending a separate source judgment;
+no new issue is created. All ten technical rows, original cleanup custody,
+bounded handling OR retained-artifact alternative and execution limits remain.
+This publication records routing, not implementation, native/cleanup
+acceptance, process/service action or source/resource release.
 

@@ -29,6 +29,12 @@ activation; existing generations affect compatibility/state transfer, not a
 separate legacy construction route. This alignment changes no completed credit,
 source custody, operational hold or deployment authority.
 
+The [current lifetime clarification](update-service-lifetimes.md) is part of
+this Goal: ordinary updates are foreground-owned and cancellable, while accepted
+service setup/start and its retained process/runtime tree have independent
+ownership. Preserve the complete installation goal and all other acceptance
+rows; a documentation merge does not qualify this new behavior.
+
 **Finite-scope amendment: reviewed in #11708.** The consolidated
 Plan and global Validation Plan below replace duplicated acceptance inventories,
 not the operator's original request or later refinements. The
@@ -38,6 +44,13 @@ No item is newly passed, no tracker is closed, no custody changes and no native
 or installed operation is authorized by this proposal. The effort remains Active.
 
 ## Guiding Intent
+
+The [foreground-update/service-startup amendment](update-service-lifetimes.md)
+adds the current cancellation and lifetime requirements to this complete
+effort, without narrowing its existing Goal. Ordinary updates remain
+caller-controlled; accepted service setup/start, daemon trees and required
+retention have independent ownership. The associated-owner matrix and L1-L6
+retain the cross-effort delivery/validation obligations and all existing holds.
 
 The governing completion target is
 [authoritative runtime replacement](../../../visions/installer/README.md#authoritative-runtime-replacement):
@@ -441,7 +454,7 @@ independent of Manager and other plugins. The detailed packaging, bootstrap
 admission and adapter sequence below are **agent-recommended implementation
 work**, not additional operator-selected mechanisms.
 
-**Execution-owner clarification (2026-10-22):** the operator requires one
+**Historical execution-owner clarification (2026-10-22):** the operator required one
 background installation driver, not merely independent per-installer locks.
 Ordinary callers submit durable requests; waiting observes the operation and
 does not become its installer. Direct execution is reserved for supervised
@@ -450,6 +463,12 @@ debugging under the same exclusive authority. The operator directed:
 someone else's PR". The [execution-driver slice](execution-driver.md) therefore
 proceeds against the existing canonical updater, independently of open staging,
 watchdog and recurring-maintenance changes, without superseding their owners.
+
+The later [foreground-update/service-startup clarification](update-service-lifetimes.md#request)
+supersedes the ordinary-background-worker-only requirement above, not its
+single-writer, request-history or delivered source credit. Direct foreground
+execution is no longer merely a debugging exception in the intended contract;
+this amendment does not claim that migration is already implemented.
 
 **Repair evidence clarification (2026-10-23), summary:** audited, request-bound
 pre-launch recovery is allowed, but an explicit operator order to repair,
@@ -617,9 +636,11 @@ adoption. Other completed source slices remain credited in the
 
 - [ ] P4bD: Complete the addressed installation's ordinary update, explicit
   repair and independent cold-foundation entry through #7758's one
-  caller-independent transaction owner, without requiring preexisting Python,
+  transaction owner: ordinary execution is foreground/cancellable, while
+  explicitly background execution and independently accepted service startup
+  retain their declared lifetimes. Do not require preexisting Python,
   Manager or a plugin runtime for foundation establishment. Preserve durable
-  outcomes, supervised-debug exclusivity and bounded manual continuation through
+  outcomes, execution-mode exclusivity and bounded manual continuation through
   stale/unsupported old state; do not replay uncertain work or require old-runtime
   approval.
 - [ ] P4bP: Connect the inventory's remaining actual installation publishers to
@@ -701,7 +722,8 @@ independent objectives, not recursively imported completion gates.
   outcomes; do not mandate mutation of a completed legacy venv, arbitrary old
   protocol compatibility or an exhaustive historical corruption matrix.
 - [ ] V8: Verify the required cold entry and actual transaction owner with
-  relevant native caller-loss/concurrency evidence, one writer and durable
+  the [L1-L6 cancellation and service-handoff evidence](update-service-lifetimes.md#validation-and-completion),
+  relevant native concurrency evidence, one writer and durable
   attributable results. Reuse qualified foundation components; an accepted
   request, recipe fixture or process spawn alone is not completed installation.
 - [ ] V9: Observe one unchanged regular maintenance cycle reusing the selected
@@ -751,6 +773,8 @@ independent configuration choice rather than forcing the Manager and suite
 onto one branch.
 
 ## Journal
+
+- [2026-11-13 - Foreground update and service-start lifetime clarification](journal/2026/11.13%20foreground-update-service-startup.md)
 
 - [2026-11-13 - Original canonical application integration merged](journal/2026/11.13%20canonical-application-integration.md)
 - [2026-11-12 - Composition delivered and complete preparation integration](journal/2026/11.12%20complete-preparation.md)

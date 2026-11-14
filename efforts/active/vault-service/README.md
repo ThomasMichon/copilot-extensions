@@ -8,6 +8,15 @@
 - **Vision:** [Vault service](../../../visions/vault/README.md), all Features and Behaviors
 - **Umbrella issue:** #8729
 
+## Goal
+
+Make the complete reviewed Vault credential/transaction and independent
+deployment vision realizable through the unchanged Guiding Intent below.
+The [current lifetime amendment](../source-managed-runtime-installs/update-service-lifetimes.md)
+requires accepted setup/start and the service tree to outlive updater
+cancellation. This remains a Draft proposal: architecture review, owner/slice
+admission, credential and deployment gates are not waived.
+
 ## Guiding Intent
 
 Make the reviewed Vault vision realizable by composing existing credential,
@@ -88,6 +97,10 @@ authority. These requirements are already captured in the reviewed vision and
 #8729. Planning does not authorize vendor login, native interaction or cutover.
 
 ## Plan
+
+- [ ] Reflect independent accepted setup/start ownership in the proposed local
+  and central service lifecycle; retain P0 and every original implementation
+  admission gate rather than treating this alignment as permission to execute.
 
 **Agent-recommended proposal:** the phase decomposition, technical boundaries
 and validation design below are recommendations derived from the reviewed
@@ -203,6 +216,10 @@ Draft; no runtime, interaction, credential or implementation admission._
   finite branch.
 
 ## Validation Plan
+
+- [ ] Map the applicable [L1-L4 caller-loss cases](../source-managed-runtime-installs/update-service-lifetimes.md#validation-and-completion)
+  into the existing proposal's validation without using real credentials,
+  changing a live service or bypassing architecture/owner admission.
 
 All runtime acceptance below is **pending**, not evidence of an implementation.
 The [validation matrix](validation.md) is the detailed, agent-recommended plan.
