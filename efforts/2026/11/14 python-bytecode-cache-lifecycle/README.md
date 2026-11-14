@@ -14,10 +14,11 @@ The preceding location preference remains part of that request:
 - **Repo:** copilot-extensions
 - **Branch(es):** dependency-ordered PRs against `dev`
 - **Created:** 2026-11-11
-- **Status:** Active
-- **Parent:** [Derived Disk Hygiene](../derived-disk-hygiene/README.md), bytecode follow-on
+- **Status:** Done
+- **Completed:** 2026-11-14
+- **Parent:** [Derived Disk Hygiene](../../../active/derived-disk-hygiene/README.md), bytecode follow-on
 - **Coordination issue:** #10968
-- **Vision:** reconcile the design with [authoritative runtime replacement](../../../visions/installer/README.md#authoritative-runtime-replacement) before implementation
+- **Vision:** reconciled with [authoritative runtime replacement](../../../../visions/installer/README.md#authoritative-runtime-replacement) before implementation
 
 ## Guiding Intent
 
@@ -103,57 +104,74 @@ nor reinterpret an ignored file or a directory name as disposal authority.
 - [x] Implement shared cache placement and ownership without per-plugin
   divergent cache roots or a new resident cleanup service; provider foundation
   merged in #12145 and consumer adoption in #12569.
-- [ ] Integrate process-exit, runtime-retirement and bounded orphan cleanup
+- [x] Integrate process-exit, runtime-retirement and bounded orphan cleanup
   with the existing lifecycle owners, preserving active and rollback users;
   indexed retirement collection merged in #12506 and no-write adoption in
-  #12569; legacy reconciliation still remains.
+  #12569; legacy reconciliation merged in #12585.
 - [x] Update canonical launcher/installer sources and regenerate their declared
   consumers; keep independently updated old consumers compatible; merged in #12569.
-- [ ] Add bounded, safety-qualified cleanup of recognized existing cache trees
-  to normal updates, reporting actual reclaimed and retained outcomes.
-- [ ] Preserve the explicit inspection/prune surface and document new placement,
-  legacy handling, incremental progress and refusal behavior.
+- [x] Add bounded, safety-qualified cleanup of recognized existing cache trees
+  to normal updates, reporting actual reclaimed and retained outcomes; #12585.
+- [x] Preserve the explicit inspection/prune surface and document new placement,
+  legacy handling, incremental progress and refusal behavior; #12585.
 
 ### Phase 3 - Prove and deliver the complete flow
 
-- [ ] Pass focused unit, lint, generation and install-contract gates.
-- [ ] Prove fresh install, repeated invocation, process exit/retirement and
+- [x] Pass focused unit, lint, generation and install-contract gates.
+- [x] Prove fresh install, repeated invocation, process exit/retirement and
   repeated upgrades against isolated native fixtures and practical clean-room
   scenarios, including both Windows and POSIX behavior.
-- [ ] Demonstrate bounded legacy disk relief and stable continuing cache growth
+- [x] Demonstrate bounded legacy disk relief and stable continuing cache growth
   without deleting protected, unknown or non-bytecode content.
-- [ ] Land implementation through required review and exact-head CI; verify the
-  release state before describing the change as released or deployed.
-- [ ] Reconcile the parent bytecode track, remaining scopes and this effort's
+- [x] Land implementation through required review and exact-head CI; verify the
+  release state before describing the change as released or deployed; #12613.
+- [x] Reconcile the parent bytecode track, remaining scopes and this effort's
   entire Plan/Validation before Done and normal source-workspace finalization.
 
 ## Validation Plan
 
-- [ ] Valid installed reuse, development/unsealed behavior, interpreter/build
+- [x] Valid installed reuse, development/unsealed behavior, interpreter/build
   separation and portable cache-root resolution.
-- [ ] Native current-user ownership/permission boundaries reject pre-created
+- [x] Native current-user ownership/permission boundaries reject pre-created
   foreign-owned or shared-writable caches before selecting executable bytecode.
-- [ ] Active/retained/rollback/construction owners, interrupted callers,
+- [x] Active/retained/rollback/construction owners, interrupted callers,
   stale ownership, concurrent allocation and cleanup races.
-- [ ] Strictly bounded discovery/work with persistent fair progress across
+- [x] Strictly bounded discovery/work with persistent fair progress across
   repeated updates; no repeated starvation behind a retained namespace.
-- [ ] Legacy idle bytecode is actually reclaimed under admitted proof;
+- [x] Legacy idle bytecode is actually reclaimed under admitted proof;
   live/unknown, unexpected files, retained evidence, links/reparse points,
   unreadable state and replaced paths are preserved with truthful reasons.
-- [ ] Incoming readiness and current selection remain authoritative; independent
+- [x] Incoming readiness and current selection remain authoritative; independent
   cleanup errors or incumbent retirement do not veto a successful replacement.
-- [ ] Current required tests, generated-source audits, install-contract checks,
+- [x] Current required tests, generated-source audits, install-contract checks,
   documentation-impact review, AI attribution and sanitized publication.
-- [ ] No real host cleanup or candidate rollout is claimed from fixture,
+- [x] No real host cleanup or candidate rollout is claimed from fixture,
   source-merge or release evidence alone.
 
 ## Proposal
 
-The [proposed design](design.md) selects the OS user-cache directory, completed
+The [accepted design](design.md) selects the OS user-cache directory, completed
 runtime namespace reuse, no-write unsealed execution, runtime-retirement
 integration and evidence-qualified incremental legacy cleanup. Its budgets,
-mixed-version compatibility and safety assertions are implementation acceptance
-gates, not claims that the current code already provides them.
+mixed-version compatibility and safety assertions are qualified by the native
+fixtures and reviewed implementation recorded in the Journal. Source delivery
+does not claim a host rollout, production latency distribution or automatic
+reclamation of unknown formats and whole legacy prefixes.
+
+## Delivery
+
+The complete source is released through #12613 at Main commit
+`88bc5c4be89a82e69edb13a66ca9ea0a1730631c`. All required qualification jobs
+in run `43588887211` passed, and the canonical policy, permission, indexed/legacy
+collector, bytecode reader and runtime integration bytes match accepted Dev
+merge `55cc5179e955ab7abe3c88b62a465e5526e13980`.
+
+The parent #10968 retains real-host adoption, the 24-hour creation-rate
+observation and its unrelated tracks under their existing owners and approval
+gates. Native Manager crash #12609 and fresh-installed qualification #12013
+remain independent. This effort did not perform a host update, real-cache
+deletion or fleet rollout. Its scope is Done; release is pending separately
+authorized adoption.
 
 ## Journal
 
