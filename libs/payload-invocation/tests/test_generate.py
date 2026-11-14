@@ -71,7 +71,9 @@ def _manifest(tmp_path: Path) -> Path:
                          else ["sh", "sh-installed", "ps1", "ps1-installed", "dispatcher", "dispatcher-installed",
                                "dispatcher-sh", "dispatcher-sh-installed", "sh-old", "ps1-old",
                                "dispatcher-old", "dispatcher-sh-old"])
-def test_generated_shim_external_cache_cold_and_warm(tmp_path: Path, kind: str, record_property) -> None:
+def test_generated_shim_external_cache_cold_and_warm(
+    tmp_path: Path, kind: str, record_property: Callable[[str, object], None],
+) -> None:
     dispatcher = kind.startswith("dispatcher")
     old_provider = kind.endswith("-old")
     installed = kind.endswith("-installed") or old_provider

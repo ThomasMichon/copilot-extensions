@@ -360,16 +360,20 @@ def spawn_monitor(argv: list[str], env: dict[str, str], *, console_children: boo
     :func:`monitor_log_path`. If breakaway is forbidden, refuse rather than
     starting a monitor that would die with its caller.
     """
-    import agent_procutil
     from . import status_monitor_runtime as smr
-    python_cache_args = getattr(agent_procutil, "python_cache_policy_args", lambda *a, **k: ["-B"])
 
     cwd = smr._daemon_cwd()
-    return spawn_daemon(
-        [argv[0], *python_cache_args(
+    command = argv
+    if "-B" not in argv[1:]:
+        import agent_procutil
+
+        python_cache_args = getattr(agent_procutil, "python_cache_policy_args", lambda *a, **k: ["-B"])
+        command = [argv[0], *python_cache_args(
             os.path.abspath(smr.cfg.install_dir()),
             runtime=env.get("__PYVENV_LAUNCHER__", argv[0]),
-        ), *argv[1:]],
+        ), *argv[1:]]
+    return spawn_daemon(
+        command,
         cwd=cwd, log_path=monitor_log_path(cwd), env=env,
         instance=DaemonInstanceSpec(
             "agent-worktrees-status-monitor", Path(cwd), Path(__file__).resolve(),

@@ -7,6 +7,7 @@ import os
 import subprocess
 import sys
 import time
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -124,6 +125,44 @@ def test_monitor_spawn_preserves_direct_interpreter_environment(tmp_path, monkey
     assert kwargs["console_children"] is True
     assert kwargs.get("breakaway", True) is True
     assert not kwargs.get("contained_fallback", False)
+
+
+@pytest.mark.parametrize("nested", [False, True])
+def test_retained_monitor_skips_cache_preparation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, nested: bool,
+) -> None:
+    from agent_worktrees.runtime_monitor_launch import retained_monitor_argv
+
+    root = tmp_path / "runtime"
+    slot = root / "versions" / "1.0.0"
+    bootstrap = slot / ".runtime-bootstrap"
+    bootstrap.mkdir(parents=True)
+    for name in ("runtime_launcher.py", "versioned_runtime.py"):
+        (bootstrap / name).write_text("fixture", encoding="utf-8")
+    environment = slot / ".venv" if nested else slot
+    python = environment / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    argv = retained_monitor_argv([str(python), "-m", "agent_worktrees", "status-monitor"])
+    monkeypatch.setattr(runtime, "_daemon_cwd", lambda: str(root))
+    monkeypatch.setattr(runtime.cfg, "install_dir", lambda: pytest.fail("cache root must not be resolved"))
+    monkeypatch.setattr(
+        interpreter, "python_cache_policy_args",
+        lambda *_args, **_kwargs: pytest.fail("retained bootstrap already disables bytecode"),
+    )
+    captured = {}
+    process = object()
+
+    def spawn(command: list[str], **kwargs: object) -> object:
+        captured.update(argv=command, kwargs=kwargs)
+        return process
+
+    monkeypatch.setattr(cutover, "spawn_daemon", spawn)
+    env = {"KEEP": "yes"}
+    assert cutover.spawn_monitor(argv, env, console_children=True) is process
+    assert captured["argv"] == argv
+    assert captured["kwargs"]["env"] is env
+    assert captured["kwargs"]["cwd"] == str(root)
+    assert captured["kwargs"]["console_children"] is True
+    assert not (root / "cache").exists()
 
 
 def test_posix_passive_monitor_is_a_detached_daemon(tmp_path, monkeypatch):
