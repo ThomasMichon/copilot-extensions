@@ -3164,6 +3164,17 @@ sources, transferring owners or turning partial/planning gains into completion.
   receiving objective or a retained gap; investigate actual implementation
   evidence when claiming completion, rather than making that the prerequisite
   for discovering thematic alignment.
+  The [canonical-lifecycle/source-boundary study](journal/2026/11.13-canonical-lifecycle-and-source-boundaries.md)
+  retains six further complete sources and forty clauses after seven complete
+  permitted documentary reads. No amendment or source effect is proposed.
+  The [whole-ROOT correction](journal/2026/11.13-prerequisite-and-installed-keepers.md#correction-inherited-whole-root-source-hold)
+  withdraws earlier runtime-install ROOT-derived fit/absence qualification:
+  the inherited #7028 whole-source hold remains after current metadata
+  fails actual-primary/bot-linked provenance. Matching file hashes and
+  file-primary authors did not clear it; the past exposure is not made
+  retrospectively compliant. Independently qualified original contracts and
+  release-lock receiving remain distinct. The complete 03:18:44 UTC census
+  remains 853 whole open, 124 above fixed 729, with no new closure credit.
   The [prerequisite/installed-keeper study](journal/2026/11.13-prerequisite-and-installed-keepers.md)
   retains six complete canonical outcomes and all fifty clauses without
   redundant plan rows. Four whole documentary reads and independently
