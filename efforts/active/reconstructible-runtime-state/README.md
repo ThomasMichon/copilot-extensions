@@ -64,6 +64,13 @@ or shared implementation.
   handoff receipt observation (#7942) are not implementation scope here.
   Gateway deployment, services, shared installation and rollout are excluded.
 
+The supplemental #7947 families below retain their existing SSH, container,
+MCP, Index, Bridge/Dispatch, keeper and updater owners. Documentary receiving
+does not admit an implementation slice or transfer a session, claim, lease,
+task or resource. #7208's Windows receipt-stability cause remains unresolved;
+#7250 retains redirect-rollback ownership. Existing execution/contact limits,
+G2-before-G4 sequencing and component admission decisions remain unchanged.
+
 ## Context
 
 Source baseline: `b2ed7bf3b24e47e82197f36db2ccd7a2292902fb`. The focused trace
@@ -176,6 +183,43 @@ execution assignments or implemented APIs.
 - [ ] Qualify cost, crash/replay, rollback and platform evidence, then request
       any separate deployment authorization. No shared rollout is owned here.
 
+### Phase 4 - Direct receiving of supplemental guard families
+
+These are planned requirements from the complete #7947 refinements, not new
+product-source findings. The [six-family matrix](validation.md#supplemental-7947-family-acceptance)
+is their local acceptance; the actual ROOT-global G7947 gate below requires
+the whole union. Existing core phases, decisions and first unchecked G1
+production-persistence item are unchanged.
+
+- [ ] **SG7947-P1:** Keep SSH verify/explore available after independent target
+  resolution when only disposable fragment/source provenance is missing.
+  Preserve contradictory-alias and unsafe-syntax refusal and hand-edited
+  configuration; do not make observation imply configuration or keeper mutation.
+- [ ] **SG7947-P2:** Reconstruct container birth using the actual physical
+  resource ID, surviving label, issuer assignment AND recipient evidence.
+  A label alone cannot authorize rebinding another task; preserve current
+  owner fences and the existing lease/unknown-field compatibility contract.
+- [ ] **SG7947-P3:** Distinguish lost MCP discovery/control-sidecar metadata
+  from unsupported daemon capabilities. Preserve authenticated control/drain
+  and direct-execution fallback; provide protected same-owner re-advertisement
+  or doctor without making missing metadata require destruction/reset.
+- [ ] **SG7947-P4:** Keep authorized Index diagnostics/doctor available when
+  derived receipts, FTS or vector views are dirty/unmarked. Reconstruct them
+  from canonical source under current ownership without bypassing corpus
+  authorization. Unsupported publication/schema parsing cannot itself
+  authorize endpoint withdrawal.
+- [ ] **SG7947-P5:** Reconstruct Bridge/Dispatch relationship, reservation and
+  outbox projections from durable grants, original request/admission IDs and
+  recipient acknowledgments, retaining native invocation/delivery identity,
+  withdrawal and coordinator epoch. Missing receipt means UNKNOWN, not
+  contradictory ownership or proof no seed/effect occurred; never blindly replay.
+- [ ] **SG7947-P6:** Preserve keeper protocol/fallback compatibility and
+  rollback-symmetric, hold-preserving authorized handover. A positively
+  identified process or older selected runtime is not a revoked incarnation.
+  Distinguish raw slot/build-pointer mismatch from genuine supersession;
+  a corrupt pointer cannot retire an active validated fallback. Retain the
+  unresolved #7208 cause and existing #7250 redirect-rollback owner.
+
 ## Validation Plan
 
 - [x] Check plan structure, local references, public-safe scope and exact source
@@ -191,6 +235,13 @@ execution assignments or implemented APIs.
       cardinality; explicit rebuild owns the historical scan.
 - [ ] Publish platform and validation-tier results on each implementation PR,
       with explicit reasons for any skipped tier.
+- [ ] **G7947:** Resolve EVERY SG7947-P1 through SG7947-P6 Plan clause AND all
+  six local V.SG7947 rows in [validation.md](validation.md#supplemental-7947-family-acceptance),
+  together with the existing core reconstruction/rollback/uncertainty acceptance.
+  Show positive missing-cache/older-current cases AND negative real-conflict/
+  newer-revoked cases without a hidden old-database copy. Preserve the existing
+  first Plan/global gates and G2-before-G4 dependency; this receiving plan
+  does not admit G2/G4/G5/G6 execution, release custody or prove live recovery.
 
 ## Proposal
 
@@ -306,3 +357,19 @@ supported rollback-reader floor are explicit decisions, not implied approval.
   fences. Unknown preservation or required semantics gate only the affected new
   operation/representation. Owner policy and exact future containment remain
   decisions; no G2/G4/G5/G6 implementation or activation is admitted.
+
+### 2026-11-14 - Supplemental issue-union receiving
+
+- The complete qualified #7947 original and refinements retain six additional
+  SSH, container, MCP, Index, Bridge/Dispatch and keeper/updater families.
+  SG7947-P1 through P6, the six local matrix rows and actual ROOT-global G7947
+  now receive those finite requirements directly rather than retaining only
+  an inventory link or a promise to trace them later.
+- All seven new checkbox rows remain unchecked. Every incumbent byte/check
+  state, existing first Plan/global gate and G2-before-G4 edge is preserved;
+  earlier G1/G3 source credit is not full reconstruction or compatibility
+  acceptance. No duplicated compatibility-proposal completion row is added.
+- These are issue-reported requirements, not a new product-source audit,
+  implementation appointment, native result, force-mode selection or rollout.
+  Existing component owners, #7208 uncertainty, #7250 custody and the
+  execution/contact restrictions above remain unchanged.

@@ -3164,6 +3164,17 @@ sources, transferring owners or turning partial/planning gains into completion.
   receiving objective or a retained gap; investigate actual implementation
   evidence when claiming completion, rather than making that the prerequisite
   for discovering thematic alignment.
+  The [service-family recovery intake](journal/2026/11.14-service-family-receiving.md)
+  proposes direct receiving for six #7947 service/keeper families in its
+  existing Active home: six Plan rows, six local matrix rows and actual
+  ROOT-global G7947. All seven new checkbox rows remain unchecked; incumbent
+  bytes, first Plan/global gates, G2-before-G4 sequencing and owners survive.
+  Five other complete source outcomes retain actual claim, plan-only,
+  release/installed or held-source conditions, not generic Active-label gates.
+  The obsolete #7946 source-approval hold is separately reconciled against
+  accepted contended-tier delivery; nominal and consumer duties remain.
+  No new issue closes. Out-of-scope acquired material and unadmitted
+  independent-study fit claims are excluded, not used as receiving evidence.
   The [runner/entry/attribution intake](journal/2026/11.13-runner-entry-and-attribution-receiving.md)
   records three finite direct unions merged in #12573 under existing Active
   homes: separate
@@ -3177,10 +3188,12 @@ sources, transferring owners or turning partial/planning gains into completion.
   retain complete positive gaps or current conditions, including #7500's
   unresolved fit after withdrawal of an out-of-scope candidate read.
   Complete current postmerge receiving and fresh source readback support
-  #7906's separate NOT_PLANNED tracking retirement; its technical work
-  remains planned.
-  The complete 07:23:56 UTC census is 854 whole open, 125 above fixed 729,
-  with that one verified campaign departure and no arrival.
+  #7906's separate NOT_PLANNED tracking retirement and, after #12580's
+  reviewed route/status reconciliation, #7643's separate NOT_PLANNED
+  retirement. Their technical work remains planned; artifact and cleanup
+  custody are unchanged. The complete 08:17:57 UTC census is 853 whole open,
+  124 above fixed 729, with #7643 the one new verified campaign departure
+  since the preceding 854-open observation and no arrival.
   The [fixture/startup/hook intake](journal/2026/11.13-fixture-startup-and-hook-receiving.md)
   records three complete finite direct unions merged in #12567 under existing Active homes,
   with 32 unchecked Plan/local/actual-global Validation rows and unchanged
