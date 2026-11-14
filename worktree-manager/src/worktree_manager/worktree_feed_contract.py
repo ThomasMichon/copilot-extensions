@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from .worktree_rows_contract import CurrentSnapshot, parse_current_rows, publication_wire_rows
+from .worktree_reporting_contract import RECEIVER_FIELD, parse_reporting_context
 from .worktree_observation_contract import (
     check_advance,
     check_observation_advance,
@@ -39,11 +40,15 @@ class CurrentFeed:
         self._observed: set = set()
         self._version = 1
         self._project: str | None = None
+        self.reporting_context: dict | None = None
 
     def _metadata(self, rows, frame) -> list[dict]:
+        reporter = parse_reporting_context(frame)
         return [
-            {**row, "_projection": dict(frame["projection"]),
-             "_availability": frame.get("availability")}
+            {**{key: value for key, value in row.items() if key != RECEIVER_FIELD},
+             "_projection": dict(frame["projection"]),
+             "_availability": frame.get("availability"),
+             **({RECEIVER_FIELD: dict(reporter)} if reporter is not None else {})}
             for row in rows
         ]
 
@@ -104,7 +109,17 @@ class CurrentFeed:
                     or frame.get("cursor") != self.head["revision"]
                 ):
                     raise ValueError("current-roster feed heartbeat changed generation or cursor")
-                return None
+                if "reporting_context" not in frame:
+                    return None
+                reporter = parse_reporting_context(frame)
+                if reporter == self.reporting_context:
+                    return None
+                self.rows = self._metadata(self.rows, {
+                    "projection": self.head, "availability": self.availability,
+                    "reporting_context": reporter,
+                })
+                self.reporting_context = reporter
+                return self.rows
             if frame.get("projection") != self.head:
                 raise ValueError("current-roster feed availability changed publication")
             parse_current_rows(
@@ -112,7 +127,11 @@ class CurrentFeed:
                  "project": self._project, "worktrees": []},
                 complete=False,
             )
-            self.rows = self._metadata(self.rows, frame)
+            self.rows = self._metadata(self.rows, {
+                **frame,
+                **({"reporting_context": self.reporting_context}
+                   if self.reporting_context is not None else {}),
+            })
             self.availability = frame.get("availability")
             return self.rows
         if kind in {"begin", "update"}:
@@ -240,6 +259,7 @@ class CurrentFeed:
         self.rows = rows
         self.availability = self._begin.get("availability")
         self.head = dict(self._begin["projection"])
+        self.reporting_context = parse_reporting_context(self._begin)
         self._begin = None
         self._pending = None
         self._touched = set()
