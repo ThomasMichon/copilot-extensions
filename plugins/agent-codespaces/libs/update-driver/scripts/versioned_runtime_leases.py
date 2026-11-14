@@ -47,8 +47,9 @@ def normalize_version(v: str) -> str:
 
 def normalize_windows_extended_path(target: str) -> str:
     """Normalize extended drive and UNC prefixes, preserving ordinary target names."""
-    if target.startswith("\\\\?\\UNC\\"):
-        return "\\\\" + target[len("\\\\?\\UNC\\"):]
+    unc_prefix = "\\\\?\\UNC\\"
+    if target[:len(unc_prefix)].casefold() == unc_prefix.casefold():
+        return "\\\\" + target[len(unc_prefix):]
     if target.startswith("\\\\?\\"):
         return target[4:]
     return target

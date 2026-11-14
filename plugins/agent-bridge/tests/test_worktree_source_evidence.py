@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sys
 import time
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -24,6 +26,105 @@ def envelope(**extra: object) -> dict:
         "worktrees": [{"id": "good"}],
         **extra,
     }
+
+
+def reporter(name: str = "current", environment: str = "wsl") -> dict:
+    return {
+        "version": 1, "status": "resolved", "hostname": "reporter-host",
+        "machine": name, "environment": environment, "execution_machine": name + "-slot",
+    }
+
+
+@pytest.mark.parametrize("environment", ["windows", "wsl", "linux"])
+@pytest.mark.asyncio
+async def test_reporter_naming_overrides_stored_names_without_retargeting_agent(
+    environment: str,
+) -> None:
+    body = envelope(
+        reporting_context=reporter(environment=environment),
+        worktrees=[{"id": "legacy-worktree", "machine": "old-host"}],
+    )
+    row = wt._parse_worktree_list(json.dumps(body), "configured-agent")[0]
+    assert row.machine == "current-slot"
+    assert row.agent_name == "configured-agent"
+    assert row.id == "legacy-worktree"
+    assert body["worktrees"][0]["machine"] == "old-host"
+    body["reporting_context"] = {"version": 1, "status": "unavailable"}
+    row = wt._parse_worktree_list(json.dumps(body), "configured-agent")[0]
+    assert row.machine == "" and row.agent_name == "configured-agent"
+    del body["reporting_context"]
+    assert wt._parse_worktree_list(json.dumps(body), "configured-agent")[0].machine == "old-host"
+    del body["worktrees"][0]["machine"]
+    assert wt._parse_worktree_list(json.dumps(body), "configured-agent")[0].machine == "configured-agent"
+
+
+@pytest.mark.parametrize("context", [
+    None, [], {}, {"version": True, "status": "unavailable"},
+    {"version": 2, "status": "unavailable"},
+    {"version": 1, "status": "unavailable", "machine": "retained"},
+    {**reporter(), "environment": []}, {**reporter(), "environment": "future"},
+    {**reporter(), "hostname": "x\nbad"}, {**reporter(), "machine": ""},
+    {**reporter(), "execution_machine": "x" * 257},
+])
+@pytest.mark.asyncio
+async def test_invalid_reporting_context_does_not_replace_last_good_inventory(
+    monkeypatch: pytest.MonkeyPatch, context: object,
+) -> None:
+    cache = wt.WorktreeDiscoveryCache()
+    resolver = SimpleNamespace(agents={"route": AgentConfig(name="route", project="sample")})
+    body = envelope(reporting_context=reporter())
+
+    async def source(*args, **kwargs) -> tuple[str, str]:
+        return json.dumps(body), ""
+
+    monkeypatch.setattr(wt, "_run_local_ex", source)
+    try:
+        await cache.crawl(resolver)
+        before = cache._refresh.metadata()["sources"]["route"]
+        body = envelope(reporting_context=context, worktrees=[{"id": "replacement"}])
+        await cache.crawl(resolver)
+        assert cache.get_all()["route"][0].machine == "current-slot"
+        assert cache.get_all()["route"][0].id == "good"
+        after = cache._refresh.metadata()["sources"]["route"]
+        assert after["diagnostic"] == "source-reporting-malformed"
+        assert after["generation"] == before["generation"]
+    finally:
+        await cache.stop()
+
+
+@pytest.mark.asyncio
+async def test_real_source_stdout_refresh_renames_and_withdraws_without_row_changes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cache = wt.WorktreeDiscoveryCache()
+    resolver = SimpleNamespace(agents={"route": AgentConfig(name="route", project="sample")})
+    body = envelope(reporting_context=reporter("first"), worktrees=[{
+        "id": "legacy-worktree", "machine": "old-host", "path": "unchanged-checkout",
+    }])
+    original_rows = json.dumps(body["worktrees"], sort_keys=True)
+    calls = []
+
+    async def source(project: str, args: list[str], **kwargs) -> tuple[str | None, str]:
+        calls.append((project, args))
+        script = Path(__file__).parent / "fixtures" / "worktree_list_source.py"
+        return await wt._exec_ex([sys.executable, str(script), json.dumps(body)])
+
+    monkeypatch.setattr(wt, "_run_local_ex", source)
+    try:
+        for context, expected in (
+            (reporter("first"), "first-slot"), (reporter("renamed"), "renamed-slot"),
+            ({"version": 1, "status": "unavailable"}, ""),
+        ):
+            body["reporting_context"] = context
+            await cache.crawl(resolver)
+            row = cache.get_all()["route"][0]
+            assert row.machine == expected
+            assert row.agent_name == "route" and row.id == "legacy-worktree"
+            assert row.path == "unchanged-checkout"
+            assert json.dumps(body["worktrees"], sort_keys=True) == original_rows
+        assert len(calls) == 3
+    finally:
+        await cache.stop()
 
 
 @pytest.mark.parametrize("degraded", [

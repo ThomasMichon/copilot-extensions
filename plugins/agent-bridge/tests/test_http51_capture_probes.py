@@ -25,6 +25,14 @@ from test_native_send_unavailable import (
     test_transport_distinguishes_preflight_from_a_lost_post_response
     as test_transport_distinguishes_preflight_from_a_lost_post_response,
 )
+from test_worktree_source_evidence import (
+    test_reporter_naming_overrides_stored_names_without_retargeting_agent
+    as test_reporter_naming_overrides_stored_names_without_retargeting_agent,
+    test_invalid_reporting_context_does_not_replace_last_good_inventory
+    as test_invalid_reporting_context_does_not_replace_last_good_inventory,
+    test_real_source_stdout_refresh_renames_and_withdraws_without_row_changes
+    as test_real_source_stdout_refresh_renames_and_withdraws_without_row_changes,
+)
 from test_dispatch_origin_cli import (
     test_origin_cli_reaches_actual_keyed_owner_without_acquisition
     as test_origin_cli_reaches_actual_keyed_owner_without_acquisition,

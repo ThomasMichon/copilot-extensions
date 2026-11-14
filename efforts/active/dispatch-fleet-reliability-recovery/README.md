@@ -138,6 +138,17 @@ Retain existing evaluator/override/status and supervisor/publication custodians;
 
 Preserve every incumbent byte, status, checked credit, first unresolved Plan AND global Validation gate, Participant and Journal entry. Retain every owner-fenced and registry/deferral annex duty, including #3179's specific current-owner transfer acceptance without generalizing it into an ACK requirement for these families. Retain ordinary-startup admission and startup-clock matrices at their own scope; startup clocks are not new conclusion/recovery defaults. The separate #6189 design family does not expand Phase 6's checked source-safety reservation. No execution, cleanup, replay, restart, policy selection, source closure or release authority follows.
 
+The finite #7116 continuation keeps existing Coordinator/startup-attempt,
+native-head/mux/process, Bridge/Dispatch, reservation/ground/cleanup and
+detailed-effort owners. Retain the #8051 continuation and #9255 first-create
+reservations, #7116's existing narrow provenance/fresh-acquisition source
+claimant, and separately owned #6467 watchdog, #4028/#6934/#7337 lifecycle,
+#3194 hydration/reconnect, #4171 active turn, #6812 updater, #8015/#8046 discovery
+and #6462 ordinary identity/adoption. #7116 stays OPEN; current A9 receiving
+credit does not complete product acceptance or decide another source's
+tracking. No executor, model/native operation, cleanup or claim/resource
+transfer is appointed.
+
 ## Context
 
 Recurring maintenance occurrences are ordinary tasks today. Newer rows can fill
@@ -402,6 +413,88 @@ contract within Phase 3, not as another supervisor or automatic failover.
   containing release and authorized adoption remain separate acceptance.
 - [ ] Resolve source/release and authorized adoption separately; preserve the
   parent Phase 3 and all unrelated owners' open acceptance.
+
+#### Complete acquisition-startup continuation - #7116
+
+- [ ] **AS7116-P1:** Preserve ALL NINE original finite findings: supported
+  truthful never-registered launching terminal/reconcile outcome; exact
+  native-head registration independent of deferred trust hooks OR correctly
+  prepared managed trust; authoritative fresh first-prompt readiness without
+  arbitrary unknown/null-to-idle; mux descendants reaped OR cleanly orphaned/
+  reported/accounted; two-attempt/rearm-three alignment OR no unsupported lower
+  dead-lettering; unresolved prepared-operation accountability; task-visible
+  requested-model fallback; transient ACP identity recovery through original
+  key/allocation/conversation/prompt/receipt; and terminal-reservation
+  generation/liveness/late-start/release ownership. Historical one-host counts/
+  manual workarounds are not current universal-outage proof or a supported fix.
+- [ ] **AS7116-P2:** Retain actual #8051 continuation and the existing startup
+  annex: 30s renewable RECEIVED target-contact silence AND independent fixed
+  5min startup grace; 1min is expected continuation latency, not turn execution.
+  Reject the old 2hour recommendation. Forward nested preparation/state/lock/
+  SSH/SessionHost/ACP/Git/mux/plugin/instruction progress, unknown/additive events
+  and target keepalives, never local timers; preserve final JSON/privacy,
+  identity and uncertain acceptance.
+- [ ] **AS7116-P3:** Compose the transferred relay/SSH preflight with the actual
+  3s ping, independent owner observation and retry/backoff, readiness BEFORE
+  plugin installation, exact relay identity and owned idempotent-probe
+  cancellation versus uncertain launch/shared-service custody. Keep #5761
+  namespace discovery and #9624 interim scope/design separately owned; neither
+  is delivered two-clock adoption.
+- [ ] **AS7116-P4:** Retain DISTINCT #9255 first-keyed-create acceptance through
+  existing StartupProgress/StartupClock/process/keyed/event owners: real composed
+  launch/readiness/hooks/pre-START overhead measured against ordinary native
+  loading BEFORE clock adoption, separate from synthetic slow peers. Compose
+  caller/receiver 30s/fixed 5min budgets, not a larger 180s buffered timeout,
+  copied 1min expectation or inferred safety-ceiling causality. Preserve
+  selected-peer negotiation/older refusal, original key/workspace/native
+  identity, final result/privacy; readiness ends startup, not the turn.
+- [ ] **AS7116-P5:** Retain direct A9R1-R3: terminal capacity accounting separate
+  from retained obligations; discount only definitively completed/fenced startup
+  AND proved exact-body absence, with conservative live/unknown/unreachable/
+  missing/legacy/in-progress refusal and late-start admission/publication fenced
+  BEFORE overlap. Keep actual `reconcile_reserving`/`fail_spawn`
+  release-requested consumers, the queued launcher-blocked-before-creation
+  counterexample, observer-only GONE retaining capacity, and definitive
+  original-caller failure closing only its matching revision. No invented test
+  node, native scenario or rollout prerequisite.
+- [ ] **AS7116-P6:** Retain A9R4 explicit reservation keys AND expected preview
+  revision at apply, WHOLE-queue native/transport protection, current control
+  authorization/no-live-holder evidence, unchanged legacy syntax and explicit
+  older-provider refusal. Existing queue/HTTP/client/CLI owners retain
+  provider-first adoption separately from source completion. Source #7836 merge
+  credit is delivered scope, not full ordinary-startup source acceptance or
+  resource settlement.
+- [ ] **AS7116-P7:** Preserve the existing narrow created-workspace-provenance/
+  exact-keyed-replay and operator-attested fresh-acquisition source claim in
+  #7116's current discussion: latest retained conversation already retired AND
+  holder absence confirmed, with generation/worktree/active-reservation/
+  exclusive-key fences intact. Reported focused tests and a forthcoming PR are
+  not technical completion, source transfer or permission to operate.
+
+##### Local Validation - #7116
+
+- [ ] **AS7116-LV1:** Resolve EACH original nine finding against its actual
+  receiver/evidence tier, preserving every OR alternative; readiness shape
+  alone cannot close mux/rearm/prepared/model/ACP/reservation acceptance.
+- [ ] **AS7116-LV2:** Qualify actual composed continuation/relay/fresh-create,
+  including real-versus-synthetic timing, healthy duration beyond silence,
+  pre-first/between-phase silence, recognized/unknown events, target-vs-local
+  keepalives, continued updates past fixed expiry, nested forwarding/flush/final
+  framing/privacy, selected-peer compatibility, disconnect/reconnect/response
+  loss and exactly ONE original operation with preserved identity. Only
+  existing-authorized owned teardown applies.
+- [ ] **AS7116-LV3:** Qualify every A9 capacity/queued-start/selection control:
+  completed/fenced-start AND exact-body absence, conservative unknowns and late
+  publication; explicit keys/preview revision with whole-queue/control/
+  no-live-holder/older-provider guards through actual existing boundaries.
+  Source/focused tests/independent acceptance/provider adoption remain distinct.
+- [ ] **AS7116-LV4:** Keep #7116 OPEN, every unresolved product row unchecked,
+  existing #8051/#9255 and narrow source reservations/custodians intact. Credit
+  historical #7593/#8177/#8218/#7836 only at their actual source/release tiers.
+  No new framework/lab/ledger/scheduler, prompt replay/fresh allocation/
+  shared-service stop, task/resource settlement, generic ACK or all-host/native
+  bar is introduced. Existing #7486/owner-fenced/deferral annexes remain operative
+  without importing another source's personal transfer condition.
 
 ### Phase 4 - Resolve repository resources from one registry
 
@@ -910,6 +1003,16 @@ _(Agent-recommended direct Phase3/Phase7 consumer case; all rows unchecked.)_
 - [ ] **G6187:** Resolve EVERY P6187-A through D AND V6187-A through C: visible per-entry stale-name isolation with eligible progress; all dry-run/authority/admission/dedup/verification/evaluator/completion controls; invalid-input refusal; deliberate future revision of BOTH old behavior AND test. Preserve independently OPEN source and producer/evaluation custody; no hygiene-owner transfer or whole-programme gate.
 - [ ] **G6189:** Resolve EVERY P6189-A through D AND V6189-A through C for BOTH unfinished designs: UNCLAIMED transaction/acceptance/provenance/unknown/retry/claim races AND NEW-production stop with continued existing-work updates/evaluation. Retain corrected transport/motivation, Phase 6's checked non-goal/reservation, existing claims and independently OPEN source. Receiving/design acceptance is not execution, foreign-work transfer, federation prerequisite or source/resource release.
 
+- [ ] **AS7116-G:** Resolve EVERY AS7116-P1-P7 AND AS7116-LV1-LV4 together
+  with existing Phase 3a/startup, Phase 7 ordinary-keyed, owner-fenced and
+  registry-deferral duties at their original finite tiers. Score all nine
+  findings, continuation/relay, DISTINCT first-create, A9 capacity/queued-start/
+  key-selection and the actual narrow source claim without conflating
+  source/release/native/installed or capacity/resource settlement. Preserve every
+  original OR/AND, unknown-operation identity, explicit OPEN token, incumbent
+  check state/first gate and custodian; no universal ACK, every-host or unrelated
+  whole-parent prerequisite.
+
 ## Proposal
 
 The initial proposal changes no runtime or deployment configuration. Category is
@@ -923,6 +1026,18 @@ named-resource resolution so an older peer cannot silently accept but ignore a
 requested contract.
 
 ## Journal
+
+### Proposed complete #7116 acquisition-startup receiving
+
+Added proposed direct Phase 3a Plan, local Validation and actual ROOT-global
+Validation for the complete current nine-finding/continuation/relay/first-create/
+A9/narrow-claim union. Existing checked continuation and ordinary-keyed source
+credit, all historical failures/uncertainties, status, first gates and strict
+annexes remain. Current direct #7116 receiving is credited without redoing
+settled intake or inventing implementation. Normal review, actual merge and
+whole-current readback remain; #7116's OPEN instruction and all source/resource
+duties survive. No product/native/test, queue, replay, rollout or custody effect
+occurred.
 
 ### 2026-11-13 - Proposed four-family status, recovery and reassignment intake
 

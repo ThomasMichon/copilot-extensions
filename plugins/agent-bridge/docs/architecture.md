@@ -290,6 +290,13 @@ warming and pending refreshes. It carries projection epoch/generation and
 per-source generation, age and bounded diagnostic codes. Valid complete empty
 inventories replace prior rows; failed, malformed, incomplete or incompatible
 source reads retain their last good rows without erasing healthy peers.
+When a source includes `worktrees-reporting-context-v1` naming in its response,
+discovery's descriptive `machine` uses that reporter's current execution name,
+not the stored row label or the coordinator's hostname. Explicit unavailable
+reporting withdraws the name; an absent envelope keeps the legacy fallback.
+Malformed reporting retains the last good source inventory with a diagnostic.
+The configured `agent_name`, worktree ID and routing/ownership checks remain
+unchanged. This is consumer migration, not durable roster-field removal.
 Freshness expires after 30 seconds or the configured discovery interval,
 whichever is greater; automatic failed/stale retries have a 10-second minimum
 spacing. Source replacement and shutdown fence late publication. A render
