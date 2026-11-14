@@ -1388,6 +1388,17 @@ installation, installed runtime, other-platform qualification or completed
 recovery. No native/model lane is implied by unit fixtures; required unit-only
 CI is unchanged.
 
+Bridge's opt-in `--test-file tests/test_session_host.py -k
+bridge_picks_up_relocated_core_without_recreating_conversation
+--allow-explicit-tiers` control relocates the current compact Core, removes its
+construction artifact and launches it through isolated Python without target
+suite imports. After an independent original conversation and literal seed,
+the real Bridge ACP client adopts that same child/session and sends one later
+input, without `session/new`, `session/load` or seed replay during pickup.
+Explicit Core termination and caller-owned Job/group cleanup remain separate
+from frontend shutdown. The child speaks synthetic ACP: this is a real-process
+consumer contract, not native Copilot or clean-room/installed qualification.
+
 Bridge's opt-in `--test-file tests/test_portable_mux_joined.py
 --allow-explicit-tiers` packet composes the real CLI, CodeSpace detached
 provider, support archive/receiver, extracted Bridge and standalone-driver
