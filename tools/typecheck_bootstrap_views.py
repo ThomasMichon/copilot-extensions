@@ -21,6 +21,104 @@ HELPER = "plugins/agent-worktrees/scripts/command_binding.py"
 TEMPLATE = "libs/payload-invocation/templates/catalog-powershell.tmpl"
 INPUTS = tuple(dict.fromkeys((*MEMBERS, DECLARATION, MANIFEST, TEMPLATE)))
 MATERIALIZED_INPUTS = (*INPUTS, CONSUMER, HELPER)
+SELECTOR_TEMPLATES = tuple(
+    "libs/payload-invocation/templates/" + name + "-shim.tmpl"
+    for name in ("powershell", "posix")
+)
+SELECTOR_HELPER = "libs/agent-procutil/src/agent_procutil/python_cache.py"
+SELECTOR_PACKAGE = "libs/agent-procutil/src/agent_procutil/__init__.py"
+SELECTOR_INPUTS = (*MEMBERS, DECLARATION, *SELECTOR_TEMPLATES, SELECTOR_HELPER, SELECTOR_PACKAGE)
+_SELECTOR_TRANSPORT = (
+    (
+        "function Select-PythonCache([string]$Python) {\n    $selector = @'\n",
+        "\n'@\n    try {\n"
+        '        $selected = & $Python -I -B -X "pycache_prefix=$_mintedPythonCache" -c $selector $_runtimeRoot\n'
+        "        if ($LASTEXITCODE -eq 0 -and @($selected).Count -eq 1) { return [string]($selected | ConvertFrom-Json) }\n"
+        "    } catch {}\n    return $_mintedPythonCache\n}",
+    ),
+    (
+        '        _selector_root="$_runtime_root"\n'
+        '        case "$AGENT_RT_PY" in\n'
+        '            *.exe) _selector_root="$(cygpath -aw "$_runtime_root")" || _selector_root="" ;;\n'
+        "        esac\n"
+        '        if [ -n "$_selector_root" ]; then\n'
+        '            _selected_cache="$("$AGENT_RT_PY" -I -B -X utf8 -X "pycache_prefix=$_python_cache" -c \'',
+        '\' "$_selector_root" 2>/dev/null)" || _selected_cache=""\n'
+        '            if [ -n "$_selected_cache" ]; then\n'
+        '                _python_cache="$_selected_cache"\n'
+        "            fi\n        fi\n",
+    ),
+)
+
+
+@dataclass(frozen=True)
+class ShimSelectorView(SourceView):
+    members: tuple[str, ...]
+
+    def verify(self, root: Path) -> None:
+        if _membership(root) != self.members:
+            raise SourceViewError("Shim selector canonical source membership changed")
+        self._verify_bytes(root)
+
+
+def powershell_selector_view(root: Path, paths: tuple[str, ...], output: Path) -> ShimSelectorView:
+    """Expose the actual single-quoted PowerShell here-string without rewriting it."""
+    return _selector_view(root, paths, output, 0)
+
+
+def posix_selector_view(root: Path, paths: tuple[str, ...], output: Path) -> ShimSelectorView:
+    """Expose the actual shell single-quoted -c argument, including its newlines."""
+    return _selector_view(root, paths, output, 1)
+
+
+def _selector_view(
+    root: Path, paths: tuple[str, ...], output: Path, index: int,
+) -> ShimSelectorView:
+    inputs, _flight, _template, members = catalog_inputs(root, paths)
+    if not {SELECTOR_HELPER, SELECTOR_PACKAGE} <= set(paths):
+        raise SourceViewError("Shim selectors require their actual inventoried cache helper")
+    sources = dict(inputs)
+    sources.update((name, _read(root, name)) for name in (SELECTOR_HELPER, SELECTOR_PACKAGE))
+    template_path = SELECTOR_TEMPLATES[index]
+    template = sources[template_path].decode("utf-8").replace("\r\n", "\n")
+    prefix, suffix = _SELECTOR_TRANSPORT[index]
+    matches = list(re.finditer(re.escape(prefix) + r"(.*?)" + re.escape(suffix), template, re.DOTALL))
+    if (
+        len(matches) != 1
+        or template.count(prefix) != 1 or template.count(suffix) != 1
+        or template.count("from agent_procutil.python_cache import cache_arguments") != 1
+        or (index == 0 and template.count("$selector") != 2)
+    ):
+        raise SourceViewError(f"{template_path}: shim selector quote/argv transport changed")
+    match = matches[0]
+    body = match.group(1)
+    if "@@" in body or (index == 1 and "'" in body):
+        raise SourceViewError(f"{template_path}: shim selector interpolation/quoting changed")
+    content = body.encode("utf-8")
+    tree = _parse(content, template_path, feature_version=(3, 10))
+    expected_import = ast.parse("from agent_procutil.python_cache import cache_arguments").body[0]
+    imports = [n for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)
+               and n.module == "agent_procutil.python_cache"]
+    calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call)
+             and isinstance(n.func, ast.Name) and n.func.id == "cache_arguments"]
+    expected_call = ast.parse(
+        "cache_arguments(sys.argv[1], runtime=sys.executable)", mode="eval",
+    ).body
+    if (
+        len(imports) != 1 or _shape(imports[0]) != _shape(expected_import)
+        or len(calls) != 1 or _shape(calls[0]) != _shape(expected_call)
+        or any(isinstance(n, ast.Name) and n.id == "cache_arguments"
+               and isinstance(n.ctx, (ast.Store, ast.Del)) for n in ast.walk(tree))
+    ):
+        raise SourceViewError(f"{template_path}: shim selector cache-helper call changed")
+    _reject_directives(template_path, content)
+    first = template[:match.start(1)].count("\n") + 1
+    identity = _write_view(output, content)
+    return ShimSelectorView(
+        output, content, tuple(sources.items()),
+        tuple(SourceLine(template_path, first + n) for n in range(len(content.splitlines()))),
+        identity, members,
+    )
 
 
 def require_bootstrap_version(level: str, versions: tuple[str, ...]) -> None:

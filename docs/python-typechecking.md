@@ -493,11 +493,11 @@ reported. Each view retains its own source correspondence. These safeguards do
 not execute the guard, admit its pending consumer, qualify emitted programs or
 extend the adapter to other hyphenated modules.
 
-### Invocation catalogs and binding bootstrap
+### Invocation catalogs, binding bootstrap and shim selectors
 
 The pending `lib-payload-invocation` project selects its four complete physical
-source files plus four in-process catalog witnesses and one catalog-binding
-bootstrap view. The catalog declaration binds the real producer, validators
+source files plus four in-process catalog witnesses, one catalog-binding
+bootstrap view and two shim cache-selector views. The catalog declaration binds the real producer, validators
 and templates; its closed data witnesses cover single/multi-command and
 PowerShell/cmd variants. The bootstrap view preserves the actual PowerShell
 single-quote transport, both interpreter launch sites and real helper forwarding.
@@ -509,10 +509,22 @@ separately verify the actual emitted block and helper correspondence. Frozen
 checks use their candidate's inputs, with the same byte/membership custody and
 lease-bound cleanup as other source views. Neither path executes the bootstrap.
 
+The selector views preserve the actual PowerShell here-string and POSIX
+single-quoted `-c` argument, including their distinct newline transports.
+Their fixed launch arguments and real `cache_arguments` import/call must match.
+The winning candidate-local `agent_procutil` provider and its ordinary source
+tree are captured and rechecked; first-party stubs cannot replace that helper.
+Selector diagnostics map to the original shim-template lines. The optional
+PowerShell prefix annotation preserves the existing `None` fallback and JSON
+output rather than coercing it to an empty string.
+The seventeen in-process correspondence controls are positively selected in
+the required unit packet. Real interpreter, Git and source/frozen frontdoor
+checks remain separate integration controls, not additional required-unit work.
+
 The production project keeps Python 3.10 plus persistent Python 3.11 analysis
 on both platforms. Python 3.10 checks the bootstrap's early exit guard only;
 Python 3.11 checks its full body. Strict admission refuses a declaration that
-omits that full-body target. These nine analysis targets do not qualify native
+omits that full-body target. These eleven analysis targets do not qualify native
 execution, interpreter availability, remaining embedded programs or consumer
 copies. Production remains pending; the independently strict test-source
 project does not activate these views.
