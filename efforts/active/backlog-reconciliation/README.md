@@ -3165,7 +3165,7 @@ sources, transferring owners or turning partial/planning gains into completion.
   evidence when claiming completion, rather than making that the prerequisite
   for discovering thematic alignment.
   The [service-family recovery intake](journal/2026/11.14-service-family-receiving.md)
-  proposes direct receiving for six #7947 service/keeper families in its
+  records reviewed delivery in #12590 for six #7947 service/keeper families in its
   existing Active home: six Plan rows, six local matrix rows and actual
   ROOT-global G7947. All seven new checkbox rows remain unchecked; incumbent
   bytes, first Plan/global gates, G2-before-G4 sequencing and owners survive.
@@ -3173,8 +3173,13 @@ sources, transferring owners or turning partial/planning gains into completion.
   release/installed or held-source conditions, not generic Active-label gates.
   The obsolete #7946 source-approval hold is separately reconciled against
   accepted contended-tier delivery; nominal and consumer duties remain.
-  No new issue closes. Out-of-scope acquired material and unadmitted
-  independent-study fit claims are excluded, not used as receiving evidence.
+  Complete current receiving/source readback subsequently supports #7947's
+  separate NOT_PLANNED tracking retirement; every technical row and actual
+  owner/execution/resource condition remains. The complete 09:26:47 UTC census
+  is 853 whole open, 124 above fixed 729, with that one new departure and no
+  arrival since the preceding 854-open observation. Out-of-scope acquired
+  material and unadmitted independent-study fit claims are excluded, not used
+  as receiving evidence.
   The [runner/entry/attribution intake](journal/2026/11.13-runner-entry-and-attribution-receiving.md)
   records three finite direct unions merged in #12573 under existing Active
   homes: separate
