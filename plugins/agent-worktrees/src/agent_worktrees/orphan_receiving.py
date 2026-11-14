@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
+from collections.abc import Iterator
 
 from . import config as cfg, record_reporting, tracking
 
 
-def has_released_local_claim(entry: dict, config: cfg.Config) -> bool:
-    """Require the actual receiving source and its completed claim disposition."""
+def _source_path(entry: dict, config: cfg.Config) -> Path | None:
     project, source = entry.get("project"), entry.get("source_worktree")
     if (
         not isinstance(project, str) or project != getattr(config, "repo_name", None)
@@ -16,13 +17,21 @@ def has_released_local_claim(entry: dict, config: cfg.Config) -> bool:
         or not isinstance(source, str) or source in {"", ".", ".."}
         or Path(source).name != source or "/" in source or "\\" in source
     ):
-        return False
+        return None
+    return cfg.project_dir(project) / "worktrees" / f"{source}.yaml"
+
+
+def has_released_local_claim(entry: dict, config: cfg.Config) -> bool:
+    """Require the actual receiving source and its completed claim disposition."""
     try:
+        path = _source_path(entry, config)
+        if path is None:
+            return False
         record = tracking.load_record_by_id(
-            source, tracking_path=cfg.project_dir(project) / "worktrees",
+            path.stem, tracking_path=path.parent,
         )
         if (
-            record is None or record.repo != project or record.worktree_id != source
+            record is None or record.repo != entry["project"] or record.worktree_id != entry["source_worktree"]
             or record.status != "finalized" or not record_reporting.locally_proven_subject(record)
         ):
             return False
@@ -36,3 +45,25 @@ def has_released_local_claim(entry: dict, config: cfg.Config) -> bool:
         )
     except (OSError, ValueError, RuntimeError, TypeError):
         return False
+
+
+@contextmanager
+def claim_guard(entry: dict, config: cfg.Config, *, apply: bool) -> Iterator[bool]:
+    """Pin fresh custody through bounded disposal and orphan settlement.
+
+    This is a cleanup exclusion, not an ordinary metadata read/write hold.
+    No persistent freeze or new cooperation protocol is required.
+    """
+    if not apply:
+        yield has_released_local_claim(entry, config)
+        return
+    with ExitStack() as stack:
+        try:
+            path = _source_path(entry, config)
+            lock = (
+                stack.enter_context(tracking._RecordLock(path, blocking=False, require_sidecar=True))
+                if path is not None and path.is_file() and not path.is_symlink() else None
+            )
+        except (OSError, ValueError, RuntimeError, TypeError):
+            lock = None
+        yield lock is not None and lock.acquired and has_released_local_claim(entry, config)

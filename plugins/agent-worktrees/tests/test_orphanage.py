@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import json
 import types
+from contextlib import nullcontext
 
 import pytest
 
@@ -439,7 +440,7 @@ def test_reclaim_pr_rejects_provider_or_authority_mismatch_before_credentials(
 
 def test_claims_cleanup_releases_only_provider_confirmed_merged_prs(
         tmp_path, monkeypatch):
-    monkeypatch.setattr(orphan_receiving, "has_released_local_claim", lambda *_args: True)
+    monkeypatch.setattr(orphan_receiving, "claim_guard", lambda *_args, **_kwargs: nullcontext(True))
     _seed_project(tmp_path, monkeypatch)
     ref = "https://github.com/example/project/pull/42"
     tracking.rehome_abandoned_obligations(
@@ -467,7 +468,7 @@ def test_claims_cleanup_releases_only_provider_confirmed_merged_prs(
 
 def test_claims_cleanup_keeps_unmerged_or_unqueryable_pr_claims(
         tmp_path, monkeypatch):
-    monkeypatch.setattr(orphan_receiving, "has_released_local_claim", lambda *_args: True)
+    monkeypatch.setattr(orphan_receiving, "claim_guard", lambda *_args, **_kwargs: nullcontext(True))
     _seed_project(tmp_path, monkeypatch)
     ref = "https://github.com/example/project/pull/42"
     tracking.rehome_abandoned_obligations(

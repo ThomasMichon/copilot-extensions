@@ -42,7 +42,9 @@ idempotent no-change rehome performs no migration.
 The cleanup consumer independently proves receiving-source custody before
 reclamation; stripping a legacy label never makes an obligation local or
 disposable. Foreign, missing, live, transferred or ambiguous source evidence
-retains the entry. See [resource obligations and custody](architecture.md).
+retains the entry. Apply serializes fresh proof, bounded reclamation and orphan
+settlement against source mutations; preview remains read-only. See
+[resource obligations and custody](architecture.md).
 
 Independent [retained local authority](execution-identity.md#retained-local-checkout-authority)
 and normal integrity/ownership checks still govern real mutations. A naming

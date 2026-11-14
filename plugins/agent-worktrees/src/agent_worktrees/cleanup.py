@@ -34,6 +34,7 @@ import re
 import shutil
 import subprocess
 from collections import Counter
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import ParseResult, urlparse
@@ -515,6 +516,7 @@ _RECLAIMERS = {
 
 def reclaim_orphan(
     entry: dict, config: cfg.Config, *, apply: bool,
+    settle: Callable[[], bool] | None = None,
 ) -> ReclaimResult:
     """Dispatch one orphanage entry to its kind-specific reclaimer.
 
@@ -527,17 +529,23 @@ def reclaim_orphan(
     if reclaimer is None:
         return ReclaimResult(
             "unsupported", f"no reclaimer for kind {kind!r} yet")
-    from .orphan_receiving import has_released_local_claim
+    from .orphan_receiving import claim_guard
 
-    if not has_released_local_claim(entry, config):
-        return ReclaimResult(
-            "skipped", "receiving source custody is unproven; original obligation retained",
-        )
-    try:
-        return reclaimer(entry.get("ref") or "", apply, config)
-    except Exception as exc:  # a reclaimer must never break the pass
-        log.debug("reclaim of %s failed: %s", entry.get("ref"), exc)
-        return ReclaimResult("failed", f"reclaimer error: {exc}")
+    with claim_guard(entry, config, apply=apply) as admitted:
+        if not admitted:
+            return ReclaimResult(
+                "skipped", "receiving source custody is unproven or busy; original obligation retained",
+            )
+        try:
+            result = reclaimer(entry.get("ref") or "", apply, config)
+            if apply and result.reclaimed and settle is not None and not settle():
+                return ReclaimResult(
+                    "failed", "resource reclaimed but orphan settlement is unconfirmed; reconcile before retrying",
+                )
+            return result
+        except Exception as exc:  # a reclaimer must never break the pass
+            log.debug("reclaim of %s failed: %s", entry.get("ref"), exc)
+            return ReclaimResult("failed", f"reclaimer error: {exc}")
 
 
 def cleanup_orphanage(
@@ -556,7 +564,6 @@ def cleanup_orphanage(
     ``claims cleanup`` verb) can render text or JSON. Best-effort throughout.
     """
     rows: list[dict] = []
-    reclaimed_keys: list[tuple[str | None, str | None]] = []
     entries = tracking.load_orphaned_obligations(project)
     identities = Counter(_orphan_key(entry) for entry in entries)
     if selectors:
@@ -570,7 +577,10 @@ def cleanup_orphanage(
         result = (
             ReclaimResult("skipped", "orphan identity is invalid or ambiguous; obligations retained")
             if key is None or identities[key] != 1
-            else reclaim_orphan(entry, config, apply=apply)
+            else reclaim_orphan(
+                entry, config, apply=apply,
+                settle=lambda: tracking.remove_orphaned_obligations([key], project=project) == 1,
+            )
         )
         rows.append({
             "kind": entry.get("kind"),
@@ -580,11 +590,6 @@ def cleanup_orphanage(
             "status": result.status,
             "detail": result.detail,
         })
-        if apply and result.reclaimed:
-            reclaimed_keys.append(
-                (entry.get("source_worktree"), entry.get("ref")))
-    if apply and reclaimed_keys:
-        tracking.remove_orphaned_obligations(reclaimed_keys, project=project)
     return rows
 
 

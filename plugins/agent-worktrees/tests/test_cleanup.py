@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import types
+from contextlib import nullcontext
 
 import pytest
 
@@ -39,7 +40,7 @@ def _proc(returncode=0, stdout="", stderr=""):
 @pytest.fixture(autouse=True)
 def released_receiving_source(monkeypatch):
     # These are dispatch/provider units; real receiving proofs run in test_orphanage_identity.
-    monkeypatch.setattr(orphan_receiving, "has_released_local_claim", lambda *_args: True)
+    monkeypatch.setattr(orphan_receiving, "claim_guard", lambda *_args, **_kwargs: nullcontext(True))
 
 
 # ── tracking.remove_orphaned_obligations ─────────────────────────────────────
@@ -393,7 +394,7 @@ def test_reclaim_orphan_worktree_dispatches(monkeypatch):
 # ── reclaim_orphan dispatch ──────────────────────────────────────────────────
 
 def test_reclaim_orphan_unproven_source_skipped(monkeypatch):
-    monkeypatch.setattr(orphan_receiving, "has_released_local_claim", lambda *_args: False)
+    monkeypatch.setattr(orphan_receiving, "claim_guard", lambda *_args, **_kwargs: nullcontext(False))
     entry = {"kind": "codespace", "ref": "cs", "machine": "other"}
     r = cleanup.reclaim_orphan(entry, _config(machine="m"), apply=True)
     assert r.status == "skipped" and "custody is unproven" in r.detail
