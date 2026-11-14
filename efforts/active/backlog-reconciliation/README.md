@@ -3598,6 +3598,16 @@ sources, transferring owners or turning partial/planning gains into completion.
   and every source/claim/resource boundary remain. The complete 13:36:38 UTC
   census is 851 whole issues, 122 above fixed 729: three own inflow departures,
   no arrivals or external departures; 473 original-cohort issues remain open.
+- [x] Deliver the [publication-hook and retrieval-glob
+  intake](journal/2026/11.14-publication-and-retrieval-receiving.md) through
+  reviewed #12629, complete full current receiving readback and separate
+  source judgments. Verified `NOT_PLANNED` retirements of #8924/#9023 retain
+  every unfinished requirement and incumbent claim in the SAME Active
+  CI-identifier and incremental-indexing efforts, with direct Plan, local
+  technical and actual global AND gates. The complete 14:48:35 UTC census is
+  849 whole issues, 120 above fixed 729: two own inflow departures, no arrivals
+  or external departures; 473 original-cohort issues remain open. No technical
+  completion, claim/resource release, measurement execution or rollout follows.
 - [ ] Refresh live and original-cohort metrics, append journal checkpoints, and
   continue graph-backed consolidation with creation-oldest-first coverage until
   at most 729 issues remain.
