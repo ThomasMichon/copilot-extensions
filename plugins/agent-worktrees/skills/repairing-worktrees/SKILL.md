@@ -90,11 +90,20 @@ then use `doctor --repair-record <id> --bound-agent-end-field pair_id --json`
 (replace `pair_id` with the actual following field). A missing, repeated,
 unverifiable or later-than-first known field boundary refuses; no field boundary
 is guessed. The repair quotes
-only the delimited text, preserves surrounding fields, holds native record and
+only the delimited text, preserves other field values, holds native record and
 publication-authority locks, and retains the exact original bytes in a
 content-addressed `.yaml.repair-<digest>.bak` beside the record (created exclusively
 with mode `0600`; existing non-private POSIX backups refuse reuse). Contention or
 a changed record requires a fresh inspection. Never hand-edit tracking YAML.
+
+Both targeted and general YAML repairs omit the five obsolete machine/environment
+naming fields when an actual corruption repair writes the record. A legacy
+mapping is re-encoded to preserve values referenced by YAML aliases, so its
+formatting/comments may change; its exact original remains in the backup.
+Records without legacy naming retain the repaired text's surrounding bytes.
+Valid legacy records are not proactively migrated. General scalar repair leaves
+explicit YAML aliases, anchors, tags and flow structures intact and refuses
+unverified or duplicate mappings; it uses the same guarded backup/write owner.
 
 ### Retired machine-label repair
 

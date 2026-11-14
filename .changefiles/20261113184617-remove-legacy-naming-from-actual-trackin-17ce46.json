@@ -1,0 +1,9 @@
+{
+  "comment": "Remove legacy naming from actual tracking YAML repairs while retaining guarded original evidence.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

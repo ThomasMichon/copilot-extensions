@@ -213,6 +213,13 @@ Canonical naming is derived live; no record, checkout, historical audit or
 roster is inspected or rewritten. See
 [retirement, JSON compatibility and ordinary writes](machine-record-repair.md).
 
+Tracking-YAML corruption repair also omits legacy naming on an actual repair
+write, through the guarded original-byte backup and replacement owner. Targeted
+`--repair-record` and general integrity passes never migrate an already-valid
+legacy record. Legacy repaired mappings may be reformatted while preserving
+alias-referenced values; the exact original bytes remain in the private backup.
+See [scoped repair and byte/data preservation](../skills/repairing-worktrees/SKILL.md).
+
 ## Disposable producer ownership
 
 `resource-producer <capabilities|reserve|begin|complete|bind|inspect|close> --json
