@@ -33,10 +33,13 @@ def _input(operation: str, payload: object) -> dict:
         "reserve": {"kind", "namespace", "recovery"},
         "begin": {"token"}, "complete": {"token"},
         "bind": {"token", "identity"}, "inspect": {"token"}, "close": {"token"},
+        "retain": {"token"},
     }
     if not isinstance(operation, str) or operation not in keys:
         raise ValueError(f"unsupported producer operation {operation!r}; expected one of {sorted(keys)}")
     allowed = [keys[operation]]
+    if operation == "reserve":
+        allowed.append(keys[operation] | {"lifetime"})
     if operation in {"bind", "complete"}:
         allowed.append(keys[operation] | {"allocation_fence"})
     if not isinstance(payload, dict) or set(payload) not in allowed:
@@ -44,6 +47,8 @@ def _input(operation: str, payload: object) -> dict:
         raise ValueError(f"{operation}: expected exactly {options}")
     producer.canonical_json(payload)
     if operation == "reserve":
+        if payload.get("lifetime", "disposable-owned") not in {"disposable-owned", producer.ARTIFACT_LIFETIME}:
+            raise ValueError("unsupported producer lifetime")
         if not isinstance(payload["kind"], str) or not claim_providers.is_safe_argument(payload["kind"]):
             raise ValueError("reserve: kind must be a safe nonempty token")
         if not isinstance(payload["namespace"], str) or not claim_providers.is_safe_argument(payload["namespace"]):
@@ -97,7 +102,7 @@ def _matched_claim(record, token):
     claim = matches[0]
     if (
         not producer.valid_metadata(claim.producer)
-        or claim.producer.get("lifetime") != "disposable-owned"
+        or claim.producer.get("lifetime") not in {"disposable-owned", producer.ARTIFACT_LIFETIME}
         or producer.claim_ref(claim.producer) != claim.ref
     ):
         raise ValueError("producer metadata/ref is malformed or unsupported; obligation retained")
@@ -121,21 +126,31 @@ def apply_resource_producer(args: dict) -> dict:
                 raise ValueError(f"resource-producer field {field} must be a nonempty string")
         path = Path(args["yaml_path"])
         probe_subject, probe_result, granted_fence = None, None, None
-        if operation in {"close", "begin", "bind", "complete"}:
+        if operation in {"close", "retain", "begin", "bind", "complete"}:
             with tracking._RecordLock(path, require_sidecar=True):
-                snapshot, _ = _owned_record(args, path, mutable=operation != "close")
+                snapshot, _ = _owned_record(args, path, mutable=operation not in {"close", "retain"})
                 candidate = _matched_claim(snapshot, payload["token"])
                 phase = candidate.producer["phase"]
+                if operation == "retain":
+                    if candidate.producer["lifetime"] != producer.ARTIFACT_LIFETIME:
+                        raise ValueError("retain requires an explicitly reserved artifact lifetime")
+                    if phase == "retained":
+                        return _response(snapshot, candidate)
+                    _require_mutable_owner(snapshot)
+                    if phase != "bound":
+                        raise ValueError("retain requires a bound artifact allocation")
                 if operation == "close":
                     if tracking.claim_handoff_reservation(snapshot, candidate):
                         raise ValueError("producer claim is reserved by an offered handoff")
                     if phase == "closed":
                         return _response(snapshot, candidate)
-                    _require_mutable_owner(snapshot)
+                    if phase != "retained":
+                        _require_mutable_owner(snapshot)
                 if operation == "close" and phase == "allocating":
                     raise ValueError("allocation is in progress; complete or recover it before close")
                 if (
-                    operation == "close" and phase in {"pending", "bound"}
+                    operation == "close" and phase in {"pending", "bound", "retained"}
+                    or operation == "retain" and phase == "bound"
                     or operation == "begin" and phase == "pending" and "allocation_epoch" in candidate.producer
                     or operation == "bind" and phase in {"pending", "allocating"} and "allocation_fence" not in payload
                     or operation == "complete" and phase == "allocating" and "allocation_fence" not in payload
@@ -148,10 +163,11 @@ def apply_resource_producer(args: dict) -> dict:
                 # the subject including phase and non-repeating allocation epoch.
                 probe_result = claim_providers.resolve_claim_status(probe_subject)
         with tracking._RecordLock(path, require_sidecar=True):
-            record, owner = _owned_record(args, path, mutable=operation not in {"inspect", "close"})
+            record, owner = _owned_record(args, path, mutable=operation not in {"inspect", "close", "retain"})
             if operation == "reserve":
                 metadata = {
-                    "version": producer.VERSION, "lifetime": "disposable-owned",
+                    "version": producer.VERSION,
+                    "lifetime": payload.get("lifetime", "disposable-owned"),
                     "token": secrets.token_urlsafe(32), "namespace": payload["namespace"],
                     "phase": "pending", "creator": owner.canonical(),
                     "recovery": copy.deepcopy(payload["recovery"]),
@@ -173,11 +189,26 @@ def apply_resource_producer(args: dict) -> dict:
                 phase = claim.producer["phase"]
                 if phase == "closed" and operation == "close":
                     return _response(record, claim)
-                if operation == "close":
+                if operation == "retain" and phase == "retained":
+                    return _response(record, claim)
+                if operation == "retain":
                     _require_mutable_owner(record)
-                if phase not in {"pending", "allocating", "bound"}:
+                if operation == "close" and phase != "retained":
+                    _require_mutable_owner(record)
+                if phase not in {"pending", "allocating", "bound"} and not (
+                    operation == "close" and phase == "retained"
+                ):
                     raise ValueError(f"producer claim is {phase}; mutation refused")
-                if operation == "begin":
+                if operation == "retain":
+                    if (
+                        claim.producer["lifetime"] != producer.ARTIFACT_LIFETIME
+                        or phase != "bound" or claim.ref != probe_subject
+                        or not producer.verified_retention(probe_result, claim.ref, claim.producer["identity"])
+                    ):
+                        raise ValueError("artifact retention proof is unavailable or changed")
+                    claim.producer = {**claim.producer, "phase": "retained", "closeout": copy.deepcopy(probe_result)}
+                    claim.state = "at-rest"
+                elif operation == "begin":
                     if "allocation_epoch" in claim.producer and (
                         claim.ref != probe_subject or not isinstance(probe_result, dict)
                         or probe_result.get("available") is not True

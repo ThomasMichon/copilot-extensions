@@ -83,6 +83,8 @@ def validate_producer_offer(
         return
     if len(producers) != len(claims):
         raise error_type("offer disposable producer claims in a separate bundle")
+    if any(isinstance(c.producer, dict) and c.producer.get("namespace") == "worktree-scratch" for c in producers):
+        raise error_type("native scratch handoff requires receiving settlement support; not available")
     if any(isinstance(claim.producer, dict) and claim.producer.get("lifetime") == "retained-relationship" for claim in producers):
         raise error_type("retained relationship handoff requires provider acknowledgement; not available")
     if any(isinstance(claim.producer, dict) and claim.producer.get("lifetime") == "owned-worktree" for claim in producers):
@@ -125,6 +127,8 @@ def validate_supported_claims(
     if producer_claims:
         if len(producer_claims) != len(bundle.claims):
             raise error_type("offer disposable producer claims in a separate bundle")
+        if any(isinstance(c["producer"], dict) and c["producer"].get("namespace") == "worktree-scratch" for c in producer_claims):
+            raise error_type("native scratch handoff requires receiving settlement support; not available")
         if any(isinstance(c["producer"], dict) and c["producer"].get("lifetime") == "retained-relationship" for c in producer_claims):
             raise error_type("retained relationship handoff requires provider acknowledgement; not available")
         if any(isinstance(c["producer"], dict) and c["producer"].get("lifetime") == "owned-worktree" for c in producer_claims):

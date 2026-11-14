@@ -806,6 +806,11 @@ def resolve_claim_status(
     if split is None:
         return {"available": False, "reason": "ref has no namespace prefix, or contains unsafe characters"}
     namespace, identifier = split
+    if namespace == "worktree-scratch":
+        if native_restart_policy:
+            return {"available": False, "reason": "scratch does not implement native restart policy"}
+        from .artifact_scratch import callback_status
+        return callback_status(ref)
     providers, _findings = discover_claim_providers(plugins_root)
     provider = providers.get(namespace)
     if provider is None:

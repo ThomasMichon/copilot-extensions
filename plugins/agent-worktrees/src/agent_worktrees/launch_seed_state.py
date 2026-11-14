@@ -288,7 +288,10 @@ def _apply_remove(args: dict) -> dict:
         raise ValueError("Launch-seed removal identity mismatch")
     with tracking._RecordLock(path, require_sidecar=True):
         if path.exists():
-            _record(args)
+            record = _record(args)
+            from .retirement_safety import retains_artifact_metadata
+            if args.get("remove_record") and retains_artifact_metadata(record):
+                raise ValueError("retained artifact metadata requires record retirement, not deletion")
         elif target.exists() or (args.get("remove_record") and receipt.exists()):
             raise ExecutionSpaceError("cannot authorize launch-seed removal without its worktree record")
         if args.get("remove_record"):
