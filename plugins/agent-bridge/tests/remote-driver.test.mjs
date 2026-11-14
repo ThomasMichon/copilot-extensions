@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createDriverServer } from "../../agent-remote-driver/extensions/agent-remote-driver/driver-server.mjs";
-import { createRemoteDriverSession } from "../extensions/agent-bridge/remote-driver.mjs";
+import { createRemoteDriverSession } from "../../../libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/remote-driver.mjs";
 
 async function fixture(run) {
   const directory = await mkdtemp(join(tmpdir(), "bridge-driver-"));
@@ -42,6 +42,7 @@ async function fixture(run) {
     abort: () => { throw new Error("raw native abort must not be used"); },
   };
   const options = {
+    extensionPluginRoot: fileURLToPath(new URL("../", import.meta.url)),
     pluginRoot: fileURLToPath(new URL("../../agent-remote-driver/", import.meta.url)),
     descriptorDirectory: directory, expectedSessionId: nativeId, cwd: directory, ownerId: "bridge-launch",
   };

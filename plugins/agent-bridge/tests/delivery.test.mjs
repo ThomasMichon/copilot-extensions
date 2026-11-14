@@ -5,6 +5,7 @@ import {
   DELIVERY_SOURCE,
   InFlightMessages,
   MainTurn,
+  PendingInputNotice,
   isSubAgentEvent,
   buildDeliveredSendOptions,
   consumedMessageId,
@@ -20,7 +21,69 @@ import {
   REJECTED_RETRY_MS,
   drainInbox,
   drainControls,
-} from "../extensions/agent-bridge/delivery.mjs";
+} from "../../../libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/delivery.mjs";
+
+test("pending-input notice coalesces, preserves mute and clears only actual root input", () => {
+  let now = 0;
+  const notice = new PendingInputNotice({ now: () => now, reminderMs: 100 });
+  const input = { sessionId: "root" }, invocation = { sessionId: "root" };
+  notice.offered("root", [{ id: 1 }]);
+  assert.equal(notice.postTool(input, invocation, "root", false), undefined);
+  assert.match(notice.postTool(input, invocation, "root", true).additionalContext, /END YOUR TURN/);
+  notice.offered("root", [{ id: 2 }]);
+  assert.equal(notice.postTool(input, invocation, "root", true), undefined);
+  now = 100;
+  assert.match(notice.postTool(input, invocation, "root", true).additionalContext, /2 pending/);
+  const event = { type: "user.message", data: {
+    source: "agent-bridge", content: '<agent-message msg-id="1">body</agent-message>',
+  } };
+  notice.observe({ ...event, sessionId: "other" }, "root");
+  notice.observe({ ...event, agentId: "child" }, "root");
+  now = 200;
+  assert.match(notice.postTool(input, invocation, "root", true).additionalContext, /2 pending/);
+  notice.observe(event, "root");
+  now = 300;
+  assert.match(notice.postTool(input, invocation, "root", true).additionalContext, /1 pending/);
+  notice.observe({ ...event, data: {
+    ...event.data, content: '<agent-message msg-id="2">body</agent-message>',
+  } }, "root");
+  notice.offered("root", [{ id: 3 }]);
+  assert.match(notice.postTool(input, invocation, "root", true).additionalContext, /1 pending/);
+  notice.offered("successor", []);
+  assert.equal(notice.postTool(input, invocation, "root", true), undefined);
+});
+
+test("bounded pending-input overflow stays incomplete rather than inventing an empty inbox", () => {
+  const notice = new PendingInputNotice({ limit: 1 });
+  notice.offered("root", [{ id: 1 }, { id: 2 }]);
+  assert.equal(notice.pending.size, 1);
+  notice.observe({ type: "user.message", data: {
+    source: "agent-bridge", content: '<agent-message msg-id="1">body</agent-message>',
+  } }, "root");
+  assert.match(notice.postTool(
+    { sessionId: "root" }, { sessionId: "root" }, "root", true,
+  ).additionalContext, /incomplete/);
+});
+
+test("pending notification cannot resurrect input consumed while the inbox read was awaiting", async () => {
+  const inFlight = new InFlightMessages();
+  const observed = [], sent = [], acks = [];
+  await drainInbox("root", {
+    inFlight,
+    getJson: async () => {
+      inFlight.observe({ type: "user.message", data: {
+        source: "agent-bridge", content: '<agent-message msg-id="1">body</agent-message>',
+      } });
+      return { messages: [{ id: 1, body: "body" }] };
+    },
+    session: { send: async (options) => sent.push(options) },
+    post: async (_method, _route, body) => acks.push(body.ids),
+    onPending: (_sid, messages) => observed.push(messages),
+  });
+  assert.deepEqual(observed, [[]]);
+  assert.deepEqual(sent, []);
+  assert.deepEqual(acks, [[1]]);
+});
 
 test("a same-process resume switches registration to the resumed id", () => {
   const state = { sessionId: null, registered: false };
@@ -845,7 +908,7 @@ test("a control is acked under the id it was claimed for, even across a rename",
 });
 
 test("a history replay control is applied by replaying, and rejected when it can't be", async () => {
-  const { drainControls: drain } = await import("../extensions/agent-bridge/delivery.mjs");
+  const { drainControls: drain } = await import("../../../libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/delivery.mjs");
   for (const [replayHistory, applied] of [[async () => true, true], [async () => false, false],
                                            [async () => { throw new Error("no transcript"); }, false],
                                            [null, false]]) {
@@ -863,7 +926,7 @@ test("a history replay control is applied by replaying, and rejected when it can
 });
 
 test("transcriptTail keeps the newest represented events with their ids and times", async () => {
-  const { transcriptTail } = await import("../extensions/agent-bridge/delivery.mjs");
+  const { transcriptTail } = await import("../../../libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/delivery.mjs");
   const lines = [
     '{"type":"user.message","id":"a"', // a torn first line (the read started mid-line)
     JSON.stringify({ type: "user.message", id: "u1", data: { content: "hi" }, timestamp: "2026-10-09T01:00:00.000Z" }),

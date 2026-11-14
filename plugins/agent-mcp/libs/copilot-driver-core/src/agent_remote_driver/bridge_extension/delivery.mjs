@@ -1,0 +1,676 @@
+// Pure helpers for rendering and admitting a delivered agent-bridge inbox
+// message into a Copilot CLI session. Split out of extension.mjs (which does
+// a top-level `await joinSession(...)` and so cannot be imported directly by
+// a test) so this logic is unit-testable without the Copilot SDK.
+import { observePluginReadiness, readinessContextMatches } from "./plugin-readiness.mjs";
+
+// Render an incoming envelope as an ATTRIBUTED, ANSWERABLE agent-message. The
+// wrapper mirrors the runtime's own system markers (<system_reminder> /
+// <system_notification>) so a cooperating agent parses it as authoritative
+// structure: it can tell peer traffic from operator input, see who sent it, and
+// reply with the agent-bridge session catalog's exact argv[0] plus
+// `send <reply-to> "..."`.
+// Attribute values are escaped; the body is left literal (trusted single-
+// operator mesh) for readability.
+export function escAttr(v) {
+  return String(v == null ? "" : v)
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+// A non-`prompt` kind (D2) asks only for a terse out-of-band acknowledgement --
+// it must NOT be treated as new work. The guidance line makes that explicit to
+// the receiving agent so a status ping doesn't spawn a task.
+export const KIND_GUIDANCE = {
+  notify: "This is a NOTIFY (informational). No reply or new work is expected; " +
+    "acknowledge only if useful.",
+  "status-check": "This is a STATUS-CHECK. Answer tersely using the exact " +
+    "argv[0] from the agent-bridge session command catalog with " +
+    "`send <reply-to> \"...\"`; do NOT treat it as new work or start a task.",
+};
+
+// A status-check with no reply-to (e.g. from the bridge's browser UI, which is
+// not a session) has nowhere to `send` to: answer in the turn itself, where the
+// sender is watching.
+export const STATUS_CHECK_INLINE_GUIDANCE = "This is a STATUS-CHECK with no " +
+  "reply-to. Answer tersely in your reply right here; do NOT treat it as new " +
+  "work or start a task, and carry on with what you were doing.";
+
+// An ordinary ("prompt" kind) message with a reply-to still needs the same
+// explicit routing hint as notify/status-check: `from` is the sender's
+// display label, not guaranteed to be a resolvable send target by itself.
+// Without this, a receiving agent naturally tries `send <from> "..."` first
+// (reply to whoever it looks like the message came from) and only `reply-to`
+// is guaranteed to resolve back through the bridge.
+export const PROMPT_REPLY_GUIDANCE = "To reply, use the exact argv[0] from " +
+  "the agent-bridge session command catalog with `send <reply-to> \"...\"` " +
+  "-- `from` is a display label, not necessarily a valid send target.";
+
+// The runtime's SendRequest.source provenance tag this delivery always uses.
+// Must carry the `agent-` prefix (any non-empty suffix is accepted) so the
+// runtime's own admission logic (apply_public_send_admission) never defaults
+// this send to `source: "user"` -- an unmarked delivery would then be
+// indistinguishable from the real operator's own live keystrokes at the
+// contention/steering layer, exactly the collision
+// docs/delegation-contract.md flags as "experimental until single-stream
+// admission is proven".
+export const DELIVERY_SOURCE = "agent-bridge";
+
+export function renderDeliveredPrompt(msg) {
+  const kind = msg.kind && msg.kind !== "prompt" ? String(msg.kind) : null;
+  const attrs = [`from="${escAttr(msg.sender || "unknown")}"`];
+  if (msg.reply_to) attrs.push(`reply-to="${escAttr(msg.reply_to)}"`);
+  if (typeof msg.id === "number") attrs.push(`msg-id="${msg.id}"`);
+  if (kind) attrs.push(`kind="${escAttr(kind)}"`);
+  const body = String(msg.body ?? "");
+  const text = kind === "status-check" && !msg.reply_to
+    ? STATUS_CHECK_INLINE_GUIDANCE
+    : kind
+      ? KIND_GUIDANCE[kind]
+      : msg.reply_to && PROMPT_REPLY_GUIDANCE;
+  const guidance = text ? `\n\n(${text})` : "";
+  return `<agent-message ${attrs.join(" ")}>\n${body}${guidance}\n</agent-message>`;
+}
+
+// Build the exact options object pollInbox() passes to session.send() for one
+// delivered message. Centralized so every delivery path (today: the inbox
+// poller) is guaranteed to carry an explicit, non-"user" source.
+export function buildDeliveredSendOptions(msg) {
+  return {
+    prompt: renderDeliveredPrompt(msg),
+    displayPrompt: `Message from ${msg.sender || "peer"} (via agent-bridge)`,
+    source: DELIVERY_SOURCE,
+  };
+}
+
+const MSG_ID_ATTR = /<agent-message\b[^>]*\bmsg-id="(\d+)"/;
+
+// The bridge message id a `user.message` event carries, when it is one of our
+// deliveries (the rendered envelope names it), else null.
+export function consumedMessageId(event) {
+  if (event?.type !== "user.message" || isSubAgentEvent(event)) return null;
+  const data = event.data || {};
+  if (data.source !== undefined && data.source !== DELIVERY_SOURCE) return null;
+  const match = MSG_ID_ATTR.exec(String(data.transformedContent ?? data.content ?? ""));
+  return match ? Number(match[1]) : null;
+}
+
+// Messages handed to session.send() that the CLI has not yet recorded as a
+// user.message. session.abort() discards the CLI's pending input -- queued and
+// steering alike (verified live) -- so an interrupt must re-send these after
+// its abort, or they are silently lost.
+export class InFlightMessages {
+  constructor(limit = 50) {
+    this.pending = new Map();
+    this.consumed = new Set();
+    this.consumptionObservers = new Set();
+    this.limit = limit;
+  }
+
+  sent(msg) {
+    if (this.consumed.has(msg.id)) return;
+    this.pending.set(msg.id, msg);
+    while (this.pending.size > this.limit) {
+      this.pending.delete(this.pending.keys().next().value);
+    }
+  }
+
+  observe(event) {
+    const id = consumedMessageId(event);
+    if (id !== null) {
+      this._rememberConsumed(id);
+      for (const observer of this.consumptionObservers) observer(id);
+    }
+  }
+
+  _rememberConsumed(id) {
+    this.pending.delete(id);
+    this.consumed.delete(id);
+    this.consumed.add(id);
+    while (this.consumed.size > this.limit) {
+      this.consumed.delete(this.consumed.values().next().value);
+    }
+  }
+
+  watchConsumption() {
+    // Keep active delivery observations even when the bounded history evicts them.
+    const consumed = new Set(this.consumed);
+    const polled = new Set();
+    let selected = false;
+    const observer = (id) => {
+      if (!selected || polled.has(id)) consumed.add(id);
+    };
+    this.consumptionObservers.add(observer);
+    return {
+      has: (id) => consumed.has(id),
+      select: (ids) => {
+        for (const id of ids) polled.add(id);
+        for (const id of consumed) {
+          if (!polled.has(id)) consumed.delete(id);
+        }
+        selected = true;
+      },
+      close: () => {
+        this.consumptionObservers.delete(observer);
+        for (const id of polled) {
+          if (consumed.has(id)) this._rememberConsumed(id);
+        }
+      },
+    };
+  }
+
+  // The unconsumed messages older than `id`, oldest first, removed from tracking.
+  takeBefore(id) {
+    const out = [...this.pending.values()]
+      .filter((m) => m.id < id)
+      .sort((a, b) => a.id - b.id);
+    for (const m of out) this.pending.delete(m.id);
+    return out;
+  }
+}
+
+// Whether an SDK session event belongs to a sub-agent rather than the main
+// agent: the event envelope's ``agentId`` (absent for the root agent and
+// session-level events), plus the legacy ``data.agentId`` /
+// ``data.parentToolCallId`` markers the runtime also recognizes.
+export function isSubAgentEvent(event) {
+  if (!event || typeof event !== "object") return false;
+  if (event.agentId) return true;
+  const d = event.data;
+  return !!(d && typeof d === "object" && (d.agentId || d.parentToolCallId));
+}
+
+export class PendingInputNotice {
+  constructor({ now = Date.now, reminderMs = 30_000, limit = 1_000 } = {}) {
+    this.now = now;
+    this.reminderMs = reminderMs;
+    this.limit = limit;
+    this.sessionId = null;
+    this.pending = new Set();
+    this.incomplete = false;
+    this.lastNoticeAt = null;
+  }
+
+  offered(sessionId, messages) {
+    if (sessionId !== this.sessionId) {
+      this.sessionId = sessionId;
+      this.pending.clear();
+      this.incomplete = false;
+      this.lastNoticeAt = null;
+    }
+    for (const msg of messages) {
+      if (!Number.isSafeInteger(msg?.id) || msg.id <= 0
+          || String(msg.kind || "").startsWith("control:")
+          || String(msg.kind || "").startsWith("startup:")) continue;
+      if (this.pending.has(msg.id)) continue;
+      if (this.pending.size >= this.limit) this.incomplete = true;
+      else this.pending.add(msg.id);
+    }
+  }
+
+  observe(event, sessionId) {
+    if (sessionId !== this.sessionId
+        || (event?.sessionId !== undefined && event.sessionId !== sessionId)
+        || event?.data?.source !== DELIVERY_SOURCE) return;
+    const id = consumedMessageId(event);
+    if (id !== null) this.confirmed(sessionId, id);
+  }
+
+  confirmed(sessionId, id) {
+    if (sessionId !== this.sessionId) return;
+    this.pending.delete(id);
+    if (!this.pending.size && !this.incomplete) this.lastNoticeAt = null;
+  }
+
+  postTool(input, invocation, sessionId, enabled) {
+    if (!enabled || !sessionId || sessionId !== this.sessionId
+        || input?.sessionId !== sessionId || invocation?.sessionId !== sessionId
+        || input.agentId || input.parentAgentId || input.parentToolCallId
+        || (!this.pending.size && !this.incomplete)) return;
+    const now = this.now();
+    if (this.lastNoticeAt !== null && now - this.lastNoticeAt < this.reminderMs) return;
+    this.lastNoticeAt = now;
+    return {
+      additionalContext: this.incomplete
+        ? "Agent-bridge's bounded pending-input observation is incomplete. " +
+          (this.pending.size ? "Known messages remain pending; END YOUR TURN for queued steering. " : "") +
+          "Original inbox receipts remain authoritative; do not acknowledge or replay uncertain input."
+        : `Agent-bridge has ${this.pending.size} pending message(s) awaiting root input. ` +
+          "END YOUR TURN now so queued steering can be submitted. Do not send an acknowledgement or replay input.",
+    };
+  }
+}
+
+const MAIN_TURN_START = new Set(["user.message", "assistant.turn_start"]);
+// ``assistant.idle`` fires when the main agent's loop goes idle even while
+// background sub-agents keep running; ``session.idle`` only once all of them
+// are done too. Either one means the main turn is over.
+const MAIN_TURN_END = new Set(["assistant.idle", "session.idle"]);
+
+// Tracks whether the session's MAIN turn is running, from the root agent's own
+// events only -- a background sub-agent's activity never counts. Starts idle:
+// the extension joins as the session starts, and a missed start only degrades
+// an interrupt to an immediate (steering) send.
+export class MainTurn {
+  constructor() {
+    this.running = false;
+  }
+
+  observe(event) {
+    if (isSubAgentEvent(event)) return;
+    const type = event?.type;
+    if (MAIN_TURN_START.has(type)) this.running = true;
+    else if (MAIN_TURN_END.has(type)) this.running = false;
+  }
+}
+
+// Translate the bridge's persisted per-message urgency into SDK actions.
+// Missing delivery uses non-aborting steering, matching ordinary peer sends.
+// Unknown values are refused visibly rather than silently changing urgency.
+//
+// ``mainTurnRunning`` (default true: abort when unknown) decides whether an
+// interrupt aborts first. session.abort() also cancels every running
+// sub-agent, background ones included, so with no main turn to interrupt an
+// abort would only kill those -- the message is sent immediately instead.
+export function deliveryPlan(msg, { mainTurnRunning = true } = {}) {
+  const options = buildDeliveredSendOptions(msg);
+  if (msg?.delivery == null || msg.delivery === "steer") {
+    return { abortFirst: false, options: { ...options, mode: "immediate" } };
+  }
+  if (msg?.delivery === "interrupt") {
+    // Immediate (after the abort, when there is one), so it is not queued
+    // behind messages that were enqueued before it.
+    return { abortFirst: !!mainTurnRunning, options: { ...options, mode: "immediate" } };
+  }
+  if (msg.delivery === "queue") return { abortFirst: false, options };
+  throw new Error(`unknown message delivery ${msg.delivery}`);
+}
+
+// Session controls (polled from /controls, never delivered as a prompt).
+export const SESSION_MODES = ["interactive", "plan", "autopilot"];
+
+// What to do for one control row: {action: "set-mode", mode} for a mode change
+// the CLI knows, else {action: "skip", reason} (acked so it doesn't loop).
+export function controlPlan(msg) {
+  if (msg?.kind === "control:plugin-readiness") return { action: "plugin-readiness" };
+  if (msg?.kind === "control:replay-history") return { action: "replay-history" };
+  if (msg?.kind === "control:set-mode-ready") {
+    let payload;
+    try {
+      payload = JSON.parse(msg.body);
+    } catch {
+      return { action: "skip", reason: "invalid readiness-bound mode control" };
+    }
+    if (!payload || !SESSION_MODES.includes(payload.mode) || !payload.plugin_readiness) {
+      return { action: "skip", reason: "invalid readiness-bound mode control" };
+    }
+    return { action: "set-mode", mode: payload.mode, pluginReadiness: payload.plugin_readiness };
+  }
+  if (msg?.kind !== "control:set-mode") {
+    return { action: "skip", reason: `unknown control ${msg?.kind}` };
+  }
+  const mode = String(msg.body ?? "").trim();
+  if (!SESSION_MODES.includes(mode)) return { action: "skip", reason: `unknown mode ${mode}` };
+  return { action: "set-mode", mode };
+}
+
+// Whether session.rpc.mode.set's result means the mode took effect.
+export function modeApplied(result) {
+  return !!result && result.modeApplied !== false;
+}
+
+// The transcript tail a ``control:replay-history`` sends: this session's own
+// events.jsonl (the CLI's durable record, where the CLI runs), the newest
+// ``maxEvents`` of the represented ``types``, read from at most ``maxBytes`` at
+// its end. Each event keeps its id, so the bridge drops what it already has.
+export const REPLAY_MAX_EVENTS = 1500;
+export const REPLAY_MAX_BYTES = 8 * 1024 * 1024;
+
+export function transcriptTail(text, types, maxEvents = REPLAY_MAX_EVENTS) {
+  const out = [];
+  for (const line of String(text || "").split("\n")) {
+    if (!line.trim()) continue;
+    let ev;
+    try { ev = JSON.parse(line); } catch { continue; } // a torn first or last line
+    if (!ev || typeof ev.type !== "string" || !types.has(ev.type)) continue;
+    const item = { type: ev.type, id: ev.id ?? null, data: ev.data ?? {} };
+    if (ev.agentId) item.agentId = ev.agentId;
+    if (typeof ev.timestamp === "string") item.timestamp = Date.parse(ev.timestamp) / 1000 || undefined;
+    out.push(item);
+  }
+  return out.slice(-maxEvents);
+}
+
+// Follow the conversation this extension serves. Its id comes from SESSION_ID
+// or the first event; a resume in the same process then switches the events to
+// the resumed conversation's id. Registering that id while the placeholder is
+// still live is what lets the bridge fold the placeholder into it (its claim,
+// handle and queued messages), so a change is adopted, never ignored. Returns
+// true when the caller must register the (new) id.
+export const REJECTED_RETRY_MS = 5 * 60 * 1000;
+
+export function adoptSessionId(state, eventSessionId, now = Date.now()) {
+  if (eventSessionId) state.nativeSessionId = eventSessionId;
+  if (!eventSessionId || eventSessionId === state.sessionId) return false;
+  // An id the bridge refused for this process (see serializedRegister) is
+  // tried again only after a while, not on every event.
+  const retryAt = state.rejectedIds && state.rejectedIds.get(eventSessionId);
+  if (retryAt !== undefined && now < retryAt) return false;
+  state.sessionId = eventSessionId;
+  state.registered = false;
+  return true;
+}
+
+// One registration at a time (initial, heartbeat, and the one a rename kicks
+// off all share it). Each request reads the id when its turn comes, and is
+// ready only if that is still the current id: a rename while it was in flight
+// registers the new id first. Serialized, a late request for the old id can't
+// land after the new one and fold the alias back. ``register.close()`` stops
+// admitting registrations, drains the one in flight, and resolves to every id
+// this process registered (newest first) -- what shutdown must deregister: a
+// DELETE sent before a pending registration lands would leave it behind.
+//
+// ``post(id)`` resolves to true (registered), "rejected" (the bridge refused
+// this process for that id: its row belongs to another incarnation, e.g. a
+// crashed predecessor's expired row awaiting purge) or false (unreachable,
+// retried by the next heartbeat). On a rejection after a rename, the process
+// keeps serving under the id it did register -- inbox, controls and events
+// go on -- and the refused id is retried after REJECTED_RETRY_MS. A rejection
+// of the only id it serves revokes it: delivery stops (``registered`` false)
+// and shutdown no longer deregisters it; a later heartbeat re-registers it if
+// the other incarnation's row goes away.
+//
+// ``ready`` (optional promise) holds every registration until it settles --
+// the session's metadata (machine, worktree): a placeholder registered
+// without it can't be recognized as the predecessor once a resume renames it,
+// so its handle and history would never follow the resumed session. Only
+// registration waits on it; ``close()`` stops the wait (nothing posted then).
+// ``prepare`` supplies one fresh metadata snapshot for an attempt. A rollover
+// refreshes the owned predecessor with that same snapshot before its successor,
+// so a machine rename cannot strand the predecessor's alias or CLI claim.
+export function serializedRegister(
+  state, post, onRegistered = () => {}, { now = Date.now, ready = null, prepare = null } = {},
+) {
+  let chain = Promise.resolve();
+  let closed = false;
+  let stopWaiting;
+  const closing = new Promise((resolve) => { stopWaiting = resolve; });
+  let lastOk = null;
+  const posted = [];
+  const reject = (id) => {
+    (state.rejectedIds ||= new Map()).set(id, now() + REJECTED_RETRY_MS);
+    if (posted.includes(id)) posted.splice(posted.indexOf(id), 1);
+    if (lastOk === id) lastOk = null;
+  };
+  const once = async () => {
+    if (ready) await Promise.race([ready, closing]);
+    for (;;) {
+      const id = state.sessionId;
+      if (!id || closed) return false;
+      const metadata = prepare ? await Promise.race([prepare(), closing]) : undefined;
+      if (closed) return false;
+      if (state.sessionId !== id) continue;
+      if (prepare && lastOk && lastOk !== id) {
+        const previous = lastOk;
+        const refreshed = await post(previous, metadata);
+        if (refreshed === "rejected") reject(previous);
+        else if (refreshed !== true || metadata?.clear_targeting_metadata) return false;
+        if (closed) return false;
+        if (state.sessionId !== id) continue;
+      }
+      const result = await post(id, metadata);
+      if (result === true) {
+        lastOk = id;
+        if (!posted.includes(id)) posted.push(id);
+      } else if (result === "rejected") {
+        // The id is another incarnation's -- whether or not it is still the
+        // current one: this process no longer serves it, and shutdown must not
+        // delete that row (even if an earlier, id-only registration of it was
+        // accepted).
+        reject(id);
+      }
+      if (state.sessionId !== id) continue; // renamed meanwhile
+      if (result === "rejected") {
+        if (lastOk) {
+          state.sessionId = lastOk; // keep a usable handle; refresh it, then ready
+          continue;
+        }
+        state.registered = false; // stop inbox, control and event delivery
+        return false;
+      }
+      const ok = result === true;
+      if (ok && !state.registered) {
+        state.registered = true;
+        onRegistered(id);
+      }
+      return ok;
+    }
+  };
+  const register = () => (chain = chain.then(once, once));
+  register.close = async () => {
+    closed = true;
+    stopWaiting(); // a registration still waiting on ``ready`` never posts
+    await chain.catch(() => {});
+    return [...posted].reverse();
+  };
+  return register;
+}
+
+// Deliver one batch of this session's bridge inbox into the CLI, then ack it.
+// ``sid`` is the id the poll started under, used for both the fetch and the
+// ack: a rename while a delivery is awaited must not redirect the ack to an id
+// whose registration hasn't committed (or was refused) -- the original queue
+// would keep the message and deliver it twice. A rollover that does commit in
+// between is followed by the bridge's alias forwarding. Best-effort and
+// ordered: the batch stops at the first send failure (unacked redelivers).
+//
+// ``mainTurn`` (a MainTurn) says whether an interrupt has a main turn to abort;
+// without one, every interrupt aborts first (the historical behavior).
+export async function drainInbox(sid, options) {
+  const consumption = options.inFlight.watchConsumption();
+  try {
+    return await drainObservedInbox(sid, options, consumption);
+  } finally {
+    consumption.close();
+  }
+}
+
+async function drainObservedInbox(sid, { getJson, post, session, inFlight, mainTurn,
+  pluginReadiness = false, isCurrent = () => true, log = () => {}, onPending = () => {} }, consumption) {
+  const base = `/api/v1/live-sessions/${encodeURIComponent(sid)}`;
+  const inbox = `${base}/messages?exact_native=true${pluginReadiness ? "&plugin_readiness=true" : ""}`;
+  const data = await getJson(inbox);
+  const messages = data?.messages;
+  if (!Array.isArray(messages) || messages.length === 0) return [];
+  consumption.select(messages.filter((msg) => msg && typeof msg.id === "number").map((msg) => msg.id));
+  onPending(sid, messages.filter((msg) => msg && !consumption.has(msg.id)));
+  const delivered = [];
+  let interrupted = false;
+  const currentNative = async (msg) => {
+    if (!msg.exact_session) return true;
+    if (!isCurrent() || msg.original_session_id !== sid
+        || typeof session.rpc?.metadata?.snapshot !== "function") {
+      log(`exact message ${msg.id} held: native context unavailable or changed`);
+      return false;
+    }
+    const context = await session.rpc.metadata.snapshot();
+    if (!isCurrent() || context?.sessionId !== msg.original_session_id) {
+      log(`exact message ${msg.id} held: native context changed before delivery`);
+      return false;
+    }
+    return true;
+  };
+  const stillCurrent = (msg) => !msg.exact_session || isCurrent();
+  for (const incoming of messages) {
+    let msg = incoming;
+    if (!msg || typeof msg.id !== "number") continue;
+    try {
+      if (!await currentNative(msg) || !stillCurrent(msg)) continue;
+      if (consumption.has(msg.id)) {
+        delivered.push(msg.id);
+        continue;
+      }
+      if (String(msg.kind || "").startsWith("startup:prompt:")) {
+        if (!pluginReadiness || !msg.plugin_readiness) {
+          log(`startup message ${msg.id} held: readiness context unavailable`);
+          continue;
+        }
+        const observed = await observePluginReadiness(session, msg.plugin_readiness, {
+          isCurrent, waitForReady: false,
+        });
+        if (observed.status !== "ready") {
+          log(`startup message ${msg.id} held: ${observed.reason}`);
+          continue;
+        }
+        const retained = await getJson(inbox);
+        if (!isCurrent() || !retained?.messages?.some((row) => row.id === msg.id)) continue;
+        const context = await session.rpc.metadata.snapshot();
+        if (!isCurrent() || !readinessContextMatches(context, msg.plugin_readiness)) {
+          log(`startup message ${msg.id} held: native context changed before delivery`);
+          continue;
+        }
+        msg = { ...msg, kind: "prompt" };
+      }
+      if (consumption.has(msg.id)) {
+        delivered.push(msg.id);
+        continue;
+      }
+      const plan = deliveryPlan(msg, { mainTurnRunning: mainTurn ? mainTurn.running : true });
+      // One interrupt per batch: a second interrupt in the same batch must not
+      // cancel the turn the first one just started.
+      const abort = plan.abortFirst && !interrupted;
+      if (msg.delivery === "interrupt") interrupted = true;
+      if (abort) {
+        try {
+          await session.abort();
+        } catch (e) {
+          log(`abort failed before message ${msg.id}: ${e.message}`);
+        }
+        // The abort discarded every message still pending in the CLI;
+        // re-send those (oldest first) so the interrupt loses nothing.
+        const replay = inFlight.takeBefore(msg.id);
+        // Restore the whole batch before any awaited operation can reject.
+        // Only an observed user.message consumes an acknowledged input.
+        for (const earlier of replay) inFlight.sent(earlier);
+        for (const earlier of replay) {
+          if (!await currentNative(earlier) || !stillCurrent(earlier)
+              || !inFlight.pending.has(earlier.id)) {
+            continue;
+          }
+          await session.send({ ...deliveryPlan(earlier).options, mode: "immediate" });
+        }
+      }
+      if (!await currentNative(msg) || !stillCurrent(msg)) continue;
+      if (!consumption.has(msg.id)) {
+        await session.send(plan.options);
+        if (!consumption.has(msg.id)) inFlight.sent(msg);
+      }
+      delivered.push(msg.id);
+    } catch (e) {
+      log(`deliver failed for message ${msg.id}: ${e.message}`);
+      break;
+    }
+  }
+  if (delivered.length > 0) await post("POST", `${base}/messages/ack`, { ids: delivered });
+  return delivered;
+}
+
+// Apply this session's claimed controls (a mode change) through the CLI's RPC
+// and report each outcome. The poll claims each control (returned once; its
+// requester can no longer withdraw it), and every claimed control gets an
+// outcome -- applied or rejected -- so the bridge's ``POST /mode`` reports what
+// really happened; acked under ``sid``, the id it was claimed under (see
+// ``drainInbox``). An older bridge without /controls answers 404 (null).
+export async function drainControls(sid, { getJson, post, session, replayHistory = null,
+  isCurrent = () => true, readinessTasks = null, readinessOnly = false, log = () => {} }) {
+  const base = `/api/v1/live-sessions/${encodeURIComponent(sid)}`;
+  if (readinessOnly) {
+    const health = await getJson("/health");
+    if (health?.capabilities?.readonly_plugin_controls !== 1) return;
+  }
+  const data = await getJson(`${base}/controls${readinessOnly ? "?readiness_only=true" : ""}`);
+  const controls = data?.messages;
+  if (!Array.isArray(controls) || controls.length === 0) return;
+  const applied = [];
+  const rejected = [];
+  for (const c of controls) {
+    if (!c || typeof c.id !== "number") continue;
+    const plan = controlPlan(c);
+    if (readinessOnly && plan.action !== "plugin-readiness") continue;
+    if (plan.action === "plugin-readiness") {
+      let request;
+      try {
+        request = JSON.parse(c.body);
+      } catch {
+        rejected.push(c.id);
+        continue;
+      }
+      const observe = async (signal) => {
+        const result = await observePluginReadiness(session, request, { isCurrent, signal });
+        await post("POST", `${base}/controls/ack`, {
+          ids: [c.id], applied: result.status === "ready", plugin_readiness: result,
+        });
+      };
+      if (readinessTasks) {
+        if (readinessTasks.size >= 8) {
+          log(`readiness control ${c.id} rejected: observation capacity reached`);
+          rejected.push(c.id);
+          continue;
+        }
+        const controller = new AbortController();
+        const task = observe(controller.signal)
+          .catch(() => log(`readiness control ${c.id}: acknowledgment failed`))
+          .finally(() => readinessTasks.delete(c.id));
+        readinessTasks.set(c.id, { controller, task });
+      } else {
+        await observe();
+      }
+      continue;
+    }
+    if (plan.action === "skip") {
+      log(`control ${c.id} rejected: ${plan.reason}`);
+      rejected.push(c.id);
+      continue;
+    }
+    if (plan.action === "replay-history") {
+      // The bridge restarted and lost this session's represented history.
+      const replayed = replayHistory ? await replayHistory(sid).catch((e) => { log(`replay failed: ${e.message}`); return false; }) : false;
+      (replayed ? applied : rejected).push(c.id);
+      continue;
+    }
+    try {
+      if (plan.pluginReadiness) {
+        const observed = await observePluginReadiness(session, plan.pluginReadiness, {
+          isCurrent, waitForReady: false,
+        });
+        if (observed.status !== "ready") {
+          log(`control ${c.id} rejected: ${observed.reason}`);
+          rejected.push(c.id);
+          continue;
+        }
+        const context = await session.rpc.metadata.snapshot();
+        if (!isCurrent() || !readinessContextMatches(context, plan.pluginReadiness)) {
+          log(`control ${c.id} rejected: native context changed before mode application`);
+          rejected.push(c.id);
+          continue;
+        }
+      }
+      const result = await session.rpc.mode.set({ mode: plan.mode });
+      if (modeApplied(result)) {
+        log(`control ${c.id}: mode set to ${plan.mode} (from ${c.sender || "bridge"})`);
+        applied.push(c.id);
+      } else {
+        log(`control ${c.id}: mode ${plan.mode} not applied (${result?.status || "no status"})`);
+        rejected.push(c.id);
+      }
+    } catch (e) {
+      log(`control ${c.id}: mode ${plan.mode} failed: ${e.message}`);
+      rejected.push(c.id);
+    }
+  }
+  const ack = `${base}/controls/ack`;
+  if (applied.length > 0) await post("POST", ack, { ids: applied, applied: true });
+  if (rejected.length > 0) await post("POST", ack, { ids: rejected, applied: false });
+}

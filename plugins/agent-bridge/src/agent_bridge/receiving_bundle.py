@@ -51,6 +51,8 @@ def _read(root: Path, relative: str) -> bytes:
 
 def support_sources() -> tuple[tuple[str, bytes], ...]:
     """Read the selected source or materialized package, without guest discovery."""
+    from agent_remote_driver.bridge_extension import extension_sources
+
     package = _package_root()
     assets = package / "receiving_assets"
     materialized = assets.exists()
@@ -62,25 +64,50 @@ def support_sources() -> tuple[tuple[str, bytes], ...]:
         declaration = json.loads(_read(manifests, name))
         if (
             not isinstance(declaration, dict) or declaration.get("schema") != schema
-            or type(declaration.get("version")) is not int or declaration["version"] != 1
-            or not isinstance(declaration.get("files"), list) or not declaration["files"]
+            or type(declaration.get("version")) is not int
+            or declaration["version"] not in (1, 2)
+            or declaration["version"] == 2 and schema != "copilot-extensions.packaged-assets"
         ):
             raise ValueError("Unsupported receiving-support asset declaration")
-        payload = _relative(declaration.get("payloadDir"))
-        prefix = _ASSET_PREFIX + "/"
-        if not payload.startswith(prefix):
-            raise ValueError("Receiving-support assets have an unexpected payload location")
-        destination = payload[len(prefix):]
-        canonical = _relative(declaration.get("canonicalDir"))
-        for raw in declaration["files"]:
-            relative = _relative(raw)
-            archive = destination + "/" + relative
-            if archive in sources:
-                raise ValueError("Receiving-support asset declarations overlap")
-            sources[archive] = (
-                _read(assets, archive) if materialized
-                else _read(manifests.parent.parent, canonical + "/" + relative)
-            )
+        groups = [declaration] if declaration["version"] == 1 else declaration.get("groups")
+        if (
+            not isinstance(groups, list) or not 1 <= len(groups) <= 32
+            or any(not isinstance(group, dict) for group in groups)
+        ):
+            raise ValueError("Unsupported receiving-support asset groups")
+        for group in groups:
+            members = group.get("files")
+            if not isinstance(members, list) or not members:
+                raise ValueError("Receiving-support assets require explicit members")
+            members = [_relative(member) for member in members]
+            payload = _relative(group.get("payloadDir"))
+            canonical = _relative(group.get("canonicalDir"))
+            core = None
+            if payload == "extensions/agent-bridge/core":
+                # The native payload projection and Python runtime consume the
+                # same Core owner; a wheel never searches for its source repo.
+                core = dict(extension_sources())
+                if (
+                    canonical != "libs/copilot-driver-core/src/agent_remote_driver/bridge_extension"
+                    or set(members) != core.keys()
+                ):
+                    raise ValueError("Receiving-support Core declaration differs from its package")
+                destination = "plugins/agent-bridge/" + payload
+            else:
+                prefix = _ASSET_PREFIX + "/"
+                if not payload.startswith(prefix):
+                    raise ValueError("Receiving-support assets have an unexpected payload location")
+                destination = payload[len(prefix):]
+            for raw in members:
+                relative = _relative(raw)
+                archive = destination + "/" + relative
+                if archive in sources:
+                    raise ValueError("Receiving-support asset declarations overlap")
+                sources[archive] = (
+                    core[relative] if core is not None
+                    else _read(assets, archive) if materialized
+                    else _read(manifests.parent.parent, canonical + "/" + relative)
+                )
     bridge_manifest = "plugins/agent-bridge/plugin.json"
     metadata = json.loads(sources[bridge_manifest])
     if not isinstance(metadata, dict) or metadata.get("name") != "agent-bridge":

@@ -182,6 +182,35 @@ def test_timestamp_only_refresh_and_heartbeats_do_not_advance_event_cursor(owner
         stream.close()
 
 
+@pytest.mark.parametrize("versioned", [False, True])
+def test_reporter_naming_is_neither_observation_facts_nor_record_incarnation(owner, versioned):
+    def naming(name):
+        return {
+            "machine": name,
+            **({
+                "machine_identity_version": 1, "environment": "wsl", "platform": "wsl",
+                "execution_machine": name + "-slot",
+            } if versioned else {}),
+        }
+
+    initial = enroll(owner, **naming("original"))
+    owner.publish("project", [row(title="meaningful change", **naming("original"))], observed_at=2)
+    before = owner.observation_read(request())
+    retained = deepcopy(history(owner, initial)["entries"])
+    assert len(retained) == 1
+    for at, names in ((3, naming("renamed")), (4, {})):
+        owner.publish("project", [row(title="meaningful change", **names)], observed_at=at)
+        current = owner.observation_read(request())
+        assert current["source_generation"] == initial["source_generation"]
+        assert current["cursor"] == before["cursor"]
+        assert history(owner, initial)["entries"] == retained
+        assert not {
+            "machine", "platform", "environment", "execution_machine", "machine_identity_version",
+        } & current["facts"]["row"].keys()
+    owner.publish("project", [row(title="meaningful change", nonce="record-two")], observed_at=5)
+    assert owner.observation_read(request())["source_generation"] != initial["source_generation"]
+
+
 @pytest.mark.parametrize("change", ["head", "source", "removed", "publication-failed"])
 def test_scope_changes_never_keep_old_active_facts(owner, change):
     initial = enroll(owner)

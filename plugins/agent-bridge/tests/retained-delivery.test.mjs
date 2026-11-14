@@ -2,8 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   createRetainedInbox, retainedDeliverySelected, retainedConsumption,
-} from "../extensions/agent-bridge/retained-delivery.mjs";
-import { isRemoteDriverSource } from "../extensions/agent-bridge/remote-driver.mjs";
+} from "../../../libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/retained-delivery.mjs";
+import { isRemoteDriverSource } from "../../../libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/remote-driver.mjs";
 
 const contract = "retained-inbox-v1";
 const sid = "native-a";
@@ -125,8 +125,21 @@ test("retained mode is explicit and never changes legacy delivery defaults", () 
 test("driver consumption requires explicit source selection and still binds the original receipt", async () => {
   const f = fixture();
   f.add();
-  const inbox = f.consumer("consumer-a", { sourceAllowed: isRemoteDriverSource });
+  const pending = [], consumed = [];
+  const inbox = f.consumer("consumer-a", {
+    sourceAllowed: isRemoteDriverSource,
+    onPending: (sessionId, messages) => {
+      assert.equal(sessionId, sid);
+      pending.push(messages.map((msg) => msg.id));
+    },
+    onConsumed: (sessionId, id) => {
+      assert.equal(sessionId, sid);
+      consumed.push(id);
+    },
+  });
   await inbox.tick(sid);
+  assert.deepEqual(pending.at(-1), [1]);
+  assert.deepEqual(consumed, []);
   const receipt = f.receipt(f.rows[0]);
   const event = f.event();
   event.data.source = "agent-remote-driver-11111111-2222-4333-8444-555555555555";
@@ -137,6 +150,7 @@ test("driver consumption requires explicit source selection and still binds the 
   f.clock += 30_001;
   await inbox.tick(sid);
   assert.equal(f.rows[0].handoff_stage, "consumed");
+  assert.deepEqual(consumed, [1]);
   assert.equal(f.sends.length, 1);
 });
 

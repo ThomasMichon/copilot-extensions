@@ -373,8 +373,9 @@ def _assert_generated_windows_binary_frames(
     bin_dir = plugin / "bin" if surface == "payload" else legacy_bin
     if entrypoint.endswith("51"):
         system32 = Path(os.environ["SystemRoot"]) / "System32"
+        # Select the legacy shell without removing its declared Python prerequisite.
         env["PATH"] = os.pathsep.join(
-            (str(system32), str(system32 / "WindowsPowerShell" / "v1.0"))
+            (sys.base_prefix, str(system32), str(system32 / "WindowsPowerShell" / "v1.0"))
         )
     if entrypoint.startswith("powershell"):
         host = (
@@ -432,7 +433,7 @@ def _assert_generated_windows_binary_frames(
                 stdout, stderr = communication.result(
                     timeout=max(0.01, deadline - time.monotonic())
                 )
-                assert stdout == expected
+                assert stdout == expected, (process.returncode, stderr)
             assert process.returncode == 17, stderr
             assert stderr == b"probe-stderr"
         finally:
@@ -844,7 +845,7 @@ def test_out_of_session_boundaries_remain_explicit() -> None:
     # operator at runtime through the import; the literal text now lives in
     # delivery.mjs, not duplicated here.
     delivery = (
-        PLUGIN / "extensions" / "agent-bridge" / "delivery.mjs"
+        PLUGIN.parents[1] / "libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/delivery.mjs"
     ).read_text(encoding="utf-8")
     assert "agent-bridge session command catalog" in delivery
     assert "`agent-bridge send <reply-to>" not in extension

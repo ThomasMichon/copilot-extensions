@@ -182,6 +182,67 @@ export function isSubAgentEvent(event) {
   return !!(d && typeof d === "object" && (d.agentId || d.parentToolCallId));
 }
 
+export class PendingInputNotice {
+  constructor({ now = Date.now, reminderMs = 30_000, limit = 1_000 } = {}) {
+    this.now = now;
+    this.reminderMs = reminderMs;
+    this.limit = limit;
+    this.sessionId = null;
+    this.pending = new Set();
+    this.incomplete = false;
+    this.lastNoticeAt = null;
+  }
+
+  offered(sessionId, messages) {
+    if (sessionId !== this.sessionId) {
+      this.sessionId = sessionId;
+      this.pending.clear();
+      this.incomplete = false;
+      this.lastNoticeAt = null;
+    }
+    for (const msg of messages) {
+      if (!Number.isSafeInteger(msg?.id) || msg.id <= 0
+          || String(msg.kind || "").startsWith("control:")
+          || String(msg.kind || "").startsWith("startup:")) continue;
+      if (this.pending.has(msg.id)) continue;
+      if (this.pending.size >= this.limit) this.incomplete = true;
+      else this.pending.add(msg.id);
+    }
+  }
+
+  observe(event, sessionId) {
+    if (sessionId !== this.sessionId
+        || (event?.sessionId !== undefined && event.sessionId !== sessionId)
+        || event?.data?.source !== DELIVERY_SOURCE) return;
+    const id = consumedMessageId(event);
+    if (id !== null) this.confirmed(sessionId, id);
+  }
+
+  confirmed(sessionId, id) {
+    if (sessionId !== this.sessionId) return;
+    this.pending.delete(id);
+    if (!this.pending.size && !this.incomplete) this.lastNoticeAt = null;
+  }
+
+  postTool(input, invocation, sessionId, enabled) {
+    if (!enabled || !sessionId || sessionId !== this.sessionId
+        || input?.sessionId !== sessionId || invocation?.sessionId !== sessionId
+        || input.agentId || input.parentAgentId || input.parentToolCallId
+        || (!this.pending.size && !this.incomplete)) return;
+    const now = this.now();
+    if (this.lastNoticeAt !== null && now - this.lastNoticeAt < this.reminderMs) return;
+    this.lastNoticeAt = now;
+    return {
+      additionalContext: this.incomplete
+        ? "Agent-bridge's bounded pending-input observation is incomplete. " +
+          (this.pending.size ? "Known messages remain pending; END YOUR TURN for queued steering. " : "") +
+          "Original inbox receipts remain authoritative; do not acknowledge or replay uncertain input."
+        : `Agent-bridge has ${this.pending.size} pending message(s) awaiting root input. ` +
+          "END YOUR TURN now so queued steering can be submitted. Do not send an acknowledgement or replay input.",
+    };
+  }
+}
+
 const MAIN_TURN_START = new Set(["user.message", "assistant.turn_start"]);
 // ``assistant.idle`` fires when the main agent's loop goes idle even while
 // background sub-agents keep running; ``session.idle`` only once all of them
@@ -417,13 +478,14 @@ export async function drainInbox(sid, options) {
 }
 
 async function drainObservedInbox(sid, { getJson, post, session, inFlight, mainTurn,
-  pluginReadiness = false, isCurrent = () => true, log = () => {} }, consumption) {
+  pluginReadiness = false, isCurrent = () => true, log = () => {}, onPending = () => {} }, consumption) {
   const base = `/api/v1/live-sessions/${encodeURIComponent(sid)}`;
   const inbox = `${base}/messages?exact_native=true${pluginReadiness ? "&plugin_readiness=true" : ""}`;
   const data = await getJson(inbox);
   const messages = data?.messages;
   if (!Array.isArray(messages) || messages.length === 0) return [];
   consumption.select(messages.filter((msg) => msg && typeof msg.id === "number").map((msg) => msg.id));
+  onPending(sid, messages.filter((msg) => msg && !consumption.has(msg.id)));
   const delivered = [];
   let interrupted = false;
   const currentNative = async (msg) => {

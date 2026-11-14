@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 
 FIELDS = frozenset(
     """
-id repo machine environment execution_machine machine_identity_version creation_nonce
+id repo creation_nonce
 status kind title activity summary active_effort follow_up paused owner_ref
 claims_assets claims_links claims_link_count claims_links_complete claims_projection
 controllers controller_revision reciprocal_relation current_profile_assignment
@@ -168,20 +168,7 @@ def selected(
     }
     raw = c.utf8(c.encode(facts, c.BODY_BYTES - 4096))
     facts = c.decode(raw, c.BODY_BYTES - 4096)
-    incarnation = hashlib.sha256(
-        c.utf8(
-            c.encode(
-                [
-                    project,
-                    worktree,
-                    nonce,
-                    row.get("machine"),
-                    row.get("execution_machine"),
-                    row.get("environment"),
-                ]
-            )
-        )
-    ).hexdigest()
+    incarnation = hashlib.sha256(c.utf8(c.encode([project, worktree, nonce]))).hexdigest()
     try:
         at = datetime.fromtimestamp(publication["observed_at"], timezone.utc).isoformat()
     except (ValueError, OverflowError, OSError) as error:
