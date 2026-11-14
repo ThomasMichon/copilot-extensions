@@ -50,20 +50,19 @@ def _enabled(expression, inputs):
     return True
 
 
-def test_filtered_workflow_is_one_source_pinned_disposable_linux_job():
-    workflow = yaml.safe_load(
-        (ROOT / ".github/workflows/pr-filtered-acceptance.yml").read_text("utf-8")
-    )
-    assert set(workflow.get("on", workflow.get(True))) == {"workflow_dispatch"}
-    assert set(workflow["jobs"]) == {"pr-filtered-linux"}
-    job = workflow["jobs"]["pr-filtered-linux"]
+def test_filtered_acceptance_precedes_the_complementary_service_portfolio():
+    job = WORKFLOW["jobs"]["pr-service-linux"]
     assert job["runs-on"] == "ubuntu-latest" and job["timeout-minutes"] == 10
     checkout = job["steps"][0]
     assert checkout["with"] == {"ref": "${{ github.sha }}", "persist-credentials": False}
-    installed = job["steps"][-1]
-    assert installed["env"] == {"PYTEST_ADDOPTS": "-k filtered"}
-    assert "run-standalone-tests.py services/pr" in installed["run"]
-    assert "--timeout 180" in installed["run"]
+    focused, remaining = job["steps"][-2:]
+    assert focused["env"] == {"PYTEST_ADDOPTS": "-k filtered"}
+    assert remaining["env"] == {"PYTEST_ADDOPTS": "-k 'not filtered'"}
+    for step in (focused, remaining):
+        assert "run-standalone-tests.py services/pr" in step["run"]
+    assert "--prepare --timeout 180" in focused["run"]
+    assert "--timeout 420" in remaining["run"]
+    assert WORKFLOW["jobs"]["pr-service-windows"]["steps"] == job["steps"]
 
 
 def test_manual_selection_preserves_every_existing_route_and_default():

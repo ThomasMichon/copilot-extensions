@@ -209,6 +209,15 @@ The focused lane therefore lives in `pr-filtered-acceptance.yml`, with one
 Linux job and no inputs; existing shared-workflow selectors remain unchanged.
 Workflow contract controls check the input limit and focused job scope.
 
+That temporary separate-workflow plan is superseded: GitHub does not register
+the new workflow from the unmerged branch, so it cannot close pre-merge
+qualification. The existing registered `pr_service` lane now runs the focused
+filtered standalone selection first, then its complete complementary portfolio
+in the same two 10-minute jobs. The remaining-suite runner limit is 420 seconds
+instead of the observed insufficient 180; the overall job cap is unchanged.
+No tests or assertions are removed, and any new invocation still requires its
+own applicable approval. The unused separate workflow is removed.
+
 The next review's byte-accounting, disproved-cache, query-fairness and
 sponsor-conflict findings are addressed in the same service slice. Shared-cache
 bytes are included before each bounded registration projection; complete scans
