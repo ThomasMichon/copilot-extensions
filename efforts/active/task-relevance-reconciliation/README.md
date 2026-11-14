@@ -113,6 +113,9 @@ merged plan does not establish running adoption.
       Accepted original-owner wake and steering now survive same-generation
       unassignment and requeue in source controls. Generation-advancing recovery,
       uncaptured owners and recovered-owner lifecycle closeout remain open.
+      The [strict recovery correction](journal/2026/11.14-recovery-generation.md)
+      preserves a pending closeout's generation rather than orphaning its owner
+      through reset or detachment; this does not qualify broader recovery.
 
 ### Phase 3 - Source and periodic evaluation integration
 
@@ -260,6 +263,8 @@ operator's explicit bulk reset; it must not inherit that reset's broad discard
 authority. Add no universal attestation layer or duplicate lifecycle engine.
 
 ## Journal
+
+- [Strict recovery retains closeout generation](journal/2026/11.14-recovery-generation.md)
 
 - [November 14 - source fence acceptance reconciliation](journal/2026/11.14-source-fence-acceptance.md)
   records the existing concurrency and observation-fencing controls separately

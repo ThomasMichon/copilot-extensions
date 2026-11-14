@@ -8,12 +8,12 @@
       "fallback": {
         "destination": ".github/copilot/context-fallbacks/agent-dispatch/blocked-task-fallback.md",
         "renderedBytes": 2743,
-        "renderedSha256": "ae8755617e4109d14ce4e1647891d09d886058cf85da7c9cf0e3e05f4e1f6ef3"
+        "renderedSha256": "2fd9832ab4f2ec6dc4d154165f3b5c65358db4d2ac413f078dcc0622ae1891c6"
       },
       "plugin": "agent-dispatch@copilot-extensions",
-      "pluginVersion": "0.19.53-dev1",
+      "pluginVersion": "0.19.54-dev1",
       "renderedBytes": 1464,
-      "renderedSha256": "fcda327de173e01fb69e5c591c31cec2d2a749f6ee26eef48055f6ff5f1a5b80",
+      "renderedSha256": "7817b59da4836ad1118fee43ecd2af063ad07928e7ccf0e733bf0262aad49d68",
       "sourceId": "blocked-task-fallback",
       "template": "instructions/blocked-task-fallback.instructions.md",
       "templateBytes": 1958,
@@ -27,12 +27,12 @@
       "fallback": {
         "destination": ".github/copilot/context-fallbacks/agent-dispatch/session-guidance.md",
         "renderedBytes": 1013,
-        "renderedSha256": "12d818137f0c5b12123d60e9e1fa6d3c8523329d21f523e18cc233301f108736"
+        "renderedSha256": "b55817d7a8620a985431c2b6114808c740650000b87214c6d9db9085bf1696be"
       },
       "plugin": "agent-dispatch@copilot-extensions",
-      "pluginVersion": "0.19.53-dev1",
+      "pluginVersion": "0.19.54-dev1",
       "renderedBytes": 1439,
-      "renderedSha256": "d1af981091bdcd695aaf197561c48490aec92d857b05feb5780d8d7152a021ce",
+      "renderedSha256": "6ff1dd43cda72e248910e178ee0dffbe1a2ede6d41ad61ef0100bebf7c6821a8",
       "sourceId": "session-guidance",
       "template": "instructions/session-guidance.instructions.md",
       "templateBytes": 244,

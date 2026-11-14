@@ -635,9 +635,6 @@ def _ensure_anchor_ledger(
 
 def _journal_run_claim(owner_ref: str, stdout: str) -> tracking.ResourceClaim | None:
     """Append the produced-resource claim to the caller's tracking record."""
-    claim = _claim_from_run_output(stdout)
-    if claim is None:
-        return None
     parsed = tracking.parse_claim_ref(owner_ref)
     if parsed is None:
         return None
@@ -663,6 +660,9 @@ def _journal_run_claim(owner_ref: str, stdout: str) -> tracking.ResourceClaim | 
         protected = existing_claim(record, stdout)
         if protected is not None:
             return protected
+        claim = _claim_from_run_output(stdout)
+        if claim is None:
+            return None
         # Idempotency contract matches `pr_ops._ensure_pr_claim`: capture
         # whether this ref is already an active `pr` claim BEFORE mutating
         # -- `add_resource_claim` reuses a matching ref rather than
@@ -778,11 +778,13 @@ def cmd_run(args: argparse.Namespace) -> int:
             return 1
 
     reused_allocation = False
+    claim = None
 
-    def _finish_pending(claim: tracking.ResourceClaim | None) -> bool:
-        nonlocal reused_allocation
+    def _finish_pending() -> bool:
+        nonlocal reused_allocation, claim
 
         if owner_path is None or not pending_ref:
+            claim = _claim_from_run_output(child_stdout) if child_stdout.strip() else None
             return claim is not None
         try:
             with tracking._RecordLock(owner_path, require_sidecar=True):
@@ -793,6 +795,8 @@ def cmd_run(args: argparse.Namespace) -> int:
                 from .allocation_run import existing_claim
 
                 protected = existing_claim(owner_record, child_stdout)
+                if protected is None and child_stdout.strip():
+                    claim = _claim_from_run_output(child_stdout)
                 if claim is None and protected is None:
                     return False
                 owner_record.resources = [
@@ -847,8 +851,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     sys.stdout.write(child_stdout)
     sys.stdout.flush()
 
-    claim = _claim_from_run_output(child_stdout) if child_stdout.strip() else None
-    if not _finish_pending(claim):
+    if not _finish_pending():
         if claim is None:
             output.err(
                 f"run: resource command exited {proc.returncode} but no claim could "
