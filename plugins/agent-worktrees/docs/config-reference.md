@@ -350,9 +350,11 @@ Launch selectors accept both `--machine example-host --environment WSL` and
 `--machine example-host-wsl`. The suffix decomposes into physical host
 `example-host` and environment `wsl`; it does not make the native Windows
 execution space local to its guest. Conflicting requests such as
-`example-host-wsl` with `Win` are rejected. Historical worktree records retain
-their machine and separately recorded platform rather than being relabeled
-merely because a launch used a logical key.
+`example-host-wsl` with `Win` are rejected. Historical worktree IDs, checkout
+names and allocation references retain their original spelling rather than
+being renamed by a launch selector. Canonical records do not persist machine
+or environment labels: [reporter naming](execution-identity.md#reporter-naming-and-tracking-data)
+is derived live, legacy naming keys are ignored and ordinary saves remove them.
 
 A machine registry entry opts into independent execution-space identity with
 `execution_platform: windows`, `wsl` or `linux`. Its registry key is canonical;
