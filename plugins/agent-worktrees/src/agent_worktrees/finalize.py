@@ -1005,6 +1005,10 @@ def _settle_parent_obligation(
     execution-space authority failures propagate and preserve the obligation.
     """
     from .execution_spaces import settle_parent_obligation
+    from . import retired_owner_finalization
+
+    if retired_owner_finalization.selected(record):
+        return
     settle_parent_obligation(record, config, worktree_id, output=output)
 
 

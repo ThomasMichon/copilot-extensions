@@ -14,6 +14,8 @@ import yaml
 from agent_worktrees import claimant, context_cli, execution_spaces, finalize, finalize_cli
 from agent_worktrees import git_ops, retired_owner_finalization as recovery, tracking
 from agent_worktrees import status_monitor_runtime, tracking_write
+from agent_worktrees import output, sessions
+from agent_worktrees.tracking_claims import canonicalize_ref
 from pr_test_helpers import _git
 from test_local_worktree_authority import local_worktree  # noqa: F401
 
@@ -55,6 +57,7 @@ def retired(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> 
     fixture.claimant_death_probe = claimant._confirmed_record_death
     monkeypatch.setattr(claimant, "_confirmed_record_death", lambda record, config: False)
     monkeypatch.setattr(finalize, "_has_live_session", lambda record: False)
+    monkeypatch.setattr(sessions, "mux_status_many", lambda *a, **k: {})
     monkeypatch.setattr(finalize.procs, "checkout_retirement_blocker", lambda path: None)
     monkeypatch.setattr(finalize, "_warn_of_codespace_claims_for_worktree", lambda *a: None)
     monkeypatch.setattr(finalize, "_warn_of_dev_slot_claims_for_worktree", lambda *a: None)
@@ -71,7 +74,7 @@ def _run(fixture: SimpleNamespace, **changes) -> int:
     return finalize_cli.cmd_finalize(Namespace(**options))
 
 
-def test_explicit_recovery_removes_landed_legacy_child_on_actual_branch(retired: SimpleNamespace) -> None:
+def test_explicit_recovery_removes_landed_legacy_child_on_actual_branch(retired: SimpleNamespace, capsys) -> None:
     _git("switch", "-c", "reviewed-topic", cwd=retired.checkout)
     parent = retired.parent.read_bytes()
     assert _run(retired, recover_retired_owner=None) == 1
@@ -83,6 +86,7 @@ def test_explicit_recovery_removes_landed_legacy_child_on_actual_branch(retired:
     child = tracking.load_record(retired.ledger)
     assert child.owner_ref == retired.data["owner_ref"]
     assert not child.receiving_allocation_present
+    assert "parent-obligation settlement is unconfirmed" not in capsys.readouterr().err
 
 
 @pytest.mark.parametrize("source", ["dirty", "unlanded"])
@@ -202,16 +206,19 @@ def test_recovery_rechecks_absence_when_ordinary_custody_becomes_valid(
 
 @pytest.mark.parametrize("after_admission", [False, True])
 @pytest.mark.parametrize("metadata", [{"producer": {"namespace": "unknown"}}, {"future": "opaque"}])
+@pytest.mark.parametrize("canonical", [False, True])
 def test_recovery_rejects_mixed_duplicate_claims(
-    retired: SimpleNamespace, after_admission: bool, metadata: dict,
+    retired: SimpleNamespace, after_admission: bool, metadata: dict, canonical: bool,
 ) -> None:
     from contextlib import nullcontext
 
     record = tracking.load_record(retired.ledger)
     scope = recovery.scope(record.worktree_id, retired.config, record.owner_ref)
     with scope if after_admission else nullcontext():
+        ref = retired.parent_data["resources"][0]["ref"]
         retired.parent_data["resources"].append({
             **retired.parent_data["resources"][0], **metadata, "state": "active",
+            "ref": canonicalize_ref("worktree", ref) if canonical else ref,
         })
         retired.parent.write_text(yaml.safe_dump(retired.parent_data), encoding="utf-8")
         if after_admission:
@@ -255,3 +262,37 @@ def test_recovery_uses_the_qualified_retired_parent_for_inactivity(
     monkeypatch.setattr(claimant, "_confirmed_record_death", retired.claimant_death_probe)
     assert claimant.local_claimant_alive(retired.data["owner_ref"]) is None
     assert _run(retired) == 0
+
+
+@pytest.mark.parametrize("probe", ["live", "unknown"])
+def test_recovery_checks_actual_parent_binding_probe(
+    retired: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, probe: str,
+) -> None:
+    from agent_worktrees import reclaim
+
+    retired.parent_data["sessions"] = [{"session_id": "parent-session", "name": "parent"}]
+    retired.parent.write_text(yaml.safe_dump(retired.parent_data), encoding="utf-8")
+    seen = []
+
+    def bindings(*, worktree_id, session_ids, strict=False):
+        seen.append((worktree_id, session_ids, strict))
+        if probe == "unknown":
+            raise OSError("native binding observation unavailable")
+        return [{"session_id": "parent-session", "homing": "bare"}]
+
+    monkeypatch.setattr(reclaim, "resolve_bound_copilots", bindings)
+    monkeypatch.setattr(sessions, "mux_status_many", lambda *a, **k: {})
+    before = retired.ledger.read_bytes(), retired.parent.read_bytes()
+    assert _run(retired) == 1
+    assert seen == [("retired-parent", ["parent-session"], True)]
+    assert (retired.ledger.read_bytes(), retired.parent.read_bytes()) == before
+    assert retired.checkout.exists()
+
+
+def test_recovery_malformed_child_is_a_json_refusal(retired: SimpleNamespace) -> None:
+    retired.ledger.write_text("resources: [\n", encoding="utf-8")
+    with output.capture_json_output() as captured:
+        assert _run(retired) == 1
+    response = json.loads(captured.getvalue())
+    assert response["error"]
+    assert retired.checkout.exists()

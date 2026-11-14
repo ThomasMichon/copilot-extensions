@@ -27,7 +27,7 @@ _admitted: ContextVar[_Admission | None] = ContextVar("retired_owner_finalizatio
 
 
 def _proof(record: tracking.WorktreeRecord, config: cfg.Config, owner_ref: str) -> _Admission:
-    from . import claimant, execution_spaces, record_reporting, retained_checkout, tracking_lookup
+    from . import claimant, execution_spaces, finalize, record_reporting, retained_checkout, sessions, tracking_lookup
 
     error = execution_spaces.ExecutionSpaceError
     owner = tracking.parse_claim_ref(owner_ref)
@@ -63,10 +63,17 @@ def _proof(record: tracking.WorktreeRecord, config: cfg.Config, owner_ref: str) 
     if (
         claim is None or claim.state not in {"abandoned", "released", "at-rest"}
         or claim.handoff_bundle
-        or sum(candidate.ref == claim.ref for candidate in parent.resources) != 1
+        or sum(
+            tracking.parse_claim_ref(candidate.ref) == tracking.parse_claim_ref(claim.ref)
+            for candidate in parent.resources
+        ) != 1
     ):
         raise error("retired-owner recovery requires the unique settled original child claim")
-    if claimant._confirmed_record_death(parent, receiving) is not False:
+    live = sessions.verify_worktree_active(parent, strict=True)
+    if (
+        not live.probes_ok or live.active or finalize._has_live_session(parent)
+        or claimant._confirmed_record_death(parent, receiving) is not False
+    ):
         raise error("retired-owner recovery requires positively inactive original ownership")
     return _Admission(
         record_machine_identity.subject_fence(record, record.yaml_path), record.creation_nonce, owner_ref,
@@ -95,7 +102,12 @@ def scope(
         yield
         return
     path = cfg.tracking_dir(config.repo_name) / f"{worktree_id}.yaml"
-    record = tracking.load_record(path)
+    try:
+        record = tracking.load_record(path)
+    except (OSError, ValueError, RuntimeError, TypeError, cfg.yaml.YAMLError) as exc:
+        from .execution_spaces import ExecutionSpaceError
+
+        raise ExecutionSpaceError(f"retired-owner child proof is unavailable: {exc}") from exc
     admission = _checked_proof(record, config, owner_ref)
     token = _admitted.set(admission)
     try:

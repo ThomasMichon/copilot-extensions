@@ -42,14 +42,18 @@ cleanup section, preventing claim reactivation between fresh proof and removal.
 Ordinary record locks are not held across the earlier fetch/provider work.
 Revalidation still applies if ordinary custody becomes available meanwhile.
 Any additional entry for the original child claim reference refuses admission,
-including producer-backed or opaque entries. Inactivity is resolved from the
-already-qualified local parent, not by reinterpreting its historical host label.
+including equivalent canonical encodings, producer-backed or opaque entries.
+Inactivity is resolved from the already-qualified local parent, not by
+reinterpreting its historical host label. Strict native mux/binding observation
+must confirm inactivity; an archived status or absent directory alone does not.
 
 Recovery authority exists only for this invocation. Original ownership, parent
 history and settled claim disposition remain intact. This is not a claim
 handoff, takeover, generic mutation exception or invoker-authorization protocol.
 Session-claim settlement uses the existing locked handler in the admitted
 process; no recovery authority is sent to a resident daemon.
+The original parent claim is already settled, so recovery does not attempt
+another parent settlement after removing the child.
 It cannot be combined with abandonment or open-PR overrides. Existing content,
 publication, effort, downstream responsibility, session and checkout-preservation
 checks remain independent. Finalization checks the actual checked-out branch,
