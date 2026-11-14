@@ -92,6 +92,8 @@ def test_skill_and_record_are_discoverable_without_a_runtime():
     "re-request review and reply to threads",
     "A mechanical rebase or conflict-only push is not a new revision of intent",
     "caps bind intent-changing revisions",
+    "add, move or delete files in its change",
+    "as is a self-written expiry (grants last until task completion, revocation or hold)",
 ])
 def test_kernel_preserves_useful_work_and_real_authority_boundaries(clause):
     assert clause in " ".join(_TEMPLATE.read_text().split())
@@ -160,6 +162,17 @@ def test_kernel_preserves_useful_work_and_real_authority_boundaries(clause):
         "Operator picks a narrower option offered beside a broader one",
         "The narrowing binds; record it as operator-chosen and ask once at class level if the "
         "work later needs more.",
+    ),
+    (
+        "Agent wrote an expiry or time window into its own only approving option",
+        "Record it as an agent-proposed precaution; the grant lasts until the task completes, "
+        "is revoked or narrowed, or a hold applies.",
+    ),
+    (
+        "Author agent's own reviewed change deletes or moves files, including superseded "
+        "same-purpose paths found during a rebase",
+        "Treat it as an ordinary source edit visible in review, not a destructive deletion; "
+        "data outside source control keeps its gates.",
     ),
 ])
 def test_record_preserves_explicit_decision_cases(situation, required):

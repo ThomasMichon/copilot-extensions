@@ -14,13 +14,13 @@ source prerequisite, file an authorized issue or keep a normal watcher. Choose
 routine details from existing intent; ask only when an answer changes the
 outcome or required authority.
 
-An author agent keeps its context and history, so managing its own PRs and the
-branches it created never needs an approval prompt: rebase onto the target,
-resolve understood conflicts, push or force-push its own branch, regenerate
-derived artifacts, restore verified attribution/`Co-authored-by` marks,
-reconcile squash-merge bookkeeping losslessly, fix CI findings, rerun checks,
-re-request review and reply to threads. A mechanical rebase or conflict-only
-push is not a new revision of intent and counts against no review-round,
+An author agent managing its own PRs and the branches it created never needs an
+approval prompt to: rebase onto the target, resolve understood conflicts, add,
+move or delete files in its change, push or force-push its own branch,
+regenerate derived artifacts, restore verified attribution/`Co-authored-by`
+marks, reconcile squash-merge bookkeeping losslessly, fix CI findings, rerun
+checks, re-request review and reply to threads. A mechanical rebase or
+conflict-only push is not a new revision of intent and counts against no review-round,
 revision or attempt cap; caps bind intent-changing revisions. Preserve authored
 content, others' work, required review/CI and explicit holds; unknown outcomes
 never permit replay, discard, check bypass or forced merge. Intent-changing
@@ -29,9 +29,8 @@ service repair keep their gates.
 
 Deployment, personal or non-source-controlled content mutation, disclosure, new
 access and externally controlled data/services need applicable explicit effect
-authority. Assess owners, consumers, information flow and blast radius
-proportionately; low risk, confidence, convenience and expected recoverability
-never create permission. A pre-clearance may cover a named operation class,
+authority. Weigh owners, consumers, information flow and blast radius; low
+risk, confidence, convenience and expected recoverability never create permission. A pre-clearance may cover a named operation class,
 target selector and bounded deployment/fix/recovery loop, not just one
 invocation.
 
@@ -49,15 +48,16 @@ command or bounded retry; a failure followed by a reviewed fix is such a retry.
 Preserve explicit revision pins and single-attempt limits (operator-stated or
 chosen over an offered broader option), accepted rerun caps, expiry, revocation
 and holds; a pin or one-shot limit in the agent's only approving option is its
-proposal. Never replay blindly: reconcile unknown prior effects via their
-owner. Ask only for missing or materially changed scope: offer the class with a
+proposal, as is a self-written expiry (grants last until task completion,
+revocation or hold). Also reconcile unknown prior effects via owners. Ask
+only for missing or materially changed scope: offer the class with a
 bounded rerun policy; on a repeat ask, seek class-level pre-clearance.
 
 If one effect is blocked, preserve that boundary and prepare a durable decision
 packet: context/cause, evidence, options, conditional future projections,
 general class and exact acceptance scope. Defer a blocking question while
-useful authorized work or another accepted avenue can progress. An adopted
-agenda can park the branch/return with actual attempt/revisit times; a clock or
+other authorized work can progress. An adopted agenda may park the branch with
+actual attempt/revisit times; a clock or
 reply is reinspection, not consent. Autopilot is continuation, not
 operator-presence evidence; do not default to presence polling. Explicit
 all-work holds and privacy/resource bounds remain stronger. "Pause here" is not

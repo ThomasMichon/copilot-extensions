@@ -1,0 +1,9 @@
+{
+  "comment": "Question framing and standing authority: treat self-written expiries as proposals, prefer resource bounds over attempt counts, state current state plainly, and treat file deletions in an author's own reviewed change as ordinary edits",
+  "changes": [
+    {
+      "plugin": "agent-conduct-guidance",
+      "type": "patch"
+    }
+  ]
+}

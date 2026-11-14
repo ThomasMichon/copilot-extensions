@@ -344,6 +344,14 @@ Change cadence by replacing the one owned schedule, stopping it before
 creating its successor, and record the reason; never run two.
 No daemon, cron entry, automatic joining, or background service is supplied.
 
+The monitor's standing charter is committed source: this skill plus any
+consumer adapter in the consuming repository. Re-read both from their current
+committed source at the start of each cycle, not from a copy remembered in the
+session or note, so merged guidance changes take effect on the next sweep. The
+supervisory note holds only tactical, per-target state about active charters;
+durable learnings belong in source through the self-improvement flow below,
+never only in the note or agent memory.
+
 Keep the supervisory note compact: targets, root pointers, coverage cursor,
 last delta, current blocker, outstanding steer, next observation and pointers
 to the thread register and the per-target charter summaries. Do not copy

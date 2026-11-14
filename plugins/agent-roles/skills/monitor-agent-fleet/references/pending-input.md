@@ -59,6 +59,17 @@ clear a question. Record the missing answer path as a coverage gap. Report
 the question to the operator once with a ready-to-paste answer and its
 default, and include it in the sweep report until it is answered.
 
+## Relay operator answers at class scope
+
+When the operator answers a parked question, relay it at the scope of the
+decision class, not the narrow invocation the worker asked about. Before
+relaying a worker's question to the operator, rewrite options the worker
+narrowed on its own (one attempt, a pin, an invented expiry) into a broad or
+standing option beside any narrower one, and state the current state plainly.
+An answer such as "yes until done" or "as much as it wants" is a standing grant
+for that class until the task completes or the operator narrows it; relay it
+that way and record it in the worker's charter, not only the monitor's note.
+
 ## Prevent repeat questions
 
 When the same worker parks on routine questions repeatedly, steer it (under
