@@ -11,6 +11,7 @@ import json
 from pathlib import Path
 
 import agent_logger.segmenter.ramp_up as ramp_up
+import pytest
 
 
 def _make_session(
@@ -151,17 +152,49 @@ def test_discover_by_suffix(monkeypatch, tmp_path: Path) -> None:
     assert ramp_up.discover_by_suffix("9999") == []
 
 
-def test_discover_by_suffix_machine_filter(monkeypatch, tmp_path: Path) -> None:
+def test_local_machine_selector_ignores_historical_prefixes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capfd: pytest.CaptureFixture[str],
+) -> None:
     state_root = _point_home(monkeypatch, tmp_path / "home")
-    lc = str(tmp_path / "anomalous-potato-win-20260724-120542-dupe")
-    bl = str(tmp_path / "emancipation-cube-win-20260724-120542-dupe")
-    _make_session(state_root, "lc01", lc, updated_at="2026-01-02T00:00:00.000Z")
-    _make_session(state_root, "bl01", bl, updated_at="2026-01-03T00:00:00.000Z")
+    for session, dirname, updated in (
+        ("old", "old-host-win-20260724-120542-dupe", "2026-01-02"),
+        ("opaque", "workspace-dupe", "2026-01-03"),
+        ("other", "current-host-win-20260724-120542-other", "2026-01-04"),
+    ):
+        _make_session(
+            state_root, session, str(tmp_path / dirname),
+            updated_at=f"{updated}T00:00:00.000Z",
+        )
+    monkeypatch.setattr(ramp_up, "detect_machine", lambda: "current-host")
+    monkeypatch.setattr(
+        ramp_up.sys, "argv",
+        ["ramp-up-session", "dupe", "--machine", "current-host", "--list", "--json"],
+    )
+    ramp_up.main()
+    value = json.loads(capfd.readouterr().out)
+    assert value["machine"] == "current-host"
+    assert [s["id"] for s in value["sessions"]] == ["opaque", "old"]
 
-    # Same suffix on two machines -> both without a filter, one with it.
-    assert {s["id"] for s in ramp_up.discover_by_suffix("dupe")} == {"lc01", "bl01"}
-    assert [s["id"] for s in ramp_up.discover_by_suffix("dupe", "anomalous-potato")] == ["lc01"]
-    assert [s["id"] for s in ramp_up.discover_by_suffix("dupe", "emancipation-cube")] == ["bl01"]
+
+def test_remote_machine_selector_still_delegates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(ramp_up, "detect_machine", lambda: "current-host")
+    monkeypatch.setattr(
+        ramp_up.sys, "argv",
+        ["ramp-up-session", "dupe", "--machine", "remote-host", "--list", "--json"],
+    )
+    calls = []
+
+    def delegate(machine: str, ref: str, passthrough: list[str]) -> int:
+        calls.append((machine, ref, passthrough))
+        return 17
+
+    monkeypatch.setattr(ramp_up, "_delegate_remote", delegate)
+    with pytest.raises(SystemExit) as result:
+        ramp_up.main()
+    assert result.value.code == 17
+    assert calls == [("remote-host", "dupe", ["--tail-turns", "6", "--list", "--json"])]
 
 
 def test_is_local_machine(monkeypatch) -> None:
