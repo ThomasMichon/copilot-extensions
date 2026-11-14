@@ -416,6 +416,13 @@ the separate flight-expression source range. These witnesses do not qualify
 actual consumer copies, shell execution, toolkit activation or native runtime
 behavior, and do not change this project's pending status.
 
+Two additional source-mapped views check the actual shim cache selectors:
+the PowerShell here-string and POSIX single-quoted Python argument. Their
+launch arguments, real cache-helper import/call and candidate-local helper
+source retain checker custody. The PowerShell selector explicitly allows an
+optional prefix, preserving its existing `None` fallback and JSON output.
+These views do not execute either shell or qualify generated consumer copies.
+
 The four canonical programs belong to `lib-payload-invocation` in
 `tools/typecheck-projects.json`, checked on Python 3.10 and 3.11.
 The test/helper tree belongs to `lib-payload-invocation-tests`, checked on

@@ -673,9 +673,52 @@ def test_real_bootstrap_source_and_frozen_frontdoors(
     )
 
 
+@pytest.mark.timeout(30)
+@pytest.mark.parametrize("frontdoor", ["source", "frozen"])
+@pytest.mark.parametrize("selector", ["powershell", "posix"])
+def test_real_shim_selector_source_and_frozen_frontdoors(
+    tmp_path: Path, frontdoor: str, selector: str,
+    record_property: Callable[[str, object], None],
+) -> None:
+    _real_catalog_frontdoors(
+        tmp_path, "win32", "3.11", False, frontdoor, record_property,
+        bad_selector=selector,
+    )
+
+
+@pytest.mark.timeout(30)
+@pytest.mark.parametrize("configured", [False, True])
+def test_shim_selector_annotation_preserves_real_fallback(
+    tmp_path: Path, configured: bool,
+) -> None:
+    template = (typecheck.ROOT / "libs/payload-invocation/templates/powershell-shim.tmpl").read_text(
+        encoding="utf-8",
+    )
+    body = template.split("    $selector = @'\n", 1)[1].split("\n'@", 1)[0]
+    original = body.replace("prefix: str | None\n", "", 1)
+    assert original != body
+    expected = str(tmp_path / "existing-cache") if configured else None
+    provider = typecheck.ROOT / "libs/agent-procutil/src"
+    outputs = []
+    for program in (original, body):
+        code = (
+            "import sys;from pathlib import Path;"
+            f"sys.path.insert(0,{str(provider)!r});"
+            "from agent_procutil import python_cache;"
+            f"assert Path(python_cache.__file__).resolve()==Path({str(provider / 'agent_procutil/python_cache.py')!r}).resolve();"
+            f"sys.pycache_prefix={expected!r};sys.argv=['-c'];"
+            f"exec(compile({program!r},'<actual-shim-selector>','exec'))"
+        )
+        result = typecheck._run([sys.executable, "-I", "-B", "-c", code], tmp_path)
+        assert result.returncode == 0 and not result.stderr, result.stdout + result.stderr
+        outputs.append(result.stdout)
+    assert outputs == [json.dumps(expected, ensure_ascii=True) + "\n"] * 2
+
+
 def _real_catalog_frontdoors(
     tmp_path: Path, platform: str, python_version: str, bad_template: bool, frontdoor: str,
     record_property: Callable[[str, object], None], *, bad_bootstrap: bool = False,
+    bad_selector: str | None = None,
 ) -> None:
     """Reuse the test SDK, but exercise real Git transport, checker and MyPy."""
     from tools import promote_release as promotion
@@ -741,6 +784,16 @@ def _real_catalog_frontdoors(
         }), encoding="utf-8")
     expected_template = template.read_bytes()
     expected_declaration = (root / catalog.DECLARATION).read_bytes()
+    if bad_selector is not None:
+        assert bad_selector in {"powershell", "posix"}
+        selector_template = root / catalog.PREFIX / "templates" / (bad_selector + "-shim.tmpl")
+        original = selector_template.read_text(encoding="utf-8")
+        changed = original.replace("try:\n", "probe: int = \"wrong\"\ntry:\n", 1)
+        assert changed != original
+        selector_template.write_text(changed, encoding="utf-8")
+    expected_selectors = {
+        name: (root / name).read_bytes() for name in bootstrap_views.SELECTOR_TEMPLATES
+    }
     policy = next(p for p in typecheck.load_projects() if p.name == "lib-payload-invocation")
     assert policy.level == "pending" and policy.additional_python_versions == ("3.11",)
     declared_versions = (policy.python_version, *policy.additional_python_versions)
@@ -833,11 +886,16 @@ def _real_catalog_frontdoors(
     label_prefix = "[pending] lib-payload-invocation (Python "
     assert result.stdout.count(label_prefix) == 1, result.stdout + result.stderr
     for version in (python_version,):
-        label = f"{label_prefix}{version}, {platform}, 4 physical files, 9 targets)"
+        label = f"{label_prefix}{version}, {platform}, 4 physical files, 11 targets)"
         assert label in result.stdout, result.stdout + result.stderr
         segment = result.stdout.split(label, 1)[1].split(label_prefix, 1)[0]
         errors = [line for line in segment.splitlines() if ": error:" in line]
-        if bad_bootstrap:
+        if bad_selector is not None:
+            assert len(errors) == 1, segment
+            assert errors[0].startswith(
+                catalog.PREFIX + "templates/" + bad_selector + "-shim.tmpl:"
+            ) and "[assignment]" in errors[0], segment
+        elif bad_bootstrap:
             assert len(errors) == 1, segment
             assert errors[0].startswith(catalog.PRODUCER + ":") and "[assignment]" in errors[0], segment
             assert "bootstrap canonical source" in errors[0] and "full body requires Python 3.11" in errors[0]
@@ -851,6 +909,7 @@ def _real_catalog_frontdoors(
             assert not errors and "Success: no issues found" in segment, segment
     assert (checkout / catalog.TEMPLATE).read_bytes() == expected_template
     assert (checkout / catalog.DECLARATION).read_bytes() == expected_declaration
+    assert all((checkout / name).read_bytes() == content for name, content in expected_selectors.items())
     assert (checkout / "tools/typecheck_catalog_views.py").read_bytes() == (
         typecheck.ROOT / "tools/typecheck_catalog_views.py"
     ).read_bytes()

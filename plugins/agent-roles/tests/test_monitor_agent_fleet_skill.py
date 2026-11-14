@@ -60,12 +60,12 @@ def test_offline_scenarios_have_distinct_evidence_and_explicit_modes() -> None:
     for case in cases:
         assert case["mode"] in {
             "read-only", "steering-authorized", "dormant-correction",
-            "repair-authorized",
+            "repair-authorized", "goal-establishment",
         }
         assert case["facts"].strip() and case["expected"].strip()
     assert {case["mode"] for case in cases} == {
         "read-only", "steering-authorized", "dormant-correction",
-        "repair-authorized",
+        "repair-authorized", "goal-establishment",
     }
 
 
@@ -512,3 +512,44 @@ def test_agent_charters_drive_resolution_with_light_touch() -> None:
         "standing-charter-no-completion-push",
         "charter-backfill-and-rework",
     } <= {case["id"] for case in scenarios["cases"]}
+
+def test_goal_establishment_is_standing_but_bounded() -> None:
+    skill = " ".join(_read(SKILL / "SKILL.md").split())
+    text = " ".join(_read(SKILL / "references" / "agent-charters.md").split())
+    steering = " ".join(_read(SKILL / "references" / "steering.md").split())
+    charter = " ".join(_read(SKILL / "assets" / "CHARTER.md").split())
+    template = _read(SKILL / "assets" / "AGENT-CHARTER.md")
+    patterns = _read(SKILL / "references" / "misdirection-patterns.md")
+    assert "**Goal establishment is role-inherent.**" in skill
+    assert "**Drive by outcome goals, not activity.**" in skill
+    assert "never the current activity" in skill
+    for requirement in (
+        "## Drive by outcome goals, not activity",
+        "## Standing goal-establishment authority",
+        "**equivalent supervisory agent**",
+        "It needs no separate steering grant for them",
+        "wins over every other source",
+        "it is never operator authority and never widens what the agent may do",
+        "keeps **messages sent: none**",
+        "An all-work hold or a recorded exclusion still means no message",
+        "never changes an operator-defined root",
+        "never edits a live agent's charter",
+        "Do not send a second goal steer on the same evidence",
+        "still need the charter's steering scope",
+    ):
+        assert requirement in text, requirement
+    assert "standing goal-establishment authority" in steering
+    assert "If persistence fails, do not send" in steering
+    assert "Operator-goal register:" in charter
+    assert "Goal establishment: <standing (role-inherent default)" in charter
+    assert "no operator-defined goal was paraphrased" in charter
+    for field in ("Root source:", "Alignment:", "Projected progress:"):
+        assert field in template, field
+    assert "| Activity mistaken for goal |" in patterns
+    scenarios = json.loads(_read(SKILL / "assets" / "scenarios.json"))
+    cases = {case["id"]: case for case in scenarios["cases"]}
+    assert "messages sent: none" in cases["goal-steer-read-only-sweep"]["expected"]
+    assert {
+        "activity-shaped-root-goal-steer",
+        "goal-steer-disputed-draft",
+    } <= set(cases)
