@@ -162,11 +162,10 @@ class FilteredProjection:
                     if number not in prepared and scan["outcome"] == "complete":
                         result = NONMATCH
                     if result == MATCH:
-                        if number in prepared or number in previous:
-                            if number not in members and len(members) >= MAX_PULLS * 2:
-                                capacity_limited = True
-                            else:
-                                members.add(number)
+                        if number not in members and len(members) >= MAX_PULLS * 2:
+                            capacity_limited = True
+                        else:
+                            members.add(number)
                     elif result == NONMATCH:
                         members.discard(number)
                     else:
@@ -180,7 +179,9 @@ class FilteredProjection:
                     if number in members:
                         row["projected"][str(number)] = {
                             "number": number, "facts": copy.deepcopy(facts),
-                            "observed_at": observed_at if number in prepared else row["projected"][str(number)]["observed_at"],
+                            "observed_at": observed_at if number in prepared else (
+                                row["projected"].get(str(number)) or cached[number]
+                            )["observed_at"],
                         }
                     else:
                         row["projected"].pop(str(number), None)

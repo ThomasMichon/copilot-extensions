@@ -416,3 +416,23 @@ def test_repeated_partial_acquisitions_bound_members_without_disproving_prior_me
     result = execute(selected, "first", "query", registration(first))["baseline"]
     assert result["inventory"]["outcome"] == "complete"
     assert result["pulls"][0]["number"] == 401
+
+
+@pytest.mark.parametrize(("outcome", "error"), [
+    ("partial", "page_limit"), ("unavailable", "provider_unavailable"),
+])
+def test_cached_pr_enters_and_leaves_age_window_without_fresh_acquisition(selected, outcome, error):
+    watched = subscribe(selected, "age", {"age": {"field": "created", "min_seconds": 5, "max_seconds": 10}})
+    observe(selected, {7: facts(created_at=100)})
+    assert not execute(selected, "age", "query", registration(watched))["baseline"]["pulls"]
+    selected[0][0] = 106
+    observe(selected, outcome=outcome, error=error)
+    entered = execute(selected, "age", "query", registration(watched))["baseline"]
+    assert entered["pulls"][0]["number"] == 7
+    assert entered["pulls"][0]["observed_at"] == 100
+    assert entered["inventory"]["outcome"] == outcome
+    assert any(e["kind"] == "entry" and e["number"] == 7 for e in events(selected, "age", watched))
+    selected[0][0] = 111
+    observe(selected, outcome=outcome, error=error)
+    assert not execute(selected, "age", "query", registration(watched))["baseline"]["pulls"]
+    assert any(e["kind"] == "departure" and e["number"] == 7 for e in events(selected, "age", watched))
