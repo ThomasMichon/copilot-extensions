@@ -23,7 +23,8 @@ progress toward the goal, never the goal itself.
 
 A good root goal names who or what reaches which state, the acceptance
 evidence that proves it, and any ordering the operator required. Judge every
-target against it each sweep:
+set-to-work target against it each sweep (exploratory targets keep the light
+touch below):
 
 - **Alignment.** Does the recent work clearly advance the root goal, or is it
   a detour, a self-added prerequisite or an unrelated tangent?
