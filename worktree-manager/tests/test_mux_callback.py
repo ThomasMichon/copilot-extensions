@@ -1,8 +1,6 @@
 """Mux metadata dispatch keeps installed retention and development entry modes."""
 
 import sys
-from pathlib import Path
-import re
 
 import pytest
 
@@ -38,11 +36,8 @@ def test_callback_command_preserves_entry_mode(tmp_path, monkeypatch, installed,
         assert "PYTHONPATH" not in env
         assert root == tmp_path
     else:
-        assert command[1] == "-X"
-        cache = Path(command[2].removeprefix("pycache_prefix=").removeprefix("\\\\?\\"))
-        assert cache.parent == root / "cache" / "python"
-        assert re.fullmatch(r"unsealed-[0-9a-f]{32}", cache.name)
-        assert command[3] == "-m"
+        assert command[1:3] == ["-B", "-m"]
+        assert not (root / "cache").exists()
         assert env["PYTHONPATH"] == "development"
         assert root == tmp_path / "source-root"
     assert env["WORKTREE_MANAGER_ROOT"] == str(root)

@@ -64,16 +64,18 @@ def _manifest(tmp_path: Path) -> Path:
     return path
 
 
-@pytest.mark.parametrize("kind", ["sh", "sh-installed", "ps1", "ps1-installed", "cmd", "cmd-installed",
-                                  "dispatcher", "dispatcher-installed"] if os.name == "nt"
+@pytest.mark.parametrize("kind", ["sh", "sh-installed", "sh-old", "ps1", "ps1-installed", "ps1-old",
+                                  "cmd", "cmd-installed", "cmd-old",
+                                  "dispatcher", "dispatcher-installed", "dispatcher-old"] if os.name == "nt"
                          else ["sh", "sh-installed", "ps1", "ps1-installed", "dispatcher", "dispatcher-installed",
-                               "dispatcher-sh", "dispatcher-sh-installed"])
+                               "dispatcher-sh", "dispatcher-sh-installed", "sh-old", "ps1-old",
+                               "dispatcher-old", "dispatcher-sh-old"])
 def test_generated_shim_external_cache_cold_and_warm(tmp_path: Path, kind: str) -> None:
     dispatcher = kind.startswith("dispatcher")
-    installed = kind.endswith("-installed")
-    kind = kind.removesuffix("-installed") if not dispatcher else kind
-    # A waiting PowerShell shim removes the unsealed cache it minted; exec-style launchers cannot.
-    cleaned = not installed and kind in ("ps1", "cmd")
+    old_provider = kind.endswith("-old")
+    installed = kind.endswith("-installed") or old_provider
+    kind = kind.removesuffix("-installed").removesuffix("-old")
+    writable = installed and not old_provider
     manifest = _manifest(tmp_path)
     (manifest.parent / "plugin.json").write_text('{"name":"agent-example"}', encoding="utf-8")
     profile = tmp_path / "profile"
@@ -98,12 +100,15 @@ def test_generated_shim_external_cache_cold_and_warm(tmp_path: Path, kind: str) 
     )
     if installed:
         procutil = site / "agent_procutil"
-        procutil.mkdir()
-        (procutil / "__init__.py").touch()
-        shutil.copyfile(
-            REPO / "libs" / "agent-procutil" / "src" / "agent_procutil" / "python_cache.py",
-            procutil / "python_cache.py",
+        shutil.copytree(
+            REPO / "libs" / "agent-procutil" / "src" / "agent_procutil",
+            procutil, ignore=shutil.ignore_patterns("__pycache__"),
         )
+        if old_provider:
+            (procutil / "python_cache.py").write_text(
+                "def cache_arguments(*args, **kwargs):\n"
+                "    raise AssertionError('legacy selector must not be used')\n", encoding="utf-8",
+            )
         (slot / ".install-complete.json").write_text(json.dumps({
             "version": slot.name, "completed_at": "fixture", "pid": 0, "payload_hash": "a" * 64,
         }), encoding="utf-8")
@@ -121,7 +126,7 @@ def test_generated_shim_external_cache_cold_and_warm(tmp_path: Path, kind: str) 
     shim = manifest.parent / "bin" / ("agent-example" + ("" if kind == "sh" else "." + kind))
     if kind == "cmd":
         argv = [os.environ["COMSPEC"], "/d", "/c", str(shim)]
-    elif kind in ("ps1", "dispatcher", "dispatcher-installed"):
+    elif kind in ("ps1", "dispatcher"):
         host = shutil.which("pwsh") or shutil.which("powershell")
         if not host and os.name != "nt":
             pytest.skip("PowerShell unavailable on this POSIX host")
@@ -164,7 +169,11 @@ def test_generated_shim_external_cache_cold_and_warm(tmp_path: Path, kind: str) 
         else:
             argv = ["sh", str(shim)]
     environment = dict(os.environ)
-    child_env = {**environment, "USERPROFILE": str(profile), "HOME": str(profile)}
+    cache_base = profile / "user cache with spaces"
+    child_env = {
+        **environment, "USERPROFILE": str(profile), "HOME": str(profile),
+        "LOCALAPPDATA": str(cache_base), "XDG_CACHE_HOME": str(cache_base),
+    }
     child_env.pop("PYTHONDONTWRITEBYTECODE", None)
     child_env.pop("PYTHONPYCACHEPREFIX", None)
 
@@ -188,17 +197,18 @@ def test_generated_shim_external_cache_cold_and_warm(tmp_path: Path, kind: str) 
         )
         assert result.returncode == 0, result.stderr
         output = json.loads(result.stdout)
-        assert output[0] == 42 and output[2:] == [False, ["argument with spaces"]]
-        prefix = str(root / "cache" / "python")
+        assert output[0] == 42 and output[2:] == [not writable, ["argument with spaces"]]
+        assert not (root / "cache").exists()
+        if not writable:
+            assert not Path(output[1]).exists()
+            assert not cache_base.exists()
+            assert snapshot() == before
+            continue
+        prefix = str(cache_base / "copilot-extensions" / "python" / "v1")
         if os.name == "nt":
             prefix = "\\\\?\\" + prefix
         cached = Path(output[1])
         assert cached.is_relative_to(Path(prefix))
-        if cleaned:
-            assert any(part.startswith("unsealed-") for part in cached.parts)
-            assert not any((root / "cache" / "python").iterdir())
-            assert snapshot() == before
-            continue
         current = (cached.read_bytes(), cached.stat().st_mtime_ns, cached.stat().st_ino)
         if cached_before is not None:
             assert (cast(Path, previous_cache).read_bytes(), cast(Path, previous_cache).stat().st_mtime_ns,
@@ -207,9 +217,7 @@ def test_generated_shim_external_cache_cold_and_warm(tmp_path: Path, kind: str) 
         cached_before = current
         previous_cache = cached
         assert snapshot() == before
-        if installed:
-            assert all(path.name.startswith("installed-") for path in (root / "cache" / "python").iterdir())
-    if cleaned:
+    if not writable:
         assert dict(os.environ) == environment
         return
     module = package / "__init__.py"
@@ -797,8 +805,8 @@ def _agent_library_src(payload: Path, name: str) -> Path:
 
 def _agent_machines_import_sources(payload: Path) -> list[str]:
     return [str(payload / "src")] + [
-        str(_agent_library_src(payload, name))
-        for name in ("plugin-resolve", "agent-procutil", "machine-transport", "remote-login-shell")
+        str(library / "src" if (library / "src").is_dir() else library)
+        for library in sorted((payload / "libs").iterdir()) if library.is_dir()
     ]
 def _dependency_materializer() -> ModuleType:
     helper = REPO / "tools" / "materialize_main.py"
@@ -1015,6 +1023,7 @@ def _agent_worktrees_test_environment(
     payload: Path,
 ) -> dict[str, str]:
     environment = os.environ.copy()
+    environment.pop("AGENT_WORKTREES_NO_SELFPROVISION", None)
     environment.update(
         {
             "HOME": str(home),
@@ -1061,11 +1070,9 @@ def test_required_context_inner_command_external_cache(tmp_path: Path, host: str
         "sys.dont_write_bytecode, sys.argv[1:]]))\n", encoding="utf-8",
     )
     procutil = package.parent / "agent_procutil"
-    procutil.mkdir()
-    (procutil / "__init__.py").touch()
-    shutil.copyfile(
-        REPO / "libs" / "agent-procutil" / "src" / "agent_procutil" / "python_cache.py",
-        procutil / "python_cache.py",
+    shutil.copytree(
+        REPO / "libs" / "agent-procutil" / "src" / "agent_procutil",
+        procutil, ignore=shutil.ignore_patterns("__pycache__"),
     )
     (slot / ".install-complete.json").write_text(json.dumps({
         "version": slot.name, "completed_at": "fixture", "pid": 0, "payload_hash": "a" * 64,
@@ -1079,6 +1086,7 @@ def test_required_context_inner_command_external_cache(tmp_path: Path, host: str
     environment = dict(os.environ)
     child_env = _agent_worktrees_test_environment(home, payload)
     child_env["COPILOT_EXTENSIONS_CONTEXT"] = str(context)
+    child_env["LOCALAPPDATA"] = str(home / "user-cache")
     for key in ("PYTHONDONTWRITEBYTECODE", "PYTHONPYCACHEPREFIX", "PYTHONPATH"):
         child_env.pop(key, None)
 
@@ -1104,7 +1112,7 @@ def test_required_context_inner_command_external_cache(tmp_path: Path, host: str
         output = json.loads(result.stdout)
         assert output[0] == 42 and output[2:] == [False, ["argument with spaces"]]
         cached = Path(output[1])
-        assert cached.is_relative_to(Path("\\\\?\\" + str(root / "cache" / "python")))
+        assert cached.is_relative_to(Path("\\\\?\\" + str(home / "user-cache")))
         current = (cached.read_bytes(), cached.stat().st_mtime_ns, cached.stat().st_ino)
         if cached_before is not None:
             assert current == cached_before
@@ -2897,11 +2905,7 @@ def test_posix_shim_preserves_args_exit_and_project_cwd(tmp_path: Path) -> None:
         check=False,
     )
     assert result.returncode == 23
-    assert re.fullmatch(
-        re.escape(f"{project}|-X pycache_prefix={home / '.agent-example/cache/python'}")
-        + r"/unsealed-[0-9a-f]{32} -m agent_example search two words",
-        result.stdout.strip(),
-    )
+    assert result.stdout.strip() == f"{project}|-B -m agent_example search two words"
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX shim test")
@@ -3155,11 +3159,7 @@ def test_multi_command_shim_dispatches_its_own_module(tmp_path: Path) -> None:
         text=True,
         check=True,
     )
-    assert re.fullmatch(
-        re.escape(f"-X pycache_prefix={home / '.agent-example/cache/python'}")
-        + r"/unsealed-[0-9a-f]{32} -m agent_example\.helper two words",
-        result.stdout.strip(),
-    )
+    assert result.stdout.strip() == "-B -m agent_example.helper two words"
 
 
 def test_multi_command_traces_use_manifest_plugin_identity(tmp_path: Path) -> None:

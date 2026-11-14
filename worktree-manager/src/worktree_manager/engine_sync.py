@@ -48,11 +48,12 @@ def supports_progress(command):
     """Read support only beside the exact attributed Python runtime."""
     if not (
         command
-        and len(command) == 5
         and Path(command[0]).is_absolute()
-        and command[1] == "-X"
-        and command[2].startswith("pycache_prefix=")
-        and command[3:] == ["-m", "agent_worktrees"]
+        and (command[1:] == ["-B", "-m", "agent_worktrees"] or (
+            len(command) == 5 and command[1] == "-X"
+            and command[2].startswith("pycache_prefix=")
+            and command[3:] == ["-m", "agent_worktrees"]
+        ))
     ):
         return False
     slot = Path(command[0]).parent.parent

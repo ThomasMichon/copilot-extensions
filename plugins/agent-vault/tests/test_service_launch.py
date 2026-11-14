@@ -7,7 +7,7 @@ import os
 import shutil
 import subprocess
 import venv
-import re
+import sys
 from pathlib import Path
 
 import agent_procutil
@@ -17,11 +17,8 @@ from agent_vault import cli, config, configuration, configuration_scope, launch,
 
 
 def _cache_args(argv, root):
-    assert argv[0] == "-X" and len(argv) == 2
-    cache = Path(argv[1].removeprefix("pycache_prefix="))
-    assert cache.parent == Path(agent_procutil.python_cache_args(root)[1].partition("=")[2]).parent
-    assert re.fullmatch(r"unsealed-[0-9a-f]{32}", cache.name)
-    return str(cache)
+    assert argv == ["-B"]
+    assert not (Path(root) / "cache" / "python").exists()
 
 
 @pytest.fixture
@@ -144,9 +141,9 @@ def test_spawn_service_runs_from_the_runtime_root_with_a_log(monkeypatch, tmp_pa
     assert launch.spawn_service(["--foreground"]) == "proc"
     root = home.resolve()
     assert root.is_dir()
-    _cache_args(seen["argv"][1:3], root)
-    assert seen["argv"][3] == "-c"
-    assert seen["argv"][5:] == [
+    _cache_args(seen["argv"][1:2], root)
+    assert seen["argv"][2] == "-c"
+    assert seen["argv"][4:] == [
         str(Path(launch.__file__).resolve().parent.parent), "--foreground",
         "--configuration-root", str(Path.cwd()),
     ]
@@ -295,14 +292,13 @@ def test_vendored_service_imports_its_own_package_from_runtime_cwd(
     monkeypatch.setattr(launch, "spawn_daemon", capture)
     args = ["--foreground", "--probe-value", "value with spaces"]
     launch.spawn_service(args)
-    prefix = _cache_args(command[1:3], home)
+    _cache_args(command[1:2], home)
     env = {
         key: value for key, value in os.environ.items()
         if not key.upper().startswith("PYTHON")
     }
     env.update(overrides)
     before = {path: path.read_bytes() for path in package.rglob("*") if path.is_file()}
-    cached_before = None
     for _ in range(2):
         result = subprocess.run(
             [command[0], "-S", *command[1:]], cwd=home, env=env,
@@ -315,12 +311,10 @@ def test_vendored_service_imports_its_own_package_from_runtime_cwd(
         assert Path(observed["cwd"]) == home.resolve()
         assert Path(observed["module"]).resolve() == (package / "service.py").resolve()
         assert {path: path.read_bytes() for path in package.rglob("*") if path.is_file()} == before
-        assert observed["cache"] == prefix
+        assert observed["cache"] is None
         cached = Path(observed["cached"])
-        current = (cached.read_bytes(), cached.stat().st_mtime_ns, cached.stat().st_ino)
-        if cached_before is not None:
-            assert current == cached_before
-        cached_before = current
+        assert not cached.exists()
+        assert not (home / "cache").exists()
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Actual Windows service launcher template")
@@ -374,7 +368,6 @@ def test_generated_task_launcher_routes_late_imports_outside_the_slot(tmp_path, 
     assert host, "native PowerShell is required"
     env = {key: value for key, value in os.environ.items() if not key.upper().startswith("PYTHON")}
     before = {path: path.read_bytes() for path in slot.rglob("*") if path.is_file()}
-    previous_cache = None
     for _ in range(2):
         result = subprocess.run(
             [host, "-NoProfile", "-File", str(harness)], env=env,
@@ -390,13 +383,10 @@ def test_generated_task_launcher_routes_late_imports_outside_the_slot(tmp_path, 
         assert observed["value"] == 42
         assert observed["config"] == str(tmp_path / "selected-\u03bb.json")
         assert {path: path.read_bytes() for path in slot.rglob("*") if path.is_file()} == before
-        _cache_args(["-X", "pycache_prefix=" + observed["cache"]], root)
+        assert observed["cache"] is None
         cached = Path(observed["cached"])
-        # Without install evidence the launcher mints a private cache and
-        # removes it once the waited service exits.
-        assert not Path(observed["cache"]).exists()
-        assert cached != previous_cache
-        previous_cache = cached
+        assert not cached.exists()
+        assert not (root / "cache").exists()
     module = site / "zdd/private_peer.py"
     module_stat = module.stat()
     module.write_text("VALUE = 84\n", encoding="utf-8")
@@ -407,20 +397,21 @@ def test_generated_task_launcher_routes_late_imports_outside_the_slot(tmp_path, 
     )
     assert result.returncode == 0, result.stderr
     observed = json.loads(result.stdout)
-    assert observed["value"] == 84 and Path(observed["cached"]) != previous_cache
-    assert not Path(observed["cache"]).exists()
+    assert observed["value"] == 84 and not Path(observed["cached"]).exists()
 
-    # Valid install evidence selects the sealed installed-<digest> cache, which
-    # is reused across launches and never deleted by the launcher.
-    sealed = root / "cache" / "python" / ("installed-" + "0" * 64)
     helper = site / "agent_procutil"
-    helper.mkdir()
-    (helper / "__init__.py").write_text("", encoding="utf-8")
-    (helper / "python_cache.py").write_text(
-        "def cache_arguments(root, runtime=None):\n"
-        f"    return ['-X', 'pycache_prefix=' + {str(sealed)!r}]\n",
-        encoding="utf-8",
+    shutil.copytree(
+        Path(agent_procutil.__file__).parent, helper, ignore=shutil.ignore_patterns("__pycache__"),
     )
+    (slot / ".install-complete.json").write_text(json.dumps({
+        "version": slot.name, "completed_at": "fixture", "pid": 0, "payload_hash": "a" * 64,
+    }), encoding="utf-8")
+    record = site / "fixture.dist-info" / "RECORD"
+    record.parent.mkdir()
+    record.write_text("fixture.py,sha256=" + "a" * 43 + ",1\n", encoding="utf-8")
+    cache_base = tmp_path / "user-cache"
+    env["LOCALAPPDATA"] = str(cache_base)
+    caches = []
     for _ in range(2):
         result = subprocess.run(
             [host, "-NoProfile", "-File", str(harness)], env=env,
@@ -428,9 +419,72 @@ def test_generated_task_launcher_routes_late_imports_outside_the_slot(tmp_path, 
         )
         assert result.returncode == 0, result.stderr
         observed = json.loads(result.stdout)
-        assert Path(observed["cache"]) == sealed
-        assert Path(observed["cached"]).is_file()
-    assert [path.name for path in sealed.parent.iterdir()] == [sealed.name]
+        cached = Path(observed["cached"])
+        assert cached.is_relative_to(Path("\\\\?\\" + str(cache_base)))
+        assert cached.is_file()
+        caches.append(cached)
+    assert caches[0] == caches[1]
+    assert not (root / "cache").exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX systemd service entrypoint")
+@pytest.mark.parametrize("provider", ["absent", "legacy", "managed"])
+def test_posix_service_entrypoint_consumes_complete_cache_policy(tmp_path, provider):
+    root = tmp_path / "vault root"
+    slot = root / "versions" / "1.0.0"
+    venv.EnvBuilder(with_pip=False).create(slot)
+    python = slot / "bin" / "python"
+    site = slot / f"lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages"
+    package = site / "agent_vault"
+    package.mkdir()
+    (package / "__init__.py").write_text("VALUE = 42\n", encoding="utf-8")
+    (package / "service.py").write_text(
+        "import agent_vault, json, sys\n"
+        "print(json.dumps([agent_vault.VALUE, agent_vault.__cached__, "
+        "sys.dont_write_bytecode, sys.argv[1:]]))\n"
+        "raise SystemExit(19)\n", encoding="utf-8",
+    )
+    if provider != "absent":
+        helper = site / "agent_procutil"
+        shutil.copytree(
+            Path(agent_procutil.__file__).parent, helper,
+            ignore=shutil.ignore_patterns("__pycache__"),
+        )
+        if provider == "legacy":
+            (helper / "python_cache.py").write_text(
+                "def cache_arguments(*args, **kwargs):\n"
+                "    raise AssertionError('legacy allocation must not run')\n", encoding="utf-8",
+            )
+    (slot / ".install-complete.json").write_text(json.dumps({
+        "version": slot.name, "completed_at": "fixture", "pid": 0, "payload_hash": "a" * 64,
+    }), encoding="utf-8")
+    record = site / "fixture.dist-info" / "RECORD"
+    record.parent.mkdir()
+    record.write_text("fixture.py,sha256=" + "a" * 43 + ",1\n", encoding="utf-8")
+    cache_base = tmp_path / "user cache"
+    env = {key: value for key, value in os.environ.items() if not key.upper().startswith("PYTHON")}
+    env["XDG_CACHE_HOME"] = str(cache_base)
+    launcher = Path(__file__).resolve().parents[1] / "scripts" / "vault-service.sh"
+    caches = []
+    for _ in range(2):
+        result = subprocess.run(
+            ["/bin/sh", str(launcher), str(python), str(root), "argument with spaces"],
+            cwd=root, env=env, capture_output=True, text=True, timeout=15,
+        )
+        assert result.returncode == 19, result.stderr
+        value, cached, readonly, arguments = json.loads(result.stdout)
+        assert value == 42 and arguments == ["argument with spaces"]
+        assert readonly is (provider != "managed")
+        cache = Path(cached)
+        assert not (root / "cache").exists()
+        if provider == "managed":
+            assert cache.is_file() and cache.is_relative_to(cache_base)
+            caches.append(cache)
+        else:
+            assert not cache.exists() and not cache_base.exists()
+    if caches:
+        assert caches[0] == caches[1]
+    assert not list(package.rglob("*.pyc"))
 
 
 def test_relative_home_override_is_passed_resolved(monkeypatch, tmp_path):

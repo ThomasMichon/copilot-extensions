@@ -7,10 +7,10 @@ agent-worktrees <subcommand> [options]
 ## Legacy management launchers
 
 Legacy global management launchers select external Python bytecode through the
-[canonical installed-cache helper](../../../libs/agent-procutil/README.md#managed-python-bytecode-cache).
+[canonical cache policy](../../../libs/agent-procutil/README.md#platform-cache-provider-contract).
 An unchanged completed installation reuses its recorded namespace; changed
-completion or distribution evidence selects another. Older runtimes without
-the helper retain fresh invocation caches. Native selector replies use
+completion or distribution evidence selects another. Unsealed runtimes and
+older providers use `-B`, without allocating an invocation cache. Native selector replies use
 ASCII-safe JSON so Unicode paths do not depend on the console's encoding.
 This changes no account/ownership
 checks, command deadlines, runtime selection or immutable slot bytes.
@@ -1772,13 +1772,16 @@ on a cadence at two natural lifecycle boundaries -- **picker launch** and
 
 ### Python bytecode caches (`python-cache prune`)
 
-Plugin launchers pass `-X pycache_prefix=<runtime-root>/cache/python/<namespace>`.
-A runtime with valid install evidence (`.install-complete.json` plus package
-`RECORD`s) reuses one sealed `installed-<digest>` namespace. Without that
-evidence a launcher mints a one-off `unsealed-<id>` namespace. Launchers that
-wait for their child delete the namespace they minted afterwards. Detached
-daemons and `exec`-style launchers cannot, so some `unsealed-*` directories
-still accumulate. `python-cache prune` reclaims them:
+Current launchers use the [shared platform-cache policy](../../../libs/agent-procutil/README.md#platform-cache-provider-contract):
+completed version slots reuse private OS-user-cache bytecode; unsealed or
+older providers disable writes with `-B`. New launchers do not mint
+`unsealed-*` directories. Source-injecting hooks and read-only bootstraps also
+disable writes.
+
+Older launchers used `<runtime-root>/cache/python/<namespace>` and could leave
+one `unsealed-*` directory per invocation. `python-cache prune` remains the
+explicit legacy inspection/removal command; it does not collect the new
+owned platform-cache namespaces:
 
 ```bash
 agent-worktrees python-cache prune                    # dry run: report eligible dirs/bytes
@@ -2563,11 +2566,11 @@ loudly rather than logging a `worktree_id: null` entry invisible to
 `activity --worktree-id <id>`.
 
 **Disk growth under `~/.agent-*/cache/python`.** Thousands of `unsealed-*`
-directories there usually come from a launcher that ran without valid install
-evidence, or from a detached or `exec`-style launcher that cannot clean up
-after its child. A persistently empty `installed-*` set for a runtime suggests
-its install evidence is missing or invalid. Reinstalling or updating that
-runtime restores reuse. Run `agent-worktrees python-cache prune` (dry run) to
+directories there come from older launchers, especially unsealed, detached or
+`exec`-style invocations. Current launchers use the shared OS-cache policy and
+disable writes when installation evidence is unavailable, stopping that new
+per-invocation growth. This does not itself remove the old backlog.
+Run `agent-worktrees python-cache prune` (dry run) to
 size the backlog, then `--apply` to reclaim it (on Windows or macOS, where no
 process scan exists, add `--allow-age-only` once no affected runtime is
 running). See

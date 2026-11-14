@@ -9,10 +9,11 @@ def reconciliation_argv(
     python: str, runtime_root: Path, cwd: str, status: Path,
 ) -> list[str]:
     """Arguments for the existing background reconciliation operation."""
-    from agent_procutil.python_cache import cache_arguments
+    import agent_procutil
+    cache_arguments = getattr(agent_procutil, "python_cache_policy_args", lambda *a, **k: ["-B"])
 
     return [
-        python, *cache_arguments(runtime_root), "-m", "agent_worktrees", "reconcile-plugins",
+        python, *cache_arguments(runtime_root, runtime=python), "-m", "agent_worktrees", "reconcile-plugins",
         "--repo", cwd, "--status", str(status), "--apply",
     ]
 

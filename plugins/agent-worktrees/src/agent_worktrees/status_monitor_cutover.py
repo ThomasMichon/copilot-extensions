@@ -360,8 +360,9 @@ def spawn_monitor(argv: list[str], env: dict[str, str], *, console_children: boo
     :func:`monitor_log_path`. If breakaway is forbidden, refuse rather than
     starting a monitor that would die with its caller.
     """
-    from agent_procutil import python_cache_args
+    import agent_procutil
     from . import status_monitor_runtime as smr
+    python_cache_args = getattr(agent_procutil, "python_cache_policy_args", lambda *a, **k: ["-B"])
 
     cwd = smr._daemon_cwd()
     return spawn_daemon(

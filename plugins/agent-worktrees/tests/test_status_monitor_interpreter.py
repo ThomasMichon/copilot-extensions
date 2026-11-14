@@ -7,7 +7,6 @@ import os
 import subprocess
 import sys
 import time
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -109,14 +108,12 @@ def test_monitor_spawn_preserves_direct_interpreter_environment(tmp_path, monkey
     monkeypatch.setattr(cutover, "spawn_daemon", spawn_daemon)
     if passive:
         assert cutover.spawn_passive(venv_python, port=54321).pid == 77
-        assert captured["argv"][6:] == ["--passive", "--control-port", "54321"]
+        assert captured["argv"][5:] == ["--passive", "--control-port", "54321"]
     else:
         assert runtime._spawn_detached([venv_python, "-m", "agent_worktrees", "status-monitor"])
     assert captured["argv"][0] == "base-python"
-    assert captured["argv"][1] == "-X"
-    cache = Path(captured["argv"][2].removeprefix("pycache_prefix="))
-    assert cache.parent == Path(interpreter.python_cache_args(tmp_path)[1].partition("=")[2]).parent
-    assert cache.name.startswith("unsealed-")
+    assert captured["argv"][1:5] == ["-B", "-m", "agent_worktrees", "status-monitor"]
+    assert not (tmp_path / "cache" / "python").exists()
     kwargs = captured["kwargs"]
     assert kwargs["env"]["KEEP"] == "yes"
     assert kwargs["env"]["__PYVENV_LAUNCHER__"] == venv_python

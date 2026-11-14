@@ -531,7 +531,7 @@ def _fallback_legacy_session_start(
     environment = {**os.environ, "PYTHONPATH": ""}
     python = _runtime_python(Path.home())
     if python is not None:
-        environment["PYTHONPYCACHEPREFIX"] = _RUNTIME.python_cache_arguments(python)[1].split("=", 1)[1]
+        _RUNTIME.configure_python_cache_environment(python, environment)
     group_kwargs = (
         {"start_new_session": True}
         if os.name == "posix"

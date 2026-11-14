@@ -23,7 +23,6 @@ try {
         else { $env:AGENT_RT_ROOT = $previousRoot }
     }
     if (-not $python) { throw 'Selected runtime unavailable' }
-    $cache = Join-Path $runtimeRoot ('cache\python\unsealed-session-end-' + [Guid]::NewGuid().ToString('N'))
     if ($env:COPILOT_EXTENSIONS_CONTEXT) {
         # Bootstrap only the owning SDK, without slot site code, before admitting the client.
         $owner = if ($env:AGENT_WORKTREES_PAYLOAD_ROOT) { $env:AGENT_WORKTREES_PAYLOAD_ROOT }
@@ -32,7 +31,7 @@ try {
         $durableHome = $pointer
         1..5 | ForEach-Object { $durableHome = Split-Path -Parent $durableHome }
         $validator = Join-Path $PSScriptRoot 'installation-context\installation_context.py'
-        $validation = @(& $python -I -S -B -X utf8 -X "pycache_prefix=$cache" $validator validate `
+        $validation = @(& $python -I -S -B -X utf8 $validator validate `
             --context $pointer --durable-home $durableHome `
             --expected-plugin-id agent-worktrees --expected-payload-root $owner)
         if ($LASTEXITCODE -ne 0) { throw 'Invalid installation context' }
@@ -42,17 +41,7 @@ try {
             throw 'Invalid installation-context runtime root'
         }
     }
-    $cacheSelector = @'
-import runpy,sys
-from pathlib import Path
-helper = runpy.run_path(sys.argv[1])
-print(helper['python_cache_arguments'](Path(sys.executable))[1].split('=', 1)[1])
-'@
-    $selectedCache = @(& $python -I -S -B -X utf8 -X "pycache_prefix=$cache" -c $cacheSelector `
-        (Join-Path $PSScriptRoot 'hook_runtime.py'))
-    if ($LASTEXITCODE -ne 0 -or $selectedCache.Count -ne 1 -or
-        -not [IO.Path]::IsPathRooted($selectedCache[0])) { throw 'Runtime cache selection failed' }
-    $payload | & $python -I -X utf8 -X "pycache_prefix=$($selectedCache[0])" (Join-Path $PSScriptRoot 'hook_client.py') sessionEnd
+    $payload | & $python -I -B -X utf8 (Join-Path $PSScriptRoot 'hook_client.py') sessionEnd
     if ($LASTEXITCODE -ne 0) { throw 'SessionEnd client failed' }
 } catch {
     [Console]::Error.WriteLine('[agent-worktrees] SessionEnd client unavailable; closure is unconfirmed.')

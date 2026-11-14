@@ -14,6 +14,7 @@ RUNTIME_RESOURCES = {
     "versioned_runtime_construction.py": "versioned_runtime_construction.py",
     "versioned_runtime_publication.py": "versioned_runtime_publication.py",
     "versioned_runtime_source.py": "versioned_runtime_source.py",
+    "versioned_runtime_cache.py": "versioned_runtime_cache.py",
 }
 APPLICATION_RESOURCES = {
     "worktree_manager": (
@@ -26,6 +27,7 @@ APPLICATION_RESOURCES = {
         "scripts/runtime-source-tools/**/*",
         "scripts/runtime-input-provider/**/*",
         "scripts/libs/payload-invocation/*.py",
+        "scripts/libs/versioned-runtime/standalone_build.py",
         "bin/**/*",
         "references/control-plane-provider.json", "references/uninstall-contract.json",
     ),

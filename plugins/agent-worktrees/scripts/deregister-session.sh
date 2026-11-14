@@ -22,16 +22,5 @@ AGENT_RT_ROOT="$runtime_root"
 AGENT_RT_RESOLVE_TRACE_MODE=read-only
 . "$scripts/resolve-runtime.sh"
 [[ -x "${AW_PY:-}" ]] || unavailable
-cache="$runtime_root/cache/python/unsealed-session-end-$$-$RANDOM"
-if command -v cygpath >/dev/null 2>&1; then
-    cache="$(cygpath -aw "$cache")"
-fi
-selected_cache="$("$AW_PY" -I -S -B -X utf8 -X "pycache_prefix=$cache" -c '
-import runpy,sys
-from pathlib import Path
-helper = runpy.run_path(sys.argv[1])
-print(helper["python_cache_arguments"](Path(sys.executable))[1].split("=", 1)[1])
-' "$scripts/hook_runtime.py")" || unavailable
-[[ -n "$selected_cache" ]] || unavailable
-printf '%s' "$payload" | PYTHONPATH="" "$AW_PY" -I -X utf8 -X "pycache_prefix=$selected_cache" "$scripts/hook_client.py" sessionEnd || unavailable
+printf '%s' "$payload" | PYTHONPATH="" "$AW_PY" -I -B -X utf8 "$scripts/hook_client.py" sessionEnd || unavailable
 exit 0
