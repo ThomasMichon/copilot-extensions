@@ -125,13 +125,15 @@ def test_annotate_delegate_graph_keeps_active_host_blocking():
     assert delegate["delegate_finalizable_reason"] == "host-active"
 
 
-def test_annotate_delegate_graph_marks_missing_reachable_host_gone():
+def test_annotate_delegate_graph_marks_missing_qualified_reachable_caller_gone():
     delegate = _row(
         "ember-linux-20260101-delegate",
         machine="ember",
         platform="linux",
         status="active",
-        caller_worktree="atlas-core-wsl-20260101-000000-abcd",
+        caller_worktree=tracking.format_claim_ref(
+            "atlas-core", "example", "atlas-core-wsl-20260101-000000-abcd",
+        ),
     )
 
     delegate_cli.annotate_delegate_graph(
@@ -153,13 +155,13 @@ def test_annotate_delegate_graph_marks_missing_reachable_host_gone():
     assert delegate["delegate_finalizable_reason"] == "host-gone"
 
 
-def test_annotate_delegate_graph_normalizes_windows_platform_token():
+def test_annotate_delegate_graph_uses_qualified_source_platform_not_id_token():
     delegate = _row(
         "ember-linux-20260101-delegate",
         machine="ember",
         platform="linux",
         status="active",
-        caller_worktree="atlas-core-win-20260101-000000-abcd",
+        caller_worktree=tracking.format_claim_ref("atlas-core", "example", "opaque-caller"),
     )
 
     delegate_cli.annotate_delegate_graph(
@@ -191,7 +193,8 @@ def test_missing_environment_named_caller_preserves_reachability_gate(
     identity = f"{prefix}-20261013-100000-abcd"
     delegate = _row(
         "worker-linux-20261013-100001-abcd",
-        machine="worker", platform="linux", status="active", caller_worktree=identity,
+        machine="worker", platform="linux", status="active",
+        caller_worktree=tracking.format_claim_ref(machine, "example", identity),
     )
 
     delegate_cli.annotate_delegate_graph(
@@ -220,11 +223,16 @@ def test_normalized_caller_does_not_choose_between_colliding_host_prefixes() -> 
     assert delegate["delegate_finalizable_reason"] == "host-unresolved"
 
 
-def test_legacy_caller_keeps_the_longest_matching_machine_prefix() -> None:
-    hosts = {("host", "wsl"): False, ("host-wsl", "wsl"): True}
-    assert delegate_cli._expected_host_key(
-        "host-wsl-wsl-20261013-100000-abcd", hosts,
-    ) == ("host-wsl", "wsl")
+def test_qualified_caller_does_not_choose_between_execution_environments() -> None:
+    delegate = _row(
+        "child", machine="worker", platform="linux", status="active",
+        caller_worktree=tracking.format_claim_ref("host", "example", "opaque-parent"),
+    )
+    delegate_cli.annotate_delegate_graph(
+        [delegate], reachable_hosts={("host", "windows"): True, ("host", "wsl"): True},
+    )
+    assert delegate["caller_state"]["state"] == "unresolved"
+    assert delegate["delegate_finalizable"] is False
 
 
 @pytest.mark.parametrize("caller", [
@@ -249,27 +257,29 @@ def test_partial_machine_or_environment_match_never_authorizes_finalization(call
 
 @pytest.mark.parametrize("prefix", ["host-wsl", "host-wsl-wsl"])
 @pytest.mark.parametrize("suffix", ["abcd", "a" * 32])
-def test_missing_paired_caller_retains_exact_host_inference(prefix: str, suffix: str) -> None:
+def test_missing_paired_caller_id_does_not_prove_its_current_host(prefix: str, suffix: str) -> None:
     caller = f"{prefix}-20261013-100000-{suffix}-k"
-    assert delegate_cli._expected_host_key(caller, {("host-wsl", "wsl"): True}) == (
-        "host-wsl", "wsl",
+    delegate = _row(
+        "child", machine="worker", platform="linux", status="active", caller_worktree=caller,
     )
+    delegate_cli.annotate_delegate_graph(
+        [delegate], reachable_hosts={("host-wsl", "wsl"): True},
+    )
+    assert delegate["caller_state"]["state"] == "unresolved"
+    assert delegate["delegate_finalizable"] is False
 
 
-def test_host_inference_parses_the_allocation_once(monkeypatch: pytest.MonkeyPatch) -> None:
-    parse = delegate_cli.parse_session_worktree_id
-    calls: list[str] = []
-
-    def counted(identity: str) -> tuple[str, str, str] | None:
-        calls.append(identity)
-        return parse(identity)
-
-    monkeypatch.setattr(delegate_cli, "parse_session_worktree_id", counted)
-    caller = "host-wsl-20261013-100000-abcd"
+def test_qualified_missing_caller_uses_the_explicit_selector_not_allocation_syntax() -> None:
+    delegate = _row(
+        "child", machine="worker", platform="linux", status="active",
+        caller_worktree=tracking.format_claim_ref("host-wsl", "example", "arbitrary-parent"),
+    )
     hosts = {(f"host-{number}-wsl", "wsl"): True for number in range(50)}
     hosts[("host-wsl", "wsl")] = True
-    assert delegate_cli._expected_host_key(caller, hosts) == ("host-wsl", "wsl")
-    assert calls == [caller]
+    delegate_cli.annotate_delegate_graph([delegate], reachable_hosts=hosts)
+    assert delegate["caller_state"]["state"] == "gone"
+    assert delegate["caller_state"]["machine"] == "host-wsl"
+    assert delegate["delegate_finalizable"] is True
 
 
 def test_build_list_json_payload_adds_delegate_annotations(monkeypatch):
@@ -393,7 +403,7 @@ def _fleet_hosts(caller_host: dict, caller_rows: list[dict], *, probed: float | 
         {"machine": "ember", "env": "linux", "reachable": True, "projection": _CURRENT, **stamp,
          "worktrees": [_row(
              _DELEGATE_ID, machine="ember", platform="linux", status="active",
-             caller_worktree=_CALLER_ID,
+             caller_worktree=tracking.format_claim_ref("atlas-core", "example", _CALLER_ID),
          )]},
     ]
 
@@ -557,7 +567,7 @@ def test_slow_later_probe_expires_an_earlier_fresh_caller_roster(
     monkeypatch.setattr(delegate_cli, "time", timer)
     delegate_host = {"projection": _CURRENT, "worktrees": [_row(
         _DELEGATE_ID, machine="ember", platform="linux", status="active",
-        caller_worktree=_CALLER_ID,
+        caller_worktree=tracking.format_claim_ref("atlas-core", "example", _CALLER_ID),
     )]}
 
     def _run(cmd, **_kwargs):
@@ -591,7 +601,8 @@ def test_execute_rechecks_caller_roster_freshness_before_each_finalize(monkeypat
     second = "ember-linux-20260101-000002-abcd"
     hosts = _fleet_hosts({"projection": _CURRENT}, [], probed=1000.0)
     hosts[1]["worktrees"].append(_row(
-        second, machine="ember", platform="linux", status="active", caller_worktree=_CALLER_ID,
+        second, machine="ember", platform="linux", status="active",
+        caller_worktree=tracking.format_claim_ref("atlas-core", "example", _CALLER_ID),
     ))
     _stub_fleet(monkeypatch)
     monkeypatch.setattr(delegate_cli.list_views_cli, "_probe_host", lambda *a, **k: hosts.pop(0))
@@ -731,6 +742,7 @@ def test_finalize_target_parses_banner_noise(monkeypatch):
         project="agent-worktrees",
         timeout=5,
         host_index={("atlas-core", "wsl"): ("atlas-core-wsl", "bash", True)},
+        source_key=("atlas-core", "wsl"),
     )
 
     assert result["ok"] is True
@@ -751,6 +763,7 @@ def test_finalize_target_uses_shared_headless_flags_for_local_and_ssh(monkeypatc
         _row("wt", machine="host", platform="windows", status="active"),
         project="project", timeout=1,
         host_index={("host", "windows"): ("host", "pwsh", local)},
+        source_key=("host", "windows"),
     )
     assert result["ok"] is True
     for name, value in delegate_cli.no_window_kwargs().items():

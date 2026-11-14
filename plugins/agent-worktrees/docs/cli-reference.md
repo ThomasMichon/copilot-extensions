@@ -148,8 +148,14 @@ locally, and each remote one runs
 binstub.
 
 `--json` prints `{"version": 1, "hosts": [{"machine", "env", "reachable",
-"worktrees", "projection"?, "availability"?, "error"?}]}`. Each worktree row is
-the host's own `list --json` record:
+"worktrees", "projection"?, "availability"?, "reporting_context"?, "error"?}]}`.
+Host-level `machine` / `env` identify the configured source route. An optional
+version-1 `reporting_context` supplies the serving host's current descriptive
+naming for its worktree rows; a rename appears on the next read, while explicit
+unavailability withdraws row names without changing source freshness. Absence
+retains the older provider's row naming. Malformed reporting is a coverage gap,
+not an authoritative empty inventory. The coordinator does not resolve its own
+hostname for remote rows. Other fields remain the host's `list --json` record:
 
 - **Live work** is the derived `state == "active"`. Lifecycle
   `status == "active"`, a nonempty `live_session_ids`, and `--glance` are not
@@ -1465,6 +1471,14 @@ inheritance rule now made programmatic: a delegate becomes finalizable once its
 host is `finalized`, `complete(d)`, or gone. The reverse edge is surfaced on
 explicit legacy/detail host rows as `delegates` (the delegate worktree ids plus
 their own finalizable/not-finalizable verdicts); current rows omit that graph.
+Allocation IDs are opaque: their spelling never proves a missing caller's host.
+A qualified `machine/project/worktree` selector can locate an unambiguous
+reporting host; it never falls back to another host's matching ID. A bare ID
+can resolve an actually present, unique caller, but absence remains `unresolved`
+without a host selector. Physical selectors spanning multiple execution
+environments and duplicate reporter slots cannot prove a missing caller gone.
+A selected-project inventory leaves a missing caller in another project
+`unknown`; that project's absence was not observed.
 `fleet` and `delegates` accept a host's roster as proof that a caller is gone
 or terminal only when it is a current publication (`projection.quality:
 "current"` with no `availability` label) whose `projection.freshness` proves a
@@ -1478,7 +1492,10 @@ authorizes finalization (`delegate_finalizable: false`, reason
 `host-roster-advisory`). `delegates --execute` repeats that check immediately
 before each finalization, so a caller roster that has outlived its bound since
 the snapshot leaves the remaining delegates unfinalized (an `errors` entry with
-reason `host-roster-advisory`).
+reason `host-roster-advisory`). The command destination comes from the delegate's
+containing configured fleet source, never its reported machine/platform.
+Execution results expose that destination separately as `source.machine` /
+`source.env`; reporter rename or withdrawal cannot retarget it.
 
 When a worktree record carries profile-assignment history, the ordinary
 `list --json` row includes `current_profile_assignment`: the bound assignment

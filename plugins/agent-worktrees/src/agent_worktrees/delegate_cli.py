@@ -28,10 +28,10 @@ from typing import Any
 from agent_procutil import no_window_kwargs
 
 from . import config as cfg
+from . import fleet_reporting
 from . import list_views_cli
 from . import tracking
 from .worktree_machine_identity import execution_machine_from_fields, projected_machine_fields
-from .worktree_naming import parse_session_worktree_id, session_worktree_prefix
 
 _HOST_TERMINAL_STATUSES = frozenset({"complete", "completed", "finalized"})
 _ROSTER_ADVISORY_REASON = "host-roster-advisory"
@@ -67,22 +67,12 @@ def _caller_lookup_tokens(
     return parsed.machine, (parsed.project or default_project), parsed.worktree_id
 
 
-def _expected_host_key(
-    worktree_id: str,
+def _qualified_host_key(
+    machine: str | None,
     reachable_hosts: dict[tuple[str, str], bool],
 ) -> tuple[str, str] | None:
-    """Infer the host machine/environment from a machine-stamped worktree id."""
-    allocation = parse_session_worktree_id(worktree_id.removesuffix("-k"))
-    if allocation is None:
-        return None
-    matches = [
-        (machine, platform)
-        for machine, platform in reachable_hosts
-        if allocation[0] in (
-            session_worktree_prefix(machine, platform),
-            session_worktree_prefix(machine, platform, legacy=True),
-        )
-    ]
+    """Locate an explicit caller selector; allocation IDs carry no host proof."""
+    matches = [key for key in reachable_hosts if key[0] == machine] if machine else []
     return matches[0] if len(matches) == 1 else None
 
 
@@ -102,16 +92,20 @@ def annotate_delegate_graph(
     ``gone``. ``advisory_rows`` holds the ``id()`` of rows read from such a
     host; a terminal caller resolved to one never authorizes finalization."""
     id_index: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    qualified_index: dict[tuple[str, str, str], dict[str, Any]] = {}
+    qualified_index: dict[tuple[str, str, str], list[dict[str, Any]]] = defaultdict(list)
     for row in worktrees:
         worktree_id = row.get("id")
         if not isinstance(worktree_id, str) or not worktree_id:
             continue
         id_index[worktree_id].append(row)
-        machine = execution_machine_from_fields(row)
         project = row.get("repo")
-        if isinstance(machine, str) and machine and isinstance(project, str) and project:
-            qualified_index[(machine, project, worktree_id)] = row
+        if isinstance(project, str) and project:
+            machines = {
+                name for name in (execution_machine_from_fields(row), row.get("machine"))
+                if isinstance(name, str) and name
+            }
+            for machine in machines:
+                qualified_index[(machine, project, worktree_id)].append(row)
 
     for row in worktrees:
         row.pop("caller_state", None)
@@ -144,10 +138,8 @@ def annotate_delegate_graph(
 
         matches: list[dict[str, Any]] = []
         if machine_hint and project_hint:
-            candidate = qualified_index.get((machine_hint, project_hint, caller_id))
-            if candidate is not None:
-                matches = [candidate]
-        if not matches:
+            matches = qualified_index.get((machine_hint, project_hint, caller_id), [])
+        else:
             matches = id_index.get(caller_id, [])
 
         if len(matches) == 1:
@@ -200,7 +192,7 @@ def annotate_delegate_graph(
             row["delegate_finalizable_reason"] = "host-ambiguous"
         else:
             expected = (
-                _expected_host_key(caller_id, reachable_hosts or {})
+                _qualified_host_key(machine_hint, reachable_hosts or {})
                 if reachable_hosts
                 else None
             )
@@ -212,7 +204,9 @@ def annotate_delegate_graph(
                     caller_state["state"] = "unreachable"
                     row["delegate_finalizable"] = False
                     row["delegate_finalizable_reason"] = "host-unreachable"
-                elif authoritative_hosts is not None and expected not in authoritative_hosts:
+                elif project_hint != row.get("repo") or (
+                    authoritative_hosts is not None and expected not in authoritative_hosts
+                ):
                     caller_state["state"] = "unknown"
                     row["delegate_finalizable"] = False
                     row["delegate_finalizable_reason"] = _ROSTER_ADVISORY_REASON
@@ -310,19 +304,31 @@ def annotate_fleet_hosts(
     authoritative_hosts: set[tuple[str, str]] = set()
     advisory_rows: set[int] = set()
     worktrees: list[dict[str, Any]] = []
+    duplicate_hosts: set[tuple[str, str]] = set()
+    reporter_rows: dict[tuple[str, str], list[int]] = defaultdict(list)
     for host in hosts:
-        key = (str(host.get("machine") or ""), str(host.get("env") or ""))
-        reachable_hosts[key] = bool(host.get("reachable"))
+        try:
+            keys, copies = fleet_reporting.reported_rows(host)
+        except ValueError:
+            host.update(reachable=False, worktrees=[], error="malformed reporting context")
+            continue
+        for key in keys:
+            if key in reachable_hosts:
+                duplicate_hosts.add(key)
+            reachable_hosts[key] = bool(host.get("reachable"))
+            reporter_rows[key].extend(id(row) for row in copies)
         current = host_roster_is_current(host, now=now)
         if current:
-            authoritative_hosts.add(key)
+            authoritative_hosts.update(keys)
         elif host.get("reachable") is True and host.get("availability") is None:
             host["availability"] = {"status": "stale", "reason": _UNPROVEN_ROSTER_REASON}
-        copies = [dict(row) for row in host.get("worktrees") or [] if isinstance(row, dict)]
         if not current:
             advisory_rows.update(id(row) for row in copies)
         worktrees.extend(copies)
         host["worktrees"] = copies
+    authoritative_hosts.difference_update(duplicate_hosts)
+    for key in duplicate_hosts:
+        advisory_rows.update(reporter_rows[key])
     annotate_delegate_graph(
         worktrees,
         reachable_hosts=reachable_hosts,
@@ -365,18 +371,19 @@ def _fleet_snapshot(
     return rows
 
 
-def _target_key(row: dict[str, Any]) -> tuple[Any, ...]:
-    return (row.get("id"), execution_machine_from_fields(row), row.get("platform"))
-
-
-def _still_finalizable(hosts: list[dict[str, Any]], target: dict[str, Any]) -> bool:
+def _still_finalizable(
+    hosts: list[dict[str, Any]], target: dict[str, Any], *, source_key: tuple[str, str],
+) -> bool:
     """Re-derive ``target``'s verdict from the snapshot at this instant, just
     before finalizing it: a caller roster that authorized it at annotation may
     have outlived its freshness bound since."""
-    key = _target_key(target)
+    if sum(fleet_reporting.source_key(host) == source_key for host in hosts) != 1:
+        return False
     return any(
-        _target_key(row) == key and row.get("delegate_finalizable") is True
+        row.get("id") == target.get("id") and row.get("repo") == target.get("repo")
+        and row.get("delegate_finalizable") is True
         for host in annotate_fleet_hosts(copy.deepcopy(hosts))
+        if fleet_reporting.source_key(host) == source_key
         for row in host.get("worktrees") or []
     )
 
@@ -409,6 +416,7 @@ def _finalize_target(
     project: str,
     timeout: float,
     host_index: dict[tuple[str, str], tuple[str, str, bool]],
+    source_key: tuple[str, str],
 ) -> dict[str, Any]:
     worktree_id = str(target.get("id") or "")
     machine = execution_machine_from_fields(target) or ""
@@ -417,8 +425,9 @@ def _finalize_target(
         "worktree_id": worktree_id,
         "machine": machine,
         "platform": platform,
+        "source": {"machine": source_key[0], "env": source_key[1]},
     }
-    host = host_index.get((machine, platform))
+    host = host_index.get(source_key)
     if host is None:
         result["ok"] = False
         result["error"] = "no fleet target matched this delegate host"
@@ -510,6 +519,10 @@ def run_delegates(argv: list[str]) -> int:
         return 1
 
     candidates = _delegate_candidates(hosts)
+    sources = {
+        id(row): fleet_reporting.source_key(host)
+        for host in hosts for row in host.get("worktrees", [])
+    }
     eligible: list[dict[str, Any]] = []
     blocked: list[dict[str, Any]] = []
     for row in candidates:
@@ -542,8 +555,9 @@ def run_delegates(argv: list[str]) -> int:
                 project=project,
                 timeout=args.timeout,
                 host_index=host_index,
+                source_key=sources[id(row)],
             )
-            if _still_finalizable(hosts, row)
+            if _still_finalizable(hosts, row, source_key=sources[id(row)])
             else {
                 "worktree_id": row.get("id"),
                 "machine": execution_machine_from_fields(row) or "",

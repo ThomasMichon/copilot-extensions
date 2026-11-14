@@ -160,7 +160,9 @@ def test_requested_point_refresh_reconciles_bound_hint_before_acknowledgement(
         if failure == "status-collision":
             record.status = "archived"
         elif failure == "platform-collision":
-            record.platform = "linux"
+            record.platform = "linux" if producer.cfg.detect_platform() != "linux" else "windows"
+            # Canonical writes replace this obsolete label with current reporting.
+            selected_id = "one"
     tracking_dir = producer.cfg.tracking_dir("project")
     tracking_dir.mkdir(parents=True, exist_ok=True)
     paths = []
@@ -169,6 +171,9 @@ def test_requested_point_refresh_reconciles_bound_hint_before_acknowledgement(
         tracking.save_record(item, path)
         paths.append(path)
     initial_bytes = paths[0].read_bytes()
+    initial_record_bytes = {path: path.read_bytes() for path in paths}
+    selected_path = next(path for path in paths if path.stem == selected_id)
+    selected_record = next(item for item in records if item.worktree_id == selected_id)
     malformed = {
         "malformed-registry": {"session_id": "unobserved"},
         "malformed-entry": ["unobserved"],
@@ -286,7 +291,7 @@ def test_requested_point_refresh_reconciles_bound_hint_before_acknowledgement(
     elif collision:
         query.update({
             "status-collision": {"status_filter": "active"},
-            "platform-collision": {"platform_filter": "windows"},
+            "platform-collision": {"platform_filter": producer.cfg.detect_platform()},
             "checkout-collision": {"include_missing": False},
         }[failure])
     release, entered = threading.Event(), threading.Event()
@@ -375,18 +380,19 @@ def test_requested_point_refresh_reconciles_bound_hint_before_acknowledgement(
         else:
             assert producer.publish_active_project(owner, **options) == len(records)
             result = owner.handle(query)
-            assert result["ok"] is True and result["point_refresh"]["request_id"] == "a" * 32
-            assert tracking.load_record(paths[-1]).bound_live is False
+            assert result["ok"] is True and result["point_refresh"]["request_id"] == "a" * 32, result
+            assert tracking.load_record(selected_path).bound_live is False
             assert result["point_refresh"]["worktree_id"] == selected_id
-            assert result["point_refresh"]["creation_nonce"] == (records[-1].creation_nonce or None)
+            assert result["point_refresh"]["creation_nonce"] == (selected_record.creation_nonce or None)
             if failure in {"legacy-no-nonce", "legacy-unindexed"}:
                 assert "creation_nonce" not in result["worktrees"][0]
                 assert tracking.load_record(paths[-1]).creation_nonce == ""
-            assert result["point_refresh"]["path"] == records[-1].worktree_path
+            assert result["point_refresh"]["path"] == selected_record.worktree_path
             assert result["worktrees"][0]["id"] == selected_id
             if collision:
-                assert tracking.load_record(paths[0]).bound_live is True
-                assert paths[0].read_bytes() == initial_bytes
+                unselected = next(path for path in paths if path != selected_path)
+                assert tracking.load_record(unselected).bound_live is True
+                assert unselected.read_bytes() == initial_record_bytes[unselected]
             assert result["worktrees"][0].get("session_bound_live") is not True
             assert result["worktrees"][0]["mux_session"] is False
             if managed:
