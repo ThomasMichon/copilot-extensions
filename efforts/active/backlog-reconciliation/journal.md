@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-14 - Mux receiving and three tracking retirements](journal/2026/11.14-mux-receiving-and-retirements.md)
+
 - [2026-11-14 - Compiler-free intake and source qualification](journal/2026/11.14-compiler-free-and-source-qualification.md)
 
 - [2026-11-13 - Runner, existing-entry and attribution receiving](journal/2026/11.13-runner-entry-and-attribution-receiving.md)

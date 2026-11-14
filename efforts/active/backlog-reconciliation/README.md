@@ -3589,6 +3589,15 @@ sources, transferring owners or turning partial/planning gains into completion.
   The 2026-10-29 05:02:13 UTC census is 920 whole issues, 191 above 729:
   two own original-cohort folds and one external departure, no arrivals.
   No technical completion or claim/resource release is inferred.
+- [x] Deliver the [Mux lifecycle, launch-CWD and attributed raw-head
+  intake](journal/2026/11.14-mux-receiving-and-retirements.md) through normal
+  review in #12623/#12624, complete receiving readback and separate current
+  source judgments. Verified `NOT_PLANNED` retirements of #8776/#8797/#8811
+  remove duplicated tracking, not their unfinished technical acceptance.
+  The SAME Active Mux ROOT, local AND actual global gates, incumbent owners
+  and every source/claim/resource boundary remain. The complete 13:36:38 UTC
+  census is 851 whole issues, 122 above fixed 729: three own inflow departures,
+  no arrivals or external departures; 473 original-cohort issues remain open.
 - [ ] Refresh live and original-cohort metrics, append journal checkpoints, and
   continue graph-backed consolidation with creation-oldest-first coverage until
   at most 729 issues remain.
