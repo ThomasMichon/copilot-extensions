@@ -14,7 +14,7 @@ from __future__ import annotations
 import datetime as _dt
 
 from rich.cells import cell_len
-from worktree_identity import parse_machine_identity
+from ...worktree_reporting_contract import row_identity
 
 from .. import prune
 from . import reciprocal
@@ -656,7 +656,7 @@ def norm(
     source_capabilities=None,
 ):
     """Normalize one raw worktree dict into the engine's record shape."""
-    identity = parse_machine_identity(w)
+    identity = row_identity(w)
     source_id = source_identity.resolve_id(
         source_kind, source_id, machine=str(machine), env=str(env)
     )
