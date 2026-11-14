@@ -79,7 +79,7 @@ def publish_active_project(
 def _publish_active_project(
     runtime, project: str, *, observe_records=None, managed_mux_cache=None,
 ) -> int:
-    from . import __main__ as core
+    from . import __main__ as core, worktrees_reporting
 
     # The roster is only as fresh as the first fact read for it.
     collected_from = runtime.clock()
@@ -97,7 +97,9 @@ def _publish_active_project(
         accepted_requests = []
         for request_id, selection in refresh_requests:
             try:
-                selected_ids = selection_index.select(selection)
+                selected_ids = selection_index.select(worktrees_reporting.platform_selection(
+                    selection, cfg.detect_platform(),
+                ))
             except ProjectionError as error:
                 runtime.refreshes.reject(request_id, str(error))
                 continue

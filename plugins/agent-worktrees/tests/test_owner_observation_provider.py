@@ -11,6 +11,7 @@ from types import SimpleNamespace
 import pytest
 
 from agent_worktrees import owner_observation_contract as c
+from agent_worktrees import config as cfg
 from agent_worktrees import owner_observation_transport as wire
 from agent_worktrees.owner_observation_history import OwnerObservationHistory
 from agent_worktrees.worktrees_projection_index import ProjectionError, ProjectionUnavailable
@@ -278,7 +279,7 @@ def test_optional_activation_failure_leaves_roster_and_current_path_usable(
         runtime.activate()
         runtime.publish("project", [{"id": "ordinary"}], observed_at=1)
         assert runtime.handle({"contract_version": 1, "project": "project"})["worktrees"] == [
-            {"id": "ordinary"}
+            {"id": "ordinary", "platform": cfg.detect_platform()}
         ]
         assert runtime.observation_read(request())["error"]["code"] == "unavailable"
         assert not set(wire.CAPABILITIES) & set(runtime.health()["capabilities"])

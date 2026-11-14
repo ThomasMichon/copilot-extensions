@@ -10,6 +10,7 @@ import time
 from collections.abc import Callable, Iterator
 from contextlib import closing
 from pathlib import Path
+from typing import Any
 
 from . import config as cfg
 from . import worktrees_observation_contract as observations
@@ -142,7 +143,7 @@ class WorktreesRuntime:
     ) -> None:
         from .worktrees_feed import WorktreesFeed
 
-        self.store = WorktreesProjection(db_path)
+        self.store = WorktreesProjection(db_path, wire_platform=cfg.detect_platform())
         self._lock = threading.Lock()
         self._activation_lock = threading.Lock()
         self._terminated = False
@@ -207,7 +208,9 @@ class WorktreesRuntime:
                             raise
                         self.close_admission("superseded")
                         # Rollback elects the resident again, not its fenced writer.
-                        self.store = WorktreesProjection(self.store.db_path)
+                        self.store = WorktreesProjection(
+                            self.store.db_path, wire_platform=self.store.wire_platform,
+                        )
             except (ProjectionError, ProjectionUnavailable, sqlite3.Error, OSError) as exc:
                 with self._lock:
                     self._admitting = False
@@ -427,7 +430,7 @@ class WorktreesRuntime:
                         self._wake.set()
                     return self._failure("unready", "requested point refresh is awaiting publication")
         try:
-            result = self.store.read(
+            result = self.read_publication(
                 project, **selection, contract_version=payload["contract_version"],
             )
         except ProjectionUnavailable as exc:
@@ -485,6 +488,11 @@ class WorktreesRuntime:
             return
         result["availability"] = {"status": "stale", "reason": reason}
 
+    def read_publication(self, project: str, **selection: Any) -> dict:
+        return worktrees_reporting.read_publication(
+            self.store.read, project, platform=self.store.wire_platform, **selection,
+        )
+
     def _failure(self, code: str, message: str) -> dict:
         return {
             "ok": False,
@@ -529,7 +537,8 @@ class WorktreesRuntime:
             try:
                 with self.observations.publication(project):
                     self.store.publish(
-                        project, rows, observed_at=observed_at, authority_check=self._elected,
+                        project, (worktrees_reporting.publication_row(row) for row in rows),
+                        observed_at=observed_at, authority_check=self._elected,
                     )
                     self.native_observations.accepted(project)
                     self.observations.accepted(project)
@@ -555,7 +564,7 @@ class WorktreesRuntime:
                 self._refreshed[project] = started
                 self._changed_pending.pop(project, None)
                 if refresh_requests:
-                    self.refreshes.complete(project, refresh_requests, read=self.store.read)
+                    self.refreshes.complete(project, refresh_requests, read=self.read_publication)
         self.feed.changed(project)
 
     def note_changed(self, path: str | None) -> None:
