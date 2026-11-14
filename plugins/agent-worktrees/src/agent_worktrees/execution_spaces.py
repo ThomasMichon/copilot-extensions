@@ -129,7 +129,7 @@ def settle_parent_obligation(record: Any, config: Any, worktree_id: str, *, outp
         require_record_mutation(record, config)
         local_child = retained_checkout.is_local(record, config)
         caller_key = record.execution_machine if local_child else current_execution_context(config).execution_machine
-        local_parent = retained_checkout.resolve_owner(owner, config)
+        local_parent = retained_checkout.resolve_owner(owner, config, child=record)
         if local_parent is not None:
             parent_path, legacy_parent = local_parent, False
         elif owner.machine in (config.machine, caller_key):
@@ -150,17 +150,37 @@ def settle_parent_obligation(record: Any, config: Any, worktree_id: str, *, outp
                 return
             receiving_config = project_record_config(parent)
             require_record_mutation(parent, receiving_config)
+            from .tracking_lookup import local_pair_subjects, original_owned_claim
+
+            paired_child = (
+                getattr(record, "pair_role", None) == "knowledge"
+                and getattr(record, "pair_kind", None) == "worktree"
+                and record.worktree_id == worktree_id and record.repo == config.repo_name
+                and owner == record.pair_claim_ref and local_pair_subjects(record, parent)
+            )
+            ordinary_claim = original_owned_claim(record, parent)
+            ordinary_child = (
+                ordinary_claim is not None and record.worktree_id == worktree_id
+                and record.repo == config.repo_name and record.status == "finalized"
+            )
             if owner.machine != getattr(parent, "execution_machine", parent.machine):
                 alias = None
                 if getattr(parent, "machine_identity", None) is None:
                     alias = legacy_wsl_record_locality.resolve_legacy_wsl_owner_ref(owner, config)
-                if alias is None or alias.resolve() != parent_path.resolve():
+                if not (paired_child or ordinary_child) and (
+                    alias is None or alias.resolve() != parent_path.resolve()
+                ):
                     raise ValueError("parent reference conflicts with the record execution owner")
             if not local_child and not require_owner_identity(caller_key, receiving_config):
                 raise ExecutionSpaceError("caller is not local to the parent receiving execution space")
-            child_ref = tracking.format_claim_ref(
-                getattr(record, "execution_machine", record.machine), config.repo_name, worktree_id,
+            child_ref = (
+                parent.pair_ref if paired_child else ordinary_claim.ref if ordinary_child
+                else tracking.format_claim_ref(
+                    getattr(record, "execution_machine", record.machine), config.repo_name, worktree_id,
+                )
             )
+            if ordinary_child and not ordinary_claim.is_live:
+                return
             if child_ref == paired_claims.paired_ref(parent) and any(
                 c.ref == child_ref and c.kind == "worktree" and c.state == obligations.RELEASED
                 for c in parent.resources
@@ -302,7 +322,10 @@ def require_record_mutation(record: Any, config: Any, *, recover_receiving: bool
 
     if record is None:
         return
-    if getattr(record, "platform", cfg.detect_platform()) != cfg.detect_platform():
+    reporting = getattr(record, "_reporting_context", None) is not None
+    if reporting and record._reporting_context.environment != cfg.detect_platform():
+        raise ExecutionSpaceError("reporter observations belong to another execution platform")
+    if not reporting and getattr(record, "platform", cfg.detect_platform()) != cfg.detect_platform():
         raise ExecutionSpaceError(
             "record snapshot identity/platform belongs to a different execution space/platform; "
             "native execution platform required"
@@ -357,10 +380,15 @@ def require_record_mutation(record: Any, config: Any, *, recover_receiving: bool
             owner = tracking.parse_claim_ref(record.owner_ref)
             if owner is None or not owner.is_qualified:
                 raise ExecutionSpaceError("owned record has an unqualified owner reference")
-            if not has_receiving_allocation and retained_checkout.resolve_owner(owner, config) is None:
+            if not has_receiving_allocation and retained_checkout.resolve_owner(owner, config, child=record) is None:
                 raise ExecutionSpaceError(
                     "owned local record requires its original receiving allocation or proven local parent"
                 )
+        return
+    if reporting:
+        from .record_reporting import require_receiving_subject
+
+        require_receiving_subject(record, config)
         return
     entries = registry_for_config(config)
     from .legacy_wsl_record_locality import resolve_legacy_wsl_owner_ref

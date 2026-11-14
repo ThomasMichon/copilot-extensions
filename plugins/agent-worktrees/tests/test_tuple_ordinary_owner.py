@@ -123,22 +123,25 @@ def test_explicit_foreign_owner_is_never_replaced_by_local_inference(
 
 
 @pytest.mark.parametrize("platform", ["windows", "linux"])
-def test_implicit_legacy_reference_is_not_relabelled_to_admit_a_tuple_child(
+def test_implicit_owner_uses_current_reporter_without_changing_parent_allocation(
     observed_config, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture,
     platform: str,
 ) -> None:
     config = observed_config(platform, "sibling-only", "ordinary")
     row = m._create_worktree_core(config, build_launch_plan=False)["worktree"]
     path = cfg.tracking_dir() / f"{row['id']}.yaml"
-    before = path.read_bytes()
+    parent = tracking.load_record(path)
     monkeypatch.setattr(m, "_infer_worktree_id_from_cwd", lambda *_a: row["id"])
     monkeypatch.delenv("AGENT_WORKTREES_OWNER_REF", raising=False)
     monkeypatch.delenv("COPILOT_AGENT_SESSION_ID", raising=False)
-    expected = f"{config.machine}/{config.repo_name}/{row['id']}"
+    expected = f"{tracking.load_record(path).execution_machine}/{config.repo_name}/{row['id']}"
     assert worktree_ops_cli._resolve_owner_ref() == expected
     args = _create_args(json_output=True)
     args.no_owner = False
     capfd.readouterr()
-    assert m.cmd_create(args) != 0
-    assert "physical-host metadata" in json.loads(capfd.readouterr().out)["error"]
-    assert path.read_bytes() == before
+    assert m.cmd_create(args) == 0
+    assert json.loads(capfd.readouterr().out)["worktree"]["owner_ref"] == expected
+    retained = tracking.load_record(path)
+    assert (retained.worktree_id, retained.branch, retained.worktree_path, retained.creation_nonce) == (
+        parent.worktree_id, parent.branch, parent.worktree_path, parent.creation_nonce,
+    )

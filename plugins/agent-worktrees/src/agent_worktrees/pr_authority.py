@@ -136,17 +136,13 @@ def write_record(record: tracking.WorktreeRecord, path: Path, content: str) -> N
     Ordinary stamps with unchanged PR authority do not contend with network I/O.
     """
     current = tracking.load_record(path) if path.exists() else None
-    loaded_machine = getattr(record, "_loaded_machine", None)
-    expected_machine = record.machine if loaded_machine is None else loaded_machine
-    if current is not None and current.machine != expected_machine:
-        raise ValueError("record owner machine changed; reload the record")
     record_machine_identity.require_unchanged_identity(record, current)
     if _projection(current) == _projection(record):
         tracking._atomic_write(path, content)
     else:
         with guard(timeout=0):
             tracking._atomic_write(path, content)
-    record_machine_identity.remember_loaded_identity(record, path)
+    record_machine_identity.remember_loaded_subject(record, path)
 
 
 def write_registry(path: Path, content: str) -> None:

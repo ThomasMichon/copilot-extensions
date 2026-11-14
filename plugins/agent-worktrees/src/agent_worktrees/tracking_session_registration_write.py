@@ -221,6 +221,12 @@ def _apply_session_register_locked(args: dict) -> dict:
         self_session_ref = tracking.format_claim_ref(
             record.execution_machine, record.repo, record.worktree_id, session=session_id
         )
+        if existing is not None:
+            from .session_self_claims import self_claims
+
+            original_claims = self_claims(record, session_id)
+            if len(original_claims) == 1:
+                self_session_ref = original_claims[0].ref
         tracking.add_resource_claim(
             record,
             tracking.ResourceClaim(

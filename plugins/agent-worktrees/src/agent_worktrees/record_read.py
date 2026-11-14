@@ -12,7 +12,7 @@ from typing import get_args
 import yaml
 
 from . import config as cfg
-from . import tracking
+from . import record_reporting, tracking
 from .record_config import configured_repositories, configured_repository_paths, metadata_project
 from .record_io import read_record_mapping
 
@@ -151,8 +151,6 @@ def read_exact_record(worktree_id: str, *, include_workspace: bool = False) -> d
         if data["status"] not in get_args(tracking.WorktreeStatus):
             raise ValueError("Record has an unknown status")
         for key in (
-            "machine",
-            "platform",
             "creation_nonce",
             "owner",
             "owner_ref",
@@ -186,7 +184,9 @@ def read_exact_record(worktree_id: str, *, include_workspace: bool = False) -> d
                     raise ValueError(f"Record {key} version must be an integer")
         # Compatibility parsing may stringify fields, expanding shared aliases.
         _json_value(data)
-        record = tracking.parse_record_data(data, path=record_path)
+        record = tracking.parse_record_data(
+            data, path=record_path, reporting_context=record_reporting.current_context(project),
+        )
         leg = tracking.derive_execution_leg(record)
         worktree = {
             "id": record.worktree_id,
@@ -226,8 +226,6 @@ def read_exact_record(worktree_id: str, *, include_workspace: bool = False) -> d
             "bound_agent": record.bound_agent,
         }
         for key in (
-            "machine",
-            "platform",
             "owner",
             "owner_ref",
             "caller_worktree",
@@ -235,8 +233,7 @@ def read_exact_record(worktree_id: str, *, include_workspace: bool = False) -> d
             "checkout_managed",
         ):
             worktree[key] = data.get(key)
-        if record.machine_identity is not None:
-            worktree.update(record.machine_fields)
+        worktree.update(record.machine_fields)
         if include_workspace:
             head = record.resolved_head_session
             entry = record.session_entry(head) if head else None

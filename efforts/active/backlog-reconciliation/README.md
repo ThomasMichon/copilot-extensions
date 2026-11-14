@@ -3164,12 +3164,24 @@ sources, transferring owners or turning partial/planning gains into completion.
   receiving objective or a retained gap; investigate actual implementation
   evidence when claiming completion, rather than making that the prerequisite
   for discovering thematic alignment.
+  The [status/recovery/reassignment intake](journal/2026/11.13-status-recovery-and-reassignment-intake.md)
+  proposes 36 unchecked Dispatch Phase 3 rows for four complete families,
+  preserving literal OR/AND choices, each source's actual Open condition,
+  the checked Phase 6 transfer non-goal and all strict companions.
+  Two canonical keepers remain; no source or resource disposition follows.
   The [link-capability/portable-timeout intake](journal/2026/11.13-link-capability-and-portable-timeout-intake.md)
   proposes twelve unchecked portfolio Phase 4 rows through the actual
   Phase 7 domain-review route. Three canonical keepers remain; #6082's
   five-row installer proposal is withheld at its copied-source boundary.
   The earlier whole installer-ROOT qualification is explicitly withdrawn,
   not made retroactively compliant. No new source disposition is claimed.
+  Subsequent permitted receiving readback after #12510 and reconciliation of
+  #9618's already-audited November 5 child gate support #6093's separate
+  redundant-tracking retirement. #6138 remains under its investigator's
+  actual retained-issue condition; all twelve technical rows stay unchecked.
+  The [post-merge judgment](journal/2026/11.13-link-capability-and-portable-timeout-intake.md#separate-post-merge-receiving-and-tracking-judgments)
+  records 854 whole open, still 125 above target, with no child recredit
+  or resource release.
   The [onboarding/conclusion/key-consumer intake](journal/2026/11.13-onboarding-conclusion-and-key-intake.md)
   proposes eighteen unchecked rows in existing Fleet, Draft tidier and
   attribution plans, preserving strict annexes, pilot/credential/custody

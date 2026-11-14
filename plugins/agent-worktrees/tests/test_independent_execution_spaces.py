@@ -18,7 +18,7 @@ from agent_worktrees import claims_cli, config as cfg, execution_spaces, trackin
 
 @pytest.mark.parametrize("actual", ["windows", "linux", "wsl"])
 @pytest.mark.parametrize("scoped", [False, True])
-@pytest.mark.parametrize("field", ["platform", "machine", "worktree_path"])
+@pytest.mark.parametrize("field", ["branch", "creation_nonce", "worktree_path"])
 @pytest.mark.guard
 def test_snapshot_identity_must_match_the_actual_proven_record(
     tmp_path, monkeypatch, actual, scoped, field,
@@ -46,12 +46,12 @@ def test_snapshot_identity_must_match_the_actual_proven_record(
     )
     before = record.yaml_path.read_bytes()
     execution_spaces.require_record_mutation(replace(record, title="valid mutable snapshot"), config)
-    value = (
-        "windows" if actual != "windows" else "wsl"
-    ) if field == "platform" else (
-        "record-alias" if field == "machine" else str(tmp_path / "foreign" / "owned")
-    )
-    with pytest.raises(execution_spaces.ExecutionSpaceError, match="snapshot identity/platform"):
+    value = {
+        "branch": "worktree/replacement",
+        "creation_nonce": "replacement-allocation",
+        "worktree_path": str(tmp_path / "foreign" / "owned"),
+    }[field]
+    with pytest.raises(execution_spaces.ExecutionSpaceError, match="snapshot identity"):
         execution_spaces.require_record_mutation(replace(record, **{field: value}), config)
     assert record.yaml_path.read_bytes() == before
 
@@ -228,18 +228,68 @@ def scoped_config(tmp_path, monkeypatch):
     }
     monkeypatch.setattr(cfg, "load_machines_yaml", lambda anchor, **_kwargs: entries)
     monkeypatch.setattr(cfg, "detect_platform", lambda: "windows")
+    monkeypatch.setattr(cfg.socket, "gethostname", lambda: "workstation")
+    monkeypatch.setattr(cfg, "project_dir", lambda project=None: tmp_path / (project or "project"))
     config = cfg.Config(
         machine="workstation-windows", platform="windows", repo_name="project",
         srcroot=str(tmp_path), repos={"project": cfg.RepoConfig(
             anchor=str(tmp_path), worktree_root=str(tmp_path / "children"),
         )},
     )
+    (tmp_path / "machines.yaml").write_text(yaml.safe_dump({"machines": {
+        key: {"hostname": entry.hostname, "execution_platform": entry.execution_platform,
+              "physical_host": entry.physical_host}
+        for key, entry in entries.items()
+    }}), encoding="utf-8")
+    project = cfg.project_dir("project")
+    project.mkdir()
+    (project / "config.yaml").write_text(yaml.safe_dump({
+        "repo_name": "project",
+        "repos": {"project": {
+            "anchor": config.default_repo.anchor,
+            "worktree_root": config.default_repo.worktree_root,
+        }},
+    }), encoding="utf-8")
     monkeypatch.setattr(cfg, "load_project_config", lambda project, **kwargs: config)
     monkeypatch.setattr(
         config_authority, "load_project_authority_config",
         lambda project, **kwargs: config,
     )
     return config
+
+
+def receiving_record(config, worktree_id="wt-owner", *, checkout=None, owner_ref=None):
+    checkout = Path(checkout) if checkout is not None else (
+        Path(config.default_repo.worktree_root) / worktree_id
+    )
+    checkout.mkdir(parents=True, exist_ok=True)
+    return tracking.create_new_record(
+        worktree_id, f"worktree/{worktree_id}", str(checkout),
+        config.repo_name, config.machine, config.platform,
+        cfg.project_dir(config.repo_name) / "worktrees", owner_ref=owner_ref,
+    )
+
+
+def replace_receiving_checkout(path):
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    raw["worktree_path"] = str(path.parent.parent / "foreign-checkouts" / path.stem)
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    return path.read_bytes()
+
+
+def test_obsolete_reporter_stamp_cannot_reject_current_receiving_record(scoped_config):
+    record = receiving_record(scoped_config)
+    raw = yaml.safe_load(record.yaml_path.read_text(encoding="utf-8"))
+    raw.update(machine="obsolete-host-wsl", platform="wsl", machine_identity_version=1,
+               environment="wsl", execution_machine="obsolete-host-wsl")
+    record.yaml_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    before = record.yaml_path.read_bytes()
+    current = tracking.load_record(record.yaml_path)
+    assert current.machine == "workstation"
+    assert current.execution_machine == scoped_config.machine
+    assert current.platform == "windows"
+    execution_spaces.require_record_mutation(current, scoped_config)
+    assert record.yaml_path.read_bytes() == before
 
 
 def test_explicit_registration_preserves_key_and_grouping_only_metadata(tmp_path):
@@ -470,10 +520,7 @@ def test_finalize_authority_fenced_write_catches_a_record_gone_foreign(
     success."""
     from agent_worktrees import finalize
 
-    record = tracking.create_new_record(
-        "wt-authority", "worktree/wt-authority", str(tmp_path), "project",
-        scoped_config.machine, "windows", tmp_path,
-    )
+    record = receiving_record(scoped_config, "wt-authority")
     calls = []
     result = finalize._authority_fenced_write(
         record.yaml_path, scoped_config, lambda r: calls.append(r.worktree_id),
@@ -481,9 +528,7 @@ def test_finalize_authority_fenced_write_catches_a_record_gone_foreign(
     assert result is not None and result.worktree_id == "wt-authority"
     assert calls == ["wt-authority"]
 
-    raw = yaml.safe_load(record.yaml_path.read_text(encoding="utf-8"))
-    raw["machine"], raw["platform"] = "workstation-wsl", "wsl"
-    record.yaml_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    replace_receiving_checkout(record.yaml_path)
     calls.clear()
     assert finalize._authority_fenced_write(
         record.yaml_path, scoped_config, lambda r: calls.append(r.worktree_id),
@@ -591,7 +636,12 @@ def test_parent_record_authority_is_rechecked_before_settlement(
     )
     parent_dir = tmp_path / "project"
     (parent_dir / "worktrees").mkdir(parents=True)
-    (parent_dir / "worktrees" / "wt-parent.yaml").write_text("{}", encoding="utf-8")
+    (parent_dir / "worktrees" / "wt-parent.yaml").write_text(yaml.safe_dump({
+        "worktree_id": "wt-parent",
+        "repo": "project",
+        "branch": "worktree/wt-parent",
+        "worktree_path": str(Path(scoped_config.default_repo.worktree_root) / "wt-parent"),
+    }), encoding="utf-8")
     monkeypatch.setattr(cfg, "project_dir", lambda project: parent_dir)
     monkeypatch.setattr(tracking, "_RecordLock", lambda *args, **kwargs: nullcontext())
     monkeypatch.setattr(tracking, "load_record", lambda path, **kwargs: parent)
@@ -699,7 +749,7 @@ def test_sibling_only_map_settles_actual_parent_without_target_enrollment(
     ("wsl", "windows"), ("wsl", "linux"),
     ("linux", "windows"), ("linux", "wsl"),
 ])
-def test_legacy_platform_override_requires_actual_record_platform(
+def test_legacy_platform_stamp_cannot_override_actual_receiving_platform(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, actual: str, override: str,
 ) -> None:
     (tmp_path / "machines.yaml").write_text(
@@ -724,11 +774,17 @@ def test_legacy_platform_override_requires_actual_record_platform(
             name, f"worktree/{name}", str(checkout), "project",
             config.machine, platform, records,
         )
+        raw = yaml.safe_load(record.yaml_path.read_text(encoding="utf-8"))
+        raw["platform"] = platform
+        record.yaml_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
         paths.append(record.yaml_path)
     before = {path: path.read_bytes() for path in paths}
-    with pytest.raises(execution_spaces.ExecutionSpaceError, match="execution platform"):
-        execution_spaces.require_record_mutation(tracking.load_record(paths[0]), config)
-    execution_spaces.require_record_mutation(tracking.load_record(paths[1]), config)
+    for path in paths:
+        with pytest.raises(execution_spaces.ExecutionSpaceError, match="execution platform"):
+            execution_spaces.require_record_mutation(tracking.load_record(path), config)
+        execution_spaces.require_record_mutation(
+            tracking.load_record(path), replace(config, platform=actual),
+        )
     assert all(path.read_bytes() == contents for path, contents in before.items())
 
 
@@ -944,10 +1000,7 @@ def test_source_accept_rejects_foreign_record_before_registry_transition(
     tracking_dir = project_dir / "worktrees"
     tracking_dir.mkdir(parents=True)
     source_path = tracking_dir / "wt-source.yaml"
-    source = tracking.create_new_record(
-        "wt-source", "worktree/wt-source", str(tmp_path), "project",
-        "workstation-wsl", "wsl", tracking_dir,
-    )
+    source = receiving_record(scoped_config, "wt-source", checkout=tmp_path / "foreign-source")
     claim = tracking.ResourceClaim(
         kind="pr", ref="owner/example#1", created_at="2026-10-09T12:00:00",
         state="active", handoff_bundle="bundle-1",
@@ -966,7 +1019,7 @@ def test_source_accept_rejects_foreign_record_before_registry_transition(
     before = source_path.read_bytes(), registry.read_bytes()
     monkeypatch.setattr(cfg, "project_dir", lambda project: project_dir)
     monkeypatch.setattr(claim_handoffs, "registry_path", lambda: registry)
-    with pytest.raises(claim_handoffs.ClaimHandoffError, match="different execution space"):
+    with pytest.raises(claim_handoffs.ClaimHandoffError, match="receiving worktree namespace"):
         claim_handoffs.accept_source(bundle.bundle_id, actor=bundle.consumer)
     assert (source_path.read_bytes(), registry.read_bytes()) == before
 
@@ -1149,10 +1202,8 @@ def test_seed_daemon_returns_known_authority_rejection_without_writing(
 ):
     from agent_worktrees import launch_seed_state, locks, status_monitor_runtime, tracking_write
 
-    record = tracking.create_new_record(
-        "wt-owner", "worktree/wt-owner", str(tmp_path), "project",
-        scoped_config.machine, "windows", tmp_path,
-        owner_ref="workstation-wsl/project/wt-parent",
+    record = receiving_record(
+        scoped_config, owner_ref="workstation-wsl/project/wt-parent",
     )
     before = record.yaml_path.read_bytes()
     server = tracking_write.start_server(tracking_write.compute)
@@ -1214,18 +1265,15 @@ def test_cleanup_registry_failure_is_a_structured_refusal(
 ):
     from agent_worktrees import cleanup_gc_cli
 
-    record = tracking.create_new_record(
-        "wt-owner", "worktree/wt-owner", str(tmp_path), "project",
-        scoped_config.machine, "windows", tmp_path,
-    )
+    record = receiving_record(scoped_config)
 
-    def invalid_registry(anchor):
+    def invalid_registry(anchor, **kwargs):
         raise failure("cannot validate registry")
 
     monkeypatch.setattr(cfg, "load_machines_yaml", invalid_registry)
     result = cleanup_gc_cli._revalidate_cleanup_safety(
         record.worktree_id, repo=SimpleNamespace(anchor=str(tmp_path)),
-        tracking_path=tmp_path, force=force,
+        tracking_path=record.yaml_path.parent, force=force,
         reap=lambda *args: pytest.fail("cleanup reached destructive work without registry authority"),
     )
     assert not result.cleanable
@@ -1239,10 +1287,8 @@ def test_forced_cleanup_rechecks_fresh_authority_inside_sidecar_lock(
 ):
     from agent_worktrees import cleanup_gc_cli
 
-    record = tracking.create_new_record(
-        "wt-owner", "worktree/wt-owner", str(tmp_path), "project",
-        scoped_config.machine, "windows", tmp_path,
-    )
+    record = receiving_record(scoped_config)
+    execution_spaces.require_record_mutation(record, scoped_config)
     monkeypatch.setattr(cfg, "load_config", lambda: scoped_config)
     real_lock = tracking._RecordLock
     locked = False
@@ -1251,9 +1297,7 @@ def test_forced_cleanup_rechecks_fresh_authority_inside_sidecar_lock(
     def raced_lock(path, *, require_sidecar):
         nonlocal locked
         assert require_sidecar is True
-        fresh = yaml.safe_load(path.read_text(encoding="utf-8"))
-        fresh["machine"], fresh["platform"] = "workstation-wsl", "wsl"
-        path.write_text(yaml.safe_dump(fresh), encoding="utf-8")
+        replace_receiving_checkout(path)
         with real_lock(path, require_sidecar=require_sidecar):
             locked = True
             try:
@@ -1272,11 +1316,12 @@ def test_forced_cleanup_rechecks_fresh_authority_inside_sidecar_lock(
 
     monkeypatch.setattr(tracking, "load_record", fresh_load)
     result = cleanup_gc_cli._revalidate_cleanup_safety(
-        record.worktree_id, repo=scoped_config.default_repo, tracking_path=tmp_path, force=True,
+        record.worktree_id, repo=scoped_config.default_repo,
+        tracking_path=record.yaml_path.parent, force=True,
         reap=lambda *args: pytest.fail("foreign forced cleanup began deleting checkout or branch"),
     )
     assert not result.cleanable and result.bucket == "execution-space"
-    assert "different execution space" in result.reason
+    assert "receiving worktree namespace" in result.reason
     assert record.yaml_path.exists()
 
 
@@ -1289,10 +1334,7 @@ def test_session_lifecycle_fences_raced_fresh_foreign_record(
 ):
     from agent_worktrees import tracking_session_lifecycle_write, tracking_write
 
-    record = tracking.create_new_record(
-        "wt-owner", "worktree/wt-owner", str(tmp_path), "project",
-        scoped_config.machine, "windows", tmp_path,
-    )
+    record = receiving_record(scoped_config)
     record.sessions = [tracking.SessionEntry("session-1", "2026-01-01T00:00:00")]
     record.head_session = "session-1"
     if verb == "session_link_succession":
@@ -1303,6 +1345,7 @@ def test_session_lifecycle_fences_raced_fresh_foreign_record(
     expected_state = record.session_entry("session-1").state
     expected_head = record.head_session
     tracking.save_record(record)
+    execution_spaces.require_record_mutation(record, scoped_config)
     real_lock = tracking._RecordLock
     foreign_bytes = []
 
@@ -1310,7 +1353,7 @@ def test_session_lifecycle_fences_raced_fresh_foreign_record(
     def raced_lock(path, *, require_sidecar):
         assert require_sidecar is True
         raw = yaml.safe_load(path.read_text(encoding="utf-8"))
-        raw["machine"], raw["platform"] = "workstation-wsl", "wsl"
+        raw["worktree_id"] = "foreign-incarnation"
         path.write_text(yaml.safe_dump(raw), encoding="utf-8")
         foreign_bytes.append(path.read_bytes())
         with real_lock(path, require_sidecar=True):
@@ -1351,7 +1394,7 @@ def test_session_lifecycle_fences_raced_fresh_foreign_record(
         }[verb]
         result = handler(args)
     assert result["error"] == "execution_space"
-    assert "different execution space" in result["message"]
+    assert "receiving ledger" in result["message"]
     assert record.yaml_path.read_bytes() == foreign_bytes[-1]
     latest = tracking.load_record(record.yaml_path)
     assert latest.session_entry("session-1").state == expected_state
@@ -1373,19 +1416,17 @@ def test_session_register_deregister_fence_raced_fresh_foreign_record(
         tracking_write,
     )
 
-    record = tracking.create_new_record(
-        "wt-owner", "worktree/wt-owner", str(tmp_path), "project",
-        scoped_config.machine, "windows", tmp_path,
-    )
+    record = receiving_record(scoped_config)
     record.sessions = [tracking.SessionEntry("session-1", "2026-01-01T00:00:00")]
     tracking.save_record(record)
+    execution_spaces.require_record_mutation(record, scoped_config)
     real_lock = tracking._RecordLock
     foreign_bytes = []
 
     @contextmanager
     def raced_lock(path, *args, **kwargs):
         raw = yaml.safe_load(path.read_text(encoding="utf-8"))
-        raw["machine"], raw["platform"] = "workstation-wsl", "wsl"
+        raw["worktree_id"] = "foreign-incarnation"
         path.write_text(yaml.safe_dump(raw), encoding="utf-8")
         foreign_bytes.append(path.read_bytes())
         with real_lock(path, *args, **kwargs):
@@ -1419,7 +1460,7 @@ def test_session_register_deregister_fence_raced_fresh_foreign_record(
         }[verb]
         result = handler(args)
     assert result["error"] == "execution_space"
-    assert "different execution space" in result["message"]
+    assert "receiving ledger" in result["message"]
     assert record.yaml_path.read_bytes() == foreign_bytes[-1]
     latest = tracking.load_record(record.yaml_path)
     assert latest.session_entry("session-1").ended_at is None
@@ -1438,10 +1479,7 @@ def test_session_lifecycle_production_callers_never_dial_old_daemon(
         tracking_write,
     )
 
-    record = tracking.create_new_record(
-        "wt-owner", "worktree/wt-owner", str(tmp_path), "project",
-        "workstation-wsl", "wsl", tmp_path,
-    )
+    record = receiving_record(scoped_config, checkout=tmp_path / "foreign-owner")
     record.sessions = [tracking.SessionEntry("session-1", "2026-01-01T00:00:00")]
     record.head_session = "session-1"
     tracking.save_record(record)
@@ -1484,10 +1522,7 @@ def test_session_lifecycle_cli_reports_authority_refusal_without_success(
 ):
     from agent_worktrees import session_tracking_cli
 
-    record = tracking.create_new_record(
-        "wt-owner", "worktree/wt-owner", str(tmp_path), "project",
-        "workstation-wsl", "wsl", tmp_path,
-    )
+    record = receiving_record(scoped_config, checkout=tmp_path / "foreign-owner")
     record.sessions = [tracking.SessionEntry("session-1", "2026-01-01T00:00:00")]
     record.head_session = "session-1"
     tracking.save_record(record)
@@ -1503,7 +1538,7 @@ def test_session_lifecycle_cli_reports_authority_refusal_without_success(
     ))
     assert result == 1
     report = json.loads(capfd.readouterr().out)
-    assert "different execution space" in report["error"]
+    assert "receiving worktree namespace" in report["error"]
     assert "state" not in report
     assert record.yaml_path.read_bytes() == before
 
@@ -1542,28 +1577,29 @@ def test_finalize_session_settlement_propagates_authority_rejection(
         finalize._settle_current_session_claim(tmp_path / "wt-owner.yaml", record, "session-1")
 
 
-@pytest.mark.parametrize("platform", ["wsl", None])
+@pytest.mark.parametrize(("field", "message"), [
+    ("worktree_path", "receiving worktree namespace"),
+    ("worktree_id", "receiving ledger"),
+])
 def test_pr_reconciliation_never_persists_foreign_fresh_record(
-    platform, tmp_path, scoped_config, monkeypatch, caplog,
+    field, message, tmp_path, scoped_config, monkeypatch, caplog,
 ):
     from agent_worktrees import prune
 
-    record = tracking.create_new_record(
-        "wt-owner", "worktree/wt-owner", str(tmp_path), "project",
-        scoped_config.machine, "windows", tmp_path,
-    )
+    record = receiving_record(scoped_config)
     record.prs = [tracking.PRRecord(number=1, repo="owner/example", state="open")]
     tracking.save_record(record)
-    fresh = tracking.load_record(record.yaml_path)
-    fresh.platform = platform
-    tracking.save_record(fresh)
+    execution_spaces.require_record_mutation(record, scoped_config)
+    raw = yaml.safe_load(record.yaml_path.read_text(encoding="utf-8"))
+    raw[field] = str(tmp_path / "foreign-checkout") if field == "worktree_path" else "replacement"
+    record.yaml_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
     before = record.yaml_path.read_bytes()
     changes = prune.reconcile_and_persist_best_effort(
         record, lambda *args: SimpleNamespace(merged=True),
     )
     assert changes == [(1, "open", "merged")]
     assert record.yaml_path.read_bytes() == before
-    assert "execution platform" in caplog.text
+    assert message in caplog.text
 
 
 @pytest.mark.parametrize("owner_locked", [False, True])
@@ -1581,13 +1617,7 @@ def test_reciprocal_claim_rejects_foreign_record_behind_current_space_reference(
         record_failure(code, error, **details)
 
     monkeypatch.setattr(creation_diagnostics, "record_failure", capture_failure)
-    monkeypatch.setattr(cfg, "project_dir", lambda project: tmp_path)
-    path = tmp_path / "worktrees"
-    path.mkdir()
-    record = tracking.create_new_record(
-        "wt-parent", "worktree/wt-parent", str(tmp_path), "project",
-        scoped_config.machine, "wsl", path,
-    )
+    record = receiving_record(scoped_config, "wt-parent", checkout=tmp_path / "foreign-parent")
     before = record.yaml_path.read_bytes()
     assert not worktree_creation._journal_owner_reciprocal_claim(
         scoped_config, "wt-child", f"{scoped_config.machine}/project/wt-parent",
@@ -1599,19 +1629,16 @@ def test_reciprocal_claim_rejects_foreign_record_behind_current_space_reference(
     code, error = failures[0]
     assert code == "owner_claim_persistence"
     assert isinstance(error, execution_spaces.ExecutionSpaceError)
-    assert "execution platform" in str(error)
+    assert "receiving worktree namespace" in str(error)
 
 
 def test_run_claim_journal_rejects_foreign_fresh_owner(tmp_path, scoped_config, monkeypatch):
     from agent_worktrees import worktree_ops_cli
 
-    monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
-    record = tracking.create_new_record(
-        "wt-parent", "worktree/wt-parent", str(tmp_path), "project",
-        scoped_config.machine, "wsl", tmp_path,
-    )
+    record = receiving_record(scoped_config, "wt-parent", checkout=tmp_path / "foreign-parent")
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: record.yaml_path.parent)
     before = record.yaml_path.read_bytes()
-    with pytest.raises(execution_spaces.ExecutionSpaceError, match="execution platform"):
+    with pytest.raises(execution_spaces.ExecutionSpaceError, match="receiving worktree namespace"):
         worktree_ops_cli._journal_run_claim(
             f"{scoped_config.machine}/project/wt-parent",
             json.dumps({"worktree": {
@@ -1628,16 +1655,16 @@ def test_run_reservation_and_settlement_fence_fresh_owner(
     from agent_worktrees import worktree_ops_cli
 
     monkeypatch.setattr(cfg, "load_config", lambda: scoped_config)
-    monkeypatch.setattr(cfg, "project_dir", lambda project: tmp_path)
     monkeypatch.setattr(
         claims_cli, "_coordination_readiness_for_owner_ref",
         lambda *args: SimpleNamespace(ready=True),
     )
-    record = tracking.create_new_record(
-        "wt-parent", "worktree/wt-parent", str(tmp_path), "project",
-        scoped_config.machine, "windows" if race_after_creation else "wsl",
-        tmp_path / "worktrees",
+    record = receiving_record(
+        scoped_config, "wt-parent",
+        checkout=None if race_after_creation else tmp_path / "foreign-parent",
     )
+    if race_after_creation:
+        execution_spaces.require_record_mutation(record, scoped_config)
     before = record.yaml_path.read_bytes()
     created = []
     raced_bytes = []
@@ -1647,9 +1674,7 @@ def test_run_reservation_and_settlement_fence_fresh_owner(
         fresh = tracking.load_record(record.yaml_path)
         assert len(fresh.resources) == 1
         assert fresh.resources[0].ref.startswith("pending-run:")
-        fresh.platform = "wsl"
-        tracking.save_record(fresh)
-        raced_bytes.append(record.yaml_path.read_bytes())
+        raced_bytes.append(replace_receiving_checkout(record.yaml_path))
         created.append(True)
         return SimpleNamespace(returncode=0, stdout=json.dumps({"worktree": {
             "id": "wt-child", "machine": scoped_config.machine, "repo": "project",
@@ -1662,7 +1687,7 @@ def test_run_reservation_and_settlement_fence_fresh_owner(
     )) == 1
     assert bool(created) == race_after_creation
     assert record.yaml_path.read_bytes() == (raced_bytes[0] if race_after_creation else before)
-    assert "execution platform" in capfd.readouterr().out
+    assert "receiving worktree namespace" in capfd.readouterr().out
 
 
 @pytest.mark.parametrize("json_mode", [False, True])
@@ -1672,35 +1697,39 @@ def test_resume_reports_raced_authority_rejection_as_structured_error(
 ):
     from agent_worktrees import resolve_cli, resolve_launch_cli
 
-    record = tracking.create_new_record(
-        "wt-owner", "worktree/wt-owner", str(tmp_path), "project",
-        scoped_config.machine, "windows", tmp_path,
-    )
-    before = record.yaml_path.read_bytes()
-    fresh = tracking.load_record(record.yaml_path)
-    fresh.owner_ref = "workstation-wsl/project/wt-new-parent"
+    record = receiving_record(scoped_config)
+    execution_spaces.require_record_mutation(record, scoped_config)
+    real_lock = tracking._RecordLock
+    foreign_bytes = []
+
+    @contextmanager
+    def raced_lock(path, *, require_sidecar):
+        assert require_sidecar is True
+        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+        raw["owner_ref"] = "workstation-wsl/project/wt-new-parent"
+        path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+        foreign_bytes.append(path.read_bytes())
+        with real_lock(path, require_sidecar=True):
+            yield
+
+    monkeypatch.setattr(tracking, "_RecordLock", raced_lock)
     module = resolve_cli if json_mode else resolve_launch_cli
     monkeypatch.setattr(module, "seed_for_attempt", lambda *args, **kwargs: None)
     monkeypatch.setattr(
         module, "_preflight_launch", lambda *args: SimpleNamespace(error=None),
     )
+    monkeypatch.setattr(module.sessions, "verify_worktree_active", lambda *args: None)
     monkeypatch.setattr(
         tracking, "save_record",
         lambda *args, **kwargs: pytest.fail("late authority rejection saved the foreign record"),
     )
     args = SimpleNamespace(json=True, base=False, dry_run=False, bare_resume=False)
     if json_mode:
-        reads = iter([record, fresh])
-        monkeypatch.setattr(
-            tracking, "load_record",
-            lambda *args, **kwargs: record if kwargs.get("copy_result") is False else next(reads),
-        )
-        monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+        monkeypatch.setattr(cfg, "tracking_dir", lambda: record.yaml_path.parent)
         monkeypatch.setattr(module, "_relocate_active_project_for_worktree", lambda *args: False)
         monkeypatch.setattr(module.worktree_identity, "_resolve_worktree_id", lambda value: value)
         monkeypatch.setattr(module, "_validate_profile_assignment_config", lambda *args: None)
         monkeypatch.setattr(module.local_cache_refresh, "prepare_for_launch", lambda *args, **kw: None)
-        monkeypatch.setattr(module.sessions, "verify_worktree_active", lambda *args: None)
         state = module.ResolveCommandState(
             args=args, use_json=True, use_base=False, use_new=False,
             requested_machine=None, worktree_id=record.worktree_id, config=scoped_config,
@@ -1708,7 +1737,6 @@ def test_resume_reports_raced_authority_rejection_as_structured_error(
         assert module._resolve_json_mode(state) == 3
         assert "cross-space" in json.loads(capfd.readouterr().out)["error"]
     else:
-        monkeypatch.setattr(tracking, "load_record", lambda *args, **kwargs: fresh)
         monkeypatch.setattr(module, "_dispatch_validate_profile_assignment_config", lambda *args: None)
         plans = []
         monkeypatch.setattr(module, "_emit_plan", plans.append)
@@ -1718,4 +1746,5 @@ def test_resume_reports_raced_authority_rejection_as_structured_error(
         assert plans[-1]["action"] == "error"
         assert plans[-1]["exit_code"] == 3
         assert "cross-space" in plans[-1]["error"]
-    assert record.yaml_path.read_bytes() == before
+    assert foreign_bytes
+    assert record.yaml_path.read_bytes() == foreign_bytes[-1]

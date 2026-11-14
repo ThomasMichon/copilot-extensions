@@ -6,21 +6,17 @@ import os
 from pathlib import Path
 from typing import Protocol
 
-import yaml
-
 from .worktree_machine_identity import WorktreeMachineIdentity, WorktreeMachineIdentityError
 
 
 class IdentityRecord(Protocol):
     machine: str
     platform: str
-    _loaded_machine: str | None
-    _loaded_machine_identity: tuple[object, ...] | None
     _loaded_record_subject: tuple[object, ...] | None
 
 
 class RecordMachineIdentityView(IdentityRecord):
-    """Derived identity roles; the tracking dataclass owns the stored fields."""
+    """Compatibility projections of transient reporter naming facts."""
 
     @property
     def execution_machine(self) -> str:
@@ -52,26 +48,23 @@ def machine_identity(record: IdentityRecord) -> WorktreeMachineIdentity | None:
 
 
 def execution_machine(record: IdentityRecord) -> str:
-    """One-term owner key; historical records retain their exact original label."""
+    """One-term reporter key, not an identity read from tracking YAML."""
     identity = machine_identity(record)
     return identity.execution_machine if identity is not None else record.machine
 
 
 def record_fields(record: IdentityRecord) -> dict[str, object]:
     identity = machine_identity(record)
-    return identity.to_record_fields() if identity is not None else {
+    result = identity.to_record_fields() if identity is not None else {
         "machine": record.machine, "platform": record.platform,
     }
+    if getattr(getattr(record, "_reporting_context", None), "unavailable", False):
+        result["machine_context"] = {"status": "unavailable", "reason": "invalid-machine-registry"}
+    return result
 
 
 def identity_fence(record: IdentityRecord) -> tuple[object, ...]:
     return tuple(record_fields(record).items())
-
-
-def serialized_fields(record: IdentityRecord) -> str:
-    if machine_identity(record) is None:
-        return f"machine: {record.machine}\nplatform: {record.platform}\n"
-    return yaml.safe_dump(record_fields(record), sort_keys=False)
 
 
 def subject_fence(record: IdentityRecord, path: Path | None) -> tuple[object, ...]:
@@ -82,15 +75,13 @@ def subject_fence(record: IdentityRecord, path: Path | None) -> tuple[object, ..
     )))
 
 
-def remember_loaded_identity(record: IdentityRecord, path: Path) -> None:
+def remember_loaded_subject(record: IdentityRecord, path: Path) -> None:
     """Retain transient save evidence without adding persisted identity fields."""
-    record._loaded_machine = record.machine
-    record._loaded_machine_identity = identity_fence(record)
     record._loaded_record_subject = subject_fence(record, path)
 
 
 def require_unchanged_identity(record: IdentityRecord, current: IdentityRecord | None) -> None:
-    """Allow existing explicit legacy-label repair, never implicit tuple migration."""
+    """Fence the receiving subject independently of changing reporter labels."""
     if current is not None:
         path = getattr(current, "_loaded_from", None)
         expected_subject = getattr(record, "_loaded_record_subject", None)
@@ -98,12 +89,3 @@ def require_unchanged_identity(record: IdentityRecord, current: IdentityRecord |
             expected_subject = subject_fence(record, path)
         if subject_fence(current, path) != expected_subject:
             raise WorktreeMachineIdentityError("record subject changed; reload the receiving record")
-    expected = getattr(record, "_loaded_machine_identity", None)
-    if expected is None:
-        expected = identity_fence(record)
-    if current is not None and identity_fence(current) != expected:
-        raise WorktreeMachineIdentityError("record owner machine identity changed; reload the record")
-    if current is not None and (
-        machine_identity(record) is not None or machine_identity(current) is not None
-    ) and identity_fence(record) != identity_fence(current):
-        raise WorktreeMachineIdentityError("versioned record machine identity is immutable")

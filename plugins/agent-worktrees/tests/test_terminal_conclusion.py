@@ -16,6 +16,12 @@ from agent_worktrees import terminal_conclusion as tc
 from conftest import _published_seed_environment, _seed_directory
 
 
+@pytest.fixture(autouse=True)
+def _observed_reporter(monkeypatch):
+    monkeypatch.setattr(tc.cfg.socket, "gethostname", lambda: "host")
+    monkeypatch.setattr(tc.cfg, "detect_platform", lambda: "linux")
+
+
 def _git(cwd: Path, *args: str) -> str:
     return git_ops.git(*args, cwd=cwd).stdout.strip()
 
@@ -53,10 +59,29 @@ def _build_worker_seed(tmp_path: Path):
 def _worker_record(tmp_path: Path, monkeypatch):
     anchor = tmp_path / "anchor"
     root = tmp_path / "worktrees"
-    tracking_dir = tmp_path / "tracking"
+    tracking_dir = tmp_path / ".demo" / "worktrees"
     worktree_id = "worker-20260901-abcd"
     worktree = root / worktree_id
-    tracking_dir.mkdir()
+    tracking_dir.mkdir(parents=True)
+    previous_project_dir = tc.cfg.project_dir
+    monkeypatch.setattr(
+        tc.cfg, "project_dir",
+        lambda name=None: tracking_dir.parent if name == "demo" else previous_project_dir(name),
+    )
+    config = tc.cfg.Config(
+        srcroot=str(tmp_path), repo_name="demo", machine="host", platform="linux",
+        repos={"demo": tc.cfg.RepoConfig(
+            anchor=str(anchor), worktree_root=str(root), remote="origin", default_branch="main",
+        )},
+    )
+    previous_config = tc.cfg.load_project_config
+    monkeypatch.setattr(
+        tc.cfg, "load_project_config",
+        lambda name, **kwargs: config if name == "demo" else previous_config(name, **kwargs),
+    )
+    (tracking_dir.parent / "config.yaml").write_text(json.dumps({
+        "repos": {"demo": {"anchor": str(anchor), "worktree_root": str(root)}},
+    }), encoding="utf-8")
     record = tracking.create_new_record(
         worktree_id,
         f"worktree/{worktree_id}",
@@ -134,7 +159,7 @@ def test_terminal_worker_copies_isolate_commit_push_and_removal(
     ):
         assert repo.anchor == str(root / "anchor")
         assert repo.worktree_root == str(root / "worktrees")
-        assert record_path.parent == root / "tracking"
+        assert record_path.parent == root / ".demo" / "worktrees"
         record = tracking.load_record(record_path)
         assert record.worktree_path == str(worktree)
         assert record.head_session == "session-exact"
@@ -1834,6 +1859,8 @@ class TestReciprocalDisposal:
     def test_pair_progress_blocks_native_gc_until_primary_unlink(self, tmp_path, monkeypatch, _worker_seed):
         from agent_worktrees import reap_cli
 
+        monkeypatch.setattr(sessions, "_list_mux_sessions", lambda: {})
+        monkeypatch.setattr(sessions, "_mux_session_activity", lambda: {})
         project_config_loader = tc.cfg.load_project_config
         sibling, sibling_path, sibling_worktree = _pair_sibling(
             tmp_path, monkeypatch, project="knowledge-proj", harness_machine="host",
@@ -1865,6 +1892,7 @@ class TestReciprocalDisposal:
             "repo_name": "knowledge-proj", "machine": "host",
             "repos": {"knowledge-proj": {
                 "anchor": sibling_repo.anchor, "default_branch": "main",
+                "worktree_root": str(sibling_worktree.parent),
             }},
         }), encoding="utf-8")
         monkeypatch.setattr(tc.cfg, "load_project_config", project_config_loader)
@@ -1885,7 +1913,8 @@ class TestReciprocalDisposal:
         removed, reasons = reap_cli._remove_managed_worktree(
             tracking.load_record(sibling_path), sibling_repo, sibling_path.parent,
         )
-        assert removed and not reasons
+        assert removed, reasons
+        assert not reasons
         assert not sibling_path.exists() and not receipt.exists()
 
 

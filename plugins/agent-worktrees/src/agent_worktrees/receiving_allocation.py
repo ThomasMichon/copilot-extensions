@@ -26,7 +26,7 @@ _writing: ContextVar[frozenset[str]] = ContextVar("receiving_allocation_writes",
 
 
 def _require_ordinary_parent(record: tracking.WorktreeRecord) -> None:
-    from . import config as cfg, tracking
+    from . import config as cfg, record_reporting, tracking
     from .checkout_relocation_plan import read_record
 
     owner = tracking.parse_claim_ref(record.owner_ref)
@@ -43,6 +43,7 @@ def _require_ordinary_parent(record: tracking.WorktreeRecord) -> None:
     path = cfg.tracking_dir(owner.project) / f"{owner.worktree_id}.yaml"
     try:
         parent = read_record(path)
+        record_reporting.apply_context(parent, record_reporting.local_context(path, parent.repo))
     except (yaml.YAMLError, KeyError, TypeError) as error:
         raise ValueError("ordinary creator ledger is malformed") from error
     if (parent.execution_machine, parent.repo, parent.worktree_id) != (
@@ -218,9 +219,16 @@ class ReceivingAllocation:
             raise ValueError("receiving allocation does not select this execution space/project")
 
     def receipt(self, record: tracking.WorktreeRecord) -> dict:
+        identity = record_identity(record) if record.receiving_allocation_present else (
+            allocation.AllocationIdentity.from_dict({
+                "ref": f"{self.target['machine']}/{self.target['project']}/{record.worktree_id}",
+                "creation_nonce": record.creation_nonce,
+                "path": record.worktree_path, "branch": record.branch,
+            })
+        )
         return {
             "schema": allocation.SCHEMA, "version": allocation.VERSION,
-            **self.to_fields(), "identity": record_identity(record).to_dict(), "phase": "created",
+            **self.to_fields(), "identity": identity.to_dict(), "phase": "created",
         }
 
     def require_planned_identity(
@@ -235,16 +243,25 @@ class ReceivingAllocation:
 def record_identity(record: tracking.WorktreeRecord) -> allocation.AllocationIdentity:
     from . import tracking
 
+    receipt = record.receiving_allocation
+    original = (
+        allocation.AllocationIdentity.from_dict(receipt["identity"])
+        if record.receiving_allocation_present and isinstance(receipt, dict) and "identity" in receipt
+        else None
+    )
     current = allocation.AllocationIdentity.from_dict({
-        "ref": tracking.format_claim_ref(record.execution_machine, record.repo, record.worktree_id),
+        "ref": original.ref if original is not None else tracking.format_claim_ref(
+            record.execution_machine, record.repo, record.worktree_id,
+        ),
         "creation_nonce": record.creation_nonce,
         "path": record.worktree_path, "branch": record.branch,
     })
-    receipt = record.receiving_allocation
-    if record.receiving_allocation_present and isinstance(receipt, dict) and "identity" in receipt:
-        original = allocation.AllocationIdentity.from_dict(receipt["identity"])
-        if (original.ref, original.creation_nonce, original.branch) != (
-            current.ref, current.creation_nonce, current.branch,
+    if original is not None:
+        subject = tracking.parse_claim_ref(original.ref)
+        if (
+            subject is None or not subject.is_qualified
+            or (subject.project, subject.worktree_id, original.creation_nonce, original.branch)
+            != (record.repo, record.worktree_id, current.creation_nonce, current.branch)
         ):
             raise ValueError("receiving allocation identity conflicts with the child incarnation")
         if original.path != current.path:

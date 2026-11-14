@@ -25,6 +25,7 @@ config = cfg.Config(
     repos={project_name: cfg.RepoConfig(anchor=str(state), worktree_root=str(state / "trees"))},
 )
 cfg.detect_platform = lambda: "linux"
+cfg.socket.gethostname = lambda: "local"
 cfg.load_project_config = lambda *a, **k: config
 cfg.load_config = lambda *a, **k: config
 cfg.project_dir = lambda *a, **k: project

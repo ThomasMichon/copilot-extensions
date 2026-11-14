@@ -14,7 +14,6 @@ from pathlib import Path
 import yaml
 
 from . import tracking
-from .worktree_machine_identity import execution_machine_from_fields
 
 _PAIR_FIELDS = ("pair_id", "pair_role", "pair_ref", "pair_kind")
 
@@ -53,12 +52,21 @@ def _digest(path: Path) -> str:
 
 def primary_identity(record):
     return {
-        **(record.machine_fields if record.machine_identity is not None else {"machine": record.machine}),
         "repo": record.repo,
         "worktree_id": record.worktree_id, "worktree_path": record.worktree_path,
         "branch": record.branch, "pair": {name: getattr(record, name) for name in _PAIR_FIELDS},
         "dispatch_attempt": record.dispatch_attempt.to_dict() if record.dispatch_attempt else None,
     }
+
+
+def identity_matches(left: dict, right: dict) -> bool:
+    """Compare retained receipt subjects while ignoring obsolete naming snapshots."""
+    names = {"machine", "platform", "machine_identity_version", "environment", "execution_machine"}
+    return (
+        isinstance(left, dict) and isinstance(right, dict)
+        and {key: value for key, value in left.items() if key not in names}
+        == {key: value for key, value in right.items() if key not in names}
+    )
 
 
 def _supported_pair(pair) -> bool:
@@ -78,22 +86,21 @@ def reciprocal_identity_valid(primary: dict, sibling: dict) -> bool:
                 or left["pair_id"].strip() != right["pair_id"].strip()
                 or {left["pair_role"], right["pair_role"]} != {"harness", "knowledge"}):
             return False
+        refs = []
         for current, other in ((primary, sibling), (sibling, primary)):
             if (any(not isinstance(current[name], str) or not current[name].strip()
-                    for name in ("machine", "repo", "worktree_id", "worktree_path", "branch"))
+                    for name in ("repo", "worktree_id", "worktree_path", "branch"))
                     or Path(current["worktree_path"]).name != current["worktree_id"]
                     or current["branch"] != f"worktree/{current['worktree_id']}"):
                 return False
             ref = tracking.parse_claim_ref(current["pair"]["pair_ref"])
-            execution_owner = execution_machine_from_fields(other)
-            if execution_owner is None:
+            if (
+                ref is None or not ref.is_qualified or ref.session
+                or (ref.project, ref.worktree_id) != (other["repo"], other["worktree_id"])
+            ):
                 return False
-            expected = tracking.format_claim_ref(
-                execution_owner, other["repo"], other["worktree_id"],
-            )
-            if ref is None or not ref.is_qualified or ref.canonical() != expected:
-                return False
-        return True
+            refs.append(ref)
+        return refs[0].machine == refs[1].machine
     except (KeyError, TypeError, ValueError):
         return False
 
@@ -143,7 +150,7 @@ def gc_preservation_reason(sibling_path: Path) -> str | None:
             other_name = receipt["sibling_record_path"]
             if (receipt["version"] != 1 or not _supported_pair(expected["pair"])
                     or not reciprocal_identity_valid(expected, receipt["sibling"])
-                    or identity != expected or _document(sibling_path) != document
+                    or not identity_matches(identity, expected) or _document(sibling_path) != document
                     or current.kind not in tracking.MANAGED_KINDS
                     or current.status not in {"complete", "finalized"}
                     or current.resolved_origin != "delegate"
@@ -189,7 +196,7 @@ def gc_preservation_reason(sibling_path: Path) -> str | None:
         identity["pair"] = expected["pair"]
         sibling_identity = primary_identity(sibling)
         sibling_identity["pair"] = receipt["sibling_pair"]
-        if (identity != expected or primary.kind not in tracking.MANAGED_KINDS
+        if (not identity_matches(identity, expected) or primary.kind not in tracking.MANAGED_KINDS
                 or not reciprocal_identity_valid(expected, sibling_identity)
                 or primary.status not in {"complete", "finalized"}
                 or primary.resolved_origin != "delegate"
@@ -212,7 +219,7 @@ def reciprocal_snapshot(record, sibling, sibling_path: Path):
         if any(name in document for name in _PAIR_FIELDS):
             return None
         receipt = json.loads(receipt_path(sibling_path).read_text(encoding="utf-8"))
-        if (receipt["version"] != 1 or receipt["primary"] != primary_identity(record)
+        if (receipt["version"] != 1 or not identity_matches(receipt["primary"], primary_identity(record))
                 or receipt["sibling_digest"] != _document_digest(document)):
             return None
         pair = receipt["sibling_pair"]
