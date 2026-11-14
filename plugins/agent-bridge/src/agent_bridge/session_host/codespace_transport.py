@@ -374,7 +374,7 @@ async def _refresh_checkout_metadata(target: dict) -> None:
         isinstance(part, str) and part for part in provider
     ):
         raise RuntimeError("Legacy checkout target requires fresh provider metadata")
-    from ..transport import _reresolve_stale_interpreter
+    from ..transport import _reresolve_stale_interpreter, _wrap_batch_for_windows
 
     argv = [*_reresolve_stale_interpreter(list(provider)), "namespace-resolve", target["name"]]
     requested = target.get("requested_repo") or target.get("repo")
@@ -382,10 +382,12 @@ async def _refresh_checkout_metadata(target: dict) -> None:
         argv += ["--repo", requested]
     if target.get("repo_remote"):
         argv += ["--repo-remote", target["repo_remote"]]
+    env = os.environ.copy()
+    argv = _wrap_batch_for_windows(argv, env)
     proc = await asyncio.create_subprocess_exec(
         *argv, stdin=asyncio.subprocess.DEVNULL,
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-        creationflags=_creation_flags(),
+        creationflags=_creation_flags(), env=env,
     )
     try:
         output, _error = await asyncio.wait_for(proc.communicate(), timeout=60)
