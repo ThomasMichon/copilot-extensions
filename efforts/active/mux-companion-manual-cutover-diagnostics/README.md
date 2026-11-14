@@ -66,6 +66,18 @@ source supersession. Preserve #4369's manual-only/human-gated cutover and actual
 source/head/background-work/provider holds. Closing a popup does not trigger cutover,
 consume a baton or retire a session.
 
+The direct #8776, #8797 and #8811-embedded raw-head lanes below retain the
+existing producer, launch, Companion, Relay and ground-head custodians.
+Bridge owns represented-session registration and event normalization;
+Companion consumes those facts without acquiring control authority.
+Worktree Manager owns client launch mechanics; Relay retains popup/focus
+and lifetime integration. The ground layer owns authoritative head writes
+and their attribution; Companion is an explicit invoker, not a second store.
+Preserve #4196, #5361/#4119/#2530, #7962, #84/#5935 and all incumbent
+claims, reservations, accepted alternatives and evidence tiers. No resource
+or source ownership transfers. These are future implementation obligations,
+not authority to execute a head change, launch a client or change a runtime.
+
 ## Context
 
 ### Current Step 7 source approval
@@ -488,6 +500,64 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
       hotkey guides
       through the Mux-bind owner, with tmux/psmux qualification.
 
+#### Direct Windows PSMux launch-directory isolation (#8797)
+
+- [ ] WC1. Start managed Windows PSMux clients from the resolved user's home,
+  while passing the selected worktree explicitly to the pane/session. Cover
+  both Manager PowerShell launch and programmatic pane/session creation.
+  Keep the PSMux process launch directory distinct from the selected child's
+  execution directory; #7962's Copilot execution-directory contract is unchanged.
+- [ ] WC2. Preserve POSIX behavior, argument boundaries, error/exit behavior
+  and selected child CWD. Do not change global PSMux configuration, disable
+  warm state globally, patch PSMux or deploy a runtime/live session.
+- [ ] WC3. Add an isolated Windows standby-lifetime regression using an
+  owned temporary checkout, not a production checkout or existing session.
+
+Local technical validation:
+
+- [ ] WCV1. Exercise both Windows creation paths and separately assert process
+  launch CWD and selected child CWD. Cover POSIX parity, argv boundaries and
+  error/exit behavior; prove no global configuration or warm-state change.
+- [ ] WCV2. In an isolated fixture, create the standby, remove only its owned
+  temporary checkout, and prove that standby remains alive without inheriting
+  that checkout as its process CWD. Keep source, release and installed
+  qualification distinct. This plan performs no deletion or native run.
+
+#### Direct attributed raw-head action (original embedded in #8811)
+
+This is the distinct #5833 lane preserved in #8811, not a new investigation
+or disposition of #5833 and not a relabelled normal Cut over action.
+
+- [ ] RH1. Provide the standing vision's distinct raw head-pointer action
+  through the ground layer's authoritative operation. No second head store,
+  inferred head selection or mismatch-triggered override.
+- [ ] RH2. Require unmistakable explicit operator choice, show old and
+  selected new head, and retain visible durable forced-reassignment
+  attribution. A pointer write does not prove process retirement, repaired
+  lineage, ordinary handoff completion or safe automatic selection.
+- [ ] RH3. Preserve normal Cut over/Refresh and the full direct #4369
+  manual/head lane, #84 ground authority and #5935 prior-session recovery.
+  The archived finding is not reopened and does not own implementation.
+- [ ] RH4. Retain the same-window CLI/Summary contract, permanent second
+  Claims row and selected actionable hotkey guides, separate Ctrl+K popup
+  and historical Relay click deferral. No reverted clickable-tab requirement
+  or new SDK actor, rollout, live binding, automatic answer or resource action.
+
+Local action and attribution validation:
+
+- [ ] RHV1. Qualify the actual UI/action and ground-owned durable attribution:
+  explicit choice, visible old/new heads and recorded forced reassignment.
+  Include controls against automatic selection/repair/retirement and against
+  conflating raw override with normal Cut over or mismatch observation.
+- [ ] RHV2. Qualify live summon/provider behavior in explicitly identified
+  available build/mode lanes. Keep source, fixture, runtime-install, Windows,
+  headed and performance tiers distinct; do not invent all-native proof.
+  Preserve every existing source-coverage/PRE, app-input/Relay, Claims/mode,
+  manual/head, native/installed, D5 archival/resource and performance gate.
+  Existing finite #10744/#10758/#10766/#10777 and later actual-owner credits
+  remain at their recorded tiers, with failed attempts and unresolved causes
+  retained. A readback or source-only receipt is not action delivery.
+
 ### Step 7 - Live Sidecar timeline and owner observations (#8811)
 
 - [ ] Complete S0-S5 and the own Validation Plan of the
@@ -635,7 +705,52 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
       Current answerability/PRE qualification, archival/rescue, combined native integration and
       whole S2-S5 and original root gates remain open.
 
+#### Direct represented-session creator and lifecycle source (#8776)
+
+- [ ] LR1. Carry an optional `caller_session_id`/`parent_session_id` or
+  owner-approved creator equivalent through live registration, persistence,
+  list/detail and launchers, populated only from actually known launch
+  metadata. Preserve absent, invalid and unknown values and old clients;
+  never guess from timestamps, names or Dispatch records.
+- [ ] LR2. Identify the link as caller-asserted, not proof of origin,
+  authority, ownership or accepted transfer. Keep `role`/`driven_by` and the
+  #5361/#4119/#2530 owners distinct; preserve #4196 and all existing claims
+  and holds. Bridge remains producer/source owner and Companion consumer.
+- [ ] LR3. Forward supported subagent started/completed/failed events and
+  configured metadata through existing ACP-compatible normalization.
+  Preserve background lifetime beyond task-tool completion/end-of-turn;
+  tool completion is not subagent completion.
+- [ ] LR4. Forward `system.notification` or a selected narrow background
+  completion subset, preserving the source allowlist, source ownership,
+  permission-sensitive payload boundaries and explicit unknowns. No new
+  control authority or poller. Complete both local technical LRV1/LRV2 rows
+  in the [Sidecar Validation Plan](sidecar-live-timeline.md#validation-plan).
+
+Administrative readback, separate from technical LRV1/LRV2: before
+administrative supersession of #8776, obtain a normal reviewed actual merge
+of this complete intake and read the complete current OPEN source and this
+ROOT's current Plan/Validation/Coordination/Journal. Preserve the issue's
+LRV3 readback condition; it is not technical registration/event evidence and
+cannot satisfy the actual global validation below.
+
 ## Validation Plan
+
+- [ ] Complete EVERY direct #8776 LR1-LR4 clause AND local technical
+  LRV1/LRV2 row in the [Sidecar plan](sidecar-live-timeline.md#validation-plan),
+  with actual producer/consumer evidence. Preserve all original owner,
+  source-coverage and evidence-tier gates. The separate administrative LRV3
+  readback is not a substitute for any of these technical requirements.
+- [ ] Complete EVERY #8797 WC1-WC3 clause AND local WCV1/WCV2 row above.
+  Both Windows creation paths, separate launch/child CWDs, isolated standby
+  lifetime, POSIX/argv/error controls and unchanged global state are required;
+  a no-deploy statement alone is not validation. Record source, release and
+  installed evidence separately without changing #7962 or authorizing rollout.
+- [ ] Complete EVERY embedded raw-head RH1-RH4 clause AND local RHV1/RHV2
+  action/attribution/control row above. Keep this finite slice distinct from
+  #4369 P1-P8/V1-V8, #84/#5935, #2696/Relay and all original source/PRE,
+  native/installed/performance, Claims/mode and D5/resource gates.
+  Do not add a blanket all-native or owner-ACK requirement. Administrative
+  intake/readback and source-only results do not prove a live head action.
 
 - [x] Step 6 finite PR-association provider (R1 of the
       [PR-state realization](sidecar-pr-state.md)): the optional declared
@@ -803,6 +918,7 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
 
 ## Journal
 
+- [2026-11-14 - Represented lifecycle, launch CWD and attributed raw-head intake](journal/2026/11.14-receiving-lifecycle-cwd-raw-head.md)
 - [2026-11-08 - PR record, cross-version process and snapshot codec controls](sidecar-pr-state.md#2026-11-08---actual-record-cross-version-process-and-snapshot-codec-controls)
 - [2026-11-08 - PR narrow rendering and blocked-read dismissal controls](sidecar-pr-state.md#2026-11-08---narrow-rendering-and-blocked-read-dismissal-controls)
 - [2026-11-06 - R2 PR-association consumer merged](sidecar-pr-state.md#2026-11-06---r2-consumer-source-merged)
