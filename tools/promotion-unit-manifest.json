@@ -5649,7 +5649,7 @@
         "tools/plugin_test_containment_observation.py": "3a216c9051cccc4c1d4448638166651895621fe2fbeba350ff27c6ad86de78a0",
         "tools/plugin_test_containment_posix.py": "0d5fca39319742d34f858f1db3829172bd4541cbb6be6b39772f938f35ebeb19",
         "tools/plugin_test_environment.py": "52ea6846d91c74eacce935fa8225761fc2850312f4556fd19193756ad8242d06",
-        "tools/plugin_test_lifecycle.py": "4487423f581e6bf3861309e53b7340691982b9737b21ab1cf79de68f0bb7b37a",
+        "tools/plugin_test_lifecycle.py": "8bd76c99b336328886ce3d5dfdfbc14794018c57ff70ce0ccf12b5208d53df0b",
         "tools/promote_release.py": "13e424d6fd60366ff41844a7a174fee030a7c8aefd563bc4e58c550a19433d34",
         "tools/promotion_admission_evidence.py": "fcfca78b764933b5d40e347eb296a3d4f471a4ec0c0e5c5eaa81136c75419365",
         "tools/promotion_artifact_readiness.py": "173d45f0d2880ce2223e1384155cd4b2dd591f59fc71f26ad8dfca4a3caf8705",

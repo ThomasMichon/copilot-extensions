@@ -207,3 +207,62 @@ def test_root_admission_refuses_junctions_before_allocation(tmp_path):
             with admit_root(selected, forbidden=(), create=True):
                 pytest.fail("junction admitted as private scratch")
     assert not (target / "scratch").exists()
+
+
+@pytest.mark.parametrize("codes,guards,expected", [
+    ((5, 0), False, 0), ((0, 5), False, 0), ((5, 5), False, 5),
+    ((1, 0), False, 1), ((5,), True, 0),
+])
+def test_disposition_uses_the_normalized_partition_outcome(runner_owner, monkeypatch, codes, guards, expected):
+    runner, _, selected, root, ledger = runner_owner
+    plugin = root / "fixture-plugin"
+    (plugin / "tests").mkdir(parents=True)
+    test = plugin / "tests/test_fixture.py"
+    test.write_text("def test_fixture(): pass\n")
+    monkeypatch.setattr(runner, "_plugin_dir", lambda name: plugin)
+    monkeypatch.setattr(runner, "_ensure_venv", lambda *a, **k: Path(sys.executable))
+    monkeypatch.setattr(runner, "VENV_ROOT", root / "cache")
+    monkeypatch.setattr(runner, "_test_group_plan", lambda *a: [([test], "fixture") for _ in codes])
+    results = iter(codes)
+    monkeypatch.setattr(runner, "run_contained", lambda *a, **k: next(results))
+    outcome = runner.run_plugin(
+        "fixture", "unused", reinstall=False, kexpr=None if guards else "fixture", guards=guards,
+        limits=runner.Limits(), plugin_timeout=60, test_timeout=15, max_files_per_subsuite=25,
+    )
+    assert outcome == expected
+    claim = tracking.load_record(ledger).resources[0]
+    assert claim.producer["phase"] == ("retained" if expected else "closed")
+    location = selected / artifact_scratch._name(claim.producer["recovery"])
+    assert location.exists() is bool(expected)
+
+
+@pytest.mark.parametrize("cleanup", ["held", "error"])
+def test_ordinary_daemon_cleanup_failure_preserves_active_scratch(runner_owner, monkeypatch, cleanup):
+    from contextlib import contextmanager
+    from types import SimpleNamespace
+    import plugin_test_containment as contained
+    from plugin_test_owned_scratch import OwnedTestSandbox
+    runner, owner, _, _, ledger = runner_owner
+
+    @contextmanager
+    def lifecycle(**kwargs):
+        yield {}
+        if cleanup == "error":
+            raise OSError("fixture daemon registry cleanup failed")
+        kwargs["cleanup_results"].append(SimpleNamespace(status="held"))
+
+    monkeypatch.setattr(contained, "daemon_test_lifecycle", lifecycle)
+    monkeypatch.setattr(contained, "_run_contained_process", lambda *a, **k: 0)
+    monkeypatch.setattr(contained, "_read_registry_environment", lambda: None)
+    monkeypatch.setattr(contained, "_registry_environment_drift", lambda _: [])
+    with pytest.raises(contained.UnreapedProcessError, match="unsettled"):
+        with OwnedTestSandbox(owner, runner.REPO, stage="tests") as raw:
+            location = Path(raw)
+            record = location / "daemon-record"
+            record.write_bytes(b"unresolved daemon custody")
+            contained.run_contained(
+                ["unused"], cwd=runner.REPO, env={}, sandbox=location, limits=contained.Limits(),
+            )
+    claim = tracking.load_record(ledger).resources[0]
+    assert claim.producer["phase"] == "bound" and claim.is_unsettled
+    assert record.read_bytes() == b"unresolved daemon custody"

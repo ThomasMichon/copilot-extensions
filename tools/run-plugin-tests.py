@@ -694,6 +694,13 @@ def run_plugin(
             if returncode != 0:
                 fatal_group = True
                 break
+        if failed_assertions and not fatal_group:
+            returncode = 1
+        elif returncode == 5 and passed_group and (guards or kexpr) and not fatal_group:
+            returncode = 0
+        skipped_guards = guards and returncode == 5 and not test_files
+        if OWNED_SCRATCH_OWNER is not None:
+            sandbox_scope.record_outcome(0 if skipped_guards else returncode)
     elapsed = time.monotonic() - plugin_started
     if elapsed > plugin_timeout:
         print(
@@ -703,13 +710,9 @@ def run_plugin(
             file=sys.stderr,
         )
         return 124
-    if failed_assertions and not fatal_group:
-        returncode = 1
-    elif returncode == 5 and passed_group and (guards or kexpr) and not fatal_group:
-        returncode = 0
     # pytest exit code 5 == "no tests collected"; in --guards mode that just
     # means the plugin declares no guard-marked tests -- not a failure.
-    if guards and returncode == 5 and not test_files:
+    if skipped_guards:
         print(f"[SKIP] {name}: no guard-marked tests")
         return 0
     status = "PASS" if returncode == 0 else "FAIL"

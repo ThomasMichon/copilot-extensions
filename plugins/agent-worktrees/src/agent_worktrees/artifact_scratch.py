@@ -11,11 +11,12 @@ import os
 from pathlib import Path
 import secrets
 import stat
+import time
 from typing import Iterator
 
 from agent_procutil import scratch
 from agent_procutil._daemon_instance_owner import open_private
-from single_instance_lease.operation import OperationLock
+from single_instance_lease.operation import OperationLock, OperationLockedError
 
 from . import resource_producer as producer, tracking, tracking_write
 from .artifact_root import AdmittedRoot, admit_root, directory_identity
@@ -27,6 +28,7 @@ SCHEMA = "agent-worktrees.scratch-allocation/v1"
 _MARKER = scratch.BREADCRUMB
 _DIAGNOSTIC = "runner-diagnostic.txt"
 _RETENTION = {"class": "disposable-scratch", "cleanup": "explicit-owner-pass"}
+_LOCK_WAIT_SECONDS = 10.0
 
 
 def capabilities() -> dict:
@@ -46,6 +48,8 @@ def _arguments(path: Path, owner: str) -> dict:
 def _record(path: Path, owner: str, *, mutable: bool = False):
     with tracking._RecordLock(path, require_sidecar=True):
         record, _ = _owned_record(_arguments(path, owner), path, mutable=mutable)
+        if record.kind in tracking.MANAGED_KINDS:
+            raise ValueError("native scratch requires a session owner with a retained ledger")
         if not record.creation_nonce:
             raise ValueError("scratch allocation requires a worktree incarnation")
         return record
@@ -117,9 +121,22 @@ def _root(recovery: dict, forbidden: tuple[Path, ...]) -> Iterator[AdmittedRoot]
     ) as root:
         # One fixed control file, not a second per-allocation inventory. Its
         # kernel lock serializes physical operations, never the running work.
-        with OperationLock(root.path / ".artifact-root.lock"):
+        lock = OperationLock(root.path / ".artifact-root.lock")
+        deadline = time.monotonic() + _LOCK_WAIT_SECONDS
+        while True:
+            try:
+                lock.acquire()
+                break
+            except OperationLockedError:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise
+                time.sleep(min(0.05, remaining))
+        try:
             root.verify()
             yield root
+        finally:
+            lock.release()
 
 
 def _name(recovery: dict) -> str:

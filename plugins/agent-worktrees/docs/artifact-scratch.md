@@ -16,6 +16,10 @@ capabilities, owner authority, malformed configuration or unsafe roots fail
 visibly; this option neither bootstraps a runtime nor silently downgrades to
 unclaimed scratch. No default setting enables it.
 
+The pilot admits session-owned worktrees only. System/bridge owners are refused
+before allocation because their managed sweeper can remove the sole ledger;
+native retained-ledger preservation for those owner kinds is not yet supported.
+
 The real `main()` entry admits/creates that private root before the legacy
 cache initializer can create it with inherited permissions. The same admission
 runs for direct sandbox callers; unsafe existing roots are never repaired.
@@ -38,6 +42,9 @@ writable location. Full creator, worktree incarnation, allocation epoch, nonce,
 root/directory identity and creation time live in metadata, not long path names.
 One fixed root operation lock serializes physical operations; it is not an
 allocation inventory or a running-process lease.
+Transient contention waits up to a ten-second monotonic acquisition deadline.
+Only lock contention is retried, never allocation/disposition effects; expiry
+preserves the existing token and unresolved responsibility.
 
 `worktree-scratch` is a native provider dispatched inside the same owner.
 Callbacks resolve the existing authoritative record rather than accepting a
@@ -63,6 +70,9 @@ Only the integrated containment owner calls `settle_after_cleanup`, after its
 descendants and cleanup workers have joined. Unknown descendant cleanup retains
 the entire allocation and active ledger responsibility. There is deliberately
 no CLI accepting a caller's `work_settled` assertion.
+Ordinary contained runs, not just native-application qualification, collect
+daemon lifecycle cleanup outcomes. Held outcomes or teardown errors propagate
+as unknown process custody before sandbox disposition.
 
 Opt-in environment preparation executes the original preparation function in a
 separate worker under that same verified process-tree owner. UV and build
@@ -77,6 +87,9 @@ The configured byte bound is enforced and truncation recorded; at most one
 diagnostic file is retained. External caller-selected reports stay caller-owned.
 Incomplete payload pruning remains unsettled, not a purported bounded bundle.
 An aggregate failure flag survives eviction from the bounded diagnostic tail.
+The runner supplies its final normalized partition outcome before disposition:
+accepted empty filtered/guard groups do not become false failure bundles, while
+genuine assertion failures and all-empty filtered failures remain failures.
 
 The provider publishes settled physical state, then requests `retain` through
 the normal exact-subject ledger transaction. Successful consumed output may be

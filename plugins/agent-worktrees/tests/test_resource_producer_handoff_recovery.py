@@ -35,6 +35,21 @@ def _accept(bundle):
     return handoffs.accept(bundle.bundle_id, actor="m/p/consumer", machine="m")
 
 
+def test_accepted_artifact_handoff_replays_after_recipient_retention(handoff_owner, monkeypatch):
+    from test_resource_producer_retention import artifact, retention
+    path = handoff_owner
+    bound = artifact(path)
+    bundle, _ = handoffs.offer("m/p/owner", "m/p/consumer", [bound["ref"]], machine="m")
+    accepted = _accept(bundle)
+    consumer = path.with_name("consumer.yaml")
+    monkeypatch.setattr(claim_providers, "resolve_claim_status", lambda ref: retention(bound))
+    retained = call(consumer, "retain", {"token": bound["token"]}, ref="m/p/consumer")
+    assert retained.get("ok") and retained["phase"] == "retained", retained
+    before = consumer.read_bytes()
+    assert _accept(bundle) == accepted
+    assert consumer.read_bytes() == before
+
+
 def _rewrite(path, mutate):
     raw = yaml.safe_load(path.read_text())
     mutate(raw)
@@ -259,10 +274,11 @@ def historical_producer(tmp_path, monkeypatch, request):
     records = tmp_path / "state" / "worktrees"
     records.mkdir(parents=True)
     config = cfg.Config(
-        srcroot=str(tmp_path), machine="example-host", platform="wsl", repo_name="p",
+        srcroot=str(tmp_path), machine="example-host", platform="linux", repo_name="p",
         repos={"p": cfg.RepoConfig(anchor=str(anchor), worktree_root=str(namespace))},
     )
-    monkeypatch.setattr(cfg, "detect_platform", lambda: "wsl")
+    monkeypatch.setattr(cfg, "detect_platform", lambda: "linux")
+    monkeypatch.setattr(cfg.socket, "gethostname", lambda: "example-host")
     monkeypatch.setattr(cfg, "project_dir", lambda name=None: records.parent)
     monkeypatch.setattr(cfg, "tracking_dir", lambda: records)
     monkeypatch.setattr(cfg, "load_config", lambda *a, **k: config)
@@ -291,9 +307,10 @@ def historical_producer(tmp_path, monkeypatch, request):
     (anchor / "machines.yaml").write_text(
         "machines:\n  example-host: {}\n  example-host-wsl: {}\n", encoding="utf-8",
     )
-    config = replace(config, machine="example-host-wsl")
+    monkeypatch.setattr(cfg, "detect_platform", lambda: "wsl")
+    config = replace(config, machine="example-host-wsl", platform="wsl")
     bundle, _ = handoffs.offer(
-        old_ref, f"{config.machine if request.param else 'example-host'}/p/consumer",
+        f"{config.machine}/p/owner", f"{config.machine if request.param else 'example-host'}/p/consumer",
         [bound["ref"]], machine=config.machine,
     )
     return path, bundle, bound
@@ -323,7 +340,7 @@ def test_historical_producer_real_offer_accept_and_accepted_retry(historical_pro
 @pytest.mark.parametrize("role", ["owner", "consumer"])
 @pytest.mark.parametrize("violation", ["platform", "machine", "namespace"])
 @pytest.mark.guard
-def test_historical_producer_foreign_context_retains_exact_ledgers(
+def test_historical_labels_do_not_override_receiving_namespace(
     historical_producer, role, violation,
 ):
     path, bundle, _ = historical_producer
@@ -335,6 +352,11 @@ def test_historical_producer_foreign_context_retains_exact_ledgers(
         {"worktree_path": str(path.parent / "foreign" / record.worktree_id)}
     )
     _rewrite(target, lambda mapping: mapping.update(changes))
+    if violation != "namespace":
+        assert handoffs.accept(
+            bundle.bundle_id, actor="example-host-wsl/p/consumer", machine="example-host-wsl",
+        ).state == "accepted"
+        return
     paths = (path, path.with_name("consumer.yaml"), handoffs.registry_path())
     before = {item: item.read_bytes() for item in paths}
     with pytest.raises(handoffs.ClaimHandoffError):

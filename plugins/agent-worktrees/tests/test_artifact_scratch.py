@@ -290,3 +290,62 @@ def test_native_scratch_refuses_both_handoff_admission_paths(allocation):
             error_type=ValueError,
         )
     assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("kind", ["system", "bridge"])
+def test_native_scratch_refuses_owners_whose_sweep_removes_the_ledger(allocation, kind):
+    path, root, _ = allocation
+    record = tracking.load_record(path)
+    record.kind = kind
+    tracking.save_record(record, path)
+    with pytest.raises(ValueError, match="session owner"):
+        create(allocation)
+    assert not root.exists()
+    assert tracking.load_record(path).resources == []
+
+
+def test_shared_root_waits_for_the_existing_operation_before_settlement(allocation, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+    path, root, _ = allocation
+    result = create(allocation)
+    entered = Event()
+    original = scratch.OperationLock
+
+    class ObservedLock(original):
+        def acquire(self):
+            entered.set()
+            return super().acquire()
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        held = original(root / ".artifact-root.lock")
+        held.acquire()
+        try:
+            monkeypatch.setattr(scratch, "OperationLock", ObservedLock)
+            future = pool.submit(
+                scratch.settle_after_cleanup, path, "m/p/owner", result["token"], forbidden=(),
+            )
+            assert entered.wait(5)
+            assert not future.done()
+        finally:
+            held.release()
+        assert future.result(timeout=5)["phase"] == "retained"
+    assert len(tracking.load_record(path).resources) == 1
+
+
+def test_operation_deadline_keeps_the_same_unsettled_token_for_retry(allocation, monkeypatch):
+    path, root, _ = allocation
+    result = create(allocation)
+    location = Path(result["path"])
+    (location / "in-use").write_bytes(b"not yet settled")
+    with monkeypatch.context() as patch:
+        patch.setattr(scratch, "_LOCK_WAIT_SECONDS", 0)
+        with scratch.OperationLock(root / ".artifact-root.lock"):
+            with pytest.raises(scratch.OperationLockedError):
+                scratch.settle_after_cleanup(path, "m/p/owner", result["token"], forbidden=())
+    claim = tracking.load_record(path).resources[0]
+    assert claim.producer["token"] == result["token"] and claim.is_unsettled
+    assert (location / "in-use").read_bytes() == b"not yet settled"
+    assert scratch.settle_after_cleanup(
+        path, "m/p/owner", result["token"], forbidden=(),
+    )["phase"] == "retained"

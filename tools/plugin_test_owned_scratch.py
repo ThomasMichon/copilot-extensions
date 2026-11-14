@@ -110,6 +110,9 @@ class OwnedTestSandbox:
         self.group_count += 1
         self.failed |= code != 0
 
+    def record_outcome(self, code: int) -> None:
+        self.failed = code != 0
+
     def __exit__(self, exc_type, exc_value, traceback):
         allocation = self.allocation
         assert allocation is not None
