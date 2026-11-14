@@ -1554,12 +1554,15 @@ It renders three fields:
 
 | Field | Style | Source | Example |
 |-------|-------|--------|---------|
-| Machine | Black, bold | Tracking record `machine` (else live host detection) | `anomalous-potato` |
-| Environment | Badge: white on an OS-keyed background (win=blue, wsl=purple, linux=orange) | Platform short code, matching the worktree id | `win` |
+| Machine | Black, bold | Current reporting-host view (else live host detection), not a stored worktree label | `example-host` |
+| Environment | Badge: white on an OS-keyed background (win=blue, wsl=purple, linux=orange) | Current execution platform short code, independent of the historical worktree id | `win` |
 | Repo : id4 | Black | Record `repo` + the worktree id's 4-char suffix | `copilot-extensions:8e45` |
 
 Like the right segment, the watcher classifies the worktree by `--path` and
-stores the result in `@aw_ctx` (once -- identity is static for a session).
+stores its initial rendered view in `@aw_ctx`. This per-session presentation
+cache can retain the last rendering until refreshed; it is not persisted
+worktree identity or authority. Each new context render uses the
+[current reporter view](execution-identity.md#reporter-naming-and-tracking-data).
 Outside a tracked worktree it falls back to live machine/platform detection and
 omits the `repo:id4` field. Flags: `--path PATH`, `--plain` (no `#[style]`
 directives).
