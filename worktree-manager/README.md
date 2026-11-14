@@ -3235,6 +3235,13 @@ cd scripts/picker-snapshot && python install.py
 uv run python render.py picker.png
 ```
 
+Current-roster readers consume the optional
+[live reporting context](../plugins/agent-worktrees/docs/engine-picker-contract.md#live-reporting-context)
+from the serving engine, including heartbeat-only renames and unavailable
+mapping withdrawal. Reporter naming never rewrites the configured source,
+selection key or action route. Providers without the envelope retain the legacy
+row-tuple baseline; no local-host lookup substitutes for a remote reporter.
+
 New Worktree options and the Open/Resume action menu expose independent,
 default-off `AHP` and `No Mux` checkmarks. `AHP` asks the Manager to create or
 verify a same-machine hosted session for the exact engine-resolved worktree;

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from worktree_identity import parse_machine_identity
+from ...worktree_reporting_contract import RECEIVER_FIELD, row_execution_machine, row_identity
 
 
 def worktree_reclaimable(rec: dict) -> bool:
@@ -25,14 +25,20 @@ def worktree_reclaimable(rec: dict) -> bool:
 
 def build_worktree_action_context(rec: dict, *, repo: str = "") -> dict:
     raw = rec.get("raw") or {}
-    identity = parse_machine_identity(raw)
+    identity = row_identity(raw)
     context = {
         key: value for key, value in raw.items()
         if isinstance(value, (str, int, float, bool))
     }
+    if RECEIVER_FIELD in raw:
+        for key in (
+            "machine_identity_version", "machine", "environment", "execution_machine", "platform",
+        ):
+            context.pop(key, None)
     if identity is not None:
         context["physical_machine"] = identity.machine
-    fallback_owner = identity.execution_machine if identity is not None else raw.get("machine")
+        context.update(identity.to_record_fields())
+    fallback_owner = row_execution_machine(raw)
     context.update({
         "worktree": raw.get("id") or rec.get("id4"),
         "id": raw.get("id") or rec.get("id4"),
