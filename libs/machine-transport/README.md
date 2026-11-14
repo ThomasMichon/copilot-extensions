@@ -64,6 +64,8 @@ resolved -- network call to reach a host that is actually the caller itself.
   raises `ValueError` rather than assigning an unconfirmed guest identity.
   Inherited WSL environment variables are not evidence. Native Linux does not
   need a mount-table read; confirmed container markers retain the fast path.
+  Worktrees' pre-runtime admission copy is generated from this same stdlib
+  module by [the admission-helper synchronizer](../../tools/sync-execution-platform.py).
 - **`transport`** -- `resolve_ssh_target()` (pick the best SSH alias/shell
   for an entry), `wrap_remote_command()` (POSIX login-shell wrapping via
   `remote_login_shell`, non-POSIX shells passed through untouched), and

@@ -18,7 +18,7 @@ def identity_source() -> bytes:
     )
     names = {
         "IDENTITY_SCHEMA", "IDENTITY_VERSION", "RepositoryIdentity",
-        "_is_link_or_reparse", "_normalize_repository_remote", "_identity",
+        "_is_link_or_reparse", "_normalize_repository_remote", "_repository_id", "_identity",
         "_receipt", "_validate_receipt",
     }
     parts = [
