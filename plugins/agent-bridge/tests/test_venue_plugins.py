@@ -878,7 +878,7 @@ async def test_provider_refresh_preserves_controller_provenance(
 @pytest.mark.parametrize("context", [
     "managed", "unmanaged", "legacy", "affinity", "qualified", "owner-only", "bad-session",
     "invalid-explicit", "empty-explicit", "absolute-affinity", "legacy-absolute-affinity",
-    "explicit-equals-affinity",
+    "explicit-equals-affinity", "unpublished-roster",
 ])
 async def test_native_venue_controller_context_start_and_recovery(
     monkeypatch, session_manager, controller, hosting_allowed, kind, recovery, context,
@@ -891,6 +891,12 @@ async def test_native_venue_controller_context_start_and_recovery(
     from agent_bridge.transport import SpawnTarget
 
     caller, owner = controller
+    if context == "unpublished-roster":
+        async def exact_record_only(args, project):
+            if args[0] == "list":
+                raise RuntimeError("no usable advisory roster: no durable current roster")
+            return owner.return_value
+        owner.side_effect = exact_record_only
     before = os.getcwd()
     provider = AsyncMock(return_value=(0, b'{"plugins":[]}', b""))
     monkeypatch.setattr("agent_bridge.session_host.container_transport._run_provider", provider)
@@ -939,12 +945,12 @@ async def test_native_venue_controller_context_start_and_recovery(
         "acp_command": "cd /workspaces/project && copilot --acp --stdio",
     }
     target = SpawnTarget(type="command", cwd="/workspaces/project", **{kind: metadata})
-    managed = context in {"managed", "qualified", "owner-only", "bad-session"}
+    managed = context in {"managed", "qualified", "owner-only", "bad-session", "unpublished-roster"}
     owner_ref = caller.caller_owner_ref if managed else None
     if context in {"qualified", "bad-session"}:
         owner_ref += "#native-caller"
     caller_id = caller.caller_worktree if context in {
-        "managed", "unmanaged", "qualified", "bad-session", "empty-explicit",
+        "managed", "unmanaged", "qualified", "bad-session", "empty-explicit", "unpublished-roster",
     } else None
     if context == "affinity":
         caller_id = "sdk/opaque-affinity"
@@ -1009,6 +1015,10 @@ async def test_native_venue_controller_context_start_and_recovery(
             assert provider.await_args.kwargs.get("cwd") == expected
             assert ("cwd" in provider.await_args.kwargs) == (expected is not None)
         assert owner.await_count == int(managed)
+        if context == "unpublished-roster":
+            owner.assert_awaited_once_with(
+                ["record", "--worktree-id", "controller", "--json"], "control",
+            )
         assert child_started == [True]
     assert os.getcwd() == before
 
@@ -1175,7 +1185,6 @@ async def test_legacy_dynamic_workspace_recovery_resolves_persists_then_prepares
         _codespace_lock_sessions=set(), _acquire_codespace_lock=lambda *a: None,
         _release_codespace_lock=lambda *a: None,
         _session_host_unexpected_reap_seconds=60, _session_host_active_reap_seconds=0,
-        _timeouts=SimpleNamespace(session_host_ready=30),
         _db=SimpleNamespace(update_session_target=lambda *a: persisted.append(a)),
         _connect_via_session_host=connect,
     )
