@@ -11,6 +11,16 @@
 
 ## Goal
 
+Operator root goal, verbatim:
+
+> Factor out session-host, mux logic, and agent-bridge's internal extension into a forward-deployable core, so that a machine or container lacking suite service can still have Copilot launched via ACP or Mux in an ACP-controllable Copilot session that can be picked up by a local or calling agent-bridge. This core should be uses by agent-worktrees and agent-bridge, and it should not depend on those services being installed into the target space.
+
+Source: operator direction of 2026-11-14 00:27Z, relayed through existing
+coordination. The complete intake reference is retained privately by the
+effort owner, not published with transport or session identifiers.
+
+### Continuing acceptance obligations
+
 Complete the standalone core, all named caller migrations, mode-appropriate
 lifetime and receiving acceptance, with the required source publication.
 For recovery, treat abrupt transport loss and observer, process or host restart
@@ -34,6 +44,31 @@ identity and obey their distinct lifetime policies.
 The completion gate is the complete caller-convergence and receiving flow,
 with real consumer validation and required source publication. A package,
 an extraction-only PR or one migrated caller is not completion.
+
+## Outcome acceptance and finalization
+
+The root outcome requires evidence from a built or copied core artifact, not
+only imports from this source checkout:
+
+- A target with only the core and its declared Copilot/mux prerequisites can
+  launch in both ACP and mux modes without installed or running Bridge,
+  Worktrees, Manager or Dispatch services.
+- A local or calling Bridge can discover and control that existing session
+  through the common broker, retaining its exact native conversation and
+  original input without a second session, seed replay or effectful fallback.
+- Actual Worktrees and Bridge callers select that same core. Receiving,
+  mode-appropriate lifetime, ownership, supported skew/rollback and exact
+  cleanup pass their existing acceptance gates.
+- Evidence names the artifact, executing provider and consumer boundary.
+  Controlled SDK/model-free cases, native Copilot execution and installed
+  adoption are reported separately; unavailable authority or capability is
+  an explicit open gate, never a substituted pass.
+
+Finalization requires this complete functional flow, every continuing Plan and
+Validation Plan item resolved or explicitly transferred to a named tracked
+objective, required source review/CI/publication completed, and the canonical
+effort marked Done and archived. A package, source leaf, review or merged PR
+alone does not satisfy this criterion. Deployment remains separately authorized.
 
 ## Participants
 
@@ -139,6 +174,25 @@ receiver-owned leaf is actor-free source/state testing with effects unwired;
 native qualification and activation need their existing separate admission.
 
 ## Plan
+
+### Next outcome - portable consumer acceptance
+
+- [ ] Prove the smallest admitted standalone artifact flow for ACP and mux,
+  then Bridge pickup, with suite services absent from the target. Reuse
+  existing owned fixtures; preserve separate admission for native effects.
+- [ ] Correlate that flow with the actual Worktrees/Bridge caller paths and
+  coordinate any launch-caller changes with their existing owner, rather
+  than duplicate the mux-launch implementation.
+- [ ] Publish the first complete functional outcome through normal gates and
+  update this root acceptance record, retaining all remaining obligations.
+
+The source-complete actor-free recovery-intent adapter supports original-owner
+persistence but does not prove this outcome. Its bounded source acceptance is
+recorded in the journal, not counted as root acceptance. Select the portable
+consumer flow before adding further optional recovery-data layers.
+The completed source items below remain source milestones, not native
+or installed qualification. Container-auth pumping and mux-launch custody
+remain with their existing owners.
 
 ### Phase 1 - Review the implementation boundary
 
