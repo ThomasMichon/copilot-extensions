@@ -3164,6 +3164,13 @@ sources, transferring owners or turning partial/planning gains into completion.
   receiving objective or a retained gap; investigate actual implementation
   evidence when claiming completion, rather than making that the prerequisite
   for discovering thematic alignment.
+  The [Gateway availability/source-condition intake](journal/2026/11.13-gateway-availability-and-source-conditions.md)
+  proposes eight unchecked local/parent Plan and actual global Validation
+  rows for #6443's two finite source-only refinements in its existing Fleet
+  receiver. All six source outcomes remain OPEN, including #6394's fresh
+  bounded queued-steering follow-up; no operational appointment or retirement
+  is inferred. The complete 00:05:58 UTC census remains 854 whole open,
+  125 above the fixed target; every existing custodian and first gate remains.
   The [status/recovery/reassignment intake](journal/2026/11.13-status-recovery-and-reassignment-intake.md)
   proposes 36 unchecked Dispatch Phase 3 rows for four complete families,
   preserving literal OR/AND choices, each source's actual Open condition,
