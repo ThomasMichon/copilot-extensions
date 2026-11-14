@@ -9,6 +9,14 @@
 - **Umbrella issue:** #6812
 - **Sub-issues:** #6826 (Bridge serving no-op), #6827 (supervisor result framing); existing #6600, #6086, #6046 and #6796 retain their owners and boundaries
 
+## Goal
+
+Make the complete install/update flow's necessity, cost, progress and real
+outcomes accountable, preserving the unchanged Guiding Intent below. Include
+the [current execution/lifetime boundary](../source-managed-runtime-installs/update-service-lifetimes.md):
+foreground cancellation, independent service acceptance and separately
+observable startup/serving results must never be conflated.
+
 ## Guiding Intent
 
 An operator should be able to account for every install/update operation:
@@ -116,6 +124,10 @@ On 2026-10-24, the operator added the following compatibility requirements:
 > Flags like `--require-launch-attempt` and `--launch-attempt-id` also seem odd, like we're adding opt-in flags which should be the norm. I guess `launch-attempt-id` is good to maintain a contract with a programmatic caller, but we should avoid needing too many speciality arguments to launch a worktree from worktree manager.
 
 ## Plan
+
+- [ ] Expose the real update and service-operation owners, cancellation scope,
+  accepted handoff and stable/unknown outcome under the shared lifetime
+  amendment, without changing another owner's execution or repair authority.
 
 The audit, timing, presentation and speed goals are operator-requested.
 The sequencing, specific repair choices, formatter grammar and validation
@@ -338,6 +350,10 @@ intent without changing session, seed or publication authority.
   named tracked objective, archive this effort, and release responsibility.
 
 ## Validation Plan
+
+- [ ] Cover the relevant [L1/L2/L5 cancellation and observation cases](../source-managed-runtime-installs/update-service-lifetimes.md#validation-and-completion):
+  a cancelled wait is neither service cancellation nor successful completion,
+  and a created PID/early ping is not post-caller-cleanup readiness.
 
 - [ ] Satisfy the [direct cohort Validation](cohort-receiving.md#direct-validation)
   under existing source/native/installed owners; tracking receipt is not a

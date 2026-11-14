@@ -23,6 +23,13 @@ It links artifact/profile, Manager/onboarding, staging/sequencing, lifecycle,
 observability and upgrade-acceptance owners without merging their custody or
 declaring their remaining gates complete.
 
+The [foreground-update and independent-service-startup amendment](active/source-managed-runtime-installs/update-service-lifetimes.md)
+adds the current lifetime requirements to that map and its associated active
+efforts. Ordinary updates remain cancellable with their callers; accepted
+service setup/start and retained daemon trees survive caller cleanup. Historical
+background-driver credit and completed efforts are not qualification of this
+new behavior, nor permission to resume held implementation or deployment.
+
 | Effort | Status | Coordination |
 |--------|--------|--------------|
 | [Bridge Queued Steering](active/bridge-queued-steering/README.md) | Draft; notification, exact submission receipt and nonduplicating timed fallback before implementation | Bounded #6394 follow-up; preserves #12487/#11448/#11445 and #10765 owners; no rollout or container-auth takeover |
