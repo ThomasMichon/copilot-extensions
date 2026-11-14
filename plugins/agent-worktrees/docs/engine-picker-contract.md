@@ -534,11 +534,39 @@ Saved local responses retain their advisory rows and add the reading host's
 current context. Remote consumers preserve the reporting host's envelope;
 they must not derive remote names from the coordinator's local hostname.
 
-Existing row naming and selection semantics remain during consumer migration.
-Older receivers ignore the additive envelope; a provider rollback may omit it.
-Missing context means that live reporter naming is unsupported, not that the
-reader should invent it. This capability does not certify durable row/index
-naming removal.
+Resident publication removes `machine`, `platform`, `machine_identity_version`,
+`environment` and `execution_machine` from stored worktree rows and their nested
+`caller_state`/candidate naming projections. Original `caller_worktree` and
+claim/allocation locators remain unchanged. The next normal complete publication
+replaces older row/index naming snapshots; there is no bulk migration or
+historical-event rewrite.
+
+Platform-filtered reads select the reporting process's OS substrate before
+resolving row IDs or codenames. Matching filters use the platform-free index;
+other platforms select no rows without resolving ambiguous aliases or decoding
+excluded rows. Producer point-refresh selection and completion use that same
+rule. All v1/v2 wire rows retain a transient `platform` for independently updated
+receivers, including unfiltered reads. It is not stored per worktree or derived
+from the machine registry. Its byte cost is checked before publication; naming
+renames or unavailable registry mappings cannot change semantic rows or their
+revisions. Saved responses reapply this compatibility field without writing
+the database.
+
+Naming-free publications use durable storage format 2, while both live protocols
+retain wire `projection.schema_version: 1`. An older saved-roster reader's
+strict format-1 gate refuses the platform-free index instead of misreading it as
+an empty platform selection. Its ordinary authenticated v1/v2 resident reads
+still work; saved fallback during resident absence requires an updated reader.
+New readers accept formats 1 and 2, and an older elected writer's next complete
+publication restores format 1 without a migration.
+
+Older saved publications retain their original semantic body for rollback.
+If that body cannot satisfy a requested platform filter, admission refuses it
+rather than treating a stamped platform as current identity. Older receivers
+ignore the additive reporting envelope; a provider rollback may omit it.
+Missing context means live reporter naming is unsupported, not that the reader
+should invent it. The reporting-context capability alone does not certify
+durable row/index naming removal on an older provider.
 
 Manager's production readers admit the envelope separately as receiver-only
 `_reporting_context`, stripping it before semantic-row validation or comparison.

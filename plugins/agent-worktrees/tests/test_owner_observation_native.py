@@ -133,6 +133,36 @@ def test_late_history_and_retry_do_not_regress_current_facts(native):
     assert len(ids) == len(set(ids)) and first[0]["event_id"] in ids
 
 
+def test_queued_native_receipt_survives_reporter_rename_with_stable_allocation(native):
+    import socket
+    from pathlib import Path
+
+    import yaml
+
+    from agent_worktrees import config as cfg
+
+    owner, path, _home = native
+    before = owner.observation_read(selection())
+    assert compute(owner, path)["ok"]
+    receipt = owner.native_observations._queue[0].receipt
+    record = tracking.load_record(path)
+    registry = path.parent.parent / "config.yaml"
+    original_config = registry.read_bytes()
+    (Path(record.worktree_path) / "machines.yaml").write_text(yaml.safe_dump({"machines": {
+        "renamed-reporter": {
+            "hostname": socket.gethostname(), "execution_platform": cfg.detect_platform(),
+        },
+    }}), encoding="utf-8")
+    assert tracking.load_record(path).machine != receipt.after.identity.machine
+    current = publish(owner, path)
+    assert current["source_generation"] == before["source_generation"]
+    assert native_entries(owner)[-1]["kind"] == "claim-added"
+    assert not {
+        "machine", "platform", "machine_identity_version", "environment", "execution_machine",
+    } & current["facts"]["row"].keys()
+    assert registry.read_bytes() == original_config
+
+
 def test_qualified_disposition_is_native_not_a_sampled_proxy(native):
     owner, path, _home = native
     result = compute(owner, path, "status_disposition_write", summary="real saved summary")

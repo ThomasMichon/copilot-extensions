@@ -36,6 +36,7 @@ class NativeProof:
 
 
 def validate_current(current: CanonicalObservation, receipt: SaveReceipt) -> None:
+    """Compare allocation identity; intake/proof retain path, epoch and writer fences."""
     identity = receipt.after.identity
     if identity is None:
         raise c.ObservationError("native record identity is unknown", "unqualified-native")
@@ -44,19 +45,6 @@ def validate_current(current: CanonicalObservation, receipt: SaveReceipt) -> Non
         identity.project,
         identity.worktree_id,
         identity.incarnation,
-    ) or tuple(
-        row.get(key)
-        for key in (
-            "machine",
-            "machine_identity_version",
-            "environment",
-            "execution_machine",
-        )
-    ) != (
-        identity.machine,
-        identity.machine_identity_version,
-        identity.environment,
-        identity.execution_machine,
     ):
         raise c.ObservationError("native record incarnation/namespace changed", "source-replaced")
 
