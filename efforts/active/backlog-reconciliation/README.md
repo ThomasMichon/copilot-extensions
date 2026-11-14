@@ -342,6 +342,14 @@ the non-public approval conversation.
 
 ## Plan
 
+The [ambient routing-intent intake](journal/2026/11.14-ambient-routing-intake.md)
+proposes complete #1414 provisioner-to-CWD behavior in a separate Dispatch
+family: four unchecked Plan rows, four behavior Validation rows and one
+root-global acceptance row. Explicit authority, literal alternatives and
+incumbent custody remain unchanged. #1043 remains its own whole seven-family
+registry-doctor keeper. Both sources remain OPEN; the latest complete census
+is 846 open, 117 above fixed 729, with no intake reduction credit.
+
 The [host inspection proposal](journal/2026/11.14-host-proof-receiving.md)
 retains the complete #1045 observer/progress contract in three direct unchecked
 driver Plan, behavior Validation and root-global acceptance rows. Literal
