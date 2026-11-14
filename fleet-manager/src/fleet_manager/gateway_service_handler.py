@@ -10,6 +10,7 @@ import asyncio
 import base64
 import logging
 import time
+from urllib.parse import urlsplit
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from threading import Event
@@ -20,6 +21,7 @@ from aiohttp import ClientWebSocketResponse
 from .gateway_service_channel import (
     BODY_BYTES, CHUNK_BYTES, RESPONSE_BYTES, RESPONSE_HEADERS, TransportError,
     check, headers, response_status, send, shape,
+    origin, target,
 )
 from .gateway_service_context import ServicePolicyError, identifier
 
@@ -77,6 +79,34 @@ class CallerContext:
 
 
 @dataclass(frozen=True)
+class RelayOrigin:
+    """Original Gateway admission coordinates, not a retargeted request proof."""
+
+    slot: str
+    method: str
+    target_uri: str
+
+    @classmethod
+    def parse(cls, value: object) -> RelayOrigin | None:
+        if value is None:
+            return None
+        check(type(value) is dict, "invalid-relay-origin")
+        shape(value, {"slot", "method", "target_uri"})
+        try:
+            identifier(value["slot"])
+            check(value["method"] in ("GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS")
+                  and type(value["target_uri"]) is str
+                  and len(value["target_uri"]) <= 4096, "invalid-relay-origin")
+            parsed = urlsplit(value["target_uri"])
+            origin(parsed.scheme + "://" + parsed.netloc)
+            target(parsed.path + ("?" + parsed.query if parsed.query else ""))
+            check(not parsed.fragment, "invalid-relay-origin")
+        except (ServicePolicyError, ValueError):
+            raise TransportError("invalid-relay-origin") from None
+        return cls(**value)
+
+
+@dataclass(frozen=True)
 class ServiceRequest:
     context: CallerContext
     method: str
@@ -85,6 +115,8 @@ class ServiceRequest:
     body: bytes
     lifetime: RequestLifetime = field(default_factory=RequestLifetime, repr=False, compare=False)
     response_limit: int = field(default=BODY_BYTES, kw_only=True)
+    service: str | None = field(default=None, kw_only=True)
+    origin: RelayOrigin | None = field(default=None, kw_only=True)
 
 
 def _validate_response(

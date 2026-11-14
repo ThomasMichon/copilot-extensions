@@ -25,6 +25,7 @@ declaring their remaining gates complete.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
+| [Bridge Queued Steering](active/bridge-queued-steering/README.md) | Draft; notification, exact submission receipt and nonduplicating timed fallback before implementation | Bounded #6394 follow-up; preserves #12487/#11448/#11445 and #10765 owners; no rollout or container-auth takeover |
 | [Compatible Agent Messaging](active/compatible-agent-messaging/README.md) | Draft; compatibility-first ordinary send contract before implementation | #12487; existing Bridge/Driver, receipt and discovery owners retained; no implicit resume or rollout |
 | [Task Relevance Reconciliation](active/task-relevance-reconciliation/README.md) | Active; source receiver, emitter caller and periodic evaluator merged; source episodes, cohort attribution and actual closeout remain | #12274; existing queue, wake, session and workspace owners; no runtime activation |
 | [Python Bytecode Cache Lifecycle](active/python-bytecode-cache-lifecycle/README.md) | Active; design accepted, additive private user-cache provider under implementation; consumer migration and retirement/update relief remain | #10968 bytecode follow-on; preserves runtime retention, other hygiene tracks and normal update authority; no real cleanup or rollout |

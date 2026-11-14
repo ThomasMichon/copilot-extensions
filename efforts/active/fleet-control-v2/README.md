@@ -50,6 +50,15 @@ neither live enrollment nor deployment, destructive retirement or capacity acces
   competing Gateway or ledger. Existing contract, auth, deployment and migration
   owners retain their work; inventory unmerged prototypes before duplicating
   implementation. The integrator owns the slice's PRs, not the whole V2 effort.
+- **Retained #6443 source-only refinements:** The existing Gateway/index
+  integrator retains the bounded lease/controller/consumer and Gateway-hosted
+  availability-coordinator contributions described in the linked slice. Normal
+  reviewed owned-module source contributions use non-blocking consultation;
+  another campaign-owner acknowledgement is not an added approval gate.
+  Coordinate actual overlapping edits and incompatible contracts. Preserve
+  existing serving-authority/provenance and affected runtime interfaces,
+  provider/credential/transaction custody, client lifecycle and deployment gates.
+  Source publication neither satisfies those effects nor transfers their owners.
 - **Central state and observation:** Reuse #5862 for the shared backing-store
   and query/subscription plane, not a competing observer. #3761 retains origin
   agency/write-through authority; #352 retains Manager UX/mux ownership.
@@ -403,6 +412,12 @@ All detailed slices are **agent-recommended** and remain subject to review.
 - [ ] Prove the real CLI/Gateway/container/controller path, independently
   persistent index state and scoped negative cases before any native offload.
 
+- [ ] Retain and deliver #6443's bounded source-only lease/controller/consumer
+  and availability-coordinator refinements through the slice's GI-S1 through
+  GI-S3 Plan and matching local validation. These are independently progressable
+  source contributions, not closure of the resident/provider/live-adoption
+  items above; keep existing clients and explicit unsupported outcomes.
+
 ### Phase 2b - Central push-backed current state
 - [x] Review the [backing-store amendment](central-state-backing-store.md) under
   existing #5862, preserving #3761 origin authority and #352 client/mux ownership.
@@ -491,6 +506,15 @@ All entries are **agent-recommended implementation gates**, not completed tests.
   Prove long-lived provider/OS sessions renew without Gateway-added presence
   prompts, with real challenge, explicit revocation and optional dead-man
   outcomes distinct from token/lease churn or temporary unavailability.
+
+- [ ] Complete GI-SV1 through GI-SV3 in the Gateway/index slice for #6443's
+  retained source-only lease/controller/consumer and availability-coordinator
+  refinements. Verify exact correlation/affinity, current-incarnation fencing,
+  explicit noninteractive lookup, one at-most-30-second concurrent-read phase
+  and truthful unsupported/cache-miss/unavailable/uncertain outcomes without
+  nonce/popup or replay. Record selected channel/consumer source composition
+  separately from synthetic controls. Do not check the parent Gateway/index,
+  provider, installed/container or live-adoption rows from source publication.
 - [x] Complete the bounded [RS256 enrolled-service source controls](rs256-enrolled-service-profile.md#validation-and-stopping-boundary)
   with real synthetic-token/proof verification and contained TLS service-path
   tests; retain actual provider/protected-key/enrollment and live-adoption gates.
@@ -533,6 +557,21 @@ All entries are **agent-recommended implementation gates**, not completed tests.
 [Architecture and migration contract](architecture.md).
 
 ## Journal
+
+### 2026-11-13 - Proposed retained #6443 source-only refinements
+
+- Proposed explicit local Plan/Validation and matching parent Plan/global
+  Validation for the retained lease/controller/consumer and Gateway-hosted
+  noninteractive-availability source contributions. Existing options, clients,
+  custodians and all unfinished technical gates remain unchanged.
+- The source-contribution correction permits normal reviewed owned-module work
+  with non-blocking consultation, not an added campaign-owner signature.
+  Actual conflicting source, current serving authority and runtime/provider/
+  deployment boundaries retain their original contracts.
+- This is a tracking proposal, pending actual review, merge and fresh whole
+  receiving readback. It claims no delivered adapter, source acceptance,
+  technical completion, donor retirement, credential/resource release or rollout.
+
 
 ### 2026-11-12 - Explicit RS256 enrolled-service source accepted
 

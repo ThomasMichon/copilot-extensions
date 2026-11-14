@@ -13,8 +13,9 @@ import logging
 import re
 import secrets
 from collections import deque
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
 from aiohttp import ClientWebSocketResponse, WSMsgType, web
@@ -23,6 +24,9 @@ from . import planning
 from .gateway_service_policy import CallerGrant, ServiceAuthority, ServiceGrant
 from .gateway_service_context import ServicePolicyError
 from .runtime_identity import CLOCK_SKEW, MAX_REPLAYS, PROOF_AGE
+
+if TYPE_CHECKING:
+    from .gateway_controller_services import ControllerService
 
 FRAME_BYTES = 65536
 BODY_BYTES = 32768
@@ -219,6 +223,9 @@ class Pending:
     total: int = 0
     dispatched: bool = False
     unacknowledged: bool = False
+    service_offer: ControllerService | None = None
+    service_epoch: str | None = None
+    relay_checkpoint: Callable[[], None] | None = field(default=None, repr=False)
 
     def fail(self, code: str, status: int = 502) -> None:
         while not self.queue.empty():
@@ -231,9 +238,14 @@ class Channel:
     """An exact grant/generation owns every accepted frame and cancellation."""
 
     def __init__(self, ws: web.WebSocketResponse, authority: ServiceAuthority,
-                 grant: ServiceGrant, *, caller_context: bool = False) -> None:
+                 grant: ServiceGrant, *, caller_context: bool = False,
+                 services: tuple[ControllerService, ...] | None = None) -> None:
         self.ws, self.authority, self.grant = ws, authority, grant
         self.caller_context = caller_context
+        self.services = services
+        self.offer_epochs = {item: secrets.token_hex(24) for item in services or ()}
+        self.services_revision = 0
+        self.incarnation = secrets.token_hex(24)
         self.pending: dict[str, Pending] = {}
         self.retired: deque[str] = deque(maxlen=64)
         self.closed = False
@@ -273,6 +285,16 @@ class Channel:
             return
         self.authority.revalidate_service(self.grant)
         self.authority.revalidate_caller(pending.caller)
+        if pending.relay_checkpoint is not None:
+            try:
+                pending.relay_checkpoint()
+            except TransportError as exc:
+                pending.fail(exc.code, exc.status)
+                return
+        check(pending.service_offer is None or (
+            self.services is not None and pending.service_offer in self.services
+            and self.offer_epochs.get(pending.service_offer) == pending.service_epoch),
+            "controller-service-withdrawn", 503)
         if kind == "headers":
             shape(value, {"type", "id", "status", "headers"})
             check(pending.phase == "initial")
@@ -313,6 +335,9 @@ class Channel:
             async for message in self.ws:
                 check(message.type == WSMsgType.TEXT)
                 value = unpack(message.data)
+                if value.get("type") == "services" and self.services is not None:
+                    await self.update_services(value)
+                    continue
                 try:
                     self.receive(value)
                 except ServicePolicyError:
@@ -324,3 +349,23 @@ class Channel:
                     self.authority.revalidate_service(self.grant)
         finally:
             await self.close()
+
+    async def update_services(self, value: dict) -> None:
+        from .gateway_controller_services import admitted_services, services
+
+        shape(value, {"type", "revision", "services"})
+        revision = value["revision"]
+        check(type(revision) is int and revision == self.services_revision + 1
+              and revision <= 2**53 - 1, "invalid-services-revision")
+        selected = services(value["services"])
+        slot = self.authority.revalidate_service(self.grant)
+        admitted_services(selected, slot)
+        self.offer_epochs = {
+            item: self.offer_epochs.get(item) or secrets.token_hex(24) for item in selected}
+        self.services = selected
+        self.services_revision = revision
+        for pending in list(self.pending.values()):
+            if pending.service_offer is not None and pending.service_offer not in selected:
+                pending.fail("controller-service-withdrawn", 503)
+                await self.cancel(pending)
+        await send(self.ws, {"type": "services-accepted", "revision": revision})

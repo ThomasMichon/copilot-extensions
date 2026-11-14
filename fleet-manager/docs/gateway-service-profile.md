@@ -28,6 +28,11 @@ adds service-policy version `6`: original RSA token verification plus an
 independently approved P-256 request-proof enrollment. It does not broaden
 the existing ES256 or caller-only bearer profiles.
 
+The SDK-only [Controller services profile](gateway-controller-services.md)
+adds current, policy-constrained service offers and explicit in-process
+local-owner dispatch on those same channels. Legacy connector defaults remain
+unchanged; offers do not grant credential or operation authority.
+
 ## In-process deployment owners
 
 An SDK embedding may explicitly supply `local_handlers=(LocalHandlerBinding(...),)`
