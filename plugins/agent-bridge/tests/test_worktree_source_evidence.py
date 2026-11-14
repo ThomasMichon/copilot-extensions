@@ -6,6 +6,7 @@ import asyncio
 import json
 import sys
 import time
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -105,8 +106,8 @@ async def test_real_source_stdout_refresh_renames_and_withdraws_without_row_chan
 
     async def source(project: str, args: list[str], **kwargs) -> tuple[str | None, str]:
         calls.append((project, args))
-        script = "print(" + repr(json.dumps(body)) + ")"
-        return await wt._exec_ex([sys.executable, "-c", script])
+        script = Path(__file__).parent / "fixtures" / "worktree_list_source.py"
+        return await wt._exec_ex([sys.executable, str(script), json.dumps(body)])
 
     monkeypatch.setattr(wt, "_run_local_ex", source)
     try:

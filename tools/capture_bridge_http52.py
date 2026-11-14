@@ -12,7 +12,8 @@ import capture_bridge_http48 as common
 
 def run_probes(root: Path, proof: dict, vector: dict) -> dict:
     return common.run_probes(
-        root, proof, vector, evidence=evidence, expected_roles=frozenset({"cli", "record-writer"}),
+        root, proof, vector, evidence=evidence,
+        expected_roles=frozenset({"cli", "record-writer", "roster-source"}),
         isolated_probes=frozenset({
             "test_retained_acquisition_and_later_lineage_use_actual_owner_processes",
             "test_keyed_creation_uses_actual_retained_serializer_and_preserves_claim",

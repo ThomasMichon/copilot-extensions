@@ -141,6 +141,8 @@ EXTRA_PATHS = (
     "plugins/agent-bridge/docs/retained-acquisition-writer.md",
     "plugins/agent-worktrees/tests/fixtures/worktree_record_owner.py",
     "plugins/agent-bridge/tests/fixtures/portable-mux-sdk.mjs",
+    "plugins/agent-bridge/tests/fixtures/worktree_list_source.py",
+    "plugins/agent-bridge/tests/test_http47_launch_audit.py",
     "plugins/agent-bridge/launch-wrapper-assets.json",
     "plugins/agent-bridge/packaged-assets.json",
     *(path.relative_to(Path(__file__).resolve().parents[1]).as_posix()
