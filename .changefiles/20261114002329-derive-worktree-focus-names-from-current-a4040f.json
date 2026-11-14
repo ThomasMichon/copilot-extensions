@@ -1,0 +1,9 @@
+{
+  "comment": "Derive worktree focus names from current reporting context instead of per-row identity snapshots.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}
