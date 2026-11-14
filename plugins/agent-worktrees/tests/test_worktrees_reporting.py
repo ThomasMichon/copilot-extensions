@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import threading
 from pathlib import Path
 
 import pytest
@@ -103,6 +104,21 @@ def test_live_heartbeat_renames_reporter_without_changing_row_or_observation_rev
     owner = WorktreesRuntime(tmp_path / "current.sqlite3")
     owner.activate()
     owner.publish("project", [{"id": "one", "machine": "obsolete"}], observed_at=1)
+    heartbeat_lookup = threading.Event()
+    renamed = threading.Event()
+    original = worktrees_reporting.current
+    initial = True
+
+    def synchronized_context(project):
+        nonlocal initial
+        if initial:
+            initial = False
+        else:
+            heartbeat_lookup.set()
+            assert renamed.wait(3), "fixture rename did not release the heartbeat lookup"
+        return original(project)
+
+    monkeypatch.setattr(worktrees_reporting, "current", synchronized_context)
     receiver = worktrees_feed_client.FeedReceiver(request(version))
     server = control.ControlServer(
         lambda action, body: owner.health() if action == "health" else owner.handle(body),
@@ -119,8 +135,10 @@ def test_live_heartbeat_renames_reporter_without_changing_row_or_observation_rev
             frames.append(frame)
             receiver.receive(frame)
         first = receiver.current
+        assert heartbeat_lookup.wait(3), "provider did not reach its heartbeat lookup"
         before = durable_bytes(owner.store.db_path)
         rename("renamed-reporter")
+        renamed.set()
         heartbeat = next(stream)
         assert heartbeat["type"] == "heartbeat"
         assert receiver.receive(heartbeat) == [heartbeat]
@@ -141,6 +159,7 @@ def test_live_heartbeat_renames_reporter_without_changing_row_or_observation_rev
         assert legacy.receive(heartbeat) is None
         assert legacy.rows == rows
     finally:
+        renamed.set()
         stream.close()
         server.close()
         owner.shutdown()
