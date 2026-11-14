@@ -455,3 +455,31 @@ def test_hot_first_subscriber_cannot_starve_later_projection_after_ack(selected,
     execute(selected, "first", "acknowledge", {**registration(first), "event_id": pending[-1]["event_id"]})
     observe(selected, {7: facts(tags=["changed"])})
     assert execute(selected, "later", "query", registration(later))["baseline"]["pulls"]
+
+
+def test_configured_sponsor_cancellation_survives_receipt_retirement(selected):
+    now, _store, identity, projection, registry = selected
+    projection.sponsored_requests = frozenset({("sponsor", "startup")})
+    payload = {"request_id": "startup", "ttl": 1, "filter": expression({"repo": ["owner/repo"]})}
+    original = registry.execute(identity.key, "sponsor", "subscribe", payload, expires_at=1000000)
+    registry.execute(identity.key, "sponsor", "cancel", registration(original), expires_at=1000000)
+    now[0] = 86600
+    registry.execute(identity.key, "other", "subscribe", {
+        "request_id": "new", "ttl": 60, "filter": expression({"repo": ["owner/repo"]}),
+    }, expires_at=1000000)
+    retry = registry.execute(identity.key, "sponsor", "subscribe", payload, expires_at=1000000)
+    assert retry["status"] == "cancelled"
+    assert registration(retry) == registration(original)
+
+
+def test_warm_baseline_pages_within_the_persisted_baseline_limit(selected):
+    subscribe(selected, "first", {"repo": ["owner/repo"]})
+    tags = [f"{number:03d}" + "x" * 247 for number in range(250)]
+    observe(selected, {number: facts(tags=tags) for number in range(1, 17)})
+    joined = subscribe(selected, "joined", {"repo": ["owner/repo"]})
+    assert joined["baseline"]["more"]
+    pulls = joined["baseline"]["pulls"]
+    remaining = execute(selected, "joined", "query", {
+        **registration(joined), "after": pulls[-1]["number"],
+    })["baseline"]
+    assert [p["number"] for p in [*pulls, *remaining["pulls"]]] == list(range(1, 17))
