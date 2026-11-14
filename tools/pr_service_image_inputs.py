@@ -40,6 +40,9 @@ def _inspect_profiles(selections, limits: WheelLimits, deadline: float):
         "archive": limits.max_archive_bytes,
         "expanded": limits.max_expanded_bytes,
         "seen": {},
+        "ownership": {
+            "owners": {}, "directories": {}, "manager_directories": set(), "wheels": set(),
+        },
     }
     inputs, identities, wheels, archives = [], [], {}, {}
     target = backend = None
@@ -86,7 +89,7 @@ def _inspect_profiles(selections, limits: WheelLimits, deadline: float):
             archives.setdefault(wheel["filename"], snapshot.archives[wheel["filename"]])
     if not _REQUIRED <= wheels.keys():
         raise ProfileError("PR image closure omits a required service or native distribution")
-    return inputs, tuple(identities), wheels, archives
+    return inputs, tuple(dict.fromkeys(identities)), wheels, archives
 
 
 @contextmanager

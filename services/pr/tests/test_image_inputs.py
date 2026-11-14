@@ -346,3 +346,65 @@ def test_composed_profiles_refuse_different_runtime_targets(tmp_path: Path) -> N
         with pytest.raises(ProfileError, match="different targets"):
             with prepare(service, service_wheels, deadline, additional_inputs=((native, native_wheels),)):
                 pytest.fail("foreign native runtime target admitted")
+
+
+@contextmanager
+def manager_inputs(
+    tmp_path: Path, reference: RuntimeProfile, deadline: float, *, collision: str | None,
+) -> Iterator[tuple[RuntimeProfile, WheelSnapshot]]:
+    name = "copilot-extensions-worktree-manager"
+    prefix = name.replace("-", "_")
+    filename = prefix + "-1.0-py3-none-any.whl"
+    data = cast(Callable[..., bytes], wheel_bytes)(
+        name=prefix, prefix=prefix + "-1.0.dist-info/",
+        metadata=f"Metadata-Version: 2.3\nName: {name}\nVersion: 1.0\n\n".encode(),
+        extra={collision: b"overwrite\n"} if collision else None,
+    )
+    path = tmp_path / filename
+    path.write_bytes(data)
+    record = reference.record() | {
+        "component": "worktree-manager", "roots": [name + "==1.0"],
+        "wheels": [{
+            "name": name, "version": "1.0", "filename": filename,
+            "sha256": "sha256:" + hashlib.sha256(data).hexdigest(),
+            "requires_python": "", "provides_extras": [], "selected_extras": [], "requires_dist": [],
+        }],
+    }
+    with cast(Callable[..., AbstractContextManager[WheelSnapshot]], retain_wheel_inputs)(
+        {filename: path}, {filename: record["wheels"][0]["sha256"]},
+        max_wheels=10, max_archive_bytes=LIMITS.max_archive_bytes,
+        max_total_bytes=LIMITS.max_archive_bytes, max_snapshot_bytes=LIMITS.max_archive_bytes,
+        deadline=deadline,
+    ) as snapshot:
+        yield validate_profile(record), snapshot
+
+
+@pytest.mark.parametrize("manager_first", [False, True])
+@pytest.mark.parametrize("collision", [
+    "fleet_manager/__init__.py",
+    "fleet_manager",
+    "copilot_extensions_worktree_manager-1.0.data/purelib/fleet_manager/__init__.py",
+])
+def test_composed_profiles_preserve_canonical_payload_ownership(
+    tmp_path: Path, manager_first: bool, collision: str,
+) -> None:
+    with separate_application_inputs(tmp_path) as (service, service_wheels, native, native_wheels, deadline):
+        with manager_inputs(tmp_path, service, deadline, collision=collision) as manager:
+            selections: tuple[tuple[RuntimeProfile, WheelSnapshot], ...] = (
+                (service, service_wheels), (native, native_wheels),
+            )
+            selections = (manager, *selections) if manager_first else (*selections, manager)
+            with pytest.raises(ProfileError, match="ownership collision"):
+                with prepare(*selections[0], deadline, additional_inputs=selections[1:]):
+                    pytest.fail("split profiles bypassed canonical payload ownership")
+
+
+def test_identical_shared_manager_is_checked_once_without_self_collision(tmp_path: Path) -> None:
+    with separate_application_inputs(tmp_path) as (service, service_wheels, native, native_wheels, deadline):
+        with manager_inputs(tmp_path, service, deadline, collision=None) as manager:
+            with prepare(
+                service, service_wheels, deadline,
+                additional_inputs=(manager, (native, native_wheels), manager),
+            ) as result:
+                assert len(list((result.path / "wheels").iterdir())) == len(NAMES) + 1
+                assert result.profile_lock_ids == (service.lock_id, manager[0].lock_id, native.lock_id)

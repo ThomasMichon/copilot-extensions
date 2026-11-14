@@ -563,6 +563,8 @@ All selected targets and backends must match. Shared distributions must have
 identical inspected metadata and bytes, apart from the union of selected extras,
 and consume the aggregate archive/expanded-byte budgets once. The combined
 `lock_id` identifies the selected profile set, not a separately approved runtime.
+Canonical payload ownership is checked across the deduplicated union in the
+shared environment, not independently reset for each profile.
 Keep every selected snapshot open through context consumption. The existing
 single-profile call and its original lock identity remain unchanged.
 
