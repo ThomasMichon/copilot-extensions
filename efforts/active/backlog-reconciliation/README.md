@@ -350,6 +350,12 @@ controls remain explicit; #1138 stays an independently owned interface, not a
 whole-parent barrier. Source dispositions and technical acceptance remain
 separate. The complete queue is 846 open, 117 above fixed 729, with no new credit.
 
+Its [post-merge receiving refinement](journal/2026/11.14-host-proof-receiving.md#reviewed-plan-delivery-and-local-acceptance-refinement)
+records reviewed #12643 and a concrete V1045 field/no-mutation/no-reap
+assertion gap corrected before any source disposition. All three technical
+rows remain unchecked; both sources stay OPEN, with owners and parent gates
+unchanged.
+
 The [deferred account/provider proposal](journal/2026/11.14-account-provider-intake.md)
 retains #69's actual provider abstraction AND resolver/integration in one
 existing account-aware family, with four unchecked contract, implementation,

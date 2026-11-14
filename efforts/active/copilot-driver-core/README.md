@@ -320,6 +320,18 @@ remain with their existing owners.
   demonstrates only its scoped liveness/RTT property, not semantic progress,
   ownership or completion. Check #1138's interface at this consumer boundary,
   not by re-owning or requiring its entire acceptance contract.
+  **Explicit V1045 field and effect assertions:** Check current phase,
+  active-tool elapsed/update ages, output/event byte-or-sequence delta,
+  last-thought age/chunk count, `source`, `observed_at`, proof/scope,
+  declared/derived milestones and reasoned `unknown_result` individually.
+  Assert each literal domain: `freshness` = fresh/stale/unknown; `truncation` =
+  none/truncated/unknown; `request_state` =
+  requested/running/blocked/complete/unknown; `terminal_result` =
+  success/failure/not-terminal/unknown. Check `liveness`,
+  `last_output_at` and `last_heartbeat_at` on both required pull surfaces.
+  Exercise the explicit thought-detail path with non-secret fixture content
+  while default output stays redacted. Assert that inspection never mutates
+  or reaps the session, in addition to every no-effect prohibition above.
 - [ ] Exact native identity, multiline/quoted seed, permissions and preference
   selections survive new/resume/reuse without staging or delivering a duplicate.
 - [ ] Structured pending-work and schedule evidence controls ACP idle expiry;
