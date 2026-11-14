@@ -279,8 +279,8 @@ until the work itself was measured.
 
 ## 5. Report, or steer within explicit authority
 
-In a finite read-only sweep, return recommendations and **messages sent:
-none**. A recorded recurring observation also returns recommendations, except
+In a finite read-only sweep, return recommendations and
+**messages sent: none**. A recorded recurring observation also returns recommendations, except
 that it may send goal-establishment steers under the standing authority, the
 one message class it sends without a steering grant; all other steers stay
 recommendations.
