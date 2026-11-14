@@ -18,15 +18,17 @@ def _seed_owner(tmp_path, monkeypatch):
     tracking_dir = project_dir / "worktrees"
     tracking_dir.mkdir(parents=True)
     monkeypatch.setattr(cfg, "project_dir", lambda name=None: project_dir)
+    monkeypatch.setattr(cfg.socket, "gethostname", lambda: "m")
+    monkeypatch.setattr(cfg, "detect_platform", lambda: "windows")
     monkeypatch.setattr(
         cfg, "load_config",
-        lambda *a, **k: types.SimpleNamespace(machine="m", repo_name="p"))
+        lambda *a, **k: cfg.load_project_config("p"))
     monkeypatch.setattr(
         cfg, "load_project_config",
         lambda name, **kwargs: cfg.Config(
             srcroot=str(tmp_path), machine="m", platform="windows", repo_name=name,
             repos={"p": cfg.RepoConfig(
-                anchor=str(tmp_path), worktree_root=str(tmp_path / "trees"),
+                anchor=str(tmp_path), worktree_root=str(tmp_path),
             )},
         ),
     )
@@ -74,6 +76,70 @@ def test_run_success_replaces_pending_with_real_claim(
     assert m.cmd_run(_args()) == 0
     rec = tracking.load_record(path)
     assert [claim.ref for claim in rec.resources] == ["m/p/child"]
+
+
+@pytest.mark.parametrize("bound,mismatch", [
+    (False, None), (True, None), (False, "target"), (True, "target"), (True, "nonce"),
+])
+@pytest.mark.parametrize("labels", [{}, {
+    "machine": "obsolete-host", "execution_machine": "renamed-space",
+    "machine_identity_version": "invalid",
+}])
+def test_run_reuses_protected_allocation_without_row_naming_authority(
+    tmp_path, monkeypatch, bound, mismatch, labels,
+):
+    from agent_worktrees import owned_worktree as allocation, resource_producer
+
+    path = _seed_owner(tmp_path, monkeypatch)
+    identity = {
+        "ref": "receiver/destination/child", "creation_nonce": "original-nonce",
+        "path": "/worktrees/child", "branch": "worktree/child",
+    }
+    metadata = {
+        "version": allocation.METADATA_VERSION, "lifetime": allocation.LIFETIME,
+        "namespace": allocation.NAMESPACE, "creator": "m/p/owner",
+        "request_id": "original-request", "token": "a" * 32,
+        "phase": "bound" if bound else "pending",
+        "recovery": {"machine": "receiver", "project": "destination"},
+        **({"identity": identity} if bound else {}),
+    }
+    ref = allocation.claim_ref(metadata)
+
+    def create(*args, **kwargs):
+        record = tracking.load_record(path)
+        record.resources.append(tracking.ResourceClaim(
+            kind="worktree", ref=ref, producer=metadata,
+            created_at=tracking._now_iso(), state="active",
+        ))
+        with resource_producer.transaction(path):
+            tracking.save_record(record, path)
+        row_identity = {
+            key: identity[key] for key in ("creation_nonce", "path", "branch")
+        }
+        if mismatch == "nonce":
+            row_identity["creation_nonce"] = "replacement"
+        destination = {**metadata["recovery"]}
+        if mismatch == "target":
+            destination["machine"] = "other"
+        return types.SimpleNamespace(returncode=0, stdout=json.dumps({
+            "worktree": {
+                "id": "child", "repo": "destination", "owner_ref": "m/p/owner",
+                **row_identity, **labels,
+            },
+            "allocation": {
+                "version": 1, "creator": "m/p/owner", "request_id": "original-request",
+                "target": destination, "receiving_status": "allocated",
+            },
+        }))
+
+    monkeypatch.setattr(m.subprocess, "run", create)
+    assert m.cmd_run(_args()) == (1 if mismatch else 0)
+    claims = tracking.load_record(path).resources
+    protected = [claim for claim in claims if claim.ref == ref]
+    assert [(claim.ref, claim.producer) for claim in protected] == [(ref, metadata)]
+    pending = [claim for claim in claims if claim.ref.startswith("pending-run:")]
+    assert len(claims) == (2 if mismatch else 1)
+    assert len(pending) == (1 if mismatch else 0)
 
 
 @pytest.mark.parametrize("wrapped", [False, True])

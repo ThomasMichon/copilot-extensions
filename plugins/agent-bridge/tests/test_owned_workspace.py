@@ -173,6 +173,52 @@ async def test_changed_or_unknown_result_never_becomes_an_embodiment(monkeypatch
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("names", [
+    {},
+    {"machine": "renamed-host", "execution_machine": "renamed-execution"},
+    {"machine_identity_version": "invalid", "execution_machine": None},
+])
+async def test_receiving_row_labels_do_not_replace_original_allocation_destination(monkeypatch, names):
+    session = SimpleNamespace(session_id="bridge-session", target=owned.arm(target(), "bridge-session"))
+    intent = dict(owned._intent(session.target))
+    response = result(intent["creation_key"])
+    response["worktree"].pop("execution_machine")
+    response["worktree"].update(names)
+    command = AsyncMock(side_effect=[capabilities(), response])
+    monkeypatch.setattr(owned, "worktree_command", command)
+    db = Mock()
+    await owned.prepare_session(session, db)
+    persisted = SpawnTarget.from_json(db.update_session_target.call_args.args[1])
+    assert persisted.worktree_id == "actual-child"
+    assert persisted.cwd == "/worktrees/actual-child"
+    assert persisted.execution_space_key == intent["machine"] == "receiver"
+    assert owned._intent(persisted) == intent
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("section,field,value", [
+    ("target", "machine", "other"), ("target", "project", "other"),
+    ("worktree", "repo", "other"), ("worktree", "owner_ref", "other/control/parent"),
+    ("worktree", "kind", "session"), ("worktree", "caller_worktree", "other"),
+    ("worktree", "creation_nonce", None), ("worktree", "path", "relative/child"),
+])
+async def test_machine_free_result_keeps_destination_and_workspace_admission(
+    monkeypatch, section, field, value,
+):
+    session = SimpleNamespace(session_id="bridge-session", target=owned.arm(target(), "bridge-session"))
+    response = result(owned._intent(session.target)["creation_key"])
+    response["worktree"].pop("execution_machine")
+    changed = response["allocation"]["target"] if section == "target" else response["worktree"]
+    changed[field] = value
+    monkeypatch.setattr(owned, "worktree_command", AsyncMock(side_effect=[capabilities(), response]))
+    db = Mock()
+    with pytest.raises(AcquisitionRefused):
+        await owned.prepare_session(session, db)
+    assert session.target.worktree_id is None
+    db.update_session_target.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_actual_creator_probe_normalizes_legacy_machine_without_rebinding_owner(monkeypatch):
     selected = target()
     selected.caller_owner_ref = "legacy-origin/control/parent#session"
