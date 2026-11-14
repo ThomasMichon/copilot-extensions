@@ -311,6 +311,7 @@ def retain_helpers(slot: Path, *, complete: bool, context_source: Path | None = 
     names = (
         "runtime_launcher.py", "versioned_runtime.py", "versioned_runtime_leases.py", "versioned_runtime_source.py",
         "versioned_runtime_construction.py", "versioned_runtime_publication.py",
+        "versioned_runtime_cache.py", "daemon_instance_runtime.pyz",
     )
     contents = {}
     for name in names:

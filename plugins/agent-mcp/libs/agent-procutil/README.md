@@ -175,7 +175,7 @@ that those gates have passed or introduce another cleanup policy.
 `agent_procutil.python_cache.POLICY_VERSION == 2` advertises the additive
 `policy_arguments(root, runtime=target)` provider. Existing `cache_arguments`
 and `python_cache_args` callers retain their preceding contract; consumer
-migration and update-time collection are separate lifecycle work.
+migration and legacy update relief are separate lifecycle work.
 
 The new provider returns `["-X", "pycache_prefix=<private-platform-cache>"]`
 only for a completed target slot belonging to the addressed installation.
@@ -226,6 +226,58 @@ no-write fallback, preserving the existing objects. This provider neither
 deletes a cache nor changes runtime selection, retention or service lifetime.
 The caller still owns target admission and retention across launch; an owner
 record or catalog entry is not a runtime lease or permission to execute it.
+
+### Incremental retirement collection
+
+`python_cache_collect.collect(root, retirement=...)` visits only the addressed
+installation's private catalog. The versioned-runtime owner supplies lexical
+construction/retention/publication custody, rechecks its existing protection
+policy and requires the exact recorded immutable slot to be absent. Existing,
+selected, rollback, retained, referenced and busy runtimes keep their caches.
+The catalog and owner record identify cache work; neither grants retirement.
+
+The default pass considers at most eight indexed namespaces, 256 directory
+entries (including empty-directory probes) and 32 MiB of successful bytecode
+removals, with a one-second soft deadline checked between operations. Ownership
+records are separately capped at 16 KiB per namespace and continuation state
+at 32 KiB and 64 directory levels. Individual native filesystem/security calls
+cannot be preempted. A keyset cursor rotates past protected/refused namespaces.
+An identity-bound persistent depth-first stack resumes within a large clean
+tree; deleted leaves provide progress without rescanning a skipped prefix.
+Oversized single files or depth, unknown content, links, replacement identities
+and unverified native ownership are retained with a partial/refusal outcome.
+Custom budgets require at least two entry probes so finalization can prove the
+namespace contains only its owner record. Metadata access failures retain work;
+only an explicit not-found result establishes absence. Malformed or excessively
+nested JSON is a per-namespace refusal and does not reset fair progress.
+
+Ordinary `.pyc` and interrupted numeric `.pyc.<id>` writes are removed through
+anchored no-follow operations. POSIX uses directory descriptors; Windows keeps
+non-delete-sharing ancestor handles and deletes the verified leaf by handle.
+An earlier committed finalization phase permits recovery after owner-record
+removal. Only a now-empty namespace is removed. Successful byte counts are
+logical file sizes, not a physical-disk-space estimate.
+The deadline follows anchored entries through metadata reads, retirement's
+recorded/native process probes and removal. Expiry during protection scanning
+retains the namespace without completing the remaining process census.
+Expired finalization retains its continuation before the next owner-record or
+namespace mutation; mandatory handle and transaction cleanup remains unconditional.
+On POSIX, the private bytecode root protects normal interpreter-created
+group-writable mirror directories and files; descendants must still be
+ordinary current-user-owned objects. Windows retains per-descendant DACL checks.
+
+Normal version-slot `gc` runs this independent maintenance after runtime GC,
+including on repeated passes with no newly removed slot. Its existing return
+value/JSON remains unchanged; a bounded `gc: python-cache` stderr report carries
+counts, retained reasons, sanitized error codes and continuation status.
+Unsupported providers and maintenance failures do not veto runtime GC or
+successful incoming selection. No service or scheduler is added. This collector
+does not discover or delete legacy `cache/python` namespaces.
+Standalone maintenance imports its shipped source archive only after checking
+file protection. POSIX additionally validates the resolved archive ancestry
+with no-follow directory opens: current-user/root ownership, no shared writes
+(apart from sticky intermediate ancestors), and supported macOS ACLs. This
+protects the filename reopened by the importer, not merely an earlier descriptor.
 
 ## Windows bootstrap and shell admission
 

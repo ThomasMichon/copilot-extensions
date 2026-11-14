@@ -10,8 +10,10 @@ from . import python_cache_permissions as permissions
 
 
 @contextlib.contextmanager
-def connection(installation: Path, *, private_owner):
+def connection(installation: Path, *, private_owner, check_budget=None):
     """Open only this cache layout's private catalog, refusing unknown schemas."""
+    check_budget = check_budget or (lambda: None)
+    check_budget()
     path = installation / "catalog.sqlite"
     try:
         descriptor = private_owner.open_private(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
@@ -20,24 +22,38 @@ def connection(installation: Path, *, private_owner):
     else:
         os.close(descriptor)
     for candidate in (path, *(Path(str(path) + suffix) for suffix in ("-journal", "-wal", "-shm"))):
-        if os.path.lexists(candidate):
-            permissions.check_file(candidate)
+        check_budget()
+        try:
+            candidate.lstat()
+        except FileNotFoundError:
+            continue
+        check_budget()
+        permissions.check_file(candidate)
     database = None
     try:
+        check_budget()
         database = sqlite3.connect(path, timeout=0.1)
+        check_budget()
         database.execute("BEGIN IMMEDIATE")
+        check_budget()
         version = database.execute("PRAGMA user_version").fetchone()[0]
+        check_budget()
         if version == 0 and database.execute("SELECT 1 FROM sqlite_master LIMIT 1").fetchone() is None:
+            check_budget()
             database.execute("CREATE TABLE entries (key TEXT PRIMARY KEY, owner BLOB NOT NULL)")
+            check_budget()
             database.execute("CREATE TABLE progress (name TEXT PRIMARY KEY, value TEXT NOT NULL)")
+            check_budget()
             database.execute(
                 "CREATE TABLE work (id INTEGER PRIMARY KEY, key TEXT NOT NULL, "
                 "directory TEXT NOT NULL, after TEXT NOT NULL DEFAULT '', "
                 "UNIQUE(key, directory))",
             )
+            check_budget()
             database.execute("PRAGMA user_version = 1")
         elif version != 1:
             raise ValueError("Python cache catalog schema is unsupported")
+        check_budget()
         yield database
         database.commit()
     except sqlite3.Error as error:

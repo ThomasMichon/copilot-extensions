@@ -104,6 +104,7 @@ def verify_runtime_candidate() -> None:
         "runtime_launcher.py", "versioned_runtime.py", "versioned_runtime_leases.py",
         "versioned_runtime_source.py", "versioned_runtime_construction.py",
         "versioned_runtime_publication.py",
+        "versioned_runtime_cache.py",
     ):
         if not (slot / ".runtime-bootstrap" / name).is_file():
             raise RuntimeError(f"Manager retention bootstrap is missing {name}")
