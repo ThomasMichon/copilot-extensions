@@ -11,8 +11,9 @@ Conservative + degrade-safe, matching the rest of the effort:
 
 * **Dry-run by default** -- ``apply=False`` reports what *would* be reclaimed and
   touches nothing.
-* **Same-machine only** -- an entry whose ``machine`` is not this box is
-  *skipped* (surfaced for cleanup on its own machine), never acted on from here.
+* **Receiving custody only** -- a finalized local source and its released claim
+  must still be provable. Foreign, missing, live or ambiguous custody is retained;
+  legacy machine labels supply no authority.
 * **Best-effort, never raises** -- every reclaimer swallows failure and reports
   it; a failed reclaim leaves the entry in the registry (never lost) for a
   retry. Only a *positive* reclaim removes the entry.
@@ -32,6 +33,7 @@ import logging
 import re
 import shutil
 import subprocess
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import ParseResult, urlparse
@@ -516,21 +518,21 @@ def reclaim_orphan(
 ) -> ReclaimResult:
     """Dispatch one orphanage entry to its kind-specific reclaimer.
 
-    Same-machine guard first: an entry naming a different ``machine`` is
-    ``skipped`` (its resource must be reclaimed on that box). An unknown kind is
-    ``unsupported``. Everything is best-effort -- a reclaimer never raises.
+    An actual receiving source and its released claim establish custody, not a
+    legacy machine label. Foreign or unavailable source evidence stays pending.
+    An unknown kind is unsupported. A reclaimer never raises.
     """
-    machine = entry.get("machine")
-    this_machine = getattr(config, "machine", None)
-    if machine and this_machine and machine != this_machine:
-        return ReclaimResult(
-            "skipped", f"cross-machine (owned by {machine}); "
-                       f"run 'claims cleanup' there")
     kind = entry.get("kind")
     reclaimer = _RECLAIMERS.get(kind or "")
     if reclaimer is None:
         return ReclaimResult(
             "unsupported", f"no reclaimer for kind {kind!r} yet")
+    from .orphan_receiving import has_released_local_claim
+
+    if not has_released_local_claim(entry, config):
+        return ReclaimResult(
+            "skipped", "receiving source custody is unproven; original obligation retained",
+        )
     try:
         return reclaimer(entry.get("ref") or "", apply, config)
     except Exception as exc:  # a reclaimer must never break the pass
@@ -556,6 +558,7 @@ def cleanup_orphanage(
     rows: list[dict] = []
     reclaimed_keys: list[tuple[str | None, str | None]] = []
     entries = tracking.load_orphaned_obligations(project)
+    identities = Counter(_orphan_key(entry) for entry in entries)
     if selectors:
         entries = [
             entry for entry in entries
@@ -563,7 +566,12 @@ def cleanup_orphanage(
             or entry.get("source_worktree") in selectors
         ]
     for entry in entries:
-        result = reclaim_orphan(entry, config, apply=apply)
+        key = _orphan_key(entry)
+        result = (
+            ReclaimResult("skipped", "orphan identity is invalid or ambiguous; obligations retained")
+            if key is None or identities[key] != 1
+            else reclaim_orphan(entry, config, apply=apply)
+        )
         rows.append({
             "kind": entry.get("kind"),
             "ref": entry.get("ref"),
@@ -578,3 +586,8 @@ def cleanup_orphanage(
     if apply and reclaimed_keys:
         tracking.remove_orphaned_obligations(reclaimed_keys, project=project)
     return rows
+
+
+def _orphan_key(entry: dict) -> tuple[str, str] | None:
+    source, ref = entry.get("source_worktree"), entry.get("ref")
+    return (source, ref) if isinstance(source, str) and source and isinstance(ref, str) and ref else None

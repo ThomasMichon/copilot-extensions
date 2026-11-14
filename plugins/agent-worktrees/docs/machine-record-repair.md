@@ -39,6 +39,10 @@ not a reason to restamp a record. Orphan-obligation readers likewise ignore
 legacy naming fields; an actual ordinary orphan write omits them while
 preserving original references, handoff targets and unknown fields. A read or
 idempotent no-change rehome performs no migration.
+The cleanup consumer independently proves receiving-source custody before
+reclamation; stripping a legacy label never makes an obligation local or
+disposable. Foreign, missing, live, transferred or ambiguous source evidence
+retains the entry. See [resource obligations and custody](architecture.md).
 
 Independent [retained local authority](execution-identity.md#retained-local-checkout-authority)
 and normal integrity/ownership checks still govern real mutations. A naming

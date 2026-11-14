@@ -1938,6 +1938,14 @@ containers, bridge sessions) so finalizing never orphans unfinished work. (Effor
   `finalize --abandon --handoff-to <recipient-or-flow>` re-homes
   still-unsettled obligations to a durable **orphanage** (not dropped);
   selective `claims cleanup <ref-or-source-worktree>` accepts/reclaims them.
+  Cleanup qualifies the actual receiving project/source record and its unique
+  released claim before a destructive callback; the source must be finalized,
+  locally proven and free of a pending claim handoff. This also covers a retained
+  source record after its checkout is retired, without trusting old machine
+  labels. Missing/foreign/live source evidence and colliding orphan cleanup keys
+  remain unsettled; an unavailable source record is not proof of disposal
+  authority. The resource owner's independent reclaim and finalization checks
+  still apply.
   *(Phases 4–6 complete; effort `resource-obligation-settlement` closed.)*
 - **Derived output claims (`agent_worktrees.derived_claims`).** A producer that
   creates a regenerable directory inside the checkout journals it as a
