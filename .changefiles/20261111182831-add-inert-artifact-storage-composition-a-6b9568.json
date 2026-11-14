@@ -1,0 +1,9 @@
+{
+  "comment": "Add opt-in owned test-runner scratch with private storage admission, bounded retained diagnostics and independent cleanup while preserving legacy disposable and cache behavior",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

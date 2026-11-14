@@ -257,6 +257,30 @@ admission or budgets.
 - **Handoff:** every slice updates the machine-readable inventory, contract map,
   disposition record, and effort journal before it is considered complete.
 
+The finite #6093/#6138 families enter through existing Phase 7
+deduplication and normal domain-Plan review into Phase 4 ONLY:
+Logger/Manager link-fixture capability and Budget portable-PowerShell
+timeout disposition remain distinct families under this same portfolio
+primary maintainer. Existing source/fixture/investigation custodians,
+OPEN #1303, all incumbent rows/check states, first unresolved gates,
+native/periodic/release/resource holds and historical Journal remain.
+
+#6093 retains all LF/LFV conditions, its inherited #9618 taking statement
+and FULL CURRENT OPEN parent readback before administrative retirement.
+Its held fixture source supplies no current-repair assertion.
+#6138 retains its existing investigator, actual-candidate-first
+source-correction OR bounded-same-SHA-retry alternative, original bounds
+and independent #6131/#6135 repair.
+
+Normal review must actually merge the complete direct Phase 4 Plan/local
+Validation, actual level-two global Validation, Coordination and dated
+Journal before domain receiving is accepted. Ledger publication alone is
+not acceptance. Separate permitted whole-current source/receiver/custody
+readback and each literal source condition govern any later administrative
+judgment. Both sources stay OPEN now; no generic ACK, implementation
+appointment, execution, activation, privilege change or custody release
+is introduced.
+
 ## Context
 
 The [weighted native fixture/runner cohort](../backlog-reconciliation/semantic-theme-results.md#native-fixturerunner-cohort)
@@ -602,6 +626,104 @@ Sources: #6662, #6663, #6690, #6900, #9442 and #9815, each with its complete
 original and refinement. OPEN #1303 remains the live portfolio coordination
 token; historical source trackers are not required live claim tokens after
 a separately qualified administrative supersession.
+
+#### Finite Logger and HostProfile link-fixture capability from #6093
+
+Proposed Phase 4 Logger/Manager fixture-wave receiving through Phase 7
+migration-intake and domain-Plan review. The portfolio remains the single
+canonical domain owner; existing Logger and HostProfile source custodians
+retain their separate implementation scopes.
+
+The five original Logger nodes are
+`test_explicit_repo_config_env_rejects_symlinked_ancestor`,
+`test_explicit_repo_config_env_rejects_symlinked_non_git_root`,
+`test_explicit_repo_config_env_rejects_symlink_masked_by_dotdot`,
+`test_repo_config_rejects_symlinked_candidate`, and
+`test_repo_config_rejects_symlinked_ancestor_directory`.
+
+The inherited #9618 HostProfileTests controls are
+`test_linked_or_hardlinked_owned_profile_is_refused` and
+`test_incomplete_receipt_publication_and_linked_ancestor_are_refused`,
+including their direct promotion-unit packet invocation. Preserve that
+source's taking statement and unchanged nodes, effects and budgets.
+
+##### Direct Plan
+
+- [ ] LF1 (#6093) - Establish an explicit portable capability contract OR
+  native reparse/junction coverage that genuinely proves the five original
+  scaffold link-rejection boundaries: explicit env-config ancestor, non-Git
+  root, link masked by dotdot, config candidate and ancestor directory.
+  Correct the directory-link target_is_directory=True fixture declaration.
+  Do not require both alternatives or replace rejection with ordinary
+  relative-path acceptance.
+- [ ] LF2 (#9618) - Use the existing explicit Windows WinError-1314 skip
+  convention for actual symlink controls in the two named HostProfileTests
+  cases, including their direct promotion-packet invocation. Preserve
+  unrelated hardlink/incomplete-publication assertions even when only
+  symlink creation lacks capability; do not skip the whole composite test.
+- [ ] LF3 - Retain real POSIX link rejection, selected test nodes/effect
+  allowances/budgets, production trust rules and otherwise modeled host
+  policy. Report skipped/unreached assertions as such, never passes.
+  No automatic elevation, Developer Mode/host setting change, trust
+  relaxation or corpus-inventory change.
+
+##### Local Validation
+
+- [ ] LFV1 - Under separately authorized ordinary native Windows capability,
+  run the actual Logger scaffold and direct host-profile promotion-unit
+  paths without undeclared elevation. Show explicit unavailable symlink
+  controls, surviving independent assertions and completion of the selected
+  packet; retain real rejection coverage where symlinks/reparse controls
+  are supported and on POSIX.
+- [ ] LFV2 - Verify each original rejection boundary still runs when its
+  capability is present, including directory and dotdot masking cases.
+  Preserve genuine non-1314 failures and truthful pass/skip/failure results.
+  Historical suite counts and passing inventory behavior are not a fresh
+  fixture-repair receipt.
+- [ ] LFV3 - Keep the existing claimants, source/portfolio owners and gates;
+  read back the FULL current OPEN parent before administrative retirement.
+  Acceptance stays unchecked. This intake creates no link, runs no test
+  and changes no privilege, selected packet or production policy.
+
+#### Finite portable PowerShell spaced-path timeout disposition from #6138
+
+Proposed Phase 4 Budget fixture-wave receiving through Phase 7 intake and
+domain-Plan review. Preserve the existing bounded release-blocker
+investigator; #6131 / PR #6135's watch-generation repair remains independent.
+
+##### Direct Plan
+
+- [ ] **B6138-P1:** Retain actual Dev run38106720038, Budget
+  job114376374185, head e5990b0f0940e893c0dffca6c5707f11d4333d42:
+  `test_powershell_self_stage_preserves_spaced_paths_and_force`
+  exceeded the 30-second item limit while waiting for its PowerShell child;
+  the job reported 1 failed/52 passed. Diagnose the actual subprocess and
+  contained-test assumptions before budget edits or release retry.
+- [ ] **B6138-P2:** Preserve the owner's unchanged contained Linux
+  8.17-second pass as limited evidence, explicitly not CI-flake proof.
+  Inspect the attributable actual candidate result THEN choose a justified
+  source correction OR bounded same-SHA retry, not both. A genuine
+  regression requires a versioned fix-forward through normal review and
+  release gates; retry is not a substitute. Keep the original bounds and
+  existing investigator's decision custody.
+- [ ] **B6138-P3:** Preserve spaced profile/payload/runtime paths, actual
+  self-staging and Force forwarding. Credit real materialization and
+  bounded-copy fixture improvements at their delivered scopes. This is a
+  portable PowerShell case skipped on native Windows; native-only,
+  unrelated-plugin, absent-job, cancelled or skipped results do not prove
+  this consumer passed or its timeout was causally dispositioned.
+
+##### Local Validation
+
+- [ ] **B6138-V:** At the existing separately authorized finite portable
+  consumer boundary, retain exact candidate/source, invocation and selected
+  test, literal child/item outcomes and unchanged budgets, original failed
+  receipt and limited Linux pass. Record the investigator's justified
+  correction-OR-bounded-same-SHA-retry disposition without hiding failures,
+  assuming a flake or substituting native/unrelated green. Preserve
+  unit-only required CI, proper existing contained/periodic/native tiers,
+  owning cleanup and independent #6131/#6135 credit. Documentary intake
+  runs no installer, workflow or test and grants no retry or rollout.
 
 ### Phase 5 — Tiered developer and review workflows
 
@@ -2009,6 +2131,27 @@ every-host or release prerequisite is added to a finite family.
   holders. Tracking intake is not a native full pass, accepted
   flake, implementation, parent completion or custody/resource release.
 
+- [ ] **LF6093-G:** Resolve EVERY LF1-LF3 and LFV1-LFV3 condition:
+  all five original Logger rejection boundaries, directory-link declaration,
+  capability contract OR genuinely equivalent native reparse/junction proof,
+  both named HostProfile controls and their direct promotion packet,
+  surviving hardlink/incomplete-publication assertions, real POSIX rejection
+  and truthful capability-present/unavailable/non-1314 outcomes. Preserve
+  unchanged nodes, effects, budgets, production trust, source custodians,
+  OPEN #1303 and LFV3's FULL CURRENT OPEN parent readback condition.
+  Documentary receiving is not fixture repair, native PASS, privilege
+  authority, implementation appointment or source/resource release.
+- [ ] **B6138-G:** Resolve EVERY B6138 Plan/local Validation and continuing
+  Coordination condition at the original finite portable PowerShell
+  spaced-path/Force boundary: exact failed run/job/source and 30-second
+  budget, Linux8.17 not-flake distinction, actual-candidate inspection THEN
+  justified source correction OR bounded same-SHA retry, real caller/fixture
+  assertions and truthful result grades. Preserve the retained investigator,
+  independent #6131/#6135 work, genuine-regression fix-forward and normal
+  release gates, unit-only required CI and existing bounds/custodians.
+  No new native, whole-release or whole-portfolio prerequisite is added;
+  planning is not causal closure, execution or source/resource release.
+
 ## Proposal
 
 Approve the vision, framework, and phased campaign as the repository's
@@ -2321,3 +2464,22 @@ replacement tournament.
 - Added focused Linux and Windows contract coverage for admission and state
   isolation. Complete descendant cleanup after every exit mode remains the
   outstanding Phase 1 gate.
+
+### 2026-11-13 - Proposed finite link-capability and portable-timeout receiving
+
+Proposed complete #6093 original/inherited LF1-LF3/LFV1-LFV3 plus actual
+global LF6093-G, and #6138 B6138-P1-P3/local-V/actual-global-G, through
+existing Phase 7 intake into Phase 4 only. Twelve new technical rows remain
+unchecked; all 13 checked and 275 incumbent unchecked rows, original
+alternatives, first Plan/global gates, participants and source/resource
+custodians remain unchanged.
+
+The complete current ROOT, strict triage framework, linked historical
+Journal and intake ROOT/append-only ledger were read. Normal review of
+the accompanying complete domain amendment supplies domain acceptance,
+not this proposal or ledger alone. #6093's held fixture body remains
+unread and no current repair is asserted. #6138's failed portable receipt,
+limited Linux pass and candidate-first correction-OR-retry decision remain
+distinct. Both sources and #1303 stay OPEN. No implementation, import,
+collection, test, native/privilege probe, workflow retry, rollout or
+source/resource effect occurred.

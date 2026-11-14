@@ -1380,11 +1380,17 @@ def test_manager_uninstall_native_groups_preserve_existing_contracts_and_bounds(
     )
     expression = compile(ast.Expression(assignment.value), "native-groups", "eval")
     for contract, count in (("runtime", 1), ("callbacks", 1), ("updater", 3), ("uninstall", 2)):
-        groups = eval(expression, {"str": str}, {
+        groups = eval(expression, {"str": str, "Path": Path, "__file__": str(SCRIPT.with_name("run-manager-runtime-acceptance.py"))}, {
             "args": SimpleNamespace(contract=contract), "prepare_command": ["prepare"],
             "assertions": ["assert"], "python": "python", "native": "native", "sandbox": "sandbox",
         })
         assert len(groups) == count
+        if contract == "runtime":
+            assert groups[0][1] == [[
+                "python", str(SCRIPT.with_name("run-manager-runtime-acceptance.py").resolve()),
+                "--runtime-group", "sandbox", "--runtime-python", "python",
+            ]]
+            continue
         assert groups[0][1][0] == ["prepare"]
         assert groups[-1][1][-1] == ["assert"]
         if contract == "uninstall":
@@ -1574,7 +1580,7 @@ def test_bridge_historical_partitions_collect_every_selected_case_exactly_once(
 def test_bridge_historical_partitions_share_the_original_plugin_deadline(
     bridge_historical_plan, monkeypatch,
 ):
-    clock = iter([0, 0, 250, 650, 901, 901])
+    clock = iter([0, 0, 0, 250, 650, 901, 901])
     monkeypatch.setattr(runner, "time", SimpleNamespace(monotonic=lambda: next(clock)))
     seen = []
     monkeypatch.setattr(

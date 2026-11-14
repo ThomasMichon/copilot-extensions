@@ -539,12 +539,22 @@ lifetime or expose a native effect. Its matching candidate keeps
 `effects_wired: false`, `native_recovery: unqualified`,
 `intent_contract: unavailable` and `replay: never`.
 
-No permit-aware recovery descriptor or intent contract is implemented by that
-leaf. The existing v1 fields retain their meanings and prior records remain
-unqualified. The next source boundary is the explicit contract evolution above,
-coordinated with the current Core and receiver owners before consumer changes.
-Complete historical identity publication, actual execution admission and
-provider reacquisition remain independently open.
+That leaf does not implement a permit-aware recovery intent. The follow-on
+#12513 publishes the separate strict `PermitRecoveryIntent` data contract and
+its selected-Core `--support-json` declaration. It retains the original v1
+descriptor and operation, opaque source-lease identity, separate receiver
+identity/order and original/current execution-permit ordering. Only revisions
+within that execution permit are compared. V1 records and fields retain their
+meanings; no conversion, automatic rewriting or resealing is provided.
+
+Current Core and receiver ownership/contract constraints were aligned before
+that expansion. Its declaration is data-only: owner-store and native support
+remain unqualified. The Worktrees recovery store and passive permit inspector
+remain unchanged, and no caller emits the new form. Next expand that original
+owner's durable intent adapter and actual executing-provider support/refusal
+declaration before consumer use. Complete historical identity publication,
+current-source and decision verification, final execution admission, provider
+reacquisition and native qualification remain independently open.
 
 ## Evidence before each functional promotion
 

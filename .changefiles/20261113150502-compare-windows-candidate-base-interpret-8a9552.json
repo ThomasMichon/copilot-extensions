@@ -1,0 +1,9 @@
+{
+  "comment": "Compare Windows candidate base interpreters by physical file identity, accepting equivalent extended-length paths while rejecting different or unavailable executables.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

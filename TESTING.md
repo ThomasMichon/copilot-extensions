@@ -66,6 +66,13 @@ directory convenience links on Windows. RedirectionGuard may permit creating
 such a link but refuse pytest's later cleanup traversal. Native symlink APIs,
 symlink-specific tests, fixture cleanup and containment remain unchanged.
 
+The explicit owned-scratch source pilot is documented in
+[Owned test-runner scratch](plugins/agent-worktrees/docs/artifact-scratch.md).
+Its `--owned-scratch-owner` option requires an already-available compatible
+Worktrees Python owner; ordinary runs and reusable caches keep their existing
+behavior. The real consumer qualification is the opt-in Worktrees
+`tests/test_artifact_runner.py` T3 packet, not an installed rollout.
+
 This page is a reference catalog, not a sequential checklist. Read the lane
 needed for the changed behavior; optional packets below do not all become
 prerequisites for one contribution.

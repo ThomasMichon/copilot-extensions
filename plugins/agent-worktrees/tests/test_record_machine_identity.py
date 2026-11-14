@@ -1,4 +1,4 @@
-"""Versioned tracking tuples retain execution ownership and historical bytes."""
+"""Reporter naming is transient; receiving subjects retain their save fences."""
 
 from __future__ import annotations
 
@@ -7,9 +7,17 @@ from pathlib import Path
 
 import pytest
 import yaml
+from machine_transport import LocalExecutionContext
 
-from agent_worktrees import config as cfg, execution_spaces, tracking
+from agent_worktrees import config as cfg, execution_spaces, record_reporting, tracking
 from agent_worktrees.worktree_machine_identity import WorktreeMachineIdentity
+
+REPORTER = LocalExecutionContext("desk", "desk", "wsl", "guest-space", "guest-space")
+
+
+@pytest.fixture(autouse=True)
+def reporter(monkeypatch):
+    monkeypatch.setattr(record_reporting, "local_context", lambda *args: REPORTER)
 
 
 def _record(path: Path, *, versioned: bool = True) -> tracking.WorktreeRecord:
@@ -20,32 +28,28 @@ def _record(path: Path, *, versioned: bool = True) -> tracking.WorktreeRecord:
     }
     if versioned:
         data.update(WorktreeMachineIdentity("desk", "wsl", "guest-space").to_record_fields())
-    return tracking.parse_record_data(data, path=path)
+    return tracking.parse_record_data(data, path=path, reporting_context=REPORTER)
 
 
 @pytest.mark.parametrize("versioned", [False, True])
-def test_record_identity_roundtrip_does_not_migrate_legacy(tmp_path: Path, versioned: bool) -> None:
+def test_record_identity_roundtrip_drops_legacy_stamps(tmp_path: Path, versioned: bool) -> None:
     path = tmp_path / "retained-wsl-wsl.yaml"
     record = _record(path, versioned=versioned)
     tracking.save_record(record, path)
     before = path.read_bytes()
     loaded = tracking.load_record(path)
-    assert loaded.machine == ("desk" if versioned else "desk-wsl")
-    assert loaded.execution_machine == ("guest-space" if versioned else "desk-wsl")
+    assert loaded.machine == "desk"
+    assert loaded.execution_machine == "guest-space"
     assert loaded.worktree_id == path.stem
     assert loaded.machine_identity == record.machine_identity
     assert loaded.execution_reference_fields["machine"] == loaded.execution_machine
-    if versioned:
-        assert loaded.execution_reference_fields["worktree_identity"] == loaded.machine_fields
-    else:
-        assert loaded.execution_reference_fields == {"machine": loaded.machine}
-    assert yaml.safe_load(before) | loaded.machine_fields == yaml.safe_load(before)
+    assert loaded.execution_reference_fields["worktree_identity"] == loaded.machine_fields
+    assert not set(loaded.machine_fields).intersection(yaml.safe_load(before))
     tracking.save_record(loaded, path)
     assert path.read_bytes() == before
-    if not versioned:
-        assert b"machine_identity_version" not in before
-        assert b"execution_machine" not in before
-        assert b"environment:" not in before
+    assert b"machine_identity_version" not in before
+    assert b"execution_machine" not in before
+    assert b"environment:" not in before
 
 
 @pytest.mark.parametrize("field,value", [
@@ -53,7 +57,7 @@ def test_record_identity_roundtrip_does_not_migrate_legacy(tmp_path: Path, versi
     ("environment", "linux"),
     ("machine_identity_version", 2),
 ])
-def test_same_physical_host_cannot_hide_identity_cas_drift(
+def test_legacy_naming_changes_do_not_replace_the_receiving_subject(
     tmp_path: Path, field: str, value: object,
 ) -> None:
     path = tmp_path / "owned.yaml"
@@ -66,33 +70,33 @@ def test_same_physical_host_cannot_hide_identity_cas_drift(
     path.write_text(yaml.safe_dump(data))
     before = path.read_bytes()
     stale.title = "stale writer"
-    with pytest.raises(ValueError, match="identity|version"):
-        tracking.save_record(stale, path)
-    assert path.read_bytes() == before
+    tracking.save_record(stale, path)
+    assert tracking.load_record(path).title == "stale writer"
+    assert field not in yaml.safe_load(path.read_text())
+    assert path.read_bytes() != before
 
 
 @pytest.mark.parametrize("versioned", [False, True])
-def test_ordinary_writer_cannot_upgrade_or_relabel_a_tuple(tmp_path: Path, versioned: bool) -> None:
+def test_ordinary_writer_refreshes_transient_naming(tmp_path: Path, versioned: bool) -> None:
     path = tmp_path / "owned.yaml"
     tracking.save_record(_record(path, versioned=versioned), path)
     loaded = tracking.load_record(path)
     loaded.machine_identity = WorktreeMachineIdentity(
         loaded.machine, "wsl", "new-guest",
     )
-    before = path.read_bytes()
-    with pytest.raises(ValueError, match="immutable"):
-        tracking.save_record(loaded, path)
-    assert path.read_bytes() == before
+    tracking.save_record(loaded, path)
+    assert loaded.machine_identity == WorktreeMachineIdentity("desk", "wsl", "guest-space")
+    assert "machine" not in yaml.safe_load(path.read_text())
 
 
-def test_legacy_explicit_owner_label_repair_still_uses_loaded_fence(tmp_path: Path) -> None:
+def test_legacy_owner_label_edit_cannot_override_reporter(tmp_path: Path) -> None:
     path = tmp_path / "owned.yaml"
     tracking.save_record(_record(path, versioned=False), path)
     loaded = tracking.load_record(path)
     loaded.machine = "old-label-repaired"
     tracking.save_record(loaded, path)
-    assert tracking.load_record(path).machine == "old-label-repaired"
-    assert tracking.load_record(path).machine_identity is None
+    assert tracking.load_record(path).machine == REPORTER.machine
+    assert tracking.load_record(path).execution_machine == REPORTER.execution_machine
 
 
 @pytest.mark.parametrize("field,value", [
@@ -197,9 +201,9 @@ def test_subject_fence_preserves_timestamp_spelling_after_cache_eviction(
 
 
 @pytest.mark.parametrize("defect", [
-    "physical", "environment", "execution", "config-platform", "native", "snapshot",
+    "repository", "incarnation", "ledger", "config-platform", "native", "snapshot",
 ])
-def test_tuple_mutation_never_uses_physical_host_equality(
+def test_reporter_naming_never_replaces_receiving_subject_proof(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, defect: str,
 ) -> None:
     (tmp_path / "machines.yaml").write_text(
@@ -221,14 +225,12 @@ def test_tuple_mutation_never_uses_physical_host_equality(
     tracking.save_record(record, path)
     record = tracking.load_record(path)
     execution_spaces.require_record_mutation(record, config)
-    if defect == "physical":
-        record.machine = "elsewhere"
-        record.machine_identity = WorktreeMachineIdentity("elsewhere", "wsl", "guest-space")
-    elif defect == "environment":
-        record.platform = "windows"
-        record.machine_identity = WorktreeMachineIdentity("desk", "windows", "native-space")
-    elif defect == "execution":
-        record.machine_identity = WorktreeMachineIdentity("desk", "wsl", "other-guest")
+    if defect == "repository":
+        record.repo = "elsewhere"
+    elif defect == "incarnation":
+        record.creation_nonce = "replacement"
+    elif defect == "ledger":
+        record._loaded_from = tmp_path / "elsewhere.yaml"
     elif defect == "config-platform":
         config = replace(config, platform="windows")
     elif defect == "snapshot":
@@ -236,7 +238,7 @@ def test_tuple_mutation_never_uses_physical_host_equality(
     else:
         config = replace(config, machine="native-space", platform="windows")
         monkeypatch.setattr(cfg, "detect_platform", lambda: "windows")
-    with pytest.raises(execution_spaces.ExecutionSpaceError, match="identity|execution|platform"):
+    with pytest.raises(execution_spaces.ExecutionSpaceError):
         execution_spaces.require_record_mutation(record, config)
 
 
@@ -248,12 +250,11 @@ def test_record_json_contains_physical_metadata_and_explicit_owner(tmp_path: Pat
         record = _record(path, versioned=versioned)
         result = _worktree_to_dict(record)
         assert {key: result[key] for key in record.machine_fields} == record.machine_fields
-        if not versioned:
-            assert "execution_machine" not in result
-            assert "machine_identity_version" not in result
+        assert result["execution_machine"] == REPORTER.execution_machine
+        assert result["machine_identity_version"] == 1
 
 
-def test_tuple_requires_exact_local_context_without_optional_map(
+def test_reporter_labels_do_not_authorize_an_unproven_ledger(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config = cfg.Config(
@@ -265,7 +266,11 @@ def test_tuple_requires_exact_local_context_without_optional_map(
     monkeypatch.setattr(execution_spaces, "registry_for_config", lambda config: {})
     monkeypatch.setattr(cfg, "detect_platform", lambda: "wsl")
     monkeypatch.setattr(cfg, "project_dir", lambda project: tmp_path / project)
-    record = _record(tmp_path / "owned.yaml", versioned=False)
+    path = tmp_path / "project" / "worktrees" / "owned.yaml"
+    path.parent.mkdir(parents=True)
+    record = _record(path, versioned=False)
+    record.worktree_path = str(tmp_path / "trees" / record.worktree_id)
+    tracking.save_record(record, path)
     execution_spaces.require_record_mutation(record, config)
 
     record.machine = "desk"
@@ -276,10 +281,13 @@ def test_tuple_requires_exact_local_context_without_optional_map(
         WorktreeMachineIdentity("desk", "windows", "desk-wsl"),
         WorktreeMachineIdentity("desk", "wsl", "foreign-space"),
     ):
-        with pytest.raises(execution_spaces.ExecutionSpaceError, match="identity|execution space"):
-            execution_spaces.require_record_mutation(replace(
-                record, machine=identity.machine, platform=identity.environment, machine_identity=identity,
-            ), config)
+        snapshot = replace(
+            record, machine=identity.machine, platform=identity.environment, machine_identity=identity,
+        )
+        snapshot._reporting_context = REPORTER
+        snapshot._loaded_from = tmp_path / "foreign.yaml"
+        with pytest.raises(execution_spaces.ExecutionSpaceError, match="ledger"):
+            execution_spaces.require_record_mutation(snapshot, config)
 
 
 @pytest.mark.parametrize("unrelated_map", [False, True])
@@ -315,12 +323,11 @@ def test_optional_map_never_replaces_receiving_record_fences(
     elif defect == "repo":
         record.repo = "foreign-project"
     elif defect == "platform":
-        record.platform = "windows"
-        record.machine_identity = WorktreeMachineIdentity("desk", "windows", "desk")
+        config = replace(config, platform="windows")
     elif defect == "owner":
         record.owner_ref = "peer-space/project/parent"
     else:
-        record.machine_identity = WorktreeMachineIdentity("desk", "wsl", "peer-space")
+        record.creation_nonce = "foreign-incarnation"
     with pytest.raises(execution_spaces.ExecutionSpaceError):
         execution_spaces.require_record_mutation(record, config)
     assert path.read_bytes() == before
@@ -400,13 +407,16 @@ def test_factory_tuple_is_explicit_and_existing_admission_is_not_reformatted(
         assert not created
         assert retained.worktree_path == record.worktree_path
         assert retained.creation_nonce == record.creation_nonce
-        assert retained.machine_identity == identity
+        assert retained.execution_machine == REPORTER.execution_machine
         assert path.read_bytes() == before
     else:
         record = tracking.create_new_record(*arguments, machine_identity=identity)
-    assert tracking.load_record(tmp_path / "historical-wsl-wsl.yaml").machine_identity == identity
+    assert tracking.load_record(tmp_path / "historical-wsl-wsl.yaml").execution_machine == REPORTER.execution_machine
     assert record.worktree_id == "historical-wsl-wsl"
-    assert record.execution_machine == "custom-guest"
+    assert record.execution_machine == REPORTER.execution_machine
+    assert "machine_identity_version" not in yaml.safe_load(
+        (tmp_path / "historical-wsl-wsl.yaml").read_text()
+    )
 
 
 def test_delegate_graph_qualifies_same_host_records_by_execution_owner() -> None:
@@ -466,12 +476,8 @@ def test_forced_tuple_cleanup_requires_receiving_registry_before_legacy_fallback
         "owned", repo=config.default_repo, tracking_path=path.parent, force=True,
         reap=lambda record, info: reaped.append(record.worktree_id) or (0, []),
     )
-    if versioned:
-        assert not result.cleanable and result.bucket == "execution-space"
-        assert reaped == []
-    else:
-        assert result.cleanable and result.reaped
-        assert reaped == ["owned"]
+    assert not result.cleanable and result.bucket == "execution-space"
+    assert reaped == []
     assert path.read_bytes() == before
 
 

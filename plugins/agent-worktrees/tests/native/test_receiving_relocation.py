@@ -146,6 +146,13 @@ def test_native_receiving_continuity_preserves_original_results_and_current_cons
     assert receiving.record_identity(current) == original_identity
     assert journal.read_bytes() == original_journal
     assert fixture.origin.yaml_path.read_bytes() == original_origin
+    retained = location.read(current.yaml_path)
+    retained["identity"].update(
+        machine=fixture.record.machine, platform=fixture.record.platform,
+        execution_machine=fixture.record.execution_machine, machine_identity=None,
+    )
+    location.write(current.yaml_path, retained)
+    receiving_relocation.require_retained_provenance(current.yaml_path)
     receiving.require_record(current, fixture.config)
     execution_spaces.require_record_mutation(current, fixture.config, recover_receiving=False)
     current.title = "ordinary update at the new location"

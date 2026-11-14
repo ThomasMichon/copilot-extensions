@@ -58,6 +58,14 @@
       "type": "patch"
     },
     {
+      "plugin": "wsl-setup",
+      "type": "patch"
+    },
+    {
+      "plugin": "libs/agent-procutil",
+      "type": "patch"
+    },
+    {
       "plugin": "libs/update-driver",
       "type": "patch"
     }

@@ -185,11 +185,12 @@ def _verified_profile_wheels(
         remaining_archive = max_archive_bytes
         remaining_unpacked = max_unpacked_bytes
         distributions = []
-        owners = {}
-        directory_owners = {}
-        manager_directories = set()
+        ownership = None if aggregate is None else aggregate.get("ownership")
+        owners = {} if ownership is None else ownership["owners"]
+        directory_owners = {} if ownership is None else ownership["directories"]
+        manager_directories = set() if ownership is None else ownership["manager_directories"]
         manager = "copilot-extensions-worktree-manager"
-        check_ownership = any(
+        check_ownership = ownership is not None or any(
             canonicalize_name(wheel["name"]) == manager for wheel in expected.values()
         )
         for filename, wheel in expected.items():
@@ -224,7 +225,10 @@ def _verified_profile_wheels(
                 "Lib/site-packages/" if environment["os_name"] == "nt"
                 else f"lib/python{environment['python_version']}/site-packages/"
             )
-            for member in (*facts.member_hashes, facts.prefix + "RECORD") if check_ownership else ():
+            check_payload = check_ownership and (
+                ownership is None or filename not in ownership["wheels"]
+            )
+            for member in (*facts.member_hashes, facts.prefix + "RECORD") if check_payload else ():
                 _check_deadline(deadline)
                 parts = member.split("/")
                 if len(parts) > 2 and parts[0].endswith(".data"):
@@ -289,6 +293,8 @@ def _verified_profile_wheels(
                     aggregate["seen"][filename] = observed
                 elif aggregate["seen"][filename] != observed:
                     raise ProfileError("shared wheel changed between environments")
+            if ownership is not None:
+                ownership["wheels"].add(filename)
             remaining_archive -= size
             remaining_unpacked -= unpacked
             distributions.append((

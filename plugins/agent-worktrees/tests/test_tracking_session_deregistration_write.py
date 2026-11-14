@@ -36,9 +36,11 @@ def _clean_verb_registry():
 
 
 @pytest.fixture
-def record_path(tmp_tracking_dir: Path, monkeypatch) -> Path:
+def record_path(tmp_tracking_dir: Path, monkeypatch, monkeypatch_config) -> Path:
+    monkeypatch.setattr(cfg.socket, "gethostname", lambda: "test")
+    monkeypatch.setattr(cfg, "project_dir", lambda name=None: tmp_tracking_dir.parent)
     config = cfg.Config(
-        srcroot=str(tmp_tracking_dir), machine="test", platform="wsl", repo_name="test-repo",
+        srcroot=str(tmp_tracking_dir), machine="test", platform=cfg.detect_platform(), repo_name="test-repo",
         repos={"test-repo": cfg.RepoConfig(
             anchor=str(tmp_tracking_dir), worktree_root=str(tmp_tracking_dir / "trees"),
         )},
@@ -46,8 +48,9 @@ def record_path(tmp_tracking_dir: Path, monkeypatch) -> Path:
     monkeypatch.setattr(cfg, "load_project_config", lambda name, **kwargs: config)
     path = tmp_tracking_dir / "wt-dereg.yaml"
     rec = WorktreeRecord(
-        worktree_id="wt-dereg", branch="worktree/wt-dereg", worktree_path="/tmp/wt-dereg",
-        repo="test-repo", machine="test", platform="wsl",
+        worktree_id="wt-dereg", branch="worktree/wt-dereg",
+        worktree_path=str(tmp_tracking_dir / "trees" / "wt-dereg"),
+        repo="test-repo", machine="test", platform=config.platform,
         started_at="2026-06-01T10:00:00", last_resumed_at="2026-06-01T10:00:00",
         resume_count=0, title=None, status="active", completed_at=None,
         sessions=[SessionEntry(session_id="sess-1", started_at="2026-06-01T10:00:00")],
@@ -249,7 +252,7 @@ def test_stop_fsmonitor_daemon_runs_while_the_lock_is_still_held(
         {"worktree_id": "wt-dereg", "yaml_path": str(record_path), "session_id": "sess-1"}
     )
     assert result == {"ok": True}
-    assert probe_result["worktree_path"] == "/tmp/wt-dereg"
+    assert probe_result["worktree_path"] == str(record_path.parent / "trees" / "wt-dereg")
     assert probe_result["acquired"] is False
 
 

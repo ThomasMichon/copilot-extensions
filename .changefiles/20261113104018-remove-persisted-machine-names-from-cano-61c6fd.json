@@ -1,0 +1,9 @@
+{
+  "comment": "Remove persisted machine names from canonical tracking records and derive fresh reporter context while preserving receiving-ledger and allocation fences.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

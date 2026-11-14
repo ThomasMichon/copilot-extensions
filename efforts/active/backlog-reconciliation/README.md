@@ -3164,11 +3164,59 @@ sources, transferring owners or turning partial/planning gains into completion.
   receiving objective or a retained gap; investigate actual implementation
   evidence when claiming completion, rather than making that the prerequisite
   for discovering thematic alignment.
+  The [conductor/native-condition intake](journal/2026/11.13-conductor-continuation-and-native-conditions.md)
+  proposes 21 unchecked direct Plan/local and actual global Validation rows
+  for #6464 under its existing receiver and strict OPEN-until-implementation-
+  AND-real-consumer condition. All ten source outcomes remain OPEN.
+  The complete 00:20:26 UTC census is 855 whole open, 126 above 729,
+  after one excluded metadata-only arrival and no departure or closure credit.
+  The [Gateway availability/source-condition intake](journal/2026/11.13-gateway-availability-and-source-conditions.md)
+  proposes eight unchecked local/parent Plan and actual global Validation
+  rows for #6443's two finite source-only refinements in its existing Fleet
+  receiver. All six source outcomes remain OPEN, including #6394's fresh
+  bounded queued-steering follow-up; no operational appointment or retirement
+  is inferred. The complete 00:05:58 UTC census remains 854 whole open,
+  125 above the fixed target; every existing custodian and first gate remains.
+  Reviewed #12529 actually merged; complete current ROOT/slice/retained-annex
+  readback confirms all eight rows remain unchecked and every original
+  acceptance condition survives. Six separate judgments retain all six OPEN;
+  no technical completion, source retirement or resource release follows.
+  The [status/recovery/reassignment intake](journal/2026/11.13-status-recovery-and-reassignment-intake.md)
+  proposes 36 unchecked Dispatch Phase 3 rows for four complete families,
+  preserving literal OR/AND choices, each source's actual Open condition,
+  the checked Phase 6 transfer non-goal and all strict companions.
+  Two canonical keepers remain; proposal delivery alone establishes no
+  source or resource disposition.
+  Reviewed #12519 actually merged; complete current receiving readback
+  supports the separate #6185 redundant-tracking retirement, not technical
+  completion. #6184/#6187/#6189 retain their distinct explicit conditions.
+  All 36 technical rows remain unchecked and every custodian remains.
+  Eligible arrival #12522 offsets that original-cohort departure: the
+  complete 23:46:16 UTC census remains 854 whole open, 125 above 729.
+  The [link-capability/portable-timeout intake](journal/2026/11.13-link-capability-and-portable-timeout-intake.md)
+  proposes twelve unchecked portfolio Phase 4 rows through the actual
+  Phase 7 domain-review route. Three canonical keepers remain; #6082's
+  five-row installer proposal is withheld at its copied-source boundary.
+  The earlier whole installer-ROOT qualification is explicitly withdrawn,
+  not made retroactively compliant. No new source disposition is claimed.
+  Subsequent permitted receiving readback after #12510 and reconciliation of
+  #9618's already-audited November 5 child gate support #6093's separate
+  redundant-tracking retirement. #6138 remains under its investigator's
+  actual retained-issue condition; all twelve technical rows stay unchecked.
+  The [post-merge judgment](journal/2026/11.13-link-capability-and-portable-timeout-intake.md#separate-post-merge-receiving-and-tracking-judgments)
+  records 854 whole open, still 125 above target, with no child recredit
+  or resource release.
   The [onboarding/conclusion/key-consumer intake](journal/2026/11.13-onboarding-conclusion-and-key-intake.md)
   proposes eighteen unchecked rows in existing Fleet, Draft tidier and
   attribution plans, preserving strict annexes, pilot/credential/custody
   gates and two canonical keepers. No new operational action or source
   disposition follows from this five-source proposal.
+  Complete current receiving readback after #12503 now supports #6060/#6068's
+  separate redundant-tracking retirements, while #6030 retains its canonical
+  OPEN-parent role. All eighteen technical rows remain unchecked; the
+  [post-merge judgment](journal/2026/11.13-onboarding-conclusion-and-key-intake.md#separate-post-merge-receiving-and-tracking-judgments)
+  records 854 whole open, still 125 above target, without pilot or credential
+  authority, operational actions or resource release.
   The [distinct decision/consumer/transfer intake](journal/2026/11.13-distinct-decisions-and-transfer-intake.md)
   proposes #5956's separately owned architecture decision, #5960's complete
   Phase 2 consumer promises and #6028's inherited custom-force family in

@@ -18,7 +18,6 @@ from . import output, permissions, repos, sessions, state_root, tracking
 from . import worktree_creation
 from .launch_progress import step
 from .resume_seed import cold_start_error
-from .worktree_naming import session_worktree_allocation
 
 
 _REPAIR_ERRORS = (
@@ -58,7 +57,7 @@ def _validate(
     if retained is not None and (
         any(getattr(record, field) != getattr(retained, field) for field in (
             "worktree_id", "repo", "branch", "worktree_path", "creation_nonce",
-            "machine", "platform", "machine_identity", "owner_ref",
+            "owner_ref",
         ))
         or any(
             getattr(retained, field) is not None and getattr(record, field) != getattr(retained, field)
@@ -136,14 +135,15 @@ def _prepare_permissions(anchor: str, worktree_path: str) -> None:
 
 
 def _allocation(record: tracking.WorktreeRecord) -> tuple[str, str, str]:
+    """Recover original time/suffix without treating an ID prefix as identity."""
     platform = "win" if record.platform == "windows" else record.platform
-    allocation = session_worktree_allocation(
-        record.worktree_id, record.machine, record.platform,
-        physical_machine=record.machine_identity is not None,
+    allocation = re.fullmatch(
+        r".+-(?:win|wsl|linux)-(\d{8}-\d{6})-([0-9a-f]{4}|[0-9a-f]{32})",
+        record.worktree_id,
     )
     if allocation is None:
         raise ValueError("retained New has no verifiable native creation allocation")
-    return allocation[0], allocation[1], platform
+    return allocation[1], allocation[2], platform
 
 
 def _existing_pair(config: cfg.Config, record: tracking.WorktreeRecord, root: state_root.StateRoot):
@@ -181,22 +181,35 @@ def _retained_sibling(
         if path.is_symlink():
             raise ValueError("retained paired record symlink refused")
         child = tracking.load_record(path)
-        if child.pair_ref != harness_ref:
+        from .tracking_lookup import local_pair_subjects
+
+        parent_ref = child.pair_claim_ref
+        matches_parent = (
+            parent_ref is not None and parent_ref.is_qualified
+            and (parent_ref.project, parent_ref.worktree_id) == (record.repo, record.worktree_id)
+            and (
+                creation_repair_identity.retained_owner_is_current(parent_ref.machine, config)
+                or local_pair_subjects(record, child)
+            )
+        )
+        if child.pair_ref != harness_ref and not matches_parent:
             if name == root.repo:
                 raise ValueError("paired allocation is already owned by another worktree")
             continue
         if name != root.repo or found is not None:
             raise ValueError("retained paired allocation conflicts with the current binding")
         expected = {
-            "worktree_id": knowledge_id, "repo": root.repo, "machine": record.machine,
-            "machine_identity": record.machine_identity,
+            "worktree_id": knowledge_id, "repo": root.repo,
             "platform": record.platform, "kind": "session", "branch": f"worktree/{knowledge_id}",
             "pair_id": f"{timestamp}-{suffix}", "pair_role": "knowledge",
             "pair_kind": "worktree",
         }
         if any(getattr(child, field) != value for field, value in expected.items()):
             raise ValueError("retained paired allocation identity does not match")
-        if child.owner_ref is not None and child.owner_ref != harness_ref:
+        if (
+            child.owner_ref is not None and child.owner_ref != harness_ref
+            and not (matches_parent and child.owner_ref == child.pair_ref)
+        ):
             raise ValueError("retained paired allocation has a different parent owner")
         expected_path = Path(child.worktree_path)
         receiving = cfg.load_project_config(root.repo, include_control_plane_related_pr=False)
@@ -317,7 +330,7 @@ def _prepare_pair(
         _prepare_permissions(root.path, child.worktree_path)
         stamp = {
             "pair_id": child.pair_id, "pair_role": "harness",
-            "pair_ref": tracking.format_claim_ref(child.execution_machine, child.repo, child.worktree_id),
+            "pair_ref": tracking.format_claim_ref(child.pair_claim_ref.machine, child.repo, child.worktree_id),
             "pair_kind": "worktree",
         }
     if existing is not None:

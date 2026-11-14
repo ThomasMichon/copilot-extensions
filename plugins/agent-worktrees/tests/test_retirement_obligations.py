@@ -56,6 +56,20 @@ def test_cleanup_rechecks_obligations_before_force_or_missing_checkout(
     record = make_record(
         tmp_path, status="finalized" if exists else "active", exists=exists
     )
+    harness.tracking_dir = tmp_path / "state" / "worktrees"
+    harness.tracking_dir.mkdir(parents=True)
+    harness.repo = tracking.cfg.RepoConfig(anchor=str(harness.anchor), worktree_root=str(tmp_path))
+    harness.config = tracking.cfg.Config(
+        srcroot=str(tmp_path), machine="m", platform="linux", repo_name="fixture",
+        repos={"fixture": harness.repo},
+    )
+    record.repo, record.platform = "fixture", "linux"
+    monkeypatch.setattr(tracking.cfg, "detect_platform", lambda: "linux")
+    monkeypatch.setattr(tracking.cfg.socket, "gethostname", lambda: "m")
+    monkeypatch.setattr(tracking.cfg, "project_dir", lambda *a: harness.tracking_dir.parent)
+    monkeypatch.setattr(tracking.cfg, "tracking_dir", lambda *a: harness.tracking_dir)
+    monkeypatch.setattr(tracking.cfg, "load_config", lambda *a, **k: harness.config)
+    monkeypatch.setattr(tracking.cfg, "load_project_config", lambda *a, **k: harness.config)
     path = harness.seed(record)
     harness.set_classifier(info(S.COMPLETED), info(S.COMPLETED))
     harness.set_branch_merged_sequence([True, True])
@@ -148,6 +162,8 @@ def test_held_obligation_must_be_released_before_retirement(
 def test_pair_retirement_preserves_sibling_with_reopened_pr(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    monkeypatch.setattr(tracking.cfg, "detect_platform", lambda: "linux")
+    monkeypatch.setattr(tracking.cfg.socket, "gethostname", lambda: "m")
     monkeypatch.setattr(
         tracking.cfg, "project_dir", lambda name: tmp_path / str(name)
     )
