@@ -175,16 +175,17 @@ def test_actual_sdk_facade_loads_the_core_without_suite_services(tmp_path, layou
     else:
         construction = tmp_path / "construction"
         if layout == "wheel":
-            uv = shutil.which("uv")
-            assert uv, "the Core wheel resource control requires uv"
             source = construction / "core"
             shutil.copytree(root / "libs/copilot-driver-core", source)
             output = construction / "wheels"
+            output.mkdir()
             build = run_caller_owned([
-                uv, "build", "--wheel", "--offline", "--no-sources",
-                "--no-build-isolation", "--python", sys.executable,
-                "--out-dir", str(output), str(source),
-            ], timeout=45, max_stdout_bytes=256 * 1024, max_stderr_bytes=64 * 1024)
+                sys.executable, "-I", "-c",
+                "import sys; from setuptools.build_meta import build_wheel; "
+                "build_wheel(sys.argv[1])",
+                str(output),
+            ], cwd=source, timeout=45,
+                max_stdout_bytes=256 * 1024, max_stderr_bytes=64 * 1024)
             assert build.returncode == 0, build.stderr
             built, = output.glob("*.whl")
             retained = tmp_path / built.name
