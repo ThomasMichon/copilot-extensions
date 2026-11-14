@@ -188,8 +188,8 @@ execution assignments or implemented APIs.
 These are planned requirements from the complete #7947 refinements, not new
 product-source findings. The [six-family matrix](validation.md#supplemental-7947-family-acceptance)
 is their local acceptance; the actual ROOT-global G7947 gate below requires
-the whole union. Existing core phases, decisions and first unchecked G1
-production-persistence item are unchanged.
+the whole union. Existing core phases, decisions and first unchecked Plan
+item are unchanged.
 
 - [ ] **SG7947-P1:** Keep SSH verify/explore available after independent target
   resolution when only disposable fragment/source provenance is missing.
@@ -373,3 +373,18 @@ supported rollback-reader floor are explicit decisions, not implied approval.
   implementation appointment, native result, force-mode selection or rollout.
   Existing component owners, #7208 uncertainty, #7250 custody and the
   execution/contact restrictions above remain unchanged.
+
+### 2026-11-14 - Separate original tracking retirement
+
+- #12590 merged the complete supplemental planned union. Whole current
+  receiving readback, unchanged compatibility evidence and the complete
+  original/discussion bindings precede a separate source-specific judgment.
+- [#7947's explanation](https://github.com/ThomasMichon/copilot-extensions/issues/7947#issuecomment-6875177025)
+  records its verified NOT_PLANNED retirement at 09:25:04 UTC, not technical
+  completion. This Active effort remains the canonical unfinished owner.
+  All seven new checkboxes, all six local supplemental rows, existing first
+  Plan/global gates and every remaining core requirement stay unfinished.
+- Bounded G1/G3/proposal credit, actual #1460/#3761 policy, optional force
+  selection, offline dependency/accepted isolation proof, component admission
+  and existing execution/contact/resource boundaries are unchanged. No
+  implementer is appointed and no claim, lease, artifact or resource is released.
