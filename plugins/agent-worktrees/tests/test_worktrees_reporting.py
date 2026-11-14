@@ -148,16 +148,20 @@ def test_live_heartbeat_renames_reporter_without_changing_row_or_observation_rev
         assert receiver.current.get("observations") == first.get("observations")
         assert durable_bytes(owner.store.db_path) == before
 
-        # The unchanged Manager receiver is a real prior consumer of both wire versions.
+        # The current Manager receiver consumes naming outside semantic wire rows.
         monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[3] / "worktree-manager" / "src"))
         from worktree_manager.worktree_feed_contract import CurrentFeed
+        from worktree_manager.worktree_rows_contract import publication_wire_rows
 
-        legacy = CurrentFeed()
+        consumer = CurrentFeed()
         for frame in frames:
-            legacy.receive(frame)
-        rows = legacy.rows
-        assert legacy.receive(heartbeat) is None
-        assert legacy.rows == rows
+            consumer.receive(frame)
+        rows = publication_wire_rows(consumer.rows)
+        head = dict(consumer.head)
+        assert consumer.receive(heartbeat) == consumer.rows
+        assert consumer.reporting_context == heartbeat["reporting_context"]
+        assert publication_wire_rows(consumer.rows) == rows
+        assert consumer.head == head
     finally:
         renamed.set()
         stream.close()
