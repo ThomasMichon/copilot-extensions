@@ -57,8 +57,15 @@ resolved -- network call to reach a host that is actually the caller itself.
   to a qualified explicit identity because topology has no dedicated guest
   entry. Its platform detector also treats container roots identified by
   Docker/Podman markers or `/proc/1/cgroup` as plain `linux` even when the
-  shared kernel string mentions Microsoft/WSL, so containerized work on a
-  WSL host never acquires a spurious guest identity.
+  shared kernel string mentions Microsoft/WSL. Markerless private-cgroup
+  containers with an overlay or fuse-overlay root are also `linux`.
+  A Microsoft kernel with no container-root evidence and only root/missing
+  cgroup paths requires the actual `WSLInterop` proc entry; otherwise detection
+  raises `ValueError` rather than assigning an unconfirmed guest identity.
+  Inherited WSL environment variables are not evidence. Native Linux does not
+  need a mount-table read; confirmed container markers retain the fast path.
+  Worktrees' pre-runtime admission copy is generated from this same stdlib
+  module by [the admission-helper synchronizer](../../tools/sync-execution-platform.py).
 - **`transport`** -- `resolve_ssh_target()` (pick the best SSH alias/shell
   for an entry), `wrap_remote_command()` (POSIX login-shell wrapping via
   `remote_login_shell`, non-POSIX shells passed through untouched), and

@@ -75,12 +75,14 @@ def _normalize_repository_remote(project: str, remote: str) -> str:
         normalized = normalized.casefold()
     return normalized
 
+def _repository_id(normalized: str) -> str:
+    return "repo-" + hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:24]
+
 def project_identity(project: str, remote: str, context: dict) -> RepositoryIdentity:
     if context is None:
         raise ValueError("repository identity requires namespaced context")
     normalized = _normalize_repository_remote(project, remote)
-    digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:24]
-    repository_id = f"repo-{digest}"
+    repository_id = _repository_id(normalized)
     try:
         cell_root = Path(context["cellRoot"])
         marketplace_id = str(context["marketplaceId"])

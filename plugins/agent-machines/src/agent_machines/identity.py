@@ -42,7 +42,10 @@ def _dedupe(values: Iterable[str]) -> tuple[str, ...]:
 
 
 def detect_platform() -> str:
-    return local_execution_platform()
+    try:
+        return local_execution_platform()
+    except ValueError as exc:
+        raise ManifestError(str(exc)) from exc
 
 
 def _topology_paths(repos: Iterable[Path]) -> list[Path]:

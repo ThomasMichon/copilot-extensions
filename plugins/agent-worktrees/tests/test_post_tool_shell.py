@@ -381,7 +381,9 @@ def test_registered_post_hook_reuses_original_prepared_membership(tmp_path, monk
 
 @pytest.fixture
 def prepared_read_event(tmp_path, monkeypatch, monkeypatch_config, request):
-    from agent_worktrees import __main__ as main, config as cfg, handoff_diagnostics, sessions, tracking
+    from agent_worktrees import (
+        __main__ as main, config as cfg, config_authority, handoff_diagnostics, sessions, tracking,
+    )
     from agent_worktrees.hook_facts_publication import HookFactsPublisher
     from agent_worktrees.worktrees_runtime import WorktreesRuntime
     from test_managed_session import environment, fixture_linked_worktree, fixture_project, load
@@ -426,6 +428,20 @@ def prepared_read_event(tmp_path, monkeypatch, monkeypatch_config, request):
         checkout_home = tmp_path / "space's $workspace; literal"
         checkout_home.mkdir()
     workspace, _ = fixture_linked_worktree(checkout_home, anchor)
+    topology = anchor / ".agent-worktrees" / "machines.yaml"
+    topology.parent.mkdir(parents=True, exist_ok=True)
+    topology.write_text("machines: {}\n", encoding="utf-8")
+    previous_config = cfg.load_project_config
+    receiving = previous_config("example")
+    receiving.repos["example"] = cfg.RepoConfig(
+        anchor=str(anchor), worktree_root=str(workspace.parent),
+    )
+
+    def receiving_config(name, **kwargs):
+        return receiving if name == "example" else previous_config(name, **kwargs)
+
+    monkeypatch.setattr(cfg, "load_project_config", receiving_config)
+    monkeypatch.setattr(config_authority, "load_project_authority_config", receiving_config)
     project = tmp_path / "resolved-project-state"
     records = project / "worktrees"
     records.mkdir(parents=True)

@@ -36,6 +36,12 @@ def _spaces():
     }}, normalize=True)
 
 
+def _no_identity_peer(*, allow_path_fallback: bool = True) -> list[str] | None:
+    if allow_path_fallback:
+        pytest.fail("topology discovery must not query a source-project binding")
+    return None
+
+
 @pytest.fixture
 def source(tmp_path, monkeypatch):
     root = tmp_path / "project"
@@ -46,7 +52,7 @@ def source(tmp_path, monkeypatch):
     monkeypatch.setattr("socket.gethostname", lambda: "local-host")
     monkeypatch.setattr(
         session_lifecycle_cli, "_agent_worktrees_launch_prefix",
-        lambda: pytest.fail("topology discovery must not query a source-project binding"),
+        _no_identity_peer,
     )
     return root
 
@@ -96,7 +102,7 @@ def test_local_only_config_needs_no_machine_inventory_or_peer(tmp_path, monkeypa
     )
     monkeypatch.setattr(
         session_lifecycle_cli, "_agent_worktrees_launch_prefix",
-        lambda: pytest.fail("local-only startup must not require an identity peer"),
+        _no_identity_peer,
     )
     monkeypatch.setattr(agent_registry, "discover_local_agents", lambda: {})
     monkeypatch.setattr(agent_registry, "_register_namespace_resolvers", lambda resolver: None)
