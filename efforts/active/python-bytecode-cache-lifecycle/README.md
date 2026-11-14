@@ -100,8 +100,9 @@ nor reinterpret an ignored file or a directory name as disposal authority.
 
 ### Phase 2 - Implement the shared lifecycle and consumers
 
-- [ ] Implement shared cache placement and ownership without per-plugin
-  divergent cache roots or a new resident cleanup service.
+- [x] Implement shared cache placement and ownership without per-plugin
+  divergent cache roots or a new resident cleanup service; provider foundation
+  merged in #12145, with consumer adoption still separate.
 - [ ] Integrate process-exit, runtime-retirement and bounded orphan cleanup
   with the existing lifecycle owners, preserving active and rollback users.
 - [ ] Update canonical launcher/installer sources and regenerate their declared
@@ -153,6 +154,165 @@ mixed-version compatibility and safety assertions are implementation acceptance
 gates, not claims that the current code already provides them.
 
 ## Journal
+
+### 2026-11-14 - Archive and build-context correction
+
+- Native Windows archive/finalization/cache controls pass 94 cases with eight
+  skips; Linux passes 87 with 15 Windows skips. All 4,954 unit assertions passed,
+  but the proof gate correctly refused the initially static Gateway test because
+  it exercised no production owner. The corrected test now consumes the actual
+  Fleet Manager injected-resource contract before checking COPY/context inputs.
+- A Docker client is present, but its existing engine is unreachable in this
+  lane. No daemon was started or configuration changed; full image execution
+  remains unavailable rather than being inferred from static input checks.
+- The corrected complete unit proof passes all 4,954 cases (27 nonselected),
+  with production contribution and one coverage capture verified. The consumed
+  failed fixture and successful replacement fixture were removed through their
+  original scratch owner.
+- Publication and review remain before this collector slice can merge. Launcher
+  migration, legacy update relief and whole-flow acceptance remain unfinished.
+- First exact-head CI caught a transport distinction in the newly hash-bound
+  Docker inputs: an automatic Windows checkout used CRLF while canonical Git
+  blobs and Linux CI used LF. Declared LF for these two repository data inputs,
+  normalized only their working copies and refreshed admission hashes. This
+  preserves strict byte admission rather than weakening it with normalization.
+- A further review identified two remaining controls: a protected archive
+  descriptor alone did not protect the filename reopened by POSIX import,
+  and retirement's process census did not check the collector deadline between
+  probes. Added protected resolved ancestry admission and threaded the
+  cache-only deadline through recorded and native process probes, retaining
+  work on expiry without changing ordinary runtime-GC policy. Native Windows
+  collector/provider controls pass 59 cases with nine platform skips; runtime
+  reference controls pass 53 cases. POSIX, exact-source CI and review remain.
+- The next review found the canonical helper-retention bundle missing its new
+  mandatory GC dependency, and protection metadata still outside the deadline
+  when PID protection was disabled. Retained bundles now carry the helper and
+  archive, and protection metadata/version discovery use the same checker.
+  Extracted live-process aggregation into the existing lease owner to satisfy
+  the unchanged shrink-only facade ceiling rather than widening its baseline.
+  Native Windows controls pass 68 cases with nine skips, including GC from a
+  retained helper bundle after removing the acquisition source; 53 reference
+  compatibility and four constructed-environment cases pass separately.
+
+### 2026-11-13 - Recovery and current-source reconciliation
+
+- Resumed the same source owner after interrupted validation, preserving the
+  original no-rollout and no-real-cache-deletion limits. Rebased the unpublished
+  collector onto current `dev`, retaining newer installer changes and regenerating
+  only conflicting derived archives and source-admission metadata.
+- Rebased Windows collector/provider/interpreter controls pass 77 cases with
+  seven platform/native-link skips. Native Linux passes 69 cases with 15
+  Windows skips, including the shipped `-I -S -B` GC archive path.
+- The complete Linux unit packet exposed a coupled resource-test assumption:
+  the new shipped cache helper increases the resource set. Corrected the test
+  to assert the exact source-owned set and duplicate-free outputs rather than
+  the old fixed count. The first run reached 2,820 passing cases before that
+  assertion; a corrected complete run is still required.
+- Updated the complete SDK fixture declaration and constructor fixture inputs
+  for the two new package modules and shipped runtime helper. The final admitted
+  Linux packet passes all 4,914 tests (23 nonselected cases), with coverage
+  recorded once. Its disposable source/tooling fixture was removed through the
+  original scratch owner after the result was captured.
+- Removed five consumed source-export archives, reclaiming approximately
+  1.49 GB of disposable validation output while retaining the current review
+  draft/export. This is not real application-cache reclamation.
+- Collector publication, review and exact-head CI remain; consumer migration,
+  legacy update relief and the whole effort's acceptance gate are unchanged.
+- The first collector review identified five concrete controls to tighten:
+  metadata lookup errors must not imply absence, finalization needs a viable
+  minimum entry budget, normal POSIX group-writable mirrors remain behind the
+  private traversal boundary, and deeply nested JSON must not reset fairness.
+  Added native regression cases and synchronized the canonical fixes.
+- First-head CI also identified missing transitive release entries and the
+  retained source-preparation archive's incomplete cache-module declaration.
+  Corrected both declaration groups. The native Windows retained-controller
+  test then exposed Git's rejection of extended `--output` spelling; preserve
+  the private native handle and pass the equivalent ordinary Git path.
+  Validation and re-review of this correction batch remain in progress.
+- Corrected review controls pass 84 Windows cases with eight platform skips
+  and 77 Linux cases with 15 Windows skips. The exact corrected Linux source
+  also passes the real retained-controller preparation case and all 4,914
+  admitted units; the successful disposable fixture was removed.
+- A copied-fixture diagnostic localized the Windows retained-controller
+  timeout to progressing materialization, final Git status and content hashing,
+  not a blocked archive. Its new complete path exceeds the native module's
+  old 90-second aggregate on a slower host. Removed all diagnostic edits and
+  gave only that case a finite 180-second ceiling; production deadlines and
+  assertions remain unchanged. The ordinary native rerun is in flight.
+- The ordinary Windows retained-controller case passes in 131.23 seconds.
+  Published the first correction batch and resolved all five original threads.
+  A second review requested a deadline check between saved continuation-frame
+  opens; added that check and a slow-operation regression.
+- Rebased the published source without discarding its ancestry. Preserved
+  newer upstream installer/source declarations and the shared Windows Git-path
+  normalizer, which independently supplies the same serialization correction.
+  Refreshed only this collector's generated metadata and retained the entire
+  Goal and remaining launcher/legacy acceptance gates.
+- A third review extended the same deadline requirement to initial ancestor
+  admission and catalog setup. Threaded an optional checker through those
+  internal owners, including native metadata checks and SQLite admission,
+  without changing existing allocation callers or mandatory unwind/commit.
+  Added slow-ancestor, final-root, catalog-setup and metadata-error controls;
+  the complete native Windows cache packet passes 90 cases with eight skips.
+- The fourth review found a missing Gateway container build input, missing
+  pre-import archive ownership/write protection, and finalization starting a
+  second mutation after expiry. Added the runtime/cache inputs to the recipe,
+  context allowlist and existing witness declaration, plus a cheap canonical
+  build-input contract check. Its two data files are explicitly hash-bound and
+  remain nonexecutable in unit admission; this does not qualify a container run.
+- Archive admission now checks the opened identity and POSIX root/current-user
+  ownership/write bits or the existing Windows file-handle DACL owner before
+  import. macOS conservatively refuses nonempty/unverifiable extended ACLs.
+  A native writable-archive canary proves refusal before code import.
+- Carried the budget through anchored metadata/read/removal operations and added
+  slow finalization controls before owner cleanup and namespace removal. The
+  complete native Windows cache packet passes 94 cases with eight skips.
+  Shipped-script fixtures use exact copied bytes with fixture-owned permissions,
+  rather than silently trusting the source checkout's ambient DACL.
+
+### 2026-11-12 - Indexed collector native fixture proof
+
+- Implemented the new-layout collector behind normal version-slot GC, using
+  indexed keyset rotation and identity-bound depth-first continuation rather
+  than a directory census. Construction, retention, publication, selectors
+  and durable runtime references remain the existing owner's decision.
+- Native Windows fixtures pass for bounded large-tree convergence, exact
+  successful logical-byte accounting, fairness past retained namespaces,
+  interrupted directory/owner removal, replaced paths, unknown content,
+  hardlinks, real GC-to-cache integration and absent-slot construction.
+  The combined collector/provider packet passes 38 cases with seven explicit
+  platform/native-link skips. POSIX and canonical packaging validation remain.
+- Corrected a native Windows sharing conflict exposed by actual deletion:
+  metadata is read through the existing guarded handle, not a second CRT
+  open which cannot share its pending delete access. This remains source and
+  disposable-fixture work; no installed runtime or real cache was changed.
+- Native Linux collector/provider/interpreter controls pass 68 cases with
+  15 Windows skips. An actual Windows `-I -S -B` shipped-script invocation
+  loads its own lifecycle archive, removes the retired fixture bytecode and
+  converges through repeated GC while preserving stdout JSON.
+- Removed unrelated optional-mirror churn from broad regeneration. Corrected
+  standalone resource admission for the new helper and kept the finite
+  constructor guardian's narrower retained-source closure unchanged. The
+  source/helper admission gate passes; the complete unit rerun remains.
+- Consumer migration and legacy discovery/relief are still unfinished.
+  The indexed collector does not pretend to inventory older unindexed roots.
+
+### 2026-11-12 - Provider merged; collection is next
+
+- #12145 merged as `2ecd801f0e054e5357442c5c2cbf3762c9771617`
+  after exact-head Copilot approval, required CI success and resolution of
+  all nine concrete review findings. The provider remains additive: current
+  launchers are not migrated and no automatic cache reclamation is claimed.
+- Pulled the source workspace forward without replaying the already-landed
+  squash. Retained the canonical effort and source owner; this phase does not
+  complete the operator's Goal.
+- Removed the consumed provider-validation scratch through its original owner,
+  including approximately 1.45 GB of source archives. This is disposable test
+  evidence cleanup, not deletion of a real application cache.
+- Next: implement bounded indexed collection under the existing runtime
+  cleanup/construction/retention owner, then adopt consumers and add qualified
+  legacy update relief. Retained, live, rollback and unknown state remain
+  protected; no new cleanup service or process-stop policy is authorized.
 
 ### 2026-11-11 - Additive provider foundation
 

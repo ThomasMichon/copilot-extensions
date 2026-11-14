@@ -315,6 +315,7 @@ def test_retained_backend_admits_without_source_modules(
     names += (
         "versioned_runtime.py", "versioned_runtime_leases.py", "versioned_runtime_source.py",
         "versioned_runtime_construction.py", "versioned_runtime_publication.py",
+        "versioned_runtime_cache.py",
         "runtime_launcher.py",
     )
     for name in names:
