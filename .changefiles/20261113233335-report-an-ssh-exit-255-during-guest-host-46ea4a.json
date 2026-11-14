@@ -1,0 +1,9 @@
+{
+  "comment": "Report an SSH exit 255 during guest hosting admission as transport unavailable, not receiver refusal",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    }
+  ]
+}

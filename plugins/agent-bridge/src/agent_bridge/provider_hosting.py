@@ -12,6 +12,9 @@ from repository_policy import AgentHostingError
 if TYPE_CHECKING:
     from .spawn_target import SpawnTarget
 
+# OpenSSH's own connection/transport failure status: no receiver answer exists.
+SSH_TRANSPORT_FAILURE_EXIT = 255
+
 
 class CodeSpaceNotRunning(AgentHostingError):
     """A read-only check cannot inspect this exact receiving CodeSpace."""
@@ -120,10 +123,17 @@ async def _codespace_policy(
                 raise AgentHostingError(f"Guest execution checkout is unavailable: {error or output}")
             workspace = parse_execution_checkout(output)
         command, payload = await asyncio.to_thread(_policy_check, workspace, operation, metadata)
-        return _answer(*await transport.run(
+        rc, output, error = await transport.run(
             f"bash -lc {shlex.quote(command)}", timeout=90,
             **({"input_bytes": payload} if payload is not None else {}),
-        ), portable=payload is not None)
+        )
+        if rc == SSH_TRANSPORT_FAILURE_EXIT:
+            raise AgentHostingError(
+                "Guest repository hosting check is unavailable: SSH transport failed "
+                "(exit 255) before the receiver answered: "
+                + (error.strip() or output.strip() or "no diagnostic output")
+            )
+        return _answer(rc, output, error, portable=payload is not None)
     finally:
         await transport.close()
 

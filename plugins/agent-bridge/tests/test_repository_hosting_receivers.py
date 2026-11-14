@@ -526,6 +526,30 @@ async def test_supported_codespace_checks_guest_and_closes_inspection(
 
 
 @pytest.mark.asyncio
+async def test_codespace_ssh_transport_failure_is_unavailable_not_refusal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    guest = SimpleNamespace(
+        is_running=AsyncMock(return_value=True),
+        run=AsyncMock(return_value=(255, "", "Connection closed by remote host")),
+        close=AsyncMock(),
+    )
+    monkeypatch.setattr(
+        "agent_bridge.session_host.codespace_transport.CodeSpaceTransport", lambda *_a, **_k: guest,
+    )
+    target = SpawnTarget(type="command", codespace={
+        "name": "member", "workspace_folder": "/actual",
+        "portable_receiving_policy": {"version": 1, "acp_command": "copilot --acp"},
+    })
+    with pytest.raises(AgentHostingError) as raised:
+        await hosting_policy.require_target_hosting(target)
+    message = str(raised.value)
+    assert "unavailable" in message and "exit 255" in message
+    assert "refused" not in message and "unsupported" not in message
+    guest.close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_project_without_cwd_uses_read_only_owner_and_honors_denial(
     repo: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
