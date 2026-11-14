@@ -792,6 +792,52 @@ async def test_controller_pair_does_not_override_explicit_or_invalid_tuple(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("labels", [{}, {
+    "machine": "obsolete-host", "execution_machine": "wrong-space",
+    "machine_identity_version": "invalid", "platform": "wsl",
+}])
+async def test_controller_uses_live_reporter_after_rename_without_row_rewrite(controller, labels):
+    import copy
+    from agent_bridge.venue_plugins import resolve_controller_cwd
+
+    caller, owner = controller
+    row = owner.return_value["worktrees"][0]
+    row.pop("machine")
+    row.update(labels)
+    original = copy.deepcopy(row)
+    for machine in ("current-space", "renamed-space"):
+        owner.return_value["reporting_context"] = {
+            "version": 1, "status": "resolved", "hostname": "observed-host",
+            "machine": machine, "environment": "windows", "execution_machine": machine,
+        }
+        caller.caller_owner_ref = f"{machine}/control/controller"
+        assert await resolve_controller_cwd(caller) == caller.caller_worktree
+        assert row == original
+    assert owner.await_count == 2
+    assert all(call.args == (
+        ["list", "--json", "--cache-only", "--worktree-id", "controller"], "control",
+    ) for call in owner.await_args_list)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("context", [
+    None, {"version": 1, "status": "unavailable"}, {"version": 2, "status": "unavailable"},
+    {
+        "version": 1, "status": "resolved", "hostname": "observed-host",
+        "machine": "other", "environment": "windows", "execution_machine": "other",
+    },
+])
+async def test_current_controller_reporter_never_downgrades_to_matching_row(controller, context):
+    from agent_bridge.venue_plugins import resolve_controller_cwd
+
+    caller, owner = controller
+    owner.return_value["reporting_context"] = context
+    with pytest.raises(RuntimeError, match="controller context"):
+        await resolve_controller_cwd(caller)
+    owner.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("session_id", [None, "other", "bad/session"])
 async def test_owner_session_mismatch_refuses_before_owner_query(controller, session_id):
     from agent_bridge.venue_plugins import resolve_controller_cwd
