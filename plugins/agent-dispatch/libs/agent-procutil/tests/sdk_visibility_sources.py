@@ -32,7 +32,7 @@ PACKAGE_FILES = (
     "diagnostics.py", "interactive.py", "job_activity.py", "linux_daemon_scope.py", "metrics.py", "metrics_accounting.py",
     "native_child.py", "owned_budget.py", "owned_process.py", "process_retirement.py", "python_cache.py",
     "python_cache_catalog.py", "python_cache_permissions.py", "python_cache_store.py", "retirement_custody.py",
-    "python_cache_collect.py", "python_cache_files.py",
+    "python_cache_collect.py", "python_cache_files.py", "python_cache_legacy.py", "python_cache_pyc.py",
     "scratch.py", "startup.py", "streaming.py",
     "windows_broker_cell.py", "windows_broker_entry.py", "windows_broker_installation.py",
     "windows_broker_native.py", "windows_broker_protocol.py", "windows_broker_retention.py",

@@ -470,6 +470,29 @@ def test_native_anchor_removes_exact_bytecode_and_owner(local):
     assert not prefix.parent.exists()
 
 
+def test_link_created_after_admission_is_refused_at_the_shared_removal_boundary(local, tmp_path):
+    root, _ = local
+    _, prefix = allocate(root)
+    victim = prefix / "module.pyc"
+    victim.write_bytes(b"retain both names")
+    sibling = store.native(tmp_path / "retained-evidence.pyc")
+    with files.installation(prefix.parent.parent) as anchor:
+        with files.child(anchor, prefix.parent.name) as namespace:
+            with files.child(namespace, "bytecode") as bytecode:
+                with files.child(bytecode, victim.name, delete=True) as entry:
+                    assert entry.info.st_nlink == 1
+                    try:
+                        os.link(victim, sibling)
+                    except PermissionError as error:
+                        if os.name == "nt" and getattr(error, "winerror", None) == 32:
+                            assert victim.is_file() and not sibling.exists()
+                            return  # The native delete-capable pin excludes this writer.
+                        raise
+                    with pytest.raises(ValueError, match="hard link"):
+                        entry.remove()
+    assert victim.read_bytes() == sibling.read_bytes() == b"retain both names"
+
+
 @pytest.fixture
 def runtime():
     source = Path(__file__).resolve().parents[2] / "versioned-runtime" / "versioned_runtime.py"

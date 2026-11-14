@@ -123,14 +123,15 @@ def maintain(root, *, cleanup_lease, protected, version_dir, windows_owned_file=
                 else:
                     yield "runtime-present"
 
-    try:
-        result = _collector(windows_owned_file=windows_owned_file).collect(        root, retirement=retirement)
-        if result.namespaces or result.reasons or result.pending:
-            print("gc: python-cache " + json.dumps(asdict(result), sort_keys=True), file=sys.stderr)
-    except Exception as error:
-        # Cache cleanup never vetoes ready incoming content or completed GC.
-        # Do not expose private paths from an arbitrary filesystem exception.
-        print(f"gc: python-cache maintenance unavailable ({type(error).__name__})", file=sys.stderr)
+    for layout, operation in (("python-cache", "collect"), ("python-cache-legacy", "collect_legacy")):
+        try:
+            provider = _collector(windows_owned_file=windows_owned_file)
+            result = getattr(provider, operation)(root, retirement=retirement)
+            if result.namespaces or result.reasons or result.pending:
+                print("gc: " + layout + " " + json.dumps(asdict(result), sort_keys=True), file=sys.stderr)
+        except Exception as error:
+            # Maintenance cannot veto selection; filesystem errors can contain private paths.
+            print(f"gc: {layout} maintenance unavailable ({type(error).__name__})", file=sys.stderr)
 
 
 def gc(root, *, candidates, cleanup_lease, protected, version_dir, is_link,

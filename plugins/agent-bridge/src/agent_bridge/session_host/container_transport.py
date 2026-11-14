@@ -418,6 +418,10 @@ class ContainerTransport:
 
     async def is_running(self) -> bool:
         """Read Docker state through the provider without starting the venue."""
+        from ..transport import _reresolve_stale_interpreter
+
+        # The recorded launcher can be retired after construction.
+        self._state_command = _reresolve_stale_interpreter(self._state_command)
         rc, out, err = await _run_provider(
             self._state_command,
             timeout=45.0,

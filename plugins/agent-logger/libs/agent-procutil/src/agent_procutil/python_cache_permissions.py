@@ -151,15 +151,17 @@ def check_ancestors(path: Path) -> None:
         check(parent, ancestor=True)
 
 
-def check_file(path: Path) -> None:
+def check_file(path: Path, *, private: bool = True) -> None:
     """Protect cache metadata too, including independently granted Windows files."""
     info = path.lstat()
     if not stat.S_ISREG(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
         raise PermissionError("bytecode cache metadata is not ordinary")
     if os.name == "nt":
-        _windows_check(path, ancestor=False, private=True)
-    elif info.st_uid != os.getuid() or info.st_mode & 0o077:
+        _windows_check(path, ancestor=False, private=private)
+    elif info.st_uid != os.getuid() or info.st_mode & (0o077 if private else 0o022):
         raise PermissionError("bytecode cache metadata is not private")
+    elif sys.platform == "darwin":
+        _macos_check(path)
 
 
 def check_bytecode(path: Path, *, max_entries: int = 256, seconds: float = 0.05) -> None:

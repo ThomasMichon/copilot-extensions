@@ -84,7 +84,9 @@ libs/agent-procutil/src/agent_procutil/**
 !libs/agent-procutil/src/agent_procutil/python_cache_catalog.py
 !libs/agent-procutil/src/agent_procutil/python_cache_collect.py
 !libs/agent-procutil/src/agent_procutil/python_cache_files.py
+!libs/agent-procutil/src/agent_procutil/python_cache_legacy.py
 !libs/agent-procutil/src/agent_procutil/python_cache_permissions.py
+!libs/agent-procutil/src/agent_procutil/python_cache_pyc.py
 !libs/agent-procutil/src/agent_procutil/python_cache_store.py
 !libs/agent-procutil/src/agent_procutil/retirement_custody.py
 !libs/agent-procutil/src/agent_procutil/startup.py
