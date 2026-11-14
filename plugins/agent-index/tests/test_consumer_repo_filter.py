@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import fnmatch
+import ntpath
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -138,3 +140,25 @@ def test_hybrid_glob_limits_preserve_the_finite_vector_window(
     )
     expected = chunks[first_match:first_match + limit] if inside_window else []
     assert {hit.chunk_id for hit in hits} == {chunk.chunk_id for chunk in expected}
+
+
+def test_hybrid_glob_does_not_apply_windows_path_normalization(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = MultiModelStore(tmp_path / "lance")
+    store.register_model(SimpleNamespace(model_id="test", table_name="vectors_test", dim=2))
+    chunks = [
+        Chunk(f"searchable phrase {index}", path, "text", "text", 1, 1, source="git:repo")
+        for index, path in enumerate([r"docs/end\Z.md", r"docs/end\z.md"])
+    ]
+    vectors = np.array([[1.0, 0.0], [0.0, 1.0]], dtype=np.float32)
+    store.upsert("test", chunks, vectors)
+    assert store.ensure_fts_index()
+    monkeypatch.setattr(fnmatch.os.path, "normcase", ntpath.normcase)
+    pattern = r"docs/end\Z.md"
+    fts_hits = store.content_store.fts_search("searchable phrase", file_path_glob=pattern)
+    assert [chunk_id for chunk_id, _ in fts_hits] == [chunks[0].chunk_id]
+    hybrid_hits = store.hybrid_search(
+        "test", vectors[0], "searchable phrase", file_path_glob=pattern, limit=10,
+    )
+    assert [hit.chunk_id for hit in hybrid_hits] == [chunks[0].chunk_id]
