@@ -157,7 +157,7 @@ gates, not claims that the current code already provides them.
 
 ## Journal
 
-- [2026-11-14 - consumer adoption and collector](journal/2026/11.14 consumer adoption and collector.md).
-- [2026-11-13 - recovery and qualification](journal/2026/11.13 recovery and qualification.md).
-- [2026-11-12 - provider and native proof](journal/2026/11.12 provider and native proof.md).
-- [2026-11-11 - design and foundation](journal/2026/11.11 design and foundation.md).
+- [2026-11-14 - consumer adoption and collector](<journal/2026/11.14 consumer adoption and collector.md>).
+- [2026-11-13 - recovery and qualification](<journal/2026/11.13 recovery and qualification.md>).
+- [2026-11-12 - provider and native proof](<journal/2026/11.12 provider and native proof.md>).
+- [2026-11-11 - design and foundation](<journal/2026/11.11 design and foundation.md>).
