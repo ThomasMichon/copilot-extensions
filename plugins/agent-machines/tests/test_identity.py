@@ -84,9 +84,10 @@ def test_discover_json_reports_unconfirmed_execution_root(monkeypatch, tmp_path,
     def unconfirmed() -> str:
         raise ValueError("execution platform is unconfirmed: private WSL root lacks interop evidence")
 
-    monkeypatch.setattr(identity_module, "detect_platform", unconfirmed)
+    monkeypatch.setattr(identity_module, "local_execution_platform", unconfirmed)
     monkeypatch.setattr(identity_module.platform, "node", lambda: "observed-host")
-    monkeypatch.setattr(cli._discover, "candidate_repos", lambda: [])
+    monkeypatch.setattr(cli._discover, "read_registry", lambda: {})
+    monkeypatch.setattr(cli._discover, "read_projects", lambda: {})
     monkeypatch.setattr(cli._layout, "resolve_cwd_repo", lambda: ("example", tmp_path, tmp_path))
     monkeypatch.setattr(
         cli._discover, "discover",

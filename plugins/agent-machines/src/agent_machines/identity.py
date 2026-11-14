@@ -42,7 +42,10 @@ def _dedupe(values: Iterable[str]) -> tuple[str, ...]:
 
 
 def detect_platform() -> str:
-    return local_execution_platform()
+    try:
+        return local_execution_platform()
+    except ValueError as exc:
+        raise ManifestError(str(exc)) from exc
 
 
 def _topology_paths(repos: Iterable[Path]) -> list[Path]:
@@ -82,10 +85,7 @@ def resolve_machine(
         raise ManifestError("machine identity is empty")
     context = execution_platform
     if value is None and context is None:
-        try:
-            context = detect_platform()
-        except ValueError as exc:
-            raise ManifestError(str(exc)) from exc
+        context = detect_platform()
     entries: dict[str, MachineEntry] = {}
     entry_paths: dict[str, Path] = {}
     warnings: list[str] = []
