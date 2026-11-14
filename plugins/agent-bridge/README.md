@@ -583,6 +583,10 @@ response to its local, nonterminal checkout, without depending on advisory roste
 publication. Missing, malformed or unavailable records refuse before preparation;
 there is no roster fallback. Any supplied controller
 path must agree, and a `#session` qualifier must match `caller_session_id`.
+The guarantee is verified controller provenance for plugin selection before
+launch and during recovery, not availability of a published roster. The exact
+record establishes controller identity only; it does not replace resident
+listings, live-state checks, or independent launch admission.
 Explicit version-1 Worktrees rows are decoded by the shared dependency-free
 identity codec: the owner reference must match the separate execution owner,
 not the physical host shared by native and guest environments. Physical and

@@ -7,6 +7,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from worktree_identity import WorktreeMachineIdentityError
+
 from agent_bridge.transport import SpawnTarget
 from agent_bridge.venue_plugins import prepare_venue_plugins, resolve_controller_cwd
 
@@ -61,11 +63,12 @@ async def test_physical_host_cannot_substitute_for_execution_owner(
     monkeypatch.setattr("agent_bridge.session_host.container_transport._run_provider", provider)
     transport = AsyncMock()
     transport.run.return_value = (0, "__VENUE_PLUGINS__{}", "")
-    with pytest.raises(RuntimeError, match="controller context could not be verified"):
+    with pytest.raises(RuntimeError, match="controller context could not be verified") as refused:
         await prepare_venue_plugins(
             {"name": "example", "provider_command": ["provider"], "plugin_plan": True},
             transport, "/workspaces/project", caller=caller,
         )
+    assert str(refused.value.__cause__) == "controller identity does not match its owner"
     provider.assert_not_awaited()
     transport.run.assert_not_awaited()
 
@@ -90,11 +93,12 @@ async def test_malformed_explicit_controller_refuses_before_provider_or_transpor
     monkeypatch.setattr("agent_bridge.session_host.container_transport._run_provider", provider)
     transport = AsyncMock()
     transport.run.return_value = (0, "__VENUE_PLUGINS__{}", "")
-    with pytest.raises(RuntimeError, match="controller context could not be verified"):
+    with pytest.raises(RuntimeError, match="controller context could not be verified") as refused:
         await prepare_venue_plugins(
             {"name": "example", "provider_command": ["provider"], "plugin_plan": True},
             transport, "/workspaces/project", caller=caller,
         )
+    assert isinstance(refused.value.__cause__, WorktreeMachineIdentityError)
     provider.assert_not_awaited()
     transport.run.assert_not_awaited()
     assert row == before
