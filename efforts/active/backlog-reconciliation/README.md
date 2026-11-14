@@ -3164,6 +3164,15 @@ sources, transferring owners or turning partial/planning gains into completion.
   receiving objective or a retained gap; investigate actual implementation
   evidence when claiming completion, rather than making that the prerequisite
   for discovering thematic alignment.
+  The [prerequisite/installed-keeper study](journal/2026/11.13-prerequisite-and-installed-keepers.md)
+  retains six complete canonical outcomes and all fifty clauses without
+  redundant plan rows. Four whole documentary reads and independently
+  verified current metadata preserve exact watchdog, managed-validation,
+  release-lock, BOTH-runtime and installed-preview conditions.
+  #12500's later [actual-consumer trace](journal/2026/11.13-merged-source-and-inflow-conditions.md#actual-consumer-proof-and-separate-12500-completion)
+  resolves its finite source-only gap and supports separate COMPLETED
+  acknowledgment, not installed rollout or exact fixture-PASS claims.
+  The complete 02:43:41 UTC census is 852 whole open, 123 above fixed 729.
   The [merged-source/inflow checkpoint](journal/2026/11.13-merged-source-and-inflow-conditions.md)
   records five new whole contracts and #12393's actual discussion delta.
   #12522's external completion is corroborated at its source/added-test tier,
@@ -3181,6 +3190,16 @@ sources, transferring owners or turning partial/planning gains into completion.
   now verified without duplicate rows. #6747 fits that programme but needs
   an eight-row direct amendment; literal source/custody conditions and
   separate disposition gates remain.
+  Reviewed #12547 actually merged; complete current receiving readback
+  and separate source judgments now support #6662/#6747's
+  [redundant-tracking retirements](journal/2026/11.13-prospective-outer-contracts.md#separate-post-merge-receiving-and-tracking-judgments),
+  not technical completion. Both original investigations and all fourteen
+  unchecked technical rows remain under unchanged custody. The complete
+  02:33:50 UTC census is 853 whole open, 124 above fixed 729, with two
+  verified original-cohort campaign departures since the explicit 02:10:26
+  UTC 855-open baseline and no arrivals or external departures in that interval.
+  External #12536 had already reduced inflow between the earlier 856-open
+  checkpoint and that 855-open baseline; it earns no campaign credit.
   The [conductor/native-condition intake](journal/2026/11.13-conductor-continuation-and-native-conditions.md)
   proposes 21 unchecked direct Plan/local and actual global Validation rows
   for #6464 under its existing receiver and strict OPEN-until-implementation-

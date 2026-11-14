@@ -10,11 +10,12 @@ from __future__ import annotations
 import argparse
 import json
 import types
+from contextlib import nullcontext
 
 import pytest
 
 import agent_worktrees.__main__ as m
-from agent_worktrees import cleanup, tracking
+from agent_worktrees import cleanup, orphan_receiving, tracking
 from agent_worktrees import config as cfg
 
 
@@ -34,6 +35,12 @@ def _config(machine="m", project="p"):
 
 def _proc(returncode=0, stdout="", stderr=""):
     return types.SimpleNamespace(returncode=returncode, stdout=stdout, stderr=stderr)
+
+
+@pytest.fixture(autouse=True)
+def released_receiving_source(monkeypatch):
+    # These are dispatch/provider units; real receiving proofs run in test_orphanage_identity.
+    monkeypatch.setattr(orphan_receiving, "claim_guard", lambda *_args, **_kwargs: nullcontext(True))
 
 
 # ── tracking.remove_orphaned_obligations ─────────────────────────────────────
@@ -386,10 +393,11 @@ def test_reclaim_orphan_worktree_dispatches(monkeypatch):
 
 # ── reclaim_orphan dispatch ──────────────────────────────────────────────────
 
-def test_reclaim_orphan_cross_machine_skipped():
+def test_reclaim_orphan_unproven_source_skipped(monkeypatch):
+    monkeypatch.setattr(orphan_receiving, "claim_guard", lambda *_args, **_kwargs: nullcontext(False))
     entry = {"kind": "codespace", "ref": "cs", "machine": "other"}
     r = cleanup.reclaim_orphan(entry, _config(machine="m"), apply=True)
-    assert r.status == "skipped" and "cross-machine" in r.detail
+    assert r.status == "skipped" and "custody is unproven" in r.detail
 
 
 def test_reclaim_orphan_unknown_kind_unsupported():

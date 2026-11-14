@@ -8,13 +8,15 @@ import os
 import subprocess
 import sys
 import threading
+import time
 from argparse import Namespace
 from pathlib import Path
 
 import pytest
 import yaml
+from agent_procutil import no_window_kwargs
 
-from agent_worktrees import maintenance_cli, pr_authority, tracking, tracking_yaml_repair as repair
+from agent_worktrees import health, maintenance_cli, pr_authority, tracking, tracking_yaml_repair as repair
 
 _PREFIX = "worktree_id: wt-agent\nbranch: worktree/wt-agent\nstatus: active\n"
 _TEXT = "Standing reviewer.\n\nLoop: read and review.\nKeep 'author' ownership: do not replace it."
@@ -115,6 +117,112 @@ def test_targeted_report_and_apply_do_not_touch_other_records(record_dir, capsys
     assert not json.loads(capsys.readouterr().out)["repaired"]
 
 
+@pytest.mark.parametrize("entrypoint", ["bound-agent", "targeted-scalar", "general"])
+def test_actual_repair_removes_legacy_naming_but_preserves_original_evidence(
+    record_dir, capsys, entrypoint,
+):
+    root, path = record_dir
+    naming = (
+        "machine: &old_name obsolete-host\nplatform: wsl\nmachine_identity_version: 1\n"
+        "environment: wsl\nexecution_machine: obsolete-guest\nsummary: *old_name\n"
+    )
+    raw = naming + (
+        _RAW if entrypoint == "bound-agent"
+        else _PREFIX + "title: original: title\nresources: []\n"
+    )
+    if entrypoint == "general":
+        raw += "future_evidence: {original: keep}\n"
+    path.write_bytes(raw.encode())
+
+    def invoke(apply):
+        if entrypoint == "general":
+            findings = health.repair_yaml_integrity(root, apply=apply)
+            assert len(findings) == 1 and findings[0].repairable
+            return findings[0].repaired
+        assert maintenance_cli.cmd_doctor(args(
+            fix=apply, bound_agent_end_field="pair_id" if entrypoint == "bound-agent" else None,
+        )) == 0
+        report = json.loads(capsys.readouterr().out)
+        assert report["repairable"]
+        return report["repaired"]
+
+    assert not invoke(False)
+    assert path.read_bytes() == raw.encode() and not list(root.glob("*.bak"))
+    assert invoke(True)
+    repaired = repair.strict_mapping(path.read_text(encoding="utf-8"))
+    assert not {
+        "machine", "platform", "machine_identity_version", "environment", "execution_machine",
+    }.intersection(repaired)
+    assert repaired["summary"] == "obsolete-host"
+    if entrypoint == "bound-agent":
+        assert repaired["bound_agent"] == _TEXT and repaired["pair_id"] == "pair-one"
+    else:
+        assert repaired["title"] == "original: title" and repaired["resources"] == []
+    if entrypoint == "general":
+        assert repaired["future_evidence"] == {"original": "keep"}
+    assert next(root.glob("*.bak")).read_bytes() == raw.encode()
+
+
+@pytest.mark.parametrize("entrypoint", ["targeted", "general"])
+def test_valid_legacy_record_is_not_proactively_migrated(record_dir, capsys, entrypoint):
+    root, path = record_dir
+    original = (_PREFIX + "machine: old-host\nplatform: linux\n").encode()
+    path.write_bytes(original)
+    before = path.stat().st_mtime_ns
+    if entrypoint == "general":
+        assert health.repair_yaml_integrity(root, apply=True) == []
+    else:
+        assert repair.targeted_doctor(args(fix=True, bound_agent_end_field=None)) == 0
+        report = json.loads(capsys.readouterr().out)
+        assert not report["repairable"] and not report["repaired"]
+    assert path.read_bytes() == original and path.stat().st_mtime_ns == before
+    assert not list(root.glob("*.bak"))
+
+
+@pytest.mark.parametrize("summary", [
+    "&kept original text", "[original, evidence]", "{original: evidence}",
+])
+def test_general_repair_preserves_explicit_yaml_values(record_dir, summary):
+    root, path = record_dir
+    raw = _PREFIX + "machine: obsolete\nsummary: " + summary + "\ntitle: original: title\n"
+    expected = repair.strict_mapping(raw.replace("title: original: title", "title: 'original: title'"))
+    expected.pop("machine")
+    path.write_bytes(raw.encode())
+    findings = health.repair_yaml_integrity(root, apply=True)
+    assert len(findings) == 1 and findings[0].repaired
+    assert repair.strict_mapping(path.read_text(encoding="utf-8")) == expected
+
+
+@pytest.mark.parametrize("extra", [
+    "status: complete\n", "summary: *missing_anchor\n",
+])
+def test_general_repair_refuses_unverified_mapping_without_replacement(record_dir, extra):
+    root, path = record_dir
+    raw = _PREFIX + "title: original: title\n" + extra
+    path.write_bytes(raw.encode())
+    findings = health.repair_yaml_integrity(root, apply=True)
+    assert len(findings) == 1 and not findings[0].repairable and not findings[0].repaired
+    assert path.read_bytes() == raw.encode() and not list(root.glob("*.bak"))
+
+
+def test_general_repair_uses_observed_byte_fence(record_dir, monkeypatch):
+    root, path = record_dir
+    raw = _PREFIX + "machine: obsolete\ntitle: original: title\n"
+    replacement = (_PREFIX + "title: changed by another writer\n").encode()
+    path.write_bytes(raw.encode())
+    fix = health.repair_yaml_text
+
+    def competing_writer(text):
+        fixed = fix(text)
+        path.write_bytes(replacement)
+        return fixed
+
+    monkeypatch.setattr(health, "repair_yaml_text", competing_writer)
+    findings = health.repair_yaml_integrity(root, apply=True)
+    assert len(findings) == 1 and findings[0].repairable and not findings[0].repaired
+    assert path.read_bytes() == replacement and not list(root.glob("*.bak"))
+
+
 @pytest.mark.guard
 @pytest.mark.parametrize("changes", [
     {"repair_record": "../wt-agent"}, {"repair_record": None},
@@ -210,6 +318,44 @@ def test_native_writer_contention_refuses_without_mutation(record_dir, held_auth
         holder.join(timeout=2)
     assert not holder.is_alive()
     assert path.read_bytes() == _RAW.encode() and not list(root.glob("*.bak"))
+
+
+def test_actual_competing_process_excludes_repair_without_backup(record_dir):
+    root, path = record_dir
+    ready, release = root / "writer-ready", root / "writer-release"
+    code = """
+import sys, time
+from pathlib import Path
+from agent_worktrees import tracking
+path, ready, release = map(Path, sys.argv[1:])
+with tracking._RecordLock(path, require_sidecar=True):
+    ready.touch()
+    deadline = time.monotonic() + 10
+    while not release.exists() and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert release.exists(), 'parent did not release its fixture writer'
+"""
+    process = subprocess.Popen(
+        [sys.executable, "-c", code, str(path), str(ready), str(release)],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, **no_window_kwargs(),
+    )
+    try:
+        deadline = time.monotonic() + 5
+        while not ready.exists() and time.monotonic() < deadline and process.poll() is None:
+            time.sleep(0.01)
+        assert ready.exists(), "fixture writer did not acquire its native sidecar"
+        with pytest.raises(TimeoutError):
+            repair.apply_repair(path, path.read_bytes(), repair.repair_bound_agent(_RAW, "pair_id"))
+        assert path.read_bytes() == _RAW.encode() and not list(root.glob("*.bak"))
+    finally:
+        release.touch()
+        try:
+            out, err = process.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.communicate(timeout=5)
+            raise
+    assert process.returncode == 0, out + err
 
 
 def test_repair_holds_authority_and_record_locks_through_replacement(record_dir, monkeypatch):

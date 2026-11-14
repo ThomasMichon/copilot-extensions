@@ -327,6 +327,8 @@ def repair_yaml_text(raw: str) -> str | None:
                 continue  # empty or already quoted
             if val in ("null", "|", "|-", ">", ">-"):
                 continue  # block/placeholder scalars -- leave alone
+            if val[0] in "*&!{[":
+                continue  # explicit YAML structure is not an unquoted prose scalar
             if any(ch in _NEEDS_QUOTE for ch in val):
                 lines[i] = f"{prefix}{_quote_scalar(val)}{tail}"
                 changed = True
@@ -340,30 +342,35 @@ def repair_yaml_integrity(tracking_dir: Path, *, apply: bool) -> list[YamlFindin
     Scans the raw ``*.yaml`` -- not ``list_records`` -- because a corrupt
     record is silently skipped there and would otherwise stay invisible.
     """
+    from . import tracking_yaml_repair
+
     findings: list[YamlFinding] = []
     if not tracking_dir.exists():
         return findings
     for y in sorted(tracking_dir.glob("*.yaml")):
         try:
-            raw = y.read_text(encoding="utf-8")
-        except OSError as e:
+            observed = y.read_bytes()
+            raw = observed.decode("utf-8")
+        except (OSError, UnicodeError) as e:
             findings.append(YamlFinding(y, f"unreadable: {e}", repairable=False))
             continue
         try:
-            data = yaml.safe_load(raw)
-        except Exception as e:
+            tracking_yaml_repair.strict_mapping(raw)
+        except (ValueError, TypeError, yaml.YAMLError) as e:
             fixed = repair_yaml_text(raw)
+            if fixed is not None:
+                try:
+                    fixed = tracking_yaml_repair.without_legacy_naming(fixed)
+                except (ValueError, TypeError, yaml.YAMLError):
+                    fixed = None
             finding = YamlFinding(y, _first_line(str(e)), repairable=fixed is not None)
             if fixed is not None and apply:
                 try:
-                    y.write_text(fixed, encoding="utf-8")
-                    finding.repaired = isinstance(yaml.safe_load(fixed), dict)
-                except Exception:
+                    tracking_yaml_repair.apply_repair(y, observed, fixed)
+                    finding.repaired = True
+                except (OSError, ValueError, TypeError, RuntimeError, yaml.YAMLError):
                     finding.repaired = False
             findings.append(finding)
-            continue
-        if not isinstance(data, dict):
-            findings.append(YamlFinding(y, "not a YAML mapping", repairable=False))
     return findings
 
 

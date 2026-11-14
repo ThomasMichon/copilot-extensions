@@ -34,6 +34,7 @@ also supports settling explicitly TO ``released``).
 from __future__ import annotations
 
 import logging
+from contextlib import ExitStack
 from pathlib import Path
 
 from . import activity, claim_history, obligations, tracking, tracking_write
@@ -48,6 +49,17 @@ def _authority_rejection(record: tracking.WorktreeRecord) -> dict | None:
             "Rejecting claim mutation for %s: %s", record.worktree_id, exc,
         )
         return {"error": "rejected", "message": str(exc)}
+    return None
+
+
+def _enter_claim_record(stack: ExitStack, path: Path) -> dict | None:
+    try:
+        stack.enter_context(tracking._RecordLock(path, require_sidecar=True))
+    except TimeoutError:
+        return {
+            "error": "rejected",
+            "message": "owner worktree is busy; no claim mutation was applied",
+        }
     return None
 
 
@@ -69,7 +81,9 @@ def apply_claim_add(args: dict) -> dict:
     ref = args["ref"]
     note = args.get("note") or ""
 
-    with tracking._RecordLock(yaml_path, require_sidecar=True):
+    with ExitStack() as stack:
+        if rejection := _enter_claim_record(stack, yaml_path):
+            return rejection
         record = tracking.load_record(yaml_path)
         if rejection := _authority_rejection(record):
             return rejection
@@ -137,7 +151,9 @@ def apply_claim_release(args: dict) -> dict:
     ref = args["ref"]
     remove = bool(args.get("remove"))
 
-    with tracking._RecordLock(yaml_path, require_sidecar=True):
+    with ExitStack() as stack:
+        if rejection := _enter_claim_record(stack, yaml_path):
+            return rejection
         record = tracking.load_record(yaml_path)
         if rejection := _authority_rejection(record):
             return rejection
@@ -221,7 +237,9 @@ def apply_claim_settle(args: dict) -> dict:
     disposition = args["disposition"]
     skip_if_released = bool(args.get("skip_if_released"))
 
-    with tracking._RecordLock(yaml_path, require_sidecar=True):
+    with ExitStack() as stack:
+        if rejection := _enter_claim_record(stack, yaml_path):
+            return rejection
         record = tracking.load_record(yaml_path)
         if rejection := _authority_rejection(record):
             return rejection
