@@ -3196,7 +3196,10 @@ sources, transferring owners or turning partial/planning gains into completion.
   not technical completion. Both original investigations and all fourteen
   unchecked technical rows remain under unchanged custody. The complete
   02:33:50 UTC census is 853 whole open, 124 above fixed 729, with two
-  verified original-cohort campaign departures and no inflow in that interval.
+  verified original-cohort campaign departures since the explicit 02:10:26
+  UTC 855-open baseline and no arrivals or external departures in that interval.
+  External #12536 had already reduced inflow between the earlier 856-open
+  checkpoint and that 855-open baseline; it earns no campaign credit.
   The [conductor/native-condition intake](journal/2026/11.13-conductor-continuation-and-native-conditions.md)
   proposes 21 unchecked direct Plan/local and actual global Validation rows
   for #6464 under its existing receiver and strict OPEN-until-implementation-
