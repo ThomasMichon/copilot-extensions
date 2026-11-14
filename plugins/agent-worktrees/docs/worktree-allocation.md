@@ -334,11 +334,14 @@ uncertainty, never permission to discard or replace a known allocation. The
 finished-proof validator is unchanged; unfinished replies cannot authorize
 binding, acknowledgement or conclusion.
 
-Consumers verify the exact original request proof and compare the ordinary
-row's execution space, repository, worktree ID, nonce, path, branch and creator
-before using it. The original sessionless result is not fresh session/head/
-holder admission; a composing host must still perform its normal current-record
-checks before embodiment.
+Consumers verify the exact original request proof, including its original
+execution destination, and compare the ordinary row's repository, worktree ID,
+nonce, path, branch and creator before using it. Optional machine/environment
+labels in the journaled row are not identity evidence: machine-free rows and
+rows carrying old labels use the same verified receiving proof. This does not
+retarget the original allocation. The original sessionless result is not fresh
+session/head/holder admission; a composing host must still perform its normal
+current-record checks before embodiment.
 
 This response has a separate bound: the existing 64 KiB ordinary-row budget
 plus the 16 KiB lifecycle-proof budget. The old proof ABI, input bound,
