@@ -12,6 +12,7 @@ from collections.abc import Callable, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 
+from agent_procutil.diagnostics import safe_diagnostic_text
 from agent_procutil.owned_process import OwnedCleanupError
 
 from .assignment_admission import StandingAdmission
@@ -41,7 +42,8 @@ def _refusal_detail(arguments: list[str], value: object, stderr: str | None) -> 
     )
     if isinstance(detail, dict):
         detail = detail.get("message") or json.dumps(detail, sort_keys=True)
-    return f" ({operation}: {str(detail)[:512]})"
+    detail = safe_diagnostic_text(str(detail), 512)
+    return f" ({operation}: {detail[:512]})"
 
 
 class WorktreeRelationshipWriter:

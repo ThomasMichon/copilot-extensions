@@ -8,6 +8,7 @@ import logging
 import pytest
 
 from agent_dispatch.queue import TaskError
+from agent_dispatch.assignment_relationship_owner import _refusal_detail
 from tests.test_assignment_relationships import assignment as assignment, claim
 
 
@@ -54,3 +55,37 @@ def test_original_writer_cause_is_redacted_and_unresolved_request_is_unchanged(
     assert "ValueError: selected record admission refused [REDACTED]" in record["error"]
     assert secret not in caplog.text
     assert "token" not in record and "payload" not in record
+
+
+@pytest.mark.parametrize("carrier", ["structured", "stderr"])
+def test_selected_owner_refusal_redacts_before_cutoff_and_causal_event(
+    assignment: tuple, monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture, carrier: str,
+) -> None:
+    queue, owner, workspace, task = assignment
+    secret = "sensitive-boundary-value-" + "x" * 600
+    monkeypatch.setenv("DISPATCH_RELATIONSHIP_TEST_SECRET", secret)
+    caplog.set_level(logging.INFO, logger="agent-dispatch.spawn")
+    text = "selected owner refused " + "p" * 440 + " " + secret
+    assert text.index(secret) < 512 < text.index(secret) + len(secret)
+
+    def refuse(operation: str, _result: dict) -> None:
+        detail = _refusal_detail(
+            ["resource-relationship", operation],
+            {"error": text} if carrier == "structured" else None,
+            text if carrier == "stderr" else None,
+        )
+        raise TaskError("selected owner command failed" + detail)
+
+    owner.before_reply = refuse
+    with pytest.raises(TaskError, match="request is unresolved"):
+        claim(queue, workspace, task)
+    [record] = [
+        json.loads(item.message) for item in caplog.records
+        if item.name == "agent-dispatch.spawn"
+    ]
+    assert record["stage"] == "task_relationship_write"
+    assert "selected owner refused" in record["error"]
+    assert "[REDACTED]" in record["error"]
+    assert "sensitive-boundary-value-" not in caplog.text
+    assert queue.task_relationship(task.id)["state"] == "pending"

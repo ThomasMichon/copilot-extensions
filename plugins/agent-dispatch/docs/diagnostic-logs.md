@@ -81,17 +81,23 @@ selected structured errors and bounded stderr, never arbitrary stdout envelopes.
 
 An unresolved cross-owner relationship write emits `task_relationship_write`
 with its original task/generation, assignment audit event, reservation when
-present, and reserve/bind/inspect/close operation. Its bounded, filtered causal
+present, and reserve/bind/close operation. Its bounded, filtered causal
 exception stays in the existing application log rather than being erased by
 the generic unresolved-request reply. The API reply and retained request are
 unchanged: this diagnostic neither proves absence nor authorizes retry,
 release, replacement or native admission.
+The separate pre-retirement inspection and admission guards outside that
+write callback do not emit this event; their existing error paths remain
+outside its coverage.
 
 Known credential values, credential assignments and supplied prompts are removed
 using the existing diagnostic-text owner. Raw task/environment/invocation
 envelopes are not copied into these records. These restrictions are not a reason
 to erase benign operation identities or causal errors. The existing optional
 `logs/bridge-cli` trace remains separate and default-off.
+Selected-owner refusal text is filtered before its formatter's text cap, so a
+credential crossing that cap cannot become an unrecognized literal fragment
+before the application event filter receives it.
 Exact supplied prompts/invocations are removed before bounded normalization, so
 a long input cannot leak a prefix merely because it was truncated before
 matching. Plain `[Errno N]`/`[WinError N]` causes remain diagnostic text, not JSON
