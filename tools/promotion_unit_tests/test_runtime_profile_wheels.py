@@ -16,7 +16,7 @@ import zipfile
 import pytest
 
 from runtime_profile import ProfileError, SCHEMA, select_profile, validate_profile
-from runtime_profile_wheels import verify_profile_layout, verify_profile_wheels
+from runtime_profile_wheels import _verified_profile_wheels, verify_profile_layout, verify_profile_wheels
 from installer_wheel_inputs import WheelLimits, inspect_archive
 
 
@@ -162,6 +162,20 @@ def test_isolated_manager_layout_checks_complete_separate_closures():
     assert {row["name"] for row in selected["manager"].record()["wheels"]} == {
         "copilot-extensions-worktree-manager",
     }
+    aggregate = {
+        "archive": 1 << 20, "expanded": 1 << 20, "seen": {},
+        "ownership": {
+            "owners": {}, "directories": {}, "manager_directories": set(), "wheels": set(),
+        },
+    }
+    with pytest.raises(ProfileError, match="ownership collision"):
+        for group in selected.values():
+            filenames = {row["filename"] for row in group.record()["wheels"]}
+            _verified_profile_wheels(
+                group, {name: archives[name] for name in filenames},
+                max_archive_bytes=1 << 20, max_unpacked_bytes=1 << 20,
+                max_metadata_bytes=1 << 16, limits=None, deadline=None, aggregate=aggregate,
+            )
 
 
 def test_isolated_manager_layout_refuses_a_collision_inside_manager():
