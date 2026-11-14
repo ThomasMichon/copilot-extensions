@@ -64,6 +64,14 @@ only imports from this source checkout:
   adoption are reported separately; unavailable authority or capability is
   an explicit open gate, never a substituted pass.
 
+- [ ] **G1045:** Accept the complete #1045 host inspection/progress contract
+  only when direct P1045 and paired V1045 pass through the built/copied core
+  artifact and its actual session-status and terse inspect/status JSON
+  receiving surfaces. Keep every incumbent artifact, caller-convergence,
+  lifetime, ownership, skew/rollback, cleanup, review/CI and finalization gate
+  conjunctive. This tracking intake adds no native, installed/live-deployment
+  or whole-#1138-completion prerequisite and waives no existing gate.
+
 Finalization requires this complete functional flow, every continuing Plan and
 Validation Plan item resolved or explicitly transferred to a named tracked
 objective, required source review/CI/publication completed, and the canonical
@@ -83,6 +91,19 @@ alone does not satisfy this criterion. Deployment remains separately authorized.
 - **Topology:** tightly coupled source work with one owner, one checkout and
   dependency-ordered functional outcomes.
 - **Host (owns PRs):** Refactor driver.
+- **Finite #1045 receiving (proposed):** Carry the complete specialized host
+  inspection/progress contract as planned work, not only an integration seam.
+  Keep its existing technical/implementation acceptance lane and all current
+  source/resource owners unchanged; appoint no executor or new claimant.
+  Normal reviewed Plan/Validation acceptance receives tracking, not technical
+  completion, source retirement or custody transfer. A later source-specific
+  disposition remains separate. #1138 stays independently canonical for
+  immutable event/reference semantics; consume its cursor-neutral reference
+  and unavailable-evidence interface without requiring its whole completion.
+  Use existing causal consumers. Do not add a new observer poller or fold the
+  lane into an event-identity/programme wrapper unable to carry its full
+  contract. Preserve credited liveness/output/heartbeat and bounded-result
+  work as partial baseline, not a new independent round-trip proof.
 - **Delegates:** source-auth receiver/enforcement implementation and its callable
   contract move to the contributor owning #11781 (proof prestage #11758).
   The refactor driver releases
@@ -237,6 +258,32 @@ remain with their existing owners.
   the [original-owner admission binding](implementation.md#original-owner-recovery-admission-binding).
 - [ ] Qualify ordinary/hoisted receiving, supported skew/rollback, endpoint and
   process identity, exact cleanup and measured cold/warm readiness.
+- [ ] **P1045:** Implement and integrate the entire host inspection/progress
+  contract in the standalone core and existing causal consumers, without a
+  new observer poller. Deliver version-tolerant end-to-end PING/PONG with a
+  nonce and RTT plus a fixed-size snapshot: Host PID/generation, child
+  PID/alive, turn-in-flight, maximum buffered sequence, frontend ACK, last
+  child-frame age and buffer depth. Choose a separate non-displacing control
+  connection/listener **OR** a supported multi-client read-only channel;
+  either choice must stay responsive independently of ACP bulk-frame
+  backpressure and must not replace the active frontend.
+  Report daemon API, provider/SSH forward, Session Host, Copilot child, ACP
+  turn and semantic-progress state/age separately. Bound current phase,
+  active-tool elapsed/update age, output/event byte **OR** sequence delta,
+  last-thought age/chunk count, `source`, `observed_at`, proof/scope and
+  cursor-neutral evidence reference. Retain the literal projection states:
+  `freshness` = fresh/stale/unknown; truncation = none/truncated/unknown;
+  `request_state` = requested/running/blocked/complete/unknown; and
+  `terminal_result` = success/failure/not-terminal/unknown. Distinguish declared
+  and derived milestones and reasoned unknown results, including evidence
+  limited or unavailable through retention/redaction.
+  Keep raw thoughts out by default; retain the explicit
+  `read --expand thoughts` detail path. Expose both the existing session-status
+  endpoint **AND** the terse `agent-bridge inspect/status --json` rendering,
+  preserving already-delivered `liveness`, `last_output_at` and
+  `last_heartbeat_at`. Preserve old-client/H1 compatibility. Consume #1138's
+  exact reference interface without taking over its identity/epoch/sequence
+  or retention semantics; a contract description alone is not delivery.
 - [ ] Establish independent POSIX owner-death custody and native Linux/pod
   qualification before opt-in auth-wait composition; ordinary non-auth execution
   remains a separate supported path.
@@ -255,6 +302,24 @@ remain with their existing owners.
   forbid legacy internal spawning and mux creation on the selected new path.
 - [ ] Both modes expose the broker and truthful stage distinctions: reservation,
   process/mux, native binding, input readiness, prompt acceptance and restoration.
+- [ ] **V1045:** Validate actual P1045 behavior on isolated fixtures and through
+  the built/copied-artifact receiving surface. Prove nonce/RTT and every
+  fixed-size field, per-layer state/age, bounded projection states and unknown
+  reasons, cursor-neutral/unavailable references, both pull surfaces and
+  old-client/H1 coexistence. Cover the original fault matrix: blackholed
+  forward without EOF; live Host/dead child; live silent-thinking turn;
+  quiet long-running tool; frontend reconnect; and high-volume ACP
+  backpressure while inspection stays responsive.
+  Also cover no signal, stale/timed-out signal, malformed/partial projection,
+  contradictory sources, active tool without update delta, PING/PONG success
+  without semantic-progress proof, terminal success/failure and
+  retention/redaction that removes or limits evidence.
+  Assert the selected allowed observer path never writes, ACKs, moves a
+  cursor, renews ownership, changes reapability, displaces the frontend or
+  exposes raw thoughts by default. Process/socket existence or PING/PONG
+  demonstrates only its scoped liveness/RTT property, not semantic progress,
+  ownership or completion. Check #1138's interface at this consumer boundary,
+  not by re-owning or requiring its entire acceptance contract.
 - [ ] Exact native identity, multiline/quoted seed, permissions and preference
   selections survive new/resume/reuse without staging or delivering a duplicate.
 - [ ] Structured pending-work and schedule evidence controls ACP idle expiry;
