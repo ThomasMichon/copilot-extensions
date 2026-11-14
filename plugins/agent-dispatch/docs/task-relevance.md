@@ -94,6 +94,11 @@ ownership, its execution lease or the original goal. A hosted conversation still
 requires its retained reservation and native identity, with release, retirement,
 cooling and conclusion guards unchanged. Recovery that advances the generation
 remains fenced; preserving intent does not authorize waking a retired native.
+Strict reset and agent-detachment recovery refuse while acknowledgement is
+pending, rather than advancing the generation beyond the accepted owner.
+The [recovery snapshot](task-recovery.md) also fences closeout acceptance after
+inspection. This preserves the existing closeout; it does not recover an
+uncaptured owner or authorize cross-generation acknowledgement.
 
 Only the outbox row linked through the closeout's actual steer can pass its
 original-goal admission fence. A later ordinary/event-note wake cannot supersede
