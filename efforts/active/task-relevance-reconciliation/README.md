@@ -132,8 +132,10 @@ merged plan does not establish running adoption.
       no-longer-needed and unknown outcomes; a failed check never implies abandon.
       The same receiver handles explicit needed/obsolete/unknown judgments;
       final-attempt report recovery remains distinct from source-check budgets.
-- [ ] Fence stale source observations and source reopen against newer task
+- [x] Fence stale source observations and source reopen against newer task
       episodes. Manual tasks and other emitters remain outside the scope.
+      The [source acceptance reconciliation](journal/2026/11.14-source-fence-acceptance.md)
+      maps existing queue, HTTP and emitter controls to this bounded gate.
 
 ### Phase 4 - Cohort attribution and closeout
 
@@ -210,8 +212,12 @@ merged plan does not establish running adoption.
 - [x] Source closure before claim abandons without launching an agent.
       Isolated receipt-caller/current-HTTP controls exercise explicit source
       closure with empty open-only production, not installed-runtime activation.
-- [ ] Concurrent claim, reservation and workspace/native preparation cannot
+- [x] Concurrent claim, reservation and workspace/native preparation cannot
       create a body after a successful unbound-abandon decision.
+      Independent queue-process races exercise both claim and the reservation
+      admission that must precede preparation; an earlier accepted reservation
+      instead retains closeout responsibility. This is source-level admission
+      acceptance, not installed driver/cohort qualification.
 - [x] A previously claimed but now unassigned task does not become
       never-claimed merely because its current owner field is empty.
       The source receiver checks durable assignment/resource history, including
@@ -222,8 +228,11 @@ merged plan does not establish running adoption.
       suspended/unreachable owners and production acceptance remain open.
 - [ ] Restart, duplicate reports and lost responses preserve a single accepted
       request, steer and closeout outcome; pending effects remain inspectable.
-- [ ] A stale report, reopened source, changed task episode, foreign emitter
+- [x] A stale report, reopened source, changed task episode, foreign emitter
       or incomplete source read cannot abandon unrelated/current work.
+      Queue acceptance fences and emitter/HTTP refusal controls preserve the
+      original task and prevent an unrelated or incomplete observation from
+      becoming an abandonment report; see the source acceptance reconciliation.
 - [x] Periodic selection respects registration scope, eligibility, batch bounds,
       retry policy and disabled registrations; age alone never retires work.
       Scoped isolated controls merged in #12325 include query-cost bounds,
@@ -252,6 +261,9 @@ authority. Add no universal attestation layer or duplicate lifecycle engine.
 
 ## Journal
 
+- [November 14 - source fence acceptance reconciliation](journal/2026/11.14-source-fence-acceptance.md)
+  records the existing concurrency and observation-fencing controls separately
+  from running lifecycle and production adoption.
 - [POSIX retained-owner construction](journal/2026/11.13-shell-retention.md):
   qualify fresh pinned Bridge builds without changing historical completed slots.
 
