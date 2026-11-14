@@ -3437,6 +3437,13 @@ sources, transferring owners or turning partial/planning gains into completion.
   #5665 handoff remains separate from documentary publication.
 - [ ] Verify and publish supported dispositions, preserving source versus
   release versus rollout distinctions and all active ownership.
+  The [auth/typing/cache outcome and changed-evidence follow-through](journal/2026/11.14-auth-typing-and-cache-intake.md#reviewed-delivery-and-separate-tracking-judgments)
+  records actual #12635 merge, complete current receiving bindings and three
+  independently audited NOT_PLANNED tracking retirements. All nine technical
+  rows and source custodians remain; the 16:17:43 UTC complete census is
+  847 whole open, 118 above fixed 729. Seven genuinely new eligible comments
+  retain #10968/#12274 as their existing open owned parents; #11875's actual
+  authorship gap remains metadata-only. No technical or custody release follows.
   The [canonical-keeper and finite-intake checkpoint](journal/2026/11.13-canonical-keepers-and-finite-intake.md)
   records three accepted complete planned families and separately verified
   tracking retirements after #12474, plus seven retained canonical/whole-transfer
