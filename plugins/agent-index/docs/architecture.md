@@ -568,6 +568,12 @@ classes), with SQL `%` and `_` treated as literal path characters. The path
 predicate runs with the other metadata predicates before the FTS candidate
 limit; it does not depend on filtering an already-truncated result list.
 
+Hydrated hybrid results apply the same case-sensitive path eligibility before the final
+result limit. Vector acquisition still uses a finite candidate window: matches
+outside it can leave an underfilled result, especially when FTS is unavailable.
+Filtering does not promise exhaustive top-N or identical FTS/hybrid rankings,
+and does not fall back to a corpus-wide scan.
+
 ```mermaid
 flowchart LR
   Agent[Any Copilot agent] --> CLI[agent-index read CLI]

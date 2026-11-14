@@ -1016,7 +1016,7 @@ def _apply_filters(
         filtered = [r for r in filtered if r.language == language]
     if file_path_glob:
         import fnmatch
-        filtered = [r for r in filtered if fnmatch.fnmatch(r.file_path, file_path_glob)]
+        filtered = [r for r in filtered if fnmatch.fnmatchcase(r.file_path, file_path_glob)]
     if repo:
         filtered = [r for r in filtered if repo_matches(r.source, repo)]
     for key in _FACET_KEYS:
