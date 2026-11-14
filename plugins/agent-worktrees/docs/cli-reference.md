@@ -1063,6 +1063,31 @@ deletion after merge is normal. Sync does not finalize or delete the local
 worktree branch, and preserves genuinely new local commits while pulling forward.
 Dry runs do not reconcile. Review/check/merge gates and rollout policy are unchanged.
 
+### Owner rewrite of a private PR branch
+
+The owning worktree may rebase, squash, amend or drop its own commits and
+republish with plain `push-changes` (or `git sync`) at any time; no operator
+form, confirmation fingerprint or `--rewrite-pr` flag is needed. When the
+bounded source-replay proof cannot be established, publication falls back to an
+owner rewrite only after every ordinary ownership check passes (owning checkout,
+publication ownership, open PR, saved head equal to the provider head, attested
+destination). The fallback still refuses when:
+
+- another tracked worktree holds a live PR on the same branch name (a
+  same-branch collision is never overwritten);
+- the source has no commits beyond the upstream default branch;
+- the remote head moved to commits this worktree never published and whose
+  changes neither its source nor its published head carries (for example a
+  reviewer's commit) -- integrate them first;
+- a moved remote head is not confirmed by the provider as this PR's head.
+
+The push is leased on the exact observed remote head. Before any rewrite,
+the published, remote and source heads are retained as local refs under
+`refs/agent-worktrees/backup/<branch>/<UTC stamp>/<label>`; only the newest five
+stamps per branch are kept. Recover a bad rewrite with
+`git for-each-ref refs/agent-worktrees/backup/<branch>/` and a normal branch
+reset to the retained commit. A backup write failure refuses the rewrite.
+
 ### Explicit operator recovery
 
 Prefer normal `push-changes` or `git sync` from the source-owning worktree's CWD.
