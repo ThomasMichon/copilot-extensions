@@ -591,7 +591,15 @@ not the daemon's launch directory or the remote product checkout when controller
 context is supplied. A declared `caller_owner_ref` resolves through the
 Worktrees owner to its local, nonterminal checkout; any supplied controller
 path must agree, and a `#session` qualifier must match `caller_session_id`.
-Explicit version-1 Worktrees rows are decoded by the shared dependency-free
+When the selected Worktrees owner supplies version-1 `reporting_context`, its
+current execution identity is authoritative, outside the durable rows.
+Machine-free rows and stale or malformed row labels cannot override that
+reporter. A renamed reporter is consumed on the next query without rewriting
+the row or adding another lookup. Invalid or unavailable current context
+refuses verification; it never falls back to matching row labels or the
+Bridge daemon's hostname.
+For older providers omitting reporting context, explicit version-1 rows are
+decoded by the shared dependency-free
 identity codec: the owner reference must match the separate execution owner,
 not the physical host shared by native and guest environments. Physical and
 environment metadata remains unchanged. Malformed explicit tuples refuse

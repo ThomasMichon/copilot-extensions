@@ -150,7 +150,9 @@ def _provider_command(metadata: dict[str, Any]) -> list[str] | None:
         or any(not isinstance(part, str) or not part for part in command)
     ):
         return None
-    return list(command)
+    from .transport import _reresolve_stale_interpreter
+
+    return _reresolve_stale_interpreter(list(command))
 
 
 async def _container_policy(target: SpawnTarget, operation: str) -> dict[str, Any]:

@@ -278,9 +278,7 @@ def collect(root: Path, *, retirement, budget: Budget | None = None) -> Report:
     report = Report()
     work = _Pass(budget, report)
     root = Path(store.normalized(root))
-    installation = store.user_cache() / "copilot-extensions" / "python" / "v1" / hashlib.sha256(
-        store.normalized(root).encode("utf-8"),
-    ).hexdigest()
+    installation = store.installation_root(root)
     try:
         work.check()
         if not files.present(installation):
@@ -371,3 +369,10 @@ def collect(root: Path, *, retirement, budget: Budget | None = None) -> Report:
         report.error(error)
         report.pending = True
     return report
+
+
+def collect_legacy(root: Path, *, retirement, budget=None):
+    """Reconcile historical prefixes through the same runtime-owner custody."""
+    from . import python_cache_legacy
+
+    return python_cache_legacy.collect(root, retirement=retirement, budget=budget)
