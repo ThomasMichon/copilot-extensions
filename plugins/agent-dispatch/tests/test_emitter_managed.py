@@ -237,6 +237,38 @@ def test_empty_source_does_not_resolve_credentials(venue):
     assert calls == []
 
 
+def test_missing_grant_resource_is_redacted_before_any_command_or_create(
+    venue, tmp_path, monkeypatch
+):
+    from agent_dispatch import repository_resources
+
+    _, spec, _, client, calls = venue
+    spec["managed_producer"]["grant_command"] = ["reader", "repo:fixtures:private-grant-missing"]
+    monkeypatch.setattr(
+        repository_resources,
+        "_registered_repository",
+        lambda *args, **kwargs: (tmp_path, "worktree"),
+    )
+    with pytest.raises(ValueError) as error:
+        emitter._author_tasks(
+            client,
+            spec,
+            json.dumps([row()]),
+            runner=lambda *args, **kwargs: pytest.fail("missing resource ran a command"),
+        )
+    assert str(error.value) == "managed producer grant resolution failed"
+    assert error.value.__suppress_context__
+    assert calls == []
+
+
+def test_malformed_grant_resource_is_redacted_during_spec_validation(venue):
+    _, spec, *_ = venue
+    spec["managed_producer"]["grant_command"] = ["reader", "repo:fixtures:../private-grant"]
+    with pytest.raises(emitter.EmitterError) as error:
+        emitter.validate_spec(spec)
+    assert str(error.value) == ("managed_producer.grant_command has invalid repository resources")
+
+
 @pytest.mark.parametrize("side_load", [False, True])
 def test_tick_and_side_load_keep_grants_out_of_domain_output_and_receipts(venue, side_load):
     _, spec, grant, client, _ = venue

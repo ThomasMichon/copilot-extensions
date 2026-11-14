@@ -32,7 +32,12 @@ def validate_config(spec: dict[str, Any]) -> None:
         or any(not isinstance(part, str) or not part for part in command)
     ):
         raise ValueError("managed_producer.grant_command must be an argument list")
-    validate_resource_arguments(command)
+    try:
+        validate_resource_arguments(command)
+    except ValueError:
+        raise ValueError(
+            "managed_producer.grant_command has invalid repository resources"
+        ) from None
     timeout = config.get("timeout_seconds", 30)
     if (
         isinstance(timeout, bool)
@@ -50,12 +55,12 @@ def load_grant(
     runner: Callable[..., Any],
 ) -> dict[str, Any]:
     config = spec["managed_producer"]
-    command, cwd = resolve_execution_resources(
-        [part.replace("{python}", sys.executable) for part in config["grant_command"]],
-        spec.get("cwd"),
-        bind_relative_executable=True,
-    )
     try:
+        command, cwd = resolve_execution_resources(
+            [part.replace("{python}", sys.executable) for part in config["grant_command"]],
+            spec.get("cwd"),
+            bind_relative_executable=True,
+        )
         completed = runner(
             command,
             cwd=cwd,
