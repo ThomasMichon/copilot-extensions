@@ -103,16 +103,16 @@ owners, information flow or effects.
 An explicit pin, single attempt, deadline, budget, pause, revocation or
 narrowing remains binding. For a revision pin or single-attempt limit,
 explicit means the operator stated it, or chose it when a broader option was
-also offered. A pin, one-shot limit or expiry/time window the agent wrote into
-its own question, as part of the only approving option, is the agent's
-proposal: record it under interpretation as a precaution, not as an operator
-limit. Such a grant lasts until its task completes, or until the operator
-revokes or narrows it or a hold applies. Inspect the evidence
+also offered. A pin or one-shot limit the agent wrote into its own question, as
+part of the only approving option, is the agent's proposal: record it under
+interpretation as a precaution, not as an operator limit. Inspect the evidence
 behind a precaution before relaxing it, within the granted class and effects;
-never clear another owner's hold this way. This origin test covers only pins,
-one-shot limits and self-written expiries. A cap in an accepted class-level
-rerun policy, and any budget, deadline or resource bound the operator accepted,
-is part of the granted scope and binds whoever drafted it.
+never clear another owner's hold this way. This origin test covers only pins
+and one-shot limits. A cap in an accepted class-level rerun policy, and any
+expiry, time window, budget, deadline or resource bound the operator accepted,
+is part of the granted scope and binds whoever drafted it. So do not invent an
+expiry: draft options valid until the task completes, revocation or a hold,
+and add a time window only when a real constraint requires one.
 Record actual use when the grant limits repetitions; do not reset it at a new
 session, branch or handoff. Unknown admission/outcome requires the existing
 owner's observation/idempotency recovery, not blind replay.

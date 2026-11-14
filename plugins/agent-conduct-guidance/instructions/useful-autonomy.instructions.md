@@ -48,8 +48,8 @@ command or bounded retry; a failure followed by a reviewed fix is such a retry.
 Preserve explicit revision pins and single-attempt limits (operator-stated or
 chosen over an offered broader option), accepted rerun caps, expiry, revocation
 and holds; a pin or one-shot limit in the agent's only approving option is its
-proposal, as is a self-written expiry (grants last until task completion,
-revocation or hold). Also reconcile unknown prior effects via owners. Ask
+proposal. An accepted expiry binds, so never invent one (default: until
+task completion). Also reconcile unknown prior effects via owners. Ask
 only for missing or materially changed scope: offer the class with a
 bounded rerun policy; on a repeat ask, seek class-level pre-clearance.
 

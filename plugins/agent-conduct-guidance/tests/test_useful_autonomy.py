@@ -93,7 +93,7 @@ def test_skill_and_record_are_discoverable_without_a_runtime():
     "A mechanical rebase or conflict-only push is not a new revision of intent",
     "caps bind intent-changing revisions",
     "add, move or delete files in its change",
-    "as is a self-written expiry (grants last until task completion, revocation or hold)",
+    "An accepted expiry binds, so never invent one (default: until task completion)",
 ])
 def test_kernel_preserves_useful_work_and_real_authority_boundaries(clause):
     assert clause in " ".join(_TEMPLATE.read_text().split())
@@ -164,9 +164,9 @@ def test_kernel_preserves_useful_work_and_real_authority_boundaries(clause):
         "work later needs more.",
     ),
     (
-        "Agent wrote an expiry or time window into its own only approving option",
-        "Record it as an agent-proposed precaution; the grant lasts until the task completes, "
-        "is revoked or narrowed, or a hold applies.",
+        "Agent is drafting an approving option and considers adding an expiry or time window",
+        "Omit it unless a real constraint requires one; an expiry in an option the operator "
+        "accepts binds, even when the agent drafted it.",
     ),
     (
         "Author agent's own reviewed change deletes or moves files, including superseded "

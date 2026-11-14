@@ -241,6 +241,8 @@ def test_parked_questions_are_answered_only_under_answer_scope() -> None:
         "relay it at the scope of the decision class",
         "rewrite options the worker narrowed on its own",
         "is a standing grant for that class until the task completes",
+        "An explicitly chosen narrower option, target or limit stays",
+        "Ask the worker to record the relayed grant in its own charter",
     ):
         assert requirement in text, requirement
     assert text.index("1. **Recheck.**") < text.index("2. **Persist first.**")
