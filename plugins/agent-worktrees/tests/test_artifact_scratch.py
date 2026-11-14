@@ -46,7 +46,8 @@ def test_real_allocation_binding_settlement_and_consumed_removal(allocation):
     assert removed["phase"] == "closed" and not location.exists()
 
 
-def test_finalize_with_bytes_then_independent_previewed_cleanup(allocation):
+@pytest.mark.parametrize("archived", [False, True])
+def test_finalize_with_bytes_then_independent_previewed_cleanup(allocation, archived):
     path, _, _ = allocation
     result = create(allocation)
     scratch.settle_after_cleanup(path, "m/p/owner", result["token"], forbidden=())
@@ -55,6 +56,9 @@ def test_finalize_with_bytes_then_independent_previewed_cleanup(allocation):
     record = tracking.load_record(path)
     record.status = "finalized"
     tracking.save_record(record, path)
+    if archived:
+        assert tracking.retire_record(record, path.parent)
+        assert tracking.load_record(path).status == "archived"
     ticket = scratch.preview_cleanup(path, "m/p/owner", result["token"], forbidden=())
     assert Path(result["path"]).exists()
     with pytest.raises(ValueError, match="preview changed"):
@@ -63,7 +67,87 @@ def test_finalize_with_bytes_then_independent_previewed_cleanup(allocation):
         path, "m/p/owner", result["token"], preview=ticket["preview"], forbidden=(),
     )
     assert outcome["outcome"] == "removed"
-    assert tracking.load_record(path).status == "finalized"
+    assert tracking.load_record(path).status == ("archived" if archived else "finalized")
+
+
+def test_record_removal_refuses_retained_bytes_until_explicit_cleanup(allocation):
+    from agent_worktrees import launch_seed_state
+    path, _, _ = allocation
+    result = create(allocation)
+    scratch.settle_after_cleanup(path, "m/p/owner", result["token"], forbidden=(), diagnostic=b"fixture")
+    args = {"yaml_path": str(path), "worktree_id": "owner", "remove_record": True}
+    before = path.read_bytes()
+    with pytest.raises(ValueError, match="retained artifact metadata"):
+        launch_seed_state._apply_remove(args)
+    assert path.read_bytes() == before and Path(result["path"]).exists()
+    record = tracking.load_record(path)
+    record.status = "finalized"
+    tracking.save_record(record, path)
+    preview = scratch.preview_cleanup(path, "m/p/owner", result["token"], forbidden=())
+    scratch.cleanup(path, "m/p/owner", result["token"], preview=preview["preview"], forbidden=())
+    assert launch_seed_state._apply_remove(args)["record_removed"]
+    assert not path.exists()
+
+
+def test_retired_pair_keeps_both_ledgers_until_retained_scratch_is_closed(allocation):
+    from agent_worktrees import retirement_safety
+    path, _, _ = allocation
+    result = create(allocation)
+    scratch.settle_after_cleanup(path, "m/p/owner", result["token"], forbidden=(), diagnostic=b"fixture")
+    record = tracking.load_record(path)
+    sibling_path = path.with_name("consumer.yaml")
+    sibling = tracking.load_record(sibling_path)
+    sibling.status, sibling.reaped_at = "finalized", tracking._now_iso()
+    tracking.save_record(sibling, sibling_path)
+    assert retirement_safety.delete_retired_pair(record, sibling, path, sibling_path)
+    assert path.exists() and sibling_path.exists()
+    assert scratch.callback_status(tracking.load_record(path).resources[0].ref)["available"]
+    preview = scratch.preview_cleanup(path, "m/p/owner", result["token"], forbidden=())
+    scratch.cleanup(path, "m/p/owner", result["token"], preview=preview["preview"], forbidden=())
+    assert retirement_safety.delete_retired_pair(tracking.load_record(path), sibling, path, sibling_path)
+    assert not path.exists() and not sibling_path.exists()
+
+
+def test_failed_retirement_save_cannot_delete_a_retained_artifact_ledger(allocation, monkeypatch):
+    path, _, _ = allocation
+    result = create(allocation)
+    scratch.settle_after_cleanup(path, "m/p/owner", result["token"], forbidden=(), diagnostic=b"fixture")
+    before = path.read_bytes()
+    def failed(*args, **kwargs):
+        raise OSError("fixture tombstone write failure")
+    with monkeypatch.context() as patch:
+        patch.setattr(tracking, "save_record", failed)
+        assert tracking.retire_record(tracking.load_record(path), path.parent) is False
+    assert path.read_bytes() == before and Path(result["path"]).exists()
+
+
+def test_managed_removal_archives_generic_retained_artifact_metadata(owner, monkeypatch):
+    from types import SimpleNamespace
+    from agent_worktrees import launch_seed_state, reap_cli
+    from test_resource_producer import call
+    from test_resource_producer_retention import artifact, retention
+    path, config = owner
+    bound = artifact(path)
+    monkeypatch.setattr(claim_providers, "resolve_claim_status", lambda ref: retention(bound))
+    assert call(path, "retain", {"token": bound["token"]}).get("ok")
+    record = tracking.load_record(path)
+    Path(record.worktree_path).rmdir()
+    record.kind, record.branch = "bridge", ""
+    tracking.save_record(record, path)
+    monkeypatch.setattr(reap_cli.sessions, "_list_mux_sessions", lambda: {})
+    monkeypatch.setattr(reap_cli.sessions, "scan_sessions_fast", lambda *a: SimpleNamespace(active_sessions={}))
+    monkeypatch.setattr(reap_cli.git_ops, "list_worktree_paths", lambda **k: [])
+    monkeypatch.setattr(reap_cli.disposition_history, "remove", lambda *a: None)
+    monkeypatch.setattr(reap_cli.handoff_trace, "remove_trace", lambda *a: None)
+    monkeypatch.setattr(
+        launch_seed_state, "_dispatch",
+        lambda verb, args, **k: launch_seed_state._apply_remove(args),
+    )
+    removed, warnings = reap_cli._remove_managed_worktree(record, config.default_repo, path.parent)
+    assert removed and not warnings
+    current = tracking.load_record(path)
+    assert current.status == "archived"
+    assert current.resources[0].producer["phase"] == "retained"
 
 
 def test_repeated_operation_id_does_not_allocate_another_directory(allocation):

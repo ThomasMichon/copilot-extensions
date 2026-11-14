@@ -17,8 +17,9 @@ visibly; this option neither bootstraps a runtime nor silently downgrades to
 unclaimed scratch. No default setting enables it.
 
 The pilot admits session-owned worktrees only. System/bridge owners are refused
-before allocation because their managed sweeper can remove the sole ledger;
-native retained-ledger preservation for those owner kinds is not yet supported.
+before allocation; their complete native managed-removal flow is not a qualified
+consumer of this pilot. Shared record-retirement protections still preserve
+retained artifact metadata as described below.
 
 The real `main()` entry admits/creates that private root before the legacy
 cache initializer can create it with inherited permissions. The same admission
@@ -97,9 +98,13 @@ The provider publishes settled physical state, then requests `retain` through
 the normal exact-subject ledger transaction. Successful consumed output may be
 removed immediately and absence-closed. Failed removal remains honestly retained.
 Logical finalization accepts safely retained bytes; it does not require deletion.
+Retirement keeps the existing ledger while artifact bytes remain retained,
+including both records at paired hard-deletion and a failed tombstone save.
+Direct record deletion refuses retained artifact metadata. The managed removal
+adapter uses record retirement instead of erasing that metadata.
 
 Independent cleanup is the separate Python owner API `preview_cleanup` then
-`cleanup`, requiring a finalized creator and exact preview. It rechecks current
+`cleanup`, requiring a finalized or archived creator and exact preview. It rechecks current
 owner/incarnation, handoffs, private root, allocation identity, quiescence and
 allowlisted diagnostic contents at removal. Unknown close replies reconcile the
 same token; no replacement allocation is created. There is no sweep, scheduler,

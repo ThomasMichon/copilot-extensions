@@ -450,7 +450,7 @@ def recover(path: Path, owner: str, token: str, *, forbidden: tuple[Path, ...]) 
 
 def preview_cleanup(path: Path, owner: str, token: str, *, forbidden: tuple[Path, ...]) -> dict:
     record, claim = _claim(path, owner, token)
-    if record.status != "finalized" or claim.producer["phase"] not in {"retained", "closed"}:
+    if record.status not in {"finalized", "archived"} or claim.producer["phase"] not in {"retained", "closed"}:
         raise ValueError("independent cleanup requires a finalized owner and retained allocation")
     if tracking.claim_handoff_reservation(record, claim):
         raise ValueError("scratch allocation has an outstanding handoff")
