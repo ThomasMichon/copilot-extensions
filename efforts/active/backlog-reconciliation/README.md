@@ -342,6 +342,13 @@ the non-public approval conversation.
 
 ## Plan
 
+The [runtime-contract discriminator refresh](journal/2026/11.14-runtime-contract-discriminators.md)
+retains twelve unfinished objectives with distinct source, receiving and
+custody gaps. Existing #1843/#2295 planned coverage is not duplicated; #2320's
+parked receiver is not reactivated. No source is closed or reassigned.
+The complete 22:15:57Z census remains 846 open, 117 above fixed 729, with no
+new disposition credit.
+
 The [owner-scoped contract receiving study](journal/2026/11.14-owner-contract-receiving.md)
 retains twelve distinct unfinished outcomes and proposes complete #1460
 per-owner support-window tracking in its existing Draft effort: ten Plan rows,

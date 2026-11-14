@@ -15,6 +15,9 @@ visions:
 - **Umbrella issue:** [#9023](https://github.com/ThomasMichon/copilot-extensions/issues/9023)
 - **Existing correctness owners:** #4222 (source checkpoints), #4220 (durable
   source locks), #8733 (readers observing committed writes), #5302 (vector gaps)
+  — the closed #4220/#5302 tracking tokens retain their unfinished requirements
+  under [#5768's receiving effort](../agent-index-standalone-service/README.md),
+  sections I4220 and I5302; closure does not certify implementation or data repair.
 
 ## Guiding Intent
 
