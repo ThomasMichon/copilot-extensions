@@ -20,6 +20,15 @@ This section is its normative installer contract, not a declaration that all
 existing installers comply. Per-component descriptions below record current
 mechanisms; legacy refusal/recovery descriptions do not redefine the target.
 
+The [foreground-update and independent-service-startup intent](../visions/installer/README.md#foreground-update-and-independent-service-startup)
+also governs this target. Ordinary updates and finite helpers are caller-owned
+and cancellable; accepted service setup/start, required persistent wrappers and
+runtime retention transfer to an independent lifecycle owner. Cancelling an
+update or readiness wait cannot kill that accepted work or daemon tree.
+Single-writer custody and durable outcomes remain required, but do not imply
+an ordinary detached whole-update worker. Existing background-driver mechanisms
+below are current adoption descriptions, not proof this target is implemented.
+
 An explicit/manual update installs admitted incoming runtime code independently
 of incumbent recovery, graceful/ZDD support, old ownership/custody/provenance,
 maintenance banners and stale installer transactions/queue fences. Such evidence

@@ -12,6 +12,15 @@
 - **Vision:** `visions/plugin-services/README.md` - `attributed-daemon-instances`
 - **Umbrella issue:** #8403
 
+## Goal
+
+Retain attributable custody for every shipped daemon and safe disposable
+instance lifetime under the unchanged Guiding Intent below. The
+[current lifetime amendment](../source-managed-runtime-installs/update-service-lifetimes.md)
+requires finite update helpers to remain caller-owned while accepted production
+startup and daemon/runtime custody transfer to an independent lifecycle owner.
+Existing lease durations and production no-expiry semantics are unchanged.
+
 ## Guiding Intent
 
 Every shipped daemon launch has attributable instance custody, including
@@ -93,6 +102,10 @@ boundary; process identity, leases, Job containment and safe cleanup retain
 their existing owners and guarantees.
 
 ## Plan
+
+- [ ] Qualify the existing instance/admission/retention handoff for independent
+  service startup versus cancellable update helpers. Preserve source, native
+  supervisor, container and test-purpose custody rather than adding an owner.
 
 ### Phase 1 - Reviewed contract
 
@@ -195,6 +208,10 @@ their existing owners and guarantees.
   construction/lifecycle qualification remain open.
 
 ## Validation Plan
+
+- [ ] Apply the relevant [L1-L4 identity/lifetime controls](../source-managed-runtime-installs/update-service-lifetimes.md#validation-and-completion)
+  without weakening lease expiry or fixture containment. A service-owned Job
+  is not automatically a caller-owned termination scope.
 
 - [ ] Review and complete the compiler-free amendment below, preserving every
   original process/lifetime/artifact guarantee without native compilation.
