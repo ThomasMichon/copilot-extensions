@@ -10,6 +10,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from agent_procutil._interpreter import physical_executable
 
 from agent_bridge.agent_registry import AgentConfig
 from agent_bridge.routes import worktree_refresh as refresh
@@ -103,11 +104,13 @@ async def test_real_source_stdout_refresh_renames_and_withdraws_without_row_chan
     }])
     original_rows = json.dumps(body["worktrees"], sort_keys=True)
     calls = []
+    interpreter = physical_executable(getattr(sys, "_base_executable", sys.executable))
+    assert interpreter is not None
 
     async def source(project: str, args: list[str], **kwargs) -> tuple[str | None, str]:
         calls.append((project, args))
         script = Path(__file__).parent / "fixtures" / "worktree_list_source.py"
-        return await wt._exec_ex([sys.executable, str(script), json.dumps(body)])
+        return await wt._exec_ex([interpreter, str(script), json.dumps(body)])
 
     monkeypatch.setattr(wt, "_run_local_ex", source)
     try:

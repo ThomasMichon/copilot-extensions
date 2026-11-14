@@ -7,7 +7,7 @@ exclude-newer = "7 days"
 
 [project]
 name = "agent-bridge"
-version = "0.9.447-dev1"
+version = "0.9.448-dev1"
 description = "Persistent inter-agent communication service for Copilot CLI"
 readme = "README.md"
 license = "MIT"
@@ -145,6 +145,7 @@ line-length = 99
 
 [project.optional-dependencies]
 dev = [
+    "setuptools>=83.0.0",
     "pytest>=9.1.1",
     "pytest-xdist>=3.8,<4",
     "pytest-asyncio>=0.24",

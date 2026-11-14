@@ -21,6 +21,16 @@ provides the ordinary application front door. Bridge consumes this same
 library through the existing canonical-reference and wheel-build owners,
 not a sibling plugin source dependency.
 
+Core also owns the complete Bridge registration/delivery JavaScript closure
+under `agent_remote_driver.bridge_extension`. It ships in the ordinary Core
+distribution and compact export. Bridge's single native SDK entrypoint supplies
+its actual plugin root and existing `joinSession` adapter; promotion projects
+these same assets into the payload, while source checkouts use the canonical
+Core directly. A partial projection refuses rather than selecting another
+source. Portable receiving exports the selected Core's package resources without
+searching for a suite installation. This ownership move adds no SDK extension,
+service, hook permission or automatic delivery mode.
+
 The compact legacy export preserves its disconnect-driven lifetime, rather
 than adopting ACP lifetime implicitly. An idle graceful detach closes that
 Host normally; cancellation of its external owner still propagates. Explicit

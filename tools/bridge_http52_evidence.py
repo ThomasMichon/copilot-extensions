@@ -1,11 +1,11 @@
 """HTTP-52 owner membership; all earlier generations remain immutable evidence."""
 
 from functools import partial
-import json
 from pathlib import Path
 
 import bridge_http51_evidence as retained
 import bridge_http_retained_evidence as common
+from launch_wrapper_assets_ref import load_manifest_groups
 
 previous = common.previous
 installation = common.installation
@@ -27,7 +27,18 @@ SCOPE = (
     "not native Copilot, mux, remote authentication or installed qualification"
 )
 POLICY = common.POLICY
-AFFECTED = (
+
+
+def _current_source(path: str) -> str:
+    if (
+        path.startswith("plugins/agent-bridge/extensions/agent-bridge/")
+        and not path.endswith("/extension.mjs")
+    ):
+        return "libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/" + path.rsplit("/", 1)[1]
+    return path
+
+
+_RETAINED_AFFECTED = (
     *retained.AFFECTED,
     *(previous.PREFIX + name for name in (
         "acp_client.py", "acp_callbacks.py", "acp_current_requests.py",
@@ -90,6 +101,14 @@ AFFECTED = (
     "libs/venue-copilot/src/venue_copilot/portable_mux.py",
     "libs/machine-transport/src/machine_transport/local_execution.py",
 )
+AFFECTED = tuple(_current_source(path) for path in _RETAINED_AFFECTED) + (
+    "libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/__init__.py",
+    "libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/extension.mjs",
+    "libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/announce.mjs",
+    "libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/bridge-endpoint.mjs",
+    "libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/plugin-readiness.mjs",
+    "libs/copilot-driver-core/src/agent_remote_driver/session_host/bundle.py",
+)
 EXTRA_PATHS = (
     *retained.EXTRA_PATHS, INPUT, CAPTURE, "tools/bridge_http52_evidence.py",
     "plugins/agent-bridge/tests/test_native_send_unavailable.py",
@@ -102,6 +121,8 @@ EXTRA_PATHS = (
     "plugins/agent-bridge/tests/test_live_inbox_producer.py",
     "plugins/agent-bridge/tests/test_plugin_readiness.py",
     "plugins/agent-bridge/tests/test_receiving_bundle.py",
+    "plugins/agent-bridge/tests/test_plugin_readiness_extension.py",
+    "libs/copilot-driver-core/pyproject.toml",
     "plugins/agent-bridge/tests/test_portable_mux_joined.py",
     "plugins/agent-bridge/tests/test_worktree_writer_observation.py",
     "plugins/agent-bridge/tests/test_acquisition_runtime.py",
@@ -150,18 +171,22 @@ EXTRA_PATHS = (
       for path in sorted(
           (Path(__file__).resolve().parents[1] / "plugins" / plugin / "src").rglob("*.py"),
       ) if "__pycache__" not in path.parts),
-    *(declaration["canonicalDir"] + "/" + name
+    *(declaration.source_relative(name)
       for manifest in ("packaged-assets.json", "launch-wrapper-assets.json")
-      for declaration in (json.loads(
-          (Path(__file__).resolve().parents[1] / "plugins/agent-bridge" / manifest).read_bytes(),
-      ),)
-      for name in declaration["files"]),
+      for declaration in load_manifest_groups(
+          Path(__file__).resolve().parents[1] / "plugins/agent-bridge", manifest_name=manifest,
+      )
+      for name in declaration.files),
 )
+EXTRA_PATHS = tuple(_current_source(path) for path in EXTRA_PATHS)
 PROBES = {
     **retained.PROBES,
     "test_reporter_naming_overrides_stored_names_without_retargeting_agent": 3,
     "test_invalid_reporting_context_does_not_replace_last_good_inventory": 11,
     "test_real_source_stdout_refresh_renames_and_withdraws_without_row_changes": 1,
+    "test_actual_sdk_facade_loads_the_core_without_suite_services": 5,
+    "test_core_extension_helper_contracts": 1,
+    "test_readiness_and_existing_delivery_node_contracts": 1,
     "test_real_cli_reports_unavailable_before_constructing_native_admission": 2,
     "test_other_commands_keep_existing_unavailable_client_behavior": 1,
     "test_transport_distinguishes_preflight_from_a_lost_post_response": 3,

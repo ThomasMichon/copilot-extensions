@@ -69,6 +69,17 @@ declaration: delivery then uses the retained common Session Host rather than
 a competing direct SDK sender. Ordinary launches without that declaration
 keep their existing selection.
 
+Registration and delivery implementation assets are owned by the
+[independent Core](../../libs/copilot-driver-core/README.md). The existing Bridge
+SDK entrypoint is a thin adapter to that same closure in source, released and
+portable receiving layouts. Native plugin-root checks still bind the adapter's
+actual root; there is no additional extension activation or service prerequisite.
+
+The interactive extension also offers a bounded
+[post-tool pending-input notice](docs/retained-sdk-consumer.md#post-tool-pending-input-notice).
+It is a steering hint, not a consumption receipt, fallback delivery or native
+qualification.
+
 Remote credential-relay admission and persisted-session reconnect use
 `timeouts.session_host_ready` (90 seconds by default) as a bounded readiness
 budget, including fresh SSH establishment and retries. Each probe receives

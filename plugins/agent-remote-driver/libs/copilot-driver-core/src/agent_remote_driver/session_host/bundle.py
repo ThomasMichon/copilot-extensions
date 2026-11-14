@@ -22,6 +22,7 @@ _DRIVER_MODULES = (
     "session_preferences.py",
     "preference_attestation.py",
     "preference_exec.py",
+    "bridge_extension/__init__.py",
     "headed/__init__.py",
     "headed/backend.py",
     "headed/staging.py",
@@ -117,10 +118,15 @@ def _legacy_sources() -> tuple[tuple[str, bytes], ...]:
 
 
 def _sources(legacy: bool) -> tuple[tuple[str, bytes], ...]:
+    from agent_remote_driver.bridge_extension import extension_sources
+
     module, function = (_LEGACY_MAIN if legacy else _MAIN).split(":")
     entrypoint = f"import sys\nfrom {module} import {function}\nsys.exit({function}())\n"
     return tuple(
         (relative, path.read_bytes()) for relative, path in _bundle_sources()
+    ) + tuple(
+        ("agent_remote_driver/bridge_extension/" + name, content)
+        for name, content in extension_sources()
     ) + _policy_sources() + (_legacy_sources() if legacy else ()) + (
         ("__main__.py", entrypoint.encode("utf-8")),
     )
