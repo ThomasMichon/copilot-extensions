@@ -11,6 +11,7 @@ from zdd import routing
 from . import status_monitor_cutover as control
 from . import config as cfg
 from . import worktrees_observation_contract as observations
+from . import worktrees_reporting
 from .worktrees_projection import SCHEMA_VERSION, _encode_row, read_advisory
 from .worktrees_projection_index import ProjectionError, ProjectionUnavailable
 from .worktrees_runtime import CONTRACT_VERSION, request_selection
@@ -105,6 +106,8 @@ def validate_result(result: dict, request: dict, *, quality: str = "current") ->
     if quality == "advisory" and availability is None:
         raise ProjectionUnavailable("unlabeled advisory current-roster result")
     try:
+        if "reporting_context" in result:
+            worktrees_reporting.validate(result["reporting_context"])
         if result["contract_version"] == observations.VERSION:
             observations.validate_rows(rows, result.get("observations"), revision)
         for row in rows:
@@ -209,6 +212,7 @@ def saved_result(request: dict, reason: str, *, db_path=None) -> dict:
     result.update(
         ok=True, contract_version=request["contract_version"],
         availability={"status": "advisory", "reason": reason},
+        reporting_context=worktrees_reporting.current(project),
     )
     if request["contract_version"] == observations.VERSION:
         result["project"] = project
@@ -401,6 +405,8 @@ def emit_current(args) -> int:
                     "projection": head,
                     "availability": result.get("availability"),
                     "selected_count": len(result["worktrees"]),
+                    **({"reporting_context": result["reporting_context"]}
+                       if "reporting_context" in result else {}),
                 }
             ),
             flush=True,

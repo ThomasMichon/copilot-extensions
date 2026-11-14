@@ -513,6 +513,36 @@ as well as prompt-delivery execution.
 
 ## Resident current-roster reads
 
+### Live reporting context
+
+The running resident advertises `worktrees-reporting-context-v1` through its
+authenticated health response. Successful v1/v2 reads add `reporting_context`
+outside `worktrees` and `projection`; feed `begin`/`update` and `heartbeat`
+frames carry the same optional envelope. Its version-1 resolved shape is
+`{version: 1, status: "resolved", hostname, machine, environment, execution_machine}`.
+The three names are nonempty strings bounded to 256 UTF-8 bytes;
+`environment` is `windows`, `wsl` or `linux`. Invalid/unreadable current
+configuration returns `{version: 1, status: "unavailable"}`, never a retained
+name. Reporting facts grant no ownership, allocation or transport authority.
+
+The serving host uses the shared current execution resolver on every response
+and heartbeat, reading current machine configuration without loading tracking
+records, constructing a full project Config or spawning Git/CLI processes.
+Names are not persisted in this envelope, and changing them neither advances
+row/observation revisions nor changes a publication's freshness or quality.
+Saved local responses retain their advisory rows and add the reading host's
+current context. Remote consumers preserve the reporting host's envelope;
+they must not derive remote names from the coordinator's local hostname.
+
+This is provider expansion, not row-field retirement. Existing row naming and
+selection semantics remain during consumer migration. Older receivers ignore
+the additive envelope; a provider rollback may omit it. Missing context means
+that live reporter naming is unsupported, not that the reader should invent
+it. Consumer migration and durable row/index naming removal follow separately;
+this capability alone does not certify those later changes.
+
+### Current publication and selection
+
 The separate [`record --worktree-id <exact-id> --json`](cli-reference.md#exact-durable-record-read)
 API reads one ground-owned durable record in the receiving project's tracking
 namespace. It is metadata, not a roster fallback, resident computation,
