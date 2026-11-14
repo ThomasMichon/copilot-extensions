@@ -1,0 +1,9 @@
+{
+  "comment": "Allow unbound local New sessions while retaining configured binding validation and separate storage and coordination gates.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

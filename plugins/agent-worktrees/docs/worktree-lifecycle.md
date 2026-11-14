@@ -71,19 +71,26 @@ Explicit Picker bootstrap and lifecycle wakes are unchanged.
 
 ### Creation starts from freshly resolved repository state
 
-New authoring preflight first checks the selected repository's native
-coordination readiness. When the repository requires external knowledge,
-an absent or unresolved binding refuses before worktree allocation or source
-preparation; complete the owning knowledge setup and retry. A non-external
-repository does not acquire a knowledge requirement. Source-only allocation,
-existing-session entry and explicit recovery retain their existing admission
-rules. This check is not provider authentication or complete application health.
+New authoring preflight validates the selected repository's configured knowledge
+binding. An absent binding permits basic local managed sessions: worktree and
+session bookkeeping stay in the existing machine-local tracking store, with no
+knowledge pair or implicit repository creation. A configured but unresolved
+binding still refuses before worktree allocation or source preparation; repair
+that binding and retry. Valid bindings retain automatic pairing and composition.
+Personal-state writes and claim-producing coordination keep their separate
+external-root requirements; local launch does not make `state-root` or
+`coordination-readiness` ready. Source-only allocation, existing-session entry
+and explicit recovery retain their existing admission rules. This check is not
+provider authentication or complete application health.
 Structured New requests check before their first durable admission, so a denied
 request can retain its original identity for retry after readiness is repaired.
 The creation-time preflight also completes before the request is marked started,
 and creation consumes that validated result. A refusal at either read does not
 poison an otherwise unstarted request's fixed allocation.
 Previously admitted request recovery keeps its existing ownership checks.
+The existing ordinary and structured New syntax and response shapes are
+unchanged. Older engines can still refuse an absent binding; callers must not
+work around that refusal by disabling statelessness or selecting another store.
 If project configuration itself cannot resolve, `coordination-readiness` and
 JSON `resolve` return a nonzero error envelope, not invented readiness facts.
 The readiness JSON also advertises optional receiver support in an additive
