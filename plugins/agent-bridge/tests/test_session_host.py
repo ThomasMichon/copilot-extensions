@@ -3789,7 +3789,10 @@ for line in sys.stdin:
             await asyncio.sleep(.025)
         else:
             pytest.fail("The copied Core did not stop after explicit termination")
-        assert exit_code == 0
+        if os.name == "nt":
+            assert exit_code == 0
+        else:
+            assert exit_code.si_code == os.CLD_EXITED and exit_code.si_status == 0
         assert not osutil_pid_alive(original_host.child_pid)
     finally:
         try:
