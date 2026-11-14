@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-14 - Finite auth, typing and cache-admission intake](journal/2026/11.14-auth-typing-and-cache-intake.md)
+
 - [2026-11-14 - First-use readiness and messaging-handoff research](journal/2026/11.14-first-use-and-message-handoff-research.md)
 
 - [2026-11-14 - Publication-hook and retrieval-glob receiving](journal/2026/11.14-publication-and-retrieval-receiving.md)

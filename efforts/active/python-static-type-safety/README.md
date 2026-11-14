@@ -42,6 +42,14 @@ definition of success.
 - **Handoff:** A merged slice returns to the canonical README, updates its Plan/Validation/Journal, then selects the next unresolved item. A continuation retains #9807, this README, the current slice, live PRs and exactly one next action.
 - Existing contributor PRs are reviewed/coordinated, not superseded. Shared-library changes precede dependent activations; unrelated leaf activations may proceed independently.
 
+- **Finite #9177 tracking:** The direct Phase 4 item and paired local/global
+  validation below preserve the existing separate owner/claim. Normal reviewed
+  Plan acceptance does not assign that source to the lead, activate the Index
+  plugin or extend the completed Credential Relay/Index-service admissions.
+  Any implementation remains in the existing authorized, explicitly assigned
+  source lane; no generic acknowledgement or whole-parent completion gate is
+  added to the finite issue.
+
 ## Context
 
 The initial investigation found no MyPy CI gate. `AGENTS.md` and
@@ -317,6 +325,28 @@ rewrite.
 - [ ] Tighten each activated runtime/service to strict through component-sized PRs; cover source, optional extras and platform-specific implementations.
 - [ ] Converge the larger Worktrees, Worktree Manager and Fleet Manager surfaces through subsystem-sized PRs, preserving lazy-loading and native behavior.
 
+#### Direct retained #9177 Index-plugin credential typing
+
+**Agent-recommended tracking amendment.** This is the separately owned
+`plugins/agent-index/src/agent_index/sources/credentials.py` file, not whole
+plugin admission or the already-qualified Index service.
+
+- [ ] **P9177:** Explicitly narrow all four reported diagnostics: the optional
+  `_relay_destination` hostname, configured relay path passed to `Path`,
+  conditional `token_provider` import-name collision and optional gateway/
+  relay reference at `Path` conversion. Preserve runtime policy validation's
+  existing invalid-shape rejection and unchanged source/account and
+  credential-delivery policy. Add no dependency or credential fallback.
+
+#### Local Validation - #9177
+
+- [ ] **V9177:** On the existing authorized source head and supported plugin
+  environment, keep the existing renewable-source credential tests passing
+  and require a clean standalone
+  `mypy --python-executable .test-venvs/linux/agent-index/bin/python --ignore-missing-imports --follow-imports=silent plugins/agent-index/src/agent_index/sources/credentials.py`.
+  Retain both results for that same head, without changing policy or treating
+  the finite standalone check as strict whole-plugin admission.
+
 ### Phase 5 - Tests, tools and bootstrap
 
 - [x] Strictly admit AI Attribution's complete five-file Python helper/test portfolio (#10171), preserving shell emission and signature/disclosure behavior.
@@ -401,6 +431,13 @@ rewrite.
   This is the actual Harness/composed-consumer obligation, not a newly inherited
   full-portfolio, native or installed barrier for another canonical source leaf.
 - [ ] Each typing change preserves behavior through the smallest existing focused tests plus directly relevant integration/native checks. Skips are explicitly justified in that PR.
+- [ ] **G9177:** Resolve P9177 and V9177 at the exact reviewed source head:
+  all four named diagnostics absent, existing renewable-source credential
+  tests passing, runtime invalid-shape refusals and source/account/credential
+  policy unchanged, with no dependency or fallback change. Preserve separate
+  ownership and all incumbent portfolio gates; this finite issue does not
+  require whole-plugin activation, all consumers, every native host or the
+  unrelated #10362 composed-consumer completion.
 - [x] Credential Relay preserves its production behavior, assertions and deadlines across both strict targets, Python 3.10 native/copy tests and fresh exact-input source CI (#10310).
 - [x] Index service preserves its original function/assertion contracts across both strict targets, Python 3.10 native/copy tests, composed-source qualification and fresh exact-input source CI; the eight original skips receive no additional credit (#10327).
 - [x] PR service preserves all 81 original functions and 114 assertion expressions across both strict targets, actual Python 3.10 installed/native tests and fresh exact-input source CI (#10332).

@@ -3164,6 +3164,13 @@ sources, transferring owners or turning partial/planning gains into completion.
   receiving objective or a retained gap; investigate actual implementation
   evidence when claiming completion, rather than making that the prerequisite
   for discovering thematic alignment.
+  The [auth, typing and cache-admission intake](journal/2026/11.14-auth-typing-and-cache-intake.md)
+  directly preserves #12466/#9177/#12600 in their existing canonical domains,
+  with nine unchecked Plan/local/actual-global technical rows. Original
+  alternatives, positive source credit, Draft/separate-owner/source-custody
+  boundaries and all prior acceptance remain; documentary receiving is not
+  implementation or source retirement. The complete 16:06:33 UTC census
+  remains 850 whole open, 121 above fixed 729, with no new closure credit.
   The [first-use and messaging-handoff research](journal/2026/11.14-first-use-and-message-handoff-research.md)
   distinguishes #9177/#9238's specific nonmatching receivers, #9281's plausible
   but unaccepted doctor/readiness intake, #12487's existing canonical owner and
