@@ -13,6 +13,7 @@ from pathlib import Path
 
 from . import config as cfg
 from . import worktrees_observation_contract as observations
+from . import worktrees_reporting
 from .worktrees_projection import WorktreesProjection, _identity
 from .worktrees_projection_index import (
     ProjectionError,
@@ -256,6 +257,7 @@ class WorktreesRuntime:
                 "capabilities": [
                     CAPABILITY, FEED_CAPABILITY, BOOTSTRAP_CAPABILITY, REFRESH_CAPABILITY,
                     observations.CAPABILITY, "picker-bootstrap-v1",
+                    worktrees_reporting.CAPABILITY,
                     "worktree-agendas-v1",
                     "worktree-agendas-v2",
                     "worktree-agendas-graph-v1",
@@ -436,7 +438,10 @@ class WorktreesRuntime:
             )
         except ProjectionError as exc:
             return self._failure("invalid-request", str(exc))
-        result = {"ok": True, "contract_version": payload["contract_version"], **result}
+        result = {
+            "ok": True, "contract_version": payload["contract_version"], **result,
+            "reporting_context": worktrees_reporting.current(project),
+        }
         if refresh_receipt is not None:
             from .worktrees_refresh import receipt_matches
 
