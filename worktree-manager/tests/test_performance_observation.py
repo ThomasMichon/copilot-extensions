@@ -801,7 +801,8 @@ def test_manager_uses_canonical_vendored_dependency():
 
     root = Path(__file__).resolve().parents[1]
     project = tomllib.loads((root / "pyproject.toml").read_text())
-    assert "agent-process-telemetry" in project["project"]["dependencies"]
+    assert "agent-process-telemetry" in project["dependency-groups"]["first-party-core"]
+    assert "agent-process-telemetry" not in project["project"]["dependencies"]
     assert project["tool"]["uv"]["sources"]["agent-process-telemetry"] == {
         "path": "../libs/process-telemetry", "editable": True,
     }
