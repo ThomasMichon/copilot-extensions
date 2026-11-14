@@ -48,6 +48,8 @@ from collections import deque
 from pathlib import Path
 from typing import Any
 
+from agent_procutil import no_window_kwargs
+
 from agent_logger import sessions
 from agent_logger.segmenter.collate import (
     DEFAULT_MAX_TOOL_OUTPUT,
@@ -231,7 +233,7 @@ def _delegate_remote(machine: str, ref: str, passthrough: list[str]) -> int:
     remote = ["ramp-up-session", ref, *passthrough]
     print(f"# Hunting worktree '{ref}' on {machine} via ssh...", file=sys.stderr)
     try:
-        proc = subprocess.run(["ssh", machine, *remote], check=False)
+        proc = subprocess.run(["ssh", machine, *remote], check=False, **no_window_kwargs())
     except FileNotFoundError:
         print("error: ssh not found on PATH (needed to reach another machine)", file=sys.stderr)
         return 1

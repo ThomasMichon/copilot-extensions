@@ -8,6 +8,7 @@ tests and functional checks.
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 
 import agent_logger.segmenter.ramp_up as ramp_up
@@ -195,6 +196,26 @@ def test_remote_machine_selector_still_delegates(
         ramp_up.main()
     assert result.value.code == 17
     assert calls == [("remote-host", "dupe", ["--tail-turns", "6", "--list", "--json"])]
+
+
+def test_remote_delegation_uses_shared_headless_options(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup = object()
+    monkeypatch.setattr(ramp_up, "no_window_kwargs", lambda: {"startupinfo": startup})
+    calls = []
+
+    def run(
+        argv: list[str], *, check: bool, startupinfo: object,
+    ) -> subprocess.CompletedProcess[bytes]:
+        calls.append((argv, check, startupinfo))
+        return subprocess.CompletedProcess(argv, 17)
+
+    monkeypatch.setattr(ramp_up.subprocess, "run", run)
+    assert ramp_up._delegate_remote("remote-host", "dupe", ["--list"]) == 17
+    assert calls == [
+        (["ssh", "remote-host", "ramp-up-session", "dupe", "--list"], False, startup),
+    ]
 
 
 def test_is_local_machine(monkeypatch) -> None:
