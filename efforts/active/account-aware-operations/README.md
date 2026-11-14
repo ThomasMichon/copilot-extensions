@@ -51,6 +51,14 @@ switch or leaking one operation's credentials into another.
   tracker, provider abstraction, executor appointment or authentication
   operation is authorized.
 
+- **Finite #12466 intake:** Phase 4 is the single canonical phase for
+  provider-appropriate update-failure guidance. Existing scoped-command and
+  update-authentication custodians retain their work; this receives tracking,
+  not their source claim. The [append-only intake record](../migration-intake/ledger.md#finite-provider-appropriate-update-guidance-intake-2026-11-14-utc)
+  retains the existing issue rather than creating another tracker. Normal
+  reviewed direct Plan acceptance does not activate this Draft effort, waive
+  the temporary-token implementation restriction or authorize an auth ceremony.
+
 ## Context
 
 Repository tools often inherit whichever account happens to be active in a
@@ -172,6 +180,28 @@ lookup; neither is a fresh missing implementation or whole-family proof.
   failures, and target/account mismatches.
 - [ ] Document migration from ambient selection and a reversible rollback path.
 
+#### Direct retained #12466 provider-appropriate update guidance
+
+**Agent-recommended tracking amendment.** This is the finite update failure
+diagnostic, not another identity resolver or a replacement for #5791/#810.
+
+- [ ] **P12466:** Select recovery guidance from the actual remote/provider
+  and authentication policy. Preserve valid GitHub and GitHub Enterprise
+  guidance, but do not unconditionally prescribe `gh auth login` for an
+  unrelated HTTPS provider. Distinguish probe timeout/unavailability from
+  credential rejection; unknown providers receive a neutral diagnostic
+  without an authentication ceremony. Preserve configured probe bounds,
+  non-secret diagnostics and the original operation/update outcome.
+
+#### Local Validation - #12466
+
+- [ ] **V12466:** Through the actual update-authentication guidance entry,
+  use synthetic GitHub, GitHub Enterprise, unrelated HTTPS and unknown
+  provider cases, with rejected credentials, timeout and unavailable-probe
+  controls. Prove provider/policy-appropriate advice without changing the
+  original status/update result or configured timeout. No real login, token
+  change, provider write or installed update is needed for this finite check.
+
 ### Phase 5 - Reconcile deferred backlog
 
 - [ ] Accept account-scoping candidates only through
@@ -241,6 +271,14 @@ _Correlated via a facility-driven sweep of open `bug`-labeled issues against act
   record do not activate this Draft effort, satisfy technical acceptance,
   authorize implementation or release source/resource custody.
 
+- [ ] **G12466:** Resolve P12466 and V12466 at the same reviewed source
+  head: provider/policy-appropriate GitHub/Enterprise and neutral unknown/
+  unrelated-provider advice, honest timeout/unavailable versus rejected-
+  credential classification, unchanged configured bounds and original
+  operation/update result. Retain the existing owners, Draft and
+  temporary-token restriction, #5791/#810 acceptance and separate source,
+  release and installed evidence. Planned receiving is not a technical fix.
+
 ## Proposal
 
 Establish repository-scoped identity resolution as a shared primitive, then
@@ -248,6 +286,16 @@ adopt it incrementally across commands that currently inherit ambient account
 state.
 
 ## Journal
+
+### 2026-11-14 - Finite provider-appropriate update-guidance intake
+
+- Added Phase 4 P12466, local V12466 and actual global G12466 through the
+  existing Phase 5 intake, preserving the existing tracker and source
+  custodians. Existing structured refusal, credential isolation and timeout
+  controls are positive source credit, not proof the reported branch is fixed.
+- Direct reviewed Plan delivery is documentary acceptance, not activation,
+  implementation appointment, a login/test/update or a source/resource transfer.
+  Draft status, the temporary-token restriction and all prior rows remain.
 
 ### 2026-11-13 - Proposed finite intended-account execution intake
 
