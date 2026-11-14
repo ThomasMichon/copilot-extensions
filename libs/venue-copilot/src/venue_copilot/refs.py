@@ -37,9 +37,25 @@ _OWNED_REFUSAL_REASONS = frozenset({
 })
 #: Bridge readiness diagnostics that mean guest plugins were still loading,
 #: not that the compiled selection was rejected.
-_TRANSIENT_READINESS = re.compile(r"(?<![\w-])(?:readiness-timeout|selected-loadout-pending)(?![\w-])")
+_TRANSIENT_READINESS = frozenset({"readiness-timeout", "selected-loadout-pending"})
+_READINESS_REASON = re.compile(r"['\"]reason['\"]:\s*['\"]([^'\"]*)")
 #: Waits before re-observing readiness for the same keyed operation.
 READINESS_RETRY_DELAYS = (15.0, 30.0)
+
+
+def _transient_readiness(error: str) -> bool:
+    """Return whether a readiness refusal's diagnostic prefix means still loading.
+
+    Only the leading reason segments are inspected, so plugin names that merely
+    contain a transient token never trigger a retry.
+    """
+    match = _READINESS_REASON.search(error)
+    if match is None:
+        return False
+    parts = match.group(1).split(":")
+    if parts[0] in _TRANSIENT_READINESS:
+        return True
+    return parts[0] in {"failed", "unsupported"} and len(parts) > 1 and parts[1] in _TRANSIENT_READINESS
 
 
 class RefFileError(ValueError):
@@ -294,7 +310,7 @@ def deliver_note(
                 error = payload.get("error")
                 if (
                     reason == "plugins_not_ready" and readiness_delays
-                    and isinstance(error, str) and _TRANSIENT_READINESS.search(error)
+                    and isinstance(error, str) and _transient_readiness(error)
                 ):
                     sleep(readiness_delays.pop(0))
                     attempts = 2

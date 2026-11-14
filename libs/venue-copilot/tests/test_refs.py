@@ -143,7 +143,9 @@ def test_prepared_delivery_bounds_loading_retries_and_keeps_final_refusals() -> 
     assert sleeps == list(venue_refs.READINESS_RETRY_DELAYS)
     assert count == len(venue_refs.READINESS_RETRY_DELAYS) + 1
     for final in ("failed:selected-plugin-disabled:alpha@market", "native-session-changed",
-                  "startup-operation-input-changed"):
+                  "startup-operation-input-changed",
+                  "failed:native-observation-error:readiness-timeout@market",
+                  "failed:selected-plugin-disabled:selected-loadout-pending@m"):
         result, sleeps, count = deliver(final)
         assert result.status == "refused" and sleeps == [] and count == 1
 
