@@ -5776,7 +5776,7 @@
         "tools/standalone_python_artifacts.py": "03ebfebbf6314ca6a0dadd3102f2b45f1fb3e94a5e2fca74ca6fc7759c03f4f6",
         "tools/tag_promotion.py": "06ffc590cf6a32a4e20ff226b76d49e88b7bf7b33e4eeeb3e08a269b20d96ae9",
         "tools/test_check_docs_consistency.py": "18746b96d0ddd72d1750fffb1149921cd002434bde1781cbaa8791646903626b",
-        "tools/test_native_qualification_owner.py": "0ba4a09155cae0161f978270f71c13c929efb70e0c0ec8d676ded76fb8afff55",
+        "tools/test_native_qualification_owner.py": "cb90edf2342137d43332b662aee0942c6907b8ac5ac3ba078b0362e018c91914",
         "tools/uv_editable_ref.py": "5742a4cfba48e84434a3a104cd1166974d8a17bba0f4293c5b992fc94d9be3d6",
         "tools/validate_materialized_candidate.py": "336e69c6c8233845469eec10e80e74769919a651a8eeed37e9394b89233c5da8",
         "tools/vendored_lib_inventory.py": "3a63eb67c0747f1375822e59837e6740b481cb6ae2ba8d49720356cef23a2f98",
