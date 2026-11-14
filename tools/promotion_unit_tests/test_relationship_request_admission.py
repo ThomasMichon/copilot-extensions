@@ -59,6 +59,14 @@ def boundary(monkeypatch):
     stub(f"{PACKAGE}.procutil", agent_worktrees_environment=lambda: {})
     stub("agent_procutil", __path__=[])
     stub("agent_procutil.owned_process", OwnedCleanupError=Refused)
+    diagnostic_spec = importlib.util.spec_from_file_location(
+        "agent_procutil.diagnostics",
+        ROOT / "libs/agent-procutil/src/agent_procutil/diagnostics.py",
+    )
+    assert diagnostic_spec and diagnostic_spec.loader
+    diagnostics = importlib.util.module_from_spec(diagnostic_spec)
+    monkeypatch.setitem(sys.modules, diagnostic_spec.name, diagnostics)
+    diagnostic_spec.loader.exec_module(diagnostics)
     calls = []
 
     def capture(*args, **kwargs):
@@ -127,6 +135,25 @@ def boundary(monkeypatch):
         admitted=admitted, Refused=Refused, module=owner_module, monkeypatch=monkeypatch,
         relationships=relationships,
     )
+
+
+@pytest.mark.parametrize("carrier", ["structured", "stderr"])
+def test_selected_writer_refusal_filters_known_credential_before_its_text_cap(
+    boundary, monkeypatch: pytest.MonkeyPatch, carrier: str,
+) -> None:
+    secret = "sensitive-boundary-value-" + "x" * 600
+    monkeypatch.setenv("UNIT_API_TOKEN", secret)
+    text = "selected owner refused " + "p" * 440 + " " + secret
+    assert text.index(secret) < 512 < text.index(secret) + len(secret)
+    detail = boundary.module._refusal_detail(
+        ["resource-relationship", "reserve"],
+        {"error": text} if carrier == "structured" else None,
+        text if carrier == "stderr" else None,
+    )
+    assert detail.startswith(" (reserve: selected owner refused")
+    assert "[REDACTED]" in detail
+    assert "sensitive-boundary-value-" not in detail
+    assert len(detail) <= len(" (reserve: )") + 512
 
 
 @pytest.mark.parametrize("selection", [

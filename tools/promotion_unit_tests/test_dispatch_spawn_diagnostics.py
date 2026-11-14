@@ -120,3 +120,34 @@ def test_opaque_envelope_and_prompt_are_not_application_output(diagnostics) -> N
         json.dumps({"error": "failure allocation-a " + long_prompt}),
         {"STARTUP_PROMPT_SECRET": long_prompt},
     ) == {"error": "failure allocation-a [REDACTED]"}
+
+
+@pytest.mark.parametrize("reservation", [None, "reservation-a"], ids=["unreserved", "reserved"])
+def test_original_relationship_failure_keeps_filtered_cause_without_mutating_request(
+    diagnostics: tuple, monkeypatch: pytest.MonkeyPatch, reservation: str | None,
+) -> None:
+    module, records = diagnostics
+    monkeypatch.setenv("UNIT_API_TOKEN", "synthetic-sensitive-value")
+    prompt = "synthetic private task input"
+    request = {
+        "task_id": "task-a", "generation": 3, "event_id": 17,
+        "reservation_key": reservation,
+    }
+    original = dict(request)
+    cause = ValueError("record admission refused synthetic-sensitive-value " + prompt)
+    error = RuntimeError("original writer unavailable")
+    error.__cause__ = cause
+    trace = module.SpawnDiagnostics(secrets={"TASK_PROMPT_SECRET": prompt})
+    with trace.stage("fixture_scope"):
+        module.record_relationship_failure(request, "bind", error)
+    [written] = [e for e in events(records) if e["stage"] == "task_relationship_write"]
+    assert written["outcome"] == "unresolved" and written["operation"] == "bind"
+    assert written["task_id"] == request["task_id"]
+    assert written["generation"] == request["generation"]
+    assert written["assignment_event_id"] == request["event_id"]
+    assert written["reservation_key"] == reservation
+    assert "RuntimeError: original writer unavailable" in written["error"]
+    assert "ValueError: record admission refused" in written["error"]
+    assert "synthetic-sensitive-value" not in json.dumps(events(records))
+    assert prompt not in json.dumps(events(records))
+    assert request == original and error.__cause__ is cause
