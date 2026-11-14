@@ -238,6 +238,11 @@ def test_parked_questions_are_answered_only_under_answer_scope() -> None:
         "**Never inject keystrokes, drive a terminal or impersonate the "
         "operator**",
         "Treat as operator-only",
+        "relay it at the scope of the decision class",
+        "rewrite options the worker narrowed on its own",
+        "is a standing grant for that class until the task completes",
+        "An explicitly chosen narrower option, target or limit stays",
+        "Ask the worker to record the relayed grant in its own charter",
     ):
         assert requirement in text, requirement
     assert text.index("1. **Recheck.**") < text.index("2. **Persist first.**")
@@ -264,6 +269,9 @@ def test_recurring_watch_re_resolves_roster_each_cycle() -> None:
         "Readiness failures never authorize provisioning, connecting or "
         "repairing a venue",
         "Each cycle begins with the roster refresh above.",
+        "Re-read both from their current committed source at the start of "
+        "each cycle",
+        "The supervisory note holds only tactical, per-target state",
     ):
         assert requirement in skill, requirement
     assert skill.index("re-resolves its roster") < skill.index(

@@ -1,0 +1,9 @@
+{
+  "comment": "monitor-agent-fleet: refresh charter from committed source each cycle, keep only tactical state in the note, and relay operator answers at class scope",
+  "changes": [
+    {
+      "plugin": "agent-roles",
+      "type": "patch"
+    }
+  ]
+}

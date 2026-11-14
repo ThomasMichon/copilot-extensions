@@ -105,12 +105,14 @@ narrowing remains binding. For a revision pin or single-attempt limit,
 explicit means the operator stated it, or chose it when a broader option was
 also offered. A pin or one-shot limit the agent wrote into its own question, as
 part of the only approving option, is the agent's proposal: record it under
-interpretation as a precaution, not as an operator pin. Inspect the evidence
+interpretation as a precaution, not as an operator limit. Inspect the evidence
 behind a precaution before relaxing it, within the granted class and effects;
 never clear another owner's hold this way. This origin test covers only pins
-and one-shot limits on a single invocation. A cap in an accepted class-level
-rerun policy, and any budget, deadline or resource bound the operator accepted,
-is part of the granted scope and binds whoever drafted it.
+and one-shot limits. A cap in an accepted class-level rerun policy, and any
+expiry, time window, budget, deadline or resource bound the operator accepted,
+is part of the granted scope and binds whoever drafted it. So do not invent an
+expiry: draft options valid until the task completes, revocation or a hold,
+and add a time window only when a real constraint requires one.
 Record actual use when the grant limits repetitions; do not reset it at a new
 session, branch or handoff. Unknown admission/outcome requires the existing
 owner's observation/idempotency recovery, not blind replay.
@@ -150,9 +152,15 @@ it, check the options:
   narrowest next action.
 - Qualifiers: option labels, the recommendation and the default carry no
   qualifier the agent invented, such as "exact", "one", "only", "single",
-  "just", "read-only", "this time", "once" or a version/revision pin. Use a
+  "just", "read-only", "this time", "once", a version/revision pin or an
+  expiry. Use a
   narrower limit only for a concrete risk the agent can name; state that reason
   inline and still offer the broader option.
+- Limits: when a limit is warranted, prefer a resource bound (CPU, memory,
+  storage or wall time per run) lasting until validation completes over an
+  attempt or run count; use a count only to protect a named scarce resource.
+- Current state: say plainly what exists today, such as which credential,
+  scope, access or configuration is already in place.
 - Default: the recommended option is the broadest choice that completes the
   goal within the authority being requested, including routine follow-through:
   retries after reviewed fixes, rebases, regeneration, re-review and later runs
@@ -219,6 +227,11 @@ conflicts with it.
   review the push triggers and for green CI, then continues to merge. The push
   spends no revision or review-round cap. It asks only if resolving the conflict
   would change the PR's intent or discard someone else's work.
+- Deleting or moving files inside its own reviewed change is an ordinary source
+  edit, not a destructive deletion needing confirmation. That includes removing
+  same-purpose paths a rebase reveals as superseded duplicates of its own
+  change; review sees the deletion in the diff. Data outside source control,
+  and files other owners changed, keep their gates.
 
 ### Worked example: framing a how-to-proceed question
 
