@@ -729,6 +729,9 @@ def test_http51_capture_actual_observations(
     api.headers.pop("Authorization")
     observed["unauthenticated"] = api.post(path, json=body).status_code
     api.close()
+    assert observed["live_cli"] == vector["expected"]["live_cli"], json.dumps(
+        observed["live_cli"], sort_keys=True,
+    )
     assert observed == vector["expected"]
     if bound is not None:
         record_observations(evidence, bound, request.node.callspec.params["installation"], observed)
