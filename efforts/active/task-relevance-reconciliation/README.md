@@ -281,6 +281,8 @@ authority. Add no universal attestation layer or duplicate lifecycle engine.
 
 ## Journal
 
+- [Managed command-emitter grant carrier](journal/2026/11.14-managed-command-emitter.md)
+  - credential-free discovery and existing managed-create integration; running adoption remains open.
 - [Original body closeout before affirmative start](journal/2026/11.14-before-start-owner.md)
   - proved original-body targeting without accepting an obsolete goal; broader recovery retained.
 - [Native owner-state acceptance reconciliation](journal/2026/11.14-native-owner-state-acceptance.md)

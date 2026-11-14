@@ -54,6 +54,8 @@ a payload in a trusted checker. Historical verified receipts remain valid after
 a producer handoff; legacy/unmanaged tasks remain outside automatic enrollment.
 Configure production through the existing managed producer-scope/capability owner
 before enabling this policy; this source does not mint or migrate those grants.
+The opt-in [command-emitter carrier](managed-command-emitters.md) can resolve an
+already-owned grant without putting credentials in domain discovery output.
 
 ## Script contract
 

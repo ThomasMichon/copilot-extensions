@@ -96,11 +96,15 @@ def qualify_supplier_context(
             spec["cwd"] = qualify(spec.get("cwd"))
         if "command" in spec:
             spec["command"] = qualify_command(spec["command"], emitter=True)
-        for key in ("side_load", "relevance"):
+        for key, command_field in (
+            ("side_load", "command"), ("relevance", "command"),
+            ("managed_producer", "grant_command"),
+        ):
             companion = spec.get(key)
-            if isinstance(companion, Mapping) and "command" in companion:
+            if isinstance(companion, Mapping) and command_field in companion:
                 spec[key] = {
-                    **companion, "command": qualify_command(companion["command"], emitter=True),
+                    **companion,
+                    command_field: qualify_command(companion[command_field], emitter=True),
                 }
         if "worker_identity_cwd" in spec:
             spec["worker_identity_cwd"] = qualify(spec["worker_identity_cwd"])

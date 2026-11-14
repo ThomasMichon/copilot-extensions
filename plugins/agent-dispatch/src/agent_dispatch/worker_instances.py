@@ -266,6 +266,25 @@ def _validate_dependencies(
             _validate_command_dependency(
                 side_command, directory, explicit_cwd=bool(declaration.spec.get("cwd")),
             )
+        managed = declaration.spec.get("managed_producer")
+        if declaration.kind == RegistrationKind.EMITTER and isinstance(managed, dict):
+            from .producers.emitter import _render_command
+
+            try:
+                grant_command = [
+                    resources.resolve(part)
+                    for part in _render_command(managed["grant_command"])
+                ]
+                directory = Path(resources.resolve(
+                    str(declaration.spec.get("cwd") or repo_root or active_dir()), directory=True,
+                ))
+                _validate_command_dependency(
+                    grant_command, directory, explicit_cwd=bool(declaration.spec.get("cwd")),
+                )
+            except (OSError, ValueError, TypeError):
+                raise RegistrarError(
+                    "missing or invalid managed producer grant command dependency"
+                ) from None
         if declaration.kind == RegistrationKind.SUPERVISED_LANE:
             # The registrar validates named identities on composed issue loops.
             # A basic lane may name a custom body agent; do not fabricate a
