@@ -202,6 +202,74 @@ async def test_ungated_action_needs_no_token() -> None:
         await srv.stop()
 
 
+@pytest.mark.asyncio
+async def test_token_gate_denial_log_separates_missing_from_unrecognized(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """#1494: a missing token and an unrecognized token are logged distinctly,
+    the latter only by a non-reversible fingerprint; a storm warns once."""
+    import logging
+
+    from credential_relay.server import TOKEN_DENIAL_STORM_THRESHOLD, token_fingerprint
+
+    srv = CredentialRelayServer(
+        port=0,
+        sources=[_AzStub()],
+        token_validator=TokenRegistry().validate,
+        token_required_actions=frozenset({"get-azure-token"}),
+    )
+    await srv.start()
+    assert srv._server is not None
+    srv.port = srv._server.sockets[0].getsockname()[1]
+    stale = "stale-relay-token-value"
+    try:
+        with caplog.at_level(logging.WARNING, logger="agent-codespaces.relay"):
+            await _roundtrip(srv, "get-azure-token\nresource=https://storage.azure.com/\n\n")
+            for _ in range(TOKEN_DENIAL_STORM_THRESHOLD + 1):
+                await _roundtrip(
+                    srv,
+                    f"get-azure-token\nauth={stale}\nresource=https://storage.azure.com/\n\n",
+                )
+    finally:
+        await srv.stop()
+    messages = [r.getMessage() for r in caplog.records if r.name == "agent-codespaces.relay"]
+    assert sum("(missing token)" in m for m in messages) == 1
+    fp = f"fp={token_fingerprint(stale)}"
+    unrecognized = sum(f"(unrecognized token {fp})" in m for m in messages)
+    assert unrecognized == TOKEN_DENIAL_STORM_THRESHOLD + 1
+    storms = [m for m in messages if "stale or undelivered relay token" in m]
+    assert len(storms) == 1 and fp in storms[0]
+    assert not any(stale in m for m in messages)
+    assert srv.stats.token_rejections == TOKEN_DENIAL_STORM_THRESHOLD + 2
+
+
+def test_token_denial_storm_rearms_after_quiet_window(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture,
+) -> None:
+    import logging
+    from types import SimpleNamespace
+
+    from credential_relay import server as server_mod
+
+    clock = [1000.0]
+    monkeypatch.setattr(server_mod, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    srv = CredentialRelayServer(port=0)
+
+    def burst() -> int:
+        caplog.clear()
+        with caplog.at_level(logging.WARNING, logger="agent-codespaces.relay"):
+            for _ in range(server_mod.TOKEN_DENIAL_STORM_THRESHOLD):
+                srv._note_token_denial("fp=abcd1234", "get-azure-token", "addr")
+                clock[0] += 1.0
+        return sum("stale or undelivered" in r.getMessage() for r in caplog.records)
+
+    assert burst() == 1
+    assert burst() == 0  # the same continuous storm is reported once
+    clock[0] += server_mod.TOKEN_DENIAL_STORM_WINDOW + 1
+    assert burst() == 1
+    assert len(srv._token_denials) == 1
+
+
 def test_stats_has_token_rejections() -> None:
     assert RelayStats().token_rejections == 0
 
