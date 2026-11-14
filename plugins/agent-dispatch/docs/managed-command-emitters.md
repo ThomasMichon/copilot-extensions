@@ -25,6 +25,11 @@ that existing grant, never run another handoff each tick. The emitter does not
 recover a lost capability from status. Resolver stderr/stdout and argv are not
 included in failure diagnostics. The timeout defaults to 30 seconds and is
 bounded by 300. Only nonempty JSON task output resolves the grant.
+Supplier-local executable and script operands are qualified through the existing
+registered-resource owner before persistence, so moving a registered supplier
+relocates the grant reader along with discovery. Other command arguments retain
+their literal meaning; external credential-store paths remain their owner's
+configuration.
 
 The grant's producer id must equal the emitter's `id`, and its scope source must
 equal the configured `source` (default `emitter`). Each task's canonical repo

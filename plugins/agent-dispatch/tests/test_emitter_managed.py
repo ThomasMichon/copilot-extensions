@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 import httpx
@@ -267,6 +269,62 @@ def test_malformed_grant_resource_is_redacted_during_spec_validation(venue):
     with pytest.raises(emitter.EmitterError) as error:
         emitter.validate_spec(spec)
     assert str(error.value) == ("managed_producer.grant_command has invalid repository resources")
+
+
+@pytest.mark.parametrize("script_operand", [False, True])
+def test_supplier_grant_operands_follow_registered_root_relocation(
+    venue,
+    tmp_path,
+    monkeypatch,
+    script_operand,
+):
+    from agent_dispatch import repository_resources
+    from agent_dispatch.registrar import load_declaration
+    from agent_dispatch.registrar_document import qualify_supplier_context
+
+    _, spec, grant, client, _ = venue
+    old = tmp_path / "original-supplier"
+    old.mkdir()
+    (old / "grant.py").write_text(json.dumps(grant), encoding="utf-8")
+    (old / "discover.py").write_text("[]", encoding="utf-8")
+    command = [str(old / "grant.py"), "literal-operand"]
+    if script_operand:
+        command.insert(0, sys.executable)
+    declaration = load_declaration(
+        {
+            "kind": "emitter",
+            "name": "source",
+            "spec": {
+                **spec,
+                "cwd": str(old),
+                "command": [sys.executable, str(old / "discover.py")],
+                "managed_producer": {"grant_command": command},
+            },
+        }
+    )
+    qualified = qualify_supplier_context(declaration, "source-tools", old)
+    persisted = json.loads(json.dumps(dict(qualified.spec)))
+    assert str(old) not in json.dumps(persisted)
+    new = tmp_path / "moved-supplier"
+    old.rename(new)
+    monkeypatch.setattr(
+        repository_resources,
+        "_registered_repository",
+        lambda *args, **kwargs: (new, "worktree"),
+    )
+    seen = []
+
+    def run(argv, **kwargs):
+        seen.append(argv)
+        assert kwargs["cwd"] == str(new)
+        assert argv[-1] == "literal-operand"
+        script = Path(argv[1] if script_operand else argv[0])
+        assert script == new / "grant.py"
+        return SimpleNamespace(returncode=0, stdout=script.read_text(encoding="utf-8"))
+
+    [created] = emitter._author_tasks(client, persisted, json.dumps([row()]), runner=run)
+    assert created["producer_fence"]["producer_id"] == spec["id"]
+    assert len(seen) == 1
 
 
 @pytest.mark.parametrize("side_load", [False, True])
