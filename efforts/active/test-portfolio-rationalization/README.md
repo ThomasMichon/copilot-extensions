@@ -76,6 +76,24 @@ tiers and all original process, time, storage and cleanup budgets unchanged.
 No new whole-portfolio, every-host or generic acknowledgement prerequisite
 is added to a finite family; this ROOT's own completion gate remains intact.
 
+The proposed finite #6747 classifier-startup investigation continues through
+the SAME primary maintainer, existing Phase 4 Logger wave and Phase 7
+migration-intake/domain review. Preserve the existing sole diagnosis
+claimant, OPEN #1303, all incumbent check states and the separate
+#5245/#6057/#6237/#7256/#7075 source, fixture, runner, native, release and
+resource custodians. The unfinished investigation remains open under its
+existing custodian; administrative tracking consolidation neither resolves
+its cause nor releases its claim. Normal review and actual complete direct
+Plan/local AND actual ROOT-global Validation/Coordination/Journal delivery,
+followed by permitted whole-current receiving/source/history/custody
+readback, precede a separate source judgment. No implementation appointment,
+generic ACK, execution enrollment or unrelated whole-portfolio prerequisite
+follows.
+
+#6747 is a separate finite investigation lane. The existing four-family
+fixture/runner grouping below remains exactly #7243/#9614/#9436/#10225;
+this amendment does not add a fifth member to that group.
+
 The four finite fixture/runner contracts below use the SAME primary
 maintainer and existing Phase 4 Logger/shared-fixture waves (#7243/#9614),
 Phase 5 owning runner/cache/disposal work (#9436/#10225), and Phase 7
@@ -626,6 +644,59 @@ Sources: #6662, #6663, #6690, #6900, #9442 and #9815, each with its complete
 original and refinement. OPEN #1303 remains the live portfolio coordination
 token; historical source trackers are not required live claim tokens after
 a separately qualified administrative supersession.
+
+#### Finite PowerShell classifier-startup investigation from #6747
+
+Proposed receiving through the existing Phase 4 Logger wave and Phase 7
+domain-intake review. Preserve the original investigation and sole diagnosis
+custody; this is planned unresolved work, not a causal repair or accepted flake.
+
+- [ ] **N6747-P1:** Retain hosted Linux run38633055933/job116089425533 at
+  original source ee4e6b0063dff7eafed04942feec10974de4f52c:
+  `tests/test_install_binstub.py::test_windows_task_access_denied_classifier_downgrades_and_rethrows[pwsh]`
+  reached its unchanged 20-second real PowerShell child deadline without
+  stdout/stderr, with 475 other passes and 29 skips. Preserve exact
+  access-denied downgrade AND unrelated-error rethrow assertions,
+  containment and original process/item/group/plugin/resource limits.
+- [ ] **N6747-P2:** Through the existing diagnosis owner, establish the
+  actual fresh-process/startup/execution boundary and repair the proved
+  cause through ordinary source review and CI. Preserve meaningful real
+  consumer coverage; no deadline increase, skipped assertion, blind
+  publication retrigger or CI waiver substitutes for diagnosis and repair.
+  An unresolved cause remains explicitly unchecked in this family.
+- [ ] **N6747-P3:** Credit #6756 only at its reported controlled-startup,
+  isolated-root, noninteractive and immediate-entry-marker scope. Retain
+  the reported hosted logger suites of 476 and 823 passes and the older
+  unmodified-source passing run38637663769 as distinct observations, not
+  causal proof or flake acceptance. The separately repaired Resume mocks
+  and broader #5245 containment remain independent.
+- [ ] **N6747-P4:** Retain the distinct #6747 discussion of #7139 at
+  235e04d33c289c85f18af964e78946e5dd37c26f, run39038095790/
+  job117411887700:
+  `test_native_source_recovery_matches_explicit_python_selection[canonical-None-pwsh]`
+  reached its unchanged 15-second child deadline without output, with
+  95 other passes and 34 skips; a later unchanged-code local matrix passed
+  12 with six skips. Neither observation establishes a shared cause,
+  accepted flake or completion of the source-install/release owners'
+  independent duties.
+
+##### Local Validation
+
+- [ ] **N6747-V1:** When separately authorized in the existing faithful
+  bounded lane, qualify the actual selected PowerShell classifier consumer:
+  denied access warns/continues and unrelated errors rethrow. Retain
+  startup/entry/stream/stage evidence, original assertions, unchanged
+  20-second child limit and primary versus diagnostic/cleanup outcomes.
+- [ ] **N6747-V2:** Keep original failures, controlled diagnostic gains,
+  older-source hosted passes and the separate 15-second source-recovery
+  observation/local pass attributable and distinct. Passing retries,
+  suite totals or an entry marker do not explain the original timeout.
+- [ ] **N6747-V3:** Record the proved boundary, canonical correction and
+  meaningful regression/control evidence through the existing owner and
+  normal required CI. Until then retain the diagnosis as unresolved.
+  Preserve current unit-only required CI, quiesced hosted Windows execution,
+  proper separately admitted tiers and original limits; no native run,
+  retry, process operation or implementation occurs during intake.
 
 #### Finite Logger and HostProfile link-fixture capability from #6093
 
@@ -1929,6 +2000,16 @@ budgets, every incumbent check state and actual source/resource holders.
 They add no unrelated whole-parent prerequisite to a finite source outcome
 and waive none of this ROOT's own whole completion obligations.
 
+- [ ] **N6747-G:** Resolve EVERY N6747-P1-P4/local-V1-V3 and continuing
+  Coordination clause: exact real PowerShell classifier/downgrade/rethrow
+  boundary and unchanged 20 seconds, proved cause and canonical correction,
+  limited diagnostic credit and distinct 15-second source-recovery evidence.
+  Preserve the same diagnosis/source/release custodians and all incumbent
+  portfolio acceptance. Administrative intake is not causal repair, accepted
+  flake, executed PASS or source/resource release. Technical work remains
+  unchecked after any separately qualified tracking supersession; unrelated
+  whole-portfolio completion is not an added finite-family prerequisite.
+
 - [ ] **F7243-G:** Resolve EVERY F7243 Plan/local Validation and F4
   Coordination clause: both Bash reconcile cases, independent cold-store
   publication, isolation-OR-matching-PATH, separate failed-probe decision
@@ -2483,3 +2564,30 @@ limited Linux pass and candidate-first correction-OR-retry decision remain
 distinct. Both sources and #1303 stay OPEN. No implementation, import,
 collection, test, native/privilege probe, workflow retry, rollout or
 source/resource effect occurred.
+
+### 2026-11-13 - Proposed finite classifier-startup investigation receiving
+
+Proposed direct N6747 Plan/local Validation and actual global N6747-G through
+the existing Phase 4 Logger wave and Phase 7 domain-intake review. Preserve
+the sole diagnosis claimant, exact classifier assertions/20-second bound,
+reported diagnostic credit and separate 15-second source-recovery observation.
+All eight new technical rows remain unchecked; the investigation remains open
+under its existing custodian.
+
+The complete current ROOT, strict framework, linked historical Journal and
+migration-intake ROOT/append-only ledger were read. Existing N6662 direct
+Plan/local Validation/actual global Validation and Coordination already retain
+the distinct completion-wait family; no duplicate row is added. Preserve its
+original and October 22 campaign retention disposition as historical evidence,
+including the explicit attributed owner/provider choice of #6662 tracking.
+Any separate administrative judgment must acknowledge and supersede the
+physical placement while preserving the unresolved investigation and custody;
+do not infer causal repair, claim release or a new operator hold here.
+
+Verify normal domain-review delivery for that existing receiving content and
+fresh source/OPEN #1303 custody. Normal reviewed delivery of this amendment
+and permitted whole-current post-merge receiving/source/custody readback
+precede separate administrative judgments for either source, honoring any
+actual source-specific physical-OPEN restriction. No technical completion,
+accepted flake, execution, assignment, claim release or resource release
+is claimed.

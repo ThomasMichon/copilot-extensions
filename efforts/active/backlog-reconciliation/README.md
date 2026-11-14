@@ -3164,12 +3164,33 @@ sources, transferring owners or turning partial/planning gains into completion.
   receiving objective or a retained gap; investigate actual implementation
   evidence when claiming completion, rather than making that the prerequisite
   for discovering thematic alignment.
+  The [merged-source/inflow checkpoint](journal/2026/11.13-merged-source-and-inflow-conditions.md)
+  records five new whole contracts and #12393's actual discussion delta.
+  #12522's external completion is corroborated at its source/added-test tier,
+  without duplicate closure credit or per-fixture execution claims.
+  Four sources and #12393 remain independently OPEN; #12500 retains only
+  its narrow downstream-consumer-proof gap, not an invented refusal rule.
+  The complete 01:51:47 UTC census is 856 whole open, 127 above fixed 729.
+  The [prospective outer-contract study](journal/2026/11.13-prospective-outer-contracts.md)
+  independently qualifies eight current complete originals and preserves
+  their canonical unfinished outcomes without new plan rows or children.
+  Prior quarantine is not retrospectively admitted; related metadata and
+  source reports are not whole causal/provider/installed completion.
+  Eight conditional KEEP judgments add no retirement or resource credit.
+  Complete existing N6662 receiving and its reviewed domain delivery are
+  now verified without duplicate rows. #6747 fits that programme but needs
+  an eight-row direct amendment; literal source/custody conditions and
+  separate disposition gates remain.
   The [conductor/native-condition intake](journal/2026/11.13-conductor-continuation-and-native-conditions.md)
   proposes 21 unchecked direct Plan/local and actual global Validation rows
   for #6464 under its existing receiver and strict OPEN-until-implementation-
   AND-real-consumer condition. All ten source outcomes remain OPEN.
   The complete 00:20:26 UTC census is 855 whole open, 126 above 729,
   after one excluded metadata-only arrival and no departure or closure credit.
+  Reviewed #12534 actually merged; complete current ROOT/strict-annex
+  readback confirms all 21 rows remain unchecked. Ten separate source
+  judgments retain every original OPEN, including #6464's implementation
+  AND real-consumer-proof condition; no retirement or resource credit follows.
   The [Gateway availability/source-condition intake](journal/2026/11.13-gateway-availability-and-source-conditions.md)
   proposes eight unchecked local/parent Plan and actual global Validation
   rows for #6443's two finite source-only refinements in its existing Fleet
