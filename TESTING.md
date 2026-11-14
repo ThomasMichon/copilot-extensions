@@ -10998,6 +10998,46 @@ already-small, single-contract files is not required.
 
 ## Optional devcontainer-based isolation (Linux)
 
+For a separately bounded Linux integration job using `RLIMIT_AS`, keep allocator
+arenas and Rust pools inside that job's resource budget. The complete closed-wheel
+receipt regression installs 97 wheels; unconstrained glibc arenas can exhaust
+virtual address space with little resident memory, followed by a Rayon pool
+hitting the task limit. Job-local `MALLOC_ARENA_MAX=2`, `RAYON_NUM_THREADS=2` and
+`TOKIO_WORKER_THREADS=2` can reduce arena and pool overhead without changing
+selected wheel inputs. The closed-wheel policy also preserves the resource-only
+`UV_CONCURRENT_INSTALLS`, `UV_CONCURRENT_DOWNLOADS` and `UV_CONCURRENT_BUILDS`
+controls; setting each to `2` limits their respective pools. These controls
+do not bound every Tokio blocking filesystem task: UV 0.13.0 can still exhaust
+a 96-task job with the 97-wheel fixture despite receiving all three controls.
+They are not qualification: measure virtual/resident memory and aggregate
+tasks, and require the complete selected packet to pass.
+A container CPU quota alone does not bound those pools. Do not remove wheels,
+weaken the closed transaction's resolver protections or silently enlarge limits
+to report success. Apply disposable-job settings only to that job, not the host
+or installed runtime; preserve containment and cleanup checks.
+
+For the complete `tools/test_installer_closed_wheels.py` Linux integration
+packet, declare a fixed **256-task** budget in the existing bounded executor
+and a **320-PID** limit for its fresh disposable container. Linux task limits
+count threads, unlike Windows Job process limits. UV can occupy multiple
+blocking workers per local wheel in addition to its main/Rayon threads and
+the retained Python owners. A 96-task run measured 79 UV threads plus 17
+other owned tasks at refusal; that ceiling is undersized for the indivisible
+97-wheel control. The container's extra 64 tasks provide bounded room for
+its init, shell and supervisor. Keep the 300-second total/270-second execution,
+3 GiB address-space and two-CPU limits, aggregate container memory containment
+and verified cleanup. Other packets retain their existing budgets. This is a
+declared test allocation, not a production setting or a global limit change.
+
+Keep all 97 wheels and the existing single-command installation. Splitting
+UV calls makes it re-probe candidate Python between partially installed
+closures. A `.pth`-only guard is insufficient: importable `sitecustomize`
+modules can also execute. The large-receipt canaries verify complete
+installation/reuse with supported startup customization, and refusal of an
+unverified executable `.pth`, without running hooks against an incomplete
+closure. Do not remove these controls or change supported startup-hook
+semantics to fit a smaller test budget.
+
 `tools/run_tests_in_devcontainer.py` is an opt-in wrapper around the turn-key
 runner above that additionally runs it inside a hardened, ephemeral
 devcontainer (`.devcontainer/test-isolation/devcontainer.json`, a named alternate config -- never the canonical `.devcontainer/devcontainer.json` root path, which would let a direct "Reopen in Container" pick up an empty, wrapper-only workspace by accident) -- a real OS-level

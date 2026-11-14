@@ -398,6 +398,25 @@ native cleanup or infer that nothing started. Cancellation retains its original
 exception after reporting the same uncertainty. Concurrent selector/launcher
 winners are preserved.
 
+The same publication transaction replaces ordinary bounded command files for
+the addressed installation without requiring their incumbent bytes to match
+today's generator. It captures those bytes before setup, detects intervening
+changes, and retains the existing shared-target leases through publication and
+pre-start recovery, including writers with different runtime roots. Startup
+acknowledgement checks both selection and every declared launcher before
+committing success; a changed launcher makes the outcome uncertain even if the
+selector still names the incoming generation.
+
+The prepared-source `install_source.py --install-application` entry composes
+the existing numbered candidate and application installer. Only classified
+content/health failure in an existing candidate, before invoking application
+callbacks, may select one distinct repair generation. Deadline, permission and
+callback failures are not repair-replay signals. A healthy selected repair is
+reused. With no setup/start callbacks or explicit configuration arguments, a
+complete matching publication is read back without restamping its completion,
+selectors, success record or launchers. Applications with callbacks still use
+their existing configuration/readiness owners.
+
 This is a conservative change to failure defaults, not a new callback protocol:
 existing arguments and deadlines are unchanged, and there is no new force flag,
 daemon manager or ownership receipt. A startup failure does not create a new

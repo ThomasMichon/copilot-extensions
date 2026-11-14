@@ -622,8 +622,10 @@ def test_native_archive_writes_owned_file_without_captured_binary(
     repository, tmp_path, monkeypatch, relative,
 ):
     repo, commit = repository
-    monkeypatch.chdir(tmp_path)
-    archive = Path("native.tar") if relative else tmp_path / "native.tar"
+    output = tmp_path / "archive"
+    local.preparation._private_output_directory(output)
+    monkeypatch.chdir(output)
+    archive = Path("native.tar") if relative else output / "native.tar"
     original = local.preparation_process.run
     observed = []
     deadline = time.monotonic() + 30
@@ -647,7 +649,9 @@ def test_native_archive_writes_owned_file_without_captured_binary(
 
 
 def test_native_archive_refuses_existing_destination_before_launch(tmp_path, monkeypatch):
-    archive = tmp_path / "existing.tar"
+    output = tmp_path / "archive"
+    local.preparation._private_output_directory(output)
+    archive = output / "existing.tar"
     archive.write_bytes(b"retained artifact")
     monkeypatch.setattr(local.preparation, "_git",
                         lambda *_a, **_kw: pytest.fail("existing archive was overwritten"))
@@ -1473,11 +1477,19 @@ def test_complete_output_reuse_uses_one_provider_without_replaying_worker_failur
     repository = tmp_path / "checkout"
     repository.mkdir()
     root = tmp_path / "applications"
-    local.preparation_process.procutil_module("_daemon_instance_owner").mkdir_private(root)
+    owner = local.preparation_process.procutil_module("_daemon_instance_owner")
+    owner.mkdir_private(root)
     previous, output = root / "previous", root / "incoming"
-    local.preparation_process.procutil_module("_daemon_instance_owner").mkdir_private(previous)
+    owner.mkdir_private(previous)
+    owner.mkdir_private(previous / "inputs")
     toolchain_dir = previous / "inputs" / "build-tools"
-    toolchain_dir.mkdir(parents=True)
+    owner.mkdir_private(toolchain_dir)
+
+    def private_json(path, value):
+        descriptor = owner.open_private(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            json.dump(value, stream)
+
     record = {
         "schema": local.SCHEMA, "version": 1, "kind": "source",
         "source_commit": "a" * 40, "source_tree": "b" * 40, "main_head": "c" * 40,
@@ -1487,12 +1499,12 @@ def test_complete_output_reuse_uses_one_provider_without_replaying_worker_failur
     prior = {**record, "projects": {"demo": {"artifact": {"build_toolchain": (
         {"fixture": "changed"} if phase == "changed-toolchain" else toolchain.record
     )}}}}
-    (previous / "inputs" / local.MANIFEST).write_text(json.dumps(prior))
+    private_json(previous / "inputs" / local.MANIFEST, prior)
     snapshots = {"demo": str(previous / "profiles" / "demo" / "snapshot")}
-    (previous / "applications.json").write_text(json.dumps({
+    private_json(previous / "applications.json", {
         "schema": "copilot-extensions.prepared-applications", "version": 1,
         "snapshots": snapshots, "content": {},
-    }))
+    })
     calls = []
     deadline = time.monotonic() + 30
 
@@ -1573,9 +1585,10 @@ def test_complete_output_reuse_uses_one_provider_without_replaying_worker_failur
 
 
 def test_reused_prepared_wheels_install_in_two_fresh_native_environments(
-    reusable_install_source, tmp_path,
+    reusable_install_source, tmp_path, monkeypatch,
 ):
     uv = shutil.which("uv") or pytest.skip("a real uv executable is required")
+    monkeypatch.setenv("UV_CACHE_DIR", str(tmp_path / "uv-cache"))
     previous, output, record, _ = reusable_install_source
     local.build_projects(output, record, projects=("demo",), reuse_source=previous)
     project = record["projects"]["demo"]
