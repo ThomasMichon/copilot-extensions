@@ -113,6 +113,23 @@ def test_local_only_needs_no_service_identity_key_source_or_enrollment(rsa_keys)
         h.owner.challenge()
 
 
+def test_internal_source_authorization_keeps_original_user_admission(rsa_keys):
+    h, _ = configured(rsa_keys[0], service=True)
+    h.document["user_callers"]["callers"][0]["slots"].append("service-b")
+    h.owner.reload()
+    grant = caller(h, rsa_keys[0])
+    assert h.owner.authorize_service_call(grant, slot="service-b").name == "service-b"
+    original = h.owner.revalidate_caller(grant)
+    assert original.principal == "user-a" and original.slot.name == "service-a"
+    assert original.target_uri == TARGET
+    h.document["user_callers"]["callers"][0]["slots"] = ["service-a"]
+    h.document["service"]["manifest"]["revision"] += 1
+    h.update()
+    grant = caller(h, rsa_keys[0])
+    with pytest.raises(ServicePolicyError, match="source-caller-denied"):
+        h.owner.authorize_service_call(grant, slot="service-b")
+
+
 @pytest.mark.parametrize("change", [
     "mapping", "claim", "shape", "trust", "caller", "route", "operation", "profile", "expiry",
 ])

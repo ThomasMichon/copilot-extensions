@@ -35,6 +35,12 @@ bounded cache/noninteractive source selection without a token store or login
 fallback. It is an in-process contract, not yet a consumer route or
 multi-Controller channel integration.
 
+The explicit [Controller services SDK](docs/gateway-controller-services.md)
+adds multiple current service offers on one existing outbound channel and
+original-caller-preserving dispatch from a registered local Gateway owner.
+It does not yet compose that channel with the Vault availability coordinator
+or credential custodians.
+
 The separately selected [installed Gateway host](docs/gateway-host.md) composes
 that SDK with the existing Source/application installer and an app-owned
 lifetime. It requires explicit private host inputs and the `gateway-host`
