@@ -1,0 +1,13 @@
+{
+  "comment": "Publish filtered service support and share native acquisition admission constraints",
+  "changes": [
+    {
+      "plugin": "services/pr",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

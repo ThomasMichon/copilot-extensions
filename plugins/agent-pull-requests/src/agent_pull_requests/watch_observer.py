@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+import time
 from collections.abc import Callable
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import dataclass
@@ -12,6 +13,7 @@ from .watch_contract import PRSnapshot
 from .watch_provider import command_path, fetch_snapshot
 from .watch_replay import ConsumerScope, ObservationTarget, ReplayEventTooLarge
 from .watch_replay_store import ReplayStore
+from single_instance_lease import OperationLockedError
 from .repository_contract import RepositoryIdentity
 from pathlib import Path
 from .repository_native import (
@@ -86,8 +88,16 @@ class ReplayObserver:
         self.store = store
         self.bindings = MappingProxyType(selected)
         identities = tuple(b.repository_identity for b in bindings if b.repository_identity is not None)
-        self.repositories = RepositoryProjection(store, identities) if identities else None
+        if identities and store.repository_filtered:
+            from .filtered_projection import FilteredProjection
+            from pr_filters import PROTOCOL
+            self.repositories = FilteredProjection(store, identities, capabilities={
+                identity.key: {"protocol": PROTOCOL, "fields": []} for identity in identities
+            })
+        else:
+            self.repositories = RepositoryProjection(store, identities) if identities else None
         self._repository_cursor = 0
+        self._query_cursors = {}
         self._cycle = threading.Lock()
 
     def cycle(
@@ -101,10 +111,23 @@ class ReplayObserver:
         finally:
             self._cycle.release()
 
+    def _disk_call(self, operation, *, expires_at, checkpoint):
+        deadline = time.monotonic() + max(0, expires_at - self.store.clock())
+        while True:
+            self.store.check_current(expires_at, checkpoint)
+            try:
+                return operation()
+            except OperationLockedError:
+                if time.monotonic() >= deadline:
+                    raise
+                time.sleep(min(.01, max(0, deadline - time.monotonic())))
+
     def _observe(
         self, *, expires_at: int, checkpoint: Callable[[], None] | None,
     ) -> dict:
         authority = {"expires_at": expires_at, "checkpoint": checkpoint}
+        if self.store.repository_filtered:
+            return self._observe_filtered(**authority)
         observed_at = int(self.store.clock())
         result = self.store.sweep_timeouts(**authority)
         if result["status"] == "uncertain":
@@ -181,20 +204,20 @@ class ReplayObserver:
         totals["unavailable"] += sum(
             scan["outcome"] == "unavailable" for scan in inventories.values()
         )
-        repository_targets = self.repositories.plans(inventories, **authority)
+        repository_targets = self._disk_call(lambda: self.repositories.plans(inventories, **authority), **authority)
         seen = set(prepared)
 
         def publish():
-            self.repositories.apply_facts(
+            self._disk_call(lambda: self.repositories.apply_facts(
                 inventories, prepared, observed_at=observed_at, **authority,
-            )
+            ), **authority)
             prepared.clear()
 
         while len(prepared) > _MAX_REPOSITORY_READS:
             batch = {key: prepared.pop(key) for key in list(prepared)[:_MAX_REPOSITORY_READS]}
-            self.repositories.apply_facts(
+            self._disk_call(lambda: self.repositories.apply_facts(
                 inventories, batch, observed_at=observed_at, **authority,
-            )
+            ), **authority)
         publish()
         keys = sorted(key for key in repository_targets if key not in seen and key[:2] in qualified)
         if keys:
@@ -208,6 +231,63 @@ class ReplayObserver:
             for name in totals:
                 totals[name] += result[name]
             publish()
+        return {"status": "observed", **totals}
+
+    def _observe_filtered(self, *, expires_at, checkpoint):
+        from .filtered_native import population
+        from .repository_native import RepositoryNativeUnavailable
+        authority = {"expires_at": expires_at, "checkpoint": checkpoint}
+        def check():
+            self.store.check_current(expires_at, checkpoint)
+        def demands_now():
+            return self._disk_call(lambda: self.repositories.demands(**authority), **authority)
+        demands = demands_now()
+        totals = {"observed": 0, "unavailable": 0, "unbound": 0}
+        keys = sorted(demands)
+        if keys:
+            start = self._repository_cursor % len(keys)
+            keys = keys[start:] + keys[:start]
+            self._repository_cursor = (start + 1) % len(keys)
+        for key in keys:
+            demand = demands[key]
+            check()
+            # Refresh interest before each new read; another consumer may have
+            # withdrawn while the previous repository's owned read settled.
+            current = demands_now().get(key)
+            if current is None or current["registrations"] != demand["registrations"]:
+                continue
+            identity = self.repositories.identities[key]
+            binding = self.bindings[(key, identity.repo)]
+            observed_at = int(self.store.clock())
+            class Withdrawn(Exception):
+                pass
+            def interested():
+                check()
+                current = demands_now().get(key)
+                if current is None or not any(current["registrations"].get(registration) == revision
+                                          for registration, revision in demand["registrations"].items()):
+                    raise Withdrawn()
+            def starting():
+                check()
+                current = demands_now().get(key)
+                if current is None or current["registrations"] != demand["registrations"]:
+                    raise Withdrawn()
+            try:
+                offset = self._query_cursors.get(key, 0)
+                self._query_cursors[key] = (offset + 1) % 64
+                scan = population(
+                    binding, demand["filter"], root=self.store.root,
+                    checkpoint=interested, start_checkpoint=starting, query_offset=offset,
+                )
+            except Withdrawn:
+                continue
+            except RepositoryNativeUnavailable:
+                scan = {"outcome": "unavailable", "error": "population_unavailable", "pages": 0, "pulls": []}
+            totals["unavailable"] += scan["outcome"] == "unavailable"
+            result = self._disk_call(lambda: self.repositories.apply(
+                key, demand, scan, observed_at=observed_at, **authority,
+            ), **authority)
+            totals["observed"] += result["observed"]
         return {"status": "observed", **totals}
 
     def _consume(
@@ -226,7 +306,9 @@ class ReplayObserver:
         try:
             while pending or not exhausted:
                 self.store.check_current(expires_at, checkpoint)
-                result = self.store.sweep_timeouts(**authority)
+                result = self._disk_call(lambda: self.store.sweep_timeouts(**authority), **authority) if (
+                    pending
+                ) else self.store.sweep_timeouts(**authority)
                 if result["status"] == "uncertain":
                     return result
                 while not exhausted and len(pending) < _MAX_READS:
@@ -240,7 +322,7 @@ class ReplayObserver:
                         unbound += 1
                         continue
                     if (target.account, target.repo, target.number) not in cache_keys:
-                        target = self.store.waiting_target(target, **authority)
+                        target = self._disk_call(lambda: self.store.waiting_target(target, **authority), **authority)
                     if target is not None:
                         future = readers.submit(
                             self._read, target, binding, stopped=stopped, **authority,
@@ -257,7 +339,8 @@ class ReplayObserver:
                         unavailable += 1
                     else:
                         try:
-                            result = self.store.observe(target, snapshot, **authority) if (
+                            result = self._disk_call(lambda: self.store.observe(target, snapshot, **authority),
+                                                     **authority) if (
                                 target.registration_ids or target.retention_epoch is not None
                             ) else {"status": "observed"}
                         except ReplayEventTooLarge:
@@ -268,7 +351,7 @@ class ReplayObserver:
                             observed += 1
                     if on_read is not None:
                         on_read(target, snapshot)
-                    result = self.store.sweep_timeouts(**authority)
+                    result = self._disk_call(lambda: self.store.sweep_timeouts(**authority), **authority)
                     if result["status"] == "uncertain":
                         return result
         finally:

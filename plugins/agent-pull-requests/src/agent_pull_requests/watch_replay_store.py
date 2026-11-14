@@ -7,12 +7,13 @@ import json
 import stat
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TypeVar
 
-from single_instance_lease import OperationLock
+from single_instance_lease import OperationLock, OperationLockedError
 
 from .watch_contract import PRSnapshot
 from .watch_replay import ConsumerScope, ObservationTarget, WatchReplay
@@ -89,6 +90,7 @@ class ReplayStore:
         terminal_comment_mapping: bool = False,
         repository_cache: bool = False,
         repository_continuing: bool = False,
+        repository_filtered: bool = False,
     ) -> None:
         if type(repository_cache) is not bool:
             raise ValueError("explicit repository cache selection required")
@@ -96,6 +98,9 @@ class ReplayStore:
         if type(repository_continuing) is not bool or repository_continuing and not repository_cache:
             raise ValueError("continuing repository selection requires its cache owner")
         self.repository_continuing = repository_continuing
+        if type(repository_filtered) is not bool or repository_filtered and not repository_continuing:
+            raise ValueError("filtered repository selection requires its continuing owner")
+        self.repository_filtered = repository_filtered
         if type(terminal_retention) is not bool:
             raise ValueError("explicit terminal reader selection required")
         self.terminal_retention = terminal_retention
@@ -122,6 +127,21 @@ class ReplayStore:
 
     def _lock(self) -> OperationLock:
         return OperationLock(self.root / "watch-replay.lock")
+
+    @contextmanager
+    def _review_lock(self, expires_at: int, checkpoint: Callable[[], None] | None) -> Iterator[OperationLock]:
+        deadline = time.monotonic() + max(0, expires_at - self.clock())
+        with ExitStack() as stack:
+            while True:
+                self.check_current(expires_at, checkpoint)
+                try:
+                    lock = stack.enter_context(self._lock())
+                    break
+                except OperationLockedError:
+                    if time.monotonic() >= deadline:
+                        raise
+                    time.sleep(min(.01, max(0, deadline - time.monotonic())))
+            yield lock
 
     def _encode(self, state: dict, *, owner_state: dict | None = None) -> dict:
         if owner_state is not None and owner_state.get("schema") == OWNER_SCHEMA:
@@ -187,9 +207,14 @@ class ReplayStore:
         names = {"schema", "version", "namespace", "service", "replay", "reviews", "capacities"}
         cache = "repository_cache_version" in document
         if cache:
-            from .repository_state import validate as validate_cache
+            if self.repository_filtered:
+                from .filtered_state import validate as validate_cache
+            else:
+                from .repository_state import validate as validate_cache
             if not self.repository_cache or type(document["repository_cache_version"]) is not int or (
-                document["repository_cache_version"] != (2 if self.repository_continuing else 1)
+                document["repository_cache_version"] != (
+                    3 if self.repository_filtered else 2 if self.repository_continuing else 1
+                )
             ):
                 raise ReplayStoreInvalid("repository cache reader unavailable for adopted owner")
             names.update(("repository_cache_version", "repository_cache"))
@@ -385,7 +410,7 @@ class ReplayStore:
         if checkpoint is not None and not callable(checkpoint):
             raise ValueError("invalid request checkpoint")
         self.check_current(expires_at, checkpoint)
-        with self._lock() as lock:
+        with self._review_lock(expires_at, checkpoint) as lock:
             self.check_current(expires_at, checkpoint)
             document = self._read_document()
             if document.get("schema") != OWNER_SCHEMA:
@@ -624,7 +649,9 @@ class ReplayStore:
                 if self.repository_cache:
                     from .repository_state import empty
                     document.update(
-                        repository_cache_version=2 if self.repository_continuing else 1,
+                        repository_cache_version=(
+                            3 if self.repository_filtered else 2 if self.repository_continuing else 1
+                        ),
                         repository_cache=empty(),
                     )
                 self._validate_owner(document)

@@ -16,7 +16,16 @@ from .repository_subscriptions import (
 from .watch_replay_store import ReplayCallerExpired, json_object
 from .repository_contract import RepositoryIdentity
 
-PATH = re.compile(r"/v1/repositories/([a-z0-9][a-z0-9-]{0,63})/([a-z]+)")
+PATH = re.compile(r"/v1/(repositories|populations)/([a-z0-9][a-z0-9-]{0,63})/([a-z]+)")
+
+
+def profile(owner):
+    if owner.store.repository_filtered:
+        from . import filtered_subscriptions
+        return "populations", filtered_subscriptions.OPERATIONS, (
+            filtered_subscriptions.FilteredSubscriptions
+        ), filtered_subscriptions.contract
+    return "repositories", OPERATIONS, RepositorySubscriptions, contract
 
 
 def response(status, value):
@@ -38,12 +47,13 @@ def admitted_operation(owner, request, operation):
 
 async def handle(owner, request):
     """Use only the transport-derived principal and existing admitted scope map."""
-    if request.target == "/v1/repositories":
+    route, operations, subscriptions, declaration = profile(owner)
+    if request.target == f"/v1/{route}":
         return await listing(owner, request)
     matched = PATH.fullmatch(request.target)
-    if matched is None:
+    if matched is None or matched[1] != route:
         return response(404, {"error": "repository_route_not_found"})
-    target, operation = matched.groups()
+    _, target, operation = matched.groups()
     scope = owner.bindings.get((request.context.principal, target))
     if scope is None or owner.repositories is None or not owner.store.repository_continuing:
         return response(403, {"error": "repository_scope_refused"})
@@ -52,13 +62,16 @@ async def handle(owner, request):
         return response(403, {"error": "repository_binding_refused"})
     if owner._closing:
         return response(503, {"error": "repository_service_draining"})
-    binding = {"protocol": contract()["protocol"], "namespace": owner.store.namespace,
+    binding = {"protocol": declaration()["protocol"], "namespace": owner.store.namespace,
                "repository_key": identity.key, "target": target}
     if operation == "capabilities":
         if request.method != "GET" or request.body:
             return response(400, {"error": "invalid_repository_capabilities"})
-        return response(200, {**binding, **contract(), "identity": identity.document()})
-    if operation not in OPERATIONS or request.method != "POST":
+        extra = {"driver": owner.repositories.capabilities[identity.key]} if (
+            owner.store.repository_filtered
+        ) else {}
+        return response(200, {**binding, **declaration(), "identity": identity.document(), **extra})
+    if operation not in operations or request.method != "POST":
         return response(405, {"error": "repository_operation_refused"})
     if len(request.body) > BODY_BYTES:
         return response(413, {"error": "repository_request_limit"})
@@ -84,7 +97,7 @@ async def handle(owner, request):
                 raise RequestDisconnected()
         checkpoint()
         return admitted_operation(owner, request, lambda: (
-            RepositorySubscriptions(owner.repositories).execute(
+            subscriptions(owner.repositories).execute(
                 identity.key, scope.consumer, operation, value["request"],
                 expires_at=request.context.expires_at, checkpoint=checkpoint,
             )
@@ -138,7 +151,10 @@ async def listing(owner, request):
             return [{
                 "target": target, "identity": owner.repositories.identities[key].document(),
                 "inventory": cached[key]["inventory"] if key in cached else {"outcome": "unknown"},
-                "known_members": sum(pull["member"] for pull in cached[key]["pulls"]) if key in cached else 0,
+                "known_members": (
+                    len(cached[key]["pulls"]) if owner.store.repository_filtered
+                    else sum(pull["member"] for pull in cached[key]["pulls"])
+                ) if key in cached else 0,
             } for target, key in selected.items()]
         return admitted_operation(owner, request, lambda: (
             owner.store._review_transaction(
@@ -151,7 +167,7 @@ async def listing(owner, request):
             result = await asyncio.to_thread(execute)
             owner._check(request)
             return response(200, {
-                **contract(), "namespace": owner.store.namespace, "repositories": result,
+                **profile(owner)[3](), "namespace": owner.store.namespace, "repositories": result,
             })
         except (RequestDisconnected, ReplayCallerExpired, OperationLockedError):
             return response(503, {"error": "repository_request_unavailable"})

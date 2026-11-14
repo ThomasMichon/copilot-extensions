@@ -50,10 +50,26 @@ def _enabled(expression, inputs):
     return True
 
 
+def test_filtered_acceptance_precedes_the_complementary_service_portfolio():
+    job = WORKFLOW["jobs"]["pr-service-linux"]
+    assert job["runs-on"] == "ubuntu-latest" and job["timeout-minutes"] == 10
+    checkout = job["steps"][0]
+    assert checkout["with"] == {"ref": "${{ github.sha }}", "persist-credentials": False}
+    focused, remaining = job["steps"][-2:]
+    assert focused["env"] == {"PYTEST_ADDOPTS": "-k filtered"}
+    assert remaining["env"] == {"PYTEST_ADDOPTS": "-k 'not filtered'"}
+    for step in (focused, remaining):
+        assert "run-standalone-tests.py services/pr" in step["run"]
+    assert "--prepare --timeout 180" in focused["run"]
+    assert "--timeout 420" in remaining["run"]
+    assert WORKFLOW["jobs"]["pr-service-windows"]["steps"] == job["steps"]
+
+
 def test_manual_selection_preserves_every_existing_route_and_default():
     trigger = WORKFLOW.get("on", WORKFLOW.get(True))
     assert set(trigger) == {"workflow_dispatch"}
     inputs = trigger["workflow_dispatch"]["inputs"]
+    assert len(inputs) <= 25
     assert inputs["immutable_runtime"]["type"] == "boolean"
     assert inputs["immutable_runtime"]["default"] is False
     assert inputs["immutable_runtime_ref"]["type"] == "string"
@@ -76,6 +92,8 @@ def test_manual_selection_preserves_every_existing_route_and_default():
         "pr_artifacts": {
             "pr-artifacts-linux", "pr-artifacts-windows", "gateway-role-tunnels",
             "gateway-host-application-linux", "gateway-host-application-windows",
+            "gateway-continuity-application-linux", "gateway-continuity-application-windows",
+            "gateway-normal-setup-linux", "gateway-normal-setup-windows",
         },
         "dependency_compile": {
             "dependency-compile-linux", "dependency-compile-windows",

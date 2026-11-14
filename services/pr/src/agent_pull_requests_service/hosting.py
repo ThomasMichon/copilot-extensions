@@ -221,6 +221,10 @@ async def _serve(config: ServiceConfig, scope: LaunchScope, stop: asyncio.Event)
             authority=scope.deadline, checkpoint=scope.check, interval=config.interval,
             local_socket=config.repositories.socket_path, local_peers=config.repositories.peers,
             operation_seconds=config.operation_seconds,
+            **({
+                "filter_definitions": config.repositories.definitions,
+                "filter_sponsors": config.repositories.sponsors,
+            } if config.filtered else {}),
         )
     else:
         credentials = load_service_credentials(

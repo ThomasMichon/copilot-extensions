@@ -64,6 +64,23 @@ native/fleet switch alone does not deliver this service intake model.
 
 ## Coordination
 
+### MCP startup prerequisite follow-through
+
+The existing integration driver retains concurrent MCP bridge startup diagnosis
+and source-fix ownership under #11786, alongside the filtered-population work,
+not as a pause or replacement for it. Earlier root fix #11795 is merged;
+reconcile its current source/selection and fresh owner-reported failures before
+duplicating a fix or replaying a historical failed request. Source fixes retain
+focused tests, normal independent review, required CI and role-scoped merge.
+Deployment, installed-plugin changes, rollout, shared-service restart,
+credentials, spending and retained-resource custody need their existing
+separate authority. The affected consumer owner receives the qualified fix
+availability before removing a workaround.
+
+Remaining work may be taken over only after the prior owner's change is merged
+and its worktree is actually finalized. Otherwise coordinate with or reawaken
+that existing owner rather than waiting indefinitely or replacing it silently.
+
 The [M1 cache/event contract](repository-cache-events-m1.md) under #11779
 sequences the first integrated milestone within #6007, not a second campaign.
 The plan steward owns documentation delivery only; the integration owner

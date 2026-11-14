@@ -5,6 +5,12 @@ see [local operation](LOCAL.md). It uses the same foreground host and writer,
 without requiring Core/Gateway ingress or service credential enrollment.
 The connector profile below retains its existing defaults.
 
+For explicitly selected generation-three filtered populations, inert named sets,
+startup sponsorship and owned dynamic subscriptions, see
+[filtered populations](../../plugins/agent-pull-requests/docs/filtered-populations.md).
+This adds `population-*` client forms and a fresh `repository-filtered/v1`
+profile; it neither migrates retained state nor enables a provider by default.
+
 `agent-pull-requests-service` hosts the existing PR replay store, Gateway handler,
 connector and native observation cycle. It runs without Copilot, marketplace
 hooks or an interactive client session. It is not a deployment controller,

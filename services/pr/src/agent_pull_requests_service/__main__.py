@@ -13,6 +13,8 @@ def main(argv: list[str] | None = None) -> int:
     commands = parser.add_subparsers(dest="command", required=True)
     from . import local_client
     local_client.add_commands(commands)
+    from . import filtered_client
+    filtered_client.add_commands(commands)
     for operation in ("provision", "serve"):
         command = commands.add_parser(operation)
         command.add_argument("--config", type=Path, required=True)
@@ -21,6 +23,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.command in local_client.COMMANDS:
         return local_client.run(args)
+    if args.command in filtered_client.COMMANDS:
+        return filtered_client.run(args)
     try:
         from .hosting import ready, run
 

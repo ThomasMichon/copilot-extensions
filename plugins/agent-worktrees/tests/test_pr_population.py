@@ -110,6 +110,30 @@ def test_union_author_reviewer_deduplicates_and_normalizes_all_available_fields(
     assert all(argv[1] == "-q" and "--location" not in argv for argv, _ in requests)
 
 
+def test_query_rotation_observes_fifth_author_with_only_four_pages(monkeypatch):
+    users = [f"{number:08x}-1111-1111-1111-111111111111" for number in range(5)]
+    requests = []
+    def run(argv, **kwargs):
+        url = urlsplit(argv[argv.index("--url") + 1])
+        query = parse_qs(url.query)
+        author = query.get("searchCriteria.creatorId", [None])[0]
+        requests.append(author)
+        rows = [row(createdBy={"id": users[-1]})] if (
+            author == users[-1] and query.get("$skip") == ["0"]
+        ) else []
+        value = page([]) if url.path.endswith("/labels") else page(rows)
+        return subprocess.CompletedProcess(argv, 0, json.dumps(value) + "\n200", "")
+    monkeypatch.setattr(pop, "run_cli", run)
+    selected = expression({"from": {"users": users}})
+    first = pop.population("azure-devops", REPO, api_base=ENDPOINT, expression=selected,
+                           credential_source=credential([]), max_pages=4, query_offset=0)
+    assert first["outcome"] == "partial" and not first["pulls"]
+    last = pop.population("azure-devops", REPO, api_base=ENDPOINT, expression=selected,
+                          credential_source=credential([]), max_pages=4, query_offset=4)
+    assert last["pulls"][0]["facts"]["from"] == [users[-1]]
+    assert set(users) <= set(requests)
+
+
 def test_actual_curl_cannot_expand_selected_endpoint_into_multiple_requests(monkeypatch):
     from agent_worktrees.providers.base import run_cli
     if not shutil.which("curl"):

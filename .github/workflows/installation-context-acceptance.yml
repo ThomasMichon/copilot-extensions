@@ -1636,6 +1636,9 @@ jobs:
     timeout-minutes: 10
     steps: &pr-service-steps
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -1652,10 +1655,18 @@ jobs:
           --test-file tests/test_watch_replay_binding.py
           --test-file tests/test_watch_replay_client_transport.py
           --max-files-per-sub-suite 2
-      - name: Independent installed PR service and real process transport
+      - name: Actual filtered foreground host and supported CLI
+        env:
+          PYTEST_ADDOPTS: "-k filtered"
         run: >-
           python tools/run-standalone-tests.py services/pr
           --prepare --timeout 180 --admission-wait 30
+      - name: Remaining installed PR service and real process transport
+        env:
+          PYTEST_ADDOPTS: "-k 'not filtered'"
+        run: >-
+          python tools/run-standalone-tests.py services/pr
+          --timeout 420 --admission-wait 30
 
   ssh-service-linux:
     if: ${{ inputs.ssh_service }}

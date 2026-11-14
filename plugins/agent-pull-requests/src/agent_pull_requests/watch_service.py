@@ -41,6 +41,7 @@ class WatchService:
         reports=None,
         response_limit: int = BODY_BYTES,
         local_socket=None, local_peers=(), operation_seconds: int = 60,
+        filter_definitions=None, filter_sponsors=(),
     ) -> None:
         if not callable(authority) or not callable(checkpoint):
             raise ValueError("current service authority is required")
@@ -59,6 +60,11 @@ class WatchService:
         self._disk: asyncio.Task | None = None
         self._tasks: tuple[asyncio.Task, ...] = ()
         self.observer = ReplayObserver(store, bindings=observations)
+        self.filter_sponsors = tuple(filter_sponsors)
+        if filter_definitions is not None:
+            if not store.repository_filtered:
+                raise ValueError("filter definitions require selected filtered storage")
+            self.observer.repositories.definitions = filter_definitions
         local = local_socket is not None
         if local and (not store.repository_continuing or self.observer.repositories is None):
             raise ValueError("local repository profile requires selected continuing storage")
@@ -70,6 +76,11 @@ class WatchService:
             reports=reports,
             local=local, repositories=self.observer.repositories,
         )
+        if store.repository_filtered:
+            self.observer.repositories.sponsored_requests = frozenset(
+                (self.gateway.bindings[(s["principal"], s["target"])].consumer, s["request_id"])
+                for s in self.filter_sponsors
+            )
         if any(
             (scope.account, scope.repo) not in self.observer.bindings
             for scope in self.gateway.bindings.values()
@@ -102,9 +113,12 @@ class WatchService:
     async def _observe(self) -> None:
         while not self._stop.is_set():
             self._check()
-            self._disk = asyncio.create_task(asyncio.to_thread(
-                self.observer.cycle, expires_at=self._authority(), checkpoint=self._check,
-            ))
+            self._disk = asyncio.create_task(
+                asyncio.to_thread(self._observe_cycle) if self.store.repository_filtered
+                else asyncio.to_thread(
+                    self.observer.cycle, expires_at=self._authority(), checkpoint=self._check,
+                )
+            )
             try:
                 self._last_cycle = await asyncio.shield(self._disk)
             except OperationLockedError:
@@ -126,6 +140,36 @@ class WatchService:
                 await asyncio.wait_for(self._stop.wait(), self.interval)
             except asyncio.TimeoutError:
                 pass
+
+    def _observe_cycle(self):
+        authority = {"expires_at": self._authority(), "checkpoint": self._check}
+        conflicts = 0
+        if self.store.repository_filtered:
+            from pr_filters import FilterError
+            from .filtered_subscriptions import FilteredSubscriptions
+            from .repository_subscriptions import RepositoryRequestConflict
+            subscriptions = FilteredSubscriptions(self.observer.repositories)
+            for sponsor in self.filter_sponsors:
+                scope = self.gateway.bindings[(sponsor["principal"], sponsor["target"])]
+                try:
+                    result = subscriptions.execute(scope.account, scope.consumer, "subscribe", {
+                        "request_id": sponsor["request_id"], "ttl": sponsor["ttl"],
+                        "definition": sponsor["definition"],
+                    }, **authority)
+                    row = result["subscription"]
+                    if row["cancelled"]:
+                        continue
+                    now = int(self.store.clock())
+                    if row["expires_at"] <= now + sponsor["ttl"] // 2:
+                        subscriptions.execute(scope.account, scope.consumer, "renew", {
+                            "registration_id": row["registration_id"], "expires_at": now + sponsor["ttl"],
+                        }, **authority)
+                except (FilterError, RepositoryRequestConflict, RepositoryBackpressure):
+                    conflicts += 1
+        result = self.observer.cycle(**authority)
+        if self.store.repository_filtered:
+            result["sponsor_conflicts"] = conflicts
+        return result
 
     def _withdraw(self) -> None:
         self._stopping.set()
@@ -154,10 +198,21 @@ class WatchService:
                     expires_at=self._authority(), checkpoint=self._check,
                 )
                 if self.observer.repositories is not None:
-                    from .repository_native import qualify
+                    if self.store.repository_filtered:
+                        from .filtered_native import qualify
+                    else:
+                        from .repository_native import qualify
                     for binding in self.observer.bindings.values():
                         if binding.repository_identity is not None:
-                            qualify(binding, checkpoint=self._check)
+                            support = qualify(binding, checkpoint=self._check)
+                            if self.store.repository_filtered:
+                                self.observer.repositories.capabilities[binding.account] = support
+                    if self.store.repository_filtered:
+                        for sponsor in self.filter_sponsors:
+                            scope = self.gateway.bindings[(sponsor["principal"], sponsor["target"])]
+                            self.observer.repositories.require(
+                                scope.account, self.observer.repositories.definitions.resolve(sponsor["definition"]),
+                            )
                 for workspace in self.gateway.workspaces.values():
                     # Attention has its own explicit layout contract; never relabel
                     # those bytes as the older conversation-serving layout.
@@ -213,10 +268,13 @@ class WatchService:
             and all(not task.done() for task in self._tasks)
             and cycle is not None and cycle["status"] == "observed"
             and cycle["unavailable"] == 0 and cycle["unbound"] == 0
+            and not cycle.get("sponsor_conflicts", 0)
         )
         return {
             "ready": ready, "writer_held": self._lease.held,
             "draining": self._stopping.is_set(), "closed": self._closed,
+            **({"sponsor_conflicts": cycle.get("sponsor_conflicts", 0) if cycle else 0}
+               if self.store.repository_filtered else {}),
         }
 
     async def close(self, *, timeout: float) -> None:

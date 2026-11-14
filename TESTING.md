@@ -6075,6 +6075,18 @@ runner/workflow budgets are unchanged; this is not a production database change.
 
 ## Optional PR service lifecycle
 
+The existing `pr_service=true` manual selector retains two disposable jobs
+(Linux and Windows), each capped at 10 minutes. Its source-pinned standalone
+acceptance first runs `PYTEST_ADDOPTS="-k filtered"` with a 180-second runner
+limit: the filtered CLI tests and both actual Linux foreground-host scenarios.
+It then runs the complementary `PYTEST_ADDOPTS="-k 'not filtered'"` portfolio
+with a 420-second runner limit, reusing the prepared environment. No test is
+removed from the combined portfolio and failures remain failures. Use a pinned
+published source and keep unrelated selectors off. These synthetic fixtures
+qualify local peer credentials, sponsorship, restart, outage and subscription
+lifetime; they do not enroll a live provider or deploy a service. This is an
+opt-in integration lane, not required unit CI.
+
 The existing `pr_service=true` manual Linux/Windows lane also runs
 `services/pr/tests/test_image_inputs.py` through the standalone runner. It
 checks the repository-only offline-context consumer with real retained
@@ -6128,8 +6140,8 @@ credential/channel loss before lookup or during an already-started commit.
 It adds no required-PR process matrix and does not qualify a production
 credential provider, installed artifact or fleet placement.
 
-The same manual selector also runs `tools/run-standalone-tests.py services/pr
---prepare --timeout 180`. Its independent environment installs this checkout's
+The same manual selector runs the two complementary standalone selections above.
+Its independent environment installs this checkout's
 PR/Fleet dependencies and the standalone wheel without Copilot. Tests build a
 normal source-independent wheel, validate the existing reference-only
 `container.service` declaration, and drive an installed foreground service in

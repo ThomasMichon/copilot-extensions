@@ -1,5 +1,11 @@
 # agent-pull-requests
 
+The optional [filtered-population profile](docs/filtered-populations.md) composes
+driver-aware expressions, inert named sets and independently owned continuing
+subscriptions through the existing foreground service/store/observer.
+It requires explicitly selected generation-three state and executing native
+population support; unselected profiles and defaults remain unchanged.
+
 Cross-repository pull-request commands for Copilot CLI sessions that need to
 act on `owner/repo` targets **without** requiring a local checkout of that repo.
 

@@ -162,13 +162,19 @@ def test_owned_runtime_observes_reconnects_and_restarts_over_real_gateway(tmp_pa
                 )
 
             async def send(service, operation, payload=None):
-                await eventually(lambda: service.status()["ready"])
                 path = "/api/v1/watch/project/" + operation
-                async with rig.session.post(
-                    rig.origin + path, headers=await rig.auth(path, "POST"), json=payload or {},
-                ) as response:
-                    assert response.status == 200
-                    return await response.json()
+                for _ in range(100):
+                    await eventually(lambda: service.status()["ready"])
+                    async with rig.session.post(
+                        rig.origin + path, headers=await rig.auth(path, "POST"), json=payload or {},
+                    ) as response:
+                        value = await response.json()
+                        if response.status != 503 or value != {"error": "watch_store_busy"}:
+                            assert response.status == 200, value
+                            return value
+                    # Busy precedes transaction entry; retain original identity.
+                    await asyncio.sleep(.05)
+                raise AssertionError(f"{operation} remained busy")
 
             owner = make()
             await owner.start()
