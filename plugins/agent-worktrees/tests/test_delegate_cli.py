@@ -410,6 +410,11 @@ def _fleet_hosts(caller_host: dict, caller_rows: list[dict], *, probed: float | 
          )]},
     ]
     for row in hosts:
+        row.setdefault("reporting_context", {
+            "version": 1, "status": "resolved", "hostname": "observed-host",
+            "machine": row["machine"], "environment": row["env"],
+            "execution_machine": row["machine"],
+        })
         if isinstance(row.get("projection"), dict):
             row["projection"] = dict(row["projection"])
             row["projection"].setdefault("roster_count", len(row["worktrees"]))
@@ -588,6 +593,12 @@ def test_slow_later_probe_expires_an_earlier_fresh_caller_roster(
             **reply["projection"],
             "roster_count": len(reply["worktrees"]), "selected_count": len(reply["worktrees"]),
         }
+        reply["reporting_context"] = {
+            "version": 1, "status": "resolved", "hostname": "observed-host",
+            "machine": "ember" if cmd[0] == "ssh" else "atlas-core",
+            "environment": "linux" if cmd[0] == "ssh" else "wsl",
+            "execution_machine": "ember" if cmd[0] == "ssh" else "atlas-core",
+        }
         return SimpleNamespace(returncode=0, stdout=json.dumps(reply), stderr="")
 
     monkeypatch.setattr(list_views_cli.subprocess, "run", _run)
@@ -617,6 +628,7 @@ def test_execute_rechecks_caller_roster_freshness_before_each_finalize(monkeypat
         second, machine="ember", platform="linux", status="active",
         caller_worktree=tracking.format_claim_ref("atlas-core", "example", _CALLER_ID),
     ))
+    hosts[1]["projection"].update(roster_count=2, selected_count=2)
     _stub_fleet(monkeypatch)
     monkeypatch.setattr(delegate_cli.list_views_cli, "_probe_host", lambda *a, **k: hosts.pop(0))
     finalized: list[str] = []

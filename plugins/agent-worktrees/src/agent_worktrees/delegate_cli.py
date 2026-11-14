@@ -36,6 +36,7 @@ from .worktree_machine_identity import execution_machine_from_fields, projected_
 _HOST_TERMINAL_STATUSES = frozenset({"complete", "completed", "finalized"})
 _ROSTER_ADVISORY_REASON = "host-roster-advisory"
 _UNNAMED_REASON = "host-reporting-unavailable"
+_IDENTITY_CONFLICT_REASON = "host-identity-conflict"
 _UNPROVEN_ROSTER_REASON = "roster not proven current within its freshness bound when evaluated"
 
 
@@ -84,9 +85,7 @@ def annotate_delegate_graph(
     current_only: bool = False,
     authoritative_hosts: Collection[tuple[str, str]] | None = None,
     advisory_rows: Collection[int] = frozenset(),
-    unnamed_rows: Collection[int] = frozenset(),
-    incomplete_unnamed_sources: bool = False,
-    row_hosts: dict[int, tuple[tuple[str, str], ...]] | None = None,
+    coverage: fleet_reporting.Coverage | None = None,
 ) -> list[dict[str, Any]]:
     """Annotate ``list``/``fleet`` rows with caller/host + delegate state.
 
@@ -104,7 +103,7 @@ def annotate_delegate_graph(
         id_index[worktree_id].append(row)
         project = row.get("repo")
         if isinstance(project, str) and project:
-            machines = {
+            machines = coverage.names_for(row) if coverage is not None else {
                 name for name in (execution_machine_from_fields(row), row.get("machine"))
                 if isinstance(name, str) and name
             }
@@ -140,29 +139,24 @@ def annotate_delegate_graph(
         if project_hint:
             caller_state["repo"] = project_hint
 
-        uncertainty = _UNNAMED_REASON if (
-            incomplete_unnamed_sources or machine_hint and any(
-                id(candidate) in unnamed_rows and candidate.get("repo") in (None, "", project_hint)
-                for candidate in id_index.get(caller_id, [])
-            )
-        ) else None
         matches: list[dict[str, Any]] = []
         if machine_hint and project_hint:
             matches = qualified_index.get((machine_hint, project_hint, caller_id), [])
         else:
             matches = id_index.get(caller_id, [])
 
-        if (
-            uncertainty is None and len(matches) == 1
-            and authoritative_hosts is not None and row_hosts is not None
-        ):
-            observed = row_hosts.get(id(matches[0]), ())
-            if any(
-                (machine_hint is None or key[0] == machine_hint) and key not in observed
-                and (reachable is not True or key not in authoritative_hosts)
-                for key, reachable in (reachable_hosts or {}).items()
+        uncertainty = None
+        if coverage is not None:
+            matching = {id(candidate) for candidate in matches}
+            if machine_hint and any(
+                id(candidate) not in matching and candidate.get("repo") in (None, "", project_hint)
+                for candidate in id_index.get(caller_id, [])
             ):
-                uncertainty = _ROSTER_ADVISORY_REASON
+                uncertainty = _IDENTITY_CONFLICT_REASON
+            else:
+                gap = coverage.gap(matches[0] if len(matches) == 1 else None)
+                if gap is not None:
+                    uncertainty = _UNNAMED_REASON if gap == "unnamed" else _ROSTER_ADVISORY_REASON
         if uncertainty is not None:
             caller_state["state"] = "unknown"
             row["caller_state"] = caller_state
@@ -316,18 +310,20 @@ def host_roster_is_current(host: dict[str, Any], *, now: float | None = None) ->
     return all(_finite_seconds(value) for value in (age, bound, elapsed)) and age + elapsed <= bound
 
 
-def _host_roster_is_complete(host: dict[str, Any]) -> bool:
-    """A filtered or malformed selection cannot prove a caller absent."""
+def _host_roster_counts(host: dict[str, Any]) -> tuple[int, int] | None:
+    """Validate selection cardinality before using presence or absence proof."""
     projection, rows = host.get("projection"), host.get("worktrees")
     if not isinstance(projection, dict) or not isinstance(rows, list) or not all(
         isinstance(row, dict) and isinstance(row.get("id"), str) and row["id"] for row in rows
     ):
-        return False
+        return None
     total, selected = projection.get("roster_count"), projection.get("selected_count")
-    return (
-        type(total) is int and type(selected) is int and total == selected == len(rows)
+    if (
+        type(total) is int and type(selected) is int and total >= selected == len(rows)
         and len({row["id"] for row in rows}) == len(rows)
-    )
+    ):
+        return total, selected
+    return None
 
 
 def annotate_fleet_hosts(
@@ -348,14 +344,12 @@ def annotate_fleet_hosts(
     worktrees: list[dict[str, Any]] = []
     duplicate_hosts: set[tuple[str, str]] = set()
     reporter_rows: dict[tuple[str, str], list[int]] = defaultdict(list)
-    unnamed_rows: set[int] = set()
-    incomplete_unnamed_sources = False
-    row_hosts: dict[int, tuple[tuple[str, str], ...]] = {}
+    coverage = fleet_reporting.Coverage()
     for host in hosts:
         try:
             keys, copies = fleet_reporting.reported_rows(host)
         except ValueError:
-            incomplete_unnamed_sources = True
+            coverage.add([], (), complete=False)
             host.update(reachable=False, worktrees=[], error="malformed reporting context")
             continue
         for key in keys:
@@ -363,17 +357,15 @@ def annotate_fleet_hosts(
                 duplicate_hosts.add(key)
             reachable_hosts[key] = bool(host.get("reachable"))
             reporter_rows[key].extend(id(row) for row in copies)
-        row_hosts.update((id(row), keys) for row in copies)
         current = host_roster_is_current(host, now=now)
-        complete = current and _host_roster_is_complete(host)
-        if not keys:
-            unnamed_rows.update(id(row) for row in copies)
-            incomplete_unnamed_sources |= not complete
+        counts = _host_roster_counts(host)
+        complete = current and counts is not None and counts[0] == counts[1]
+        coverage.add(copies, keys, complete=complete)
         if complete:
             authoritative_hosts.update(keys)
         if not current and host.get("reachable") is True and host.get("availability") is None:
             host["availability"] = {"status": "stale", "reason": _UNPROVEN_ROSTER_REASON}
-        if not current:
+        if not current or counts is None:
             advisory_rows.update(id(row) for row in copies)
         worktrees.extend(copies)
         host["worktrees"] = copies
@@ -385,9 +377,7 @@ def annotate_fleet_hosts(
         reachable_hosts=reachable_hosts,
         authoritative_hosts=authoritative_hosts,
         advisory_rows=advisory_rows,
-        unnamed_rows=unnamed_rows,
-        incomplete_unnamed_sources=incomplete_unnamed_sources,
-        row_hosts=row_hosts,
+        coverage=coverage,
     )
     return hosts
 

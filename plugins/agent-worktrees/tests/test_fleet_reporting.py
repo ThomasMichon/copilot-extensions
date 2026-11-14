@@ -247,6 +247,7 @@ def test_qualified_physical_caller_resolves_an_actual_guest_row_but_not_ambiguou
     assert hosts[2]["worktrees"][0]["caller_state"]["state"] == "resolved"
     assert hosts[2]["worktrees"][0]["caller_state"]["execution_machine"] == "guest-slot"
     hosts[1]["worktrees"] = []
+    hosts[1]["projection"].update(roster_count=0, selected_count=0)
     delegates.annotate_fleet_hosts(hosts)
     assert hosts[2]["worktrees"][0]["caller_state"]["state"] == "unresolved"
     assert hosts[2]["worktrees"][0]["delegate_finalizable"] is False
@@ -446,3 +447,82 @@ def test_failed_probe_is_unknown_coverage_not_a_known_legacy_reporter(monkeypatc
     assert target["caller_state"]["state"] == "unknown"
     assert target["delegate_finalizable"] is False
     assert delegates._still_finalizable(hosts, target, source_key=("worker", "wsl")) is False
+
+
+@pytest.mark.parametrize("configured,native_parent", [
+    ("configured-guest", False), ("configured-guest", True), ("physical", True),
+])
+def test_legacy_labels_cannot_hide_a_conflicting_active_caller(configured, native_parent):
+    child = {
+        "id": "child", "repo": "example",
+        "caller_worktree": tracking.format_claim_ref("physical", "example", "parent"),
+    }
+    native = host(
+        [{"id": "parent", "repo": "example", "status": "finalized"}] if native_parent else [],
+        context={**reporter("physical", "windows"), "execution_machine": "native-slot"},
+        machine="native-route", environment="windows",
+    )
+    guest = host(
+        [{"id": "parent", "repo": "example", "status": "active", "machine": "obsolete-label"}],
+        machine=configured,
+    )
+    hosts = delegates.annotate_fleet_hosts([native, guest, host([child], machine="worker")])
+    target = hosts[2]["worktrees"][0]
+    assert target["caller_state"]["state"] == "unknown"
+    assert target["delegate_finalizable"] is False
+    assert delegates._still_finalizable(hosts, target, source_key=("worker", "wsl")) is False
+    assert hosts[1]["worktrees"][0]["machine"] == "obsolete-label"
+
+
+def test_legacy_tuple_cannot_bind_a_qualified_selector_as_current_identity():
+    parent = {
+        "id": "parent", "repo": "example", "status": "finalized", "machine": "old-physical",
+        "platform": "wsl", "environment": "wsl", "execution_machine": "old-slot",
+        "machine_identity_version": 1,
+    }
+    child = {
+        "id": "child", "repo": "example",
+        "caller_worktree": tracking.format_claim_ref("old-slot", "example", "parent"),
+    }
+    hosts = delegates.annotate_fleet_hosts([
+        host([parent], machine="configured"), host([child], machine="worker"),
+    ])
+    target = hosts[1]["worktrees"][0]
+    assert target["caller_state"]["state"] == "unknown"
+    assert target["delegate_finalizable"] is False
+    assert hosts[0]["worktrees"][0] == parent
+
+
+@pytest.mark.parametrize("native_parent", [False, True])
+def test_renamed_live_caller_is_a_conflict_not_absence_from_its_old_named_source(native_parent):
+    child = {
+        "id": "child", "repo": "example",
+        "caller_worktree": tracking.format_claim_ref("original", "example", "parent"),
+    }
+    original = host(
+        [{"id": "parent", "repo": "example", "status": "finalized"}] if native_parent else [],
+        context={**reporter("original"), "execution_machine": "original"},
+        machine="original-route",
+    )
+    renamed = host(
+        [{"id": "parent", "repo": "example", "status": "active"}],
+        context=reporter("renamed"), machine="renamed-route",
+    )
+    hosts = delegates.annotate_fleet_hosts([original, renamed, host([child], machine="worker")])
+    target = hosts[2]["worktrees"][0]
+    assert target["caller_state"]["state"] == "unknown"
+    assert target["delegate_finalizable"] is False
+    assert delegates._still_finalizable(hosts, target, source_key=("worker", "wsl")) is False
+
+
+def test_successful_complete_legacy_inventory_still_supports_bare_id_status_proof():
+    parent = {"id": "parent", "repo": "example", "status": "finalized", "machine": "old"}
+    child = {"id": "child", "repo": "example", "caller_worktree": "parent"}
+    hosts = delegates.annotate_fleet_hosts([
+        host([parent], machine="configured"), host([child], machine="worker"),
+    ])
+    target = hosts[1]["worktrees"][0]
+    assert target["caller_state"]["state"] == "resolved"
+    assert target["delegate_finalizable"] is True
+    assert delegates._still_finalizable(hosts, target, source_key=("worker", "wsl")) is True
+    assert hosts[0]["worktrees"][0]["machine"] == "old"

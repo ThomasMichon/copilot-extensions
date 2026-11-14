@@ -22,7 +22,7 @@ def reported_rows(host: dict) -> tuple[tuple[tuple[str, str], ...], list[dict]]:
         keys = ()
         fields = {"machine": "", "platform": ""}
     elif "reporting_context" not in host:
-        return (source_key(host),), rows
+        return (), rows
     else:
         context = host["reporting_context"]
         worktrees_reporting.validate(context)
@@ -42,3 +42,40 @@ def reported_rows(host: dict) -> tuple[tuple[tuple[str, str], ...], list[dict]]:
             row.pop(field, None)
         row.update(fields)
     return keys, rows
+
+
+class Coverage:
+    """Request-local source visibility, independent of row labels and routing."""
+
+    def __init__(self) -> None:
+        self._complete: list[bool] = []
+        self._named: list[bool] = []
+        self._source_by_row: dict[int, int] = {}
+        self._selectors_by_row: dict[int, tuple[tuple[str, str], ...]] = {}
+
+    def add(
+        self, rows: list[dict], selectors: tuple[tuple[str, str], ...], *, complete: bool,
+    ) -> None:
+        """Retain the actual containing source for this graph evaluation."""
+        source = len(self._complete)
+        self._complete.append(complete)
+        self._named.append(bool(selectors))
+        for row in rows:
+            self._source_by_row[id(row)] = source
+            self._selectors_by_row[id(row)] = selectors
+
+    def names_for(self, row: dict) -> set[str]:
+        """Only live reporter selectors may bind a qualified caller name."""
+        return {name for name, _environment in self._selectors_by_row.get(id(row), ())}
+
+    def gap(self, observed: dict | None) -> str | None:
+        """Every other source must exclude an unseen or conflicting caller ID."""
+        selected = self._source_by_row.get(id(observed)) if observed is not None else None
+        reason = None
+        for source, complete in enumerate(self._complete):
+            if source == selected or complete:
+                continue
+            if not self._named[source]:
+                return "unnamed"
+            reason = "incomplete"
+        return reason
