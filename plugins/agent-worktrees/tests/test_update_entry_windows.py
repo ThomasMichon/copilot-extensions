@@ -23,8 +23,7 @@ pytestmark = pytest.mark.skipif(os.name != "nt", reason="native Windows security
 
 _CACHE_PROBE = (
     "if '-c' in sys.argv:\n"
-    "    print(json.dumps(next(arg.split('=', 1)[1] for arg in sys.argv "
-    "if arg.startswith('pycache_prefix='))))\n"
+    "    print(json.dumps(['-B']))\n"
     "    raise SystemExit(0)\n"
 )
 
@@ -716,8 +715,8 @@ def test_admitted_git_sh_no_manager_reaches_installed_runtime(
     record = json.loads(proof.read_text())
     assert record["msys"] is None
     forwarded = record["args"]
-    _assert_cache_arguments(forwarded[:2], runtime)
-    assert forwarded[2:] == ["-m", "agent_worktrees", *arguments]
+    _assert_cache_arguments(forwarded[:1], runtime)
+    assert forwarded[1:] == ["-m", "agent_worktrees", *arguments]
     assert not list(tmp.glob("agent-update-*"))
 
 
@@ -1262,8 +1261,8 @@ def test_selected_update_operation_bypasses_native_repair_and_implicit_provision
     assert result.returncode == (29 if available else 127), result.stdout + result.stderr
     if available:
         args = json.loads(proof.read_text())
-        _assert_cache_arguments(args[:2], home / ".agent-worktrees")
-        assert args[2:] == [
+        _assert_cache_arguments(args[:1], home / ".agent-worktrees")
+        assert args[1:] == [
             "-m", "agent_worktrees", "--project", "sample", "update", *flags,
         ]
     else:

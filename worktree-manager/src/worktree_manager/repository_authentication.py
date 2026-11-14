@@ -24,6 +24,8 @@ class InspectionError(ValueError):
 
 
 def _runtime_command(command: list[str] | None):
+    if command and command[1:] == ["-B", "-m", "agent_worktrees"]:
+        return command[0], command[2], command[3]
     if (
         command and len(command) == 5 and command[1] == "-X"
         and command[2].startswith("pycache_prefix=") and command[3:] == ["-m", "agent_worktrees"]

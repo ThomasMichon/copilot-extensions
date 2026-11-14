@@ -265,8 +265,9 @@ cleanup wait for a fresh, principal- and process-birth-verified passive or activ
 beacon matching the different selected full identity. Missing, stale, foreign
 or unprovable successor readiness does not authorize retirement.
 Its isolated startup explicitly selects the
-[external Python bytecode cache](../../libs/agent-procutil/README.md#managed-python-bytecode-cache)
-under the existing durable owner HOME, without moving existing bytecode or state.
+[platform Python cache policy](../../libs/agent-procutil/README.md#platform-cache-provider-contract)
+using the durable owner HOME as installation identity, without moving existing
+bytecode or state. Unsealed or older providers disable bytecode writes.
 The selected process publishes additive `runtime_identity`, `state` and
 `work_lease_version: 1` beacon fields. `passive` readiness has empty serving sets:
 it is process readiness, not proof of relay service. One OS-held work lease in

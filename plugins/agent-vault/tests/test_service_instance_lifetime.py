@@ -93,12 +93,8 @@ def invoke():
             assert not events, events
             bootstrap = argv.index("-c")
             assert argv[:bootstrap] == [
-                launch.windowless_python(sys.executable), "-X", argv[2],
+                launch.windowless_python(sys.executable), "-B",
             ]
-            assert argv[2].startswith("pycache_prefix=")
-            cache = Path(argv[2].split("=", 1)[1])
-            assert cache.parent.name == "python"
-            assert cache.parent.parent.parent.samefile(state)
             assert argv[bootstrap + 1] == launch._SERVICE_BOOTSTRAP
             assert argv[bootstrap + 2] == str(Path(launch.__file__).resolve().parent.parent)
             service_args = argv[bootstrap + 3:]

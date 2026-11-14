@@ -32,9 +32,18 @@ _SELECTOR_TRANSPORT = (
     (
         "function Select-PythonCache([string]$Python) {\n    $selector = @'\n",
         "\n'@\n    try {\n"
-        '        $selected = & $Python -I -B -X "pycache_prefix=$_mintedPythonCache" -c $selector $_runtimeRoot\n'
-        "        if ($LASTEXITCODE -eq 0 -and @($selected).Count -eq 1) { return [string]($selected | ConvertFrom-Json) }\n"
-        "    } catch {}\n    return $_mintedPythonCache\n}",
+        '        $selected = & $Python -I -B -X utf8 -c $selector $_runtimeRoot\n'
+        "        if ($LASTEXITCODE -eq 0 -and @($selected).Count -eq 1) {\n"
+        "            $cacheArguments = ConvertFrom-Json -InputObject ([string]$selected)\n"
+        "            if ($cacheArguments.Count -eq 1 -and $cacheArguments[0] -ceq '-B') { return '-B' }\n"
+        "            if ($cacheArguments.Count -eq 2 -and $cacheArguments[0] -ceq '-X' -and\n"
+        "                $cacheArguments[1] -is [string] -and\n"
+        "                $cacheArguments[1].StartsWith('pycache_prefix=') -and\n"
+        '                $cacheArguments[1].Length -gt 15 -and $cacheArguments[1] -notmatch "[`r`n]" -and\n'
+        "                $cacheArguments[1].IndexOf([char]0) -lt 0) {\n"
+        "                return $cacheArguments\n"
+        "            }\n        }\n"
+        "    } catch {}\n    return '-B'\n}",
     ),
     (
         '        _selector_root="$_runtime_root"\n'
@@ -42,11 +51,13 @@ _SELECTOR_TRANSPORT = (
         '            *.exe) _selector_root="$(cygpath -aw "$_runtime_root")" || _selector_root="" ;;\n'
         "        esac\n"
         '        if [ -n "$_selector_root" ]; then\n'
-        '            _selected_cache="$("$AGENT_RT_PY" -I -B -X utf8 -X "pycache_prefix=$_python_cache" -c \'',
+        '            _selected_cache="$("$AGENT_RT_PY" -I -B -X utf8 -c \'',
         '\' "$_selector_root" 2>/dev/null)" || _selected_cache=""\n'
-        '            if [ -n "$_selected_cache" ]; then\n'
-        '                _python_cache="$_selected_cache"\n'
-        "            fi\n        fi\n",
+        '            case "$_selected_cache" in\n'
+        "                '-X\npycache_prefix='*)\n"
+        '                    _python_cache_option="-X"\n'
+        '                    _python_cache_value="${_selected_cache#*\n}" ;;\n'
+        "            esac\n        fi\n",
     ),
 )
 
@@ -86,7 +97,7 @@ def _selector_view(
     if (
         len(matches) != 1
         or template.count(prefix) != 1 or template.count(suffix) != 1
-        or template.count("from agent_procutil.python_cache import cache_arguments") != 1
+        or template.count("from agent_procutil.python_cache import POLICY_VERSION, policy_arguments") != 1
         or (index == 0 and template.count("$selector") != 2)
     ):
         raise SourceViewError(f"{template_path}: shim selector quote/argv transport changed")
@@ -100,18 +111,22 @@ def _selector_view(
         raise SourceViewError(f"{template_path}: shim selector interpolation/quoting changed")
     content = body.encode("utf-8")
     tree = _parse(content, template_path, feature_version=(3, 10))
-    expected_import = ast.parse("from agent_procutil.python_cache import cache_arguments").body[0]
+    expected_import = ast.parse(
+        "from agent_procutil.python_cache import POLICY_VERSION, policy_arguments",
+    ).body[0]
     imports = [n for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)
                and n.module == "agent_procutil.python_cache"]
     calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call)
-             and isinstance(n.func, ast.Name) and n.func.id == "cache_arguments"]
+             and isinstance(n.func, ast.Name) and n.func.id == "policy_arguments"]
+    versions = [n for n in ast.walk(tree) if isinstance(n, ast.Assert)
+                and _shape(n) == _shape(ast.parse("assert POLICY_VERSION == 2").body[0])]
     expected_call = ast.parse(
-        "cache_arguments(sys.argv[1], runtime=sys.executable)", mode="eval",
+        "policy_arguments(sys.argv[1], runtime=sys.executable)", mode="eval",
     ).body
     if (
         len(imports) != 1 or _shape(imports[0]) != _shape(expected_import)
-        or len(calls) != 1 or _shape(calls[0]) != _shape(expected_call)
-        or any(isinstance(n, ast.Name) and n.id == "cache_arguments"
+        or len(calls) != 1 or _shape(calls[0]) != _shape(expected_call) or len(versions) != 1
+        or any(isinstance(n, ast.Name) and n.id in {"policy_arguments", "POLICY_VERSION"}
                and isinstance(n.ctx, (ast.Store, ast.Del)) for n in ast.walk(tree))
     ):
         raise SourceViewError(f"{template_path}: shim selector cache-helper call changed")

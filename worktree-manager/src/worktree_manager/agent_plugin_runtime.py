@@ -32,7 +32,9 @@ import sys
 from pathlib import Path
 from types import ModuleType
 
-from agent_procutil import python_cache_args
+import agent_procutil
+
+python_cache_args = getattr(agent_procutil, "python_cache_policy_args", lambda *a, **k: ["-B"])
 
 _INSTALLATION_CONTEXT_MODULE = "worktree_manager._installation_context"
 

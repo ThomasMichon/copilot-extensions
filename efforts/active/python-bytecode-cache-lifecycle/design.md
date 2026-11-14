@@ -94,6 +94,13 @@ An older wrapper with a new runtime retains its supported old behavior until
 that wrapper updates; its allocations remain visible to legacy collection.
 Do not claim lockstep deployment or remove the legacy helper in this effort.
 
+Read-only bootstrap paths need no prefix: retained Manager launchers, hook
+clients, the source-injecting Vault same-process bootstrap and the update
+execution shim keep `-B`. An installed interpreter alone does not seal a
+separately injected source tree. Normal sealed module/service entrypoints use
+the provider vector. Native CMD may also take `-B` when its command-output
+parser cannot safely represent a provider path's code page or metacharacters.
+
 Audit actual producers, not just the Worktrees binstub:
 
 - `agent-procutil`'s process arguments and standalone import path;

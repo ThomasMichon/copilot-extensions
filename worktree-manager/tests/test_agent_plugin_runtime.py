@@ -19,7 +19,6 @@ import json
 import base64
 import hashlib
 import os
-import re
 from pathlib import Path
 import subprocess
 import sys
@@ -46,13 +45,7 @@ def _write_slot(slot: Path) -> Path:
 
 
 def _assert_command(command, python, module):
-    assert command is not None
-    assert command[0] == str(python) and command[1] == "-X"
-    assert command[3:] == ["-m", module]
-    prefix = command[2].removeprefix("pycache_prefix=")
-    expected = apr.python_cache_args(python.parents[3], runtime=python)[1].split("=", 1)[1]
-    assert Path(prefix).parent == Path(expected).parent
-    assert re.fullmatch(r"(installed-[0-9a-f]{64}|unsealed-[0-9a-f]{32})", Path(prefix).name)
+    assert command == [str(python), "-B", "-m", module]
 
 
 def _write_policy(profile: Path, *, enabled: bool) -> None:

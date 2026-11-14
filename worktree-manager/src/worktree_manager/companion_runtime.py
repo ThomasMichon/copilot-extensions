@@ -8,8 +8,6 @@ import shlex
 import sys
 from pathlib import Path
 
-from agent_procutil import python_cache_args
-
 from .mux_daemon_process import scrub_session_credentials
 from .runtime_identity import running_slot
 
@@ -45,7 +43,7 @@ def companion_command(arguments: list[str]) -> tuple[list[str], dict[str, str]]:
     env["WORKTREE_MANAGER_ROOT"] = str(slot.parent.parent)
     return [
         str(python), "-I", "-S", "-B", "-X", "utf8",
-        *python_cache_args(slot.parent.parent), str(bootstrap), *arguments,
+        str(bootstrap), *arguments,
     ], env
 
 

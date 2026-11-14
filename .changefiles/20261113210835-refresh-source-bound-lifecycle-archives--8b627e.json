@@ -1,0 +1,13 @@
+{
+  "comment": "Refresh source-bound lifecycle archives for the shared cache-policy facade.",
+  "changes": [
+    {
+      "plugin": "libs/installation-context",
+      "type": "patch"
+    },
+    {
+      "plugin": "wsl-setup",
+      "type": "patch"
+    }
+  ]
+}

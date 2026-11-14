@@ -974,9 +974,8 @@ def test_session_start_fallback_uses_one_runtime_process(monkeypatch, tmp_path):
         {"sessionId": "session-1", "cwd": str(tmp_path)}, tmp_path
     )
     assert result == {"additionalContext": "fallback"}
-    assert seen["argv"][:3] == [str(python), "-I", "-X"]
-    assert seen["argv"][3].startswith("pycache_prefix=")
-    assert seen["argv"][4:] == [
+    assert seen["argv"][:3] == [str(python), "-I", "-B"]
+    assert seen["argv"][3:] == [
         "-m",
         "agent_worktrees",
         "session-lifecycle",
@@ -3273,9 +3272,8 @@ def test_explicit_context_session_end_uses_cell_runtime(
     payload = {"sessionId": "session-1", "cwd": str(tmp_path)}
 
     assert hook_client._fallback_session_end(payload, tmp_path) == {}
-    assert seen["argv"][:3] == [str(python), "-I", "-X"]
-    assert seen["argv"][3].startswith("pycache_prefix=")
-    assert seen["argv"][4:] == [
+    assert seen["argv"][:3] == [str(python), "-I", "-B"]
+    assert seen["argv"][3:] == [
         "-m",
         "agent_worktrees",
         "deregister-session",
