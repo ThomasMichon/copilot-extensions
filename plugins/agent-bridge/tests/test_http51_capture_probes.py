@@ -17,6 +17,14 @@ import test_runtime_serving as serving_controls
 import test_live_inbox_runtime as inbox_controls
 import test_native_send_admission as native_controls
 import test_gc as gc_controls
+from test_native_send_unavailable import (
+    test_real_cli_reports_unavailable_before_constructing_native_admission
+    as test_real_cli_reports_unavailable_before_constructing_native_admission,
+    test_other_commands_keep_existing_unavailable_client_behavior
+    as test_other_commands_keep_existing_unavailable_client_behavior,
+    test_transport_distinguishes_preflight_from_a_lost_post_response
+    as test_transport_distinguishes_preflight_from_a_lost_post_response,
+)
 from test_dispatch_origin_cli import (
     test_origin_cli_reaches_actual_keyed_owner_without_acquisition
     as test_origin_cli_reaches_actual_keyed_owner_without_acquisition,

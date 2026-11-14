@@ -400,6 +400,16 @@ When a wire contract does change:
 
 ## HTTP-51 standard native-send evidence
 
+The optional CLI-only no-admission refusal adds six source controls, bringing
+the current HTTP-51 portfolio from 43 to 49 cases. They execute the actual
+keyed-native CLI against failed ensure/client discovery, preserve other
+commands' existing client behavior, and distinguish read-only preflight from
+an attempted POST with a lost response. Only the former emits the
+request-bound version-1 refusal; the latter remains unknown.
+The new test module joins the committed execution closure. HTTP generation,
+daemon feature floors, input vector and historical packets remain unchanged.
+This is source evidence, not native unavailable-owner recovery.
+
 HTTP generation 51 adds `NATIVE_SEND_IDEMPOTENCY_PROTOCOL_VERSION` for ordinary
 `send` with an exact native identity and idempotency key. Bridge owns admission
 and original-receipt recovery through its existing turn journal; callers do not

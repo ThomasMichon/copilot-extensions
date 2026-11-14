@@ -44,6 +44,7 @@ AFFECTED = tuple(previous.PREFIX + name for name in (
 TEST = "plugins/agent-bridge/tests/test_http51_capture_probes.py"
 EXTRA_PATHS = (
     INPUT, TEST, "plugins/agent-bridge/tests/test_native_send_admission.py",
+    "plugins/agent-bridge/tests/test_native_send_unavailable.py",
     "tools/bridge_http51_declarations.py",
     "tools/test_bridge_http51_declarations.py",
     "plugins/agent-bridge/contract/README.md",
@@ -87,6 +88,9 @@ CAPABILITY_VERSIONS = {
     "bridge-owner-membership-v1": 1,
 }
 PROBES = {
+    "test_real_cli_reports_unavailable_before_constructing_native_admission": 2,
+    "test_other_commands_keep_existing_unavailable_client_behavior": 1,
+    "test_transport_distinguishes_preflight_from_a_lost_post_response": 3,
     "test_http51_capture_actual_observations": 2,
     "test_concurrent_stopped_retries_reconcile_after_actual_resume_state_race": 1,
     "test_failed_resume_without_a_matching_receipt_remains_a_failure": 1,
