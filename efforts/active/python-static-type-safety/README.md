@@ -13,8 +13,8 @@
 - **Latest fixture prerequisite:** The post-acquisition policy-recheck wrapper correction merged in #12133 after the original regression, Ruff, both declared Python 3.11 strict analysis targets, exact-head approval and required source CI passed. Return to the remaining original Invocation test/program corpus; no pending-project admission, coverage advance or existing native/minimum-runtime gate is closed by this fixture-only fix.
 - **Latest scoped unit qualification:** All 32 original private-file management cases now have ordinary three-phase passes, with original function/helper definitions and module markers preserved. Focused multi-case cohorts avoid repeating startup for every case. This closes that fixture family only; the original full corpus, executed/emitted programs, native/minimum-runtime and strict-admission gates remain open.
 - **Independent test-source admission:** #12324 merged strict enforcement of the complete 27-file `lib-payload-invocation-tests` project on its declared Python 3.11 Linux/win32 analysis targets, with no exclusions, after exact-head approval and required source CI. The bounded owner journal records both normal positive checks and real negative controls. This completes static test-source admission only; the separate production/catalog project remains pending, and the original full-corpus, emitted-program, native/minimum-runtime, source/frozen/candidate and final #10371 gates remain open.
-- **Current production/program boundary:** The merged checker selects four physical production files and four catalog witnesses. The bootstrap-only prerequisite restores a ninth target, with focused-control and checker-analysis evidence; production and real source/frozen qualification retain separate validation records. Two shim-embedded Python cache selectors remain outside those witnesses. This preparation is not production admission or complete emitted-program qualification.
-- **Bootstrap prerequisite qualification:** All four declared strict production probes and twenty real source/frozen catalog/bootstrap cases pass. The copied-fixture startup closure includes the bootstrap view module, and all four original version-matrix cases pass, including the three additional-version cases under their separate approved limits. Required exact-head CI, review and merge remain open for #12498; production and the parent campaign are not admitted by this prerequisite.
+- **Current production/program boundary:** The merged checker selects four physical production files, four catalog witnesses and one catalog-binding bootstrap view. The unpublished two-selector follow-up exposes eleven targets. Its explicitly approved optional-prefix annotation preserves fallback output; both checker targets, all four declared production analysis cells and all twenty-four current source/frozen frontdoor cases pass. The original thirty-second timeout and diagnostic-only profile remain recorded separately from the approved residual qualification. Production remains pending; this is not complete emitted-program, native/minimum-runtime or candidate qualification.
+- **Bootstrap prerequisite qualification:** #12498 delivers the checker-only bootstrap view after all four declared strict production probes, twenty real source/frozen catalog/bootstrap cases and four original copied-fixture version-matrix cases pass. Its complete startup dependency closure, exact-head approval and required source CI are verified. This prerequisite does not admit production or complete the parent campaign.
 - **Sub-issues:** #9831 (P1 checker foundation, complete); #9853 (P2 required source CI, complete); #9862 (P3 exact-candidate qualification, complete); #9916 (P4a canonical Installation Context source view, complete); #9924 (L1 Config Migrate strict admission, complete); #9930 (L1 Dropin Registry strict admission, complete); #9933 (L1 Endpoint Rendezvous strict admission, complete); #9941 (L1 initial leaf-library test/helper completion, complete); #9951 (L1 Lazy CLI Dispatch strict admission, complete); #9964 (L1 Bootstrap Killswitch strict admission, complete); #9967 (L1 Peer Launch strict admission, complete); #9971 (P2a Installation Context native typing preparation, complete); #9975 (P2b validation-decorator signature preservation, complete); #9980 (P2c production result and flow contracts, complete); #9983 (P2d native platform API contracts, complete); #9986 (P2e cleanup and worker contracts, complete); #9993 (P2f shared receipt-fixture typing, complete); #9996 (P2g slot-release test contracts); #10400 (shared real-import-root/additional-version checker prerequisite, merged #10553); #10331, #10362 and #10371 (independent consumer admissions, open). Create/reuse later scoped issues as selected. #9177 remains separately owned.
 
 ## Guiding Intent
@@ -151,6 +151,37 @@ Confirmed operator responses:
   protected-allocation limits are unchanged. Do not replay the passing baseline
   or prior twenty-case packet. No SDK changes, native IPC, production activation
   or installed rollout is authorized.
+- A separate checker-only follow-up may expose the two shim cache-selector
+  programs through faithful source-mapped views and regression controls,
+  preserving actual transport/helper contracts, template/runtime bytes and
+  pending production policy. Only new or genuinely affected checks may run
+  within one fresh 1,800-second aggregate, with a 1,710-second work boundary
+  and ninety-second cleanup reserve. Cohorts contain at most four cases with
+  120-second outer limits; tests/helpers stay capped at thirty seconds except
+  the three affected additional-version matrix cases, which may use ninety
+  seconds. Existing analyzer/resource/protected-allocation limits remain.
+  No full-corpus replay, SDK rebuild/borrowing, protected IPC, activation or
+  rollout is authorized. A finding requiring runtime-body changes stops for
+  diagnosis instead of expanding this scope. Normal reviewed publication
+  includes the canonical post-merge reconciliation.
+- After the first selector probe exposes the existing optional-prefix assignment,
+  the operator permits only an explicit `str | None` annotation in the
+  PowerShell template and genuinely affected checks under the same original
+  1,800-second clock, without reset or extension. Preserve its `None` fallback,
+  output behavior and Python 3.10 floor; keep production pending. If that
+  clock expires, qualification pauses. No SDK rebuild or deployment is authorized.
+- After that clock closes, the operator authorizes one separate residual-only
+  900-second aggregate, with an 810-second work boundary and ninety-second
+  cleanup reserve, for exactly twelve unfinished source/frozen frontdoor cases.
+  Use ninety-second tests, one case per 120-second cohort, thirty-second
+  helpers and the unchanged 120-second analyzer/resource/protected-allocation
+  limits. Preserve the earlier timeout and all passing evidence; do not replay
+  the twelve completed frontdoor cases or change an SDK.
+- For this selector PR only, the operator separately authorizes one backup and
+  tree-preserving soft squash of only the owning worktree's unpublished commits,
+  retaining all authors and both standard trailers before normal publication.
+  No hard reset, amendment, discarded work, review/CI bypass, activation or
+  rollout is authorized.
 - If still required to preserve commit provenance for that prerequisite PR,
   one backup and tree-preserving soft squash of only the owning worktree's
   unpublished commits is authorized, retaining all authors and both standard
@@ -214,6 +245,13 @@ rewrite.
 - [x] Deliver the faithful checker-only guard-module alias/source-view prerequisite (#10638 / merged #10866); preserve separate consumer, emitted/copy and native qualification.
 - [x] Deliver bounded emitted-program checker visibility and binding completeness (#10938), without counting pending Harness targets as strict admission.
 - [x] Deliver Payload Invocation's source/test split, source-bound catalog witnesses and authorized generated-output typing preparation with real ordinary Linux CI (#10371 / merged #11165); keep its pending project and separate consumer/native admission gates open.
+- [x] Deliver the checker-only catalog-binding bootstrap view and mapped
+  source/frozen controls (#12498), preserving canonical-first source custody,
+  actual interpreter/helper forwarding, the Python 3.10 guard-only versus
+  Python 3.11 full-body distinction and pending production policy.
+- [ ] Deliver the two actual shim cache-selector views with real transport,
+  helper/import custody, mapped source/frozen negatives and unchanged fallback
+  behavior through normal review and required CI; keep production pending.
 - [ ] Qualify generated templates and release-materialized copies against the actually checked canonical source, including negative drift controls.
 - [x] Make Dev-to-Main composition own the discussed Installer Engine and
   Invocation/helper/toolkit copies, rather than requiring contributor
@@ -331,7 +369,10 @@ rewrite.
   The 2026-11-13 merged snapshot at `12294924` reconciles all 74 projects and
   9,196 physical files: 43 strict projects, 477 strict files, 31 pending,
   zero basic and zero unclassified. This recurring and final portfolio gate
-  remains open.
+  remains open. The subsequent merged snapshot at `71cf4079` reconciles all
+  74 projects and 9,310 files: 43 strict projects, 478 strict files,
+  31 pending, zero basic and zero unclassified. The bootstrap view adds one
+  checker-owned strict file, not a production-project admission.
 - [x] Actual MyPy subprocess controls prove an incompatible argument/return fails basic mode and missing annotations/bare generics fail strict mode.
 - [ ] Local and CI use identical pinned checker, dependencies, project config and interpreter/platform targets; unknown source/setup errors fail visibly.
 - [x] Changed-scope checks include working-tree edits and affected activated consumers; changes to checker/config/workflows cannot skip enforcement.
@@ -380,6 +421,16 @@ rewrite.
 - [x] Payload Invocation preparation preserves its canonical and authorized copied-source contracts, rejects real catalog/type/data drift and passes complete ordinary Linux unit execution (#11165). The verified synthetic merge contains every current-head admitted test/source binding; this is not canonical-library, consumer, native or global strict admission.
 - [x] Shared checker controls preserve default qualification and ordinary import-root/source-frozen custody semantics, including native separator rejection (#10400 / #10553).
 - [x] Persistent dual-version checker controls reject a type error confined to the 3.11 TOML branch on both analysis platforms through local/source/frozen-candidate entry points (#10400 / #10553); four exact-head cases complete 28 actual MyPy analyses. Preserving Versioned Runtime's actual 3.10 behavior and native/copy qualification remains separately open under #10331.
+- [x] The catalog-binding bootstrap view preserves quoting, both interpreter
+  launch sites, helper forwarding and source/byte membership; mapped negatives,
+  four declared strict probes, twenty real source/frozen cases and all four
+  copied-fixture version-matrix cases pass, followed by exact-head approval
+  and required source CI (#12498). This does not qualify the two shim cache
+  selectors or complete production/native/minimum-runtime/candidate gates.
+- [ ] The two shim selector views retain actual argument bytes, source maps,
+  launch/helper contracts and candidate-local source custody; nineteen pure
+  controls, two fallback round trips, twenty-four real frontdoors and six
+  declared strict analyses pass, followed by exact-head review and required CI.
 - [x] Fresh checker preparation and a credential-free local subprocess check exercise the real developer command without executing product code or collecting tests.
 - [x] Required source gate actually rejects a type regression on activated code.
 - [x] Required exact-candidate release gate rejects a type regression on activated code.

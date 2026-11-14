@@ -30,6 +30,7 @@ release_selection reverse_listener_reservations role_bindings role_deployment ro
 RESOURCES = frozenset("""
 standalone_build.py versioned_runtime.py versioned_runtime_leases.py
 versioned_runtime_construction.py versioned_runtime_publication.py versioned_runtime_source.py
+versioned_runtime_cache.py
 """.split())
 RUNNER_FILES = frozenset({
     "run.py", "source.py", "architecture.py", "engine.py", "witness.py",
@@ -44,6 +45,7 @@ _interactive_session _interactive_terminal _interpreter _linux_pidfd _native_own
 _retirement_channel _retirement_custodian _shell_caller_owned _terminal_offer _windows_parent_job
 _windows_caller_owned _windows_job_types daemon daemon_broker daemon_instances diagnostics
 interactive job_activity linux_daemon_scope metrics metrics_accounting native_child owned_budget owned_process process_retirement python_cache retirement_custody
+python_cache_catalog python_cache_collect python_cache_files python_cache_permissions python_cache_store
 startup streaming windows_broker_cell windows_broker_entry windows_broker_installation
 windows_broker_native windows_broker_protocol windows_broker_retention windows_task_broker wsl
 """.split())

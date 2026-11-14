@@ -1063,6 +1063,36 @@ deletion after merge is normal. Sync does not finalize or delete the local
 worktree branch, and preserves genuinely new local commits while pulling forward.
 Dry runs do not reconcile. Review/check/merge gates and rollout policy are unchanged.
 
+### Owner rewrite of a private PR branch
+
+The owning worktree may rebase, squash, amend or drop its own commits and
+republish with plain `push-changes` (or `git sync`) at any time; no operator
+form, confirmation fingerprint or `--rewrite-pr` flag is needed. When the
+bounded source-replay proof cannot be established, publication falls back to an
+owner rewrite only after every ordinary ownership check passes (owning checkout,
+publication ownership, open PR, saved head equal to the provider head, attested
+destination). The fallback still refuses when:
+
+- another worktree in any adopted project tracks a live PR on the same branch
+  name and destination (a same-branch collision is never overwritten);
+- the source has no commits beyond the upstream default branch;
+- the remote head moved to anything other than an ancestor of the source or a
+  clean refresh of the published head (its tree must equal the three-way merge
+  of the published head with the upstream point it incorporates), so a
+  reviewer's commit, a hand-resolved conflict or an edited merge is refused --
+  integrate it first;
+- a moved remote head is not confirmed by the provider as this PR's head, or a
+  head to be replaced cannot be fetched for backup.
+
+Routine reconciliation before `push-changes` defers to this path for a numbered
+PR under the same conditions instead of demanding retained publication
+evidence. The push is leased on the exact observed remote head. Before any
+rewrite, the published, remote and source heads are retained as local refs under
+`refs/agent-worktrees/backup/<branch>/<UTC stamp>/<label>`; only the newest five
+stamps per branch are kept. Recover a bad rewrite with
+`git for-each-ref refs/agent-worktrees/backup/<branch>/` and a normal branch
+reset to the retained commit. A backup write failure refuses the rewrite.
+
 ### Explicit operator recovery
 
 Prefer normal `push-changes` or `git sync` from the source-owning worktree's CWD.

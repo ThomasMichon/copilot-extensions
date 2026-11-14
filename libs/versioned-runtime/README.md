@@ -27,6 +27,30 @@ retention leases, and durable references remain deletion barriers.
 Completed deep slots remain complete when `gc --toss-incomplete` follows an
 age-preserving collection pass.
 
+After its ordinary version-slot pass, `gc` performs bounded, indexed Python
+cache maintenance through the shared
+[cache lifecycle provider](../agent-procutil/README.md#incremental-retirement-collection).
+It reuses the same cleanup/construction/retention/publication owner and refuses
+cache deletion until the exact recorded runtime is absent and unprotected.
+Repeated updates resume partially collected trees without requiring another
+slot retirement. Cache failures remain independent maintenance outcomes on
+stderr; the existing removed-version list and JSON contract are unchanged.
+The cache deadline applies during reference/selector/claim metadata,
+version discovery and recorded/native process probes, including when PID
+protection is disabled. Ordinary runtime GC keeps its existing policy.
+This does not migrate launchers or reclaim legacy per-tool cache trees.
+
+Before importing a shipped lifecycle archive, maintenance verifies its opened
+ordinary-file identity and native protection. POSIX accepts root/current-user
+ownership without group/other write access; Windows uses the runtime owner's
+file-handle DACL admission. macOS additionally requires an empty extended ACL;
+unknown or nonempty ACLs conservatively retain cache work. Failure is reported
+without importing that archive or vetoing completed runtime GC.
+POSIX also checks the resolved archive ancestry before filename-based import.
+Canonical retained helper bundles carry both the cache helper and its lifecycle
+archive, so GC from a retained bootstrap remains independent of its acquisition
+checkout and of site packages.
+
 ## Selector sharing on Windows
 
 The slot-local `runtime_launcher.py` retains a completed generation before site

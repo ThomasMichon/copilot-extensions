@@ -34,6 +34,21 @@ def _record(wid):
     return tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
 
 
+def _backups(path, branch):
+    """The newest retained backup set for *branch*, by label."""
+    rows = _git(
+        "for-each-ref", "--sort=-refname", "--format=%(refname) %(objectname)",
+        f"{pr_rebase.BACKUP_NAMESPACE}/{branch}/", cwd=path,
+    ).splitlines()
+    if not rows:
+        return {}
+    newest = rows[0].split()[0].rsplit("/", 1)[0]
+    return {
+        ref.rsplit("/", 1)[1]: sha
+        for ref, sha in (row.split() for row in rows) if ref.rsplit("/", 1)[0] == newest
+    }
+
+
 @pytest.fixture(scope="session")
 def _rebase_snapshot_pr_seed(tmp_path_factory, _pr_repo_seed):
     # The general snapshot fixture publishes "Add feature", not "Own change".
@@ -479,9 +494,11 @@ def test_owned_pr_rebase_with_stale_base_preserves_exact_upstream_ancestors(
     else:
         _git("rebase", "origin/master", cwd=path)
     tip = _git("rev-parse", "HEAD", cwd=path)
-    assert finalize.push_changes(wid, config) is not drop_source
-    expected = published if drop_source else tip
-    assert _git("--git-dir", str(remote), "rev-parse", branch, cwd=path) == expected
+    # The owner may drop its own published commits; the old head stays retained.
+    assert finalize.push_changes(wid, config)
+    assert _git("--git-dir", str(remote), "rev-parse", branch, cwd=path) == tip
+    if drop_source:
+        assert published in _backups(path, branch).values()
     if not drop_source:
         assert (path / "a.txt").read_text() == "one\n"
         assert (path / "b.txt").read_text() == "two\n"
@@ -492,15 +509,18 @@ def test_owned_pr_rebase_with_stale_base_preserves_exact_upstream_ancestors(
 
 @pytest.mark.guard
 @pytest.mark.parametrize("drop_empty", [False, True], ids=["retained", "dropped"])
-def test_owned_pr_rebase_refuses_source_owned_empty_commits(pr_repo, drop_empty: bool) -> None:
+def test_owned_pr_rebase_publishes_source_owned_empty_commits_with_backup(pr_repo, drop_empty: bool) -> None:
     config, wid, path, remote, branch, published = _prepare(pr_repo)
     _git("commit", "--allow-empty", "-m", "source bookkeeping", cwd=path)
     _advance(config, path)
     options = ("--no-keep-empty",) if drop_empty else ()
     _git("rebase", *options, "origin/master", cwd=path)
-    assert not finalize.push_changes(wid, config)
-    assert _git("--git-dir", str(remote), "rev-parse", branch, cwd=path) == published
-    assert _record(wid).pr.head_sha == published
+    tip = _git("rev-parse", "HEAD", cwd=path)
+    assert finalize.push_changes(wid, config)
+    assert _git("--git-dir", str(remote), "rev-parse", branch, cwd=path) == tip
+    assert _record(wid).pr.head_sha == tip
+    retained = _backups(path, branch)
+    assert retained["published"] == published and retained["source"] == tip
 
 
 @pytest.mark.guard
@@ -516,13 +536,11 @@ def test_owned_pr_rebase_still_refuses_upstream_merge_commits(pr_repo) -> None:
 
 
 @exhaustive
-@pytest.mark.parametrize("mutation", ["reset", "same-tree-reset", "amend", "drop"])
-def test_owned_pr_rebase_refuses_unproved_source_rewrite(pr_repo, mutation):
+@pytest.mark.parametrize("mutation", ["same-tree-reset", "amend", "drop"])
+def test_owner_rewrite_without_replay_proof_publishes_with_backup(pr_repo, mutation):
     config, wid, path, remote, branch, old = _prepare(pr_repo)
     _advance(config, path)
-    if mutation == "reset":
-        _git("reset", "--hard", "origin/master", cwd=path)
-    elif mutation == "same-tree-reset":
+    if mutation == "same-tree-reset":
         _git("rebase", "origin/master", cwd=path)
         _git("reset", "--hard", "HEAD", cwd=path)
     elif mutation == "amend":
@@ -534,10 +552,97 @@ def test_owned_pr_rebase_refuses_unproved_source_rewrite(pr_repo, mutation):
         (path / "feedback.txt").write_text("source work\n")
         _git("add", "-A", cwd=path)
         _git("commit", "-m", "source feedback", cwd=path)
-        # A real rebase journal alone does not authorize skipping the published patch.
         _git("rebase", "--onto", "origin/master", old, cwd=path)
+    tip = _git("rev-parse", "HEAD", cwd=path)
+    assert finalize.push_changes(wid, config)
+    assert _git("--git-dir", str(remote), "rev-parse", branch, cwd=path) == tip
+    assert _record(wid).pr.head_sha == tip
+    assert _backups(path, branch)["published"] == old
+
+
+@pytest.mark.guard
+def test_owner_rewrite_refuses_publishing_an_empty_pr(pr_repo):
+    config, wid, path, remote, branch, old = _prepare(pr_repo)
+    _advance(config, path)
+    _git("reset", "--hard", "origin/master", cwd=path)
     assert not finalize.push_changes(wid, config)
     assert _git("--git-dir", str(remote), "rev-parse", branch, cwd=path) == old
+
+
+@pytest.mark.guard
+def test_owner_rewrite_refuses_branch_tracked_by_another_worktree(pr_repo, tmp_path):
+    config, wid, path, remote, branch, old = _prepare(pr_repo)
+    other = dataclasses.replace(
+        _record(wid), worktree_id=wid[:-4] + "bbbb", worktree_path=str(tmp_path / "other-checkout"),
+    )
+    tracking.save_record(other, cfg.tracking_dir() / f"{other.worktree_id}.yaml")
+    _advance(config, path)
+    (path / "a.txt").write_text("owner rewrite\n")
+    _git("add", "-A", cwd=path)
+    _git("commit", "--amend", "--no-edit", cwd=path)
+    _git("rebase", "origin/master", cwd=path)
+    record = _record(wid)
+    result = pr_rebase.push(
+        record, config.default_repo, "origin", f"{record.branch}:refs/heads/{branch}",
+        old, cwd=str(path),
+    )
+    assert not result
+    assert "another worktree's PR branch" in result.stderr
+    assert _git("--git-dir", str(remote), "rev-parse", branch, cwd=path) == old
+
+
+@pytest.mark.guard
+def test_owner_rewrite_replaces_provider_refreshed_head_it_already_carries(pr_repo, monkeypatch):
+    config, wid, path, remote, branch, old = _prepare(pr_repo)
+    _advance(config, path)
+    # A server-side base refresh rewrites the PR branch to a rebased copy.
+    refresher = remote.parent / "refresher"
+    _git("clone", str(remote), str(refresher), cwd=remote.parent)
+    _git("config", "user.email", "forge@example.com", cwd=refresher)
+    _git("config", "user.name", "Forge", cwd=refresher)
+    _git("checkout", "-B", branch, f"origin/{branch}", cwd=refresher)
+    _git("rebase", "origin/master", cwd=refresher)
+    _git("push", "--force", "origin", branch, cwd=refresher)
+    refreshed = _git("rev-parse", "HEAD", cwd=refresher)
+    monkeypatch.setattr(pr_publish, "_provider_head", lambda repo, pr, **kwargs: refreshed)
+    (path / "a.txt").write_text("owner rewrite\n")
+    _git("add", "-A", cwd=path)
+    _git("commit", "--amend", "--no-edit", cwd=path)
+    _git("rebase", "origin/master", cwd=path)
+    (path / "feedback.txt").write_text("more source work\n")
+    _git("add", "-A", cwd=path)
+    _git("commit", "-m", "source feedback", cwd=path)
+    tip = _git("rev-parse", "HEAD", cwd=path)
+    assert finalize.push_changes(wid, config)
+    assert _git("--git-dir", str(remote), "rev-parse", branch, cwd=path) == tip
+    retained = _backups(path, branch)
+    assert retained["published"] == old and retained["remote"] == refreshed
+
+
+@pytest.mark.guard
+@pytest.mark.parametrize("edited", [False, True])
+def test_refreshed_only_rejects_merge_commits_hiding_unpublished_edits(pr_repo, edited):
+    config, _, path, _, _, old = _prepare(pr_repo)
+    upstream = _advance(config, path)
+    _git("checkout", "--detach", old, cwd=path)
+    _git("merge", "--no-ff", "--no-edit", upstream, cwd=path)
+    if edited:
+        (path / "upstream.txt").write_text("resolved by hand\n")
+        _git("add", "-A", cwd=path)
+        _git("commit", "--amend", "--no-edit", cwd=path)
+    tip = _git("rev-parse", "HEAD", cwd=path)
+    _git("checkout", "-", cwd=path)
+    assert pr_rebase.refreshed_only(tip, old, old, upstream, str(path)) is not edited
+
+
+def test_backup_refs_are_bounded_per_branch(pr_repo):
+    _, _, path, _, branch, old = _prepare(pr_repo)
+    prefixes = [
+        pr_rebase.backup(branch, {"published": old, "missing": "f" * 40}, cwd=str(path), limit=2)
+        for _ in range(3)
+    ]
+    refs = _git("for-each-ref", "--format=%(refname)", f"{pr_rebase.BACKUP_NAMESPACE}/{branch}/", cwd=path)
+    assert refs.splitlines() == [f"{prefix}/published" for prefix in prefixes[1:]]
 
 
 @exhaustive

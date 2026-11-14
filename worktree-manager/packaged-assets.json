@@ -69,6 +69,7 @@
       "files": [
         "versioned_runtime.py", "versioned_runtime_leases.py", "versioned_runtime_source.py",
         "versioned_runtime_construction.py", "versioned_runtime_publication.py",
+        "versioned_runtime_cache.py",
         "standalone_build.py", "versioned_runtime_native.ps1"
       ]
     },
@@ -108,6 +109,8 @@
         "metrics.py", "native_child.py", "native_daemon.ps1", "native_daemon.sh",
         "native_owned.ps1", "native_owned.sh", "owned_budget.py", "owned_process.py",
         "process_retirement.py", "python_cache.py", "python_cache_permissions.py",
+        "python_cache_store.py", "python_cache_catalog.py",
+        "python_cache_collect.py", "python_cache_files.py",
         "retirement_custody.py", "startup.py",
         "streaming.py", "windows_broker_cell.py", "windows_broker_entry.py",
         "windows_broker_installation.py", "windows_broker_native.py",
@@ -185,6 +188,10 @@
         "agent-procutil/src/agent_procutil/process_retirement.py",
         "agent-procutil/src/agent_procutil/python_cache.py",
         "agent-procutil/src/agent_procutil/python_cache_permissions.py",
+        "agent-procutil/src/agent_procutil/python_cache_store.py",
+        "agent-procutil/src/agent_procutil/python_cache_catalog.py",
+        "agent-procutil/src/agent_procutil/python_cache_collect.py",
+        "agent-procutil/src/agent_procutil/python_cache_files.py",
         "agent-procutil/src/agent_procutil/retirement_custody.py",
         "agent-procutil/src/agent_procutil/startup.py",
         "agent-procutil/src/agent_procutil/streaming.py",

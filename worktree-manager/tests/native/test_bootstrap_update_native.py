@@ -440,6 +440,7 @@ def bootstrap(tmp_path, bootstrap_source):
         assert sentinel.read_bytes() == b"retained shared staging"
 
 
+@pytest.mark.timeout(180)
 def test_retained_controller_prepares_dev_source_without_its_acquisition(
     bootstrap, tmp_path, monkeypatch,
 ):

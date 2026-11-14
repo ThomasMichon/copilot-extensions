@@ -16,6 +16,30 @@ from typing import Callable
 _construction_owners = threading.local()
 
 
+def checked(check_budget, operation, *args, **kwargs):
+    if check_budget:
+        check_budget()
+    result = operation(*args, **kwargs)
+    if check_budget:
+        check_budget()
+    return result
+
+
+def versions_with_live_process(
+    root, *, versions, recorded, pids, running, probes, slot_of_path, versions_abs, check=None,
+):
+    extra = {"check": check} if check else {}
+    available = set(checked(check, versions, root, **extra))
+    in_use = checked(check, recorded, root, available, **extra)
+    processes = set(checked(check, pids, **extra)) | checked(check, running, root, **extra)
+    for pid in processes:
+        for probe in probes:
+            version = slot_of_path(checked(check, probe, pid), versions_abs, available)
+            if version:
+                in_use.add(version)
+    return in_use
+
+
 def normalize_version(v: str) -> str:
     """Match recorded PEP 440 versions to directory spelling."""
     return v.replace("-", ".").replace("_", ".")
@@ -31,7 +55,7 @@ def normalize_windows_extended_path(target: str) -> str:
     return target
 
 
-def running_pids(root: Path, *, filename: str, alive: Callable[[int], bool]) -> set[int]:
+def running_pids(root: Path, *, filename: str, alive: Callable[[int], bool], check=None) -> set[int]:
     """Filter the legacy running record through the caller's native liveness probe."""
     pids: set[int] = set()
     try:
@@ -40,6 +64,8 @@ def running_pids(root: Path, *, filename: str, alive: Callable[[int], bool]) -> 
         return pids
     entries = data if isinstance(data, list) else [data]
     for entry in entries:
+        if check:
+            check()
         if isinstance(entry, dict) and isinstance(entry.get("pid"), int) and alive(entry["pid"]):
             pids.add(entry["pid"])
     return pids
@@ -50,23 +76,24 @@ def gc_protected_versions(
     selectors: tuple[str, str], current_version: Callable[[Path, str], str | None],
     dev_claim: Callable[..., dict | None], dev_version: str,
     live_versions: Callable[[Path], set[str] | None], running: Callable[[Path], set[int]],
-    versions: Callable[[Path], list[str]],
+    versions: Callable[[Path], list[str]], check=None,
 ) -> set[str]:
     """Combine declared references, selectors, claims and current live consumers."""
-    protected = set(keep or []).union(*read_runtime_references(root).values())
+    extra = {"check": check} if check else {}
+    protected = set(keep or []).union(*checked(check, read_runtime_references, root, **extra).values())
     # Missing selectors permit legacy-link fallback; unreadable selectors must
     # not become permission to delete their unknown target.
     for name in selectors:
         try:
-            selected = (root / name).read_text(encoding="utf-8").strip()
+            selected = checked(check, (root / name).read_text, encoding="utf-8").strip()
         except FileNotFoundError:
             continue
         if selected:
             protected.add(selected)
-    current = current_version(root, link_name)
+    current = checked(check, current_version, root, link_name)
     if current:
         protected.add(current)
-    claim = dev_claim(root, strict=True)
+    claim = checked(check, dev_claim, root, strict=True)
     if claim is not None:
         protected.add(dev_version)
         selected = claim.get("selected_generation")
@@ -76,11 +103,11 @@ def gc_protected_versions(
         if isinstance(previous, str) and previous:
             protected.add(previous)
     if protect_pids:
-        in_use = live_versions(root)
+        in_use = checked(check, live_versions, root)
         if in_use:
             protected |= in_use
-        elif running(root):
-            non_current = [version for version in versions(root) if version != current]
+        elif checked(check, running, root):
+            non_current = [version for version in checked(check, versions, root, **extra) if version != current]
             if non_current:
                 protected.add(non_current[-1])
     return {version.lower() for version in protected}
@@ -642,11 +669,11 @@ def _reference_owner(owner: str) -> None:
 
 
 def _read_runtime_reference_state(
-    root: Path, *, allow_transaction: bool = False,
+    root: Path, *, allow_transaction: bool = False, check=None,
 ) -> tuple[dict[str, list[str]], dict[str, str] | None]:
     path = _native_path(root) / _REFERENCES_FILE
     try:
-        before = path.lstat()
+        before = checked(check, path.lstat)
     except FileNotFoundError:
         return {}, None
     if (
@@ -655,11 +682,13 @@ def _read_runtime_reference_state(
         or getattr(before, "st_file_attributes", 0) & 0x400
     ):
         raise ValueError("runtime reference evidence is not a bounded ordinary file")
+    if check:
+        check()
     with path.open("rb") as stream:
-        opened = os.fstat(stream.fileno())
-        raw = stream.read(_REFERENCES_LIMIT + 1)
-        after = os.fstat(stream.fileno())
-    named = path.lstat()
+        opened = checked(check, os.fstat, stream.fileno())
+        raw = checked(check, stream.read, _REFERENCES_LIMIT + 1)
+        after = checked(check, os.fstat, stream.fileno())
+    named = checked(check, path.lstat)
     fields = ("st_dev", "st_ino", "st_size", "st_mtime_ns")
     if len(raw) > _REFERENCES_LIMIT or any(
         getattr(before, field) != getattr(opened, field)
@@ -709,14 +738,14 @@ def _read_runtime_reference_state(
     return value["owners"], transaction
 
 
-def read_runtime_references(root: Path) -> dict[str, list[str]]:
+def read_runtime_references(root: Path, *, check=None) -> dict[str, list[str]]:
     """Read durable deletion barriers; only absence means no references.
 
     Readers deciding deletion already hold publication custody. Atomic replace
     also permits diagnostic readers without a second kernel-lock acquisition.
     Malformed, unreadable or transaction-pending evidence never licenses deletion.
     """
-    owners, _transaction = _read_runtime_reference_state(root)
+    owners, _transaction = _read_runtime_reference_state(root, check=check)
     return owners
 
 

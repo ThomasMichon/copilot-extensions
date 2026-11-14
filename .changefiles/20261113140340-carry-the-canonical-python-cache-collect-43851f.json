@@ -1,0 +1,21 @@
+{
+  "comment": "Carry the canonical Python cache collector source release through remaining direct shared-library consumers",
+  "changes": [
+    {
+      "plugin": "agent-remote-driver",
+      "type": "patch"
+    },
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    },
+    {
+      "plugin": "services/chat",
+      "type": "patch"
+    },
+    {
+      "plugin": "services/ssh",
+      "type": "patch"
+    }
+  ]
+}
