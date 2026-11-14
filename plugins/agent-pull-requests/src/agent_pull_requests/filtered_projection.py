@@ -23,6 +23,7 @@ class FilteredProjection:
         if set(self.capabilities) != set(self.identities):
             raise ValueError("each filtered repository requires its executing driver declaration")
         self.definitions = definitions or Definitions.parse({"protocol": FILTER_PROTOCOL, "sets": {}})
+        self.sponsored_requests = frozenset()
 
     def repository(self, state, key):
         identity = self.identities[key]

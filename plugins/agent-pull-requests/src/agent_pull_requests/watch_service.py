@@ -76,6 +76,11 @@ class WatchService:
             reports=reports,
             local=local, repositories=self.observer.repositories,
         )
+        if store.repository_filtered:
+            self.observer.repositories.sponsored_requests = frozenset(
+                (self.gateway.bindings[(s["principal"], s["target"])].consumer, s["request_id"])
+                for s in self.filter_sponsors
+            )
         if any(
             (scope.account, scope.repo) not in self.observer.bindings
             for scope in self.gateway.bindings.values()

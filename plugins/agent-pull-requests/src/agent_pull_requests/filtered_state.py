@@ -13,6 +13,7 @@ from .repository_contract import (
 from .repository_state import _fields, _integer
 
 METADATA_RESERVE_BYTES = 1_048_576
+BASELINE_BYTES = 1_000_000
 FACT_FIELDS = "repo from assigned created_at activity_at tags publication"
 
 def release_inactive(state, now):
@@ -156,7 +157,7 @@ def validate(value, namespace, *, version=3):
         _integer(row["projected_sequence"])
         if row["projected_sequence"] >= value["next_sequence"]:
             raise ValueError("invalid filtered projection order")
-        if not isinstance(row["baseline"], dict) or len(json.dumps(row["baseline"]).encode()) > 1_000_000:
+        if not isinstance(row["baseline"], dict) or len(json.dumps(row["baseline"]).encode()) > BASELINE_BYTES:
             raise ValueError("invalid filtered baseline")
     previous = 0
     for event in value["events"]:

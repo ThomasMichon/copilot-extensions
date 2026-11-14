@@ -148,6 +148,9 @@ delivery; ACK takes the delivered `--event-id`. An expired/cancelled consumer
 can reconcile already delivered events, but cannot obtain later undelivered
 events. Backpressure retains unsettled delivery rather than evicting it.
 Original settled request receipts remain at least one day beyond expiry.
+Receipts named by current trusted startup sponsorship are retained while that
+configuration remains selected, including cancelled receipts. Ordinary receipt
+retirement therefore cannot silently reactivate a configured cancelled sponsor.
 Inactive registrations release current-membership cache pins independently of
 their immutable baseline and unsettled delivered event payloads. Reactivating
 expired demand starts membership reconciliation under its new generation.
