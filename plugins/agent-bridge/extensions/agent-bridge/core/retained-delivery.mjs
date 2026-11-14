@@ -14,23 +14,26 @@ const time = (value) => typeof value === "number" && Number.isFinite(value) && v
 const nullableTime = (value) => value === null || time(value);
 const errorText = (error) => error instanceof Error ? error.message : String(error);
 const sameConsumer = (a, b) => a?.session_id === b?.session_id
-  && a?.incarnation === b?.incarnation && a?.pid === b?.pid
-  && a?.process_started_at === b?.process_started_at
+  && a?.incarnation === b?.incarnation && (a?.pid ?? null) === (b?.pid ?? null)
+  && (a?.process_started_at ?? null) === (b?.process_started_at ?? null)
   && (a?.portable_launch ?? null) === (b?.portable_launch ?? null);
 const sameBinding = (a, b) => a?.installation === b?.installation && a?.epoch === b?.epoch;
 
 export const retainedDeliverySelected = (value) => /^(1|true|on|yes)$/i.test(value || "");
 
-function consumerValid(value, sid) {
+function consumerValid(value, sid, compatible = false) {
   return value?.session_id === sid && nonblank(value.incarnation)
-    && positive(value.pid) && time(value.process_started_at)
+    && (compatible
+      ? (value.pid == null || positive(value.pid))
+        && (value.process_started_at == null || time(value.process_started_at))
+      : positive(value.pid) && time(value.process_started_at))
     && (value.portable_launch === undefined
       || /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/.test(value.portable_launch));
 }
 
 function receiptValid(value, sid) {
   return value?.session_id === sid && positive(value.message_id)
-    && nonblank(value.handoff_id) && consumerValid(value.consumer, sid)
+    && nonblank(value.handoff_id) && consumerValid(value.consumer, sid, true)
     && STAGES.has(value.stage) && time(value.admitted_at)
     && nullableTime(value.handoff_started_at) && nullableTime(value.sdk_accepted_at)
     && nullableTime(value.consumed_at)
@@ -65,7 +68,14 @@ export function createRetainedInbox({
   portableLaunch,
   onPending = () => {},
   onConsumed = () => {},
+  receivingApi,
+  validateSendContext,
 }) {
+  if (receivingApi !== undefined && receivingApi !== "native-sdk-v1") {
+    throw new Error("unsupported native receiving API");
+  }
+  const compatible = receivingApi === "native-sdk-v1";
+  const selector = compatible ? { receiving_api: receivingApi } : {};
   let busy = false;
   let stopped = false;
   let context = null;
@@ -91,7 +101,7 @@ export function createRetainedInbox({
   const sendAllowed = (sid, allowSend) => allowSend && canSend() && current(sid);
   const base = (sid) => `/api/v1/live-sessions/${encodeURIComponent(sid)}/retained-inbox`;
   const original = (receipt, outcome) => ({
-    contract: CONTRACT, consumer: receipt.consumer, message_id: receipt.message_id,
+    contract: CONTRACT, ...selector, consumer: receipt.consumer, message_id: receipt.message_id,
     handoff_id: receipt.handoff_id, outcome,
   });
 
@@ -183,7 +193,7 @@ export function createRetainedInbox({
     let events = [];
     // A page skipped during cooldown has not been reconciled. Advancing it
     // would phase-lock history reads to the first page of a persistent backlog.
-    if (attempts.length && now() < historyAt) return true;
+    if (attempts.length && now() < historyAt) return !compatible;
     if (attempts.length && now() >= historyAt) {
       historyAt = now() + RECHECK_MS;
       events = await nativeCall(() => session.getEvents());
@@ -196,8 +206,9 @@ export function createRetainedInbox({
       if (events.some((event) => retainedConsumption(event, receipt, sourceAllowed))) {
         onConsumed(sid, receipt.message_id);
         await report(receipt, "consumed");
-      } else if (receipt.stage !== "offered" || !sameConsumer(receipt.consumer, context.consumer)) {
-        held = true;
+      } else if (receipt.stage !== "offered"
+          || (!compatible && !sameConsumer(receipt.consumer, context.consumer))) {
+        if (!compatible) held = true;
         note(`original handoff ${receipt.message_id}/${receipt.handoff_id} remains ${receipt.stage}; no resend`);
       }
     }
@@ -211,6 +222,9 @@ export function createRetainedInbox({
       if (!Number.isSafeInteger(health?.protocol_version) || health.protocol_version < PROTOCOL) {
         throw new Error(`protocol ${PROTOCOL} recovery support required; legacy downgrade refused`);
       }
+      if (compatible && health?.capabilities?.compatible_native_inbox !== 1) {
+        throw new Error("compatible native inbox support required; legacy downgrade refused");
+      }
       if (portableLaunch !== undefined && (health?.capabilities?.portable_inbox !== 1
           || health?.capabilities?.readonly_plugin_controls !== 1)) {
         throw new Error("portable inbox and readonly plugin controls are required; legacy downgrade refused");
@@ -222,10 +236,12 @@ export function createRetainedInbox({
     if (!context || context.sid !== sid || context.cwd !== workingDirectory) {
       const consumer = {
         session_id: sid, incarnation: incarnation(),
-        pid: processIdentity?.pid, process_started_at: processIdentity?.process_started_at,
+        ...(compatible ? {} : {
+          pid: processIdentity?.pid, process_started_at: processIdentity?.process_started_at,
+        }),
         ...(portableLaunch === undefined ? {} : { portable_launch: portableLaunch }),
       };
-      if (!consumerValid(consumer, sid)) throw new Error("consumer process observations unavailable");
+      if (!consumerValid(consumer, sid, compatible)) throw new Error("consumer observations unavailable");
       context = { sid, cwd: workingDirectory, consumer };
       negotiation = null;
       enrolled = false;
@@ -234,7 +250,7 @@ export function createRetainedInbox({
       historyAt = 0;
     }
     if (await recover(sid) || !sendAllowed(sid, allowSend)) return;
-    const owner = { contract: CONTRACT, consumer: context.consumer };
+    const owner = { contract: CONTRACT, ...selector, consumer: context.consumer };
     if (!enrolled || frontendStale) {
       if (!negotiation) {
         const observed = await request("POST", `${base(sid)}/negotiate`, owner);
@@ -250,9 +266,15 @@ export function createRetainedInbox({
         };
       } else if (frontendStale) {
         const observed = await request("POST", `${base(sid)}/negotiate`, owner);
-        if (observed?.contract !== CONTRACT || !sameBinding(observed.binding, negotiation.binding)
-            || (observed.expected_incarnation !== context.consumer.incarnation
-              && observed.expected_incarnation !== negotiation.expected_incarnation)) {
+        if (observed?.contract !== CONTRACT || !sameBinding(observed.binding, negotiation.binding)) {
+          throw new Error("frontend recovery changed the original binding or consumer; no reenrollment");
+        }
+        if (compatible && observed.expected_incarnation === null) {
+          context.consumer = { ...context.consumer, incarnation: incarnation() };
+          owner.consumer = context.consumer;
+          negotiation = { ...negotiation, expected_incarnation: null };
+        } else if (observed.expected_incarnation !== context.consumer.incarnation
+            && observed.expected_incarnation !== negotiation.expected_incarnation) {
           throw new Error("frontend recovery changed the original binding or consumer; no reenrollment");
         }
       }
@@ -293,9 +315,14 @@ export function createRetainedInbox({
     }
     onPending(sid, [msg]);
     const receipt = {
-      session_id: sid, message_id: msg.id, handoff_id: msg.handoff_id, consumer: context.consumer,
+      session_id: sid, message_id: msg.id, handoff_id: msg.handoff_id,
+      consumer: compatible ? msg.consumer : context.consumer,
     };
+    if (!consumerValid(receipt.consumer, sid, compatible)) {
+      throw new Error("original handoff receiver unavailable");
+    }
     const readiness = async () => {
+      if (validateSendContext) await nativeCall(validateSendContext);
       if (!startup) return;
       if (!msg.plugin_readiness || msg.delivery !== "queue"
           || msg.plugin_readiness.expected_session_id !== sid) {
@@ -313,7 +340,8 @@ export function createRetainedInbox({
     await nativeContext(sid);
     if (!sendAllowed(sid, allowSend)) return;
     const grant = await currentRequest(sid, "begin", {
-      ...owner, binding: negotiation.binding, message_id: msg.id, handoff_id: msg.handoff_id,
+      ...owner, consumer: receipt.consumer,
+      binding: negotiation.binding, message_id: msg.id, handoff_id: msg.handoff_id,
     });
     if (grant?.begin !== true) {
       note(`original handoff ${msg.id}/${msg.handoff_id} has no final grant; no send`);

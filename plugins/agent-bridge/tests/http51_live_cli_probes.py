@@ -123,7 +123,13 @@ def observe(api, db, vector, monkeypatch, capsys, *, client_factory) -> dict:
         try:
             rolled_back = Database(db.db_path)
         except ValueError as exc:
-            refused = "live_messages_handoff_input_immutable" in str(exc)
+            refused = str(exc) in {
+                "Inbox custody requires writable preparation: " + guard
+                for guard in (
+                    "live_messages_runtime_admission", "live_messages_handoff_input_immutable",
+                )
+            }
+            assert refused, str(exc)
         else:
             rolled_back.close()
             refused = False

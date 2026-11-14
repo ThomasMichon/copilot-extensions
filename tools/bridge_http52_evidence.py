@@ -24,6 +24,8 @@ SCOPE = (
     "Owner, claims, forwards and POSIX-to-private-scratch namespace fixtures; "
     "discovery consumes controlled source stdout with live reporter rename, withdrawal "
     "and malformed-envelope retention controls; "
+    "native SDK receiving joins real Node/API/SQLite with controlled SDK events, "
+    "without installation or process admission; "
     "not native Copilot, mux, remote authentication or installed qualification"
 )
 POLICY = common.POLICY
@@ -84,6 +86,7 @@ _RETAINED_AFFECTED = (
         "acquisition_local_launch.py", "creation_local_launch.py",
         "worktree_native_resume.py", "singleton_resume.py", "agent_registry_resolver.py", "routes/dispatch_tasks.py",
         "routes/worktrees.py", "routes/worktree_reporting.py",
+        "compatible_inbox.py", "runtime_custody.py", "inbox_consumer_schema.py",
     )),
     *("plugins/agent-worktrees/src/agent_worktrees/" + name for name in (
         "retained_record_writer.py", "resource_relationship_cli.py", "tracking_write.py",
@@ -163,6 +166,11 @@ EXTRA_PATHS = (
     "plugins/agent-worktrees/tests/fixtures/worktree_record_owner.py",
     "plugins/agent-bridge/tests/fixtures/portable-mux-sdk.mjs",
     "plugins/agent-bridge/tests/fixtures/worktree_list_source.py",
+    "plugins/agent-bridge/tests/test_live_inbox_runtime.py",
+    "plugins/agent-bridge/tests/test_inbox_custody.py",
+    "plugins/agent-bridge/tests/test_retained_sdk_recovery.py",
+    "plugins/agent-bridge/tests/fixtures/retained-sdk-consumer.mjs",
+    "plugins/agent-bridge/tests/legacy_inbox_schema.py",
     "plugins/agent-bridge/tests/test_http47_launch_audit.py",
     "plugins/agent-bridge/launch-wrapper-assets.json",
     "plugins/agent-bridge/packaged-assets.json",
@@ -303,7 +311,18 @@ PROBES = {
     "test_portable_scope_never_leaks_a_seed_to_the_legacy_inbox_before_enrollment": 1,
     "test_portable_reload_keeps_its_native_binding_and_uses_the_existing_cas": 1,
     "test_remote_enrollment_requires_the_original_portable_reservation": 7,
-    "test_retained_startup_admission_requires_its_original_ready_input": 12,
+    "test_retained_startup_admission_requires_its_original_ready_input": 24,
+    "test_legacy_request_serialization_does_not_send_a_new_selector": 1,
+    "test_native_sdk_receiving_needs_no_installation_or_process_custody": 2,
+    "test_native_reload_keeps_offered_original_consumer_and_never_resends_begun_work": 2,
+    "test_native_inbox_preserves_real_target_and_ingress_boundaries": 10,
+    "test_native_mode_is_explicit_and_unknown_selectors_cannot_downgrade": 2,
+    "test_native_inbox_survives_closed_installation_epoch_without_relaxing_controls": 2,
+    "test_native_poll_does_not_promote_unverified_legacy_startup_input": 2,
+    "test_native_receiving_does_not_replay_or_block_on_older_unconfirmed_work": 6,
+    "test_native_receiving_does_not_reacquire_custody_after_metadata_refresh": 6,
+    "test_native_sdk_process_recovery_uses_original_receipts_without_installation_context": 2,
+    "test_v46_migration_retains_original_begun_handoff_and_requires_writable_preparation": 1,
     "test_readonly_poll_never_claims_or_expires_mutation_controls": 1,
     "test_bridge_provider_receiver_and_extensions_share_one_conversation": 2,
     "test_carrier_failures_settle_owned_tree_and_streams": 2,
@@ -384,6 +403,7 @@ CAPABILITY_VERSIONS = {
     "live_question_answers": 1,
     "live_delivery_observation": 1,
     "mux_question_answers": 1,
+    "compatible_native_inbox": 1,
 }
 SPEC = common.EvidenceSpec(
     GENERATION, INPUT, PRIMARY, FAMILY, AFFECTED, EXTRA_PATHS, PROBES,

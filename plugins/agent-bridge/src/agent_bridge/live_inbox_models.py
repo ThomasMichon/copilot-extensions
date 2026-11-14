@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import AliasPath, BaseModel, ConfigDict, Field, model_serializer
+from pydantic import AliasPath, BaseModel, ConfigDict, Field, model_serializer, model_validator
 
 from .inbox_custody import InboxConsumer
 from .live_inbox_runtime import InboxBinding
@@ -19,8 +19,8 @@ class InboxConsumerInfo(BaseModel):
 
     session_id: str = Field(min_length=1)
     incarnation: str = Field(min_length=1)
-    pid: int = Field(gt=0)
-    process_started_at: float = Field(gt=0)
+    pid: int | None = Field(default=None, gt=0)
+    process_started_at: float | None = Field(default=None, gt=0)
     portable_launch: str | None = Field(default=None, pattern=r"^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$")
 
     @model_serializer(mode="wrap")
@@ -49,6 +49,22 @@ class InboxNegotiateRequest(BaseModel):
 
     contract: Literal["retained-inbox-v1"]
     consumer: InboxConsumerInfo
+    receiving_api: Literal["native-sdk-v1"] | None = None
+
+    @model_serializer(mode="wrap")
+    def serialize(self, handler):
+        value = handler(self)
+        if self.receiving_api is None:
+            value.pop("receiving_api", None)
+        return value
+
+    @model_validator(mode="after")
+    def legacy_observations(self):
+        if self.receiving_api is None and (
+            self.consumer.pid is None or self.consumer.process_started_at is None
+        ):
+            raise ValueError("Legacy receiving requires consumer process observations")
+        return self
 
 
 class InboxNegotiationInfo(BaseModel):
@@ -86,6 +102,14 @@ class RetainedInboxMessage(LiveMessage):
 
     handoff_id: str = Field(validation_alias=AliasPath("handoff", "id"))
     handoff_stage: InboxStage
+    consumer: InboxConsumerInfo | None = None
+
+    @model_serializer(mode="wrap")
+    def serialize(self, handler):
+        value = handler(self)
+        if self.consumer is None:
+            value.pop("consumer", None)
+        return value
 
 
 class InboxPollResult(BaseModel):

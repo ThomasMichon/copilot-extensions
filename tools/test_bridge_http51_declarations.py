@@ -97,6 +97,51 @@ def test_plan_refuses_unclassified_changed_http_owner(source):
         declarations.declaration_plan(root, COMMIT, snapshot)
 
 
+def relocated_owner(snapshot):
+    canonical = "libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/remote-driver.mjs"
+    alias = "plugins/agent-bridge/extensions/agent-bridge/remote-driver.mjs"
+    owner = {
+        "path": canonical, "sha256": "0" * 64,
+        "semantic": True, "non_semantic_reason": None,
+    }
+    relocated = {
+        "path": alias, "sha256": "0" * 64, "semantic": False,
+        "non_semantic_reason": "Relocated implementation; canonical owner is registered separately.",
+        "current_path": canonical,
+    }
+    snapshot.materialized["contracts"][0]["source_paths"].extend((owner, relocated))
+    return owner, relocated
+
+
+def test_plan_refreshes_relocated_alias_without_reclassifying_or_capturing_it(source):
+    root, snapshot, _ = source
+    owner, alias = relocated_owner(snapshot)
+    (root / alias["path"]).unlink(missing_ok=True)
+    before = copy.deepcopy(snapshot.materialized["contracts"][0])
+    outputs = declarations.declaration_plan(root, COMMIT, snapshot, evidence=membership_evidence)
+    after = codec.decode(outputs[codec.REGISTRY])["contracts"][0]
+    actual = {row["path"]: row for row in after["source_paths"]}
+    expected = codec.digest((root / owner["path"]).read_bytes())
+    assert actual[owner["path"]]["sha256"] == actual[alias["path"]]["sha256"] == expected
+    assert actual[alias["path"]] == {**alias, "sha256": expected}
+    assert after["provenance"] == before["provenance"]
+    assert after["fixtures"] == before["fixtures"]
+
+
+@pytest.mark.parametrize("classification", ["missing", "non-semantic", "semantic-alias"])
+def test_relocated_alias_cannot_borrow_undeclared_or_nonsemantic_authority(source, classification):
+    root, snapshot, _ = source
+    owner, alias = relocated_owner(snapshot)
+    if classification == "missing":
+        snapshot.materialized["contracts"][0]["source_paths"].remove(owner)
+    elif classification == "non-semantic":
+        owner.update(semantic=False, non_semantic_reason="Not a semantic owner.")
+    else:
+        alias.update(semantic=True, non_semantic_reason=None)
+    with pytest.raises(ValueError, match="relocated HTTP-51 source lacks its semantic owner"):
+        declarations.declaration_plan(root, COMMIT, snapshot, evidence=membership_evidence)
+
+
 def test_plan_refuses_dirty_doc_or_foreign_doc_owner(source):
     root, snapshot, _ = source
     (root / declarations.REFERENCE).write_bytes(b"dirty\n")

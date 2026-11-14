@@ -77,7 +77,7 @@ const session = {
     plugins: { list: async () => ({ plugins }) },
   },
   send: async (options) => {
-    assert.match(options.source, /^agent-remote-driver-/);
+    assert.equal(options.source, "agent-bridge");
     emit({ effect: { sessionId: sid, options } });
     const event = {
       type: "user.message", sessionId: sid, id: `native-${events.length + 1}`,

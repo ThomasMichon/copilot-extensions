@@ -228,6 +228,9 @@ def test_creation_launch_migration_from_36_preserves_original_allocation(tmp_db)
     for name in COLUMNS:
         tmp_db.execute_write(f"ALTER TABLE workspace_embodiments DROP COLUMN {name}")
     tmp_db.execute_write("UPDATE schema_version SET version=36")
+    from legacy_inbox_schema import restore_prior_inbox_guards
+
+    restore_prior_inbox_guards(tmp_db._get_conn(), version=36)
     with pytest.raises(ValueError, match="current schema"):
         Database(tmp_db.db_path, read_only=True)
     migrated = Database(tmp_db.db_path)
