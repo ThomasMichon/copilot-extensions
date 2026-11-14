@@ -48,6 +48,16 @@ login semantics. Missing, malformed, duplicate or wrong actor evidence refuses
 the entire guarded operation. Never convert that denial into a partial
 successful inventory or snapshot under the configured account label.
 
+Every subsequent repository/PR read must use the same underlying token and
+forge binding authenticated by that actor GET. Preserve the existing
+per-request source acquisition and current-admission checks, but retain an
+operation-local immutable material binding and its earliest use deadline.
+If a later acquisition changes that token or binding, loses authorization or
+expires, refuse before sending that repository read, even when its copied scope
+fields still match. Do not silently renew/substitute material or repeat actor
+verification inside that operation. This preserves the one-extra-request bound
+without treating a check of one token as proof about another.
+
 The GET must use the selected endpoint and credential binding. Preserve
 endpoint/TLS/redirect restrictions and actual expiry/authorization checks.
 Do not print raw credential, authorization header, response body or command
@@ -109,6 +119,10 @@ remain with their existing owners.
    synthetic credentials and responses: correct/wrong actor, malformed or
    duplicate identity, HTTP authorization loss, lower request ceilings,
    verification-only exhaustion, original deadlines and value-free failures.
+   Switch accounts/tokens between acquisitions while keeping the same forge
+   binding; the second material must never reach a repository read. Also cover
+   withdrawal and shortened/extended reported expiry without extending the
+   original verified material's use deadline.
 4. Prove discovery performs no acquisition, unsupported selections refuse before
    acquisition, unguarded operations perform no actor GET, inventory accounting
    adds one and snapshot accounting stays inside its original/lower ceiling.
