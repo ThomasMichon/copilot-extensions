@@ -68,6 +68,9 @@ approval is not content authority.
 | A mechanical rebase or conflict-only push meets a review-round, revision or attempt cap | Do not count it against the cap; caps bind intent-changing revisions. |
 | Agent drafts a how-to-proceed question whose options are all narrow ("exact", "one", "only", "read-only", a revision pin) | Rewrite it: recommend the broadest option within the requested authority, add a standing option if it can recur and keep narrower options beside it with a named risk. |
 | Operator picks a narrower option offered beside a broader one | The narrowing binds; record it as operator-chosen and ask once at class level if the work later needs more. |
+| Agent is drafting an approving option and considers adding an expiry or time window | Omit it unless a real constraint requires one; an expiry in an option the operator accepts binds, even when the agent drafted it. |
+| Agent wants to cap a validation loop at a few attempts | Prefer a per-run resource bound lasting until validation completes; use a count only for a named scarce resource and still offer the class option. |
+| Author agent's own reviewed change deletes or moves files, including superseded same-purpose paths found during a rebase | Treat it as an ordinary source edit visible in review, not a destructive deletion; data outside source control keeps its gates. |
 | Prior invocation may already have produced effects | Reconcile through the existing owner with the original identity; do not blindly replay. |
 | Deployment expands beyond the approved selector, owner or accepted effects | Ask only for the expanded effect scope and continue unaffected authorized work. |
 | Low-risk tooling approval is reused for a prototype that mutates personal archives | Keep content mutation gated; deployment recoverability does not authorize data effects. |

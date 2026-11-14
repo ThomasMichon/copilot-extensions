@@ -204,9 +204,9 @@ def _resident(request: dict) -> dict:
 def saved_result(request: dict, reason: str, *, db_path=None) -> dict:
     """Read the bounded saved publication without starting or computing anything."""
     project, selection = request_selection(request)
-    result = read_advisory(
-        cfg.install_dir() / "worktrees-current.sqlite3" if db_path is None else db_path,
-        project, **selection,
+    path = cfg.install_dir() / "worktrees-current.sqlite3" if db_path is None else db_path
+    result = worktrees_reporting.read_publication(
+        lambda project, **kwargs: read_advisory(path, project, **kwargs), project, **selection,
         contract_version=request["contract_version"],
     )
     result.update(
