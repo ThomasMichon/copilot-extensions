@@ -56,6 +56,17 @@ authority cutover, mixed-version evidence, and evidence-gated retirement.
 
 ## Coordination
 
+- **Per-owner support-window inventory:** the Contract Evolution driver retains
+  #1460's shared tracking inventory, including #5957's seven internal boundary
+  groups. Worktrees verbs/IPC, Dispatch readiness/control, MCP local IPC/control,
+  Logger/cold-store fetch and notify, Index HTTP control, Vault action/ping, and
+  PR-watch/shared-singleton control keep their existing semantic, implementation,
+  credential, lifecycle and resource owners. External MCP negotiation remains
+  separately owned. This inventory appoints nobody, creates no generic
+  handshake or owner-ACK requirement, and changes no default or activation gate.
+  The effort remains Draft and #1460 remains OPEN. All existing claim state
+  and custody are unchanged.
+
 - **Topology:** the foundation lands in serial phases; AHP and delegation
   consumers may proceed independently only after the shared prerequisite they
   consume is merged.
@@ -494,6 +505,56 @@ receiving readback precede any separate source-specific disposition.
 - [ ] **SEM-14-P:** Paired older-elected/new-additive preservation AND newer-revoked fencing with
   opaque-field patch preservation; package age/raw selector mismatch is not actor authority.
 
+### Per-owner live/internal support windows retained from #1460
+
+These are direct, unfinished tracking clauses from the source's adopted #5957
+inventory. They supplement the Bridge foundation without moving sibling
+implementation into this effort. Each boundary can progress independently at
+its own accepted support and evidence tier; this is not a prerequisite to every
+bounded Bridge change. All incumbent Plan and Validation items remain intact.
+
+- [ ] **P1460-CW1:** Maintain the shared compatibility inventory beneath the
+  existing Bridge foundation. Each sibling retains its implementation,
+  semantic and resource owner; documenting a support window grants no authority
+  to operate that sibling.
+- [ ] **P1460-CW2:** For Worktrees verbs and IPC, record supported generations
+  and capabilities, additive-reader behavior, deprecation/rollback windows and
+  truthful out-of-range behavior. Existing version-1 envelopes are a foundation,
+  not proof of the complete owner-specific window.
+- [ ] **P1460-CW3:** For Dispatch readiness and control, record support windows
+  and evidence while preserving named capabilities, readiness-result shape and
+  separate control authority. A runtime version or healthy service identity is
+  not a negotiated wire range.
+- [ ] **P1460-CW4:** Keep MCP local IPC/control compatibility separate from
+  released external MCP negotiation. Reuse the external handshake where it
+  governs; do not introduce a second generic handshake or treat external
+  negotiation as proof of warm-host/local compatibility.
+- [ ] **P1460-CW5:** For Logger/cold-store fetch and notify, retain legitimate
+  miss/exit semantics, optional notification and accepted synchronization
+  responsibility. A schema, package version or User-Agent alone does not prove
+  reader compatibility.
+- [ ] **P1460-CW6:** For Index HTTP control, preserve passive/draining/serving,
+  readiness, runtime/cell identity and current admission. Record protocol
+  tolerance separately rather than inferring it from those state facts.
+- [ ] **P1460-CW7:** For Vault action/ping, record support, additive-reader,
+  deprecation and out-of-range behavior while retaining exact credential,
+  transport and live-owner admission and standalone operation. Do not probe
+  credential values or replace the separate live-owner/lifetime obligation.
+- [ ] **P1460-CW8:** For PR-watch/shared-singleton control, cover the durable
+  singleton/control boundary and actual shared coalescing envelope. Preserve
+  current transaction/writer authority; add no second lifecycle owner.
+- [ ] **P1460-CW9:** Distinguish implementation version, protocol epoch,
+  semantic capability, durable schema, record revision and current
+  instance/writer authority throughout the inventory. Select behavior from the
+  actual executable/runtime/peer before consequential effects; preserve
+  provider-first expand/migrate/contract and rollback coexistence. Wire
+  compatibility grants no installation or service-state authority.
+- [ ] **P1460-CW10:** Credit #8816's CLI/process guidance and #9362's HTTP
+  range-admission only at their reported bounded scopes. Existing
+  registry/fixtures and range gates do not complete every sibling window or the
+  Bridge durable/pinning/cutover/retirement foundation. Do not invent an
+  incompatible-release incident or universal all-host/native matrix.
+
 ## Validation Plan
 
 - [ ] Every registered contract has exact old/new fixtures and release
@@ -779,6 +840,41 @@ receiving readback precede any separate source-specific disposition.
 - [ ] **G1460:** Resolve every directly retained #1460 Plan and Validation clause at its original
   finite evidence tier, preserving alternatives, completed credit and existing custodians.
   Administrative tracking is not technical completion or claim release.
+
+### Per-owner support-window acceptance
+
+- [ ] **V1460-CWV1:** At each of the seven existing owner/consumer boundaries,
+  qualify current, previous, unsupported and applicable unversioned peers,
+  additive unknown fields, missing required semantics/capabilities and
+  deprecation/rollback behavior under that boundary's accepted contract.
+  Package equality, health or one Bridge envelope is insufficient.
+- [ ] **V1460-CWV2:** Preserve complete Bridge live/durable fixture provenance,
+  prior-runtime versus previous-generation distinctions, independent semantic
+  expectations, accepted nonsemantic maintenance, session pinning, provider
+  atomic refresh OR safe defer, actual writer fencing and rollback. Older
+  elected/newer revoked controls remain incarnation-based.
+- [ ] **V1460-CWV3:** Keep #1266 AHP, #1448 delegation, #1138 event/reference,
+  #954 venue/parity, provider/ground/relay/claim semantics with their existing
+  owners. Preserve #1915's finite inventory and #1164's complete checked corpus,
+  each original source/mock/native/installed evidence tier, and every bounded
+  alternative.
+- [ ] **V1460-CWV4:** Distinguish safe refusal before effects from ambiguous
+  post-admission outcomes. Do not probe support by mutating or retrying a
+  consequential unknown result. Required old/new and rollback evidence is
+  per-boundary, not a new unrelated all-host/native gate.
+- [ ] **V1460-CWV5:** Before any subordinate administrative retirement, read
+  back the complete current receiving ROOT, every inherited criterion and all
+  seven direct owner groups. Keep new product acceptance unchecked until its
+  actual evidence or accepted disposition exists. This documentary intake
+  itself performs no peer call, schema/wire/default change, credential/provider
+  rotation, runtime admission, restart, rollout or source/resource transfer.
+- [ ] **G1460-CW:** Resolve P1460-CW2 through P1460-CW8 with
+  V1460-CWV1 through V1460-CWV5 at each existing owner/boundary's original
+  accepted support and evidence tier, preserving the source's literal
+  alternatives and all incumbent foundation/inherited clauses. An unresolved
+  boundary remains its own open work. This global crosswalk creates no
+  all-boundary deployment/release gate, new ACK or all-native/whole-parent
+  prerequisite, and releases no source or resource claim.
 
 ## Proposal
 
