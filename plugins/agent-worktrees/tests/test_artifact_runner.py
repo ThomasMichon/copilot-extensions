@@ -209,11 +209,15 @@ def test_root_admission_refuses_junctions_before_allocation(tmp_path):
     assert not (target / "scratch").exists()
 
 
-@pytest.mark.parametrize("codes,guards,expected", [
-    ((5, 0), False, 0), ((0, 5), False, 0), ((5, 5), False, 5),
-    ((1, 0), False, 1), ((5,), True, 0),
+@pytest.mark.parametrize("codes,guards,overrun,expected", [
+    ((5, 0), False, False, 0), ((0, 5), False, False, 0), ((5, 5), False, False, 5),
+    ((1, 0), False, False, 1), ((5,), True, False, 0), ((0,), False, True, 124),
 ])
-def test_disposition_uses_the_normalized_partition_outcome(runner_owner, monkeypatch, codes, guards, expected):
+def test_disposition_uses_the_normalized_partition_outcome(
+    runner_owner, monkeypatch, codes, guards, overrun, expected,
+):
+    from contextlib import contextmanager
+    from types import SimpleNamespace
     runner, _, selected, root, ledger = runner_owner
     plugin = root / "fixture-plugin"
     (plugin / "tests").mkdir(parents=True)
@@ -225,6 +229,18 @@ def test_disposition_uses_the_normalized_partition_outcome(runner_owner, monkeyp
     monkeypatch.setattr(runner, "_test_group_plan", lambda *a: [([test], "fixture") for _ in codes])
     results = iter(codes)
     monkeypatch.setattr(runner, "run_contained", lambda *a, **k: next(results))
+    if overrun:
+        clock = [0.0]
+        cleanup_worker = runner._group_cleanup_worker
+
+        @contextmanager
+        def late_cleanup():
+            with cleanup_worker() as state:
+                yield state
+            clock[0] = 100.0
+
+        monkeypatch.setattr(runner, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+        monkeypatch.setattr(runner, "_group_cleanup_worker", late_cleanup)
     outcome = runner.run_plugin(
         "fixture", "unused", reinstall=False, kexpr=None if guards else "fixture", guards=guards,
         limits=runner.Limits(), plugin_timeout=60, test_timeout=15, max_files_per_subsuite=25,
@@ -234,6 +250,8 @@ def test_disposition_uses_the_normalized_partition_outcome(runner_owner, monkeyp
     assert claim.producer["phase"] == ("retained" if expected else "closed")
     location = selected / artifact_scratch._name(claim.producer["recovery"])
     assert location.exists() is bool(expected)
+    if overrun:
+        assert b'"exit_code": 124' in (location / "runner-diagnostic.txt").read_bytes()
 
 
 @pytest.mark.parametrize("cleanup", ["held", "error"])

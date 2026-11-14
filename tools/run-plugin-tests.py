@@ -68,7 +68,7 @@ from plugin_test_containment import (
     run_contained,
 )
 from plugin_test_command_safety import UnsafeTestCommand, check_test_sources
-from plugin_test_owned_scratch import add_cli_argument, admit_owned_root, prepare_owned, test_sandbox
+from plugin_test_owned_scratch import add_cli_argument, admit_owned_root, finish_owned_run, prepare_owned, test_sandbox
 
 REPO = Path(__file__).resolve().parents[1]
 PLUGINS = REPO / "plugins"
@@ -574,7 +574,10 @@ def run_plugin(
     sandbox_scope = test_sandbox(OWNED_SCRATCH_OWNER, REPO, _TestSandbox, stage="tests",
         prefix=run_prefix(name), dir=runs_root(REPO) if OWNED_SCRATCH_OWNER is None else None,
     )
-    with sandbox_scope as raw_sandbox, _group_cleanup_worker() as (cleanup_pool, cleanups):
+    with (sandbox_scope as raw_sandbox, finish_owned_run(
+        OWNED_SCRATCH_OWNER, sandbox_scope, lambda: 0 if skipped_guards else returncode,
+        plugin_started + plugin_timeout, time.monotonic,
+    ), _group_cleanup_worker() as (cleanup_pool, cleanups)):
         sandbox = Path(raw_sandbox)
         record_owner(sandbox, REPO, retention="disposable after verified process cleanup")
         basetemp = sandbox / "t"
@@ -699,8 +702,6 @@ def run_plugin(
         elif returncode == 5 and passed_group and (guards or kexpr) and not fatal_group:
             returncode = 0
         skipped_guards = guards and returncode == 5 and not test_files
-        if OWNED_SCRATCH_OWNER is not None:
-            sandbox_scope.record_outcome(0 if skipped_guards else returncode)
     elapsed = time.monotonic() - plugin_started
     if elapsed > plugin_timeout:
         print(
@@ -710,8 +711,7 @@ def run_plugin(
             file=sys.stderr,
         )
         return 124
-    # pytest exit code 5 == "no tests collected"; in --guards mode that just
-    # means the plugin declares no guard-marked tests -- not a failure.
+    # No guard-marked tests is an accepted skip, not a failure.
     if skipped_guards:
         print(f"[SKIP] {name}: no guard-marked tests")
         return 0

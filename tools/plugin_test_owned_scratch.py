@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
 from pathlib import Path
 import secrets
 import sys
@@ -23,6 +24,16 @@ def add_cli_argument(parser):
 
 def admit_owned_root(owner, repository):
     OwnedTestSandbox(owner, repository, stage="admission")
+
+
+@contextmanager
+def finish_owned_run(owner, scope, outcome, deadline, clock):
+    yield
+    if owner is not None:
+        code = 124 if clock() > deadline else outcome()
+        if code == 124:
+            scope.record_result(0, code)
+        scope.record_outcome(code)
 
 
 def prepare_owned(name, uv, reinstall, *, retained, environment, sandbox, limits=None, wall_seconds=None):

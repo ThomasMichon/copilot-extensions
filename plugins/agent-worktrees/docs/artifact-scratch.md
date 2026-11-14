@@ -90,6 +90,8 @@ An aggregate failure flag survives eviction from the bounded diagnostic tail.
 The runner supplies its final normalized partition outcome before disposition:
 accepted empty filtered/guard groups do not become false failure bundles, while
 genuine assertion failures and all-empty filtered failures remain failures.
+It checks the aggregate deadline after the group cleanup worker joins and before
+owned disposition; overdue cleanup records exit 124 in the retained diagnostic.
 
 The provider publishes settled physical state, then requests `retain` through
 the normal exact-subject ledger transaction. Successful consumed output may be
