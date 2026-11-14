@@ -342,6 +342,15 @@ the non-public approval conversation.
 
 ## Plan
 
+The [oldest command-contract source refresh](journal/2026/11.14-command-contract-source-refresh.md)
+retains #78's exact ID-first fleet naming contract as a current source-proof
+gap and #870's ordinary early-failure normalization as a demonstrated source
+residual. Neither receives a speculative completion or transfer. Partial
+source coverage, exact-file admission stops and incomplete vendor inventory
+remain explicit; no native, whole-parent or resource-release gate is added.
+Both original trackers remain OPEN. The complete census at 19:30:27Z is
+846 open, 117 above fixed 729, with no new disposition credit.
+
 The [ambient routing-intent intake](journal/2026/11.14-ambient-routing-intake.md)
 proposes complete #1414 provisioner-to-CWD behavior in a separate Dispatch
 family: four unchecked Plan rows, four behavior Validation rows and one
