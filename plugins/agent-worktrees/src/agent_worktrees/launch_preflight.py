@@ -38,11 +38,11 @@ class LaunchPreflightError(RuntimeError):
 
 
 def new_knowledge_error(config, *, source: str) -> str | None:
-    """Read the knowledge owner before New allocation or initial request admission."""
+    """Validate selected knowledge without requiring a binding for local New."""
     from .state_root import coordination_readiness
 
     readiness = coordination_readiness(config, cwd=source)
-    if not readiness.ready:
+    if not readiness.ready and readiness.code != "knowledge_binding_required":
         return "New authoring requires knowledge readiness before allocation. " + readiness.error
     return None
 
@@ -52,7 +52,7 @@ def new_authoring_error(config, *, source: str) -> str | None:
 
 
 def new_authoring_preflight(config, *, source: str) -> LaunchPreflight:
-    """Keep knowledge-first New admission and its checked staging input together."""
+    """Keep configured-knowledge validation and checked staging input together."""
     from .application_admission import new_application_preflight
 
     if error := new_knowledge_error(config, source=source):
