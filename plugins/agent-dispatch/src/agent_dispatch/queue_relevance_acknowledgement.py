@@ -127,6 +127,7 @@ def finish(
             expected_owner_session_id=receipt["task_attachment"]["owner_session_id"],
             expected_status=original["task"]["status"], reject_if_held=True,
             transaction_guard=retain,
+            unaccepted_closeout=original["binding"].get("owner_phase") == "before_start",
         )
     except TaskError:
         with queue._connect() as conn:

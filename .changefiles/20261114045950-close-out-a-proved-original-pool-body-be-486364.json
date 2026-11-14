@@ -1,0 +1,9 @@
+{
+  "comment": "Close out a proved original pool body before affirmative worker start without accepting its obsolete goal.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

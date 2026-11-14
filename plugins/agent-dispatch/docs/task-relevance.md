@@ -81,9 +81,25 @@ support discovery to the guarded original-worker closeout command, not `start`
 or `resume`. Steering consumption selects the closeout instead
 of older goal instructions and does not restore a suspended execution lease.
 Submitted work can use its recorded `completed_by` worker and retained native
-without reassigning the task. An owner absent at acceptance, or a conflicting
-later owner, stays pending; this receiver never guesses a historical owner or
-creates a replacement agent.
+without reassigning the task.
+
+A CLAIMED allocator task can also have a proved original body before affirmative
+start. When its current pool assignment is unreleased and unexhausted, the
+original created reservation is SPAWNED with completed startup, and the existing
+pool-start workspace/native and protected-relationship checks pass, closeout
+captures that body with `resource_binding.owner_phase: before_start`. Its
+original worker receives the linked closeout wake without accepting the goal.
+The task's owner/native fields and attachment history remain unassigned;
+closeout readiness and acknowledgement revalidate the captured body separately.
+Only the guarded finalized-workspace acknowledgement may abandon that
+unaccepted claim; ordinary worker transitions remain refused.
+
+An unproved owner, incomplete startup, targeted/reused allocation, uncaptured
+legacy history or conflicting later owner stays pending. The receiver neither
+guesses a historical owner nor creates a replacement agent. This additive
+binding changes no CLI/request syntax. An older receiver must not be assumed
+to act on a retained before-start target after rollback; keep original
+closeout/transport custody rather than restarting the goal or dropping the phase.
 
 When closeout acceptance already captured the original worker and native,
 same-generation yield, reset and requeue may clear the task's current assignment
@@ -98,7 +114,7 @@ Strict reset and agent-detachment recovery refuse while acknowledgement is
 pending, rather than advancing the generation beyond the accepted owner.
 The [recovery snapshot](task-recovery.md) also fences closeout acceptance after
 inspection. This preserves the existing closeout; it does not recover an
-uncaptured owner or authorize cross-generation acknowledgement.
+uncaptured legacy owner or authorize cross-generation acknowledgement.
 
 Only the outbox row linked through the closeout's actual steer can pass its
 original-goal admission fence. A later ordinary/event-note wake cannot supersede
