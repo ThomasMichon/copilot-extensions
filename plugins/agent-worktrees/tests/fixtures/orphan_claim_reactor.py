@@ -53,6 +53,11 @@ native_lock = tracking._RecordLock
 class ObservedRecordLock(native_lock):
     def __enter__(self):
         if self._yaml_path == source:
+            if not (markers / "probe").exists():
+                with native_lock(source, blocking=False, require_sidecar=True) as probe:
+                    (markers / "probe").write_text(
+                        "acquired" if probe.acquired else "blocked", encoding="utf-8",
+                    )
             (markers / "attempted").write_text("ready", encoding="utf-8")
         result = super().__enter__()
         if self._yaml_path == source:

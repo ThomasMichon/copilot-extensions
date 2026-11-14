@@ -205,7 +205,7 @@ def test_reclaim_and_settlement_exclude_real_competing_claim_writer(tmp_path, mo
         )
         processes.append(process)
         wait_for(markers / "attempted")
-        time.sleep(0.1)
+        assert (markers / "probe").read_text(encoding="utf-8") == "blocked"
         assert not (markers / "acquired").exists(), "claim reactivated during destructive callback"
         events.append("reclaimed")
         return cleanup.ReclaimResult("reclaimed", "synthetic callback")
