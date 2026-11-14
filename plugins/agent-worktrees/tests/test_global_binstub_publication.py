@@ -75,7 +75,9 @@ def test_global_frontdoor_reuses_only_the_recorded_installed_cache(
     env = {key: value for key, value in os.environ.items() if key.upper() not in {
         "PYTHONDONTWRITEBYTECODE", "PYTHONPYCACHEPREFIX", "PYTHONPATH", "PYTHONHOME",
     }}
-    env.update(HOME=str(home), USERPROFILE=str(home))
+    cache_base = home / "Library" / "Caches" if sys.platform == "darwin" else home / "os-cache"
+    env.update(HOME=str(home), USERPROFILE=str(home),
+               LOCALAPPDATA=str(cache_base), XDG_CACHE_HOME=str(cache_base))
     entry = local_bin / ("agent-worktrees.ps1" if shell == "ps1" else "agent-worktrees")
     command = ([executable, "-NoProfile", "-File", str(entry)]
                if shell == "ps1" else [executable, str(entry)])
@@ -93,8 +95,10 @@ def test_global_frontdoor_reuses_only_the_recorded_installed_cache(
     first = invoke()
     cached = {path.relative_to(first): (path.read_bytes(), path.stat().st_mtime_ns)
               for path in first.rglob("*") if path.is_file()}
-    assert re.fullmatch(r"installed-[0-9a-f]{64}", first.name)
-    assert first.parent.samefile(root / "cache" / "python")
+    assert first.name == "bytecode"
+    assert re.fullmatch(r"installed-[0-9a-f]{64}", first.parent.name)
+    assert Path(str(first).removeprefix("\\\\?\\")).is_relative_to(cache_base)
+    assert not (root / "cache" / "python").exists()
     assert any(path.name.startswith("__main__") for path in cached)
     assert invoke() == first
     assert {path.relative_to(first): (path.read_bytes(), path.stat().st_mtime_ns)
@@ -111,7 +115,7 @@ def test_global_frontdoor_reuses_only_the_recorded_installed_cache(
 def test_global_frontdoor_keeps_import_cache_outside_the_selected_slot(
     tmp_path: Path, shell: str, executable: str,
 ) -> None:
-    from agent_procutil import no_window_kwargs, python_cache_args
+    from agent_procutil import no_window_kwargs
     from test_source_install_transactions import _ps, _sh
 
     plugin = Path(__file__).resolve().parents[1]
@@ -127,7 +131,7 @@ def test_global_frontdoor_keeps_import_cache_outside_the_selected_slot(
     (package / "__init__.py").write_text("", encoding="utf-8")
     (package / "__main__.py").write_text(
         "import json,sys\nprint(json.dumps({'args':sys.argv[1:],"
-        "'cache':sys.pycache_prefix,'prefix':sys.prefix}))\n", encoding="utf-8",
+        "'no_write':sys.dont_write_bytecode,'prefix':sys.prefix}))\n", encoding="utf-8",
     )
     local_bin = home / ".local" / "bin"
     shutil.copytree(plugin / "bin", local_bin)
@@ -153,11 +157,9 @@ def test_global_frontdoor_keeps_import_cache_outside_the_selected_slot(
     observed = json.loads(result.stdout)
     assert observed["args"] == ["cache-probe", "argument with spaces"]
     assert Path(observed["prefix"]).resolve() == slot.resolve()
-    cache = Path(observed["cache"])
-    assert cache.parent == Path(python_cache_args(root)[1].split("=", 1)[1]).parent
-    assert re.fullmatch(r"unsealed-[0-9a-f]{32}", cache.name)
+    assert observed["no_write"] is True
+    assert not (root / "cache" / "python").exists()
     assert {path.relative_to(slot): path.read_bytes() for path in slot.rglob("*") if path.is_file()} == before
-    assert list(cache.rglob("__main__*.pyc"))
 
 
 @pytest.fixture

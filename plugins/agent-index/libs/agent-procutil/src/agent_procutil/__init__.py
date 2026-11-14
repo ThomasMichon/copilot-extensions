@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from ._async import spawn_in_kill_on_close_job
     from ._windows_job_types import _JobBasicAccountingInformation as _JobBasicAccountingInformation
     from .daemon_broker import WindowsDaemonProcess
+    from .python_cache import cache_arguments as python_cache_args, policy_arguments as python_cache_policy_args
 
 # Win32 process-creation flags. Read from ``subprocess`` when present (Windows)
 # and fall back to the stable ABI literals so this module imports cleanly off
@@ -56,6 +57,7 @@ __all__ = [
     "no_window_flags",
     "no_window_kwargs",
     "python_cache_args",
+    "python_cache_policy_args",
     "spawn_daemon",
     "spawn_in_kill_on_close_job",
     "spawn_sync_in_kill_on_close_job",
@@ -65,27 +67,18 @@ __all__ = [
 ]
 
 
-def python_cache_args(
-    root: str | os.PathLike[str], *, runtime: str | os.PathLike[str] | None = None,
-) -> list[str]:
-    """Select enabled external bytecode for the target installed generation.
-
-    ``runtime`` is the target interpreter or venv, not the current redirect.
-    Omit it only when launching this process's own installed environment.
-    """
+def _cache_helper(name: str) -> Callable[..., list[str]]:
     if __name__ in sys.modules:
-        from .python_cache import cache_arguments
-    else:
-        import importlib.util
-        from pathlib import Path
-        spec = importlib.util.spec_from_file_location(
-            __name__ + ".python_cache", Path(__file__).with_name("python_cache.py"),
-        )
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        cache_arguments = module.cache_arguments
-
-    return cache_arguments(root, runtime=runtime)
+        from . import python_cache
+        return getattr(python_cache, name)
+    import importlib.util
+    from pathlib import Path
+    spec = importlib.util.spec_from_file_location(
+        __name__ + ".python_cache", Path(__file__).with_name("python_cache.py"),
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return getattr(module, name)
 
 
 def contained_test_mode() -> bool:
@@ -457,7 +450,14 @@ def _resume_suspended_process(pid: int) -> bool:
 
 
 def __getattr__(name: str) -> Any:
-    if name == "ctypes":
+    if name in {"python_cache_args", "python_cache_policy_args"}:
+        try:
+            value = _cache_helper("cache_arguments" if name == "python_cache_args" else "policy_arguments")
+        except (OSError, ImportError, AttributeError):
+            if name == "python_cache_args":
+                raise
+            value = lambda *a, **k: ["-B"]
+    elif name == "ctypes":
         import ctypes
         value = ctypes
     elif name == "asyncio":

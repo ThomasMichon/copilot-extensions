@@ -364,8 +364,8 @@ def test_shim_selector_preserves_actual_argument_bytes_and_mapping(tmp_path: Pat
     assert view.content == body.encode("utf-8")
     if index == 1:
         assert view.content.startswith(b"\n") and view.content.endswith(b"\n")
-    number = next(n for n, line in enumerate(body.splitlines(), 1) if "sys.pycache_prefix" in line)
-    physical = next(n for n, line in enumerate(template.splitlines(), 1) if "sys.pycache_prefix" in line)
+    number = next(n for n, line in enumerate(body.splitlines(), 1) if "arguments = policy_arguments(" in line)
+    physical = next(n for n, line in enumerate(template.splitlines(), 1) if "arguments = policy_arguments(" in line)
     assert owner.diagnostics(f"{view.output}:{number}: error: assignment [assignment]\n") == (
         f"{bootstrap.SELECTOR_TEMPLATES[index]}:{physical}: error: assignment [assignment]\n"
     )
@@ -374,7 +374,7 @@ def test_shim_selector_preserves_actual_argument_bytes_and_mapping(tmp_path: Pat
 
 @pytest.mark.parametrize("index", [0, 1])
 @pytest.mark.parametrize("change", [
-    "launch", "quote", "helper-call", "token", "duplicate", "directive", "embedded-terminator",
+    "launch", "quote", "helper-call", "policy-version", "token", "duplicate", "directive", "embedded-terminator",
 ])
 def test_shim_selector_rejects_changed_transport_or_helper(
     tmp_path: Path, index: int, change: str,
@@ -390,6 +390,8 @@ def test_shim_selector_rejects_changed_transport_or_helper(
         )
     elif change == "helper-call":
         changed = original.replace("runtime=sys.executable", "runtime=sys.prefix", 1)
+    elif change == "policy-version":
+        changed = original.replace("assert POLICY_VERSION == 2", "assert POLICY_VERSION == 1", 1)
     elif change == "token":
         changed = original.replace("try:\n", "# @@PLUGIN@@\ntry:\n", 1)
     elif change == "duplicate":

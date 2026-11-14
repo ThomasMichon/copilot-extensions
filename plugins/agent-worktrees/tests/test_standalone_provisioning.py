@@ -44,7 +44,8 @@ def standalone(monkeypatch, tmp_path):
     monkeypatch.setattr(local_cache_refresh, "sessionstart_diagnostic", lambda *a, **k: "")
     monkeypatch.setattr(main, "_anchor_hygiene_diagnostic", lambda *args: "")
     monkeypatch.setattr(main, "_aw_runtime_home", lambda: runtime)
-    monkeypatch.setattr(main, "_windowless_python", lambda: "synthetic-pythonw")
+    python = str(runtime / "versions" / "fixture" / "Scripts" / "pythonw.exe")
+    monkeypatch.setattr(main, "_windowless_python", lambda: python)
     monkeypatch.setattr(main, "windowless_python_env", lambda executable: {"PYTHONUTF8": "1"})
     detach = {"creationflags": 123}
 
@@ -91,7 +92,7 @@ def standalone(monkeypatch, tmp_path):
 
     return SimpleNamespace(
         run=run, events=events, plans=plans, children=children,
-        runtime=runtime, repo=tmp_path, environment=environment, spawn=spawn,
+        runtime=runtime, python=python, repo=tmp_path, environment=environment, spawn=spawn,
         payload=payload,
         original_spawn=original_spawn, original_detached=original_detached,
     )
@@ -104,10 +105,9 @@ def test_standalone_provisioning_launches_one_noop_candidate_without_foreground_
     assert standalone.plans == []
     assert len(standalone.children) == 1
     argv, kwargs = standalone.children[0]
-    assert argv[:2] == ["synthetic-pythonw", "-X"]
-    prefix = Path(argv[2].removeprefix("pycache_prefix=").removeprefix("\\\\?\\"))
-    assert prefix.is_relative_to(standalone.runtime / "cache" / "python")
-    assert argv[3:] == [
+    assert argv[:2] == [standalone.python, "-B"]
+    assert not (standalone.runtime / "cache" / "python").exists()
+    assert argv[2:] == [
         "-m", "agent_worktrees", "reconcile-plugins",
         "--repo", str(standalone.repo),
         "--status", str(standalone.runtime / "logs" / "provision-status.json"),
@@ -277,10 +277,9 @@ def test_standalone_returns_while_the_existing_child_owns_optional_work(
             assert time.monotonic() < deadline
             time.sleep(0.01)
         cached = Path((logs / "worker-cache").read_text(encoding="utf-8"))
-        assert Path(str(cached).removeprefix("\\\\?\\")).is_relative_to(
-            standalone.runtime / "cache" / "python"
-        )
-        assert cached.is_file()
+        assert not cached.exists()
+        assert not list(worker_root.rglob("*.pyc"))
+        assert not (standalone.runtime / "cache" / "python").exists()
         assert not (logs / "worker-finished").exists()
         assert standalone.events[-2:] == ["completed", "returned"]
         captured = capsys.readouterr()

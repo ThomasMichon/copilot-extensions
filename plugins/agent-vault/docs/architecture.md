@@ -261,8 +261,13 @@ master passwords, so these commands work while the vault is locked.
 The POSIX installer writes a systemd user unit (`agent-vault.service`) when systemd is available. It runs:
 
 ```text
-<runtime>/.venv/bin/python -m agent_vault.service --foreground --persistent
+/bin/sh <runtime>/bin/vault-service.sh <selected-slot-python> <runtime> --foreground --persistent --handoff-stdin --configuration-root <configuration-root>
 ```
+
+The installed helper selects the completed slot's shared OS-cache policy or
+disables bytecode writes for an unsealed or older provider before invoking
+`agent_vault.service`. The unit's selected runtime and captured configuration
+remain explicit; no resident cache collector is added.
 
 The Windows installer registers a Scheduled Task named `AgentVault`, triggered at logon with a 15-second delay, running the resolved version-slot Python through `conhost.exe --headless ... -m agent_vault.service --foreground --persistent`.
 

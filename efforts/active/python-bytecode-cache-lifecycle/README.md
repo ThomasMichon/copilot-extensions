@@ -104,7 +104,9 @@ nor reinterpret an ignored file or a directory name as disposal authority.
   divergent cache roots or a new resident cleanup service; provider foundation
   merged in #12145, with consumer adoption still separate.
 - [ ] Integrate process-exit, runtime-retirement and bounded orphan cleanup
-  with the existing lifecycle owners, preserving active and rollback users.
+  with the existing lifecycle owners, preserving active and rollback users;
+  indexed retirement collection merged in #12506, consumer no-write adoption
+  and legacy reconciliation still remain.
 - [ ] Update canonical launcher/installer sources and regenerate their declared
   consumers; keep independently updated old consumers compatible.
 - [ ] Add bounded, safety-qualified cleanup of recognized existing cache trees
@@ -154,6 +156,68 @@ mixed-version compatibility and safety assertions are implementation acceptance
 gates, not claims that the current code already provides them.
 
 ## Journal
+
+### 2026-11-14 - Consumer source migration and native controls in progress
+
+- Added the complete-vector facade while preserving the legacy always-prefix
+  API and standalone loader. Minimal bundles without cache companions take
+  `-B`; 15 focused facade/legacy controls pass without widening the module cap.
+- Migrated canonical payload templates, Worktrees dispatchers/hooks, Manager
+  launchers and Python producers toward policy-version-2 vectors. Older
+  providers take `-B`, not a newly minted legacy namespace. Read-only and
+  source-injecting bootstraps do not allocate a prefix.
+- Native Manager CMD/PowerShell installed-cache and no-write controls pass.
+  Corrected CRLF byte transport, stock PowerShell array decoding and CMD probe
+  quoting through actual launchers. Bridge and Codespaces launch packets pass
+  six and 16 cases respectively; broader consumer acceptance remains open.
+- Vault's Windows launcher and strict daemon-admission controls pass the
+  selected new policy cases. An independent Unicode-home fixture initially
+  failed because RedirectionGuard refused its junction; a physical isolated
+  Unicode home proves the same decoding contract and passes without weakening
+  the guard or changing a host runtime.
+- The broad Invocation packet reached its unchanged aggregate limit and
+  exposed inherited no-self-provision fixture state. The corrected isolated
+  first-use and mixed-version residual passes all 20 cases; the actual native
+  cache-vector packet passes 14 cases. These focused results are not a pass of
+  the timed-out complete file. Manager's serial packet passes 162 cases with
+  14 platform skips; its corrected residual and engine-client packet pass one
+  and 130 cases respectively.
+- Windows global frontdoors and receiving-ledger controls pass 13 cases;
+  outer native hooks pass 12 cases with six platform skips, and explicit
+  selected-update forwarding passes 42 cases with 32 platform skips.
+  Dispatch's native descriptors pass nine cases; Vault's selected launcher
+  and same-process controls pass two six-case packets.
+- A disposable Linux source export proves the POSIX helper's three cache
+  policies, six generated frontdoor cases, three legacy global frontdoors,
+  six native hook cases and 22 service-publication fault/best-effort cases.
+  Exact native unit-writer and STOP-admission controls pass 83 cases on both
+  Windows and Linux. The source change includes the dependent closed-shape
+  admission for Vault's new helper and installed/legacy cache vectors.
+- Source migration, regeneration, full consumer regression checks and review
+  are still in progress. Legacy update relief, complete-flow evidence, release
+  verification and the parent reconciliation remain unfinished; no real cache
+  deletion, candidate install or host rollout is authorized or claimed.
+
+### 2026-11-14 - Indexed collector merged; consumer migration next
+
+- Merged #12506 after current-head Copilot approval, resolved review threads
+  and every required/source-retention/bootstrap CI gate passed. The collector
+  is on `dev`; this is not an installed rollout or completion of this effort.
+- Final native collector/provider controls pass 68 Windows cases (nine skips)
+  and 66 Linux cases (11 skips). Reference compatibility passes 53 Windows and
+  35 Linux cases; four constructed-environment and five narrowed foundation
+  admission cases pass. The broader foundation/Bridge selection reached its
+  unchanged packet ceiling, not a passing full-portfolio result.
+- The final exact-source unit packet passes all 4,973 admitted cases after
+  preserving new upstream inventory. Consumed native fixtures were removed
+  through their original scratch owner. No module-size baseline was widened.
+- Removed the consumed collector export/draft directory after merge, reclaiming
+  2,412,164,185 logical bytes of owned validation scratch. This is not legacy
+  application-cache reclamation and does not satisfy that remaining gate.
+- Continue with canonical launcher/provider-vector adoption and no-write
+  fallback for older providers, then bounded evidence-qualified legacy update
+  relief. The parent issue and all remaining Plan/Validation gates stay open;
+  real host cleanup and candidate rollout remain outside this authorization.
 
 ### 2026-11-14 - Archive and build-context correction
 

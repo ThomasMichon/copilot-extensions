@@ -16,11 +16,10 @@ Generated shims:
 - leave a replaceable payload working directory before provisioning or launch;
 - resolve the runtime only through the payload's canonical runtime resolver;
 - preserve caller arguments and child exit status;
-- send enabled Python bytecode caches to the resolved legacy state root's
-  `cache/python`, outside version slots (extended paths for native Windows
-  interpreters, including Windows Git Bash), with installation-scoped reuse or
-  fresh invocation namespaces under the
-  [shared cache contract](../agent-procutil/README.md#managed-python-bytecode-cache);
+- forward the complete policy-version-2 vector from the selected runtime's
+  [shared cache provider](../agent-procutil/README.md#platform-cache-provider-contract):
+  reuse completed runtimes' private OS-user-cache namespaces, or use `-B` for
+  unsealed, unavailable or older providers, without per-invocation allocation;
 - self-provision only through the same payload's installer/snapshot;
 - never scan installed marketplaces or resolve a sibling command through
   `PATH`.

@@ -44,10 +44,12 @@ credential-work readiness or changed selection returns exit 1; success returns
 scheduling, unlock a database, select optional dependencies or retire a peer.
 Older runtimes reject this callback rather than falling back to ordinary start.
 
-CLI service launches, the Windows task launcher and the existing POSIX service
-unit keep enabled Python bytecode in the owning home's `cache/python`, outside
-immutable slots. Late private-handoff imports follow that same policy; Python
-bytecode is separate from credential caches and does not change auth expiry.
+The Windows task launcher and POSIX service helper use the
+[shared platform-cache policy](../../../libs/agent-procutil/README.md#platform-cache-provider-contract):
+completed slots reuse private OS-user-cache bytecode; unsealed or older
+providers disable writes. CLI service launches use a source-injecting bootstrap
+and always disable bytecode writes, including late private-handoff imports.
+Python bytecode is separate from credential caches and does not change auth expiry.
 
 The newcomer binds a fresh endpoint beside a live predecessor and atomically
 publishes it through the existing native-transport rendezvous. TCP can use an
