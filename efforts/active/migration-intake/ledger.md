@@ -219,3 +219,28 @@ candidate or Plan row is created. #5245's broader tail, release consumers and
 source-install duties remain independent. Receiving planned unresolved work
 does not establish causal repair, flake acceptance, executed evidence or
 claim/resource transfer.
+
+## Finite external image-mapping cleanup intake (2026-11-14 UTC)
+
+This records the domain Plan acceptance already merged in #12573. The
+complete current owning ROOT, strict framework and this intake contract/ledger
+were read back; the route was missing from this append-only record.
+Earlier rows and unresolved residuals remain unchanged.
+
+| Candidate | Source | Disposition | Primary canonical owner | Tracker outcome |
+|-----------|--------|-------------|-------------------------|-----------------|
+| Runner-owned external executable mapping after successful child exit, bounded handling OR truthful retained-artifact reconciliation | Public #7643, complete original and both eligible refinements | routed | [test-portfolio-rationalization](../test-portfolio-rationalization/README.md), Phase 5 P7643/V7643/G7643 only | Existing #7643 remains OPEN pending a separate source-specific judgment; no new issue or umbrella, implementation appointment, cleanup or claim release |
+
+Phase 7 I7643 records this deduplication/ownership route, not a second primary
+owner or completed technical acceptance. The reviewed domain Plan receives
+the whole finite union directly. Its separate Phase 5 family does not join
+F4 or #10225 and does not absorb installer #7494/#7686 retained-input failures;
+no common cause or completion is inferred from shared terminology.
+
+Preserve bounded exact-owner handling **OR** a truthful retained-artifact
+outcome, successful-child versus failed-cleanup evidence, distinct primary
+and cleanup errors, actual artifact identity, original containment/budgets
+and the existing runner/group/sandbox and later cleanup custodians. Routing
+does not authorize a live XtaCache operation, process/service action, deletion,
+test, source change, resource transfer or technical completion. All ten
+P7643/V7643/G7643 technical rows remain unchecked.

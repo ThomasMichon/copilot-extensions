@@ -301,9 +301,11 @@ is introduced.
 
 The separate P7643/V7643/G7643 Phase 5 runner family enters through existing
 Phase 7 migration intake and normal domain-Plan review. It is not a fifth F4
-member or #10225 intake. Keep #7643 independently OPEN during this proposal,
-the existing runner/group/sandbox owner, later exact-path cleanup custody,
-OPEN #1303, all existing rows and all original bounds. Complete reviewed
+member or #10225 intake. Preserve the existing runner/group/sandbox owner,
+later exact-path cleanup custody, OPEN #1303 and all original bounds.
+The earlier independent-OPEN tracking placement remains historical evidence;
+a separate current whole-contract judgment may supersede that placement,
+never artifact custody or technical acceptance. Complete reviewed
 Plan/local AND actual global Validation, Coordination and dated Journal
 delivery precede a separate source judgment; no implementation appointment,
 claim expiry, resource release or generic ACK follows.
@@ -836,10 +838,13 @@ investigator; #6131 / PR #6135's watch-generation repair remains independent.
   `tools/plugin_test_containment.py` boundary, original containment and
   item/group/plugin/resource limits. Installer #7494/#7686 retained-input
   failures and #10225's distinct post-exit sharing-handle family stay separate.
-- [ ] **P7643-5:** Keep #7643 OPEN during this proposal under its existing
-  runner/group/sandbox owner; later exact-path cleanup remains separately
-  authorized. Intake is not source/resource transfer or an implementation
-  appointment.
+- [ ] **P7643-5:** Preserve the existing runner/group/sandbox owner and
+  separately authorized later exact-path cleanup. A successful child,
+  related theme or partial receiver is not whole-source acceptance. After
+  complete reviewed receiving/routing and current source readback, a separate
+  tracking judgment may supersede the earlier independent-OPEN placement
+  without declaring a repair or releasing custody. Intake is not a
+  source/resource transfer or implementation appointment.
 
 ##### Local Validation
 
@@ -880,7 +885,7 @@ investigator; #6131 / PR #6135's watch-generation repair remains independent.
 - [ ] Place each accepted public tracker item in exactly one existing phase,
   extending this plan before implementation when necessary.
 - [ ] Use synthetic fixtures and reproducible public test cases.
-- [ ] **I7643:** Route the separate P7643/V7643/G7643 Phase 5 family through
+- [x] **I7643:** Route the separate P7643/V7643/G7643 Phase 5 family through
   this existing migration-intake deduplication/ownership and domain-review
   process. Preserve its independent source status and existing cleanup
   owner; this does not add #7643 to F4 or #10225, run a test or release custody.
@@ -2001,8 +2006,12 @@ Phase 7 intake; this is not #7643's already-attributed external mapping.
   Preserve all #1303 body inheritance and live claims, original alternatives,
   checked foundations, actual ROOT global Validation and complete history.
   No new executor, blanket acknowledgement, claim expiry or handoff follows.
-- [ ] **F4-C2:** Preserve #7643 independently OPEN, #8521's explicit OPEN
-  diagnostic/private-cache residual and #9460/#9467's separate claimed
+- [ ] **F4-C2:** Preserve #7643's separate Phase 5 P7643/V7643/G7643 family
+  and original artifact/cleanup custody; I7643 records routing, not repair.
+  Its earlier independent-OPEN placement remains historical evidence for
+  the separate current whole-contract tracking judgment. Preserve #8521's
+  explicit OPEN diagnostic/private-cache residual and #9460/#9467's separate
+  claimed
   teardown-fixture/production guard. #9699 is finite completed fixture
   credit, not a production-guard relaxation or portfolio completion.
   The separate #9375/#10239 cases are not intake scope.
@@ -2668,3 +2677,29 @@ cleanup outcomes, original limits and actual later cleanup custody.
 The source remains OPEN during the proposal; no test, native reproduction,
 service/process action, file cleanup, implementation, technical acceptance
 or source/resource release is claimed.
+
+### 2026-11-14 UTC - Runner-mapping route recorded after reviewed delivery
+
+#12573 merged the complete direct P7643/V7643/G7643 domain Plan. Actual
+whole-current ROOT/strict-framework/intake-contract/ledger readback verified
+that delivery and found the missing intake record. The append-only
+[migration ledger](../migration-intake/ledger.md#finite-external-image-mapping-cleanup-intake-2026-11-14-utc)
+now records the single Phase 5 canonical owner and existing #7643 tracker.
+
+Only administrative I7643 is checked; all ten technical P7643/V7643/G7643
+rows remain unchecked. Earlier proposal-stage counts and OPEN placement
+remain dated history, not technical completion. Source-specific tracking
+judgment and original artifact/cleanup custody remain separate. No test,
+native reproduction, cleanup, service/process action, implementation or
+resource release occurred.
+
+The earlier campaign disposition on #7643 kept the whole original
+independently OPEN because the then-compared #3963 receiver did not directly
+accept this mapping/whole-run outcome; it rejected partial overlap as
+whole-source transfer and added no generic owner ACK. That historical
+placement is preserved, not reinterpreted as technical completion or an
+indefinite consent condition. The accepted dedicated Phase 5 union and its
+recorded routing now provide the complete alternative receiver. Normal
+review and complete current source/receiver readback precede any separate
+tracking supersession; original artifact custody and every technical row
+remain unchanged by that administrative judgment.
