@@ -160,6 +160,7 @@ async def resolve_controller_cwd(
     from .acquisition_authority import worktree_command
     from .caller_project import _OWNER_REF
     from .caller_session import normalize_caller_session_id
+    from .routes.worktree_reporting import reported_machine
     from .session_manager import _REQUEST_OVERRIDES_KEY
 
     raw_path = getattr(caller, "caller_worktree", None)
@@ -214,8 +215,13 @@ async def resolve_controller_cwd(
         if len(rows) != 1:
             raise ValueError("controller worktree is not tracked")
         row = rows[0]
+        reporting_machine = reported_machine(result)
+        machine_matches = (
+            _controller_machine_matches(row, machine)
+            if reporting_machine is None else reporting_machine == machine
+        )
         if (
-            row.get("repo") != project or not _controller_machine_matches(row, machine)
+            row.get("repo") != project or not machine_matches
             or row.get("status") in {"finalized", "complete", "completed", "archived"}
             or not isinstance(row.get("path"), str)
         ):

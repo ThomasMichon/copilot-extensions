@@ -1,0 +1,9 @@
+{
+  "comment": "Verify controller identity from current Worktrees reporting context rather than optional row labels",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}
