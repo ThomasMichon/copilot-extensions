@@ -38,6 +38,10 @@
       "type": "patch"
     },
     {
+      "plugin": "agent-remote-driver",
+      "type": "patch"
+    },
+    {
       "plugin": "agent-ssh",
       "type": "patch"
     },
@@ -54,6 +58,10 @@
       "type": "patch"
     },
     {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    },
+    {
       "plugin": "worktree-manager",
       "type": "patch"
     },
@@ -63,6 +71,14 @@
     },
     {
       "plugin": "libs/agent-procutil",
+      "type": "patch"
+    },
+    {
+      "plugin": "services/chat",
+      "type": "patch"
+    },
+    {
+      "plugin": "services/ssh",
       "type": "patch"
     },
     {
