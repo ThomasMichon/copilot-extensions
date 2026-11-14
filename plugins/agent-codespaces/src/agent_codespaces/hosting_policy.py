@@ -29,6 +29,20 @@ _OWNER_POLICY_JSON = (
     "print(json.dumps(p))\n"
 )
 _RECEIVER_ABSENT = "__HOSTING_RECEIVER_ABSENT__"
+# OpenSSH's own connection/transport failure status: no receiver answer exists.
+_SSH_TRANSPORT_FAILURE_EXIT = 255
+
+
+def _transport_unavailable(result) -> str:
+    detail = (
+        (result.stderr or "").strip() or (result.stdout or "").strip()
+        or "no diagnostic output"
+    )
+    return (
+        "Guest repository hosting check is unavailable: SSH transport failed "
+        f"(exit 255) before the receiver answered: {detail}"
+    )
+
 
 def guest_check_command(workspace: str | None, *, operation: str = "launch") -> str:
     if not isinstance(workspace, str) or not workspace.startswith("/") or "\0" in workspace:
@@ -102,6 +116,8 @@ async def require_guest_hosting(
             f"bash -lc {shlex.quote(command)}",
             input_bytes=payload, timeout=90,
         )
+    if result.exit_code == _SSH_TRANSPORT_FAILURE_EXIT:
+        raise RuntimeError(_transport_unavailable(result))
     if result.exit_code:
         raise RuntimeError(
             "Guest repository hosting refused or receiver unsupported: "
@@ -156,6 +172,8 @@ def require_codespace_hosting(
                 result = await exec_with_retry(
                     manager, actual_name, f"bash -lc {shlex.quote(command)}", timeout=90,
                 )
+                if result.exit_code == _SSH_TRANSPORT_FAILURE_EXIT:
+                    raise RuntimeError(_transport_unavailable(result))
                 if result.exit_code:
                     raise RuntimeError("Required guest repository hosting receiver is unsupported")
                 return

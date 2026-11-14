@@ -208,6 +208,30 @@ async def test_transport_probe_rejects_invalid_protocol_result(output):
     )()
 
 
+async def test_transport_probe_ssh_255_is_unknown_not_negative():
+    transport = SimpleNamespace(run=AsyncMock(return_value=(255, "", "Connection reset")))
+    # A health hint must not tear down a possibly-live relay on SSH failure.
+    assert await endpoints.transport_serving_probe(transport, 51000, fail_open=True)()
+    with pytest.raises(endpoints.RelayProbeTransportError):
+        await endpoints.transport_serving_probe(transport, 51000, fail_open=False)()
+    # A genuine probe failure remains an authoritative negative.
+    transport.run.return_value = (1, "", "")
+    assert not await endpoints.transport_serving_probe(transport, 51000, fail_open=True)()
+
+
+@pytest.mark.parametrize("fail_open", [True, False])
+async def test_reconstructed_probe_ssh_255_is_unknown_not_negative(probe_runtime, fail_open):
+    probe_runtime.process.returncode = 255
+    probe = endpoints.endpoint_serving_probe_factory(
+        {"ssh": {"host_alias": "example.test"}}, fail_open=fail_open, timeout=5.0,
+    )(51000)
+    if fail_open:
+        assert await probe()
+    else:
+        with pytest.raises(endpoints.RelayProbeTransportError):
+            await probe()
+
+
 @pytest.mark.parametrize("cancel", [False, True])
 async def test_readiness_deadline_cancels_and_cleans_owned_probe(
     probe_runtime, cancel,
