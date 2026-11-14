@@ -59,7 +59,9 @@ joins an acquisition already in flight. Queries return only that registration's
 projected facts, not newer shared-cache facts that bypass its generation fence.
 Large fan-out commits complete registration projections until the event/byte
 budget fills; remaining projections resume after consumers acknowledge retained
-events. Unknown facts preserve previously accepted membership and report partial
+events. A persisted last-projected sequence prioritizes older projections, so a
+hot first subscriber cannot repeatedly take the newly available event budget.
+Unknown facts preserve previously accepted membership and report partial
 coverage. Partial/unavailable discovery never proves absence. Clock-only age
 changes are evaluated at a captured cycle instant. Departure is selection loss,
 not proof that a PR closed or merged. Population events do not confer permission

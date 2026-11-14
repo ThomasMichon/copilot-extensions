@@ -119,7 +119,7 @@ def validate(value, namespace, *, version=3):
     registrations, requests = {}, set()
     for row in value["registrations"]:
         _fields(row, "registration_id request_id consumer target expires_at acknowledged cancelled "
-                "request delivered acknowledged_event members projected coverage generation baseline")
+                "request delivered acknowledged_event members projected coverage generation baseline projected_sequence")
         for name in ("registration_id", "request_id", "consumer", "target"):
             text(row[name])
         request_key = row["consumer"], row["request_id"]
@@ -153,6 +153,9 @@ def validate(value, namespace, *, version=3):
             facts(pull["facts"], identities[row["target"]])
         coverage(row["coverage"])
         _integer(row["generation"], 1)
+        _integer(row["projected_sequence"])
+        if row["projected_sequence"] >= value["next_sequence"]:
+            raise ValueError("invalid filtered projection order")
         if not isinstance(row["baseline"], dict) or len(json.dumps(row["baseline"]).encode()) > 1_000_000:
             raise ValueError("invalid filtered baseline")
     previous = 0

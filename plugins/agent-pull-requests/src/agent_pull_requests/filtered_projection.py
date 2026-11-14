@@ -128,6 +128,7 @@ class FilteredProjection:
                     and not r["cancelled"] and r["expires_at"] > now]
             if not rows:
                 return {"status": "withdrawn", "observed": 0}
+            rows.sort(key=lambda row: row["projected_sequence"])
             repository = self.repository(state, key)
             cached = {p["number"]: p for p in repository["pulls"]}
             old = {p["number"]: p["facts"] for p in repository["pulls"]}
@@ -202,6 +203,7 @@ class FilteredProjection:
                 ):
                     self.event(state, row, None, "coverage", coverage)
                 row.update(members=sorted(members), coverage=coverage)
+                row["projected_sequence"] = state["next_sequence"] - 1
                 try:
                     trim(state, new_sequence=first_new, now=now)
                 except RepositoryBackpressure:
