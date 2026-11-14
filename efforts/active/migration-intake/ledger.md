@@ -244,3 +244,30 @@ and the existing runner/group/sandbox and later cleanup custodians. Routing
 does not authorize a live XtaCache operation, process/service action, deletion,
 test, source change, resource transfer or technical completion. All ten
 P7643/V7643/G7643 technical rows remain unchecked.
+
+## Finite provider-appropriate update-guidance intake (2026-11-14 UTC)
+
+This proposes `routed`; it takes effect only when normal review merges the
+accompanying complete direct domain Plan amendment. Ledger publication alone
+is not domain acceptance. Prior rows and unresolved residuals remain unchanged.
+
+| Candidate | Source | Disposition | Primary canonical owner | Tracker outcome |
+|-----------|--------|-------------|-------------------------|-----------------|
+| Provider/policy-appropriate update-authentication advice with honest timeout/unavailable classification and unchanged update result | Public #12466, complete original | routed | [account-aware-operations](../account-aware-operations/README.md), Phase 4 P12466/V12466/G12466 only | Retain existing #12466 pending reviewed delivery, current receiving/source readback and separate judgment; no new issue or umbrella |
+
+Phase 5 is the intake/review route, not a second primary phase. The existing
+remote/provider diagnostic and scoped-execution contract is the fit. Current
+tracker deduplication retains #12466; broader auth/provider vocabulary does not
+by itself prove duplicate scope or the absence of another implementation.
+The finite source study identifies a generic-HTTPS failure branch with
+unconditional GitHub login advice, while crediting existing structured refusal,
+credential isolation and configured timeout controls. It establishes no global
+absence or technical completion.
+
+Keep GitHub/Enterprise advice valid, unknown/unrelated-provider diagnostics
+neutral, timeout/unavailability distinct from credential rejection and the
+original status/update outcome unchanged. Existing source custodians,
+Draft status, temporary-token implementation restriction, #5791/#810 scope
+and all prior Plan/Validation rows remain. Direct reviewed Plan acceptance
+does not appoint an executor, authorize authentication/test/update/provider
+effects or release a source/resource claim.
