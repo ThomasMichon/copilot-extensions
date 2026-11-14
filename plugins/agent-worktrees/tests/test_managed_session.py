@@ -793,10 +793,12 @@ def test_generated_registry_admission_needs_no_yaml_install(tmp_path, monkeypatc
     assert module.admitted({"sessionId": "fresh", "cwd": str(anchor)}, home=tmp_path)
 
 
-@pytest.mark.parametrize("container", [False, True])
+@pytest.mark.parametrize("substrate", [
+    "wsl", "container", "private-overlay", "private-fuse-overlay", "unconfirmed",
+])
 @pytest.mark.parametrize("implementation", ["standalone", "runtime"])
 def test_admission_shares_kernel_and_container_platform_detection(
-    tmp_path, monkeypatch, container, implementation,
+    tmp_path, monkeypatch, substrate, implementation,
 ):
     from types import SimpleNamespace
 
@@ -807,7 +809,7 @@ def test_admission_shares_kernel_and_container_platform_detection(
         monkeypatch.setattr(module, "detect_platform", detect_platform)
     detector = sys.modules[module.detect_platform.__module__]
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
-    if container:
+    if substrate != "wsl":
         monkeypatch.setenv("WSL_DISTRO_NAME", "inherited")
     else:
         monkeypatch.delenv("WSL_DISTRO_NAME", raising=False)
@@ -824,15 +826,32 @@ def test_admission_shares_kernel_and_container_platform_detection(
             return False
 
         def read_text(self, **kwargs):
-            return "0::/docker/example" if container else "0::/user.slice"
+            if self.path == "/proc/1/cgroup":
+                return (
+                    "0::/docker/example" if substrate == "container" else "0::/user.slice"
+                    if substrate == "wsl" else "0::/"
+                )
+            if self.path == "/proc/self/mountinfo":
+                filesystem = {
+                    "private-overlay": "overlay",
+                    "private-fuse-overlay": "fuse.fuse-overlayfs",
+                }.get(substrate, "ext4")
+                return f"29 23 0:25 / / rw - {filesystem} root rw"
+            raise AssertionError(f"unexpected proc read: {self.path}")
 
     monkeypatch.setattr(detector, "Path", Probe)
     anchor, registry = fixture_project(tmp_path)
     other = tmp_path / "other"
-    selected = "linux" if container else "wsl"
+    selected = "wsl" if substrate in {"wsl", "unconfirmed"} else "linux"
     paths = {name: str(anchor if name == selected else other) for name in ("windows", "linux", "wsl")}
     (registry / "repos.yaml").write_text(json.dumps({"repos": {"example": paths}}))
-    assert module.admitted({"sessionId": "classified", "cwd": str(anchor)}, home=tmp_path)
+    if substrate == "unconfirmed":
+        with pytest.raises(ValueError, match="execution platform is unconfirmed"):
+            module.detect_platform()
+        assert not module.admitted({"sessionId": "classified", "cwd": str(anchor)}, home=tmp_path)
+    else:
+        assert module.detect_platform() == selected
+        assert module.admitted({"sessionId": "classified", "cwd": str(anchor)}, home=tmp_path)
 
 
 def test_sdk_cell_cache_revokes_changed_resolver_ownership(tmp_path, monkeypatch):

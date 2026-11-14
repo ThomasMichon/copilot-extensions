@@ -21,7 +21,7 @@ def topology(tmp_path):
                     "hostname": "generated-host",
                     "alias": "example-transport",
                 },
-                "example-host-wsl": {"hostname": "generated-host-wsl"},
+                "example-host-wsl": {"hostname": "generated-host"},
             },
         }),
         encoding="utf-8",
@@ -359,7 +359,7 @@ def test_related_native_topology_availability(
         assert report["current_machine"] == config.machine
 
 
-@pytest.mark.parametrize("marker", ["/.dockerenv", "/run/.containerenv"])
+@pytest.mark.parametrize("marker", ["/.dockerenv", "/run/.containerenv", None])
 def test_registered_container_identity_survives_shared_wsl_kernel(tmp_path, monkeypatch, marker):
     local = tmp_path / "local.yaml"
     local.write_text(yaml.safe_dump({
@@ -371,10 +371,15 @@ def test_registered_container_identity_survives_shared_wsl_kernel(tmp_path, monk
     monkeypatch.setattr("sys.platform", "linux")
     monkeypatch.setattr("os.uname", lambda: SimpleNamespace(release="6.6-microsoft-standard-WSL2"), raising=False)
     real_read_text = Path.read_text
-    monkeypatch.setattr(
-        Path, "read_text", lambda path, *args, **kwargs: "0::/user.slice"
-        if path == Path("/proc/1/cgroup") else real_read_text(path, *args, **kwargs),
-    )
+
+    def read_text(path, *args, **kwargs):
+        if path == Path("/proc/1/cgroup"):
+            return "0::/" if marker is None else "0::/user.slice"
+        if path == Path("/proc/self/mountinfo"):
+            return "29 23 0:25 / / rw - overlay root rw"
+        return real_read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", read_text)
     monkeypatch.setenv("WSL_DISTRO_NAME", "inherited-example-value")
     real_is_file = Path.is_file
     monkeypatch.setattr(
@@ -383,6 +388,7 @@ def test_registered_container_identity_survives_shared_wsl_kernel(tmp_path, monk
         if path in (Path("/.dockerenv"), Path("/run/.containerenv")) else real_is_file(path),
     )
     config = cfg.load_config(local, include_control_plane_related_pr=False)
+    assert cfg.detect_platform() == "linux"
     assert config.platform == "linux"
     assert config.machine == "example-container"
     assert local.read_bytes() == before

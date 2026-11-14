@@ -1046,7 +1046,7 @@ advertised as HTTP generation 26 (`codespace_launch_policy`).
 Codespace admission and teardown run finite claim/release provider commands
 off the serving loop, using the existing contained process runner and 30-second
 provider deadline. Relay launch-environment resolution uses the same boundary
-with its 15-second deadline, both on fresh start and cold recovery. These calls
+and the same 30-second deadline, both on fresh start and cold recovery. These calls
 prefer the active registered provider command, preserving its installation
 context; `PATH` is the legacy fallback.
 

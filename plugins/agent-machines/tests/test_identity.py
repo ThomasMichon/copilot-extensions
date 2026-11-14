@@ -78,6 +78,30 @@ def test_unknown_machine_preserves_raw_fallback(tmp_path):
     assert identity.topology_path is None
 
 
+def test_discover_json_reports_unconfirmed_execution_root(monkeypatch, tmp_path, capsys):
+    from agent_machines import __main__ as cli, identity as identity_module
+
+    def unconfirmed() -> str:
+        raise ValueError("execution platform is unconfirmed: private WSL root lacks interop evidence")
+
+    monkeypatch.setattr(identity_module, "local_execution_platform", unconfirmed)
+    monkeypatch.setattr(identity_module.platform, "node", lambda: "observed-host")
+    monkeypatch.setattr(cli._discover, "read_registry", lambda: {})
+    monkeypatch.setattr(cli._discover, "read_projects", lambda: {})
+    monkeypatch.setattr(cli._layout, "resolve_cwd_repo", lambda: ("example", tmp_path, tmp_path))
+    monkeypatch.setattr(
+        cli._discover, "discover",
+        lambda *_args, **_kwargs: pytest.fail("unconfirmed execution must not proceed to discovery"),
+    )
+    assert cli.main(["discover", "--json"]) == 2
+    captured = capsys.readouterr()
+    assert json.loads(captured.out) == {
+        "ok": False,
+        "error": "execution platform is unconfirmed: private WSL root lacks interop evidence",
+    }
+    assert captured.err == ""
+
+
 @pytest.mark.parametrize("other", [
     {"key": "other", "display_name": "Legacy label"},
     {"key": "other", "alias": "Legacy label"},

@@ -24,7 +24,7 @@ def reader(monkeypatch):
         "config", "output", "git_ops", "sessions", "state_root", "tracking",
         "installer", "installation_cli", "machine_instructions", "pr_config",
         "session_binding_cli", "status_updater_cli", "worktree_identity",
-        "context_get_keys",
+        "context_get_keys", "context_capabilities",
     ):
         module = types.ModuleType(f"{name}.{child}")
         setattr(package, child, module)
