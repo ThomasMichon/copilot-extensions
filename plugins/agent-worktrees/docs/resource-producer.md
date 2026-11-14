@@ -6,6 +6,11 @@ It does not allocate, start, remove, or discover resources itself. It has no
 Docker dependency, sibling installer, authentication bootstrap, or second ledger.
 Reusable fleet borrowing/return and legacy claims keep their existing semantics.
 
+The opt-in [retained artifact disposition](#retained-artifact-disposition) below
+adds logical completion with retained bytes without changing the existing
+disposable lifetime or absence-only `close`. Its storage policy adapter is
+documented in [artifact-storage.md](artifact-storage.md).
+
 Retained local relationship responsibility uses the separate
 [resource-relationship API](resource-relationship.md), not this disposable
 allocation/absence protocol. Both share protected ledger preservation;
@@ -78,6 +83,57 @@ ref with a bound ref;
 the token remains the stable operation handle. Same-identity bind is idempotent;
 different identity or a ref collision is refused without changing the pending
 claim. Recovery without the private fence requires a registered provider probe.
+
+## Retained artifact disposition
+
+Negotiate `artifact_retention: 1` and `optional_lifetimes` containing
+`artifact-owned` from `resource-producer capabilities` before using this
+extension. Missing support is unavailable, not permission to fall back to
+absence-only completion or generic claim release. Existing callers, default
+reservations and callback envelopes retain their version-1 byte shape.
+
+Reserve with the additional `"lifetime":"artifact-owned"` field and follow the
+same reserve/begin/create/bind protocol. Only this explicitly selected lifetime
+adds `"lifetime":"artifact-owned"` to its callback envelope. Once the actual
+allocation is bound and its process owner has settled the work, request:
+
+```bash
+printf '%s' '{"token":"TOKEN_FROM_RESERVE"}' |
+  agent-worktrees resource-producer retain --json --owner-ref machine/project/worktree
+```
+
+`retain` probes the registered provider outside the record lock, then rechecks
+the exact subject under the lock before storing a receipt. It accepts only an
+available, existing allocation whose `producer_verification` has integer
+`version: 1`, the exact full `subject`, canonically identical `identity`,
+literal `allocation_finished: true` and `work_settled: true`, and:
+
+```json
+{"retention":{"class":"disposable-scratch","cleanup":"explicit-owner-pass"}}
+```
+
+The resulting `retained` phase discharges active responsibility and records
+generic `at-rest` state. Logical finalization can succeed while the allocation
+still exists. This is not deletion, proof of absence, live-process discovery,
+or authority for a later cleanup. Failed/missing provider checks, unfinished
+allocations, offered handoffs and malformed stored receipts remain unsettled.
+Caller-supplied proof is refused.
+
+Retained allocations remain current, discoverable entries in `claims ownership`,
+including after the producing checkout retires. Their original owner and exact
+receipt stay in the existing ledger; there is no second inventory. Duplicate
+retained/bound identities make that observational view uncertain.
+
+After an independent owner-admitted cleanup removes the actual allocation,
+`close` may store the provider's exact absence proof even on a finalized owner.
+Read-only inspect and idempotent `retain` replay remain available there; new
+retention on an active bound allocation still requires a mutable owner.
+Default `disposable-owned` claims cannot use `retain`; their absence-only close
+and finalization semantics are unchanged.
+
+This extension supplies the ledger contract, not an allocator or automatic
+runner adoption. Provider/caller integration must separately prove root
+admission, allocation identity, quiescence and the bounded diagnostic policy.
 
 ## Read-only ownership views
 

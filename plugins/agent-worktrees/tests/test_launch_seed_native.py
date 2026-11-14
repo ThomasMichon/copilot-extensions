@@ -78,16 +78,16 @@ def test_finite_monitor_paths_preserve_loaded_cli_overrides(monkeypatch, tmp_pat
 @pytest.fixture
 def record(tmp_path, monkeypatch):
     project = cfg.project_dir("demo")
-    project.mkdir(parents=True, exist_ok=True)
+    (project / "worktrees").mkdir(parents=True, exist_ok=True)
     (project / "config.yaml").write_text(json.dumps({
         "repo_name": "demo", "machine": "test",
-        "repos": {"demo": {"anchor": str(tmp_path), "default_branch": "dev"}},
+        "repos": {"demo": {"anchor": str(tmp_path), "worktree_root": str(tmp_path), "default_branch": "dev"}},
     }), encoding="utf-8")
-    checkout = tmp_path / "checkout"
+    checkout = tmp_path / "wt-a"
     checkout.mkdir()
     path = tracking.create_new_record(
         "wt-a", "worktree/wt-a", str(checkout), "demo", "test",
-        cfg.detect_platform(), tmp_path,
+        cfg.detect_platform(), project / "worktrees",
     ).yaml_path
     monkeypatch.setattr(legacy.sessions, "verify_worktree_active", lambda *a: LiveVerdict())
     return path
