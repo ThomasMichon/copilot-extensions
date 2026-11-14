@@ -311,3 +311,30 @@ def test_recovery_malformed_record_is_a_json_refusal(
     assert response["error"]
     assert (retired.ledger.read_bytes(), retired.parent.read_bytes()) == before
     assert retired.checkout.exists()
+
+
+def test_recovery_retries_a_freeze_after_original_custody_is_restored(
+    retired: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    acquire = finalize.FinalizeLock.acquire
+    changed = False
+
+    def invalidate_after_freeze(lock):
+        nonlocal changed
+        result = acquire(lock)
+        if not changed:
+            changed = True
+            retired.parent_data["status"] = "active"
+            retired.parent.write_text(yaml.safe_dump(retired.parent_data), encoding="utf-8")
+        return result
+
+    monkeypatch.setattr(finalize.FinalizeLock, "acquire", invalidate_after_freeze)
+    head = _git("rev-parse", "HEAD", cwd=retired.checkout)
+    assert _run(retired) == 1
+    assert tracking.load_record(retired.ledger).status == "finalizing"
+    assert _git("rev-parse", "HEAD", cwd=retired.checkout) == head
+    retired.parent_data["status"] = "archived"
+    retired.parent.write_text(yaml.safe_dump(retired.parent_data), encoding="utf-8")
+    assert _run(retired) == 0
+    assert not retired.checkout.exists()
+    assert tracking.load_record(retired.ledger).status == "finalized"

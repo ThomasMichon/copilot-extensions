@@ -66,6 +66,13 @@ retains the directory for an independent reason, resolve that reason and retry
 the same explicit finalization operation. Do not infer physical removal merely
 from the finalized status.
 
+If custody changes after finalization freezes new claims, recovery refuses
+cleanup and can retain the existing `finalizing` freeze. It cannot roll that
+state back by writing without current authority. Once the actual owner restores
+the required original custody, repeat explicit finalization; the freeze does not
+prevent that retry. Never edit the ledger or reactivate a claim to manufacture
+the missing proof.
+
 ## Validation and relationships
 
 The focused source packet is
