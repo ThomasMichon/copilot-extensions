@@ -31,6 +31,12 @@ source. Portable receiving exports the selected Core's package resources without
 searching for a suite installation. This ownership move adds no SDK extension,
 service, hook permission or automatic delivery mode.
 
+Capability-selected ordinary Bridge receiving uses that already-joined public
+SDK session. It does not construct or reacquire a private headed/remote controller
+to deliver queue/steer input. Native target/loadout checks and original one-shot
+receipts remain; mutable controls, creation and replacement retain their
+independent authorities.
+
 The compact legacy export preserves its disconnect-driven lifetime, rather
 than adopting ACP lifetime implicitly. An idle graceful detach closes that
 Host normally; cancellation of its external owner still propagates. Explicit

@@ -229,6 +229,10 @@ def test_schema45_upgrade_preserves_legacy_absence_and_requires_writable_prepara
     assert register(db, "legacy") == "live"
     db.execute_write("ALTER TABLE live_sessions DROP COLUMN dispatch_origin_json")
     db.execute_write("UPDATE schema_version SET version=45")
+    from legacy_inbox_schema import restore_prior_inbox_guards
+    from agent_bridge.db_core import SCHEMA_VERSION
+
+    restore_prior_inbox_guards(db._get_conn(), version=45)
     db.close()
     before = path.read_bytes()
     with pytest.raises(ValueError, match="writable preparation"):
@@ -237,7 +241,7 @@ def test_schema45_upgrade_preserves_legacy_absence_and_requires_writable_prepara
     upgraded = Database(path)
     try:
         assert upgraded.get_live_session("legacy")["dispatch_origin_json"] is None
-        assert upgraded.execute_read("SELECT version FROM schema_version")[0]["version"] == 46
+        assert upgraded.execute_read("SELECT version FROM schema_version")[0]["version"] == SCHEMA_VERSION
     finally:
         upgraded.close()
     passive = Database(path, read_only=True)

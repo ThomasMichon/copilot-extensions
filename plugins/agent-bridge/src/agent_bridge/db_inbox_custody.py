@@ -38,7 +38,8 @@ class _InboxCustodyMixin:
             "SELECT * FROM live_sessions WHERE session_id=?", (consumer.session_id,),
         ).fetchone()
         if (
-            row is None or row["status"] != "live" or row["pid"] != consumer.pid
+            consumer.pid is None or consumer.process_started_at is None
+            or row is None or row["status"] != "live" or row["pid"] != consumer.pid
             or row["process_started_at"] is None
             or abs(row["process_started_at"] - consumer.process_started_at)
             >= PROCESS_START_TOLERANCE_SECONDS
@@ -187,6 +188,7 @@ class _InboxCustodyMixin:
     @staticmethod
     def _original_handoff(
         conn: sqlite3.Connection, message_id: int, consumer: InboxConsumer, handoff_id: str,
+        *, compatible_consumer: bool = False,
     ) -> sqlite3.Row:
         nonblank(handoff_id)
         positive(message_id)
@@ -194,9 +196,15 @@ class _InboxCustodyMixin:
         if row is None or row["handoff_json"] is None:
             raise RuntimeCustodyError("Original inbox handoff is absent")
         retained = original_handoff(row)
+        matches = retained["consumer"] == consumer.document()
+        if compatible_consumer:
+            matches = (
+                retained["consumer"]["session_id"] == consumer.session_id
+                and retained["consumer"]["incarnation"] == consumer.incarnation
+            )
         if (
             retained["id"] != handoff_id
-            or retained["consumer"] != consumer.document()
+            or not matches
         ):
             raise RuntimeCustodyError("Original inbox handoff observations changed")
         return row
@@ -278,7 +286,7 @@ class _InboxCustodyMixin:
 
     def record_live_message_handoff(
         self, consumer: InboxConsumer, message_id: int, handoff_id: str, *,
-        outcome: str, now: float,
+        outcome: str, now: float, compatible_consumer: bool = False,
     ) -> str:
         """Observe the original SDK outcome after closure/expiry, never resend."""
         self._inbox_consumer(consumer)
@@ -286,7 +294,9 @@ class _InboxCustodyMixin:
         if outcome not in ("sdk_accepted", "consumed", "unknown"):
             raise RuntimeCustodyError("Unsupported inbox handoff outcome")
         with self._runtime_transaction(write=True) as conn:
-            row = self._original_handoff(conn, message_id, consumer, handoff_id)
+            row = self._original_handoff(
+                conn, message_id, consumer, handoff_id, compatible_consumer=compatible_consumer,
+            )
             if row["handoff_started_at"] is None:
                 raise RuntimeCustodyError("Inbox handoff never reached final admission")
             if outcome == "sdk_accepted" and row["delivered_at"] is None:

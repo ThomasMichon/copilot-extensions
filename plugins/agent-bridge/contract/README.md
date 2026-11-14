@@ -23,6 +23,23 @@ historical binary rollback or native SDK evidence.
 
 ## Current HTTP-52 owner-membership evidence
 
+The optional `compatible_native_inbox: 1` expansion selects
+`receiving_api: "native-sdk-v1"` on the existing retained endpoints.
+Source cases cover absent installation/process custody, actual Node/API receipt
+recovery, original one-shot handoffs, independent fresh input behind uncertain
+work, advisory metadata refresh, strict ingress/target checks, preserved legacy
+serialization and known schema-46 migration. Existing startup cases exercise
+both receiving modes. Portable execution-profile checks remain readonly and
+precede begin, without private controller ownership. Only current declarations,
+the independent HTTP-52 vector and genuine current execution evidence refresh;
+historical generations remain unchanged. These controls do not establish native
+Copilot or installed adoption.
+
+Declaration preparation can refresh a retired path's `current_path` fingerprint
+only through its already registered, affected semantic owner. The retired alias
+stays non-semantic; dirty backing bytes and missing/non-semantic owners refuse.
+This updates no captured observations or historical provenance.
+
 The optional CLI-only no-admission refusal adds six current-generation source
 controls. They execute the actual keyed-native CLI against failed ensure/client
 discovery, preserve other commands' existing client behavior, and distinguish

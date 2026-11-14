@@ -6,7 +6,7 @@ import { pathToFileURL } from "node:url";
 export const isRemoteDriverSource = (source) =>
   typeof source === "string" && /^agent-remote-driver-[0-9a-f-]{36}$/.test(source);
 
-async function selectedLoadout(native, {
+export async function selectedLoadout(native, {
   pluginRoot, expectedSessionId, cwd, bridgePluginRoot, extensionPluginRoot,
 }) {
   if (bridgePluginRoot === undefined) return;

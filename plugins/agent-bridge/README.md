@@ -62,12 +62,15 @@ Existing sessions and their launch/authentication owners are unchanged.
 
 The interactive extension's [retained SDK consumer](docs/retained-sdk-consumer.md)
 is explicitly opt-in. Legacy defaults are unchanged; selected retained delivery
-requires HTTP 50 recovery and never silently downgrades or resends an ambiguous
-original. Native qualification and installed adoption remain separate.
+requires HTTP 50 recovery plus `compatible_native_inbox: 1` from the actual
+serving daemon and never silently downgrades or resends an ambiguous original.
+Native qualification and installed adoption remain separate.
 An original headed-core launch can also select it with its private client
-declaration: delivery then uses the retained common Session Host rather than
-a competing direct SDK sender. Ordinary launches without that declaration
-keep their existing selection.
+declaration. Ordinary receiving uses the already-joined public SDK session;
+private controller ownership, installation identity and process birth are not
+messaging prerequisites. Mutation controls and session lifecycle retain their
+independent owners. Ordinary launches without that declaration keep their
+existing selection.
 
 Registration and delivery implementation assets are owned by the
 [independent Core](../../libs/copilot-driver-core/README.md). The existing Bridge

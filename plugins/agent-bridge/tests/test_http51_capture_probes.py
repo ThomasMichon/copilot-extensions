@@ -399,6 +399,35 @@ from test_live_inbox_producer import (
     test_retained_startup_admission_requires_its_original_ready_input
     as test_retained_startup_admission_requires_its_original_ready_input,
 )
+from test_live_inbox_runtime import (
+    test_legacy_request_serialization_does_not_send_a_new_selector
+    as test_legacy_request_serialization_does_not_send_a_new_selector,
+    test_native_sdk_receiving_needs_no_installation_or_process_custody
+    as test_native_sdk_receiving_needs_no_installation_or_process_custody,
+    test_native_reload_keeps_offered_original_consumer_and_never_resends_begun_work
+    as test_native_reload_keeps_offered_original_consumer_and_never_resends_begun_work,
+    test_native_inbox_preserves_real_target_and_ingress_boundaries
+    as test_native_inbox_preserves_real_target_and_ingress_boundaries,
+    test_native_mode_is_explicit_and_unknown_selectors_cannot_downgrade
+    as test_native_mode_is_explicit_and_unknown_selectors_cannot_downgrade,
+    test_native_inbox_survives_closed_installation_epoch_without_relaxing_controls
+    as test_native_inbox_survives_closed_installation_epoch_without_relaxing_controls,
+    test_native_poll_does_not_promote_unverified_legacy_startup_input
+    as test_native_poll_does_not_promote_unverified_legacy_startup_input,
+    test_native_receiving_does_not_replay_or_block_on_older_unconfirmed_work
+    as test_native_receiving_does_not_replay_or_block_on_older_unconfirmed_work,
+    test_native_receiving_does_not_reacquire_custody_after_metadata_refresh
+    as test_native_receiving_does_not_reacquire_custody_after_metadata_refresh,
+)
+from test_retained_sdk_recovery import (
+    test_native_sdk_process_recovery_uses_original_receipts_without_installation_context
+    as test_native_sdk_process_recovery_uses_original_receipts_without_installation_context,
+)
+from test_inbox_custody import (
+    inbox as inbox,
+    test_v46_migration_retains_original_begun_handoff_and_requires_writable_preparation
+    as test_v46_migration_retains_original_begun_handoff_and_requires_writable_preparation,
+)
 from test_plugin_readiness import (
     test_readonly_poll_never_claims_or_expires_mutation_controls
     as test_readonly_poll_never_claims_or_expires_mutation_controls,
@@ -599,6 +628,7 @@ def test_http51_capture_actual_observations(
     observed["mux_question_answers"] = health["capabilities"]["mux_question_answers"]
     observed["dispatch_acp_session_origin"] = health["capabilities"]["dispatch_acp_session_origin"]
     observed["dispatch_cli_session_origin"] = health["capabilities"]["dispatch_cli_session_origin"]
+    observed["compatible_native_inbox"] = health["capabilities"]["compatible_native_inbox"]
     observed["portable_capabilities"] = {
         key: health["capabilities"][key] for key in vector["expected"]["portable_capabilities"]
     }

@@ -24,6 +24,7 @@ from agent_bridge.live_inbox_runtime import LiveInboxRuntime
 from agent_bridge.loop_governance import LoopGovernance
 from agent_bridge.models import ServiceConfig
 from test_loop_governance_custody import installation as installation
+from test_live_inbox_runtime import serving as serving
 
 pytestmark = pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
 SID = "native-a"
@@ -225,3 +226,42 @@ def test_same_sdk_consumer_recovers_actual_frontend_restart_without_replacing_it
         receipt = client.get(PREFIX + f"/recovery/{retained['id']}").json()
         assert receipt["stage"] == "sdk_accepted"
         assert receipt["consumer"] == enrollments[0]["consumer"]
+
+
+def test_native_sdk_process_recovery_uses_original_receipts_without_installation_context(serving, tmp_path):
+    app, client, db, _ = serving
+    app.state.loop_governance = None
+    app.state.live_inbox_runtime = None
+    config = {
+        "sid": SID, "cwd": str(tmp_path), "incarnation": "consumer-original",
+        "effects": str(tmp_path / "sdk-effects.jsonl"),
+        "events": str(tmp_path / "sdk-events.jsonl"),
+        "exitAt": "sdk_accepted", "receivingApi": "native-sdk-v1", "omitProcess": True,
+    }
+    code, _, logs = run_consumer(client, config, insert=True)
+    assert code == 23, logs
+    original = dict(db.execute_read("SELECT * FROM live_messages")[0])
+    receipt = client.get(PREFIX + f"/recovery/{original['id']}").json()
+    assert receipt["stage"] == "sdk_accepted"
+    assert receipt["consumer"]["pid"] is None
+    effects = Path(config["effects"]).read_text(encoding="utf-8").splitlines()
+    assert len(effects) == 1
+    options = json.loads(effects[0])
+    Path(config["events"]).write_text(json.dumps({
+        "id": "native-event-a", "type": "user.message",
+        "data": {"source": options["source"], "content": options["prompt"]},
+    }) + "\n", encoding="utf-8")
+    app.state.ready = False
+    app.state.session_manager.is_draining = True
+    code, calls, logs = run_consumer(client, {
+        **config, "incarnation": "consumer-reloaded", "exitAt": "", "recoveryOnly": True,
+    })
+    assert code == 0, logs
+    recovered = client.get(PREFIX + f"/recovery/{original['id']}").json()
+    assert recovered["stage"] == "consumed"
+    assert recovered["handoff_id"] == receipt["handoff_id"]
+    assert recovered["consumer"] == receipt["consumer"]
+    assert not any(call["path"].endswith(("/enroll", "/begin")) for call in calls)
+    assert Path(config["effects"]).read_text(encoding="utf-8").splitlines() == effects
+    assert db.execute_read("SELECT * FROM bridge_runtime_epoch") == []
+    assert db.execute_read("SELECT * FROM bridge_runtime_producers") == []
