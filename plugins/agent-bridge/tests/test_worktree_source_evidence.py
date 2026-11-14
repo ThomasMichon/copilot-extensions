@@ -35,6 +35,7 @@ def reporter(name: str = "current", environment: str = "wsl") -> dict:
 
 
 @pytest.mark.parametrize("environment", ["windows", "wsl", "linux"])
+@pytest.mark.asyncio
 async def test_reporter_naming_overrides_stored_names_without_retargeting_agent(
     environment: str,
 ) -> None:
@@ -64,6 +65,7 @@ async def test_reporter_naming_overrides_stored_names_without_retargeting_agent(
     {**reporter(), "hostname": "x\nbad"}, {**reporter(), "machine": ""},
     {**reporter(), "execution_machine": "x" * 257},
 ])
+@pytest.mark.asyncio
 async def test_invalid_reporting_context_does_not_replace_last_good_inventory(
     monkeypatch: pytest.MonkeyPatch, context: object,
 ) -> None:
@@ -89,6 +91,7 @@ async def test_invalid_reporting_context_does_not_replace_last_good_inventory(
         await cache.stop()
 
 
+@pytest.mark.asyncio
 async def test_real_source_stdout_refresh_renames_and_withdraws_without_row_changes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

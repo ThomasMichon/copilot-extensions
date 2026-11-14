@@ -22,6 +22,8 @@ SCOPE = (
     "not wall-clock read qualification; portable launch joins actual archive/policy readers, "
     "ASGI/SQLite and driver HTTP with controlled SDK, native mux, provider process, SSH, "
     "Owner, claims, forwards and POSIX-to-private-scratch namespace fixtures; "
+    "discovery consumes controlled source stdout with live reporter rename, withdrawal "
+    "and malformed-envelope retention controls; "
     "not native Copilot, mux, remote authentication or installed qualification"
 )
 POLICY = common.POLICY
@@ -70,7 +72,7 @@ AFFECTED = (
         "dispatch_origin.py", "dispatch_cli_origin.py", "persisted_session_views.py", "acquisition_plugins.py",
         "acquisition_local_launch.py", "creation_local_launch.py",
         "worktree_native_resume.py", "singleton_resume.py", "agent_registry_resolver.py", "routes/dispatch_tasks.py",
-        "routes/worktrees.py",
+        "routes/worktrees.py", "routes/worktree_reporting.py",
     )),
     *("plugins/agent-worktrees/src/agent_worktrees/" + name for name in (
         "retained_record_writer.py", "resource_relationship_cli.py", "tracking_write.py",
@@ -105,6 +107,7 @@ EXTRA_PATHS = (
     "plugins/agent-bridge/tests/test_acquisition_runtime.py",
     "plugins/agent-bridge/tests/test_acquisition_writer_inspection.py",
     "plugins/agent-bridge/tests/test_worktree_lineage_authority.py",
+    "plugins/agent-bridge/tests/test_worktree_source_evidence.py",
     "plugins/agent-bridge/tests/test_creation_worktree_writer.py",
     "plugins/agent-bridge/tests/test_retained_host_recovery.py",
     "plugins/agent-bridge/tests/test_gc.py",
@@ -154,6 +157,9 @@ EXTRA_PATHS = (
 )
 PROBES = {
     **retained.PROBES,
+    "test_reporter_naming_overrides_stored_names_without_retargeting_agent": 3,
+    "test_invalid_reporting_context_does_not_replace_last_good_inventory": 11,
+    "test_real_source_stdout_refresh_renames_and_withdraws_without_row_changes": 1,
     "test_real_cli_reports_unavailable_before_constructing_native_admission": 2,
     "test_other_commands_keep_existing_unavailable_client_behavior": 1,
     "test_transport_distinguishes_preflight_from_a_lost_post_response": 3,
