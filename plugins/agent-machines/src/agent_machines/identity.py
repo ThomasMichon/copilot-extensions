@@ -82,7 +82,10 @@ def resolve_machine(
         raise ManifestError("machine identity is empty")
     context = execution_platform
     if value is None and context is None:
-        context = detect_platform()
+        try:
+            context = detect_platform()
+        except ValueError as exc:
+            raise ManifestError(str(exc)) from exc
     entries: dict[str, MachineEntry] = {}
     entry_paths: dict[str, Path] = {}
     warnings: list[str] = []
