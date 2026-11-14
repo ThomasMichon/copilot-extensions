@@ -790,10 +790,54 @@ candidates. A candidate only means supplied owner inputs match; it does not
 verify their private approvals, source lifetime, native binding or actual
 execution permission. Every result retains `effects_wired: false`,
 `native_recovery: unqualified`, `intent_contract: unavailable` and `replay: never`.
-An explicit permit-aware recovery descriptor/intent contract, final action
-admission, actual source verification and native scope reacquisition/settlement
-remain separate, unimplemented gates. The journal cannot clear unknown work
-or legacy holds in the independent recovery store.
+The separate Core `PermitRecoveryIntent` data contract and the durable adapter
+below do not qualify this inspector or final action admission. Actual source
+verification and native scope reacquisition/settlement remain unimplemented.
+The journal cannot clear unknown work or legacy holds in the independent
+recovery store.
+
+### Permit-aware recovery intent data
+
+`launch_permit_recovery_intent.WorktreePermitRecoveryIntents` retains the separate
+strict `copilot-driver.headed-permit-recovery-intent` version-1 contract. Its
+constructor takes an independently retained `ExecutionBinding`. Under the same
+guarded owner-record lock, the writer checks the exact original launch,
+descriptor, recovery operation, current v1 phase/revision and permit identity.
+The referenced original permit decision must be an approved start, and the
+exact latest permit revision must carry the referenced approved retire or
+restore decision. These are stored-data checks, not authentication of approvals,
+expiry/current-source verification, native admission or scope settlement.
+
+The separate `launch-permit-recovery-intents.json` binds the worktree creation
+nonce and retains the complete execution binding with each encoded intent.
+Each operation appends at most its retire intent and then its resume intent,
+without replacing the descriptor, operation, permit or original permit revision.
+Only revisions within that permit are ordered. Source-lease references,
+receiver identity/revision and v1 lease/authority revisions retain their distinct
+meanings. The v1 recovery/decision documents are never rewritten, converted or
+resealed; v1 unknown work and holds remain authoritative and unchanged. A
+preexisting v1 resume cannot be retrofitted without its original permit-aware
+retire intent. Construction and reads create nothing.
+
+The additive version-1 `launch_permit_recovery_intent_record` writer advertises
+through the running resident's existing verb/version roster and optional
+`tracking_write_recovery_intent_contract` declaration. That declaration is
+`durable-intent-only`, with native recovery unqualified and effects unwired.
+An older resident lacks this optional capability, not all prior operations;
+the existing pre-send path selects the same current local writer. There is no
+new service, package-equality gate or effectful probe/replay. Existing callers
+can ignore the additive declaration. Core data-only support alone does not
+establish that this owner adapter is available.
+
+The bounded journal uses the existing atomic durable publisher, strict
+canonical-path/nonce checks, 64-entry and 2-MiB limits. Corrupt, future, full,
+conflicting or indirect state refuses without repair, eviction or overwrite.
+After a possibly admitted request, reread the same operation: an exactly matching
+saved phase returns without another dispatch, even if later decisions or phases
+have advanced. Acknowledgement loss does not select another writer or replay an
+effect. Actor-free and contained process/transport controls cover this source
+boundary only. No ordinary caller, passive admission consumer, native effect,
+credential acquisition, observer or rollout is enabled by it.
 
 ### Launch-owned pane assets and current boundary handlers
 

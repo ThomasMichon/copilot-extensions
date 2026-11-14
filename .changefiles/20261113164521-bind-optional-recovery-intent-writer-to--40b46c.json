@@ -1,0 +1,9 @@
+{
+  "comment": "Bind optional recovery intent writer to current Bridge source evidence",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}
