@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { ANNOUNCED_MARKER, firstLoadThisSession } from "../extensions/agent-bridge/announce.mjs";
+import { ANNOUNCED_MARKER, firstLoadThisSession } from "../../../libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/announce.mjs";
 
 function root() {
   return mkdtempSync(join(tmpdir(), "ab-announce-"));

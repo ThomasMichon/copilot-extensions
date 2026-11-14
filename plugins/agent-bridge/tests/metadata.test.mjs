@@ -10,13 +10,14 @@ import { fileURLToPath } from "node:url";
 import {
   METADATA_REFRESH_CLI_TIMEOUT_MS, metadataRefresher, readSessionBinding, refreshRegistrationMetadata,
   registrationMetadata, resolveMachineAsync, resolveMetadataAsync, runCliAsync,
-} from "../extensions/agent-bridge/metadata.mjs";
-import { machineLookup, executionObservation } from "../extensions/agent-bridge/machine-context.mjs";
-import { serializedRegister } from "../extensions/agent-bridge/delivery.mjs";
+} from "../../../libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/metadata.mjs";
+import { machineLookup, executionObservation } from "../../../libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/machine-context.mjs";
+import { serializedRegister } from "../../../libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/delivery.mjs";
 
 test("selected receiving metadata keeps its provider scope without inventing guest ownership", async () => {
-  const { metadataRefresher } = await import("../extensions/agent-bridge/metadata.mjs");
+  const { metadataRefresher } = await import("../../../libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/metadata.mjs");
   const meta = await resolveMetadataAsync({
+    extensionPluginRoot: fileURLToPath(new URL("../", import.meta.url)),
     cwd: process.cwd(), env: {
       AGENT_BRIDGE_RECEIVING_PLUGIN_ROOT: fileURLToPath(new URL("../", import.meta.url)),
       AGENT_BRIDGE_SCOPE_ID: "provider-workspace@selected-venue",
@@ -36,6 +37,7 @@ test("selected receiving metadata keeps its provider scope without inventing gue
 
 test("receiving metadata refuses another plugin root rather than querying guest Worktrees", async () => {
   await assert.rejects(resolveMetadataAsync({
+    extensionPluginRoot: fileURLToPath(new URL("../", import.meta.url)),
     env: {
       AGENT_BRIDGE_RECEIVING_PLUGIN_ROOT: fileURLToPath(new URL("../../agent-remote-driver/", import.meta.url)),
       AGENT_BRIDGE_SCOPE_ID: "scope",
@@ -215,15 +217,15 @@ test("resolveMetadataAsync does not invent a logical machine from a physical hos
 // still report the bit-identical start time, so the bridge can compare start
 // times exactly (no drift window a reused pid could slip through).
 test("a reloaded metadata module reports the same process start time exactly", async () => {
-  const first = (await import("../extensions/agent-bridge/metadata.mjs")).processIdentity();
-  const reloaded = await import(`../extensions/agent-bridge/metadata.mjs?reload=${Date.now()}`);
+  const first = (await import("../../../libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/metadata.mjs")).processIdentity();
+  const reloaded = await import(`../../../libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/metadata.mjs?reload=${Date.now()}`);
   assert.equal(reloaded.processIdentity().process_started_at, first.process_started_at);
   assert.equal(reloaded.processIdentity().pid, process.pid);
 });
 
 
 test("metadataRefresher fills in a worktree the load-time lookup missed, with backoff", async () => {
-  const { metadataRefresher, METADATA_RETRY_MIN_MS } = await import("../extensions/agent-bridge/metadata.mjs");
+  const { metadataRefresher, METADATA_RETRY_MIN_MS } = await import("../../../libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/metadata.mjs");
   const state = { meta: { machine: "m1", cwd: "/w", worktree_id: null, repo: null, branch: "b" } };
   let t = 0;
   const answers = [null, { worktree_id: null, repo: null }, { worktree_id: "wt-1", repo: "proj", machine: "other" }];
@@ -245,7 +247,7 @@ test("metadataRefresher fills in a worktree the load-time lookup missed, with ba
 });
 
 test("metadataRefresher never replaces a known association", async () => {
-  const { metadataRefresher } = await import("../extensions/agent-bridge/metadata.mjs");
+  const { metadataRefresher } = await import("../../../libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/metadata.mjs");
   const state = { meta: { machine: "m1", worktree_id: "pinned@cs", repo: "proj" } };
   let calls = 0;
   const refresh = metadataRefresher(state, async () => { calls += 1; return { worktree_id: "other" }; }, () => 0);

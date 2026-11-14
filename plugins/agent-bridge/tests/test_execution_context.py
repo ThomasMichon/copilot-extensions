@@ -149,7 +149,10 @@ def test_machine_rename_rollover_retains_alias_and_cli_claim(tmp_db: Database) -
 
     node = shutil.which("node")
     assert node is not None, "execution-context rollover control requires Node"
-    modules = Path(__file__).resolve().parents[1] / "extensions" / "agent-bridge"
+    modules = (
+        Path(__file__).resolve().parents[3]
+        / "libs/copilot-driver-core/src/agent_remote_driver/bridge_extension"
+    )
     script = """
 import {serializedRegister, adoptSessionId} from __DELIVERY__;
 import {refreshRegistrationMetadata, processIdentity} from __METADATA__;

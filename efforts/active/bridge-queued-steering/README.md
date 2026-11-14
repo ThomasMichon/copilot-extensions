@@ -12,7 +12,7 @@ review and merge in the layer that actually owns delivery.
 - **Repo:** copilot-extensions
 - **Branch(es):** independent, dependency-ordered PRs targeting `dev`
 - **Created:** 2026-11-13
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** [Bridge attention boundary](../../../visions/plugins/agent-bridge/README.md#delegation-control-and-attention-boundary)
 - **Umbrella issue:** #6394, bounded queued-steering follow-up
 
@@ -88,7 +88,7 @@ not additional operator requirements.
 
 - [x] Separate the two reported failure boundaries and map the existing delivery
   owner without duplicating routing, carrier or container-auth work.
-- [ ] Review this source-only plan before implementation.
+- [x] Review this source-only plan before implementation.
 - [ ] Verify the actual supported hook, SDK send and model-facing event APIs;
   reproduce stalled drains and queued-but-unconsumed sends in owned fixtures.
 
@@ -148,3 +148,117 @@ delivery from an SDK promise or a timer.
 - Preserved the separate active Core refactor and its recovery source work.
   Captured this delivery objective and its authority limits; source-only
   investigation and the plan review gate precede implementation.
+
+### 2026-11-13 - Plan accepted
+
+- #12525 merged at head `4acab2c35c25e703c6fc6f526718272308f02017`
+  after genuine clean approval `5899739152`, complete empty review threads
+  and green required CI `43530218200` plus trusted metadata checks
+  `43530218235`. Managed completion verified the merge using the normal
+  Maintainer additional-CODEOWNER exception, not a CI bypass.
+- Immediately reread this Goal, Plan and full Validation Plan, together with
+  the continuing Core parent's gates. Only the plan review item closes;
+  actual API verification, reproduction, all three mechanisms and complete
+  delivery qualification remain open. No native or installed effect is enabled.
+
+### 2026-11-13 - Delivery boundaries reproduced
+
+- Repaired the actual-extension VM fixture's stale metadata exports and missing
+  machine-context dependency without changing production imports or relaxing
+  the fixture's strict dependency checks.
+- Three controlled cases establish the pre-repair boundaries: an unresolved
+  exact-native metadata lookup prevents SDK submission while registration
+  heartbeats continue; an unresolved SDK send holds the drain and ACK while
+  heartbeats continue; a resolved SDK send yields an ACK but no represented
+  model-input event until an actual root `user.message` is observed. These
+  are source reproductions, not attribution of a particular live incident.
+- The canonical contained `test_plugin_readiness_extension.py` packet passed
+  with all embedded Node controls. The first dependency preparation failed
+  without exposing its underlying error; the diagnostic retry succeeded
+  without changing dependencies, containment or seasoning policy. This is not
+  evidence of a resolved dependency defect.
+- Public SDK snapshot `540dc4e1ccd4aa174e7602465099a2aa93fab176`
+  identifies CLI `1.0.110-3` and declares extension hooks, post-tool additional
+  context and pre-model prompt blocking. Its prompt-transformed hook precedes
+  history/model input; `hook.end` records output/success, not model-input
+  admission. Matching source is not qualification of the selected runtime.
+- The full fallback remains blocked on a supported model-input witness for
+  post-tool content and restart-safe pre-input suppression of the late SDK
+  counterpart. Preserve the original message and uncertainty; do not emit a
+  consumption receipt from a hook return, send reply or later assistant
+  activity. A bounded provider-contract consultation is outstanding. No
+  runtime behavior, installation, native session or retained fence changed.
+
+### 2026-11-13 - Pending-input notice source candidate
+
+- Added the bounded in-process notice through public success/failure post-tool
+  callbacks. Existing off-loop delivery/recovery supplies only observed pending
+  IDs; a stalled metadata/send promise cannot block the hook. Root/session and
+  current-registration checks, mute, a 30-second repeat bound, consumption-race
+  filtering and honest 1,000-ID overflow are covered. Clearing the last known
+  pending ID re-arms a notice for newly arriving work.
+- Retained delivery continues to own exact original-receipt consumption and
+  its pending-native fence. Its existing history proof can clear the notice;
+  no send, outcome, cursor, original identity or replay decision changed.
+- The final contained Python/Node contract packet passed, as did documentation
+  consistency and whitespace checks. These are controlled source results,
+  not proof that an installed runtime accepts/invokes the hooks or that an idle
+  receiver is awakened. The source candidate is not yet published or merged;
+  its current-generation contract evidence and remaining publication gates
+  are still owed.
+- Matching public SDK source also carries these hook declarations in the
+  CLI `1.0.106-9` snapshot. The `1.0.110-3` client passes hook registration
+  through extension resume; the SDK's internal `registerHooks` method merely
+  stores handlers and is not an alternative runtime-support probe. No internal
+  method or policy bypass is used.
+- The external provider-contract gap has been identified as Copilot CLI/SDK
+  runtime-owned, not assigned to a fleet worker or the carrier/client owner.
+  Existing coordination is routing that gap to the operator, without an
+  upstream filing, replacement worker, resource creation or new native probe.
+  The requested prompt-submission receipt and duplicate-safe timed fallback
+  remain incomplete; no phase or parent objective is declared complete.
+
+### 2026-11-13 - Root-input evidence transport candidate
+
+- Corrected a separate loss path: the old best-effort event flusher discarded
+  actual root-input evidence after a failed event POST. The existing bounded
+  buffer now retries those native events, not a send/body or hook-generated
+  substitute. An internal weak association retains each event's original native
+  session; retries cannot retag it after registration changes.
+- Ordinary representation remains best-effort and yields capacity before
+  root-input evidence. An all-receipt overflow reports uncertainty off the
+  event loop rather than inventing consumption. This in-memory retry is not
+  durable restart recovery or duplicate-safe content fallback.
+- The final contained selection passed three tests: the full Node contract
+  wrapper, actual ASGI/SQLite consumption-before-ACK monotonicity and stable
+  event-ID deduplication. VM regressions cover HTTP failure, lost replies,
+  ordinary-event bursts and a session change during a failed POST. These
+  controls use substituted SDK input and do not qualify native hook timing.
+  Existing contract capture, remaining source gates, review/CI and all
+  prompt-submission/fallback/provider requirements remain open.
+
+- A coupled root-binding correction excludes sub-agent events from session-ID
+  adoption, matching existing turn/receipt scope. A child event carrying its
+  own session ID cannot rename the parent's registration or suppress its
+  notice. The final actual-extension Node packet passed with that regression;
+  native qualification and installed behavior remain unclaimed.
+
+### 2026-11-14 - Shared Core extension extraction
+
+- Carried the tested notification and original-event retry candidates into
+  the Core extraction without dropping their uncertainty or no-replay limits.
+  Core now owns all registration/delivery modules. Bridge retains one SDK
+  adapter and the existing native plugin-root checks; packaged assets and the
+  copied Core export use the same resource closure.
+- The actual adapter passed source, materialized-payload and isolated
+  copied-Core controls with one activation and no suite service. A partial
+  payload refuses before activation even when canonical source is available.
+  The controlled portable mux flow and moved Node helper contracts passed.
+- A broader validation selection exposed a fixture that removed Python while
+  selecting PowerShell 5.1. Restoring only that declared prerequisite preserves
+  legacy-shell selection; all sixteen binary-frame variants passed. The final
+  packaging/frame selection passed 37 cases without skips.
+- Current-generation source ownership/capture, exact-source review, CI and
+  publication remain pending. Native model-facing receipts, enforceable
+  duplicate-safe content fallback and installed qualification remain open;
+  this extraction does not complete the queued-steering objective.

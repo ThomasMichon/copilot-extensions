@@ -99,7 +99,7 @@ async function load(path, tail = "") {
         : await import(name.startsWith(".")
           ? pathToFileURL(join(dirname(path), name)).href : name);
   }
-  const linked = source.replace(
+  const linked = source.replace("export async function activateBridgeExtension", "async function activateBridgeExtension").replace(
     /^import\s+\{([^}]+)\}\s+from\s+["']([^"']+)["'];/gm,
     (_statement, names, name) => {
       for (const binding of names.split(",").map((part) => part.trim()).filter(Boolean)) {
@@ -111,7 +111,8 @@ async function load(path, tail = "") {
   );
   assert.doesNotMatch(linked, /^import\s/m);
   const context = vm.createContext({
-    __dependencies: dependencies, process, Buffer, URL, AbortController,
+    __dependencies: dependencies, __session: session, __bridgeRoot: bridgeRoot,
+    process, Buffer, URL, AbortController,
     fetch: carrier, setTimeout, clearTimeout, clearInterval,
     setInterval: (fn, ms) => {
       const timer = setInterval(fn, ms);
@@ -132,5 +133,8 @@ driver = await load(
   "return { driverServer, cleanupDescriptor };",
 );
 emit({ stage: "loading bridge extension" });
-await load(join(bridgeRoot, "extensions", "agent-bridge", "extension.mjs"));
+await load(
+  join(bridgeRoot, "extensions", "agent-bridge", "core", "extension.mjs"),
+  "await activateBridgeExtension({ joinSession: async () => __session, pluginRoot: __bridgeRoot });",
+);
 emit({ ready: true, sessionId: sid, pid: process.pid });

@@ -1,36 +1,47 @@
 {
   "schema": "copilot-extensions.packaged-assets",
-  "version": 1,
-  "canonicalDir": "plugins",
-  "payloadDir": "src/agent_bridge/receiving_assets/plugins",
-  "files": [
-    "agent-bridge/plugin.json",
-    "agent-bridge/packaged-assets.json",
-    "agent-bridge/launch-wrapper-assets.json",
-    "agent-bridge/extensions/agent-bridge/announce.mjs",
-    "agent-bridge/extensions/agent-bridge/bridge-endpoint.mjs",
-    "agent-bridge/extensions/agent-bridge/delivery.mjs",
-    "agent-bridge/extensions/agent-bridge/delivery-state.mjs",
-    "agent-bridge/extensions/agent-bridge/extension.mjs",
-    "agent-bridge/extensions/agent-bridge/machine-context.mjs",
-    "agent-bridge/extensions/agent-bridge/metadata.mjs",
-    "agent-bridge/extensions/agent-bridge/plugin-readiness.mjs",
-    "agent-bridge/extensions/agent-bridge/questions.mjs",
-    "agent-bridge/extensions/agent-bridge/remote-driver.mjs",
-    "agent-bridge/extensions/agent-bridge/retained-delivery.mjs",
-    "agent-worktrees/src/agent_worktrees/mux_prerequisite.py",
-    "agent-remote-driver/plugin.json",
-    "agent-remote-driver/bin/control-session.mjs",
-    "agent-remote-driver/bin/list-sessions.mjs",
-    "agent-remote-driver/extensions/agent-remote-driver/control-client.mjs",
-    "agent-remote-driver/extensions/agent-remote-driver/discovery.mjs",
-    "agent-remote-driver/extensions/agent-remote-driver/driver-control.mjs",
-    "agent-remote-driver/extensions/agent-remote-driver/driver-ownership.mjs",
-    "agent-remote-driver/extensions/agent-remote-driver/driver-server.mjs",
-    "agent-remote-driver/extensions/agent-remote-driver/extension.mjs",
-    "agent-remote-driver/extensions/agent-remote-driver/lifecycle.mjs",
-    "agent-remote-driver/extensions/agent-remote-driver/registry.mjs",
-    "agent-remote-driver/extensions/agent-remote-driver/session-driver.mjs",
-    "agent-remote-driver/extensions/agent-remote-driver/startup-client.mjs"
+  "version": 2,
+  "groups": [
+    {
+      "canonicalDir": "plugins",
+      "payloadDir": "src/agent_bridge/receiving_assets/plugins",
+      "files": [
+        "agent-bridge/plugin.json",
+        "agent-bridge/packaged-assets.json",
+        "agent-bridge/launch-wrapper-assets.json",
+        "agent-bridge/extensions/agent-bridge/extension.mjs",
+        "agent-worktrees/src/agent_worktrees/mux_prerequisite.py",
+        "agent-remote-driver/plugin.json",
+        "agent-remote-driver/bin/control-session.mjs",
+        "agent-remote-driver/bin/list-sessions.mjs",
+        "agent-remote-driver/extensions/agent-remote-driver/control-client.mjs",
+        "agent-remote-driver/extensions/agent-remote-driver/discovery.mjs",
+        "agent-remote-driver/extensions/agent-remote-driver/driver-control.mjs",
+        "agent-remote-driver/extensions/agent-remote-driver/driver-ownership.mjs",
+        "agent-remote-driver/extensions/agent-remote-driver/driver-server.mjs",
+        "agent-remote-driver/extensions/agent-remote-driver/extension.mjs",
+        "agent-remote-driver/extensions/agent-remote-driver/lifecycle.mjs",
+        "agent-remote-driver/extensions/agent-remote-driver/registry.mjs",
+        "agent-remote-driver/extensions/agent-remote-driver/session-driver.mjs",
+        "agent-remote-driver/extensions/agent-remote-driver/startup-client.mjs"
+      ]
+    },
+    {
+      "canonicalDir": "libs/copilot-driver-core/src/agent_remote_driver/bridge_extension",
+      "payloadDir": "extensions/agent-bridge/core",
+      "files": [
+        "announce.mjs",
+        "bridge-endpoint.mjs",
+        "delivery.mjs",
+        "delivery-state.mjs",
+        "extension.mjs",
+        "machine-context.mjs",
+        "metadata.mjs",
+        "plugin-readiness.mjs",
+        "questions.mjs",
+        "remote-driver.mjs",
+        "retained-delivery.mjs"
+      ]
+    }
   ]
 }

@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import posixpath
 import re
+import shutil
 import sys
 import zipfile
 
@@ -138,7 +139,131 @@ def test_provider_command_carries_selected_policy_and_exact_support(monkeypatch)
         with zipfile.ZipFile(io.BytesIO(archive.read("driver.pyz"))) as core:
             assert "agent_remote_driver/headed/launcher.py" in core.namelist()
             assert "agent_remote_driver/headed/extension.mjs" in core.namelist()
+            implementation = "agent_remote_driver/bridge_extension/extension.mjs"
+            assert archive.read(
+                "plugins/agent-bridge/extensions/agent-bridge/core/extension.mjs"
+            ) == core.read(implementation)
             assert not any(name.startswith("agent_bridge/") for name in core.namelist())
+
+
+@pytest.mark.parametrize("layout", ["source", "payload", "copied-core", "wheel", "partial-payload"])
+def test_actual_sdk_facade_loads_the_core_without_suite_services(tmp_path, layout):
+    from agent_procutil.owned_process import run_caller_owned
+    from agent_remote_driver.bridge_extension import extension_sources
+    from agent_remote_driver.session_host.bundle import build_session_host_bundle
+
+    node = shutil.which("node")
+    assert node, "the Core SDK entrypoint control requires Node"
+    root = Path(__file__).resolve().parents[3]
+    bridge = root / "plugins/agent-bridge"
+    selected = tmp_path / "plugins/agent-bridge"
+    entrypoint = selected / "extensions/agent-bridge/extension.mjs"
+    entrypoint.parent.mkdir(parents=True)
+    shutil.copy2(bridge / "extensions/agent-bridge/extension.mjs", entrypoint)
+    if layout in ("source", "partial-payload"):
+        resources = tmp_path / "libs/copilot-driver-core/src/agent_remote_driver/bridge_extension"
+        sources = extension_sources()
+        if layout == "partial-payload":
+            (selected / "extensions/agent-bridge/core").mkdir()
+    elif layout == "payload":
+        report = _materializer().materialize_into(
+            source_consumer_dir=bridge, dest_consumer_dir=selected, canonical_root=root,
+        )
+        assert report and all(line.startswith("OK ") for line in report), report
+        resources = selected / "extensions/agent-bridge/core"
+        sources = ()
+    else:
+        construction = tmp_path / "construction"
+        if layout == "wheel":
+            uv = shutil.which("uv")
+            assert uv, "the Core wheel resource control requires uv"
+            source = construction / "core"
+            shutil.copytree(root / "libs/copilot-driver-core", source)
+            output = construction / "wheels"
+            build = run_caller_owned([
+                uv, "build", "--wheel", "--offline", "--no-sources",
+                "--no-build-isolation", "--python", sys.executable,
+                "--out-dir", str(output), str(source),
+            ], timeout=45, max_stdout_bytes=256 * 1024, max_stderr_bytes=64 * 1024)
+            assert build.returncode == 0, build.stderr
+            built, = output.glob("*.whl")
+            retained = tmp_path / built.name
+        else:
+            built, _ = build_session_host_bundle(construction)
+            retained = tmp_path / "retained-core.pyz"
+        shutil.copy2(built, retained)
+        shutil.rmtree(construction)
+        exported = run_caller_owned([
+            sys.executable, "-I", "-S", "-c",
+            "import base64,json,sys; sys.path.insert(0,sys.argv[1]); "
+            "from agent_remote_driver.bridge_extension import extension_sources; "
+            "print(json.dumps([(name,base64.b64encode(data).decode('ascii')) "
+            "for name,data in extension_sources()]))",
+            str(retained),
+        ], timeout=15, max_stdout_bytes=256 * 1024, max_stderr_bytes=64 * 1024)
+        assert exported.returncode == 0, exported.stderr
+        import base64
+
+        sources = tuple((name, base64.b64decode(data)) for name, data in json.loads(exported.stdout))
+        assert sources == extension_sources()
+        resources = selected / "extensions/agent-bridge/core"
+    resources.mkdir(parents=True, exist_ok=True)
+    for name, contents in sources:
+        (resources / name).write_bytes(contents)
+    sdk = selected / "node_modules/@github/copilot-sdk"
+    sdk.mkdir(parents=True)
+    (sdk / "package.json").write_text(json.dumps({
+        "type": "module", "exports": {"./extension": "./extension.mjs"},
+    }), encoding="utf-8")
+    (sdk / "extension.mjs").write_text(
+        "export const joinSession = globalThis.__joinSession;\n", encoding="utf-8",
+    )
+    script = """
+import assert from "node:assert/strict";
+import {pathToFileURL} from "node:url";
+const sid = "11111111-1111-4111-8111-111111111111";
+process.env.SESSION_ID = sid;
+process.env.AGENT_BRIDGE_NATIVE_SESSION_ID = sid;
+process.env.AGENT_BRIDGE_RECEIVING_PLUGIN_ROOT = process.argv[1];
+process.env.AGENT_BRIDGE_SCOPE_ID = "fixture-scope";
+process.env.AGENT_BRIDGE_CONFIG_DIR = process.argv[2];
+process.env.COPILOT_HOME = process.argv[2];
+for (const name of ["COPILOT_DRIVER_HEADED_CLIENT", "AGENT_BRIDGE_REMOTE_DRIVER_ROOT",
+  "AGENT_BRIDGE_RETAINED_INBOX"]) delete process.env[name];
+let joins = 0, subscriptions = 0;
+globalThis.fetch = () => assert.fail("an absent Bridge must not cause network or provisioning");
+globalThis.__joinSession = async (options) => {
+  joins++;
+  assert.deepEqual(Object.keys(options).sort(), ["commands", "hooks"]);
+  assert.deepEqual(Object.keys(options.hooks).sort(), ["onPostToolUse", "onPostToolUseFailure"]);
+  assert.deepEqual(options.commands.map(command => command.name), ["peer"]);
+  return {sessionId: sid, on: () => {subscriptions++;}, log: async () => {}};
+};
+if (process.argv[4] === "partial-payload") {
+  await assert.rejects(import(pathToFileURL(process.argv[3]).href),
+    error => error.code === "ERR_MODULE_NOT_FOUND");
+  assert.equal(joins, 0);
+  assert.equal(subscriptions, 0);
+  console.log("partial Core payload refused; source fallback forbidden");
+} else {
+await import(pathToFileURL(process.argv[3]).href);
+assert.equal(joins, 1);
+assert.equal(subscriptions, 1);
+console.log("one Core registration/delivery activation; no suite service");
+}
+"""
+    config = tmp_path / "private-config"
+    config.mkdir()
+    result = run_caller_owned(
+        [node, "--input-type=module", "--eval", script,
+         str(selected), str(config), str(entrypoint), layout],
+        timeout=15, max_stdout_bytes=64 * 1024, max_stderr_bytes=64 * 1024,
+    )
+    assert result.returncode == 0, result.stderr
+    assert (
+        "partial Core payload refused" if layout == "partial-payload"
+        else "one Core registration/delivery activation"
+    ) in result.stdout
 
 
 def test_provider_cli_advertises_support_without_touching_a_daemon(capsys, monkeypatch):

@@ -29,6 +29,18 @@ for ordinary installation and its compact receiving-archive mechanism for
 hoisting the same canonical code and assets. The plugin remains a connector;
 the app must run without plugin enablement.
 
+The remaining Bridge extension source now follows this same owner:
+`agent_remote_driver.bridge_extension` carries its registration/delivery
+implementation and complete JavaScript resources in the Core distribution and
+compact export. One Bridge SDK adapter supplies `joinSession` and its actual
+plugin root to the private in-process activation. Source mode uses the canonical
+Core; released mode uses the existing multi-root packaged-asset projection.
+Portable receiving reads the selected Core's package resources without a target
+suite installation. Partial native projections refuse before activation rather
+than selecting source. This source checkpoint preserves native root/loadout
+checks and the queued-delivery candidate; current source capture, publication,
+ordinary wheel qualification and native/installed adoption remain separate gates.
+
 The core must not import Bridge, Worktrees or Manager to launch or survive.
 Small client/compatibility surfaces may compose the app, but its process must
 run from the selected core environment/artifact, not a caller-owned venv or

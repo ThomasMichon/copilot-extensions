@@ -1,7 +1,6 @@
 // Async, non-blocking session-metadata resolution for the agent-bridge
-// extension. Split out from extension.mjs (which calls joinSession() at
-// import time, making it hard to unit test directly) so this logic is
-// exercised hermetically, the same way delivery.mjs already is.
+// extension. The Core activation supplies the original SDK adapter's root;
+// relocating this module must not change the selected plugin identity.
 //
 // NEVER use execSync/execFileSync here. Those suspend the ENTIRE process --
 // no I/O of any kind, including the host's own readiness/liveness handshake
@@ -29,7 +28,6 @@ import { constants, realpathSync } from "node:fs";
 import { lstat, open } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
-import { fileURLToPath } from "node:url";
 
 // Epoch seconds this process started (wall clock minus uptime), fixed once
 // per *process*: pinned on the process object, so an extension reload in the
@@ -143,11 +141,12 @@ export async function readSessionBinding(sessionId, { env = process.env } = {}) 
 // absent/partial value and self-corrects on the next heartbeat.
 export async function resolveMetadataAsync({
   cwd = process.cwd(), env = process.env, sessionId = null, timeoutMs = METADATA_CLI_TIMEOUT_MS,
-  machineResolver = resolveMachineAsync,
+  machineResolver = resolveMachineAsync, extensionPluginRoot,
 } = {}) {
   if (env.AGENT_BRIDGE_RECEIVING_PLUGIN_ROOT) {
     const root = env.AGENT_BRIDGE_RECEIVING_PLUGIN_ROOT;
-    if (!isAbsolute(root) || realpathSync(root) !== realpathSync(fileURLToPath(new URL("../..", import.meta.url)))
+    if (!isAbsolute(root) || typeof extensionPluginRoot !== "string"
+        || !isAbsolute(extensionPluginRoot) || realpathSync(root) !== realpathSync(extensionPluginRoot)
         || !env.AGENT_BRIDGE_SCOPE_ID
         || !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/.test(env.AGENT_BRIDGE_NATIVE_SESSION_ID || "")) {
       throw new Error("Portable receiving metadata differs from its selected launch");

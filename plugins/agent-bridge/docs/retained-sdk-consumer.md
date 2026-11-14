@@ -9,6 +9,16 @@ Omitting the setting preserves ordinary legacy delivery, including its existing
 default-on behavior. This source integration is not native-platform,
 installed-cohort or guarded-restoration qualification.
 
+The [Core package](../../../libs/copilot-driver-core/README.md) owns the
+registration/delivery closure. Bridge keeps one SDK entrypoint, which supplies
+its original plugin root to the Core activation. Source checkouts select the
+canonical Core files; released payloads use the existing packaged-asset
+projection. Portable receiving reads those resources from its selected Core
+package, not a guest Bridge installation. A partial native projection refuses
+before SDK activation rather than falling back to source. The same original
+plugin root is checked against native loadout observations after relocation.
+No additional SDK join, default-mode change or permission declaration is added.
+
 An original Copilot Driver headed launch supplies the versioned private
 `COPILOT_DRIVER_HEADED_CLIENT` declaration and thereby selects retained
 delivery for that launch. The extension loads the client from the retained
@@ -25,6 +35,51 @@ selection retains the existing exact native loadout checks before the common
 send; the new path does not waive duplicate/missing-root refusal. Read-only
 SDK metadata and history still serve original consumption recovery. Full
 controller restoration is a separate qualification, not an inferred grant.
+
+## Post-tool pending-input notice
+
+The extension registers the public SDK's `onPostToolUse` and
+`onPostToolUseFailure` callbacks. Its existing off-loop inbox and original
+receipt reads populate a bounded in-memory set of pending message IDs before
+an SDK send can block. Root callbacks for the registered native session can
+then tell the agent to end its turn for queued steering. The callback performs
+no network, subprocess, file or history work and never awaits the drain.
+Nested/foreign callbacks, intentional `/peer` mute and unavailable current
+registration produce no notice. A repeated notice is coalesced for 30 seconds.
+No hook acknowledgement, peer reply or new delivery queue is required.
+
+SDK acceptance does not clear pending input. A native root input observation,
+or the retained consumer's existing exact original-receipt history check,
+clears its own observed ID. A session-binding change invalidates the old set.
+At the 1,000-ID bound, observation becomes explicitly incomplete rather than
+evicting known IDs or claiming the inbox is empty. Unknown overflow is not a
+reason to replay input; it does not itself demand an end-turn after all known
+pending IDs have cleared.
+
+This is best-effort steering from this extension's observed facts, not a fresh
+authoritative inbox read on every tool call. It cannot wake an idle receiver
+without a tool boundary, repair a hung SDK or certify callback support from a
+package version. The selected runtime must actually accept and invoke the
+public hooks; native hook-policy refusal is not bypassed. The model-free source
+controls do not qualify that native lane or an installed reload.
+
+No hook return, prompt-submitted callback or send reply is treated as model
+consumption. Timed content fallback remains unsupported until the native
+provider supplies enforceable pre-input duplicate suppression and evidence
+that the exact post-tool content reached model-facing input. Existing retained
+uncertainty, pending-native fences, original IDs and no-resend rules are unchanged.
+
+The legacy represented-event flusher separately preserves actual attributed
+root-input events across failed or unconfirmed event POSTs. It retries only
+that evidence, with the original native session and event identity, not an SDK
+send or message body. Ordinary representation remains best-effort. Bounded
+overflow evicts ordinary events first; an all-receipt overflow is reported off
+the SDK event loop and can leave original delivery receipts unknown. This is
+an in-memory retry inside the existing event buffer, not a durable outbox or
+restart guarantee. Re-registration never retags retained evidence as another
+session's input, and native hook/SDK acknowledgement alone creates no event.
+Sub-agent events likewise cannot change the parent session's registration or
+native binding; only root events can adopt a resumed conversation ID.
 
 ## Prerequisites and unsupported cases
 
