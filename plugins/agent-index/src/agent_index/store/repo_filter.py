@@ -19,6 +19,8 @@ about this repo."
 
 from __future__ import annotations
 
+import fnmatch
+
 
 def repo_matches(source: str, repo: str) -> bool:
     """True if ``source`` belongs to ``repo`` (see module docstring)."""
@@ -40,6 +42,15 @@ def _like_pattern(value: str) -> str:
     """Escape a value for a SQL ``LIKE`` pattern (with ``ESCAPE '\\'``)."""
     escaped = value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
     return _sql_str(escaped)
+
+
+def path_glob_sql(pattern: str) -> str:
+    """Build a full-path shell-glob predicate for Lance's regex engine."""
+    regex = fnmatch.translate(pattern)
+    # Rust regex lacks Python's atomic groups and \Z end anchor.
+    regex = regex.replace("(?>", "(?:").removesuffix(r"\Z").removesuffix(r"\z")
+    regex = r"\A" + regex + r"\z"
+    return f"regexp_like(file_path, '{_sql_str(regex)}')"
 
 
 def repo_filter_sql(repo: str) -> str:

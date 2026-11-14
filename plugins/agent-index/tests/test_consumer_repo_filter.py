@@ -47,3 +47,33 @@ def test_default_repo_filter_retains_generic_source_identity(tmp_path: Path) -> 
     store = ContentStore(tmp_path / "lance")
     predicate = store.repo_filter_sql("owner/repo")
     assert predicate == "split_part(source, ':', 2) = 'owner/repo'"
+
+
+@pytest.mark.parametrize("pattern, selected, sibling", [
+    ("*src/*_adapter.py", "src/code_adapter.py", "src/codeXadapter.py"),
+    ("docs/report?.[mt][dx]", "docs/report1.md", "docs/report12.md"),
+    ("docs/[!a-z].md", "docs/7.md", "docs/a.md"),
+    ("docs/100%_ready.md", "docs/100%_ready.md", "docs/100X_ready.md"),
+    ("docs/a'b.md", "docs/a'b.md", "nested/docs/a'b.md"),
+    (r"docs/end\Z.md", r"docs/end\Z.md", r"docs/end\z.md"),
+    ("*\u03b4\u03bf\u03ba\u03b9\u03bc\u03ae*.md",
+     "docs/\u03b4\u03bf\u03ba\u03b9\u03bc\u03ae.md", "docs/other.md"),
+])
+def test_path_globs_filter_real_fts_candidates_before_limit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    pattern: str, selected: str, sibling: str,
+) -> None:
+    monkeypatch.delenv("AGENT_INDEX_STORE_LAYOUT", raising=False)
+    store = ContentStore(tmp_path / "lance")
+    chunks = [
+        Chunk("searchable phrase primary", selected, "text", "text", 1, 1, source="git:repo"),
+        Chunk("searchable phrase sibling different", sibling, "text", "text", 1, 1,
+              source="git:repo"),
+    ]
+    store.upsert(chunks)
+    assert store.ensure_fts_index()
+    for limit in (1, 10):
+        hits = store.fts_search(
+            "searchable phrase", source="git:repo", file_path_glob=pattern, limit=limit,
+        )
+        assert [chunk_id for chunk_id, _score in hits] == [chunks[0].chunk_id]

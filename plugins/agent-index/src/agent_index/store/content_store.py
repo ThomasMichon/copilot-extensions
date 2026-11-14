@@ -30,7 +30,7 @@ from agent_index.store.content_fts_worker import _ContentFtsWorkerMixin, fts_ret
 from agent_index.store.content_item_reads import _ContentItemReadsMixin
 from agent_index.store.content_snapshot import _ContentSnapshotMixin
 from agent_index.store.lance_connection import connect_content_store
-from agent_index.store.repo_filter import _like_pattern, _sql_str, repo_filter_sql
+from agent_index.store.repo_filter import _like_pattern, _sql_str, path_glob_sql, repo_filter_sql
 from agent_index.store.source_layout import (
     SourceLayoutError,
     domain_for,
@@ -870,7 +870,7 @@ class ContentStore(_ContentFtsWorkerMixin, _ContentItemReadsMixin, _ContentSnaps
             if language:
                 filters.append(f"language = '{_sql_str(language)}'")
             if file_path_glob:
-                filters.append(f"file_path LIKE '{_sql_str(file_path_glob)}'")
+                filters.append(path_glob_sql(file_path_glob))
             if repo:
                 filters.append(f"({self.repo_filter_sql(repo)})")
             if filters:
