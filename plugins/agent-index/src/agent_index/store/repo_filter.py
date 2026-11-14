@@ -20,6 +20,7 @@ about this repo."
 from __future__ import annotations
 
 import fnmatch
+import re
 
 
 def repo_matches(source: str, repo: str) -> bool:
@@ -46,10 +47,42 @@ def _like_pattern(value: str) -> str:
 
 def path_glob_sql(pattern: str) -> str:
     """Build a full-path shell-glob predicate for Lance's regex engine."""
-    regex = fnmatch.translate(pattern)
-    # Rust regex lacks Python's atomic groups and \Z end anchor.
-    regex = regex.replace("(?>", "(?:").removesuffix(r"\Z").removesuffix(r"\z")
-    regex = r"\A" + regex + r"\z"
+    parts: list[str] = []
+    index = 0
+    while index < len(pattern):
+        char = pattern[index]
+        index += 1
+        if char == "*":
+            parts.append(".*")
+        elif char == "?":
+            parts.append(".")
+        elif char == "[":
+            end = index
+            if end < len(pattern) and pattern[end] == "!":
+                end += 1
+            if end < len(pattern) and pattern[end] == "]":
+                end += 1
+            while end < len(pattern) and pattern[end] != "]":
+                end += 1
+            if end == len(pattern):
+                parts.append(r"\[")
+                continue
+            # Class-only translation avoids version-dependent wildcard groups.
+            fragment = fnmatch.translate(pattern[index - 1:end + 1])[4:-3]
+            if fragment == "(?!)":
+                return "FALSE"
+            if fragment.startswith("["):
+                body = re.sub(
+                    r"\\.|[\[\]]",
+                    lambda match: "\\" + match[0] if match[0] in "[]" else match[0],
+                    fragment[1:-1],
+                )
+                fragment = "[" + body + "]"
+            parts.append(fragment)
+            index = end + 1
+        else:
+            parts.append(re.escape(char))
+    regex = r"\A(?s:" + "".join(parts) + r")\z"
     return f"regexp_like(file_path, '{_sql_str(regex)}')"
 
 
