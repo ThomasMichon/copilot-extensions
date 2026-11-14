@@ -63,11 +63,14 @@ switch or leaking one operation's credentials into another.
   boundary; P69-I and V69 retain the actual account-to-provider-to-credential
   implementation, integration and behavior validation as unchecked work.
   This is one account-aware family, not a second plan or executor assignment.
-  Credit the delivered GitHub-only source Phase 1 without reopening it:
-  optional repo `account:` overrides GitHub-remote-owner derivation;
-  underivable, non-GitHub and absent cases resolve to none. Precedence stays
-  explicit account, derived owner, then none. The related-repository index can
-  surface or override the account, and `repos`/`related` output exposes it.
+  Credit the delivered GitHub-only source Phase 1 as historical evidence:
+  its explicit-account, remote-owner-derived, then-none sequence is not a
+  current selection requirement. Current policy is exact repository
+  `account:` override, explicit owner account map, preferred/default account,
+  then none/ambient. Never infer a login from a repository namespace or a
+  sibling's account. Non-GitHub repositories may use their explicit override
+  but do not inherit a default GitHub account. Retain the related-repository
+  account surface/override and `repos`/`related` output under that current policy.
   The credited command set is `create-pr`, `push-changes`, `pr-merge`,
   `pr-ready`, `pr-status`, `pr-watch`, `pr-complete`, `set-pr` and `finalize`.
   Preserve token injection, explicit-token override and per-invocation Git
@@ -218,7 +221,10 @@ lookup; neither is a fresh missing implementation or whole-family proof.
   resolution, credential ownership and consumption. Preserve the source-named
   examples without an exhaustive provider-support floor; prove no duplicate
   owner, secret return/leak, ambient/global-account substitution or regression
-  of the credited Phase 1 behavior. Contract prose alone is insufficient.
+  of the still-applicable credited Phase 1 behavior. Honor the current explicit
+  repository/owner-map/default/none policy above, not historical namespace-as-
+  login inference; retain explicit non-GitHub overrides. Contract prose alone
+  is insufficient.
   This intake authorizes no real credentials, auth ceremony, provider write,
   native experiment or launch-auth change.
 
