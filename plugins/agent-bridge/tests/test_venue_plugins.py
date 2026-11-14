@@ -194,10 +194,14 @@ def controller(monkeypatch, tmp_path):
     caller = SpawnTarget(
         caller_worktree=str(tmp_path), caller_owner_ref="local/control/controller",
     )
-    owner = AsyncMock(return_value={"worktrees": [{
+    owner = AsyncMock(return_value={"version": 1, "ok": True, "worktree": {
         "id": "controller", "repo": "control", "machine": "local",
         "path": str(tmp_path), "status": "active",
-    }]})
+        "creation_nonce": "controller-nonce", "session_count": 1,
+        "last_session_id": "native-caller", "execution_leg": None,
+        "sessions_indexed": True, "execution_leg_opaque": False,
+        "session_backend": None, "session_backend_opaque": False,
+    }})
     monkeypatch.setattr("agent_bridge.acquisition_authority.worktree_command", owner)
     return caller, owner
 
@@ -252,7 +256,7 @@ async def test_prepare_uses_selected_transport_and_returns_each_directory(monkey
         cwd=caller.caller_worktree,
     )
     owner.assert_awaited_once_with(
-        ["list", "--json", "--cache-only", "--worktree-id", "controller"], "control",
+        ["record", "--worktree-id", "controller", "--json"], "control",
     )
     call = transport.run.await_args
     assert call.args == ("bash -ls",)
@@ -606,12 +610,12 @@ async def test_related_payload_refresh_keeps_provider_enablement(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("fault", [
     "empty-owner", "malformed-owner", "relative", "absent", "untracked",
-    "duplicate", "wrong-project", "wrong-machine", "wrong-path", "terminal", "unavailable",
-    "invalid-response",
+    "wrong-id", "wrong-project", "wrong-machine", "wrong-path", "terminal", "unavailable",
+    "invalid-response", "invalid-version", "incomplete-record",
 ])
 async def test_controller_failure_never_spawns_plugin_provider(monkeypatch, controller, fault):
     caller, owner = controller
-    row = owner.return_value["worktrees"][0]
+    row = owner.return_value["worktree"]
     if fault == "empty-owner":
         caller.caller_owner_ref = ""
     elif fault == "malformed-owner":
@@ -621,13 +625,18 @@ async def test_controller_failure_never_spawns_plugin_provider(monkeypatch, cont
     elif fault == "absent":
         caller.caller_worktree += "\\absent"
     elif fault == "untracked":
-        owner.return_value["worktrees"] = []
-    elif fault == "duplicate":
-        owner.return_value["worktrees"].append(dict(row))
+        owner.return_value.update(ok=False, worktree=None, error="not tracked")
     elif fault == "invalid-response":
-        owner.return_value["worktrees"] = None
+        owner.return_value["worktree"] = None
+    elif fault == "invalid-version":
+        owner.return_value["version"] = 2
+    elif fault == "incomplete-record":
+        del row["sessions_indexed"]
     elif fault.startswith("wrong-"):
-        row[{"wrong-project": "repo", "wrong-machine": "machine", "wrong-path": "path"}[fault]] = "other"
+        row[{
+            "wrong-id": "id", "wrong-project": "repo",
+            "wrong-machine": "machine", "wrong-path": "path",
+        }[fault]] = "other"
     elif fault == "terminal":
         row["status"] = "finalized"
     else:
@@ -762,7 +771,7 @@ async def test_controller_machine_pair_matches_qualified_execution_label(
 
     caller, owner = controller
     caller.caller_owner_ref = f"{requested}/control/controller"
-    row = owner.return_value["worktrees"][0]
+    row = owner.return_value["worktree"]
     row.update(machine=recorded, platform=platform)
     if matches:
         assert await resolve_controller_cwd(caller) == caller.caller_worktree
@@ -781,7 +790,7 @@ async def test_controller_pair_does_not_override_explicit_or_invalid_tuple(
 
     caller, owner = controller
     caller.caller_owner_ref = "example-host-wsl/control/controller"
-    row = owner.return_value["worktrees"][0]
+    row = owner.return_value["worktree"]
     row.update(
         machine_identity_version=version,
         machine="example-host", environment="wsl", platform="wsl",
@@ -869,7 +878,7 @@ async def test_provider_refresh_preserves_controller_provenance(
 @pytest.mark.parametrize("context", [
     "managed", "unmanaged", "legacy", "affinity", "qualified", "owner-only", "bad-session",
     "invalid-explicit", "empty-explicit", "absolute-affinity", "legacy-absolute-affinity",
-    "explicit-equals-affinity",
+    "explicit-equals-affinity", "unpublished-roster",
 ])
 async def test_native_venue_controller_context_start_and_recovery(
     monkeypatch, session_manager, controller, hosting_allowed, kind, recovery, context,
@@ -882,6 +891,12 @@ async def test_native_venue_controller_context_start_and_recovery(
     from agent_bridge.transport import SpawnTarget
 
     caller, owner = controller
+    if context == "unpublished-roster":
+        async def exact_record_only(args, project):
+            if args[0] == "list":
+                raise RuntimeError("no usable advisory roster: no durable current roster")
+            return owner.return_value
+        owner.side_effect = exact_record_only
     before = os.getcwd()
     provider = AsyncMock(return_value=(0, b'{"plugins":[]}', b""))
     monkeypatch.setattr("agent_bridge.session_host.container_transport._run_provider", provider)
@@ -930,12 +945,12 @@ async def test_native_venue_controller_context_start_and_recovery(
         "acp_command": "cd /workspaces/project && copilot --acp --stdio",
     }
     target = SpawnTarget(type="command", cwd="/workspaces/project", **{kind: metadata})
-    managed = context in {"managed", "qualified", "owner-only", "bad-session"}
+    managed = context in {"managed", "qualified", "owner-only", "bad-session", "unpublished-roster"}
     owner_ref = caller.caller_owner_ref if managed else None
     if context in {"qualified", "bad-session"}:
         owner_ref += "#native-caller"
     caller_id = caller.caller_worktree if context in {
-        "managed", "unmanaged", "qualified", "bad-session", "empty-explicit",
+        "managed", "unmanaged", "qualified", "bad-session", "empty-explicit", "unpublished-roster",
     } else None
     if context == "affinity":
         caller_id = "sdk/opaque-affinity"
@@ -1000,6 +1015,10 @@ async def test_native_venue_controller_context_start_and_recovery(
             assert provider.await_args.kwargs.get("cwd") == expected
             assert ("cwd" in provider.await_args.kwargs) == (expected is not None)
         assert owner.await_count == int(managed)
+        if context == "unpublished-roster":
+            owner.assert_awaited_once_with(
+                ["record", "--worktree-id", "controller", "--json"], "control",
+            )
         assert child_started == [True]
     assert os.getcwd() == before
 

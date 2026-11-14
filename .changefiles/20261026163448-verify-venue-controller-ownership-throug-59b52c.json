@@ -1,0 +1,9 @@
+{
+  "comment": "Verify venue controller ownership through authoritative exact worktree records rather than advisory rosters",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}
