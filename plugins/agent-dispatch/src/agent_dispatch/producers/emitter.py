@@ -171,6 +171,13 @@ def validate_spec(spec: dict[str, Any], *, resolve_resources: bool = False, snap
         from .emitter_relevance import validate_config
 
         validate_config(spec)
+    if spec.get("managed_producer") is not None:
+        from .emitter_managed import validate_config
+
+        try:
+            validate_config(spec)
+        except ValueError as exc:
+            raise EmitterError(str(exc)) from exc
 
 
 def load_spec(path: str | Path) -> dict[str, Any]:
@@ -220,9 +227,17 @@ def _author_tasks(
     client: DispatchClient,
     spec: dict[str, Any],
     stdout: str,
+    *,
+    runner: Callable[..., Any] = subprocess.run,
 ) -> list[dict[str, Any]]:
+    rows = _task_specs(stdout)
+    grant = None
+    if rows and spec.get("managed_producer") is not None:
+        from .emitter_managed import load_grant
+
+        grant = load_grant(client, spec, runner=runner)
     created = []
-    for row in _task_specs(stdout):
+    for row in rows:
         fields = dict(row)
         title = fields.pop("title")
         fields["source"] = spec.get("source") or "emitter"
@@ -231,7 +246,12 @@ def _author_tasks(
         fields.setdefault(
             "require_verification", bool(spec.get("require_verification", False))
         )
-        created.append(client.create(title, **fields))
+        if grant is None:
+            created.append(client.create(title, **fields))
+        else:
+            from .emitter_managed import create_or_observe
+
+            created.append(create_or_observe(client, title, fields, grant))
     return created
 
 
@@ -488,7 +508,7 @@ def run_side_load(
             f"side-load command exited {completed.returncode}: "
             f"{str(completed.stderr or '').strip()}"
         )
-    created = _author_tasks(client, spec, str(completed.stdout or ""))
+    created = _author_tasks(client, spec, str(completed.stdout or ""), runner=runner)
     _append_receipts(spec["id"], created, tick_id=f"side-load:{change_ref}")
     return {
         "registration_id": registration.get("id"),
@@ -636,7 +656,7 @@ def run_tick(
         returncode = int(completed.returncode)
         error = None
         created = (
-            _author_tasks(client, spec, str(completed.stdout or ""))
+            _author_tasks(client, spec, str(completed.stdout or ""), runner=runner)
             if returncode == 0 and task_output_json
             else []
         )
