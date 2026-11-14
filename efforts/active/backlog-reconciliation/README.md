@@ -350,6 +350,13 @@ incumbent custody remain unchanged. #1043 remains its own whole seven-family
 registry-doctor keeper. Both sources remain OPEN; the latest complete census
 is 846 open, 117 above fixed 729, with no intake reduction credit.
 
+Its [accepted contract and separate disposition](journal/2026/11.14-ambient-routing-intake.md#accepted-contract-and-separate-tracking-disposition)
+record reviewed merge #12649, complete written receiving and #1414's audited
+`NOT_PLANNED` tracking retirement. All nine technical rows remain unchecked;
+#1043 remains independently canonical and OPEN, with all owners and gates
+retained. The subsequent complete census is 845 open, 116 above fixed 729:
+one verified original-cohort departure, no arrival or unrelated departure.
+
 The [host inspection proposal](journal/2026/11.14-host-proof-receiving.md)
 retains the complete #1045 observer/progress contract in three direct unchecked
 driver Plan, behavior Validation and root-global acceptance rows. Literal
