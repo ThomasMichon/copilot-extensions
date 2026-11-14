@@ -1,0 +1,9 @@
+{
+  "comment": "Persist separate permit-aware recovery intent data through the original owner writer without enabling native effects",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
