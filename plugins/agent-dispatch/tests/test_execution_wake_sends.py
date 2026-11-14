@@ -201,10 +201,18 @@ def native_transport(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     return reply
 
 
-def test_typed_pre_admission_busy_retries_only_the_original_wake(
-    cohort: Cohort, native_transport: SimpleNamespace,
+@pytest.mark.parametrize("refusal", ["busy", "unavailable"])
+def test_typed_pre_admission_refusal_retries_only_the_original_wake(
+    cohort: Cohort, native_transport: SimpleNamespace, refusal: str,
 ) -> None:
     queue, pending, _binding = cohort
+    if refusal == "unavailable":
+        native_transport.code = 69
+        native_transport.payload.update(
+            outcome="refused_unavailable", reason="native_send_not_attempted",
+            native_send_refusal_version=1, admission_status="not_attempted",
+            native_session_id="session-a", invocation_key=pending.id,
+        )
     before = queue.get(pending.task_id)
     wake = _claim(queue, pending)
     assert wake is not None
@@ -246,6 +254,45 @@ def test_typed_pre_admission_busy_retries_only_the_original_wake(
     assert (current.owner, current.owner_session_id, current.generation) == (
         before.owner, before.owner_session_id, before.generation,
     )
+
+
+@pytest.mark.parametrize("change", [
+    "legacy", "version", "native", "key", "admission", "exit", "target", "retryable",
+])
+def test_unproven_unavailable_response_never_releases_the_original_send(
+    cohort: Cohort, native_transport: SimpleNamespace, change: str,
+) -> None:
+    queue, pending, _binding = cohort
+    native_transport.code = 69
+    native_transport.payload.update(
+        outcome="refused_unavailable", reason="native_send_not_attempted",
+        native_send_refusal_version=1, admission_status="not_attempted",
+        native_session_id="session-a", invocation_key=pending.id,
+    )
+    if change == "legacy":
+        native_transport.payload.pop("native_send_refusal_version")
+    elif change == "exit":
+        native_transport.code = 70
+    else:
+        field, value = {
+            "version": ("native_send_refusal_version", True),
+            "native": ("native_session_id", "other"),
+            "key": ("invocation_key", "other"),
+            "admission": ("admission_status", "unknown"),
+            "target": ("target", "other"),
+            "retryable": ("retryable", 1),
+        }[change]
+        native_transport.payload[field] = value
+    wake = _claim(queue, pending)
+    assert wake is not None
+    assert not deliver_execution_wake(
+        queue, wake, INCARNATION, lambda: native_transport.send(wake),
+    )
+    assert _row(queue, wake)["execution_send_state"] == "unknown"
+    assert _finish(queue, wake, delivered=False, max_attempts=1).status == "delivering"
+    assert _recover(queue, wake, now=wake.delivery_expires_at + 100) == 0
+    assert _claim(queue, wake, now=wake.delivery_expires_at + 100) is None
+    assert len(native_transport.calls) == 1
 
 
 @pytest.mark.parametrize("change", ["malformed", "target", "retryable", "reason", "exit"])

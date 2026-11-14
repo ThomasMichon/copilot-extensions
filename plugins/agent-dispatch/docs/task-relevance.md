@@ -125,6 +125,19 @@ malformed or mismatched output, a lost response and pending/unknown outcomes
 cannot authorize another send. Existing unknown records are never rewritten
 from busy-looking error text.
 
+The selected CLI may also positively refuse before native admission with
+exit 69, `reason: native_send_not_attempted`, `retryable: true`,
+integer `native_send_refusal_version: 1` and `admission_status: not_attempted`.
+Dispatch requires its target, native identity and invocation key to match
+the original wake before settling `not_sent`. A normally claimed later attempt
+uses the same guarded retry and audit path as a busy refusal; it spends the
+ordinary attempt budget and never replaces the wake, task owner or native.
+No new CLI syntax is emitted, so provider expansion is independently
+deployable. Earlier CLIs, unsupported proof versions and rollback retain
+unknown custody rather than guessed retry support. A receipt observation
+miss, unavailable target without this request-bound proof, interrupted CLI
+or post-admission failure still cannot release an unknown send.
+
 At first acceptance the existing closeout row also freezes `resource_binding`
 in the same queue transaction. A captured binding identifies the queue, original
 relationship audit event/request, managed workspace and, for a placed task,

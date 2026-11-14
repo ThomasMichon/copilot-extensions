@@ -18,13 +18,19 @@ log = logging.getLogger(__name__)
 class NativePromptNotSent(RuntimeError):
     """The selected Bridge CLI positively refused before native admission."""
 
-    def __init__(self, bridge_session: str, native_session: str, invocation_key: str) -> None:
-        super().__init__("Bridge refused the original native prompt before admission: busy")
+    def __init__(
+        self, bridge_session: str, native_session: str, invocation_key: str, *,
+        unavailable: bool = False,
+    ) -> None:
+        super().__init__("Bridge refused the original native prompt before admission")
         self.receipt = {
             "schema": "dispatch-native-prompt-refusal", "version": 1,
-            "outcome": "refused_busy", "reason": "busy", "retryable": True,
+            "outcome": "refused_unavailable" if unavailable else "refused_busy",
+            "reason": "native_send_not_attempted" if unavailable else "busy", "retryable": True,
             "bridge_session_id": bridge_session, "native_session_id": native_session,
             "invocation_key": invocation_key,
+            **({"native_send_refusal_version": 1, "admission_status": "not_attempted"}
+               if unavailable else {}),
         }
 
 
@@ -154,19 +160,33 @@ def native_prompt(
         prompt, machine=machine, launch_prefix=launch_prefix, run_ssh=run_ssh,
         timeout=timeout,
     )
-    if result is not None and result.returncode == 75:
+    if result is not None and result.returncode in {69, 75}:
         try:
             refusal = json.loads(result.stdout)
         except (TypeError, ValueError):
             refusal = None
+        busy = isinstance(refusal, dict) and (
+            result.returncode == 75 and refusal.get("outcome") == "refused_busy"
+            and refusal.get("reason") == "busy"
+        )
+        unavailable = isinstance(refusal, dict) and (
+            result.returncode == 69 and refusal.get("outcome") == "refused_unavailable"
+            and refusal.get("reason") == "native_send_not_attempted"
+            and type(refusal.get("native_send_refusal_version")) is int
+            and refusal["native_send_refusal_version"] == 1
+            and refusal.get("admission_status") == "not_attempted"
+            and refusal.get("native_session_id") == native_session
+            and refusal.get("invocation_key") == idempotency_key
+        )
         if (
             isinstance(refusal, dict)
-            and refusal.get("outcome") == "refused_busy"
+            and (busy or unavailable)
             and refusal.get("target") == bridge_session
             and refusal.get("retryable") is True
-            and refusal.get("reason") == "busy"
             and isinstance(refusal.get("error"), str)
             and refusal["error"].strip()
         ):
-            raise NativePromptNotSent(bridge_session, native_session, idempotency_key)
+            raise NativePromptNotSent(
+                bridge_session, native_session, idempotency_key, unavailable=unavailable,
+            )
     return result is not None and result.returncode == 0

@@ -142,11 +142,11 @@ def _liveness_line(s: dict) -> str | None:
     return liveness
 
 
-def _get_client(*, ensure: bool = True):
+def _get_client(*, ensure: bool = True, require_available: bool = False):
     from .client import BridgeClient, BridgeClientError, BridgeConnectionError
 
-    if ensure:
-        _ensure_daemon()
+    if ensure and _ensure_daemon() is False and require_available:
+        raise BridgeConnectionError("Bridge is unavailable before native prompt submission")
     client = BridgeClient.from_config()
     try:
         client.assert_client_supported()
@@ -154,7 +154,8 @@ def _get_client(*, ensure: bool = True):
         print(f"[FAIL] {exc.detail}", file=sys.stderr)
         sys.exit(3)
     except BridgeConnectionError:
-        pass
+        if require_available:
+            raise
     return client
 
 

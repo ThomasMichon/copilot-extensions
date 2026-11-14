@@ -90,6 +90,7 @@ AFFECTED = (
 )
 EXTRA_PATHS = (
     *retained.EXTRA_PATHS, INPUT, CAPTURE, "tools/bridge_http52_evidence.py",
+    "plugins/agent-bridge/tests/test_native_send_unavailable.py",
     "plugins/agent-bridge/tests/test_host_status.py",
     "plugins/agent-bridge/tests/test_host_status_remote.py",
     "plugins/agent-bridge/tests/test_host_status_clients.py",
@@ -153,6 +154,9 @@ EXTRA_PATHS = (
 )
 PROBES = {
     **retained.PROBES,
+    "test_real_cli_reports_unavailable_before_constructing_native_admission": 2,
+    "test_other_commands_keep_existing_unavailable_client_behavior": 1,
+    "test_transport_distinguishes_preflight_from_a_lost_post_response": 3,
     "test_origin_cli_reaches_actual_keyed_owner_without_acquisition": 2,
     "test_origin_creation_client_composes_required_selected_peer_capabilities": 6,
     "test_origin_creation_client_rechecks_after_cutover_without_baseline_replay": 1,
