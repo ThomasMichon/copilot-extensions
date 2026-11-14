@@ -23,6 +23,15 @@ historical binary rollback or native SDK evidence.
 
 ## Current HTTP-52 owner-membership evidence
 
+The optional CLI-only no-admission refusal adds six current-generation source
+controls. They execute the actual keyed-native CLI against failed ensure/client
+discovery, preserve other commands' existing client behavior, and distinguish
+read-only preflight from an attempted POST with a lost response. Only the former
+emits the request-bound version-1 refusal; the latter remains unknown.
+The new test module joins the committed execution closure. HTTP generation,
+daemon feature floors, input vector and historical HTTP-51 packets remain
+unchanged. This is source evidence, not native unavailable-owner recovery.
+
 The ordinary keyed-creation CLI/client origin carrier adds 25 source controls,
 bringing the current portfolio to 491. File/stdin parser calls join the real
 client, health negotiation, HTTP owner and first-save database without an
@@ -399,16 +408,6 @@ When a wire contract does change:
    ```
 
 ## HTTP-51 standard native-send evidence
-
-The optional CLI-only no-admission refusal adds six source controls, bringing
-the current HTTP-51 portfolio from 43 to 49 cases. They execute the actual
-keyed-native CLI against failed ensure/client discovery, preserve other
-commands' existing client behavior, and distinguish read-only preflight from
-an attempted POST with a lost response. Only the former emits the
-request-bound version-1 refusal; the latter remains unknown.
-The new test module joins the committed execution closure. HTTP generation,
-daemon feature floors, input vector and historical packets remain unchanged.
-This is source evidence, not native unavailable-owner recovery.
 
 HTTP generation 51 adds `NATIVE_SEND_IDEMPOTENCY_PROTOCOL_VERSION` for ordinary
 `send` with an exact native identity and idempotency key. Bridge owns admission
