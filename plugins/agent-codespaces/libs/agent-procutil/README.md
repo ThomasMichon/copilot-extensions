@@ -142,6 +142,9 @@ arbitrary third-party output.
 
 ## Managed Python bytecode cache
 
+This is the legacy compatibility API. New launchers use the complete
+[platform-cache policy vector](#platform-cache-provider-contract) instead.
+
 `agent_procutil.python_cache_args(root, runtime=target)` returns `["-X",
 "pycache_prefix=<root>/cache/python/<installation-scope>"]` for an absolute,
 caller-owned durable runtime state root. `target` is the interpreter or runtime
@@ -160,8 +163,8 @@ a changed installation selects another even when source paths, sizes, and
 timestamps match. Missing, malformed, redirected, or unrecorded evidence gets
 a fresh invocation namespace, not an owner-wide fallback. This reads existing
 installation evidence and produces no new deployment receipt or build cache.
-Native launchers that cannot inspect that evidence likewise use fresh
-invocation scopes; systemd uses its own service invocation ID.
+Older native launchers using that contract can likewise allocate fresh
+invocation scopes, including a systemd service invocation ID.
 
 `cache/python` contains mutable, derived executable bytecode outside immutable
 version slots, not protected credentials, configuration, or business data.
@@ -174,8 +177,13 @@ that those gates have passed or introduce another cleanup policy.
 
 `agent_procutil.python_cache.POLICY_VERSION == 2` advertises the additive
 `policy_arguments(root, runtime=target)` provider. Existing `cache_arguments`
-and `python_cache_args` callers retain their preceding contract; consumer
-migration and legacy update relief are separate lifecycle work.
+and `python_cache_args` callers retain their preceding contract.
+`agent_procutil.python_cache_policy_args` exposes the new complete-vector
+provider through the package facade, including standalone lifecycle loaders.
+Callers supporting an older package select `-B` when that export is absent;
+they must not fall back to the legacy prefix allocator. Minimal bundles without
+the managed-cache companions also take `-B`. Launcher adoption does not itself
+reclaim legacy caches; update-time legacy relief is separate lifecycle work.
 
 The new provider returns `["-X", "pycache_prefix=<private-platform-cache>"]`
 only for a completed target slot belonging to the addressed installation.

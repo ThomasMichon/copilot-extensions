@@ -299,6 +299,15 @@ judgment. Both sources stay OPEN now; no generic ACK, implementation
 appointment, execution, activation, privilege change or custody release
 is introduced.
 
+The separate P7643/V7643/G7643 Phase 5 runner family enters through existing
+Phase 7 migration intake and normal domain-Plan review. It is not a fifth F4
+member or #10225 intake. Keep #7643 independently OPEN during this proposal,
+the existing runner/group/sandbox owner, later exact-path cleanup custody,
+OPEN #1303, all existing rows and all original bounds. Complete reviewed
+Plan/local AND actual global Validation, Coordination and dated Journal
+delivery precede a separate source judgment; no implementation appointment,
+claim expiry, resource release or generic ACK follows.
+
 ## Context
 
 The [weighted native fixture/runner cohort](../backlog-reconciliation/semantic-theme-results.md#native-fixturerunner-cohort)
@@ -806,6 +815,49 @@ investigator; #6131 / PR #6135's watch-generation repair remains independent.
 - [ ] Add contribution guidance requiring new test families to declare their
   contract, tier, effects, and expected budget impact.
 
+#### Finite external image-mapping cleanup outcome - #7643
+
+- [ ] **P7643-1:** Preserve the original Windows ARM64 case: the copied x64
+  child completed, but its test-owned executable remained mapped by XtaCache
+  and cleanup failed. Retain the successful child assertions, failed
+  deletion-readiness evidence and distinction from a read-only file or a
+  still-running fixture child. Do not infer the current holder or claim a
+  fresh reproduction.
+- [ ] **P7643-2:** Choose bounded exact-ownership-scoped handling OR a
+  truthful retained-artifact outcome that the existing cleanup owner can
+  reconcile after the external mapping releases. Do not require both
+  alternatives, a new owner ACK, service restart, process kill or broad
+  directory deletion. Unknown release retains the artifact and uncertainty.
+- [ ] **P7643-3:** Report cleanup failure separately from the original
+  build/test result; failed cleanup is never a green whole run. Preserve
+  the primary error when cleanup also fails and record the exact residual
+  and custody for the existing cleanup owner.
+- [ ] **P7643-4:** Keep the owning runner/group/sandbox lifecycle and
+  `tools/plugin_test_containment.py` boundary, original containment and
+  item/group/plugin/resource limits. Installer #7494/#7686 retained-input
+  failures and #10225's distinct post-exit sharing-handle family stay separate.
+- [ ] **P7643-5:** Keep #7643 OPEN during this proposal under its existing
+  runner/group/sandbox owner; later exact-path cleanup remains separately
+  authorized. Intake is not source/resource transfer or an implementation
+  appointment.
+
+##### Local Validation
+
+- [ ] **V7643-1:** At the original bounded Windows ARM64 runner boundary,
+  exercise the selected P7643-2 outcome with a controlled owned artifact/
+  mapping fixture, preserving child-exit and original test assertions.
+  Do not touch the live XtaCache service or a host-owned executable.
+- [ ] **V7643-2:** Prove cleanup failure remains visible and the outer
+  whole-run status is non-green; retain the primary build/test error
+  separately. Cover successful child execution plus cleanup refusal and
+  the truthful retained-artifact outcome.
+- [ ] **V7643-3:** Preserve exact run-owned artifact identity; any permitted
+  cleanup is scoped to that artifact after its applicable release condition.
+  Unknown/foreign ownership remains retained, never deleted or passed.
+- [ ] **V7643-4:** Keep the finite case separate from #7494/#7686 and
+  #10225 at its existing bounded tier. No all-suite, every-host, broader
+  native, required-PR-CI or unrelated portfolio prerequisite is added.
+
 ### Phase 6 — Final assurance and steady-state governance
 
 - [ ] Re-run contract coverage and focused mutation baselines for every
@@ -828,6 +880,10 @@ investigator; #6131 / PR #6135's watch-generation repair remains independent.
 - [ ] Place each accepted public tracker item in exactly one existing phase,
   extending this plan before implementation when necessary.
 - [ ] Use synthetic fixtures and reproducible public test cases.
+- [ ] **I7643:** Route the separate P7643/V7643/G7643 Phase 5 family through
+  this existing migration-intake deduplication/ownership and domain-review
+  process. Preserve its independent source status and existing cleanup
+  owner; this does not add #7643 to F4 or #10225, run a test or release custody.
 
 ### Bug sweep — linked open bugs (2026-09-24)
 
@@ -2233,6 +2289,16 @@ every-host or release prerequisite is added to a finite family.
   No new native, whole-release or whole-portfolio prerequisite is added;
   planning is not causal closure, execution or source/resource release.
 
+- [ ] **G7643:** Resolve EVERY P7643/V7643 clause at its original finite
+  Windows ARM64 runner/sandbox boundary: bounded exact-owned handling OR
+  truthful retained-artifact reconciliation, visible non-green whole-run
+  cleanup failure, distinct primary/cleanup errors and unchanged budgets.
+  Preserve #7494/#7686 and #10225 as independent contracts, proper existing
+  contained/periodic or separately admitted native tiers, unit-only required
+  CI, incumbent holds and the original primary/cleanup custodians. No service,
+  process, broad-delete, every-host or unrelated full-portfolio action or
+  acceptance bar is added.
+
 ## Proposal
 
 Approve the vision, framework, and phased campaign as the repository's
@@ -2591,3 +2657,14 @@ precede separate administrative judgments for either source, honoring any
 actual source-specific physical-OPEN restriction. No technical completion,
 accepted flake, execution, assignment, claim release or resource release
 is claimed.
+
+### 2026-11-14 UTC - Proposed independent runner-mapping intake
+
+The separate P7643/V7643/G7643 family and I7643 Phase 7 route retain the
+complete external-mapping cleanup union outside F4 and #10225. All eleven
+new technical/intake rows remain unchecked. Preserve bounded exact-owner
+handling OR truthful retained-artifact reconciliation, distinct primary and
+cleanup outcomes, original limits and actual later cleanup custody.
+The source remains OPEN during the proposal; no test, native reproduction,
+service/process action, file cleanup, implementation, technical acceptance
+or source/resource release is claimed.

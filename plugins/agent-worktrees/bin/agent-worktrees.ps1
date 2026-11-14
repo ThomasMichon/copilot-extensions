@@ -66,13 +66,6 @@ function Invoke-AwTerminalPython {
         & $Python @PythonArguments
     }
 }
-$_awCacheId = [Guid]::NewGuid().ToString('N')
-$_awPythonCache = [IO.Path]::GetFullPath((Join-Path $_root "cache\python\unsealed-$_awCacheId"))
-if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT -and -not $_awPythonCache.StartsWith('\\?\')) {
-    $_awPythonCache = if ($_awPythonCache.StartsWith('\\')) {
-        '\\?\UNC\' + $_awPythonCache.Substring(2)
-    } else { '\\?\' + $_awPythonCache }
-}
 function _resolve_aw_py {
     $resolver = Join-Path $_root 'bin\resolve-runtime.ps1'
     if (-not (Test-Path -LiteralPath $resolver -PathType Leaf)) { return $null }
@@ -83,31 +76,27 @@ function Get-AwPythonCache([string]$Python) {
     $selector = @'
 import json, sys
 try:
-    from agent_procutil.python_cache import cache_arguments
-except ImportError:
-    prefix = sys.pycache_prefix
-else:
-    prefix = cache_arguments(sys.argv[1], runtime=sys.executable)[1].split('=', 1)[1]
-print(json.dumps(prefix, ensure_ascii=True))
+    from agent_procutil.python_cache import POLICY_VERSION, policy_arguments
+    assert POLICY_VERSION == 2
+    arguments = policy_arguments(sys.argv[1], runtime=sys.executable)
+except Exception:
+    arguments = ['-B']
+print(json.dumps(arguments, ensure_ascii=True))
 '@
-    $selected = @(& $Python -I -B -X "pycache_prefix=$_awPythonCache" -c $selector $_root)
-    if ($LASTEXITCODE -ne 0 -or $selected.Count -ne 1 -or -not $selected[0]) {
-        [Console]::Error.WriteLine('[agent-worktrees] Runtime cache selection failed.')
-        exit 126
-    }
     try {
-        $cache = ConvertFrom-Json -InputObject ([string]$selected[0]) -ErrorAction Stop
-    } catch {
-        $cache = $null
-    }
-    if ($cache -isnot [string] -or -not $cache) {
-        [Console]::Error.WriteLine('[agent-worktrees] Runtime cache selection failed.')
-        exit 126
-    }
-    return $cache
+        $selected = @(& $Python -I -B -X utf8 -c $selector $_root)
+        if ($LASTEXITCODE -eq 0 -and $selected.Count -eq 1) {
+            $cache = ConvertFrom-Json -InputObject ([string]$selected[0]) -ErrorAction Stop
+            if ($cache.Count -eq 2 -and $cache[0] -ceq '-X' -and
+                $cache[1] -is [string] -and $cache[1].StartsWith('pycache_prefix=') -and
+                $cache[1].Length -gt 15 -and $cache[1] -notmatch "[`r`n]" -and
+                $cache[1].IndexOf([char]0) -lt 0) { return $cache }
+        }
+    } catch {}
+    return '-B'
 }
 $_py = _resolve_aw_py
-if ($_py) { $_cache = Get-AwPythonCache $_py; Invoke-AwTerminalPython $_py (@('-X', "pycache_prefix=$_cache", '-m', 'agent_worktrees') + $args) @('-I', '-B', '-m', 'agent_worktrees', '--version'); exit $LASTEXITCODE }
+if ($_py) { $_cache = @(Get-AwPythonCache $_py); Invoke-AwTerminalPython $_py ($_cache + @('-m', 'agent_worktrees') + $args) @('-I', '-B', '-m', 'agent_worktrees', '--version'); exit $LASTEXITCODE }
 if ($env:AGENT_WORKTREES_INTERNAL_REQUIRE_RUNTIME) { exit 127 }
 if ($_awUpdateDiagnostic) {
     [Console]::Error.WriteLine('[agent-worktrees] selected update operation requires a provisioned runtime; use ordinary update to repair it.')
@@ -235,6 +224,6 @@ try {
     $mutex.Dispose()
 }
 $_py = _resolve_aw_py
-if ($_py) { $_cache = Get-AwPythonCache $_py; Invoke-AwTerminalPython $_py (@('-X', "pycache_prefix=$_cache", '-m', 'agent_worktrees') + $args) @('-I', '-B', '-m', 'agent_worktrees', '--version'); exit $LASTEXITCODE }
+if ($_py) { $_cache = @(Get-AwPythonCache $_py); Invoke-AwTerminalPython $_py ($_cache + @('-m', 'agent_worktrees') + $args) @('-I', '-B', '-m', 'agent_worktrees', '--version'); exit $LASTEXITCODE }
 [Console]::Error.WriteLine('[agent-worktrees] provisioning did not yield a runtime. See the log above; retry, or run the installer manually.')
 exit 1

@@ -16,7 +16,8 @@ chain. They return before environment loading, changing directory, supervisor
 label checks, log writes or process startup; unresolved selection fails.
 This is routing evidence only, not service health or activation evidence.
 Normal coordinator and supervisor launches use the
-[external Python bytecode cache](../../../libs/agent-procutil/README.md#managed-python-bytecode-cache).
+[platform Python cache policy](../../../libs/agent-procutil/README.md#platform-cache-provider-contract),
+including its no-write fallback for unsealed or older providers.
 The supervisor launch description includes the actual interpreter cache option;
 the resolve-only path still creates no cache or starts a process.
 

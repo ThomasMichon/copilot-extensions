@@ -7,10 +7,10 @@ agent-worktrees <subcommand> [options]
 ## Legacy management launchers
 
 Legacy global management launchers select external Python bytecode through the
-[canonical installed-cache helper](../../../libs/agent-procutil/README.md#managed-python-bytecode-cache).
+[canonical cache policy](../../../libs/agent-procutil/README.md#platform-cache-provider-contract).
 An unchanged completed installation reuses its recorded namespace; changed
-completion or distribution evidence selects another. Older runtimes without
-the helper retain fresh invocation caches. Native selector replies use
+completion or distribution evidence selects another. Unsealed runtimes and
+older providers use `-B`, without allocating an invocation cache. Native selector replies use
 ASCII-safe JSON so Unicode paths do not depend on the console's encoding.
 This changes no account/ownership
 checks, command deadlines, runtime selection or immutable slot bytes.
@@ -148,8 +148,16 @@ locally, and each remote one runs
 binstub.
 
 `--json` prints `{"version": 1, "hosts": [{"machine", "env", "reachable",
-"worktrees", "projection"?, "availability"?, "error"?}]}`. Each worktree row is
-the host's own `list --json` record:
+"worktrees", "projection"?, "availability"?, "reporting_context"?,
+"reporting_context_error"?, "error"?}]}`.
+Host-level `machine` / `env` identify the configured source route. An optional
+version-1 `reporting_context` supplies the serving host's current descriptive
+naming for its worktree rows; a rename appears on the next read, while explicit
+unavailability withdraws row names without changing source freshness. Absence
+in a successful response retains the older provider's row naming for presentation,
+not current identity. Malformed reporting is a coverage gap,
+not an authoritative empty inventory. The coordinator does not resolve its own
+hostname for remote rows. Other fields remain the host's `list --json` record:
 
 - **Live work** is the derived `state == "active"`. Lifecycle
   `status == "active"`, a nonempty `live_session_ids`, and `--glance` are not
@@ -1465,6 +1473,39 @@ inheritance rule now made programmatic: a delegate becomes finalizable once its
 host is `finalized`, `complete(d)`, or gone. The reverse edge is surfaced on
 explicit legacy/detail host rows as `delegates` (the delegate worktree ids plus
 their own finalizable/not-finalizable verdicts); current rows omit that graph.
+Allocation IDs are opaque: their spelling never proves a missing caller's host.
+A qualified `machine/project/worktree` selector can locate an unambiguous
+live reporting host; cached row labels and configured routes cannot bind that
+identity. It never falls back to another host's matching ID. A matching ID
+under conflicting legacy or current names instead remains `unknown`
+(`host-identity-conflict`), not absent or silently retargeted. A bare ID
+can resolve an actually present, unique caller, but absence remains `unresolved`
+without a host selector. Physical selectors spanning multiple execution
+environments and duplicate reporter slots cannot prove a missing caller gone.
+A selected-project inventory leaves a missing caller in another project
+`unknown`; that project's absence was not observed.
+An unnamed source still participates in ambiguity: a matching caller ID there,
+or incomplete unnamed-source coverage, leaves a qualified caller `unknown`
+(`host-reporting-unavailable`). Withdrawing a guest's names cannot make an
+empty native roster prove the guest's active caller gone. Current complete
+unnamed inventories can still prove that an unrelated ID is absent, without
+restoring withdrawn names.
+Failed probes are incomplete unnamed coverage, never proof that their configured
+route is a current reporter name. They cannot establish a caller absent or a
+visible terminal caller unique. Bare caller IDs require current complete coverage
+from competing sources because their lookup is fleet-wide; successful legacy
+responses retain their naming fallback.
+Absence also requires complete cardinality: integer `selected_count` and
+`roster_count` must equal the number of unique returned IDs. A filtered current
+publication can prove an actually observed caller terminal, but cannot prove an
+unobserved caller gone. Missing or malformed count proof remains non-authoritative.
+Every competing source must currently exclude that caller ID before a terminal
+row can authorize inheritance or a selected source can prove absence. This uses
+actual source inventories, not cached names as a shortcut. Complete legacy
+inventories remain useful for ID exclusion and bare-ID status proof without
+claiming a current reporter identity. An advisory, expired or filtered guest source cannot disappear
+behind a current terminal native row; the execution freshness recheck applies
+the same rule.
 `fleet` and `delegates` accept a host's roster as proof that a caller is gone
 or terminal only when it is a current publication (`projection.quality:
 "current"` with no `availability` label) whose `projection.freshness` proves a
@@ -1478,7 +1519,10 @@ authorizes finalization (`delegate_finalizable: false`, reason
 `host-roster-advisory`). `delegates --execute` repeats that check immediately
 before each finalization, so a caller roster that has outlived its bound since
 the snapshot leaves the remaining delegates unfinalized (an `errors` entry with
-reason `host-roster-advisory`).
+reason `host-roster-advisory`). The command destination comes from the delegate's
+containing configured fleet source, never its reported machine/platform.
+Execution results expose that destination separately as `source.machine` /
+`source.env`; reporter rename or withdrawal cannot retarget it.
 
 When a worktree record carries profile-assignment history, the ordinary
 `list --json` row includes `current_profile_assignment`: the bound assignment
@@ -1772,13 +1816,16 @@ on a cadence at two natural lifecycle boundaries -- **picker launch** and
 
 ### Python bytecode caches (`python-cache prune`)
 
-Plugin launchers pass `-X pycache_prefix=<runtime-root>/cache/python/<namespace>`.
-A runtime with valid install evidence (`.install-complete.json` plus package
-`RECORD`s) reuses one sealed `installed-<digest>` namespace. Without that
-evidence a launcher mints a one-off `unsealed-<id>` namespace. Launchers that
-wait for their child delete the namespace they minted afterwards. Detached
-daemons and `exec`-style launchers cannot, so some `unsealed-*` directories
-still accumulate. `python-cache prune` reclaims them:
+Current launchers use the [shared platform-cache policy](../../../libs/agent-procutil/README.md#platform-cache-provider-contract):
+completed version slots reuse private OS-user-cache bytecode; unsealed or
+older providers disable writes with `-B`. New launchers do not mint
+`unsealed-*` directories. Source-injecting hooks and read-only bootstraps also
+disable writes.
+
+Older launchers used `<runtime-root>/cache/python/<namespace>` and could leave
+one `unsealed-*` directory per invocation. `python-cache prune` remains the
+explicit legacy inspection/removal command; it does not collect the new
+owned platform-cache namespaces:
 
 ```bash
 agent-worktrees python-cache prune                    # dry run: report eligible dirs/bytes
@@ -2563,11 +2610,11 @@ loudly rather than logging a `worktree_id: null` entry invisible to
 `activity --worktree-id <id>`.
 
 **Disk growth under `~/.agent-*/cache/python`.** Thousands of `unsealed-*`
-directories there usually come from a launcher that ran without valid install
-evidence, or from a detached or `exec`-style launcher that cannot clean up
-after its child. A persistently empty `installed-*` set for a runtime suggests
-its install evidence is missing or invalid. Reinstalling or updating that
-runtime restores reuse. Run `agent-worktrees python-cache prune` (dry run) to
+directories there come from older launchers, especially unsealed, detached or
+`exec`-style invocations. Current launchers use the shared OS-cache policy and
+disable writes when installation evidence is unavailable, stopping that new
+per-invocation growth. This does not itself remove the old backlog.
+Run `agent-worktrees python-cache prune` (dry run) to
 size the backlog, then `--apply` to reclaim it (on Windows or macOS, where no
 process scan exists, add `--allow-age-only` once no affected runtime is
 running). See

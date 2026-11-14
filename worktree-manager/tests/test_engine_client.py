@@ -9,7 +9,6 @@ assert the parsing, the version-skew retry, and the error paths.
 from __future__ import annotations
 
 import json
-import re
 from pathlib import Path
 import subprocess
 import sys
@@ -798,16 +797,8 @@ def test_accept_invalid_inherited_provider_keeps_recovery_commands_usable(
 
 
 def _assert_unsealed_runtime_command(argv: list[str] | None, python: Path, root: Path) -> None:
-    expected_cache = ec.agent_plugin_runtime.python_cache_args(root, runtime=python)
-    assert argv is not None and len(argv) == 5
-    assert argv[:2] == [str(python), expected_cache[0]]
-    assert argv[-2:] == ["-m", "agent_worktrees"]
-    assert argv[2].startswith("pycache_prefix=")
-    actual = Path(argv[2].split("=", 1)[1])
-    expected = Path(expected_cache[1].split("=", 1)[1])
-    assert actual.parent == expected.parent
-    assert re.fullmatch(r"unsealed-[0-9a-f]{32}", actual.name)
-    assert actual != expected, "an unsealed runtime must not reuse a cache identity"
+    assert argv == [str(python), "-B", "-m", "agent_worktrees"]
+    assert not (root / "cache").exists()
 
 
 def test_installed_engine_command_validates_manifest(monkeypatch, tmp_path):

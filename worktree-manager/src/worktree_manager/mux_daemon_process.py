@@ -7,12 +7,15 @@ import os
 import sys
 from pathlib import Path
 
-from agent_procutil import direct_python, python_cache_args, spawn_daemon
+import agent_procutil
+from agent_procutil import direct_python, spawn_daemon
 from agent_procutil.daemon_instances import DaemonInstanceSpec
 from work_coalescing_singleton import client as wcs_client
 
 from .mux_mapping_registry import _try_lock_file_once, _unlock_file
 from .self_install import default_root
+
+python_cache_args = getattr(agent_procutil, "python_cache_policy_args", lambda *a, **k: ["-B"])
 
 _DAEMON_EXCLUDED_ENV_KEYS = {
     "GH_TOKEN", "GITHUB_TOKEN", "AGENT_WORKTREES_AHP_AUTH_TOKEN",
@@ -118,7 +121,8 @@ def detached_child_argv(root: Path | None = None) -> list[str]:
 
     command, _environment = runtime_command("worktree_manager", ("mux-daemon", "run"))
     argv = [
-        sys.executable, *python_cache_args(selected_root(root)),
+        sys.executable,
+        *([] if "-B" in command[1:] else python_cache_args(selected_root(root))),
         *command[1:],
     ]
     if root is not None:

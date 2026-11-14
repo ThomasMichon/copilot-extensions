@@ -484,36 +484,38 @@ function Invoke-AgentWorktreesRuntime([string]$Python) {
     $previousEap = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        $pythonCache = [IO.Path]::GetFullPath(
-            (Join-Path $runtimeRoot ('cache\python\unsealed-' + [Guid]::NewGuid().ToString('N')))
-        )
-        if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT -and -not $pythonCache.StartsWith('\\?\')) {
-            $pythonCache = if ($pythonCache.StartsWith('\\')) {
-                '\\?\UNC\' + $pythonCache.Substring(2)
-            } else { '\\?\' + $pythonCache }
-        }
+        $cacheArguments = @('-B')
         $cacheSelector = @'
-import sys
+import json, sys
 try:
-    from agent_procutil.python_cache import cache_arguments
-except ImportError:
-    print(sys.pycache_prefix)
-else:
-    print(cache_arguments(sys.argv[1], runtime=sys.executable)[1].split('=', 1)[1])
+    from agent_procutil.python_cache import POLICY_VERSION, policy_arguments
+    assert POLICY_VERSION == 2
+    arguments = policy_arguments(sys.argv[1], runtime=sys.executable)
+except Exception:
+    arguments = ['-B']
+print(json.dumps(arguments, ensure_ascii=True))
 '@
-        $selectedCache = & $Python -I -B -X "pycache_prefix=$pythonCache" -c $cacheSelector $runtimeRoot
-        if ($LASTEXITCODE -ne 0 -or @($selectedCache).Count -ne 1 -or -not $selectedCache) {
-            [Console]::Error.WriteLine('[agent-worktrees] Runtime cache selection failed.')
-            exit 126
-        }
+        try {
+            $selectedCache = & $Python -I -B -X utf8 -c $cacheSelector $runtimeRoot
+            if ($LASTEXITCODE -eq 0 -and @($selectedCache).Count -eq 1) {
+                $selectedArguments = ConvertFrom-Json -InputObject ([string]$selectedCache)
+                if ($selectedArguments.Count -eq 2 -and $selectedArguments[0] -ceq '-X' -and
+                    $selectedArguments[1] -is [string] -and
+                    $selectedArguments[1].StartsWith('pycache_prefix=') -and
+                    $selectedArguments[1].Length -gt 15 -and $selectedArguments[1] -notmatch "[`r`n]" -and
+                    $selectedArguments[1].IndexOf([char]0) -lt 0) {
+                    $cacheArguments = $selectedArguments
+                }
+            }
+        } catch {}
         $terminalHost = Join-Path $payloadRoot 'bin\terminal-launch.ps1'
         if (Test-Path -LiteralPath $terminalHost -PathType Leaf) {
             . $terminalHost
             Invoke-WorktreeTerminalLaunch -Executable $Python -Arguments (
-                @('-X', "pycache_prefix=$selectedCache", '-m', 'agent_worktrees') + $forwardArgs
+                $cacheArguments + @('-m', 'agent_worktrees') + $forwardArgs
             ) -QueryArguments @('-I', '-B', '-m', 'agent_worktrees', '--version') -Package agent_worktrees
         } else {
-            & $Python -X "pycache_prefix=$selectedCache" -m agent_worktrees @forwardArgs
+            & $Python @cacheArguments -m agent_worktrees @forwardArgs
         }
     } finally {
         $ErrorActionPreference = $previousEap

@@ -3,7 +3,9 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
-- [2026-11-13 - Fixture, startup and interrupted-hook receiving](journal/2026/11.13-fixture-startup-and-hook-receiving.md)
+- [2026-11-13 - Runner, existing-entry and attribution receiving](journal/2026/11.13-runner-entry-and-attribution-receiving.md)
+
+- [2026-11-13 - Reviewed fixture, startup and interrupted-hook receiving](journal/2026/11.13-fixture-startup-and-hook-receiving.md)
 
 - [2026-11-13 - Canonical lifecycle and retained source boundaries](journal/2026/11.13-canonical-lifecycle-and-source-boundaries.md)
 

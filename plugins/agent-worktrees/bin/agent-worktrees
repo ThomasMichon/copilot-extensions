@@ -37,39 +37,32 @@ _aw_exec_resolved() {
   [ -f "$_awroot/bin/resolve-runtime.sh" ] || return 1
   . "$_awroot/bin/resolve-runtime.sh"
   [ -n "$AW_PY" ] || return 1
-  _aw_cache_id="$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
-  [ "${#_aw_cache_id}" -eq 32 ] || exit 1
-  case "$_aw_cache_id" in *[!0-9a-f]*) exit 1 ;; esac
-  _aw_python_cache="$_awroot/cache/python/unsealed-$_aw_cache_id"
   _aw_cache_root="$_awroot"
   case "$AW_PY" in
     *.exe)
-      _aw_cache_root="$(cygpath -aw "$_awroot")" || return
-      _aw_python_cache="$(cygpath -aw "$_aw_python_cache")" || return
-      case "$_aw_python_cache" in
-        '\\?\'*) ;;
-        '\\'*) _aw_python_cache='\\?\UNC\'"${_aw_python_cache#'\\'}" ;;
-        *) _aw_python_cache='\\?\'"$_aw_python_cache" ;;
-      esac ;;
+      _aw_cache_root="$(cygpath -aw "$_awroot")" || _aw_cache_root="" ;;
   esac
-  _aw_selected_cache="$("$AW_PY" -I -B -X "pycache_prefix=$_aw_python_cache" -c '
-import json, sys
+  _aw_selected_cache="$("$AW_PY" -I -B -X utf8 -c '
+import sys
 try:
-    from agent_procutil.python_cache import cache_arguments
-except ImportError:
-    prefix = sys.pycache_prefix
-else:
-    prefix = cache_arguments(sys.argv[1], runtime=sys.executable)[1].split("=", 1)[1]
-print(json.dumps(prefix, ensure_ascii=True))
-' "$_aw_cache_root")" || exit 126
-  _aw_selected_cache="$("$AW_PY" -I -B -X "pycache_prefix=$_aw_python_cache" -c '
-import json, sys
-prefix = json.loads(sys.argv[1])
-if not isinstance(prefix, str) or not prefix:
-    raise ValueError("Runtime cache selection failed")
-sys.stdout.buffer.write(prefix.encode("utf-8", "surrogateescape"))
-' "$_aw_selected_cache")" || exit 126
-  exec "$AW_PY" -X "pycache_prefix=$_aw_selected_cache" -m agent_worktrees "$@"
+    from agent_procutil.python_cache import POLICY_VERSION, policy_arguments
+    assert POLICY_VERSION == 2
+    arguments = policy_arguments(sys.argv[1], runtime=sys.executable)
+    assert arguments == ["-B"] or (
+        len(arguments) == 2 and arguments[0] == "-X"
+        and arguments[1].startswith("pycache_prefix=") and len(arguments[1]) > 15
+        and not any(c in arguments[1] for c in "\r\n\0"))
+except Exception:
+    arguments = ["-B"]
+sys.stdout.buffer.write("\n".join(arguments).encode("utf-8"))
+' "$_aw_cache_root" 2>/dev/null)" || _aw_selected_cache=""
+  case "$_aw_selected_cache" in
+    '-X
+pycache_prefix='*)
+      exec "$AW_PY" -X "${_aw_selected_cache#*
+}" -m agent_worktrees "$@" ;;
+  esac
+  exec "$AW_PY" -B -m agent_worktrees "$@"
 }
 _aw_exec_resolved "$@"
 if [ -n "${AGENT_WORKTREES_INTERNAL_REQUIRE_RUNTIME:-}" ]; then exit 127; fi
