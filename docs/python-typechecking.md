@@ -512,12 +512,14 @@ lease-bound cleanup as other source views. Neither path executes the bootstrap.
 The selector views preserve the actual PowerShell here-string and POSIX
 single-quoted `-c` argument, including their distinct newline transports.
 Their fixed launch arguments and real `cache_arguments` import/call must match.
+Embedded PowerShell here-string terminators are refused even inside otherwise
+valid Python string literals.
 The winning candidate-local `agent_procutil` provider and its ordinary source
 tree are captured and rechecked; first-party stubs cannot replace that helper.
 Selector diagnostics map to the original shim-template lines. The optional
 PowerShell prefix annotation preserves the existing `None` fallback and JSON
 output rather than coercing it to an empty string.
-The seventeen in-process correspondence controls are positively selected in
+The nineteen in-process correspondence controls are positively selected in
 the required unit packet. Real interpreter, Git and source/frozen frontdoor
 checks remain separate integration controls, not additional required-unit work.
 

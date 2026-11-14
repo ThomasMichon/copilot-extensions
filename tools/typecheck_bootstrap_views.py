@@ -92,7 +92,11 @@ def _selector_view(
         raise SourceViewError(f"{template_path}: shim selector quote/argv transport changed")
     match = matches[0]
     body = match.group(1)
-    if "@@" in body or (index == 1 and "'" in body):
+    if (
+        "@@" in body
+        or (index == 0 and any(line.startswith("'@") for line in body.splitlines()))
+        or (index == 1 and "'" in body)
+    ):
         raise SourceViewError(f"{template_path}: shim selector interpolation/quoting changed")
     content = body.encode("utf-8")
     tree = _parse(content, template_path, feature_version=(3, 10))

@@ -428,7 +428,7 @@ rewrite.
   and required source CI (#12498). This does not qualify the two shim cache
   selectors or complete production/native/minimum-runtime/candidate gates.
 - [ ] The two shim selector views retain actual argument bytes, source maps,
-  launch/helper contracts and candidate-local source custody; seventeen pure
+  launch/helper contracts and candidate-local source custody; nineteen pure
   controls, two fallback round trips, twenty-four real frontdoors and six
   declared strict analyses pass, followed by exact-head review and required CI.
 - [x] Fresh checker preparation and a credential-free local subprocess check exercise the real developer command without executing product code or collecting tests.

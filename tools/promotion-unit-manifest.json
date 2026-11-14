@@ -4649,6 +4649,8 @@
         "tools/promotion_unit_tests/test_typecheck_catalog.py::test_shim_selector_rejects_changed_transport_or_helper[duplicate-1]",
         "tools/promotion_unit_tests/test_typecheck_catalog.py::test_shim_selector_rejects_changed_transport_or_helper[directive-0]",
         "tools/promotion_unit_tests/test_typecheck_catalog.py::test_shim_selector_rejects_changed_transport_or_helper[directive-1]",
+        "tools/promotion_unit_tests/test_typecheck_catalog.py::test_shim_selector_rejects_changed_transport_or_helper[embedded-terminator-0]",
+        "tools/promotion_unit_tests/test_typecheck_catalog.py::test_shim_selector_rejects_changed_transport_or_helper[embedded-terminator-1]",
         "tools/promotion_unit_tests/test_typecheck_catalog.py::test_shim_selector_custody_does_not_follow_host_drift[helper]",
         "tools/promotion_unit_tests/test_typecheck_catalog.py::test_shim_selector_custody_does_not_follow_host_drift[output]",
         "tools/promotion_unit_tests/test_typecheck_catalog.py::test_shim_selector_custody_does_not_follow_host_drift[member]",
@@ -5924,7 +5926,7 @@
         "tools/promotion_unit_tests/test_ordinary_writer_admission.py": "111653f65c04a5c1aa6149aed795808202b2dde400fcc6cb138fff76734bdf39",
         "libs/payload-invocation/command_lifecycle.py": "fa59ad840f2a9c4a5c2a77c0a9d4fd22f9124e352ec310042b07d0d7d2873271",
         "libs/payload-invocation/python-catalog-inputs.json": "608d075e5a074d71949a912afbdf1c8f72b4170339557eb8b7d19b6a3820c553",
-        "tools/promotion_unit_tests/test_typecheck_catalog.py": "62ab5234c63a9a413152b9743ca05ec333af84d0d45cccb1bcf27cc36aba8824",
+        "tools/promotion_unit_tests/test_typecheck_catalog.py": "72e0062d55e9b7643c7ffbdedb12a1e20c79b2e67e57da74a23aa4c3883e2eb8",
         "libs/payload-invocation/templates/catalog-powershell.tmpl": "2d3807fc6d93a4389dcd52237cbacdf6b94d4b884b4694b4c9c20469e40e457a",
         "libs/payload-invocation/templates/dispatcher-posix.tmpl": "a49ba79f2a92262f8a51bdab2afc5129cdfe89bdc4be13925322819f462ea238",
         "libs/payload-invocation/templates/posix-shim.tmpl": "a2a8fb152d5fd5c6425af1e4136cd31b28238042708c4d3d65a8dbd657c3b373",
@@ -6047,7 +6049,7 @@
         "tools/coverage_guided_selection/auditability.py": "7732bc5a9b14a2ab6083f9e73f5d7698888461b387515cb1a17a08174a066ed5",
         "tools/plugin_test_command_safety.py": "e9c38a3d45053f7cdda54eafd99fe696119e8f59f5b8abb71258d74751eb93e0",
         "plugins/agent-worktrees/src/agent_worktrees/dispatch_cohort.py": "cf7cf2611b5a1a33883a84e3f5319f3c9b59088fc1701b6fc5ad38d7052a235c",
-        "tools/typecheck_bootstrap_views.py": "bcbd5a3af7ac09e19841435789b48e49830c9139414031aa37a302fb58ccea3a",
+        "tools/typecheck_bootstrap_views.py": "e2ecb0cdb61b242ab2ebd6cf879ca4fb2e8effaa877b3cb53d6794884ca342d7",
         "plugins/agent-worktrees/payload-invocation.json": "9e0dc64604bc87af7c08f6a18bd3d5612a710c3b3be9aa8eaa1885b0c38f9c11",
         "tools/typecheck-projects.json": "baa202b71919b64310980bfcaf72b5ec5410c6cfad0649cadc3a8367578909e8"
     }

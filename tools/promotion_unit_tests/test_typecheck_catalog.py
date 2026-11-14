@@ -373,7 +373,9 @@ def test_shim_selector_preserves_actual_argument_bytes_and_mapping(tmp_path: Pat
 
 
 @pytest.mark.parametrize("index", [0, 1])
-@pytest.mark.parametrize("change", ["launch", "quote", "helper-call", "token", "duplicate", "directive"])
+@pytest.mark.parametrize("change", [
+    "launch", "quote", "helper-call", "token", "duplicate", "directive", "embedded-terminator",
+])
 def test_shim_selector_rejects_changed_transport_or_helper(
     tmp_path: Path, index: int, change: str,
 ) -> None:
@@ -392,6 +394,8 @@ def test_shim_selector_rejects_changed_transport_or_helper(
         changed = original.replace("try:\n", "# @@PLUGIN@@\ntry:\n", 1)
     elif change == "duplicate":
         changed = original + "\n" + original
+    elif change == "embedded-terminator":
+        changed = original.replace("try:\n", "probe = \"\"\"\n'@\n\"\"\"\ntry:\n", 1)
     else:
         changed = original.replace("try:\n", "# type: ignore\ntry:\n", 1)
     assert changed != original
