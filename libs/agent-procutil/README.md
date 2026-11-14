@@ -262,6 +262,8 @@ nested JSON is a per-namespace refusal and does not reset fair progress.
 Ordinary `.pyc` and interrupted numeric `.pyc.<id>` writes are removed through
 anchored no-follow operations. POSIX uses directory descriptors; Windows keeps
 non-delete-sharing ancestor handles and deletes the verified leaf by handle.
+The final same-object probe also requires a singly linked regular file, including
+hard links created after its initial admission.
 An earlier committed finalization phase permits recovery after owner-record
 removal. Only a now-empty namespace is removed. Successful byte counts are
 logical file sizes, not a physical-disk-space estimate.
