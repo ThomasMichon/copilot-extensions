@@ -153,6 +153,7 @@ class FilteredProjection:
                 selected = self.expression(row)
                 previous = set(row["members"])
                 members, unknown = set(previous), False
+                capacity_limited = False
                 retained = {int(number): pull["facts"] for number, pull in row["projected"].items()}
                 for number, facts in {**retained, **known, **prepared}.items():
                     # Incomplete discovery never proves absence. Cached facts
@@ -162,7 +163,10 @@ class FilteredProjection:
                         result = NONMATCH
                     if result == MATCH:
                         if number in prepared or number in previous:
-                            members.add(number)
+                            if number not in members and len(members) >= MAX_PULLS * 2:
+                                capacity_limited = True
+                            else:
+                                members.add(number)
                     elif result == NONMATCH:
                         members.discard(number)
                     else:
@@ -181,8 +185,12 @@ class FilteredProjection:
                     else:
                         row["projected"].pop(str(number), None)
                 coverage = {
-                    "outcome": "partial" if unknown and scan["outcome"] == "complete" else scan["outcome"],
-                    "error": "facts_unknown" if unknown and scan["outcome"] == "complete" else scan["error"],
+                    "outcome": "partial" if capacity_limited or (
+                        unknown and scan["outcome"] == "complete"
+                    ) else scan["outcome"],
+                    "error": "membership_limit" if capacity_limited else (
+                        "facts_unknown" if unknown and scan["outcome"] == "complete" else scan["error"]
+                    ),
                     "pages": scan["pages"], "observed_at": observed_at,
                     "last_complete_at": row["coverage"]["last_complete_at"],
                 }

@@ -395,3 +395,24 @@ def test_byte_backpressure_accounts_for_shared_cache_before_partial_projection(s
             **registration(registration_value), "event_id": pending[-1]["event_id"],
         })
     assert execute(selected, "consumer-1", "query", registration(registrations[1]))["baseline"]["pulls"]
+
+
+def test_repeated_partial_acquisitions_bound_members_without_disproving_prior_membership(selected):
+    first = subscribe(selected, "first", {"repo": ["owner/repo"]})
+    for start in (1, 201):
+        observe(selected, {n: facts() for n in range(start, start + 200)},
+                outcome="partial", error="page_limit")
+    other = subscribe(selected, "other", {"tags": {"any": ["new"]}})
+    later = {n: facts(tags=["new"]) for n in range(401, 601)}
+    observe(selected, later, outcome="partial", error="page_limit")
+    result = execute(selected, "first", "query", registration(first))["baseline"]
+    assert result["inventory"]["outcome"] == "partial"
+    assert result["inventory"]["error"] == "membership_limit"
+    assert result["pulls"][0]["number"] == 1
+    pending = events(selected, "first", first)
+    assert not any(e["kind"] == "departure" for e in pending)
+    assert execute(selected, "other", "query", registration(other))["baseline"]["pulls"][0]["number"] == 401
+    observe(selected, later)
+    result = execute(selected, "first", "query", registration(first))["baseline"]
+    assert result["inventory"]["outcome"] == "complete"
+    assert result["pulls"][0]["number"] == 401

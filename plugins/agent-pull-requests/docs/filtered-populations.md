@@ -64,6 +64,11 @@ coverage. Partial/unavailable discovery never proves absence. Clock-only age
 changes are evaluated at a captured cycle instant. Departure is selection loss,
 not proof that a PR closed or merged. Population events do not confer permission
 to review, vote, merge or emit a task.
+Repeated partial scans retain at most 400 current members per registration.
+At that boundary, additional entries remain unproven with
+`partial/membership_limit` coverage; prior members and unsettled delivery are
+not evicted or reported departed to make room. Other registrations continue
+projecting, and a later complete scan can reconcile the bounded membership.
 
 Current population facts are the seven normalized filter fields; this profile
 does not claim complete PR diff/source, reviewer-policy or posted-review
