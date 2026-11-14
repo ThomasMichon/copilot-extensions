@@ -15,6 +15,8 @@ def source_key(host: dict) -> tuple[str, str]:
 
 def reported_rows(host: dict) -> tuple[tuple[tuple[str, str], ...], list[dict]]:
     """Project optional reporter facts without changing the source or its rows."""
+    if host.get("reporting_context_error") is True:
+        raise ValueError("malformed reporting context")
     rows = [dict(row) for row in host.get("worktrees") or [] if isinstance(row, dict)]
     if "reporting_context" not in host:
         return (source_key(host),), rows

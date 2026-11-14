@@ -148,7 +148,8 @@ locally, and each remote one runs
 binstub.
 
 `--json` prints `{"version": 1, "hosts": [{"machine", "env", "reachable",
-"worktrees", "projection"?, "availability"?, "reporting_context"?, "error"?}]}`.
+"worktrees", "projection"?, "availability"?, "reporting_context"?,
+"reporting_context_error"?, "error"?}]}`.
 Host-level `machine` / `env` identify the configured source route. An optional
 version-1 `reporting_context` supplies the serving host's current descriptive
 naming for its worktree rows; a rename appears on the next read, while explicit
@@ -1479,6 +1480,12 @@ without a host selector. Physical selectors spanning multiple execution
 environments and duplicate reporter slots cannot prove a missing caller gone.
 A selected-project inventory leaves a missing caller in another project
 `unknown`; that project's absence was not observed.
+An unnamed source still participates in ambiguity: a matching caller ID there,
+or incomplete unnamed-source coverage, leaves a qualified caller `unknown`
+(`host-reporting-unavailable`). Withdrawing a guest's names cannot make an
+empty native roster prove the guest's active caller gone. Current complete
+unnamed inventories can still prove that an unrelated ID is absent, without
+restoring withdrawn names.
 `fleet` and `delegates` accept a host's roster as proof that a caller is gone
 or terminal only when it is a current publication (`projection.quality:
 "current"` with no `availability` label) whose `projection.freshness` proves a

@@ -248,3 +248,81 @@ def test_qualified_physical_caller_resolves_an_actual_guest_row_but_not_ambiguou
     delegates.annotate_fleet_hosts(hosts)
     assert hosts[2]["worktrees"][0]["caller_state"]["state"] == "unresolved"
     assert hosts[2]["worktrees"][0]["delegate_finalizable"] is False
+
+
+@pytest.mark.parametrize("native_parent", [False, True])
+def test_withdrawn_guest_cannot_hide_an_active_qualified_caller_during_execution_recheck(
+    native_parent, monkeypatch, capsys,
+):
+    child = {
+        "id": "child", "repo": "example",
+        "caller_worktree": tracking.format_claim_ref("physical", "example", "parent"),
+    }
+    native = host(
+        [{"id": "parent", "repo": "example", "status": "finalized"}] if native_parent else [],
+        context={**reporter("physical", "windows"), "execution_machine": "native-slot"},
+        machine="native-route", environment="windows",
+    )
+    guest = host(
+        [{"id": "parent", "repo": "example", "status": "active"}],
+        context={"version": 1, "status": "unavailable"}, machine="guest-route",
+    )
+    hosts = delegates.annotate_fleet_hosts([native, guest, host([child], machine="worker")])
+    target = hosts[2]["worktrees"][0]
+    assert target["caller_state"]["state"] == "unknown"
+    assert target["delegate_finalizable"] is False
+    assert delegates._still_finalizable(hosts, target, source_key=("worker", "wsl")) is False
+    assert hosts[1]["worktrees"][0].get("machine") == ""
+    assert "execution_machine" not in hosts[1]["worktrees"][0]
+    monkeypatch.setattr(delegates, "_fleet_snapshot", lambda **kwargs: hosts)
+    monkeypatch.setattr(delegates.cfg, "project_name", lambda: "example")
+    monkeypatch.setattr(delegates.cfg, "load_config", lambda: SimpleNamespace())
+    monkeypatch.setattr(fleet, "_fleet_targets", lambda _: [])
+    monkeypatch.setattr(delegates, "_finalize_target", lambda *a, **k: pytest.fail("finalized"))
+    assert delegates.run_delegates(["--json", "--execute"]) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["eligible"] == [] and result["executed"] == []
+
+
+@pytest.mark.parametrize("incomplete", [False, True])
+def test_unnamed_source_absence_is_useful_only_when_its_inventory_is_current(incomplete):
+    child = {
+        "id": "child", "repo": "example",
+        "caller_worktree": tracking.format_claim_ref("known-slot", "example", "parent"),
+    }
+    unnamed = host(
+        [{"id": "unrelated", "repo": "example", "status": "active"}],
+        context={"version": 1, "status": "unavailable"}, machine="unnamed",
+    )
+    if incomplete:
+        unnamed["availability"] = {"status": "advisory", "reason": "saved roster"}
+    hosts = delegates.annotate_fleet_hosts([
+        host([], context=reporter("known")), unnamed, host([child], machine="worker"),
+    ])
+    target = hosts[2]["worktrees"][0]
+    assert target["caller_state"]["state"] == ("unknown" if incomplete else "gone")
+    assert target["delegate_finalizable"] is (not incomplete)
+    assert delegates._still_finalizable(
+        hosts, target, source_key=("worker", "wsl"),
+    ) is (not incomplete)
+
+
+def test_malformed_reporter_gap_remains_unnamed_during_graph_and_execution_recheck(monkeypatch):
+    monkeypatch.setattr(fleet.subprocess, "run", lambda *a, **k: SimpleNamespace(
+        returncode=0, stdout=json.dumps({"worktrees": [], "reporting_context": None}), stderr="",
+    ))
+    malformed = fleet._probe_host(
+        "bad-source", "wsl", "alias", "bash", True,
+        project="example", extra_args=[], timeout=1,
+    )
+    child = {
+        "id": "child", "repo": "example",
+        "caller_worktree": tracking.format_claim_ref("known-slot", "example", "parent"),
+    }
+    hosts = delegates.annotate_fleet_hosts([
+        host([], context=reporter("known")), malformed, host([child], machine="worker"),
+    ])
+    target = hosts[2]["worktrees"][0]
+    assert target["caller_state"]["state"] == "unknown"
+    assert target["delegate_finalizable"] is False
+    assert delegates._still_finalizable(hosts, target, source_key=("worker", "wsl")) is False

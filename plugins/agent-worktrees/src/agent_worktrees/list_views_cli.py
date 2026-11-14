@@ -259,6 +259,7 @@ def _probe_host(
             worktrees_reporting.validate(envelope["reporting_context"])
         except ValueError:
             row["error"] = "malformed `list --json` reporting context"
+            row["reporting_context_error"] = True
             return row
         row["reporting_context"] = envelope["reporting_context"]
     row["reachable"] = True

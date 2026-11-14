@@ -35,6 +35,7 @@ from .worktree_machine_identity import execution_machine_from_fields, projected_
 
 _HOST_TERMINAL_STATUSES = frozenset({"complete", "completed", "finalized"})
 _ROSTER_ADVISORY_REASON = "host-roster-advisory"
+_UNNAMED_REASON = "host-reporting-unavailable"
 _UNPROVEN_ROSTER_REASON = "roster not proven current within its freshness bound when evaluated"
 
 
@@ -83,6 +84,8 @@ def annotate_delegate_graph(
     current_only: bool = False,
     authoritative_hosts: Collection[tuple[str, str]] | None = None,
     advisory_rows: Collection[int] = frozenset(),
+    unnamed_rows: Collection[int] = frozenset(),
+    incomplete_unnamed_sources: bool = False,
 ) -> list[dict[str, Any]]:
     """Annotate ``list``/``fleet`` rows with caller/host + delegate state.
 
@@ -135,6 +138,18 @@ def annotate_delegate_graph(
             caller_state["machine"] = machine_hint
         if project_hint:
             caller_state["repo"] = project_hint
+
+        if machine_hint and (
+            incomplete_unnamed_sources or any(
+                id(candidate) in unnamed_rows and candidate.get("repo") in (None, "", project_hint)
+                for candidate in id_index.get(caller_id, [])
+            )
+        ):
+            caller_state["state"] = "unknown"
+            row["caller_state"] = caller_state
+            row["delegate_finalizable"] = False
+            row["delegate_finalizable_reason"] = _UNNAMED_REASON
+            continue
 
         matches: list[dict[str, Any]] = []
         if machine_hint and project_hint:
@@ -306,10 +321,13 @@ def annotate_fleet_hosts(
     worktrees: list[dict[str, Any]] = []
     duplicate_hosts: set[tuple[str, str]] = set()
     reporter_rows: dict[tuple[str, str], list[int]] = defaultdict(list)
+    unnamed_rows: set[int] = set()
+    incomplete_unnamed_sources = False
     for host in hosts:
         try:
             keys, copies = fleet_reporting.reported_rows(host)
         except ValueError:
+            incomplete_unnamed_sources = True
             host.update(reachable=False, worktrees=[], error="malformed reporting context")
             continue
         for key in keys:
@@ -318,6 +336,9 @@ def annotate_fleet_hosts(
             reachable_hosts[key] = bool(host.get("reachable"))
             reporter_rows[key].extend(id(row) for row in copies)
         current = host_roster_is_current(host, now=now)
+        if not keys:
+            unnamed_rows.update(id(row) for row in copies)
+            incomplete_unnamed_sources |= not current
         if current:
             authoritative_hosts.update(keys)
         elif host.get("reachable") is True and host.get("availability") is None:
@@ -334,6 +355,8 @@ def annotate_fleet_hosts(
         reachable_hosts=reachable_hosts,
         authoritative_hosts=authoritative_hosts,
         advisory_rows=advisory_rows,
+        unnamed_rows=unnamed_rows,
+        incomplete_unnamed_sources=incomplete_unnamed_sources,
     )
     return hosts
 
