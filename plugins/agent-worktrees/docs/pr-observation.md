@@ -294,6 +294,35 @@ The option requires `--credential-command`; native Python callers can use
 `providers.observation_credentials.with_http_profile(source, "direct-v1")`.
 Other providers refuse this profile before credential acquisition.
 
+Typed Gitea `snapshot` and `inventory` can also select
+`--expected-account <login>` with `--http-profile direct-v1`. The selected
+provider first reads its authenticated `/user` through the same bounded GET
+owner. A missing, malformed, duplicate or nonmatching login refuses the whole
+operation without repository reads; login comparison is case-insensitive.
+Legacy tokens, missing typed/direct selection and unsupported providers refuse
+before credential acquisition. Omitting the option adds no actor request.
+
+Each later request still acquires and admits current credentials. Within a
+guarded operation, the token and complete forge binding must remain equal to
+the material used for actor verification. Rotation, withdrawal or expiry
+refuses before the next repository send, not a silent replacement or another
+actor query. The earliest reported material-use deadline is retained; a later
+expiry cannot extend it. Credential material is neither persisted nor included
+in diagnostics or results. Actor equality does not grant repository access.
+
+The actor read consumes one acquisition and native GET. Guarded inventory has
+at most `max_pages + 1` GETs; its actor read is not an inventory page. Snapshot
+verification stays **inside** the existing 64-acquisition maximum and any lower
+`--max-credential-requests` limit, including a limit exhausted by verification.
+Original deadlines and outer request reservations remain the caller's.
+Passive `inventory --contract` advertises the optional
+`observation_account_guard` version-1 object, including its option, Gitea and
+direct-v1 support, one extra inventory request and in-budget snapshot behavior.
+Discovery rejects account selection and acquires no credentials. Check the
+selected executable's declaration before emitting the option; rolled-back or
+absent support is unavailable, not permission to fall back unguarded. Result,
+storage and credential-envelope schemas are unchanged.
+
 The direct profile reuses the native provider's GET endpoints, parsing and
 per-page credential renewal, but invokes curl with `-q` first (no default
 configuration), HTTP/1.1, URL globbing off, proxies disabled, configured retries

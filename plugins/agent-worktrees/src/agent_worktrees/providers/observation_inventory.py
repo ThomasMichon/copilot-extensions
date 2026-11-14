@@ -8,7 +8,9 @@ import time
 from urllib.parse import quote
 
 from .base import ProviderError, run_cli
-from .observation_credentials import CredentialSource, ObservationCredentials, github_endpoint
+from .observation_credentials import (
+    CredentialSource, ObservationCredentialError, ObservationCredentials, github_endpoint,
+)
 
 PROTOCOL = "agent-worktrees.pr-inventory/v1"
 MAX_PAGES = 20
@@ -36,9 +38,14 @@ def inventory(
         host, endpoint = github_endpoint(endpoint)
     credentials = ObservationCredentials(
         credential_source, provider=provider.name, api_base=endpoint, repository=repo,
+        max_requests=max_pages + 1 if getattr(credential_source, "expected_account", None) is not None
+        else None,
     )
     numbers: list[int] = []
     deadline = deadline if deadline is not None else time.monotonic() + 60
+    if provider.name == "gitea":
+        from .gitea_observation_account import verify_account
+        verify_account(provider, credentials, deadline=deadline)
     pages = 0
     outcome, error = "partial", "page_limit"
     for page in range(1, max_pages + 1):
@@ -96,6 +103,11 @@ def inventory(
             if len(batch) > capacity or len(numbers) == max_pulls:
                 error = "pull_limit"
                 break
+        except ObservationCredentialError:
+            if credentials.expected_account is not None:
+                raise
+            outcome, error = ("partial" if pages else "unavailable"), "read_unavailable"
+            break
         except (ProviderError, OSError, ValueError, UnicodeError):
             outcome, error = ("partial" if pages else "unavailable"), "read_unavailable"
             break

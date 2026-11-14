@@ -33,10 +33,14 @@ def add_snapshot_arguments(parser: argparse.ArgumentParser) -> None:
         help="Lower typed credential acquisition limit (1..64; not a physical HTTP-send limit)",
     )
     parser.add_argument("--http-profile", choices=HTTP_PROFILES, default="legacy")
+    parser.add_argument("--expected-account", default=None)
 
 
 def snapshot_source(args: argparse.Namespace) -> CredentialSource | None:
     """Refuse invalid typed selection before configuration or material access."""
+    expected_account = getattr(args, "expected_account", None)
+    if expected_account is not None and args.credential_command is None:
+        raise ValueError("--expected-account requires --credential-command")
     if args.max_credential_requests is not None and args.credential_command is None:
         raise ValueError("--max-credential-requests requires --credential-command")
     if args.credential_command is None:
@@ -48,6 +52,7 @@ def snapshot_source(args: argparse.Namespace) -> CredentialSource | None:
     return command_source(
         args.credential_command, max_acquisitions=args.max_credential_requests,
         http_profile=getattr(args, "http_profile", "legacy"),
+        expected_account=expected_account,
     )
 
 
@@ -81,6 +86,7 @@ def command_source(
     enclosing_budget: OwnedExecutionBudget | None = None,
     max_acquisitions: int | None = None,
     http_profile: str = "legacy",
+    expected_account: str | None = None,
 ) -> CredentialSource:
     """Validate trusted non-secret argv once; acquire new typed material on every call."""
     if max_acquisitions is not None and (
@@ -145,4 +151,4 @@ def command_source(
                 "PR observation credential command unavailable", transient=True,
             ) from None
 
-    return with_http_profile(acquire, http_profile)
+    return with_http_profile(acquire, http_profile, expected_account=expected_account)
