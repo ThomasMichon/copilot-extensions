@@ -699,7 +699,7 @@ def _qualify_native_worktrees(
                         path.read_text(encoding="utf-8", errors="replace")[-8192:]
                         for path in (
                             *(temporary / "worktree-setup-logs").glob("setup-*.log"),
-                            *(home / ".psmux").glob("*.log"),
+                            *mux_data.glob("*.log"),
                         )
                     ],
                 ])
