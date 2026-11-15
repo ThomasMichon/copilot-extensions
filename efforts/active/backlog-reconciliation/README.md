@@ -4023,6 +4023,14 @@ The [next eight current unions](journal/2026/11.15-owned-release-boundaries.md#e
 preserve pool-startup custody, live-unknown census refusal, serial-publication
 acceptance, distinct original-attempt recoveries and the complete typing/guidance
 parents. Shared recovery vocabulary does not establish duplicate acceptance.
+The [reviewed startup checkpoint and next discriminators](journal/2026/11.15-owned-release-boundaries.md#reviewed-startup-contracts-and-continuing-finite-discriminators)
+record #12751's actual merge, the complete 838-open observation and eight
+further contracts. The cold-override fixture's current source gap is now
+confirmed; historical snapshot, native-platform and PR-recovery gates remain.
+The [next nine complete unions](journal/2026/11.15-owned-release-boundaries.md#nine-further-contracts-with-their-actual-continuation-limits)
+retain completed-write versus preparation diagnostics, live CLI and registered-
+checkout distinctions, deferred baseline qualification and standalone application
+acceptance. The later qualification pause and unpublished candidate stay parked.
 
 ### Phase 2b - Vision-linked stabilization roadmap
 
