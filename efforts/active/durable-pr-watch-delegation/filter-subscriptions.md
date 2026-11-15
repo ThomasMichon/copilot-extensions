@@ -181,6 +181,19 @@ The canonical parent remains Active until its own full Plan/Validation resolves.
 
 ## Journal
 
+### 2026-11-15 - Preserve deferred departures across backpressure and outage
+
+A review counterexample reproduced stale membership when a complete scan
+pruned shared facts while a registration could not fit its departure events.
+Three controls failed for restart/ACK followed by partial or unavailable
+discovery, including a newer positive observation for one retained member.
+The registration generation now retains bounded pending-removal evidence
+through projection rollback; positive facts supersede absence, while
+cancellation or generation replacement clears that evidence. The affected
+storage/native/observer/Gateway consumer packet passes 140 tests. Strict
+whole-file checks pass for all 31 changed Python files on Linux and Windows.
+Independent review and final-source platform qualification remain open.
+
 ### 2026-11-13 - Review corrections and bounded native validation
 
 The original five service findings are corrected: per-registration projection,

@@ -40,6 +40,7 @@ def release_inactive(state: Document, now: int) -> None:
         if row["cancelled"] or row["expires_at"] <= now:
             row["members"] = []
             row["projected"] = {}
+            row["pending_removals"] = []
     for repository in state["repositories"]:
         key = RepositoryIdentity.parse(repository["identity"]).key
         active = [row for row in state["registrations"] if row["target"] == key
@@ -141,7 +142,8 @@ def validate(value: object, namespace: str, *, version: int = 3) -> None:
     requests: set[tuple[str, str]] = set()
     for row in value["registrations"]:
         _fields(row, "registration_id request_id consumer target expires_at acknowledged cancelled "
-                "request delivered acknowledged_event members projected coverage generation baseline projected_sequence")
+                "request delivered acknowledged_event members projected pending_removals coverage generation baseline "
+                "projected_sequence")
         for name in ("registration_id", "request_id", "consumer", "target"):
             text(row[name])
         request_key = row["consumer"], row["request_id"]
@@ -163,6 +165,9 @@ def validate(value: object, namespace: str, *, version: int = 3) -> None:
         if row["acknowledged_event"] is not None:
             event_id(row["acknowledged_event"])
         _members(row["members"])
+        _members(row["pending_removals"])
+        if not set(row["pending_removals"]) <= set(row["members"]):
+            raise ValueError("pending filtered removals differ from retained membership")
         if not isinstance(row["projected"], dict) or set(row["projected"]) != {
             str(number) for number in row["members"]
         }:

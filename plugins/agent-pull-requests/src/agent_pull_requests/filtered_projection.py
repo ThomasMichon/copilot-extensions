@@ -172,6 +172,12 @@ class FilteredProjection:
             first_new = state["next_sequence"]
             progressed = False
             for row in rows:
+                pending = set(row["pending_removals"])
+                if scan["outcome"] == "complete":
+                    pending.update(set(row["members"]) - prepared.keys())
+                pending.difference_update(prepared)
+                row["pending_removals"] = sorted(pending)
+                # Row rollback must retain absence proved by this accepted scan.
                 before = copy.deepcopy(row)
                 event_count, sequence = len(state["events"]), state["next_sequence"]
                 selected = self.expression(row)
@@ -183,7 +189,7 @@ class FilteredProjection:
                     # Incomplete discovery never proves absence. Cached facts
                     # may still prove clock-driven departure without a new head.
                     result = selected.evaluate(facts, now=observed_at)
-                    if number not in prepared and scan["outcome"] == "complete":
+                    if number in pending:
                         result = NONMATCH
                     if result == MATCH:
                         if number not in members and len(members) >= MAX_PULLS * 2:
@@ -225,7 +231,7 @@ class FilteredProjection:
                     row["coverage"]["outcome"], row["coverage"]["error"],
                 ):
                     self.event(state, row, None, "coverage", coverage)
-                row.update(members=sorted(members), coverage=coverage)
+                row.update(members=sorted(members), coverage=coverage, pending_removals=[])
                 row["projected_sequence"] = state["next_sequence"] - 1
                 try:
                     trim(state, new_sequence=first_new, now=now)

@@ -64,6 +64,11 @@ hot first subscriber cannot repeatedly take the newly available event budget.
 A blocked larger projection does not prevent another registration that fits
 from progressing. If no registration can complete a bounded projection, the
 transaction retains its existing backpressure rollback behavior.
+When a complete scan proves a retained member absent but its registration
+cannot project, that generation retains bounded pending-removal evidence.
+After ACK makes room, reconciliation can emit the departure even if the next
+scan is incomplete or the provider is unavailable. New positive observations
+supersede that absence; cancellation or generation replacement clears it.
 Acknowledged or otherwise unprotected old events can be reclaimed independently
 of an earlier event retained for another consumer. Unsettled delivery and events
 created in the current transaction remain protected.

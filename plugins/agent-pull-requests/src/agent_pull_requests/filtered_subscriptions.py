@@ -145,7 +145,7 @@ class FilteredSubscriptions:
                         "acknowledged": state["next_sequence"] - 1, "delivered": state["next_sequence"] - 1,
                         "acknowledged_event": None, "cancelled": False, "request": request,
                         "members": [], "projected": {}, "coverage": copy.deepcopy(repository["inventory"]),
-                        "generation": 1, "baseline": {}, "projected_sequence": 0,
+                        "pending_removals": [], "generation": 1, "baseline": {}, "projected_sequence": 0,
                     }
                     self.projection.seed(state, row, now)
                     self.projection.require_rows(key, [*(
@@ -195,6 +195,7 @@ class FilteredSubscriptions:
                             row["generation"] += 1
                             row["members"] = []
                             row["projected"] = {}
+                            row["pending_removals"] = []
                             row["coverage"] = {
                                 "outcome": "unknown", "observed_at": None, "last_complete_at": None,
                                 "pages": 0, "error": "",
@@ -246,4 +247,4 @@ class FilteredSubscriptions:
     @staticmethod
     def receipt(row: Document) -> Document:
         return copy.deepcopy({name: value for name, value in row.items()
-                              if name not in ("members", "projected", "projected_sequence", "baseline")})
+                              if name not in ("members", "projected", "pending_removals", "projected_sequence", "baseline")})

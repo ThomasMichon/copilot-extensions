@@ -599,3 +599,43 @@ def test_cache_catchup_preserves_the_timestamp_of_the_facts_it_copies(selected: 
     assert result["pulls"][0]["facts"]["tags"] == ["changed"]
     assert result["pulls"][0]["observed_at"] == 102
     assert result["inventory"]["outcome"] == "unavailable"
+
+
+@pytest.mark.parametrize(("outcome", "returned"), [
+    ("unavailable", False), ("partial", False), ("partial", True),
+])
+def test_blocked_departures_survive_restart_ack_and_incomplete_scan(
+    selected: Selected, monkeypatch: pytest.MonkeyPatch, outcome: str, returned: bool,
+) -> None:
+    from agent_pull_requests import filtered_state
+
+    broad = subscribe(selected, "broad", {"repo": ["owner/repo"]})
+    narrow = subscribe(selected, "narrow", {"tags": {"any": ["special"]}})
+    monkeypatch.setattr(filtered_state, "MAX_EVENTS", 4)
+    observe(selected, {7: facts(), 8: facts()})
+    retained = events(selected, "broad", broad)
+    initial = events(selected, "narrow", narrow)
+    execute(selected, "narrow", "acknowledge", {**registration(narrow), "event_id": initial[-1]["event_id"]})
+    observe(selected)
+    assert events(selected, "broad", broad) == retained
+    before = execute(selected, "broad", "query", registration(broad))["baseline"]
+    assert [pull["number"] for pull in before["pulls"]] == [7, 8]
+
+    now, old, identity, _projection, _registry = selected
+    restored = ReplayStore(
+        old.root, "test", clock=lambda: now[0], repository_cache=True,
+        repository_continuing=True, repository_filtered=True,
+    )
+    projection = FilteredProjection(restored, (identity,), capabilities={identity.key: CAPABILITIES})
+    renewed = now, restored, identity, projection, FilteredSubscriptions(projection)
+    execute(renewed, "broad", "acknowledge", {**registration(broad), "event_id": retained[-1]["event_id"]})
+    observe(renewed, {7: facts()} if returned else {}, outcome=outcome, error="provider_incomplete")
+    current = execute(renewed, "broad", "query", registration(broad))["baseline"]
+    assert [pull["number"] for pull in current["pulls"]] == ([7] if returned else [])
+    pending = events(renewed, "broad", broad)
+    assert {event["number"] for event in pending if event["kind"] == "departure"} == (
+        {8} if returned else {7, 8}
+    )
+    assert not {event["event_id"] for event in pending} & {event["event_id"] for event in retained}
+    observe(renewed, {7: facts()} if returned else {}, outcome=outcome, error="provider_incomplete")
+    assert events(renewed, "broad", broad) == pending
