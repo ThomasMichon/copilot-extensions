@@ -15,8 +15,9 @@ import time
 from collections import Counter
 from collections.abc import Callable, Iterator
 from concurrent.futures import Future, ThreadPoolExecutor
+from contextlib import AbstractContextManager
 from pathlib import Path
-from types import ModuleType, SimpleNamespace
+from types import ModuleType, SimpleNamespace, TracebackType
 from typing import TYPE_CHECKING, Any, ParamSpec, Protocol, TypeVar, cast
 
 import pytest
@@ -62,12 +63,14 @@ try:
         from tools import pytest_portfolio_guard as portfolio_guard
         from tools import _admission_protocol as admission
         from tools import _devcontainer_network_scope as network_scope
+        from tools import plugin_test_owned_scratch as owned_scratch
         from tools.plugin_test_containment import TestSandbox as _TestSandbox
     else:
         import plugin_test_containment as containment
         import pytest_portfolio_guard as portfolio_guard
         import _admission_protocol as admission
         import _devcontainer_network_scope as network_scope
+        import plugin_test_owned_scratch as owned_scratch
         _TestSandbox = runner._TestSandbox
 finally:
     sys.path[:] = _previous_path
@@ -76,6 +79,76 @@ finally:
 @pytest.fixture(autouse=True)
 def runner_scratch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AGENT_SCRATCH_ROOT", str(tmp_path.parent / "runner-scratch"))
+
+
+@pytest.mark.parametrize("owner,code,now,expected", [
+    (None, 7, 11.0, []),
+    ("machine/project/worktree", 0, 9.0, [("outcome", 0)]),
+    ("machine/project/worktree", 7, 10.0, [("outcome", 7)]),
+    ("machine/project/worktree", 0, 11.0, [("group:0", 124), ("outcome", 124)]),
+])
+def test_owned_scratch_completion_keeps_owner_and_deadline_gates(
+    owner: str | None, code: int, now: float, expected: list[tuple[str, int]],
+) -> None:
+    events: list[tuple[str, int]] = []
+
+    class Scope(AbstractContextManager[str]):
+        def __enter__(self) -> str:
+            return "unused"
+
+        def __exit__(
+            self, exc_type: type[BaseException] | None, exc_value: BaseException | None,
+            traceback: TracebackType | None,
+        ) -> None:
+            pass
+
+        def record_result(self, group: int, result: int) -> None:
+            events.append((f"group:{group}", result))
+
+        def record_outcome(self, result: int) -> None:
+            events.append(("outcome", result))
+
+    with owned_scratch.finish_owned_run(owner, Scope(), lambda: code, 10.0, lambda: now):
+        assert not events
+    assert events == expected
+
+
+@pytest.mark.parametrize("budget,status", [(None, 0), (12.0, 0), (2.0, 0), (0.0, 0), (2.0, 7)])
+def test_owned_preparation_preserves_limits_and_failure_status(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, budget: float | None, status: int,
+) -> None:
+    calls: list[tuple[list[str], containment.Limits]] = []
+    limits = containment.Limits(wall_seconds=10.0, max_processes=17, max_memory_mb=256, max_temp_mb=128)
+
+    def execute(command: list[str], **kwargs: Any) -> int:
+        calls.append((command, kwargs["limits"]))
+        assert kwargs["sandbox"] == tmp_path
+        assert kwargs["env"] == {"FIXTURE": "only"}
+        return status
+
+    monkeypatch.setattr(owned_scratch, "run_contained", execute)
+
+    def prepare() -> None:
+        owned_scratch.prepare_owned(
+            "fixture", "fixture-uv", False, retained=tmp_path / "retained",
+            environment={"FIXTURE": "only"}, sandbox=str(tmp_path), limits=limits, wall_seconds=budget,
+        )
+
+    if budget == 0:
+        with pytest.raises(containment.ContainmentError, match="before worker launch"):
+            prepare()
+        assert not calls
+    else:
+        if status:
+            with pytest.raises(subprocess.CalledProcessError) as error:
+                prepare()
+            assert error.value.returncode == status
+        else:
+            prepare()
+        command, selected = calls[0]
+        assert command[2:] == ["fixture", "fixture-uv", str(tmp_path / "retained"), "reuse"]
+        assert selected.wall_seconds == (10.0 if budget is None else min(10.0, budget))
+        assert (selected.max_processes, selected.max_memory_mb, selected.max_temp_mb) == (17, 256, 128)
 
 
 def test_unreaped_tree_retains_sandbox_without_cleanup(

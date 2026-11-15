@@ -38,7 +38,7 @@ from collections.abc import Iterator
 from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import contextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, TypedDict
+from typing import TYPE_CHECKING, TypedDict, cast
 
 if TYPE_CHECKING:
     from tools.plugin_test_cli import build_argument_parser
@@ -64,7 +64,7 @@ if TYPE_CHECKING:
     )
     from tools.plugin_test_command_safety import UnsafeTestCommand, check_test_sources
     from tools.plugin_test_owned_scratch import (
-        add_cli_argument, admit_owned_root, finish_owned_run, prepare_owned, test_sandbox,
+        OwnedTestSandbox, add_cli_argument, admit_owned_root, finish_owned_run, prepare_owned, test_sandbox,
     )
 else:
     from plugin_test_cli import build_argument_parser
@@ -76,27 +76,29 @@ else:
         ordinary_cache_root, retained_build_resources, source_resolution_arguments,
     )
     from plugin_test_resources import record_owner, run_prefix, runs_root, venv_root
-# Preserve the runner's existing public map as an explicit re-export.
+    # Preserve the runner's existing public map as an explicit re-export.
     from plugin_test_selection import EXTERNAL_TEST_ROOTS as EXTERNAL_TEST_ROOTS
     from plugin_test_selection import SOURCE_ONLY_TEST_TARGETS
     from plugin_test_selection import (
-    TestSelection, load_selection, resolve_plugin_root, validate_test_file,
-    _CODESPACES_NATIVE_FILE as _CODESPACES_NATIVE_FILE,
-    _CODESPACES_WINDOWS_PARTITIONS as _CODESPACES_WINDOWS_PARTITIONS,
-    _BRIDGE_HISTORICAL_FILE as _BRIDGE_HISTORICAL_FILE,
-    plan_test_groups as _plan_test_groups,
+        TestSelection, load_selection, resolve_plugin_root, validate_test_file,
+        _CODESPACES_NATIVE_FILE as _CODESPACES_NATIVE_FILE,
+        _CODESPACES_WINDOWS_PARTITIONS as _CODESPACES_WINDOWS_PARTITIONS,
+        _BRIDGE_HISTORICAL_FILE as _BRIDGE_HISTORICAL_FILE,
+        plan_test_groups as _plan_test_groups,
     )
     from plugin_test_containment import (
-    ContainmentError,
-    Limits,
-    TestSandbox as _TestSandbox,
-    UnreapedProcessError as UnreapedProcessError,
-    isolated_environment,
-    partition,
-    run_contained,
+        ContainmentError,
+        Limits,
+        TestSandbox as _TestSandbox,
+        UnreapedProcessError as UnreapedProcessError,
+        isolated_environment,
+        partition,
+        run_contained,
     )
     from plugin_test_command_safety import UnsafeTestCommand, check_test_sources
-    from plugin_test_owned_scratch import add_cli_argument, admit_owned_root, finish_owned_run, prepare_owned, test_sandbox
+    from plugin_test_owned_scratch import (
+        OwnedTestSandbox, add_cli_argument, admit_owned_root, finish_owned_run, prepare_owned, test_sandbox,
+    )
 
 REPO = Path(__file__).resolve().parents[1]
 PLUGINS = REPO / "plugins"
@@ -669,7 +671,7 @@ def run_plugin(
                 )
                 returncode = 124
                 if OWNED_SCRATCH_OWNER is not None:
-                    sandbox_scope.record_result(index, returncode)
+                    cast(OwnedTestSandbox, sandbox_scope).record_result(index, returncode)
                 break
             group_limits = Limits(
                 wall_seconds=min(limits.wall_seconds, remaining),
@@ -733,7 +735,7 @@ def run_plugin(
                 limits=group_limits,
             )
             if OWNED_SCRATCH_OWNER is not None:
-                sandbox_scope.record_result(index, returncode)
+                cast(OwnedTestSandbox, sandbox_scope).record_result(index, returncode)
             if returncode == 0 and report is not None and not report.is_file():
                 raise ContainmentError(f"{name}: successful group produced no requested JUnit report: {report}")
             # Only this group's pytest files are disposable after verified
