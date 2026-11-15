@@ -3607,6 +3607,24 @@ The coordinator controls still invoke Python directly.
 Unit isolation controls reject default,
 foreign and whole-server routing before spawn, without mistaking child flags
 after `--` for mux routing.
+
+The same file's `native_headed_coordinator` selection with `bridge-client`
+uses the ordinary compact Core builder and Bridge's real retained-session
+client. The pane runs physical Python with `-I -S` and the built artifact,
+not the caller's suite packages. Select only that parameter with
+`-k "native_headed_coordinator and bridge-client"`, the existing explicit
+Copilot/PSMux inputs and `COPILOT_DRIVER_HEADED_MUX_E2E=1`.
+It does not force optional screen-reader mode, and its mux-data override
+matches the private profile's `.psmux` fallback. This qualifies neither
+Manager planning nor caller-Job survival. The source-only
+`tests/test_headed_fixture_preflight.py` controls stop before pane creation,
+checking that actual artifact command, private roots and plain native
+arguments. They also interpret the emitted startup wrapper with its entry
+point replaced, catching annotation/import failures without native execution.
+Both selected fixture paths stage the canonical Bridge client from Core's
+resource export and require an actual Node import before any pane creation;
+they do not require a separate Bridge source checkout.
+
 The focused `joined_session_reports_pending_read` control queries the executing
 CLI's `session.rpc.tasks.list()` and `session.rpc.schedule.list()` without a
 permission grant, checking the native `tasks` and `entries` arrays in the same
