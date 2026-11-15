@@ -53,6 +53,7 @@ def gateway_request(rig: Rig) -> GatewayRequest:
     return request
 
 CAPABILITY = "synthetic-explicit-source-capability-0001"
+MACHINE_AUDIENCE = "synthetic-vault-gateway"
 FIELDS = {
     "source": "local", "account": "account-a", "recipient": "consumer-a",
     "host": "github.com", "action": "get-github-token",
@@ -121,7 +122,7 @@ def isolate_vault(root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
 def configure(
     root: Path, rig: Rig, route: LoopbackRoute, monkeypatch: pytest.MonkeyPatch,
-    *, native_admission: bool = False,
+    *, native_admission: bool = False, machine_auth: bool = False,
 ) -> tuple[list[tuple[str | None, str, dict[str, Any]]], Publisher]:
     from cryptography.hazmat.primitives import serialization
 
@@ -147,8 +148,11 @@ def configure(
     value = selection(root)
     value["gateway_origin"] = rig.origin
     value["gateway_ca"] = rig.ca
-    value["auth"] = {
-        "kind": "az-login", "resource": "gateway-admission", "tenant": "test-tenant"}
+    value["auth"] = (
+        {"kind": "machine", "principal": "service-a", "audience": MACHINE_AUDIENCE}
+        if machine_auth else
+        {"kind": "az-login", "resource": "gateway-admission", "tenant": "test-tenant"}
+    )
     key = rig.h.keys[1].get_op_key("sign")
     (root / "proof.pem").write_bytes(key.private_bytes(
         serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
@@ -239,6 +243,75 @@ def test_running_vault_authorized_consumer_denial_conduit_loss_and_shutdown(
 
     asyncio.run(scenario())
     assert CAPABILITY not in caplog.text and "synthetic-secret" not in caplog.text
+
+
+def test_running_machine_relay_signs_real_tls_admission_and_authorized_source_request(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from fleet_manager.gateway_service_caller import ServiceCaller
+    from fleet_manager.machine_identity import PROFILE
+
+    root = tmp_path / "vault"
+    isolate_vault(root, monkeypatch)
+
+    async def no_azure(
+        self: AzLoginSource, action: str, fields: dict[str, Any], *, timeout: float,
+    ) -> str:
+        pytest.fail("Machine admission must not acquire an Azure token")
+
+    async def scenario() -> None:
+        rig = Rig(tmp_path)
+        rig.h.document["version"] = 4
+        rig.h.document["identity"] = {
+            "profile": PROFILE, "audience": MACHINE_AUDIENCE,
+            "trust_valid_until": rig.h.clock.value + 3600,
+        }
+        rig.h.document["enrollment"] = {"mappings": [
+            {"principal": name, "kind": kind, "resource": "service-a",
+             "key_source": name, "expires_at": rig.h.clock.value + 600}
+            for name, kind in (("service-a", "service"), ("caller-a", "caller"))
+        ]}
+        start: Callable[[], Awaitable[Rig]] = rig.start
+        close: Callable[[], Awaitable[None]] = rig.close
+        try:
+            await start()
+            async with conduit(rig.origin) as (route, _):
+                calls, _ = configure(root, rig, route, monkeypatch, machine_auth=True)
+                monkeypatch.setattr(AzLoginSource, "resolve", no_azure)
+                vault = service.VaultService()
+                vault.ttl_override = 0
+                task = asyncio.create_task(service.run_server(vault, tcp_port=0))
+                try:
+                    await eventually(lambda: bool(rig.state.service_offers("vault-available-v1")), 5)
+                    assert not task.done() and not calls
+                    assert rig.state.service_offers("vault-available-v1")[0].principal == "service-a"
+                    caller = ServiceCaller(
+                        gateway_origin=rig.origin, proof_key=rig.h.keys[3], gateway_ca=rig.ca,
+                        machine_principal="caller-a", machine_audience=MACHINE_AUDIENCE,
+                        machine_resource="service-a",
+                    )
+                    response = await caller.request(
+                        "POST", "/api/source-credentials",
+                        request_headers=(("X-Agent-Index-Installation-Id", "vault-test"),),
+                        body=json.dumps(FIELDS | {
+                            "capability": CAPABILITY,
+                            "lease_contract": "credential-relay.account-source-lease/v1",
+                        }).encode(),
+                    )
+                    assert response.status == 200 and isinstance(response.body, bytes)
+                    body = json.loads(response.body)
+                    assert body["token"] == "synthetic-secret"
+                    assert body["installationId"] == "vault-test"
+                    assert 0 < body["lease_remaining_seconds"] <= 60
+                    assert len(calls) == 1 and rig.backends[0].requests == []
+                finally:
+                    vault._shutdown = True
+                    await asyncio.wait_for(task, 5)
+                await eventually(lambda: not rig.state.service_offers("vault-available-v1"))
+        finally:
+            await close()
+
+    asyncio.run(scenario())
 
 
 @pytest.mark.parametrize("observation", [

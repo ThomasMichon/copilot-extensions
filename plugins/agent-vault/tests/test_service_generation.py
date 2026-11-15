@@ -1563,7 +1563,7 @@ def test_native_resume_pin_survives_reselection_and_shutdown_until_settled(
 
 
 @pytest.mark.skipif(os.name != "nt" and sys.platform != "linux", reason="Native successor cleanup")
-@pytest.mark.parametrize("failure", ["invalid-mode", "oversized-slot"])
+@pytest.mark.parametrize("failure", ["invalid-mode", "oversized-slot", "invalid-proof-key"])
 def test_invalid_relay_successor_preserves_running_predecessor_endpoints(
     tmp_path: Path, failure: str,
 ) -> None:
@@ -1581,7 +1581,7 @@ def test_invalid_relay_successor_preserves_running_predecessor_endpoints(
             "schema": "agent-vault.federated-relay", "version": 1, "mode": "invalid",
         }
         expected_error = "relay-configuration-invalid"
-        if failure == "oversized-slot":
+        if failure in {"oversized-slot", "invalid-proof-key"}:
             from cryptography.hazmat.primitives import serialization
             from cryptography.hazmat.primitives.asymmetric import ec
             grant = {
@@ -1590,7 +1590,8 @@ def test_invalid_relay_successor_preserves_running_predecessor_endpoints(
             }
             relay = {
                 "schema": "agent-vault.federated-relay", "version": 1, "mode": "federated-relay",
-                "fleet": "fleet-a", "gateway": "gateway-a", "slot": "s" * 129,
+                "fleet": "fleet-a", "gateway": "gateway-a",
+                "slot": "s" * 129 if failure == "oversized-slot" else "service-a",
                 "installation": "vault-test", "service": "vault-available-v1", "prefix": "/api",
                 "gateway_origin": "https://gateway.invalid", "gateway_ca": None,
                 "conduit_file": str(tmp_path / "conduit.json"),
@@ -1609,7 +1610,9 @@ def test_invalid_relay_successor_preserves_running_predecessor_endpoints(
                     "expires_at": time.time() + 300, "source_lease_seconds": 60,
                 }],
             }))
-            key = ec.generate_private_key(ec.SECP256R1())
+            key = ec.generate_private_key(
+                ec.SECP384R1() if failure == "invalid-proof-key" else ec.SECP256R1(),
+            )
             (tmp_path / "proof.pem").write_bytes(key.private_bytes(
                 serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
                 serialization.NoEncryption(),
@@ -1620,7 +1623,9 @@ def test_invalid_relay_successor_preserves_running_predecessor_endpoints(
                 "connect_port": 1, "generation": "synthetic-controller-generation",
                 "state": "ready", "expires_at": time.time() + 9,
             }))
-            expected_error = "relay-slot-invalid"
+            expected_error = (
+                "relay-proof-key-invalid" if failure == "invalid-proof-key" else "relay-slot-invalid"
+            )
         (tmp_path / "federated-relay.json").write_text(json.dumps(relay))
         (tmp_path / "current-version").write_text("older")
         failed = _start(tmp_path, "older", 0, "bounded-successor")

@@ -29,6 +29,7 @@ class RelayRuntime:
         try:
             from cryptography.hazmat.primitives import serialization
             from cryptography.hazmat.primitives.asymmetric import ec
+            from joserfc.jwk import ECKey
             from credential_relay.account_relay import AccountRelay
             from fleet_manager.gateway_account_source import AccountSourceGrant, AccountSourceHandler
             from fleet_manager.gateway_controller_services import ControllerService
@@ -46,7 +47,7 @@ class RelayRuntime:
             key.curve, ec.SECP256R1,
         ):
             raise ValueError("relay-proof-key-invalid")
-        self._key = key
+        self._key = ECKey.import_key(key) if selected["auth"]["kind"] == "machine" else key
         verified_tls(selected["gateway_ca"])
         self._source = AccountRelay(selected["account_policy_file"])
         self._handler = AccountSourceHandler(
