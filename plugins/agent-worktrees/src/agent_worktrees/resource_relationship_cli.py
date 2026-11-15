@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 import uuid
+from argparse import Namespace
 from pathlib import Path
+from typing import Any
+
+from work_coalescing_singleton import client as wcs_client
 
 from . import config as cfg, output, resource_producer as producer
-from . import resource_relationship as relationship, tracking, tracking_write
+from . import resource_relationship as relationship, tracking_write
+from .tracking_claims import format_claim_ref, parse_claim_ref
 from .resource_producer_cli import read_input
 
 
@@ -28,7 +33,7 @@ def _resident_selection(*, min_version: int = 2) -> tuple[Path, tuple[str, int, 
     return path, endpoint, generation, runtime
 
 
-def _inspect_resident(args: dict) -> dict:
+def _inspect_resident(args: dict[str, Any]) -> dict[str, Any]:
     from .tracking_relationship_write import _input
 
     payload = _input("inspect", args["input"])
@@ -43,13 +48,13 @@ def _inspect_resident(args: dict) -> dict:
     selection = _resident_selection(min_version=min_version)
     _, endpoint, generation, runtime = selection
     try:
-        result = tracking_write.wcs_client.request(
+        result: dict[str, Any] = wcs_client.request(
             *endpoint, kind=tracking_write.KIND, key=uuid.uuid4().hex,
             payload={"verb": "resource_relationship", "args": args},
             request_deadline_s=tracking_write.REQUEST_DEADLINE_S,
             completion_timeout_s=tracking_write.REQUEST_DEADLINE_S,
         )
-    except tracking_write.wcs_client.DaemonUnavailable as exc:
+    except wcs_client.DaemonUnavailable as exc:
         raise ValueError(f"resident-only inspection unavailable: {exc}") from exc
     if _resident_selection(min_version=min_version) != selection:
         raise ValueError("selected resident changed during relationship inspection")
@@ -84,7 +89,7 @@ def _inspect_resident(args: dict) -> dict:
     return {**result, "resident": {"generation": generation, "runtime_generation": runtime}}
 
 
-def cmd_resource_relationship(args) -> int:
+def cmd_resource_relationship(args: Namespace) -> int:
     """Resolve one explicit owner and invoke its selected registered authority."""
     try:
         resident_only = getattr(args, "resident_only", False)
@@ -105,6 +110,7 @@ def cmd_resource_relationship(args) -> int:
                 "resident_inspect": 1,
                 "writer_scope": "executing-process",
                 "retained_session_writes": 1,
+                "retained_native_activation": 1,
                 "retained_native_resume": 1,
                 "writer_contract": relationship.writer_contract(),
                 "writer_identity": relationship.writer_identity(),
@@ -114,10 +120,11 @@ def cmd_resource_relationship(args) -> int:
         from . import claims_cli
 
         payload = read_input("relationship")
-        parsed = tracking.parse_claim_ref(args.owner_ref)
+        parsed = parse_claim_ref(args.owner_ref)
         if parsed is None or not parsed.is_qualified:
             raise ValueError("relationship owner must be an explicit qualified reference")
-        owner_ref = tracking.format_claim_ref(parsed.machine, parsed.project, parsed.worktree_id)
+        assert parsed.project is not None
+        owner_ref = format_claim_ref(parsed.machine, parsed.project, parsed.worktree_id)
         config = cfg.load_project_config(parsed.project)
         path, _, error = claims_cli._resolve_owner_ref_record_path(owner_ref, config)
         if error or path is None or not path.exists():
