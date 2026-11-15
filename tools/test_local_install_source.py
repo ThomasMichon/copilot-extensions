@@ -3193,7 +3193,7 @@ def application_adapter(tmp_path, monkeypatch):
     )
 
     @contextmanager
-    def project_inputs(*_):
+    def project_inputs(*_, **_options):
         yield selected, inputs
 
     @contextmanager
@@ -3226,6 +3226,7 @@ def application_adapter(tmp_path, monkeypatch):
         }))
 
     monkeypatch.setattr(source, "project_inputs", project_inputs)
+    monkeypatch.setattr(source, "select_project", lambda *_: selected)
     monkeypatch.setattr(source, "native_selection", lambda *_: selection)
     monkeypatch.setattr(source, "application_inputs", lambda *_: declaration["construction"])
     monkeypatch.setattr(source.sources, "read_source_identity", lambda *_a, **_kw: selected.identity)
