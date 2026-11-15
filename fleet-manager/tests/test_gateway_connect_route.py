@@ -1,18 +1,23 @@
 """A local TCP conduit does not become an HTTP or TLS authority."""
 
 import asyncio
-from collections.abc import AsyncIterator, Callable
+import ssl
+from collections.abc import AsyncIterator, Callable, Coroutine
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import cast
+from typing import Literal, cast
 from urllib.parse import urlsplit
 
 import aiohttp
+from aiohttp import web
 import pytest
 
+from agent_procutil.daemon_instances import DaemonInstanceGuard, admit_daemon_instance
+from fleet_manager import gateway_service_server
 from fleet_manager.gateway_connect_route import LoopbackRoute
 from fleet_manager.gateway_service_connector import ServiceConnector
 from fleet_manager.gateway_service_handler import HandlerBinding, ServiceRequest, ServiceResponse
+from fleet_manager.gateway_service_listener import Listener
 from gateway_service_transport_fixtures import Rig, running
 
 
@@ -142,3 +147,56 @@ def test_route_refuses_bad_tls_or_missing_conduit_without_direct_fallback(
 def test_route_is_literal_loopback_with_bounded_port(host: str, port: int) -> None:
     with pytest.raises(ValueError, match="invalid-gateway-connect-route"):
         LoopbackRoute(host, port)
+
+
+@pytest.mark.parametrize("ending", ["return", "known-error", "unexpected-error", "admission-refused"])
+def test_foreground_gateway_admission_precedes_startup_and_outlives_runner(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, ending: str,
+) -> None:
+    shared_admit = admit_daemon_instance
+    guards: list[DaemonInstanceGuard] = []
+
+    def acquire(
+        service: str, *, source: str, purpose: Literal["production"], runtime_root: Path,
+    ) -> DaemonInstanceGuard:
+        if ending == "admission-refused":
+            raise ValueError("admission-refused")
+        guard = shared_admit(service, source=source, purpose=purpose, runtime_root=runtime_root)
+        guards.append(guard)
+        return guard
+
+    def load(path: Path) -> Listener:
+        assert len(guards) == 1 and not guards[0]._closed
+        return Listener(
+            "fleet-a", "gateway-a", "127.0.0.1", 443, "https://localhost:443",
+            "certificate.pem", "key.pem",
+        )
+
+    def tls(listener: Listener) -> ssl.SSLContext:
+        assert not guards[0]._closed
+        return ssl.create_default_context()
+
+    def run_app(application: Coroutine[None, None, web.Application], **options: object) -> None:
+        assert not guards[0]._closed
+        application.close()
+        if ending == "known-error":
+            raise OSError("runner-failed")
+        if ending == "unexpected-error":
+            raise RuntimeError("runner-failed")
+
+    monkeypatch.setattr(gateway_service_server, "admit_daemon_instance", acquire)
+    monkeypatch.setattr(Listener, "load", load)
+    monkeypatch.setattr(Listener, "tls", tls)
+    monkeypatch.setattr(web, "run_app", run_app)
+    policy_path, tls_path = tmp_path / "policy.json", tmp_path / "tls.json"
+    if ending == "admission-refused":
+        with pytest.raises(ValueError, match="admission-refused"):
+            gateway_service_server.serve(policy_path, tls_path)
+        assert not guards
+    elif ending == "unexpected-error":
+        with pytest.raises(RuntimeError, match="runner-failed"):
+            gateway_service_server.serve(policy_path, tls_path)
+    else:
+        assert gateway_service_server.serve(policy_path, tls_path) == (
+            1 if ending == "known-error" else 0)
+    assert all(guard._closed for guard in guards)

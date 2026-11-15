@@ -7,12 +7,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, TypeVar
 
 if TYPE_CHECKING:
-    from agent_procutil.daemon_instances import Purpose
-
     from .ledger import OperationLedger
 
 _Result = TypeVar("_Result")
-_Function = TypeVar("_Function", bound=Callable[..., object])
 
 
 class CanonicalJSON(Protocol):
@@ -21,18 +18,6 @@ class CanonicalJSON(Protocol):
 
 class Settlement(Protocol):
     def __call__(self, function: Callable[[], _Result]) -> Awaitable[_Result]: ...
-
-
-class DaemonDecorator(Protocol):
-    def __call__(self, function: _Function) -> _Function: ...
-
-
-class DaemonEntrypoint(Protocol):
-    def __call__(
-        self, service: str, *, source: str | Path,
-        runtime_root: str | Path | Callable[..., str | Path] | None = None,
-        purpose: Purpose | None = None,
-    ) -> DaemonDecorator: ...
 
 
 class OperationLedgerFactory(Protocol):

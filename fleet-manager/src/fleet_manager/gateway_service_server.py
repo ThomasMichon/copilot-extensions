@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from agent_procutil.daemon_instances import (
-    DaemonInstanceGuard, admit_daemon_instance, daemon_entrypoint as legacy_daemon_entrypoint,
+    DaemonInstanceGuard, admit_daemon_instance,
 )
 
 import asyncio
@@ -30,7 +30,7 @@ from .gateway_service_channel import (
 )
 from .gateway_service_context import ServiceContext, ServicePolicyError
 from .gateway_identity_provider import IdentityProvider
-from .gateway_legacy_interop import DaemonEntrypoint, OperationLedgerFactory, Settlement
+from .gateway_legacy_interop import OperationLedgerFactory, Settlement
 from .gateway_service_listener import Listener, read_bounded
 from .gateway_service_policy import ServiceAuthority, ServiceCandidate
 from .gateway_manifest import RouteSpec, ServiceSlot
@@ -49,7 +49,6 @@ from .planning import PlanError
 from .private_state import create_private_file, private_directory, validate_private_file
 
 LOG = logging.getLogger(__name__)
-daemon_entrypoint = cast(DaemonEntrypoint, legacy_daemon_entrypoint)
 settled = cast(Settlement, legacy_settled)
 STATE: web.AppKey[ServiceRuntime] = web.AppKey("fleet-service-state")
 DISPATCHED = web.RequestKey("fleet-service-dispatched", bool)
@@ -934,35 +933,35 @@ async def start(listener: Listener, policy_path: Path, **kwargs: Any) -> Serving
         raise
 
 
-@daemon_entrypoint(
-    "fleet-manager-service-gateway", source=__file__, purpose="production",
-    runtime_root=lambda policy_path, tls_path, **kwargs: Path(os.path.abspath(policy_path)).parent,
-)
 def serve(policy_path: Path, tls_path: Path, *, operation_journal: Path | None = None,
           operation_authority: str | None = None, operation_installation: str | None = None) -> int:
     """Foreground runner; the external service manager owns process lifetime."""
-    policy_path = Path(os.path.abspath(policy_path))
-    try:
-        listener = Listener.load(tls_path)
-        check(listener.port != 0, "ephemeral-listener-sdk-only")
-        context = listener.tls()
-        journal = None
-        if operation_journal is not None:
-            check(operation_journal.is_absolute() and operation_authority is not None
-                  and operation_installation is not None, "invalid-enrollment-journal")
-            assert operation_authority is not None and operation_installation is not None
-            private_directory(operation_journal.parent)
-            if not operation_journal.exists():
-                descriptor = create_private_file(operation_journal)
-                os.close(descriptor)
-            validate_private_file(operation_journal)
-            journal = cast(OperationLedgerFactory, OperationLedger)(
-                operation_journal, authority=operation_authority,
-                installation=operation_installation, enable_enrollment=True)
-        web.run_app(build_app(listener, policy_path, enrollment_journal=journal), host=listener.host,
-                    port=listener.port, ssl_context=context, access_log=None,
-                    print=None, shutdown_timeout=5, handler_cancellation=True)
-        return 0
-    except (TransportError, ServicePolicyError, OSError, PlanError, sqlite3.Error):
-        LOG.error("service-start-refused code=invalid-bootstrap-or-policy")
-        return 1
+    with admit_daemon_instance(
+        "fleet-manager-service-gateway", source=__file__, purpose="production",
+        runtime_root=Path(os.path.abspath(policy_path)).parent,
+    ):
+        policy_path = Path(os.path.abspath(policy_path))
+        try:
+            listener = Listener.load(tls_path)
+            check(listener.port != 0, "ephemeral-listener-sdk-only")
+            context = listener.tls()
+            journal = None
+            if operation_journal is not None:
+                check(operation_journal.is_absolute() and operation_authority is not None
+                      and operation_installation is not None, "invalid-enrollment-journal")
+                assert operation_authority is not None and operation_installation is not None
+                private_directory(operation_journal.parent)
+                if not operation_journal.exists():
+                    descriptor = create_private_file(operation_journal)
+                    os.close(descriptor)
+                validate_private_file(operation_journal)
+                journal = cast(OperationLedgerFactory, OperationLedger)(
+                    operation_journal, authority=operation_authority,
+                    installation=operation_installation, enable_enrollment=True)
+            web.run_app(build_app(listener, policy_path, enrollment_journal=journal), host=listener.host,
+                        port=listener.port, ssl_context=context, access_log=None,
+                        print=None, shutdown_timeout=5, handler_cancellation=True)
+            return 0
+        except (TransportError, ServicePolicyError, OSError, PlanError, sqlite3.Error):
+            LOG.error("service-start-refused code=invalid-bootstrap-or-policy")
+            return 1
