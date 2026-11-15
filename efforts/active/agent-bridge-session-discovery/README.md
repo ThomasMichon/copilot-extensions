@@ -75,6 +75,13 @@ remain separate. Draft stays Draft; the pending Phase 2 wire-shape/deliverabilit
 decision remains. No new registry, source assignment, peer probe, message/send/create or
 ownership release is authorized.
 
+The proposed finite #4036 capability/name/static-reload extension below
+retains #1045, historical #3966, #4179, #7206 and current static-config/source,
+resolver/cache, provider-discovery, dispatch/session and versioned-contract
+owners. #60 live/wedged state, mutation and purge custody remain separate.
+Draft and #2530's pending wire decision are not a bar to this planned
+extension; it creates no owner assignment, generic ACK or peer probe.
+
 ## Context
 
 Filed as [copilot-extensions#2530](https://github.com/ThomasMichon/copilot-extensions/issues/2530)
@@ -385,7 +392,42 @@ universal ACK, every-host or whole-parent completion gate is introduced.
   complete any-node/mesh-wide acceptance and supported native/compatibility cases
   through the existing discovery owner before declaring this added scope complete.
 
+### Proposed finite catalog metadata and static reload from #4036
+
+This additive discovery contract preserves both original discovery axes
+and current project-scoped behavior. It is not existing delivery or a new
+registry; provider-manifest/namespace/catalog/roster-cache refresh is a
+different dataset from configured static settings.
+
+- [ ] **S4036-P1:** Derive and publish `supports_worktrees` for supported
+  ordinary, namespace, cache and detail rows with versioned unsupported/
+  unknown behavior. Project, `worktree_root`, `spawnable` or `target_type`
+  alone must not stand in for the capability.
+- [ ] **S4036-P2:** Preserve distinct project-qualified display names across
+  local/remote discovery, aliases and overrides without rewriting identity.
+- [ ] **S4036-P3:** Through a change-driven watch OR explicit reload
+  signal/API, expose configured acp-agents, repo spawn/config, defaults and
+  derived-alias add/change/remove to the SAME running consumer. Preserve
+  source precedence, coherent generation, last-good configuration, sessions
+  and in-flight work.
+- [ ] **S4036-P4:** Report malformed, unavailable, ambiguous and failed
+  reloads truthfully; provider-only refresh cannot count as static reload.
+  Keep liveness/currentness and #60 state/mutation/purge controls separate.
+- [ ] **S4036-LV1:** Exercise actual row derivation through ordinary,
+  namespace, cache and detail consumers, including supported/unknown/
+  unsupported capability and local/remote names, aliases and overrides.
+- [ ] **S4036-LV2:** Prove same-consumer static add/change/remove, defaults,
+  alias/source precedence and coherent generation through the chosen OR;
+  cover every failure class and last-good/session/in-flight preservation.
+  A provider-only refresh is a negative control, not delivery.
+
 ## Validation Plan
+
+- [ ] **S4036-G:** Resolve every S4036 Plan/local Validation and Coordination
+  clause while preserving original #2530/#2440/#4044 discovery, flags,
+  currentness and partial/unreachable/unsupported/unauthorized/empty
+  distinctions, plus independent #60 live/wedged/include_dead/--all state.
+  No all-host, new-owner ACK or whole-parent completion gate is added.
 
 - [ ] `agent-bridge sessions --all-projects` / `agent-bridge live-sessions
       list --all-projects` on a machine with 2+ distinct-project sessions
@@ -496,6 +538,15 @@ _Pending — Phase 2's exact wire shape needs a short design pass before
 implementation (see Phase 2's first checklist item)._
 
 ## Journal
+
+### 2026-11-15 - Catalog metadata and static-reload extension proposed
+
+Added seven unchecked #4036 Plan/local/global Validation rows for truthful
+capability, project-qualified names and watch OR explicit same-consumer
+static reload. Provider refresh is not static reload. Draft, both discovery
+axes, #2530/#2440/#4044 acceptance and separate #60 state/mutation custody
+remain unchanged. No registry, peer probe, implementation or source
+disposition follows from this planning amendment.
 
 ### 2026-09-19 — Address remaining review finding; drive to merge
 

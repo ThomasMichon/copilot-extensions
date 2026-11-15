@@ -3768,6 +3768,21 @@ OPEN pending direct retained-detail clarification and normal receiving review;
 #3938's whole programme remains OPEN. The complete 06:02:55 UTC census is
 843 whole, 114 above fixed 729: 461 original-cohort and 382 inflow issues,
 including excluded arrival #12673. All 35 new acceptance checks remain unchecked.
+The [corrected GC follow-through](journal/2026/11.14-accepted-receivers-and-owner-frontier.md#corrected-gc-receiving-accepted-and-independently-retired)
+records #12675's actual reviewed merge, current relevant receiving readback
+and separate audited #3966 planned-tracking retirement. The complete
+06:11:30 UTC census verifies 842 whole open, 113 above fixed 729: 460
+original-cohort and 382 inflow issues. #3938's whole programme remains OPEN;
+no implementation or source/resource custody changed.
+
+The [next receiving amendment](journal/2026/11.14-accepted-receivers-and-owner-frontier.md#next-receiving-amendment)
+adds 50 unchecked Plan/local/global Validation rows across six existing
+ROOTs, plus five Vault detailed-matrix cases. Five whole-source planned
+families remain prospective; #3989 retains unresolved first-use meaning,
+and #4053 receives only its ACP subset with the whole source OPEN for
+#4046. Existing owners, check states, genuine source conditions and keeper
+gaps remain. No source retirement follows before normal reviewed delivery,
+actual current readback and separate source-specific judgment.
 
 ### Phase 2b - Vision-linked stabilization roadmap
 

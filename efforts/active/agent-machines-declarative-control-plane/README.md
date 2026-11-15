@@ -67,6 +67,13 @@ distinct selected documentation/maintenance-safe admission tail, not
 Linux/macOS scheduler acceptance. Neither source receives a replacement owner,
 automatic opt-in, host repair or resource release through this proposal.
 
+The proposed #3983 migration/opt-in-pack intake below retains the schema
+host/reviewer, module/provider, machine, source and native/adopter owners.
+It adds no participant or resource claim. Preserve #3115's actual LIVE
+owning-umbrella condition at its original Phase 3 acceptance scope; neither
+closed #1418 nor this documentary intake satisfies it or turns it into a
+universal migration-planning gate.
+
 ## Context
 
 Machine setup commonly drifts into parallel inventories: declared hosts,
@@ -394,6 +401,42 @@ convergence, rollout, a handoff or parent-effort completion.
   Phase 3 acceptance is complete.
 - [ ] Keep examples synthetic and repository-neutral.
 
+#### Proposed restore migration and opt-in settings pack from #3983
+
+These are unchecked migration-intake candidates through the existing Phase 5
+deduplication/ownership route, not accepted conversions or permission to run
+restore. Reuse Phase 1 provenance/authority and Phase 3 selected-scope
+plan/apply/verify/report contracts rather than adding another registry.
+
+- [ ] **M3983-P1:** Inventory prior restore entrypoints/per-machine
+  declarations and every existing capability under its current owner.
+  Map each to an engine-managed surface, typed resource or explicit module,
+  or retain a named tracked gap before retirement. Layout movement is not
+  functional conversion.
+- [ ] **M3983-P2:** Preserve exact source/repository, per-machine
+  applicability, canonical/legacy entrypoints and project/package boundaries
+  for each row; prevent duplicate execution and discovery-order selection.
+- [ ] **M3983-P3:** Require meaningful current-state diff/preview per
+  conversion. An opaque imperative module without safe preview stays visibly
+  skipped/blocked in dry-run, never reconciled. Preserve privilege, restart,
+  destructive, bounded-error, repeat/no-op, interruption and recovery gates;
+  migration grants no maintenance-safe opt-in.
+- [ ] **M3983-P4:** Provide a named adopter-selected opt-in pack containing
+  exactly `contextManagementTools=true`, `experimental=true`, `memory=false`.
+  Select its name through the owning contract, not this proposal. Cover
+  parser/schema, restore, packaging and baseline docs; reject unknown names,
+  preview exact managed keys and preserve unmanaged preferences. It is not
+  a universal default, model/machine pin or plugin-install side effect.
+- [ ] **M3983-P5:** Qualify conversions separately on Windows, Linux and WSL,
+  allowing only declared WSL-to-Linux reuse. Retain unsupported/blocked
+  prerequisites and relevant owner acceptance before legacy retirement.
+  Keep private inventories/values, adopter scripts and deployment evidence
+  in their authorized downstream homes.
+- [ ] **M3983-P6:** Record accepted conversions/platform observations,
+  unresolved rows and incumbent owners. Source merge, release inclusion,
+  adapter configuration and authorized installed/live proof remain distinct;
+  this intake runs no operation.
+
 ### Bug sweep — linked open bugs (2026-09-24)
 
 _Correlated via a facility-driven sweep of open `bug`-labeled issues against active efforts (VEI + direct review). Not yet triaged into a numbered phase — listed here as upcoming work for whoever picks this effort back up._
@@ -541,6 +584,29 @@ unchanged. These are two distinct outcomes, not a source-to-source fold._
   do not require both alternatives, historical-host repair or #3115's
   distinct native platform programme.
 
+### Validation of the proposed #3983 migration family
+
+- [ ] **M3983-V1:** Map the complete prior-capability inventory to retained
+  declarations/modules or named gaps; prove no behavior silently disappears
+  when a legacy route is retired.
+- [ ] **M3983-V2:** Cross-check existing source/authority and selected scope;
+  cover exact per-machine selection, no duplicate dispatch, meaningful
+  preview, opaque-module skip, scoped apply, repeat/no-op and interruption.
+- [ ] **M3983-V3:** Qualify Windows, Linux and WSL separately, including
+  explicit unsupported results and deliberate WSL/Linux reuse; one platform
+  or provider fixture cannot stand for the others.
+- [ ] **M3983-V4:** Prove pack opt-in/nonselection, unknown-name failure,
+  exact three-key expansion, unmanaged-key preservation, validation/preview
+  and packaged availability. Generic requirements alone are not delivery.
+- [ ] **M3983-V5:** Preserve privilege, restart, destructive, safe-dry-run,
+  bounded-error and recovery controls, distinguishing source/fixture,
+  released payload and authorized installed/live adopter results.
+
+- [ ] **M3983-GV1:** Crosswalk every M3983 Plan, local Validation and
+  Coordination clause with the accepted migration inventory before separate
+  source adjudication. Preserve existing Phase 1/3 and #3115 source-specific
+  gates without adding an all-host or whole-parent prerequisite.
+
 ## Proposal
 
 Establish the versioned resource graph and deterministic projection contract
@@ -548,6 +614,15 @@ first, then migrate reconcilers and retire shadow inventories only after
 behavioral parity is demonstrated.
 
 ## Journal
+
+### 2026-11-15 - Restore migration and exact opt-in pack proposed
+
+Added twelve unchecked #3983 Plan/local/global Validation rows under the
+existing Phase 5 intake, preserving Phase 1 authority and Phase 3 module
+contracts rather than duplicating them. The exact three-key opt-in pack,
+Windows/Linux/WSL conversion parity and all prior restore capabilities
+remain unfinished. #3115's source-defined LIVE-umbrella condition and all
+incumbent owners/check states remain; no restore or retirement occurred.
 
 <!-- backlog-reconciliation:7556:qualified-thirteen:3115-4075:Journal -->
 
