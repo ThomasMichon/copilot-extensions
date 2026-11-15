@@ -452,7 +452,9 @@ The existing direct #1448 Plan/Validation already carries typed per-session
 MCP arguments/toolsets through actual child execution, real required-tool
 availability/isolation, stable identity, lifecycle and attention/results.
 Its bounded current/latest/incremental results and ordinary active steering
-retain #4171's scope. Reuse those rows; this supplement adds residuals only.
+are bounded existing credit, not proof of #4171's streamed progress and
+steering during the active turn. Reuse those rows without substituting
+future-turn queueing or final snapshots for the distinct outcomes below.
 
 - [ ] **D4029-P1:** Bind the named sub-agent definition selected through
   `send`/`request` to the intended logical delegate/target, preserving
@@ -464,6 +466,13 @@ retain #4171's scope. Reuse those rows; this supplement adds residuals only.
   where the selected lifecycle permits. Expose ongoing/completed/unknown
   and owner-supported wait for attributed completion, output and outcome;
   preserve supported reattachment/cancellation and truthful refusal.
+- [ ] **D4029-P3:** Retain #4171's reliable ongoing streamed progress AND
+  durable, queryable, attributed result metadata AND real steering while
+  the turn remains active. Cover hosted/represented and local/remote paths,
+  quiet periods and reconnect/cutover continuity while preserving
+  conversation/custody and unknown delivery/replay state. A future-turn
+  queue receipt or final snapshot is not active-turn steering/progress;
+  keep queue-first compatibility as its own supported semantic path.
 - [ ] **D4029-LV1:** Through both caller operations, verify named-definition
   selection and identity, structured lifecycle outcomes and unsupported/
   malformed/refused cases. Reuse existing real tool-availability/isolation
@@ -472,11 +481,18 @@ retain #4171's scope. Reuse those rows; this supplement adds residuals only.
   root-turn boundary, attributed wait/completion/output/outcome, reattach/
   cancel and unknown/refusal without misreporting transport exit as work
   completion.
+- [ ] **D4029-LV3:** At the actual active-turn boundary, observe progressive
+  streamed output during work and accepted steering affecting that active
+  work, plus durable queryable attributed results. Cross hosted/represented,
+  local/remote, quiet periods, reconnect/cutover, refusal and delivery/
+  terminal unknowns without replacement, lost custody or blind replay.
+  Queue-for-later and final-snapshot-only controls must not pass this lane.
 
 ## Validation Plan
 
 - [ ] **D4029-G:** Resolve D4029-P1/P2 and local Validation alongside the
-  reused #1448 typed-MCP/actual-tool, #4171 result/active-steer and structured
+  D4029-P3/LV3 active-turn stream/steer, reused #1448 typed-MCP/actual-tool,
+  durable attributed results and structured
   lifecycle gates. Preserve original finite evidence tiers, compatibility,
   serial writers and all custodians; no AHP/all-host/whole-parent
   prerequisite or new transfer ceremony is introduced.
@@ -537,10 +553,12 @@ ownership.
 
 ### 2026-11-15 - Named-definition and shell continuity residuals proposed
 
-Added five unchecked #4029/#4191 Plan/local/global Validation rows.
-Reuse direct typed-MCP/actual-tool, stable lifecycle and #4171 result/steer
-acceptance; only named-definition binding and shell keep-attached OR
-owner-retire/wait outcomes are new residual rows. All owners, serial writers,
+Added seven unchecked #4029/#4191 Plan/local/global Validation rows.
+Reuse direct typed-MCP/actual-tool and stable lifecycle acceptance; retain
+named-definition binding, shell keep-attached OR owner-retire/wait, and
+explicit streamed progress/steering during active work. Review exposed that
+bounded reads and queue-first steering did not directly prove #4171's
+distinct active-turn outcomes. All owners, serial writers,
 compatibility and source-specific #1448 conditions remain. No implementation,
 ACK ceremony, owner/resource transfer or source disposition occurred.
 

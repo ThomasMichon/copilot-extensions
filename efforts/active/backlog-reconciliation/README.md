@@ -3776,7 +3776,7 @@ original-cohort and 382 inflow issues. #3938's whole programme remains OPEN;
 no implementation or source/resource custody changed.
 
 The [next receiving amendment](journal/2026/11.14-accepted-receivers-and-owner-frontier.md#next-receiving-amendment)
-adds 46 unchecked Plan/local/global Validation rows across six existing
+adds 50 unchecked Plan/local/global Validation rows across six existing
 ROOTs, plus five Vault detailed-matrix cases. Five whole-source planned
 families remain prospective; #3989 retains unresolved first-use meaning,
 and #4053 receives only its ACP subset with the whole source OPEN for

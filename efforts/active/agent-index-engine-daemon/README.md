@@ -243,6 +243,13 @@ unchecked rollback acceptance remain unchanged._
   unknown/retry and durable-index outcomes. Do not impose zero outage or
   readiness-before-every-retirement; endpoint-file presence is not model/
   inference readiness.
+- [ ] **I3989-P4:** Preserve the selected completed engine generation,
+  exact engine command and immutable source/dependency closure independently
+  from the light payload. Ordinary update must not rebuild, retarget, stop
+  or restart that engine. Missing/corrupt selector, dependency failure,
+  source disappearance or source reuse must not silently select a newer
+  payload or mutable substitute. Keep explicit upgrade/repair separate and
+  preserve both-runtime/durable-index consistency on failed upgrade/rollback.
 
 ## Open Design Questions (Phases 6-8 — confirm before building)
 
@@ -313,12 +320,20 @@ unchecked rollback acceptance remain unchanged._
   not assigned-port discovery; host-role installation is not automatically
   the original on-demand outcome. Complete source adjudication remains
   separate from this plan.
+- [ ] **I3989-V4:** Exercise missing/corrupt selectors, dependency failure,
+  disappeared/reused source and failed-upgrade/rollback controls against the
+  exact selected engine command/generation and immutable source/dependency
+  closure; no silent newer-payload selection or ordinary-update rebuild,
+  retarget, stop or restart. Preserve existing warm-update credit and
+  rollback gate. Keep fixture/lock/interpreter evidence distinct from the
+  original supported native installer/first-use/pin/restart and actual
+  inference acceptance; this documentary intake runs none of them.
 
 ## Journal
 
 ### 2026-11-15 - First-use and assigned-engine-endpoint clarification proposed
 
-Added seven unchecked #3989/#3990 Plan/local/global Validation rows.
+Added nine unchecked #3989/#3990 Plan/local/global Validation rows.
 The original first-use outcome remains explicit and unresolved, not
 silently replaced by host-role install; actual OS-assigned engine bind,
 publication and consumer discovery remain distinct from configured routing.
@@ -326,6 +341,9 @@ Keep existing pin/update credit and rollback gate, recovery OR and current
 custodians. No implementation, native proof or source disposition occurred.
 Historical shipping/status prose below records its original scope, not
 completion of these new unchecked acceptance rows.
+Review additionally exposed selector-failure and immutable-source cases
+that existing warm-update credit did not directly retain; P4/V4 now state
+those original requirements without resetting completed credit.
 
 ### 2026-09-26 — Archive-sweep audit: corrected Status from Done to Active
 Found via a repo-wide "Done; pending archive" sweep: the Plan's Phase 2 item
