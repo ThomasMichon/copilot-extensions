@@ -204,9 +204,18 @@ are unchanged. Stage executes no callbacks. These are execution ceilings, not
 silence timers, a service drain policy or authority to replay uncertain startup.
 An app selecting them must still qualify its real control and recovery path.
 Independently deployed callers can require `callback-timeouts/v1` in the
-selected producer module's `APPLICATION_INSTALL_CONTRACT.capabilities` before
+selected producer module's `APPLICATION_INSTALL_CAPABILITIES` before
 preparing an application that uses this extension. The base install contract
-remains version 1; older receivers keep their strict unknown-field rejection.
+remains the unchanged two-field version-1 declaration, so existing consumers
+that validate its exact shape still work. Older application receivers keep
+their strict unknown-field rejection.
+
+Opted-in source installation also separates retained-input lifetime from
+acquisition: copying and admitting wheel inputs keeps its original deadline,
+then those same immutable inputs remain verifiable through the finite enclosing
+installation allowance plus acquisition/construction room. Qualification still
+expires after its own 600 seconds. Only its post-qualification evidence checks
+use the enclosing callback allowance, without bypassing byte/identity checks.
 
 ### Common forward environment contract
 
