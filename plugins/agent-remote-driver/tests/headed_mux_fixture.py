@@ -1,17 +1,26 @@
 """Narrow native-fixture commands; never address the ambient mux or whole server."""
 
+from collections.abc import Mapping
 from pathlib import Path
 import os
 import re
 import subprocess
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from agent_procutil import no_window_kwargs
-from plugin_test_command_safety import SANDBOX_ENV, private_mux_args, validate_private_mux_args
+if TYPE_CHECKING:
+    from tools.plugin_test_command_safety import (
+        SANDBOX_ENV, private_mux_args, validate_private_mux_args,
+    )
+else:
+    from plugin_test_command_safety import SANDBOX_ENV, private_mux_args, validate_private_mux_args
 
 
 class FixtureMux:
-    def __init__(self, binary, root: Path, environment):
+    def __init__(
+        self, binary: str | os.PathLike[str], root: Path, environment: Mapping[str, str],
+    ) -> None:
         self.binary = str(binary)
         self.root = root
         self.mux_args = private_mux_args(root)
@@ -25,7 +34,7 @@ class FixtureMux:
             key: value for key, value in environment.items() if key.upper() not in nesting
         }
 
-    def query(self, action, *arguments):
+    def query(self, action: str, *arguments: str) -> subprocess.CompletedProcess[str]:
         validate_private_mux_args(self.mux_args, sandbox=self.sandbox, cwd=self.root)
         if re.fullmatch(r"headed-fixture-[0-9a-f]{32}", self.target) is None:
             raise ValueError("An explicit fixture mux namespace and target are required")
