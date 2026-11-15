@@ -3938,6 +3938,23 @@ already cover #5930/#5972; only #5900's existing opt-in provenance Plan/Validati
 receives a clarification. No additional source token is retired; incumbent
 technical checkbox states, actual claim/owner conditions and remaining parent
 completion gates are unchanged.
+The [reviewed provenance clarification and continuing supply](journal/2026/11.15-portable-receiving-boundaries.md#reviewed-provenance-clarification-and-continuing-supply)
+records #12734's actual merge, unchanged technical acceptance and the complete
+15:47:11 UTC census: 841 whole open, 112 above fixed 729. Nine next qualified
+original studies continue; three provenance-limited identities stay
+metadata-only. No campaign or parent completion follows from the publication.
+The [next bounded returns](journal/2026/11.15-portable-receiving-boundaries.md#seven-complete-maps-and-bounded-next-comparisons)
+admit seven complete maps while #6082/#6109 retain precise discussion gaps.
+Five qualified receiving documents were compared; #6045's finite
+legacy-API source trace establishes neither whole hardening/retirement nor
+seedless native receipt completion. No source token is retired by this study;
+the parent completion gates remain open.
+The [current receiving-detail reconciliation](journal/2026/11.15-portable-receiving-boundaries.md#current-receiving-details-and-already-completed-tracking)
+preserves #5993's superseding guidance contract, verifies that #6424/#6681's
+tracking retirements already happened, and reads #6076's existing Phase 6
+ordering rather than inventing another acquisition journal. Only #6086's
+scoped local preparation comparison receives paired unchecked Plan/Validation
+clauses; no new issue closure, claim release or technical completion follows.
 
 ### Phase 2b - Vision-linked stabilization roadmap
 
