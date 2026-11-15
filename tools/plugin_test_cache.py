@@ -15,19 +15,19 @@ if sys.version_info >= (3, 11):
 else:
     import tomli as tomllib
 
-if TYPE_CHECKING:
-    from tools.standalone_consumers import standalone_build_resources
-    from tools.native_test_paths import native_test_path
-elif __package__:
-    from standalone_consumers import standalone_build_resources
-    from .native_test_paths import native_test_path
-else:
-    from standalone_consumers import standalone_build_resources
+from standalone_consumers import standalone_build_resources
+# Static consumers use the declared tools root; runtime keeps both entry modes.
+if TYPE_CHECKING or not __package__:
     from native_test_paths import native_test_path
+else:
+    from .native_test_paths import native_test_path
 
 _ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_ROOT))
-from tools.cache_directory_paths import ordinary_cache_root as ordinary_cache_root  # noqa: E402
+if TYPE_CHECKING:
+    from cache_directory_paths import ordinary_cache_root as ordinary_cache_root
+else:
+    from tools.cache_directory_paths import ordinary_cache_root as ordinary_cache_root  # noqa: E402
 
 sys.path.insert(0, str(_ROOT / "libs" / "installer-engine"))
 sys.path.insert(0, str(_ROOT / "libs" / "versioned-runtime"))

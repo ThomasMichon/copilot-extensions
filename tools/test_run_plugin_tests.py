@@ -58,19 +58,14 @@ try:
     sys.modules[_spec.name] = runner
     _spec.loader.exec_module(runner)
 
+    import plugin_test_containment as containment
+    import pytest_portfolio_guard as portfolio_guard
+    import _admission_protocol as admission
+    import _devcontainer_network_scope as network_scope
+    import plugin_test_owned_scratch as owned_scratch
     if TYPE_CHECKING:
-        from tools import plugin_test_containment as containment
-        from tools import pytest_portfolio_guard as portfolio_guard
-        from tools import _admission_protocol as admission
-        from tools import _devcontainer_network_scope as network_scope
-        from tools import plugin_test_owned_scratch as owned_scratch
-        from tools.plugin_test_containment import TestSandbox as _TestSandbox
+        from plugin_test_containment import TestSandbox as _TestSandbox
     else:
-        import plugin_test_containment as containment
-        import pytest_portfolio_guard as portfolio_guard
-        import _admission_protocol as admission
-        import _devcontainer_network_scope as network_scope
-        import plugin_test_owned_scratch as owned_scratch
         _TestSandbox = runner._TestSandbox
 finally:
     sys.path[:] = _previous_path
@@ -713,10 +708,7 @@ def test_real_group_processes_release_readonly_files_before_cleanup(
 def test_explicit_reinstall_invalidates_uv_cached_path_dependency_wheels(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reinstall: bool, cached: bool,
 ) -> None:
-    if TYPE_CHECKING:
-        from tools import plugin_test_environment as preparation
-    else:
-        import plugin_test_environment as preparation
+    import plugin_test_environment as preparation
     monkeypatch.setattr(preparation, "capture_preparation_auth",
                         lambda *args, **kwargs: {"UV_CREDENTIALS_DIR": str(tmp_path / "fixture-auth")})
     plugin = tmp_path / "plugin"
@@ -886,10 +878,7 @@ def test_source_only_cache_invalidates_the_previous_tooling_selection() -> None:
 def test_preparation_selects_same_checkout_fleet_dependency(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str, extra: str,
 ) -> None:
-    if TYPE_CHECKING:
-        from tools import plugin_test_environment as preparation
-    else:
-        import plugin_test_environment as preparation
+    import plugin_test_environment as preparation
     monkeypatch.setattr(preparation, "capture_preparation_auth",
                         lambda *args, **kwargs: {"UV_CREDENTIALS_DIR": str(tmp_path / "fixture-auth")})
     monkeypatch.setattr(runner, "REPO", tmp_path)
@@ -968,10 +957,7 @@ def test_dispatch_preparation_fingerprints_same_checkout_replay_dependency(
 def test_manager_bridge_is_prepared_only_by_the_test_runner(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, bridge_fails: bool, cached_editable: bool,
 ) -> None:
-    if TYPE_CHECKING:
-        from tools import plugin_test_environment as preparation
-    else:
-        import plugin_test_environment as preparation
+    import plugin_test_environment as preparation
     monkeypatch.setattr(preparation, "capture_preparation_auth",
                         lambda *args, **kwargs: {"UV_CREDENTIALS_DIR": str(tmp_path / "fixture-auth")})
     for key in ("HOME", "USERPROFILE", "APPDATA", "XDG_CONFIG_HOME", "AGENT_BRIDGE_CONFIG_DIR"):
@@ -2258,10 +2244,7 @@ def test_fresh_preparation_attributes_repository_sources(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, has_project: bool,
 ) -> None:
     import agent_procutil.owned_process as owned_process
-    if TYPE_CHECKING:
-        from tools import plugin_test_environment as preparation
-    else:
-        import plugin_test_environment as preparation
+    import plugin_test_environment as preparation
     monkeypatch.setattr(owned_process, "run_caller_owned",
                         lambda *args, **kwargs: pytest.fail("pure preparation test attempted native execution"))
     monkeypatch.setattr(preparation, "capture_preparation_auth",

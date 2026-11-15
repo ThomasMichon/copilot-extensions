@@ -9,7 +9,7 @@ import sys
 from collections.abc import Callable, Sequence
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import Any, cast
 from urllib.parse import quote, unquote
 
 import pytest
@@ -23,10 +23,7 @@ if sys.version_info >= (3, 11):
 else:
     import tomli as tomllib
 
-if TYPE_CHECKING:
-    from tools import dependency_age as age
-else:
-    import dependency_age as age
+import dependency_age as age
 
 NOW = datetime(2026, 10, 13, tzinfo=timezone.utc)
 BOUNDARY = NOW - timedelta(seconds=604800)
@@ -567,10 +564,7 @@ def test_explicit_application_source_requires_canonical_attributable_input(tmp_p
 
 @pytest.mark.parametrize("relative", [".marketplace/owned-sdk", "applications/owned-sdk"])
 def test_declared_project_inventory_audits_dependencies_and_policy_without_core_roots(tmp_path: Path, relative: str) -> None:
-    if TYPE_CHECKING:
-        from tools.python_project_inventory import runtime_roots
-    else:
-        from python_project_inventory import runtime_roots
+    from python_project_inventory import runtime_roots
 
     write(tmp_path / "pyproject.toml", (
         '[tool.copilot-extensions.python-projects]\n'

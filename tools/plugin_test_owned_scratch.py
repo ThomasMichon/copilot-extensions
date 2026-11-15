@@ -13,10 +13,7 @@ import sys
 from types import TracebackType
 from typing import TYPE_CHECKING, Any, Literal, Protocol, TypedDict, TypeVar, cast, overload
 
-if TYPE_CHECKING:
-    from tools.plugin_test_containment import ContainmentError, Limits, UnreapedProcessError, run_contained
-else:
-    from plugin_test_containment import ContainmentError, Limits, UnreapedProcessError, run_contained
+from plugin_test_containment import ContainmentError, Limits, UnreapedProcessError, run_contained
 
 _Sandbox = TypeVar("_Sandbox", bound=AbstractContextManager[str])
 

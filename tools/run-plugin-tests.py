@@ -40,65 +40,41 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, TypedDict, cast
 
+from plugin_test_cli import build_argument_parser
+from codespaces_test_profile import validate_profile
 if TYPE_CHECKING:
-    from tools.plugin_test_cli import build_argument_parser
-    from tools.codespaces_test_profile import validate_profile
     from installer_dependency_policy import run_uv_install
-    from tools.standalone_consumers import standalone_build_resources as standalone_build_resources
-    from tools.plugin_test_cache import (
-        clear_cache_contents, declared_test_requirements, dependency_fingerprint, has_dev_extra,
-        ordinary_cache_root, retained_build_resources, source_resolution_arguments,
-    )
-    from tools.plugin_test_resources import record_owner, run_prefix, runs_root, venv_root
-    from tools.plugin_test_selection import (
-        EXTERNAL_TEST_ROOTS as EXTERNAL_TEST_ROOTS, SOURCE_ONLY_TEST_TARGETS,
-        TestSelection, load_selection, resolve_plugin_root, validate_test_file,
-        _CODESPACES_NATIVE_FILE as _CODESPACES_NATIVE_FILE,
-        _CODESPACES_WINDOWS_PARTITIONS as _CODESPACES_WINDOWS_PARTITIONS,
-        _BRIDGE_HISTORICAL_FILE as _BRIDGE_HISTORICAL_FILE,
-        plan_test_groups as _plan_test_groups,
-    )
-    from tools.plugin_test_containment import (
-        ContainmentError, Limits, TestSandbox as _TestSandbox,
-        UnreapedProcessError as UnreapedProcessError, isolated_environment, partition, run_contained,
-    )
-    from tools.plugin_test_command_safety import UnsafeTestCommand, check_test_sources
-    from tools.plugin_test_owned_scratch import (
-        OwnedTestSandbox, add_cli_argument, admit_owned_root, finish_owned_run, prepare_owned, test_sandbox,
-    )
 else:
-    from plugin_test_cli import build_argument_parser
-    from codespaces_test_profile import validate_profile
     from seasoned_uv import run_uv_install
-    from standalone_consumers import standalone_build_resources as standalone_build_resources
-    from plugin_test_cache import (
-        clear_cache_contents, declared_test_requirements, dependency_fingerprint, has_dev_extra,
-        ordinary_cache_root, retained_build_resources, source_resolution_arguments,
-    )
-    from plugin_test_resources import record_owner, run_prefix, runs_root, venv_root
-    # Preserve the runner's existing public map as an explicit re-export.
-    from plugin_test_selection import EXTERNAL_TEST_ROOTS as EXTERNAL_TEST_ROOTS
-    from plugin_test_selection import SOURCE_ONLY_TEST_TARGETS
-    from plugin_test_selection import (
-        TestSelection, load_selection, resolve_plugin_root, validate_test_file,
-        _CODESPACES_NATIVE_FILE as _CODESPACES_NATIVE_FILE,
-        _CODESPACES_WINDOWS_PARTITIONS as _CODESPACES_WINDOWS_PARTITIONS,
-        _BRIDGE_HISTORICAL_FILE as _BRIDGE_HISTORICAL_FILE,
-        plan_test_groups as _plan_test_groups,
-    )
-    from plugin_test_containment import (
-        ContainmentError,
-        Limits,
-        TestSandbox as _TestSandbox,
-        UnreapedProcessError as UnreapedProcessError,
-        isolated_environment,
-        partition,
-        run_contained,
-    )
-    from plugin_test_command_safety import UnsafeTestCommand, check_test_sources
-    from plugin_test_owned_scratch import (
-        OwnedTestSandbox, add_cli_argument, admit_owned_root, finish_owned_run, prepare_owned, test_sandbox,
-    )
+from standalone_consumers import standalone_build_resources as standalone_build_resources
+from plugin_test_cache import (
+    clear_cache_contents, declared_test_requirements, dependency_fingerprint, has_dev_extra,
+    ordinary_cache_root, retained_build_resources, source_resolution_arguments,
+)
+from plugin_test_resources import record_owner, run_prefix, runs_root, venv_root
+# Preserve the runner's existing public map as an explicit re-export.
+from plugin_test_selection import EXTERNAL_TEST_ROOTS as EXTERNAL_TEST_ROOTS
+from plugin_test_selection import SOURCE_ONLY_TEST_TARGETS
+from plugin_test_selection import (
+    TestSelection, load_selection, resolve_plugin_root, validate_test_file,
+    _CODESPACES_NATIVE_FILE as _CODESPACES_NATIVE_FILE,
+    _CODESPACES_WINDOWS_PARTITIONS as _CODESPACES_WINDOWS_PARTITIONS,
+    _BRIDGE_HISTORICAL_FILE as _BRIDGE_HISTORICAL_FILE,
+    plan_test_groups as _plan_test_groups,
+)
+from plugin_test_containment import (
+    ContainmentError,
+    Limits,
+    TestSandbox as _TestSandbox,
+    UnreapedProcessError as UnreapedProcessError,
+    isolated_environment,
+    partition,
+    run_contained,
+)
+from plugin_test_command_safety import UnsafeTestCommand, check_test_sources
+from plugin_test_owned_scratch import (
+    OwnedTestSandbox, add_cli_argument, admit_owned_root, finish_owned_run, prepare_owned, test_sandbox,
+)
 
 REPO = Path(__file__).resolve().parents[1]
 PLUGINS = REPO / "plugins"
@@ -218,10 +194,7 @@ sys.path.insert(0, str(LEASE_LIB))
 from single_instance_lease import AlreadyRunningError, SingleInstance  # noqa: E402
 
 sys.path.insert(0, str(TOOLS_DIR))
-if TYPE_CHECKING:
-    from tools._admission_protocol import acquire as _acquire_admission
-else:
-    from _admission_protocol import acquire as _acquire_admission  # noqa: E402
+from _admission_protocol import acquire as _acquire_admission  # noqa: E402
 
 
 def _plugin_dir(name: str) -> Path:
@@ -332,10 +305,7 @@ def _ensure_venv(
     with test_sandbox(OWNED_SCRATCH_OWNER, REPO, _TestSandbox, stage="preparation", prefix="ce-prep-", dir=parent) as private:
         retained = _venv_root()
         record_owner(Path(private), REPO, retention="disposable after verified preparation cleanup")
-        if TYPE_CHECKING:
-            from tools.plugin_test_environment import preparation_environment
-        else:
-            from plugin_test_environment import preparation_environment
+        from plugin_test_environment import preparation_environment
 
         environment = preparation_environment(os.environ, Path(private), _plugin_dir(name), uv=uv)
         cache = retained / ".uv-cache"
@@ -464,10 +434,7 @@ def _test_file_groups(
     else:
         # Explicit file arguments bypass pytest's recursive-discovery filters.
         # Apply its existing directory declaration only to our default expansion.
-        if TYPE_CHECKING:
-            from tools.plugin_test_selection import default_collection_files
-        else:
-            from plugin_test_selection import default_collection_files
+        from plugin_test_selection import default_collection_files
 
         files = list(default_collection_files(root))
     if filtered and files:
