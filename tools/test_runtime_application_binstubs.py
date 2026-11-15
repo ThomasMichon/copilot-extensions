@@ -2,30 +2,34 @@
 from __future__ import annotations
 
 import base64
-from contextlib import contextmanager
 import csv
 import hashlib
+import importlib
 import importlib.util
 import io
 import json
 import os
-from pathlib import Path
 import shutil
 import stat
 import subprocess
 import sys
 import time
-from types import SimpleNamespace
 import venv
 import zipfile
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from pathlib import Path
+from types import ModuleType, SimpleNamespace
+from typing import Any, cast
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "libs" / "installer-engine"))
+import runtime_application_install
 from runtime_application_binstubs import global_binstubs, write_slot_binstubs
 from runtime_application_project import emit, install_callbacks
-import runtime_application_install
-from local_install_profile import source_inputs as install_source
+
+install_source: ModuleType = vars(importlib.import_module("local_install_profile"))["source_inputs"]
 from installer_wheel_snapshot import retain_wheel_inputs
 
 engine = install_source.engine
@@ -38,8 +42,8 @@ engine = install_source.engine
 ])
 @pytest.mark.parametrize("implementation", [None, "cpython"])
 def test_emitted_launchers_follow_interpreter_abi_not_host_machine(
-    tmp_path, abi, target, implementation,
-):
+    tmp_path: Path, abi: str, target: str, implementation: None | str,
+) -> None:
     from packaging.markers import Marker
 
     wheel = tmp_path / "fixture_app-1.0.0-py3-none-any.whl"
@@ -77,7 +81,7 @@ def test_emitted_launchers_follow_interpreter_abi_not_host_machine(
     assert environment == original
 
 
-def test_linux_application_keeps_plain_python_request_and_exact_marker_constraints(tmp_path):
+def test_linux_application_keeps_plain_python_request_and_exact_marker_constraints(tmp_path: Path) -> None:
     wheel = tmp_path / "fixture_app-1.0.0-py3-none-any.whl"
     wheel.write_bytes(b"fixture")
     environment = {
@@ -101,7 +105,7 @@ def test_linux_application_keeps_plain_python_request_and_exact_marker_constrain
 
 
 @pytest.mark.parametrize("tags", [None, ["py3-none-any"], ["cp313-cp313-win32", "cp313-cp313-win_amd64"]])
-def test_windows_application_refuses_missing_or_ambiguous_interpreter_abi(tmp_path, tags):
+def test_windows_application_refuses_missing_or_ambiguous_interpreter_abi(tmp_path: Path, tags: None | list[str]) -> None:
     with pytest.raises(ValueError, match="unambiguous Windows Python ABI"):
         emit(
             tmp_path / "application", distribution="fixture-app", version="1.0.0",
@@ -116,8 +120,8 @@ def test_windows_application_refuses_missing_or_ambiguous_interpreter_abi(tmp_pa
     "none", "missing", "extra", "bytes", "directory", "deadline", "permission",
 ])
 def test_application_wheel_copy_damage_requires_distinct_repair_not_deadline_replay(
-    tmp_path, monkeypatch, damage,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, damage: str,
+) -> None:
     from installer_wheel_inputs import WheelDeadlineError
     content = b"fixture wheel bytes"
     wheels = tmp_path / "wheels"
@@ -135,7 +139,7 @@ def test_application_wheel_copy_damage_requires_distinct_repair_not_deadline_rep
         deadline=0 if damage == "deadline" else time.monotonic() + 30,
     )
     if damage == "permission":
-        def denied(_path):
+        def denied(_path: Path) -> None:
             raise PermissionError("fixture permission denied")
         monkeypatch.setattr(sys.modules[engine.verify_application_wheels.__module__], "_open", denied)
     if damage == "none":
@@ -149,7 +153,7 @@ def test_application_wheel_copy_damage_requires_distinct_repair_not_deadline_rep
 
 
 @pytest.mark.parametrize("variant", ["cp313d", "cp313t"])
-def test_windows_application_refuses_variants_even_with_standard_compatibility_tags(tmp_path, variant):
+def test_windows_application_refuses_variants_even_with_standard_compatibility_tags(tmp_path: Path, variant: str) -> None:
     with pytest.raises(ValueError, match="standard CPython target"):
         emit(
             tmp_path / "application", distribution="fixture-app", version="1.0.0",
@@ -163,7 +167,7 @@ def test_windows_application_refuses_variants_even_with_standard_compatibility_t
     assert not (tmp_path / "application").exists()
 
 
-def test_windows_application_refuses_non_cpython_target(tmp_path):
+def test_windows_application_refuses_non_cpython_target(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="standard CPython target"):
         emit(
             tmp_path / "application", distribution="fixture-app", version="1.0.0",
@@ -178,7 +182,7 @@ def test_windows_application_refuses_non_cpython_target(tmp_path):
 
 
 @pytest.fixture
-def install_transaction(tmp_path, monkeypatch):
+def install_transaction(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     root = tmp_path / "root"
     slot = root / "versions" / "2.0"
     (slot / ".venv").mkdir(parents=True)
@@ -191,7 +195,7 @@ def install_transaction(tmp_path, monkeypatch):
         "setup": [], "start": ["--start"], "construction": {"payload_hash": "fixture"},
     }
     (slot / "application.json").write_text(json.dumps(record), encoding="utf-8")
-    monkeypatch.setattr(runtime_application_install.sys, "prefix", str(slot / ".venv"))
+    monkeypatch.setattr(sys, "prefix", str(slot / ".venv"))
     actual_is_complete = engine.runtime.is_complete
     monkeypatch.setattr(engine.runtime, "is_complete", lambda *args, **kwargs: True)
     monkeypatch.setattr(
@@ -199,7 +203,7 @@ def install_transaction(tmp_path, monkeypatch):
     )
 
     @contextmanager
-    def qualified(*_, **_kwargs):
+    def qualified(*_: Any, **_kwargs: Any) -> Iterator[Any]:
         yield engine.runtime, lambda: None
 
     monkeypatch.setattr(runtime_application_install, "_qualified", qualified)
@@ -220,8 +224,8 @@ def install_transaction(tmp_path, monkeypatch):
     ({"start": 600}, [180, 600]),
 ])
 def test_install_callback_budgets_reach_actual_subprocess_boundary(
-    install_transaction, monkeypatch, budgets, expected,
-):
+    install_transaction: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, budgets: dict[str, int] | None, expected: list[int],
+) -> None:
     fixture = install_transaction
     fixture.record["setup"] = ["--setup"]
     if budgets is not None:
@@ -229,11 +233,11 @@ def test_install_callback_budgets_reach_actual_subprocess_boundary(
     (fixture.slot / "application.json").write_text(json.dumps(fixture.record))
     invocations = []
 
-    def run(argv, **options):
+    def run(argv: list[str], **options: Any) -> SimpleNamespace:
         invocations.append((argv, options))
         return SimpleNamespace(returncode=0)
 
-    monkeypatch.setattr(runtime_application_install.subprocess, "run", run)
+    monkeypatch.setattr(subprocess, "run", run)
     runtime_application_install.install(
         fixture.slot, stage=False, global_bin=fixture.global_bin,
     )
@@ -242,7 +246,7 @@ def test_install_callback_budgets_reach_actual_subprocess_boundary(
     assert (fixture.slot / "install-success.json").is_file()
 
 
-def test_emitted_application_retains_callback_budget_contract(tmp_path):
+def test_emitted_application_retains_callback_budget_contract(tmp_path: Path) -> None:
     wheel = tmp_path / "fixture_app-1.0.0-py3-none-any.whl"
     wheel.write_bytes(b"fixture")
     application = emit(
@@ -269,8 +273,8 @@ def test_emitted_application_retains_callback_budget_contract(tmp_path):
     None, "current-version", "last-known-good", "command", "receipt", "completion",
 ])
 def test_publication_current_requires_complete_selected_receipt_and_all_commands(
-    install_transaction, monkeypatch, ending, changed,
-):
+    install_transaction: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, ending: bytes, changed: None | str,
+) -> None:
     fixture = install_transaction
     fixture.record["commands"].append("fixture-alias")
     fixture.record["setup"] = []
@@ -310,7 +314,7 @@ def test_publication_current_requires_complete_selected_receipt_and_all_commands
     watched = [*selectors, receipt, marker, *(fixture.global_bin / name for name in commands)]
     before = {path: (path.read_bytes(), path.stat().st_mtime_ns) for path in watched}
 
-    def forbidden(*_args, **_kwargs):
+    def forbidden(*_args: Any, **_kwargs: Any) -> None:
         pytest.fail("publication proof must not execute callbacks or publish")
 
     monkeypatch.setattr(runtime_application_install, "_run", forbidden)
@@ -335,14 +339,14 @@ def test_publication_current_requires_complete_selected_receipt_and_all_commands
     ([], ["--start"], ("--config", "fixture")),
 ])
 def test_current_publication_reenters_configuration_and_readiness_owners(
-    install_transaction, monkeypatch, setup, start, arguments,
-):
+    install_transaction: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, setup: list[str], start: list[str], arguments: tuple[str, ...],
+) -> None:
     fixture = install_transaction
     fixture.record.update(setup=setup, start=start)
     (fixture.slot / "application.json").write_text(json.dumps(fixture.record), encoding="utf-8")
     calls = []
 
-    def owner(_record, command, root, slot, **_kwargs):
+    def owner(_record: dict[str, Any], command: list[str], root: Path, slot: Path, **_kwargs: Any) -> None:
         assert root == fixture.root and slot == fixture.slot
         if command:
             calls.append(tuple(command))
@@ -367,8 +371,8 @@ def test_current_publication_reenters_configuration_and_readiness_owners(
 @pytest.mark.parametrize("existing", [False, True])
 @pytest.mark.parametrize("phase", ["setup", "launcher", "publication"])
 def test_install_transaction_before_start_failure_restores_prior_state(
-    install_transaction, monkeypatch, phase, existing,
-):
+    install_transaction: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, phase: str, existing: bool,
+) -> None:
     fixture = install_transaction
     starts = []
     previous = {}
@@ -381,7 +385,7 @@ def test_install_transaction_before_start_failure_restores_prior_state(
             previous[name] = b"unrecognized old launcher: " + name.encode() + b"\r\n"
             (fixture.global_bin / name).write_bytes(previous[name])
 
-    def command(_record, arguments, _root, _slot, **_kwargs):
+    def command(_record: dict[str, Any], arguments: list[str], _root: Path, _slot: Path, **_kwargs: Any) -> None:
         if arguments == ["--setup"]:
             raise RuntimeError("setup refused")
         if arguments:
@@ -395,7 +399,7 @@ def test_install_transaction_before_start_failure_restores_prior_state(
         write = runtime_application_install._write
         failed = False
 
-        def partial_launchers(path, content):
+        def partial_launchers(path: Path, content: bytes) -> None:
             nonlocal failed
             if path.name.endswith(".ps1") and not failed:
                 failed = True
@@ -404,7 +408,7 @@ def test_install_transaction_before_start_failure_restores_prior_state(
 
         monkeypatch.setattr(runtime_application_install, "_write", partial_launchers)
     else:
-        def partial_publication(root, version, *_):
+        def partial_publication(root: Path, version: str, *_: Any) -> None:
             (root / "current-version").write_bytes((version + "\n").encode())
             raise RuntimeError("publication refused")
 
@@ -423,8 +427,8 @@ def test_install_transaction_before_start_failure_restores_prior_state(
 
 @pytest.mark.parametrize("with_start", [False, True])
 def test_install_replaces_all_declared_old_launchers_without_incumbent_provenance(
-    install_transaction, monkeypatch, with_start,
-):
+    install_transaction: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, with_start: bool,
+) -> None:
     fixture = install_transaction
     fixture.record["commands"].append("fixture-alias")
     fixture.record["start"] = ["--start"] if with_start else []
@@ -444,7 +448,7 @@ def test_install_replaces_all_declared_old_launchers_without_incumbent_provenanc
     data.write_bytes(b"preserved application state")
     starts = []
 
-    def command(_record, arguments, root, slot, **_kwargs):
+    def command(_record: dict[str, Any], arguments: list[str], root: Path, slot: Path, **_kwargs: Any) -> None:
         if arguments:
             assert (root / "current-version").read_text().strip() == slot.name
             assert all((fixture.global_bin / name).read_bytes() == text.encode()
@@ -467,15 +471,15 @@ def test_install_replaces_all_declared_old_launchers_without_incumbent_provenanc
 
 
 def test_install_replacement_preserves_launcher_changed_during_setup(
-    install_transaction, monkeypatch,
-):
+    install_transaction: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     fixture = install_transaction
     fixture.global_bin.mkdir()
     command = fixture.global_bin / "fixture-app"
     command.write_bytes(b"old launcher\n")
     calls = []
 
-    def setup(_record, arguments, _root, _slot, **_kwargs):
+    def setup(_record: dict[str, Any], arguments: list[str], _root: Path, _slot: Path, **_kwargs: Any) -> None:
         calls.append(arguments)
         command.write_bytes(b"concurrent replacement\n")
 
@@ -492,8 +496,8 @@ def test_install_replacement_preserves_launcher_changed_during_setup(
 
 @pytest.mark.parametrize("kind", ["directory", "oversized"])
 def test_install_replacement_refuses_nonordinary_or_unbounded_launcher(
-    install_transaction, monkeypatch, kind,
-):
+    install_transaction: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, kind: str,
+) -> None:
     fixture = install_transaction
     fixture.global_bin.mkdir()
     command = fixture.global_bin / "fixture-app"
@@ -516,8 +520,8 @@ def test_install_replacement_refuses_nonordinary_or_unbounded_launcher(
     "none", "missing", "extra", "bytes", "directory", "reparse", "deadline", "permission",
 ])
 def test_application_wheel_damage_distinguishes_repair_from_transient_failure(
-    tmp_path, monkeypatch, damage,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, damage: str,
+) -> None:
     from installer_wheel_inputs import WheelDeadlineError
 
     content = b"fixture wheel bytes"
@@ -536,13 +540,13 @@ def test_application_wheel_damage_distinguishes_repair_from_transient_failure(
         deadline=0 if damage == "deadline" else time.monotonic() + 30,
     )
     if damage == "permission":
-        def denied(_path):
+        def denied(_path: Path) -> None:
             raise PermissionError("fixture permission denied")
         monkeypatch.setattr(sys.modules[engine.verify_application_wheels.__module__], "_open", denied)
     if damage == "reparse":
         lstat = Path.lstat
 
-        def reparse(path, *args, **kwargs):
+        def reparse(path: Path, *args: Any, **kwargs: Any) -> os.stat_result | SimpleNamespace:
             if path == wheels:
                 return SimpleNamespace(st_mode=stat.S_IFDIR, st_file_attributes=0x400)
             return lstat(path, *args, **kwargs)
@@ -559,17 +563,17 @@ def test_application_wheel_damage_distinguishes_repair_from_transient_failure(
 
 
 def test_install_transaction_verifies_inputs_outside_selector_update(
-    install_transaction, monkeypatch,
-):
+    install_transaction: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     fixture = install_transaction
     verified = []
 
-    def unchanged():
+    def unchanged() -> None:
         with engine.runtime._publication_lease(fixture.root, timeout=0):
             verified.append(True)
 
     @contextmanager
-    def qualified(*_, **_kwargs):
+    def qualified(*_: Any, **_kwargs: Any) -> Iterator[Any]:
         yield engine.runtime, unchanged
 
     monkeypatch.setattr(runtime_application_install, "_qualified", qualified)
@@ -581,13 +585,13 @@ def test_install_transaction_verifies_inputs_outside_selector_update(
 
 @pytest.mark.parametrize("serving_committed", [False, True])
 def test_install_transaction_unknown_start_retains_selection_not_last_good(
-    install_transaction, monkeypatch, serving_committed,
-):
+    install_transaction: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, serving_committed: bool,
+) -> None:
     fixture = install_transaction
     serving = fixture.root / "serving-fixture"
     cause = subprocess.TimeoutExpired(["fixture-start"], 180)
 
-    def start(_record, arguments, root, slot, **_kwargs):
+    def start(_record: dict[str, Any], arguments: list[str], root: Path, slot: Path, **_kwargs: Any) -> None:
         if not arguments:
             return
         assert (root / "current-version").read_text().strip() == slot.name
@@ -610,12 +614,12 @@ def test_install_transaction_unknown_start_retains_selection_not_last_good(
 @pytest.mark.parametrize("reply_lost", [False, True])
 @pytest.mark.parametrize("changed_selection", [False, True])
 def test_install_transaction_unknown_start_preserves_concurrent_selector_winner(
-    install_transaction, monkeypatch, reply_lost, changed_selection,
-):
+    install_transaction: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, reply_lost: bool, changed_selection: bool,
+) -> None:
     fixture = install_transaction
     winner = b"concurrent owner's command\n"
 
-    def start(_record, arguments, root, _slot, **_kwargs):
+    def start(_record: dict[str, Any], arguments: list[str], root: Path, _slot: Path, **_kwargs: Any) -> None:
         if not arguments:
             return
         if changed_selection:
@@ -639,12 +643,12 @@ def test_install_transaction_unknown_start_preserves_concurrent_selector_winner(
 
 
 def test_install_transaction_pre_start_failure_preserves_concurrent_winner(
-    install_transaction, monkeypatch,
-):
+    install_transaction: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     fixture = install_transaction
     monkeypatch.setattr(runtime_application_install, "_run", lambda *_, **_kw: None)
 
-    def publication(root, *_):
+    def publication(root: Path, *_: Any) -> None:
         (root / "current-version").write_bytes(b"3.0\n")
         (root / "last-known-good").write_bytes(b"2.9\n")
         raise RuntimeError("publication outcome changed")
@@ -660,13 +664,13 @@ def test_install_transaction_pre_start_failure_preserves_concurrent_winner(
 
 @pytest.mark.parametrize("phase", ["publication", "launcher"])
 def test_failed_update_recovers_before_another_installer_can_commit(
-    install_transaction, monkeypatch, phase,
-):
+    install_transaction: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, phase: str,
+) -> None:
     fixture = install_transaction
     lock = engine.runtime._publication_lease
-    publish = fixture.publication.publish_selectors
+    publish = cast(Callable[..., None], fixture.publication.publish_selectors)
     write = runtime_application_install._write
-    won = []
+    won: list[object] = []
     winner = fixture.slot.name if phase == "publication" else "3.0"
     commands = global_binstubs(
         fixture.record["name"], fixture.record["root_environment"],
@@ -674,7 +678,7 @@ def test_failed_update_recovers_before_another_installer_can_commit(
     )
 
     @contextmanager
-    def competing_update(root):
+    def competing_update(root: Path) -> Iterator[Any]:
         try:
             with lock(root):
                 yield
@@ -688,11 +692,11 @@ def test_failed_update_recovers_before_another_installer_can_commit(
                         home / "last-known-good"
                     ).write_bytes((version + "\n").encode("utf-8")))
 
-    def failed_publication(*args):
+    def failed_publication(*args: Any) -> None:
         publish(*args)
         raise RuntimeError("publication refused")
 
-    def failed_launcher(path, content):
+    def failed_launcher(path: Path, content: bytes) -> None:
         if path.name.endswith(".ps1"):
             raise RuntimeError("launcher refused")
         write(path, content)
@@ -713,8 +717,8 @@ def test_failed_update_recovers_before_another_installer_can_commit(
 
 
 def test_shared_launchers_serialize_recovery_across_distinct_installation_roots(
-    install_transaction, monkeypatch, tmp_path,
-):
+    install_transaction: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     fixture = install_transaction
     commands = global_binstubs(
         fixture.record["name"], fixture.record["root_environment"],
@@ -754,10 +758,10 @@ def entered(root):
 runtime._publication_lease=entered
 print(json.dumps(app.install(slot,stage=False,global_bin=commands)),flush=True)
 """
-    children = []
+    children: list[subprocess.Popen[str]] = []
     write = runtime_application_install._write
 
-    def fail_after_competitor_enters(path, content):
+    def fail_after_competitor_enters(path: Path, content: bytes) -> None:
         if path.name.endswith(".ps1"):
             raise RuntimeError("launcher refused")
         if not children:
@@ -767,9 +771,10 @@ print(json.dumps(app.install(slot,stage=False,global_bin=commands)),flush=True)
                  str(Path(engine.runtime.__file__).parent), str(other),
                  str(fixture.global_bin)],
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+                creationflags=vars(subprocess)["CREATE_NO_WINDOW"] if os.name == "nt" else 0,
             )
             children.append(child)
+            assert child.stdout is not None
             assert child.stdout.readline().strip() == "contending", child.communicate(timeout=5)
             with pytest.raises(subprocess.TimeoutExpired):
                 child.wait(timeout=1)
@@ -798,32 +803,32 @@ print(json.dumps(app.install(slot,stage=False,global_bin=commands)),flush=True)
 
 
 def test_install_without_start_commits_one_update_after_unlocked_verification(
-    install_transaction, monkeypatch,
-):
+    install_transaction: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     fixture = install_transaction
     fixture.record["start"] = []
     (fixture.slot / "application.json").write_text(json.dumps(fixture.record), encoding="utf-8")
     checks = []
     updates = []
     lock = engine.runtime._publication_lease
-    publish = fixture.publication.publish_selectors
+    publish = cast(Callable[..., None], fixture.publication.publish_selectors)
 
-    def published(*args):
+    def published(*args: Any) -> None:
         updates.append(True)
         return publish(*args)
 
-    def unchanged():
+    def unchanged() -> None:
         checks.append(True)
         with lock(fixture.root, timeout=0):
             pass
 
     @contextmanager
-    def update(root):
+    def update(root: Path) -> Iterator[Any]:
         with lock(root):
             yield
 
     @contextmanager
-    def qualified(*_, **_kwargs):
+    def qualified(*_: Any, **_kwargs: Any) -> Iterator[Any]:
         yield engine.runtime, unchanged
 
     monkeypatch.setattr(runtime_application_install, "_qualified", qualified)
@@ -838,7 +843,7 @@ def test_install_without_start_commits_one_update_after_unlocked_verification(
     assert (fixture.slot / "install-success.json").is_file()
 
 
-def test_fleet_client_install_publishes_without_a_host_callback(install_transaction, monkeypatch):
+def test_fleet_client_install_publishes_without_a_host_callback(install_transaction: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
     fixture = install_transaction
     setup, start = install_callbacks("fleet-manager")
     fixture.record.update(
@@ -848,7 +853,7 @@ def test_fleet_client_install_publishes_without_a_host_callback(install_transact
     )
     (fixture.slot / "application.json").write_text(json.dumps(fixture.record), encoding="utf-8")
 
-    def refuse_callback(_record, arguments, *_, **_kwargs):
+    def refuse_callback(_record: dict[str, Any], arguments: list[str], *_: Any, **_kwargs: Any) -> None:
         if arguments:
             pytest.fail("ordinary Fleet client installation must not invoke a hosting callback")
 
@@ -861,12 +866,12 @@ def test_fleet_client_install_publishes_without_a_host_callback(install_transact
 
 
 def test_install_transaction_cancelled_start_retains_selection(
-    install_transaction, monkeypatch, capsys,
-):
+    install_transaction: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
     fixture = install_transaction
     cancellation = KeyboardInterrupt()
 
-    def start(_record, arguments, _root, _slot, **_kwargs):
+    def start(_record: dict[str, Any], arguments: list[str], _root: Path, _slot: Path, **_kwargs: Any) -> None:
         if arguments:
             raise cancellation
 
@@ -882,12 +887,12 @@ def test_install_transaction_cancelled_start_retains_selection(
 
 
 def test_install_transaction_last_good_follows_start_acknowledgement(
-    install_transaction, monkeypatch,
-):
+    install_transaction: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     fixture = install_transaction
     starts = []
 
-    def start(_record, arguments, root, slot, **_kwargs):
+    def start(_record: dict[str, Any], arguments: list[str], root: Path, slot: Path, **_kwargs: Any) -> None:
         if arguments:
             assert (root / "current-version").read_text().strip() == slot.name
             assert (root / "last-known-good").read_bytes() == b"0.9\n"
@@ -905,18 +910,18 @@ def test_install_transaction_last_good_follows_start_acknowledgement(
 
 @pytest.mark.parametrize("stage,failure", [(True, False), (False, False), (False, True)])
 def test_manager_regular_install_routes_to_its_owner_before_generic_publication(
-    tmp_path, monkeypatch, stage, failure,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stage: bool, failure: bool,
+) -> None:
     slot = tmp_path / "root" / "versions" / "1.2.3"
     (slot / ".venv").mkdir(parents=True)
     (slot / ".venv" / "pyvenv.cfg").write_text("fixture", encoding="utf-8")
-    monkeypatch.setattr(runtime_application_install.sys, "prefix", str(slot / ".venv"))
+    monkeypatch.setattr(sys, "prefix", str(slot / ".venv"))
     monkeypatch.setattr(
         runtime_application_install, "_application", lambda _slot: {"name": "worktree-manager"},
     )
     calls = []
 
-    def owner(record, command, root, selected, **_kwargs):
+    def owner(record: dict[str, Any], command: list[str], root: Path, selected: Path, **_kwargs: Any) -> None:
         calls.append((command, root, selected))
         if failure:
             raise RuntimeError("finite installation owner refused")
@@ -934,7 +939,7 @@ def test_manager_regular_install_routes_to_its_owner_before_generic_publication(
 
 @pytest.mark.skipif(os.name == "nt", reason="native POSIX interpreter links")
 @pytest.mark.parametrize("refusal", [None, "foreign-alias", "completed", "indirect-directory", "busy"])
-def test_staging_materializes_only_the_running_interpreter_links(tmp_path, monkeypatch, refusal):
+def test_staging_materializes_only_the_running_interpreter_links(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, refusal: None | str) -> None:
     interpreter = sys.executable
     slot = tmp_path / "slot"
     directory = slot / ".venv" / "bin"
@@ -951,7 +956,7 @@ def test_staging_materializes_only_the_running_interpreter_links(tmp_path, monke
     package = directory / "hardlinked-package"
     os.link(source, package)
     before = package.stat()
-    monkeypatch.setattr(runtime_application_install.sys, "executable", str(aliases[0]))
+    monkeypatch.setattr(sys, "executable", str(aliases[0]))
     if refusal is None:
         aliases[1].unlink()
         os.link(source, aliases[1])
@@ -975,7 +980,8 @@ def test_staging_materializes_only_the_running_interpreter_links(tmp_path, monke
             "print('held',flush=True);sys.stdin.readline();os.close(fd)",
             str(directory),
         ], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0) as owner:
+                creationflags=vars(subprocess)["CREATE_NO_WINDOW"] if os.name == "nt" else 0) as owner:
+            assert owner.stdout is not None
             assert owner.stdout.readline().strip() == "held"
             with pytest.raises(RuntimeError, match="already in progress"):
                 runtime_application_install._materialize_interpreter(slot)
@@ -999,7 +1005,7 @@ def test_staging_materializes_only_the_running_interpreter_links(tmp_path, monke
 
 
 @pytest.mark.parametrize("wheel_present", [False, True])
-def test_application_source_fallback_only_on_real_wheel_absence(tmp_path, wheel_present):
+def test_application_source_fallback_only_on_real_wheel_absence(tmp_path: Path, wheel_present: bool) -> None:
     source = tmp_path / "source"
     package = source / "src" / "fallback_app"
     package.mkdir(parents=True)
@@ -1029,7 +1035,7 @@ def test_application_source_fallback_only_on_real_wheel_absence(tmp_path, wheel_
 
 
 @pytest.fixture
-def application(tmp_path, monkeypatch, request):
+def application(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest) -> tuple[Path, Path, Path, dict[str, str]]:
     uv = shutil.which("uv")
     if uv is None:
         pytest.skip("a real uv executable is required")
@@ -1183,7 +1189,7 @@ def application(tmp_path, monkeypatch, request):
     environment.update(HOME=str(home), USERPROFILE=str(home))
     if os.name == "nt":
         environment.update(HOMEDRIVE=home.drive, HOMEPATH=str(home)[len(home.drive):])
-    flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+    flags = vars(subprocess)["CREATE_NO_WINDOW"] if os.name == "nt" else 0
     result = subprocess.run(
         [uv, "lock", *(["--project", engine._native_retained_path(slot)] if long_repair else []),
          "--offline", "--python", sys.executable],
@@ -1198,12 +1204,12 @@ def application(tmp_path, monkeypatch, request):
     return root, slot, caller, environment
 
 
-def invoke(path, arguments, caller, environment, *, host=None):
+def invoke(path: Path, arguments: list[str], caller: Path, environment: dict[str, str], *, host: str | None=None) -> subprocess.CompletedProcess[str]:
     if path.suffix == ".ps1":
         host = host or shutil.which("powershell.exe") or shutil.which("pwsh")
         if host is None:
             pytest.skip("PowerShell is unavailable")
-        command = [host, "-NoLogo", "-NoProfile", "-NonInteractive", "-File", str(path), *arguments]
+        command: str | list[str] = [host, "-NoLogo", "-NoProfile", "-NonInteractive", "-File", str(path), *arguments]
     elif path.suffix == ".cmd":
         if os.name != "nt":
             pytest.skip("native CMD is unavailable")
@@ -1215,7 +1221,7 @@ def invoke(path, arguments, caller, environment, *, host=None):
         command = [str(path), *arguments]
     return subprocess.run(
         command, cwd=caller, env=environment, capture_output=True, text=True, encoding="utf-8", timeout=30,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=vars(subprocess)["CREATE_NO_WINDOW"] if os.name == "nt" else 0,
     )
 
 
@@ -1224,7 +1230,7 @@ def invoke(path, arguments, caller, environment, *, host=None):
     pytest.param(None, id="accepted"), "component", "source", "profile", "wheel",
     "completion", "construction", "selection", "entry-point", "python",
 ])
-def test_read_only_installed_application_source_under_publication_lease(application, failure):
+def test_read_only_installed_application_source_under_publication_lease(application: tuple[Path, Path, Path, dict[str, str]], failure: tuple[None, ...] | str) -> None:
     root, slot, caller, environment = application
     environment["UV_PYTHON"] = sys.executable
     extension = ".ps1" if os.name == "nt" else ".sh"
@@ -1322,7 +1328,7 @@ else:
              str(slot), json.dumps(failure)],
             executable=engine._native_retained_path(python),
             cwd=caller, env=environment, capture_output=True, text=True, timeout=15,
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+            creationflags=vars(subprocess)["CREATE_NO_WINDOW"] if os.name == "nt" else 0,
         )
     assert result.returncode == 0, result.stdout + result.stderr
     response = json.loads(result.stdout)
@@ -1330,7 +1336,7 @@ else:
 
 
 @pytest.mark.parametrize("extension", [".cmd", ".ps1", ".sh"])
-def test_isolated_frontdoor_prints_unicode_without_environment_encoding(application, extension):
+def test_isolated_frontdoor_prints_unicode_without_environment_encoding(application: tuple[Path, Path, Path, dict[str, str]], extension: str) -> None:
     _root, slot, caller, environment = application
     environment.update(PYTHONUTF8="0", PYTHONIOENCODING="ascii", UV_PYTHON=sys.executable)
     result = invoke(slot / ("fixture-app" + extension), ["--unicode-output"], caller, environment)
@@ -1339,7 +1345,7 @@ def test_isolated_frontdoor_prints_unicode_without_environment_encoding(applicat
 
 
 @pytest.mark.parametrize("extension", [".cmd", ".ps1", ".sh"])
-def test_install_stage_uses_uv_without_touching_root_selection(application, extension):
+def test_install_stage_uses_uv_without_touching_root_selection(application: tuple[Path, Path, Path, dict[str, str]], extension: str) -> None:
     root, slot, caller, environment = application
     environment.update(UV_PYTHON=sys.executable, UV_PROJECT_ENVIRONMENT=str(caller / "wrong-env"),
                        UV_NO_SYNC="1", PYTHONPATH=str(caller), VIRTUAL_ENV=str(caller / "wrong-env"))
@@ -1363,7 +1369,7 @@ def test_install_stage_uses_uv_without_touching_root_selection(application, exte
 
 
 @pytest.mark.parametrize("extension", [".cmd", ".ps1", ".sh"])
-def test_regular_install_runs_setup_publishes_then_starts(application, extension):
+def test_regular_install_runs_setup_publishes_then_starts(application: tuple[Path, Path, Path, dict[str, str]], extension: str) -> None:
     root, slot, caller, environment = application
     environment["UV_PYTHON"] = sys.executable
     result = invoke(slot / ("install" + extension), [], caller, environment)
@@ -1387,7 +1393,7 @@ def test_regular_install_runs_setup_publishes_then_starts(application, extension
 
 
 @pytest.mark.parametrize("application", ["selector-lock"], indirect=True)
-def test_regular_install_callbacks_can_update_selection_without_parent_lock(application):
+def test_regular_install_callbacks_can_update_selection_without_parent_lock(application: tuple[Path, Path, Path, dict[str, str]]) -> None:
     root, slot, caller, environment = application
     environment["UV_PYTHON"] = sys.executable
     result = invoke(slot / ("install.ps1" if os.name == "nt" else "install.sh"),
@@ -1401,8 +1407,8 @@ def test_regular_install_callbacks_can_update_selection_without_parent_lock(appl
 
 @pytest.mark.parametrize("start_budget,succeeds", [(0.1, False), (10, True)])
 def test_real_application_callback_obeys_selected_finite_budget(
-    application, start_budget, succeeds,
-):
+    application: tuple[Path, Path, Path, dict[str, str]], start_budget: float, succeeds: bool,
+) -> None:
     root, slot, caller, environment = application
     environment["UV_PYTHON"] = sys.executable
     path = slot / "application.json"
@@ -1428,7 +1434,7 @@ def test_real_application_callback_obeys_selected_finite_budget(
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows legacy path-length behavior")
 @pytest.mark.parametrize("application", ["long-asset"], indirect=True)
-def test_installed_wheel_health_keeps_long_path_content_checks(application):
+def test_installed_wheel_health_keeps_long_path_content_checks(application: tuple[Path, Path, Path, dict[str, str]]) -> None:
     _root, slot, caller, environment = application
     environment["UV_PYTHON"] = sys.executable
     result = invoke(slot / "install.cmd", [], caller, environment)
@@ -1450,18 +1456,18 @@ pathlib.Path.stat = legacy(pathlib.Path.stat)
 pathlib.Path.open = legacy(pathlib.Path.open)
 """
 
-    def run(arguments):
+    def run(arguments: list[str]) -> None:
         arguments = list(arguments)
         index = arguments.index("-c") + 1
         arguments[index] = legacy_calls + arguments[index]
         result = subprocess.run(
             arguments, executable=arguments[0], cwd=caller, env=environment,
             capture_output=True, text=True,
-            timeout=30, creationflags=subprocess.CREATE_NO_WINDOW,
+            timeout=30, creationflags=vars(subprocess)["CREATE_NO_WINDOW"],
         )
         result.check_returncode()
 
-    def verify():
+    def verify() -> None:
         engine.verify_installed_inputs(
             slot, slot / ".venv" / "Scripts" / "python.exe", "fixture_app",
             origins=record["packages"], extras=tuple(record.get("extras", [])),
@@ -1482,7 +1488,7 @@ pathlib.Path.open = legacy(pathlib.Path.open)
 @pytest.mark.skipif(os.name != "nt", reason="native Windows long repair-slot cwd")
 @pytest.mark.parametrize("application", ["long-repair"], indirect=True)
 @pytest.mark.parametrize("host_name", ["powershell.exe", "pwsh"])
-def test_generated_install_verifies_actual_long_repair_slot(application, host_name):
+def test_generated_install_verifies_actual_long_repair_slot(application: tuple[Path, Path, Path, dict[str, str]], host_name: str) -> None:
     root, slot, caller, environment = application
     environment["UV_PYTHON"] = sys.executable
     host = shutil.which(host_name)
@@ -1515,8 +1521,8 @@ def test_generated_install_verifies_actual_long_repair_slot(application, host_na
 
 @pytest.mark.parametrize("foreign_interpreter", [False, True])
 def test_retention_bootstrap_uses_the_completed_application_environment(
-    application, foreign_interpreter,
-):
+    application: tuple[Path, Path, Path, dict[str, str]], foreign_interpreter: bool,
+) -> None:
     import runtime_launcher
 
     root, slot, caller, environment = application
@@ -1546,7 +1552,7 @@ def test_retention_bootstrap_uses_the_completed_application_environment(
              "--runtime-identity", identity, "-m", "fixture_app", "--fail"],
             executable=python, cwd=caller, env=environment,
             capture_output=True, text=True, encoding="utf-8", timeout=30,
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+            creationflags=vars(subprocess)["CREATE_NO_WINDOW"] if os.name == "nt" else 0,
         )
         if foreign_interpreter:
             assert result.returncode != 0
@@ -1560,7 +1566,7 @@ def test_retention_bootstrap_uses_the_completed_application_environment(
 
 @pytest.mark.parametrize("metadata", ["runtime-generation", ".install-complete.json"])
 @pytest.mark.parametrize("kind", ["missing", "oversized", "malformed", "linked", "fifo"])
-def test_retained_identity_refuses_unusable_metadata_before_launch(tmp_path, metadata, kind):
+def test_retained_identity_refuses_unusable_metadata_before_launch(tmp_path: Path, metadata: str, kind: str) -> None:
     import runtime_launcher
 
     if kind in {"linked", "fifo"} and os.name == "nt":
@@ -1586,17 +1592,17 @@ def test_retained_identity_refuses_unusable_metadata_before_launch(tmp_path, met
         if kind == "linked":
             path.symlink_to(previous)
         elif kind == "fifo":
-            os.mkfifo(path)
+            vars(os)["mkfifo"](path)
     with pytest.raises((OSError, ValueError)):
         runtime_launcher.runtime_identity(slot)
 
 
-def test_retention_bootstrap_preserves_the_historical_direct_slot(tmp_path):
+def test_retention_bootstrap_preserves_the_historical_direct_slot(tmp_path: Path) -> None:
     root = tmp_path / "runtime"
     slot = root / "versions" / "1.2.3"
     venv.EnvBuilder(with_pip=False).create(slot)
     python = engine.runtime.slot_python(root, slot.name)
-    flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+    flags = vars(subprocess)["CREATE_NO_WINDOW"] if os.name == "nt" else 0
     locations = subprocess.run(
         [str(python), "-I", "-c", "import sysconfig;print(sysconfig.get_path('purelib'))"],
         executable=str(python), capture_output=True, text=True, timeout=30, creationflags=flags,
@@ -1625,7 +1631,7 @@ def test_retention_bootstrap_preserves_the_historical_direct_slot(tmp_path):
 
 
 @pytest.mark.parametrize("stage", [False, True])
-def test_install_forwards_explicit_application_arguments_only_when_regular(application, stage):
+def test_install_forwards_explicit_application_arguments_only_when_regular(application: tuple[Path, Path, Path, dict[str, str]], stage: bool) -> None:
     root, slot, caller, environment = application
     environment["UV_PYTHON"] = sys.executable
     forwarded = ["--config", str(caller / "config with spaces.json"), "--role", "host"]
@@ -1655,7 +1661,7 @@ def test_install_forwards_explicit_application_arguments_only_when_regular(appli
 
 
 @pytest.mark.parametrize("extension", [".cmd", ".ps1", ".sh"])
-def test_failed_start_retains_selection_without_claiming_installation(application, extension):
+def test_failed_start_retains_selection_without_claiming_installation(application: tuple[Path, Path, Path, dict[str, str]], extension: str) -> None:
     root, slot, caller, environment = application
     record = json.loads((slot / "application.json").read_text())
     record["start"] = ["--fail"]
@@ -1671,7 +1677,7 @@ def test_failed_start_retains_selection_without_claiming_installation(applicatio
     assert (Path(environment["HOME"]) / ".local" / "bin" / "fixture-alias.cmd").is_file()
 
 
-def test_partial_selector_failure_restores_previous_publication(application, monkeypatch):
+def test_partial_selector_failure_restores_previous_publication(application: tuple[Path, Path, Path, dict[str, str]], monkeypatch: pytest.MonkeyPatch) -> None:
     root, slot, caller, environment = application
     environment["UV_PYTHON"] = sys.executable
     extension = ".cmd" if os.name == "nt" else ".sh"
@@ -1684,11 +1690,12 @@ def test_partial_selector_failure_restores_previous_publication(application, mon
     (root / "current-version").write_bytes(original)
     (root / "last-known-good").write_bytes(original)
     spec = importlib.util.spec_from_file_location("_fixture_install", slot / "install.py")
+    assert spec is not None and spec.loader is not None
     installer = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(installer)
-    replace = installer.os.replace
+    replace = cast(Callable[[Path, Path], None], installer.os.replace)
 
-    def fail_last_good(source, destination):
+    def fail_last_good(source: Path, destination: Path) -> None:
         if Path(destination) == root / "last-known-good":
             raise OSError("injected publication failure")
         return replace(source, destination)
@@ -1709,32 +1716,33 @@ def test_partial_selector_failure_restores_previous_publication(application, mon
 
 @pytest.mark.parametrize("failure_point", ["after-start", "after-success", "direct-exit"])
 def test_real_qualification_finishes_before_install_success(
-    application, monkeypatch, failure_point,
-):
+    application: tuple[Path, Path, Path, dict[str, str]], monkeypatch: pytest.MonkeyPatch, failure_point: str,
+) -> None:
     root, slot, caller, environment = application
     environment["UV_PYTHON"] = sys.executable
     extension = ".cmd" if os.name == "nt" else ".sh"
     staged = invoke(slot / ("install" + extension), ["--stage"], caller, environment)
     assert staged.returncode == 0, staged.stderr
     spec = importlib.util.spec_from_file_location("_qualification_install", slot / "install.py")
+    assert spec is not None and spec.loader is not None
     installer = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(installer)
     load = installer._load
     success = slot / "install-success.json"
     trigger = success if failure_point == "after-success" else root / "started.json"
 
-    def observed_load(path, name):
+    def observed_load(path: Path, name: str) -> ModuleType:
         module = load(path, name)
         if name == "_application_engine":
-            verify = module.verify_application_wheels
+            verify = cast(Callable[..., None], module.verify_application_wheels)
 
-            def guarded_verify(*args, **kwargs):
+            def guarded_verify(*args: Any, **kwargs: Any) -> None:
                 if trigger.exists():
                     raise RuntimeError("injected qualification failure " + failure_point)
                 return verify(*args, **kwargs)
 
             monkeypatch.setattr(module, "verify_application_wheels", guarded_verify)
-        return module
+        return cast(ModuleType, module)
 
     monkeypatch.setattr(installer, "_load", observed_load)
     monkeypatch.setattr(sys, "prefix", str(slot / ".venv"))
@@ -1766,7 +1774,7 @@ def test_real_qualification_finishes_before_install_success(
 
 
 @pytest.mark.parametrize("failure", ["missing-inputs", "source-mismatch", "installed-content"])
-def test_unqualified_application_does_not_publish_or_run_setup(application, failure):
+def test_unqualified_application_does_not_publish_or_run_setup(application: tuple[Path, Path, Path, dict[str, str]], failure: str) -> None:
     root, slot, caller, environment = application
     extension = ".cmd" if os.name == "nt" else ".sh"
     environment["UV_PYTHON"] = sys.executable
@@ -1795,7 +1803,7 @@ def test_unqualified_application_does_not_publish_or_run_setup(application, fail
         assert not path.exists(), path
 
 
-def test_regular_install_reuses_canonical_completion_without_restamping(application):
+def test_regular_install_reuses_canonical_completion_without_restamping(application: tuple[Path, Path, Path, dict[str, str]]) -> None:
     root, slot, caller, environment = application
     extension = ".cmd" if os.name == "nt" else ".sh"
     environment["UV_PYTHON"] = sys.executable
@@ -1809,7 +1817,7 @@ def test_regular_install_reuses_canonical_completion_without_restamping(applicat
     assert (root / "current-version").read_text().strip() == slot.name
 
 
-def test_fresh_repair_generation_replaces_selection_and_retires_old_frontend(application):
+def test_fresh_repair_generation_replaces_selection_and_retires_old_frontend(application: tuple[Path, Path, Path, dict[str, str]]) -> None:
     root, slot, caller, environment = application
     environment["UV_PYTHON"] = sys.executable
     incoming = slot.with_name(slot.name + ".repair." + "d" * 32)
@@ -1834,7 +1842,7 @@ def test_fresh_repair_generation_replaces_selection_and_retires_old_frontend(app
          "--root", str(root), "--json", "gc", "--protect-pids", "--min-age-days", "0"],
         executable=engine._native_retained_path(selected_python),
         cwd=caller, env=environment, capture_output=True, text=True, timeout=30,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=vars(subprocess)["CREATE_NO_WINDOW"] if os.name == "nt" else 0,
     )
     assert collected.returncode == 0, collected.stdout + collected.stderr
     assert json.loads(collected.stdout) == {"removed": [slot.name]}
@@ -1848,7 +1856,7 @@ def test_fresh_repair_generation_replaces_selection_and_retires_old_frontend(app
 
 
 @pytest.mark.parametrize("extension", [".cmd", ".ps1", ".sh"])
-def test_global_uses_nested_home_relative_root(application, extension):
+def test_global_uses_nested_home_relative_root(application: tuple[Path, Path, Path, dict[str, str]], extension: str) -> None:
     root, slot, caller, environment = application
     nested = Path(environment["HOME"]) / ".fixture-app" / "engine"
     copied = nested / "versions" / slot.name
@@ -1871,7 +1879,7 @@ def test_global_uses_nested_home_relative_root(application, extension):
 
 
 @pytest.mark.parametrize("extension", [".cmd", ".ps1", ".sh"])
-def test_global_forwards_to_slot_uv_and_preserves_failure(application, extension):
+def test_global_forwards_to_slot_uv_and_preserves_failure(application: tuple[Path, Path, Path, dict[str, str]], extension: str) -> None:
     root, slot, caller, environment = application
     binaries = root / "global"
     binaries.mkdir()
@@ -1893,7 +1901,7 @@ def test_global_forwards_to_slot_uv_and_preserves_failure(application, extension
 
 @pytest.mark.parametrize("extension", [".cmd", ".ps1", ".sh"])
 @pytest.mark.parametrize("version", ["..", "1/../../outside", "1 & echo unsafe"])
-def test_global_refuses_invalid_marker_without_invocation(application, extension, version):
+def test_global_refuses_invalid_marker_without_invocation(application: tuple[Path, Path, Path, dict[str, str]], extension: str, version: str) -> None:
     root, _slot, caller, environment = application
     binary = root / ("fixture-app" + extension)
     binary.write_text(
@@ -1909,7 +1917,7 @@ def test_global_refuses_invalid_marker_without_invocation(application, extension
     assert not result.stdout.strip()
 
 
-def test_existing_launcher_is_not_partially_overwritten(tmp_path):
+def test_existing_launcher_is_not_partially_overwritten(tmp_path: Path) -> None:
     (tmp_path / "install.cmd").write_text("retained", encoding="utf-8")
     with pytest.raises(FileExistsError):
         write_slot_binstubs(tmp_path, "fixture-app", "fixture_app")
