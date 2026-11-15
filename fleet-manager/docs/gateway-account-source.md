@@ -43,6 +43,17 @@ connector = ServiceConnector(
 await connector.run(owner_stop_event)
 ```
 
+For a protected Gateway exposed by an existing local conduit, a caller-aware
+handler may explicitly pass `gateway_route=LoopbackRoute("127.0.0.1", local_port)`
+from `fleet_manager.gateway_connect_route`. This changes only DNS/TCP routing,
+not the canonical `gateway_origin`, HTTP Host, TLS name or proof target.
+The route accepts only literal loopback addresses and bounded ports. It cannot
+be selected for an identity-less HTTP backend, redirects or other target hosts,
+and does not fall back to direct networking. Discovery, observation expiry and
+generation replacement remain the embedding owner's responsibility.
+The existing [Vault service embedding](../../plugins/agent-vault/docs/federated-relay.md)
+provides one explicit opt-in owner; it does not make Fleet own the custodian.
+
 The names and objects above are trusted deployment inputs, not request-selected
 references. The existing Gateway service policy must independently admit the
 connector and caller, including the selected slot and routes.

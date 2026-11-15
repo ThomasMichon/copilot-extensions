@@ -21,6 +21,7 @@ import aiohttp
 from yarl import URL
 
 from .gateway_auth import make_proof
+from .gateway_connect_route import GatewayTCPConnector, LoopbackRoute
 from .gateway_service_channel import (
     BODY_BYTES, CHANNEL_REQUESTS, CHUNK_BYTES, ClientSocket, DEADLINE, FRAME_BYTES,
     REQUEST_HEADERS, RESPONSE_BYTES, RESPONSE_HEADERS, TransportError,
@@ -93,7 +94,8 @@ class ServiceConnector:
                  methods: frozenset[str] = METHODS,
                  handler: HandlerBinding | None = None,
                  machine_principal: str | None = None, machine_audience: str | None = None,
-                 services: tuple[ControllerService, ...] | None = None) -> None:
+                 services: tuple[ControllerService, ...] | None = None,
+                 gateway_route: LoopbackRoute | None = None) -> None:
         check(isinstance(slot, str) and 0 < len(slot) <= 128, "invalid-slot")
         check(bool(methods) and methods <= METHODS, "invalid-methods")
         self._machine = isinstance(machine_principal, str) and bool(machine_principal) \
@@ -104,6 +106,10 @@ class ServiceConnector:
         self._principal, self._audience = machine_principal, machine_audience
         check((backend_origin is None) != (handler is None), "select-one-backend")
         check(handler is None or type(handler) is HandlerBinding, "invalid-handler")
+        check(gateway_route is None or (
+            type(gateway_route) is LoopbackRoute and handler is not None),
+            "invalid-gateway-connect-route")
+        self._gateway_route = gateway_route
         check(services is None or handler is not None, "controller-handler-required")
         self.services = (parse_services(service_values(services))
                          if services is not None else None)
@@ -333,7 +339,11 @@ class ServiceConnector:
     async def _connect(self) -> None:
         check(not self.active and not self.connected.is_set(), "connector-already-running")
         timeout = aiohttp.ClientTimeout(total=DEADLINE, connect=5, sock_read=15)
-        connector = aiohttp.TCPConnector(limit=CHANNEL_REQUESTS + 2)
+        connector = (
+            aiohttp.TCPConnector(limit=CHANNEL_REQUESTS + 2)
+            if self._gateway_route is None else GatewayTCPConnector(
+                self.gateway, self._gateway_route, limit=CHANNEL_REQUESTS + 2)
+        )
         trace = aiohttp.TraceConfig()
 
         async def refuse_redirect(*args: object) -> None:

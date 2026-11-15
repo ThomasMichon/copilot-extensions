@@ -1,0 +1,255 @@
+"""Running Vault lifetime -> real TLS Gateway -> exact source custodian."""
+
+import asyncio
+import hashlib
+import json
+import sys
+import time
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+REPO = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(REPO / "fleet-manager" / "tests"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from agent_vault import config, service, service_generation
+from credential_relay.sources.az_login import AzLoginSource
+from credential_relay.sources.gh_auth import GhAuthSource
+from gateway_service_transport_fixtures import eventually, running
+from test_gateway_connect_route import conduit
+from test_federated_relay_config import selection
+
+CAPABILITY = "synthetic-explicit-source-capability-0001"
+FIELDS = {
+    "source": "local", "account": "account-a", "recipient": "consumer-a",
+    "host": "github.com", "action": "get-github-token",
+}
+
+
+def isolate_vault(root, monkeypatch):
+    root.mkdir()
+    monkeypatch.setenv(config.HOME_ENV, str(root))
+    monkeypatch.setattr(service, "run_dir", lambda: root / "run")
+    monkeypatch.setattr(service_generation, "home_dir", lambda: root)
+    monkeypatch.setattr(service, "PID_FILE", str(root / "vault.pid"))
+    monkeypatch.setattr(service, "SOCKET_PATH", str(root / "vault.sock"))
+    suffix = hashlib.sha256(str(root).encode()).hexdigest()[:20]
+    monkeypatch.setattr(service, "PIPE_PATH", rf"\\.\pipe\vault-relay-test-{suffix}")
+    monkeypatch.setattr(service, "resolve_context", lambda: config.ResolvedVault(
+        None, None, None, 0, {"port": "default"}))
+    monkeypatch.setattr(service.VaultService, "_check_password_ttl", lambda _: None)
+
+
+def configure(root, rig, route, monkeypatch):
+    from cryptography.hazmat.primitives import serialization
+
+    calls = []
+
+    async def azure(self, action, fields, *, timeout):
+        assert action == "get-azure-token" and fields == {
+            "resource": "gateway-admission", "tenant": "test-tenant"}
+        return "token=" + rig.access("service-a", 1) + "\n"
+
+    async def github(self, action, fields, *, timeout):
+        calls.append((self._account, action, fields))
+        return "protocol=https\nhost=github.com\nusername=account-a\ntoken=synthetic-secret\n\n"
+
+    monkeypatch.setattr(AzLoginSource, "resolve", azure)
+    monkeypatch.setattr(GhAuthSource, "resolve", github)
+    value = selection(root)
+    value["gateway_origin"] = rig.origin
+    value["gateway_ca"] = rig.ca
+    value["auth"] = {
+        "kind": "az-login", "resource": "gateway-admission", "tenant": "test-tenant"}
+    key = rig.h.keys[1].get_op_key("sign")
+    (root / "proof.pem").write_bytes(key.private_bytes(
+        serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+        serialization.NoEncryption()))
+    (root / "capability").write_text(CAPABILITY)
+    policy = {
+        "schema": "credential-relay.account-policy", "version": 1,
+        "providers": {"native": {"kind": "gh-auth", "account": "account-a", "host": "github.com"}},
+        "grants": [FIELDS | {
+            "provider": "native", "capability_file": str(root / "capability"),
+            "expires_at": time.time() + 300, "source_lease_seconds": 60,
+        }],
+    }
+    (root / "policy.json").write_text(json.dumps(policy))
+    (root / "federated-relay.json").write_text(json.dumps(value))
+
+    def publish(**changes):
+        (root / "conduit.json").write_text(json.dumps({
+            "schema": "fleet-manager.gateway-conduit", "version": 2,
+            "gateway_origin": rig.origin, "connect_host": route.host, "connect_port": route.port,
+            "generation": "synthetic-controller-generation", "state": "ready",
+            "expires_at": time.time() + 9, **changes,
+        }))
+
+    publish()
+    return calls, publish
+
+
+def test_running_vault_authorized_consumer_denial_conduit_loss_and_shutdown(
+    tmp_path, monkeypatch, caplog,
+):
+    root = tmp_path / "vault"
+    isolate_vault(root, monkeypatch)
+
+    async def scenario():
+        async with running(tmp_path) as rig:
+            async with conduit(rig.origin) as (route, _):
+                calls, publish = configure(root, rig, route, monkeypatch)
+                vault = service.VaultService()
+                vault.ttl_override = 0
+                task = asyncio.create_task(service.run_server(vault, tcp_port=0))
+                try:
+                    await eventually(lambda: bool(rig.state.service_offers("vault-available-v1")), 5)
+                    assert not task.done()
+                    assert vault._generation.has_writer and vault._generation.hooks_started
+                    await eventually(lambda: vault._federated_relay.status()["channel_attached"])
+                    pin = {"X-Agent-Index-Installation-Id": "vault-test"}
+
+                    async def request(expected=200, **changes):
+                        async with await rig.request(
+                            "/api/source-credentials", "POST", headers=pin,
+                            json=FIELDS | {"capability": CAPABILITY,
+                                           "lease_contract": "credential-relay.account-source-lease/v1"}
+                            | changes,
+                        ) as response:
+                            assert response.status == expected
+                            assert response.headers["Cache-Control"] == "no-store"
+                            return await response.json()
+
+                    async with await rig.request("/api/health", headers=pin) as response:
+                        assert response.status == 200 and calls == []
+                    result = await request()
+                    assert result["token"] == "synthetic-secret"
+                    assert 0 < result["lease_remaining_seconds"] <= 60
+                    assert result["installationId"] == "vault-test"
+                    await request(403, recipient="unapproved")
+                    await request(503, capability="wrong-synthetic-capability-of-valid-size")
+                    assert len(calls) == 1
+                    publish(state="unavailable", connect_port=None, generation=None)
+                    await eventually(lambda: not rig.state.service_offers("vault-available-v1"))
+                    await request(503)
+                    assert len(calls) == 1 and not task.done()
+                    publish(generation="replacement-controller-generation")
+                    await eventually(lambda: bool(rig.state.service_offers("vault-available-v1")), 5)
+                    await request()
+                    assert len(calls) == 2
+                finally:
+                    vault._shutdown = True
+                    await asyncio.wait_for(task, 5)
+                await eventually(lambda: not rig.state.service_offers("vault-available-v1"))
+                assert vault._federated_relay.status() == {
+                    "state": "stopped", "channel_attached": False}
+                assert not (root / "account-relay-port.json").exists()
+                assert rig.backends[0].requests == []
+
+    asyncio.run(scenario())
+    assert CAPABILITY not in caplog.text and "synthetic-secret" not in caplog.text
+
+
+@pytest.mark.parametrize("observation", ["expired", "foreign", "unsupported"])
+def test_invalid_conduit_never_authenticates_or_advertises(tmp_path, monkeypatch, observation):
+    from agent_vault.federated_relay import selected_relay
+
+    root = tmp_path / "vault"
+    isolate_vault(root, monkeypatch)
+
+    async def scenario():
+        async with running(tmp_path) as rig:
+            async with conduit(rig.origin) as (route, connections):
+                calls, publish = configure(root, rig, route, monkeypatch)
+                publish(**{
+                    "expired": {"expires_at": time.time() - 1},
+                    "foreign": {"gateway_origin": "https://foreign.invalid"},
+                    "unsupported": {"version": 3},
+                }[observation])
+                runtime = selected_relay()
+                try:
+                    await runtime.tick()
+                    assert runtime.status() == {
+                        "state": "waiting-conduit", "channel_attached": False}
+                    assert not connections and not calls and not rig.state.channels
+                finally:
+                    await runtime.close()
+    asyncio.run(scenario())
+
+
+def test_unchanged_observation_cannot_outlive_monotonic_cap_after_clock_regression(
+    tmp_path, monkeypatch,
+):
+    from agent_vault import federated_relay
+
+    root = tmp_path / "vault"
+    isolate_vault(root, monkeypatch)
+
+    async def scenario():
+        async with running(tmp_path) as rig:
+            async with conduit(rig.origin) as (route, _):
+                _, publish = configure(root, rig, route, monkeypatch)
+                wall, monotonic = time.time(), time.monotonic()
+                clock = SimpleNamespace(
+                    time=lambda: wall, monotonic=lambda: monotonic)
+                monkeypatch.setattr(federated_relay, "time", clock)
+                runtime = federated_relay.selected_relay()
+                try:
+                    publish(expires_at=wall + 8)
+                    runtime._conduit()
+                    wall -= 1
+                    monotonic += 8
+                    with pytest.raises(ValueError, match="relay-conduit-unavailable"):
+                        runtime._conduit()
+                finally:
+                    await runtime.close()
+    asyncio.run(scenario())
+
+
+def test_failed_channel_budget_is_bounded_and_new_controller_generation_can_retry(
+    tmp_path, monkeypatch,
+):
+    import aiohttp
+    from agent_vault import federated_relay
+
+    root = tmp_path / "vault"
+    isolate_vault(root, monkeypatch)
+
+    async def scenario():
+        async with running(tmp_path) as rig:
+            unused = await asyncio.start_server(lambda r, w: w.close(), "127.0.0.1", 0)
+            port = unused.sockets[0].getsockname()[1]
+            unused.close()
+            await unused.wait_closed()
+            route = SimpleNamespace(host="127.0.0.1", port=port)
+            calls, publish = configure(root, rig, route, monkeypatch)
+            wall, monotonic = time.time(), time.monotonic()
+            monkeypatch.setattr(federated_relay, "time", SimpleNamespace(
+                time=lambda: wall, monotonic=lambda: monotonic))
+            runtime = federated_relay.selected_relay()
+            try:
+                await runtime.tick()
+                for failure in range(5):
+                    with pytest.raises((aiohttp.ClientError, OSError)):
+                        await runtime._task
+                    await runtime.tick()
+                    previous = runtime._task
+                    await runtime.tick()
+                    assert runtime._task is previous
+                    elapsed = min(4, .5 * 2 ** failure)
+                    monotonic += elapsed
+                    wall += elapsed
+                    publish(expires_at=wall + 9)
+                    await runtime.tick()
+                assert runtime.status() == {
+                    "state": "reconnect-exhausted", "channel_attached": False}
+                assert not runtime._task and not calls
+                publish(generation="new-controller-generation", expires_at=wall + 9)
+                await runtime.tick()
+                assert runtime._task is not None
+                assert runtime.status()["state"] == "connecting"
+            finally:
+                await runtime.close()
+    asyncio.run(scenario())

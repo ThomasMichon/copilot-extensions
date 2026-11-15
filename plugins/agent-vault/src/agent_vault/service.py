@@ -638,12 +638,16 @@ class VaultService:
         if action == "ping":
             from .password_lifetime import describe_password_lifetime
 
+            relay = getattr(self, "_federated_relay", None)
             return {
                 **self._generation_health(),
                 "ttl": self.ttl,
                 "daemon_persistent": self.ttl_override == 0,
                 "password_lifetime": describe_password_lifetime(self, kpdb),
                 "cache_warm": self._cache_warm.status(kpdb, group),
+                "federated_relay": (
+                    relay.status() if relay else {"state": "disabled", "channel_attached": False}
+                ),
                 "cached": len(self.cache),
                 "cli": self.cli.status(kpdb or None),
                 "unlocked_vaults": self.cli.unlocked_vaults(),
@@ -1078,19 +1082,31 @@ async def run_server(service: VaultService, tcp_port: int | None = None) -> None
 
 
 async def _serve(service, tcp_port, servers, pipe_servers, connections):
+    from .federated_relay import selected_relay
+
+    relay = service._federated_relay = selected_relay()
     generation = service._generation = ServiceGeneration(service, connections, servers, pipe_servers)
-    await generation.start(tcp_port)
-    loop = asyncio.get_running_loop()
-    warmer = CacheWarmRuntime(service, service._cache_warm, connections)
-    with ThreadPoolExecutor(max_workers=1, thread_name_prefix="vault-expiry") as expiry:
-        try:
-            while not service._shutdown and not service.is_expired:
-                await settle_owned(loop.run_in_executor(expiry, service._check_password_ttl))
-                await generation.tick()
-                warmer.tick()
-                await asyncio.sleep(0.5)
-        finally:
-            await settle_owned(warmer.close())
+    try:
+        await generation.start(tcp_port)
+        loop = asyncio.get_running_loop()
+        warmer = CacheWarmRuntime(service, service._cache_warm, connections)
+        with ThreadPoolExecutor(max_workers=1, thread_name_prefix="vault-expiry") as expiry:
+            try:
+                while not service._shutdown and not service.is_expired:
+                    await settle_owned(loop.run_in_executor(expiry, service._check_password_ttl))
+                    await generation.tick()
+                    warmer.tick()
+                    if relay is not None:
+                        await relay.tick(serving=(
+                            generation.hooks_started and service._runtime_can_work
+                            and not service._shutdown
+                        ))
+                    await asyncio.sleep(0.5)
+            finally:
+                await settle_owned(warmer.close())
+    finally:
+        if relay is not None:
+            await settle_owned(relay.close())
 
 
 def cleanup() -> None:

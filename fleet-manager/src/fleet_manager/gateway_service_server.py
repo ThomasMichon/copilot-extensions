@@ -244,7 +244,10 @@ class ServiceRuntime:
         check(not self.stopping and channel is not None and not channel.closed
               and channel.services is not None and channel.incarnation == offer.connection,
               "controller-service-unavailable", 503)
-        slot = self.authority.revalidate_service(channel.grant)
+        try:
+            slot = self.authority.revalidate_service(channel.grant)
+        except ServicePolicyError:
+            raise TransportError("controller-service-unavailable", 503) from None
         selected = ControllerService(offer.service, offer.prefix)
         check(slot.principal == offer.principal
               and selected in channel.services and type(offer.generation) is str

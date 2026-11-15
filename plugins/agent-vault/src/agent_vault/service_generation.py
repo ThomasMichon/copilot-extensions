@@ -524,6 +524,9 @@ class ServiceGeneration:
         if self.retiring is None:
             return
         self.service._runtime_can_work = False
+        relay = getattr(self.service, "_federated_relay", None)
+        if relay is not None:
+            await settle_owned(relay.pause())
         if self.connections.work:
             return
         expected = selected_generation()

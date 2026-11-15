@@ -295,7 +295,8 @@ from retaining it._
   into the existing proposal's validation without using real credentials,
   changing a live service or bypassing architecture/owner admission.
 
-All runtime acceptance below is **pending**, not evidence of an implementation.
+Full parent runtime acceptance below is **pending**; the separately admitted
+relay source slice and its isolated qualification are recorded in the journal.
 The [validation matrix](validation.md) is the detailed, agent-recommended plan.
 
 - [ ] V1: typed bindings, complete credential lifecycle and protected delivery/use.
@@ -375,6 +376,32 @@ detailed-matrix cases for the inherited #3980/#3981/#5918/#5940/#5959 union.
 Existing headless OR acceptance, V1-V10, qualification levels, owners and
 P0/D1-D6 gates remain unchanged. Documentary review is not implementation,
 credential/native interaction, source retirement or resource transfer.
+
+### 2026-11-15 - First running federated source flow
+
+Implemented the optional channel in the existing Vault service lifetime,
+using the existing account custodian and exact channel-derived caller grants.
+The connector consumes an expiring local conduit observation while retaining
+the canonical Gateway TLS/Host/proof identity. Native configuration and cheap
+status are separate from portable vault settings and credential acquisition.
+
+The isolated source flow exercised actual Vault generation startup, real TLS
+Gateway admission, Controller-service advertisement, authorized synthetic
+credential delivery, denied recipient/capability, conduit withdrawal,
+replacement and shutdown. The composed Gateway packet passed 130 tests,
+including caller/source contracts and revocation. A revoked offer now reports
+the stable unavailable result even before its old channel finishes closing.
+
+The contained Windows generation/request-settlement packet passed 119 tests
+with one platform skip and settled cleanup. The source work also corrected
+fixture client-lifetime and delayed receipt-cleanup problems without weakening
+production process-identity custody. These contained results do not qualify an
+installed optional profile or service survival after production caller-Job loss.
+
+The normal native `base`/`ssh` profiles do not yet select the optional relay
+dependency closure. R2-R4, attended durable transactions, independent installed
+distribution, real provider adoption and complete parent acceptance remain open.
+No live credential, enrollment, installation, tunnel or shared service changed.
 
 <!-- backlog-reconciliation:7556:qualified-sixteen:3979:Journal -->
 

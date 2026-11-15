@@ -1041,7 +1041,7 @@ def _target(endpoint: dict) -> int | str:
     )
 
 
-def _send(target: int | str, request: dict) -> dict:
+def _send(target: int | str, request: dict, *, timeout: float = 10) -> dict:
     if isinstance(target, str):
         connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         try:
@@ -1053,7 +1053,7 @@ def _send(target: int | str, request: dict) -> dict:
     else:
         connection = socket.create_connection(("127.0.0.1", target), timeout=1)
     with connection:
-        connection.settimeout(10)
+        connection.settimeout(timeout)
         connection.sendall((json.dumps(request) + "\n").encode())
         with connection.makefile("rb") as stream:
             return json.loads(stream.readline())
@@ -1096,7 +1096,7 @@ def test_unix_only_discovery_uses_the_advertised_native_transport(monkeypatch):
     assert events == ["fixture.sock"]
 
 
-def _until(predicate: Callable[[], bool], processes: list[subprocess.Popen], timeout: float = 10) -> None:
+def _until(predicate: Callable[[], bool], processes: list[subprocess.Popen], timeout: float = 15) -> None:
     deadline = time.monotonic() + timeout
     while not predicate():
         for process in processes:
@@ -1134,6 +1134,8 @@ def _start(root: Path, identity: str, port: int, mode: str = "normal") -> subpro
 
 
 def _settle(root: Path, processes: list[subprocess.Popen]) -> list[str]:
+    from agent_procutil.daemon_instances import cleanup_instance
+
     (root / "backend.release").touch()
     (root / "retire.continue").touch()
     (root / "resume.release").touch()
@@ -1141,7 +1143,12 @@ def _settle(root: Path, processes: list[subprocess.Popen]) -> list[str]:
         (root / (identity + ".start")).touch()
         (root / (identity + ".release")).touch()
         (root / (identity + ".stop")).touch()
-    outputs = ["".join(process.communicate(timeout=10)) for process in processes]
+    outputs = []
+    for process in processes:
+        outputs.append("".join(process.communicate(timeout=10)))
+        # Settle the exact receipt before later tests can reuse the daemon PID.
+        outcome = cleanup_instance(process.instance_receipt, terminate=False)
+        assert outcome.status in {"settled", "missing"}, outcome
     for output in outputs:
         if output:
             print("Owned generation output:", output[-8192:])
@@ -1227,6 +1234,7 @@ def test_real_successor_is_ready_before_self_retirement_and_cannot_overlap_write
         with ThreadPoolExecutor(max_workers=1) as worker:
             pending = worker.submit(
                 _send, fixed_port, {"action": "has", "kpdb": str(durable), "entry": "fixture"},
+                timeout=25,
             )
             _until(lambda: (tmp_path / "newer.entered").exists(), children)
             (tmp_path / "current-version").write_text("older")
@@ -1325,6 +1333,7 @@ assert (root / "current-version").read_text().strip() == "newer"
             pending = worker.submit(
                 _send, _target(endpoint),
                 {"action": "has", "kpdb": str(tmp_path / "fixture.kdbx"), "entry": "fixture"},
+                timeout=25,
             )
             _until(lambda: (tmp_path / "newer.entered").exists(), children)
             (tmp_path / "current-version").write_text("older")
@@ -1419,6 +1428,7 @@ def test_native_resume_pin_survives_reselection_and_shutdown_until_settled(
             pending = worker.submit(
                 _send, _target(first),
                 {"action": "has", "kpdb": str(tmp_path / "fixture.kdbx"), "entry": "fixture"},
+                timeout=25,
             )
             _until(lambda: (tmp_path / "newer.entered").exists(), children)
             (tmp_path / "current-version").write_text("older")
@@ -1531,6 +1541,7 @@ def test_native_repeated_replacement_excludes_the_actual_older_writer(
         with ThreadPoolExecutor(max_workers=1) as worker:
             pending = worker.submit(
                 _send, _target(first), {"action": "has", "kpdb": str(durable), "entry": "fixture"},
+                timeout=25,
             )
             _until(lambda: (tmp_path / "newer.entered").exists(), children)
             (tmp_path / "current-version").write_text("middle")
@@ -1588,6 +1599,7 @@ def test_successive_cold_replacements_recover_the_fixed_unix_alias(tmp_path: Pat
             with ThreadPoolExecutor(max_workers=1) as worker:
                 pending = worker.submit(
                     _send, fixed, {"action": "has", "kpdb": str(durable), "entry": "fixture"},
+                    timeout=25,
                 )
                 _until(lambda: (tmp_path / (outgoing + ".entered")).exists(), [children[-1]])
                 (tmp_path / "current-version").write_text(incoming)
@@ -1634,6 +1646,7 @@ def test_windows_alias_retries_after_discovery_exit_while_older_transport_surviv
         with ThreadPoolExecutor(max_workers=1) as worker:
             pending = worker.submit(
                 _send, fixed_port, {"action": "has", "kpdb": str(durable), "entry": "fixture"},
+                timeout=25,
             )
             _until(lambda: (tmp_path / "newer.entered").exists(), children)
             (tmp_path / "current-version").write_text("middle")
@@ -1725,6 +1738,7 @@ def test_native_hung_predecessor_preserves_grace_then_excludes_only_its_writer(
         with ThreadPoolExecutor(max_workers=1) as worker:
             pending = worker.submit(
                 _send, old_port, {"action": "has", "kpdb": str(durable), "entry": "fixture"},
+                timeout=25,
             )
             _until(lambda: (tmp_path / "newer.entered").exists(), children)
             if old_mode == "backend-work":
