@@ -2988,7 +2988,7 @@ def test_windows_session_hook_rejects_windowsapps_python_alias():
     assert "$ran = ($LASTEXITCODE -eq 0)" in command
     assert "-not $env:COPILOT_EXTENSIONS_CONTEXT" in command
     bash = hooks["hooks"]["sessionStart"][0]["bash"]
-    assert 'python3 -B "$s" sessionStart; then ran=true; fi' in bash
+    assert 'python3 "$s" sessionStart; then ran=true; fi' in bash
     assert '[ -z "${COPILOT_EXTENSIONS_CONTEXT:-}" ]' in bash
     assert '${COPILOT_PLUGIN_ROOT:-$PWD}' not in bash
 

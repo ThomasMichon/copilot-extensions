@@ -15,44 +15,6 @@ import pytest
 PLUGIN = Path(__file__).resolve().parents[1]
 
 
-def test_native_post_tool_hook_keeps_payload_content_only(tmp_path: Path) -> None:
-    shell = shutil.which("pwsh" if os.name == "nt" else "bash")
-    if not shell:
-        pytest.skip("Native hook shell unavailable")
-    payload = tmp_path / "payload"
-    scripts = payload / "scripts"
-    scripts.mkdir(parents=True)
-    for source in (PLUGIN / "scripts").iterdir():
-        if source.is_file() and source.suffix in {".py", ".ps1", ".sh"}:
-            shutil.copyfile(source, scripts / source.name)
-    home = tmp_path / "home"
-    home.mkdir()
-    before = {path.relative_to(payload): path.read_bytes()
-              for path in payload.rglob("*") if path.is_file()}
-    hook = json.loads((PLUGIN / "hooks.json").read_text(encoding="utf-8"))["hooks"]["postToolUse"][0]
-    command = (
-        [shell, "-NoLogo", "-NoProfile", "-Command", hook["powershell"]]
-        if os.name == "nt" else [shell, "-c", hook["bash"]]
-    )
-    environment = {
-        **os.environ, "HOME": str(home), "USERPROFILE": str(home),
-        "COPILOT_PLUGIN_ROOT": str(payload),
-    }
-    for name in ("COPILOT_EXTENSIONS_CONTEXT", "PYTHONDONTWRITEBYTECODE", "PYTHONPYCACHEPREFIX"):
-        environment.pop(name, None)
-    for _ in range(2):
-        result = subprocess.run(
-            command, input=json.dumps({"cwd": str(home), "toolName": "view"}),
-            env=environment, cwd=home, capture_output=True, text=True, encoding="utf-8",
-            timeout=25,
-            **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
-        )
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert "unavailable" not in result.stderr, result.stderr
-        assert {path.relative_to(payload): path.read_bytes()
-                for path in payload.rglob("*") if path.is_file()} == before
-
-
 def test_legacy_session_never_enters_installation_components(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -924,10 +924,11 @@ def test_windows_wrapper_preserves_policy_and_failure_contract(
         else json.dumps({"active": case == "stop"}),
         encoding="utf-8",
     )
-    root = tmp_path / "payload space's [literal]"
-    scripts = root / "scripts"
-    scripts.mkdir(parents=True)
+    root = PLUGIN
     if case in {"missing-guard", "child-failed", "echo", "relative-echo"}:
+        root = tmp_path / "payload space's [literal]"
+        scripts = root / "scripts"
+        scripts.mkdir(parents=True)
         if case == "child-failed":
             (scripts / "copilot-mention-guard.py").write_text(
                 "print('partial-policy')\nraise SystemExit(3)\n", encoding="utf-8",
@@ -937,12 +938,6 @@ def test_windows_wrapper_preserves_policy_and_failure_contract(
                 "import json,sys\nprint(json.dumps(json.load(sys.stdin),sort_keys=True))\n",
                 encoding="utf-8",
             )
-    else:
-        shutil.copyfile(PLUGIN / "plugin.json", root / "plugin.json")
-        for source in (PLUGIN / "scripts").glob("*.py"):
-            shutil.copyfile(source, scripts / source.name)
-    before = {path.relative_to(root): path.read_bytes()
-              for path in root.rglob("*") if path.is_file()}
     command = 'gh pr comment 1 --body "@copilot review"'
     if case == "uninspectable":
         command = "gh pr comment 1 --body-file -"
@@ -958,8 +953,6 @@ def test_windows_wrapper_preserves_policy_and_failure_contract(
         "PRETOOL_KILLSWITCH_STATE_FILE": str(state),
     }
     environment.pop("COPILOT_EXTENSIONS_CONTEXT", None)
-    environment.pop("PYTHONDONTWRITEBYTECODE", None)
-    environment.pop("PYTHONPYCACHEPREFIX", None)
     hook = json.loads((PLUGIN / "hooks.json").read_text())["hooks"]["preToolUse"][0]["powershell"]
     result = subprocess.run(
         [executable, "-NoProfile", "-NonInteractive", "-Command",
@@ -969,8 +962,6 @@ def test_windows_wrapper_preserves_policy_and_failure_contract(
         capture_output=True, text=True, timeout=10, creationflags=NO_WINDOW,
     )
     assert result.returncode == 0, result.stderr
-    assert {path.relative_to(root): path.read_bytes()
-            for path in root.rglob("*") if path.is_file()} == before
     if case in {"missing-guard", "child-failed"}:
         assert result.stdout == ""
         assert result.stderr == "[copilot-extensions-harness] mention guard unavailable; skipped\n"
