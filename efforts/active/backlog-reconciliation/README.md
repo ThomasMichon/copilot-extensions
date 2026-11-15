@@ -3899,6 +3899,36 @@ The diagnostic suggestion, literal alternatives, current drivers and every
 operation's prerequisites remain. #5559/#5708 stay current keepers; only
 #5664 advances to separate reviewed tracking adjudication, not technical
 completion, claim release or a decision on #4127.
+The [reviewed Phase 1 gate and state-tracking follow-through](journal/2026/11.15-title-bound-ready-frontier.md#reviewed-phase-1-gate-and-separate-state-tracking-retirement)
+records #12730's actual merge and the separately audited `NOT_PLANNED`
+retirement of #5664. Phase 1 backfill synchronization still precedes Phase 2
+slot trust; every technical and custody gate remains in its actual scope.
+The complete 14:26:06 UTC census verifies 840 whole open, 111 above fixed 729.
+Nine next original studies continue while provenance and whole-chain keepers
+remain metadata-only; this is not parent effort completion.
+The [next raw-source admission](journal/2026/11.15-title-bound-ready-frontier.md#next-raw-source-admission-with-a-precise-protected-unit)
+retains eight complete maps and #5851's precise source-unit gap. Current accepted
+decisions supersede historical design conditions within their slices;
+parent/child receipt conditions and custody remain scoped to their operations.
+Requirement admission is not technical
+completion, receiving acceptance or a new source disposition.
+The [portable receiving-boundary study](journal/2026/11.15-portable-receiving-boundaries.md)
+qualifies eight receiving documents for five admitted contracts. #5785's
+current installer-source provenance remains unresolved; #5852 and #5877
+retain their distinct actionable OPEN contracts. Their finite source,
+integration, behavior-choice and provider-lifecycle obligations are not
+replaced by adjacent work or stronger invented platform gates.
+The [completed account, documentation and allocation comparison](journal/2026/11.15-portable-receiving-boundaries.md#existing-receiving-contracts-and-scoped-allocation-gates)
+finds no material receiving-text gap for #5791/#5799/#5839. All three remain
+canonical keepers. In particular, durable pre-effect allocation responsibility,
+asynchronous linkage after durable receiving creation, and parent-conclusion
+gates remain distinct; no caller-ACK-before-child-startup rule is added.
+The [standalone and routing continuation](journal/2026/11.15-portable-receiving-boundaries.md#standalone-and-routing-continuation-not-a-second-plan)
+likewise finds complete planned #5768/#5789 receiving and preserves their
+implementation umbrellas. The routing journal now distinguishes verified
+historical merge identities from reported feature/proof details and remaining
+integration, provider, lifecycle and production gates. No phase or source
+token is completed by that synchronization.
 
 ### Phase 2b - Vision-linked stabilization roadmap
 
