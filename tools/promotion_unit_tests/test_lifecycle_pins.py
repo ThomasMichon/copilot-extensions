@@ -88,7 +88,7 @@ def test_pinned_inventory_is_not_redecoded_but_new_admission_is_still_observed(
         reads.append(root)
         return [record]
 
-    process = SimpleNamespace(_handle=123, close=lambda: None)
+    process = SimpleNamespace(_handle=123, close=lambda: None, poll=lambda: None)
     monkeypatch.setattr(daemon_instances, "inspect_instances", inspect)
     monkeypatch.setattr(identity, "_windows_handle", lambda _pid: process)
     monkeypatch.setattr(identity, "_windows_birth", lambda _handle: "expected")
@@ -101,5 +101,64 @@ def test_pinned_inventory_is_not_redecoded_but_new_admission_is_still_observed(
         (tmp_path / ("b" * 32 + ".instance")).touch()
         pins.observe()
         assert reads == [tmp_path, tmp_path]
+    finally:
+        pins.close()
+
+
+@pytest.mark.parametrize(("present", "returncode"), [(False, 0), (True, 0), (False, None)])
+def test_pin_release_needs_both_receipt_settlement_and_original_exit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, present: bool, returncode: int | None,
+) -> None:
+    from agent_procutil import _daemon_instance_identity as identity, daemon_instances
+
+    record = {"instance_id": "a" * 32, "run_id": "owned", "pid": "99", "birth": "expected"}
+    path = tmp_path / (record["instance_id"] + ".instance")
+    path.touch()
+    closed: list[bool] = []
+    process = SimpleNamespace(_handle=123, close=lambda: closed.append(True), poll=lambda: returncode)
+    monkeypatch.setattr(daemon_instances, "inspect_instances", lambda _root: [record] if path.exists() else [])
+    monkeypatch.setattr(identity, "_windows_handle", lambda _pid: process)
+    monkeypatch.setattr(identity, "_windows_birth", lambda _handle: "expected")
+    pins = lifecycle._NativeInstancePins(tmp_path, 2)
+    pins.run_id = "owned"
+    try:
+        pins.observe()
+        if not present:
+            path.unlink()
+        pins.observe()
+        released = not present and returncode is not None
+        assert bool(closed) is released
+        assert bool(pins.processes) is not released
+    finally:
+        pins.close()
+    assert closed == [True]
+
+
+def test_settled_sequential_instances_do_not_exhaust_the_concurrent_pin_budget(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_procutil import _daemon_instance_identity as identity, daemon_instances
+
+    current: list[dict[str, str]] = []
+    closed: list[int] = []
+    monkeypatch.setattr(daemon_instances, "inspect_instances", lambda _root: current)
+    monkeypatch.setattr(identity, "_windows_handle", lambda pid: SimpleNamespace(
+        _handle=pid, close=lambda: closed.append(pid), poll=lambda: 0,
+    ))
+    monkeypatch.setattr(identity, "_windows_birth", lambda _handle: "expected")
+    pins = lifecycle._NativeInstancePins(tmp_path, 2)
+    pins.run_id = "owned"
+    try:
+        for number in range(3):
+            key = f"{number:032x}"
+            path = tmp_path / (key + ".instance")
+            path.touch()
+            current[:] = [{"instance_id": key, "run_id": "owned", "pid": str(number + 1), "birth": "expected"}]
+            pins.observe()
+            path.unlink()
+        current.clear()
+        pins.observe()
+        assert not pins.processes
+        assert closed == [1, 2, 3]
     finally:
         pins.close()

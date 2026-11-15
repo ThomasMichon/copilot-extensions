@@ -22,6 +22,10 @@ birth-matched process handles through strict daemon cleanup, within the original
 process-count budget. This prevents a
 released fixture PID from being reused before cleanup; it neither signals a
 process nor relaxes unknown or reused-identity holds for unpinned records.
+A settled receipt's exited handle is released rather than counted against
+later sequential instances; present receipts or unconfirmed exits keep their
+pins. The existing inventory bound remains independent of the concurrent
+process-handle budget.
 Default-service acceptance uses the explicit leased native profile too:
 an ordinary contained install cannot prove that its service outlives the
 constructor's cleanup Job. Service checks read the selected generation's

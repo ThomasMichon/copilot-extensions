@@ -16,6 +16,8 @@ class _PinnedProcess(Protocol):
 
     def close(self) -> None: ...
 
+    def poll(self) -> int | None: ...
+
 
 class _CleanupOutcome(Protocol):
     status: str
@@ -43,13 +45,22 @@ class _NativeInstancePins:
         from agent_procutil._daemon_instance_identity import _windows_birth, _windows_handle
         from agent_procutil.daemon_instances import inspect_instances
 
-        unpinned = False
+        present: set[str] = set()
         for count, entry in enumerate(self.root.iterdir(), 1):
             if count > self.limit * 4:
                 raise RuntimeError("Native instance inventory exceeded its existing process budget.")
-            if entry.name.endswith(".instance") and entry.stem not in self.processes:
-                unpinned = True
-        if self.processes and not unpinned:
+            if entry.name.endswith(".instance"):
+                present.add(entry.stem)
+        for key, retained_process in tuple(self.processes.items()):
+            if key not in present:
+                try:
+                    returncode = retained_process.poll()
+                except OSError:
+                    continue
+                if type(returncode) is int:
+                    retained_process.close()
+                    del self.processes[key]
+        if self.processes and present <= self.processes.keys():
             return
         for record in inspect_instances(self.root):
             key = record["instance_id"]

@@ -195,10 +195,15 @@ polling alone could miss, plus a terminal-workspace 503. The command fixture
 now uses the existing direct-interpreter owner, retains the actual created
 process handle, and settles only its same-run birth-matched receipt with
 termination disabled before closing that handle. The affected terminal case
-passes with clean teardown; 16 focused runner/real-handle controls and the
+passes with clean teardown; 20 focused runner/real-handle controls and the
 33-file Linux/Windows strict ratchet pass. The retained failed fixture is not
 reaped or reinterpreted. Fresh hosted qualification remains pending under
 #12717, with no automatic reuse of the consumed two-run approval.
+The next review's sequential-budget counterexample fails against the published
+baseline. Exited pins whose receipts are settled now release their budget;
+unsettled receipts and unconfirmed process exits remain pinned. Dedicated
+controls cover both refusal branches and sequential progress without raising
+the process or inventory limits.
 
 ### 2026-11-15 - Preserve deferred departures across backpressure and outage
 
