@@ -53,7 +53,8 @@
         "fleet-manager"
       ],
       "exclude": [],
-      "level": "pending"
+      "level": "pending",
+      "requirements": "tools/typecheck-service-ssh-requirements.txt"
     },
     {
       "name": "lib-agent-procutil",
@@ -508,7 +509,8 @@
         "plugins/agent-vault"
       ],
       "exclude": [],
-      "level": "pending"
+      "level": "pending",
+      "requirements": "tools/typecheck-service-ssh-requirements.txt"
     },
     {
       "name": "agent-worktrees",
@@ -669,7 +671,8 @@
         "tools/promotion_unit_tests/test_typecheck_catalog.py",
         "tools/promotion_unit_tests/test_typecheck_new_code.py"
       ],
-      "level": "pending"
+      "level": "pending",
+      "requirements": "tools/typecheck-yaml-requirements.txt"
     },
     {
       "name": "worktree-manager",
