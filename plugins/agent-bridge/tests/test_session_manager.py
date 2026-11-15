@@ -5474,7 +5474,7 @@ class TestCodespaceExclusiveClaim:
         if caller_owner_ref is not None:
             machine, project, worktree = caller_owner_ref.partition("#")[0].split("/")
             monkeypatch.setattr(
-                "agent_bridge.acquisition_authority.worktree_command",
+                "agent_bridge.acquisition_authority._run_worktree_command",
                 AsyncMock(return_value={"worktrees": [{
                     "id": worktree, "repo": project, "machine": machine,
                     "path": caller_worktree or str(tmp_db.db_path.parent), "status": "active",

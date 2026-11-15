@@ -8,14 +8,42 @@
 - **Vision:** Verification improvement below runtime-architecture altitude; preserves `visions/test-portfolio/README.md`'s cheapest faithful tier, bounded feedback and containment.
 - **Umbrella issue:** #9807
 - **Coverage:** [Portfolio tracker and merged lockdown records](coverage.md)
-- **Current slice:** Continue Payload Invocation's complete original test/program corpus, source/frozen strict qualification, native/minimum-runtime gates and reviewed admission under #10371. The bounded declared-consumer roster and native fixture corrections merged in #11820 after the reviewed independent-runtime direction in #11796; neither activates a pending project. Promotion-owned copy implementation and complete acceptance merged in #11265; preparation and copied-source correspondence are not admission. Installer Engine (#10931) and Efforts (#10955) retain their separate owners and unmet gates. The original Windows membership report (#11468) is resolved by verified passing original cases. Preserve existing deadlines, source custody, resource limits and individual holds. Agent Roles is strictly admitted by #11485; Payload Invocation preparation merged in #11165. Versioned Runtime (#10331), full-composed-consumer qualification (#10362) and the all-Python campaign remain open. No Main release or installed rollout is inferred from a Dev merge.
+- **Current slice:** Establish strict enforcement for all new Python before continuing the existing-code admission cohorts. The selector prerequisite merged in #12541; its checker code is already strictly enforced, but a repository-wide new-code gate is not yet proven. Retain Payload Invocation's complete original test/program corpus, source/frozen, native/minimum-runtime and reviewed-admission clauses here; #10371 is a retired tracking token, not technical completion. The bounded declared-consumer roster and native fixture corrections merged in #11820 after the reviewed independent-runtime direction in #11796; neither activates a pending project. Promotion-owned copy implementation and complete acceptance merged in #11265; preparation and copied-source correspondence are not admission. Installer Engine (#10931) and Efforts (#10955) retain their separate owners and unmet gates. The original Windows membership report (#11468) is resolved by verified passing original cases. Preserve existing deadlines, source custody, resource limits and individual holds. Agent Roles is strictly admitted by #11485; Payload Invocation preparation merged in #11165. Versioned Runtime (#10331), full-composed-consumer qualification (#10362) and the all-Python campaign remain open. No Main release or installed rollout is inferred from a Dev merge.
 - **Checker-only follow-up:** #10638 is delivered by merged #10866; #10938 delivers emitted-program visibility/binding completeness. Both are prerequisites, not Harness, Versioned Runtime or Payload Invocation admission. Preserve full-composed-consumer qualification under #10362 independently while progressing the other assigned slices.
 - **Latest fixture prerequisite:** The post-acquisition policy-recheck wrapper correction merged in #12133 after the original regression, Ruff, both declared Python 3.11 strict analysis targets, exact-head approval and required source CI passed. Return to the remaining original Invocation test/program corpus; no pending-project admission, coverage advance or existing native/minimum-runtime gate is closed by this fixture-only fix.
 - **Latest scoped unit qualification:** All 32 original private-file management cases now have ordinary three-phase passes, with original function/helper definitions and module markers preserved. Focused multi-case cohorts avoid repeating startup for every case. This closes that fixture family only; the original full corpus, executed/emitted programs, native/minimum-runtime and strict-admission gates remain open.
 - **Independent test-source admission:** #12324 merged strict enforcement of the complete 27-file `lib-payload-invocation-tests` project on its declared Python 3.11 Linux/win32 analysis targets, with no exclusions, after exact-head approval and required source CI. The bounded owner journal records both normal positive checks and real negative controls. This completes static test-source admission only; the separate production/catalog project remains pending, and the original full-corpus, emitted-program, native/minimum-runtime, source/frozen/candidate and final #10371 gates remain open.
-- **Current production/program boundary:** The merged checker selects four physical production files, four catalog witnesses and one catalog-binding bootstrap view. The unpublished two-selector follow-up exposes eleven targets. Its explicitly approved optional-prefix annotation preserves fallback output; both checker targets, all four declared production analysis cells and all twenty-four current source/frozen frontdoor cases pass. The original thirty-second timeout and diagnostic-only profile remain recorded separately from the approved residual qualification. Production remains pending; this is not complete emitted-program, native/minimum-runtime or candidate qualification.
+- **Current production/program boundary:** The merged checker selects four physical production files, four catalog witnesses, one catalog-binding bootstrap view and two shim selector views: eleven targets. #12541 preserves the optional-prefix fallback and rejects embedded shell terminators. Both checker targets, all four declared production analysis cells and all twenty-four current source/frozen frontdoor cases pass; nineteen pure controls are selected in required CI. The original thirty-second timeout and diagnostic-only profile remain separate from the approved residual qualification. Production remains pending; this is not complete emitted-program, native/minimum-runtime or candidate qualification.
 - **Bootstrap prerequisite qualification:** #12498 delivers the checker-only bootstrap view after all four declared strict production probes, twenty real source/frozen catalog/bootstrap cases and four original copied-fixture version-matrix cases pass. Its complete startup dependency closure, exact-head approval and required source CI are verified. This prerequisite does not admit production or complete the parent campaign.
 - **Sub-issues:** #9831 (P1 checker foundation, complete); #9853 (P2 required source CI, complete); #9862 (P3 exact-candidate qualification, complete); #9916 (P4a canonical Installation Context source view, complete); #9924 (L1 Config Migrate strict admission, complete); #9930 (L1 Dropin Registry strict admission, complete); #9933 (L1 Endpoint Rendezvous strict admission, complete); #9941 (L1 initial leaf-library test/helper completion, complete); #9951 (L1 Lazy CLI Dispatch strict admission, complete); #9964 (L1 Bootstrap Killswitch strict admission, complete); #9967 (L1 Peer Launch strict admission, complete); #9971 (P2a Installation Context native typing preparation, complete); #9975 (P2b validation-decorator signature preservation, complete); #9980 (P2c production result and flow contracts, complete); #9983 (P2d native platform API contracts, complete); #9986 (P2e cleanup and worker contracts, complete); #9993 (P2f shared receipt-fixture typing, complete); #9996 (P2g slot-release test contracts); #10400 (shared real-import-root/additional-version checker prerequisite, merged #10553); #10331, #10362 and #10371 (independent consumer admissions, open). Create/reuse later scoped issues as selected. #9177 remains separately owned.
+
+## Goal
+
+Operator outcome direction, **2026-11-14 00:27 UTC**, verbatim:
+
+> All Python code in copilot-extensions passing string type-checking, with strict type-checkng enforced first for all new code, and then all existing code.
+
+Acceptance evidence must prove both stages, not merely a completed activity:
+
+- Required source CI rejects new first-party Python that lacks strict coverage,
+  including additions inside pending owners, with real negative controls and
+  an explicit treatment of new code in existing files and generated programs.
+- The complete physical and executed/emitted/copied-source inventory has no
+  pending, basic, unclassified or otherwise unchecked first-party scope, and
+  every declared interpreter/platform target passes strict MyPy.
+- The same contracts are enforced by required source CI and the exact release
+  candidate gate, with tested type-regression rejection and honest typed
+  dynamic/third-party boundaries.
+
+**Finalization criterion:** mark this effort Done only when that evidence proves
+the whole goal, every Plan and Validation Plan item is resolved, all owned PRs
+are actually merged, and resource obligations are settled or accepted by their
+named owners. A partial PR, diagnostic, transfer or prepared implementation does
+not make unchecked code compliant. Only then recommend managed finalization.
+
+The selector prerequisite aligns with this goal by strictly checking its new
+checker code and exposing previously unchecked programs. The next outcome is
+the repository-wide strict-new-code gate, before further legacy admission.
 
 ## Guiding Intent
 
@@ -125,6 +153,30 @@ Confirmed operator responses:
   helper limits still thirty seconds. Existing failed clocks, retained
   resources, rollout holds and unrelated qualification gates are unchanged.
 - The confirmed terminal policy is every first-party file checked strictly, with typed dynamic boundaries and narrow reviewed third-party exceptions. It is not a literal ban on all `Any` expressions.
+- `new_code_policy=whole-file-ratchet`: added or modified Python files must
+  pass strict MyPy in full, including existing errors in a touched legacy file.
+  Known fragments are checked as their complete composed program. Do not
+  grandfather diagnostics or filter failures to changed lines. Unchanged
+  pending projects do not gain admission from a passing touched-file check.
+- `new_code_validation_300=true`: one fresh 300-second aggregate permits
+  exactly twenty new/directly affected checker cases and both changed checker
+  analysis targets, with 210 seconds for work and ninety for cleanup.
+  Cohorts contain at most four cases; tests/helpers retain thirty-second
+  limits and analyzer/outer limits remain 120 seconds. Use the existing owned
+  checker SDK unchanged. No earlier passing-case replay, SDK rebuild or
+  borrowing, protected native IPC, deployment or old-clock renewal is authorized.
+- `new_code_two_analyses_180=true`: after all twenty cases pass and an
+  ownership-overlap preflight is corrected, a separate residual-only
+  180-second aggregate permits just the two unfinished strict checker targets,
+  with ninety seconds for work and ninety for cleanup. Preserve the original
+  preflight failure, all passing cases, the existing SDK and other limits.
+- `new_code_review_four_cases_600=true`: one fresh 600-second batch, with
+  510 seconds for work and ninety for cleanup, permits only the affected
+  copied source/frozen version-matrix case, one source and one frozen catalog
+  frontdoor, and the real-Git merge-comparison regression. Run one case per
+  120-second cohort with a ninety-second case limit; helpers retain thirty
+  seconds and analyzers 120. Preserve the existing SDK, earlier results and
+  all resource, protected-IPC and deployment limits.
 - The complete Invocation test-source project may be admitted independently
   through normal review and required CI, with fresh checks of both declared
   targets, actual negative controls and directly relevant behavior evidence.
@@ -242,6 +294,19 @@ rewrite.
 - [x] Prove live candidate enforcement and regression rejection under the adopted Main controller.
 - [x] Document and validate local `--prepare`, per-project, `--enforced`, `--changed`, `--all` and inventory commands. Default checking never implicitly installs tooling.
 
+### Phase 1a - Strict new-code gate before further legacy admission
+
+- [ ] Land the bounded physical-file ratchet and existing composed-input
+  selectors, without treating that prerequisite as complete emitted/candidate
+  coverage or pending-project admission.
+- [ ] Define and review complete new-code coverage: new files, new code in
+  existing pending files, tests/tools and executed or generated Python.
+- [ ] Enforce that coverage strictly in required source CI without admitting
+  untouched legacy debt, weakening diagnostics or hiding first-party code.
+- [ ] Prove actual rejection of newly introduced type errors inside pending
+  owners, plus local/CI and exact-candidate parity, before resuming the
+  remaining existing-code admission cohorts.
+
 ### Phase 2 - Source and platform qualification
 
 - [x] Land the bounded canonical Installation Context composition/source-map adapter (#9916); keep copies independently pending.
@@ -257,9 +322,9 @@ rewrite.
   source/frozen controls (#12498), preserving canonical-first source custody,
   actual interpreter/helper forwarding, the Python 3.10 guard-only versus
   Python 3.11 full-body distinction and pending production policy.
-- [ ] Deliver the two actual shim cache-selector views with real transport,
+- [x] Deliver the two actual shim cache-selector views with real transport,
   helper/import custody, mapped source/frozen negatives and unchanged fallback
-  behavior through normal review and required CI; keep production pending.
+  behavior through normal review and required CI (#12541); keep production pending.
 - [ ] Qualify generated templates and release-materialized copies against the actually checked canonical source, including negative drift controls.
 - [x] Make Dev-to-Main composition own the discussed Installer Engine and
   Invocation/helper/toolkit copies, rather than requiring contributor
@@ -389,6 +454,9 @@ plugin admission or the already-qualified Index service.
 
 ## Validation Plan
 
+- [ ] The strict-new-code gate rejects actual regressions under pending owners
+  and in the reviewed new-code forms; required source CI and the exact-candidate
+  gate cannot silently omit new Python while legacy debt remains pending.
 - [ ] Unit controls cover manifest validity, complete file classification, additions/renames, safe selection, monotonic activation and dependency impact.
 - [ ] Reconcile tracker rows and file totals with the authoritative manifest
   and inventory; local proposals and canonical-library locks must not imply
@@ -403,6 +471,10 @@ plugin admission or the already-qualified Index service.
   74 projects and 9,310 files: 43 strict projects, 478 strict files,
   31 pending, zero basic and zero unclassified. The bootstrap view adds one
   checker-owned strict file, not a production-project admission.
+  The merged `16f10b7f` snapshot reconciles all 74 projects and 9,329 files:
+  43 strict projects, 478 strict files and 31 pending projects owning 8,851
+  files, with no basic or unclassified scopes. All nineteen further file
+  additions are pending; selector visibility adds no admission credit.
 - [x] Actual MyPy subprocess controls prove an incompatible argument/return fails basic mode and missing annotations/bare generics fail strict mode.
 - [ ] Local and CI use identical pinned checker, dependencies, project config and interpreter/platform targets; unknown source/setup errors fail visibly.
 - [x] Changed-scope checks include working-tree edits and affected activated consumers; changes to checker/config/workflows cannot skip enforcement.
@@ -464,10 +536,11 @@ plugin admission or the already-qualified Index service.
   copied-fixture version-matrix cases pass, followed by exact-head approval
   and required source CI (#12498). This does not qualify the two shim cache
   selectors or complete production/native/minimum-runtime/candidate gates.
-- [ ] The two shim selector views retain actual argument bytes, source maps,
+- [x] The two shim selector views retain actual argument bytes, source maps,
   launch/helper contracts and candidate-local source custody; nineteen pure
   controls, two fallback round trips, twenty-four real frontdoors and six
-  declared strict analyses pass, followed by exact-head review and required CI.
+  declared strict analyses pass, followed by exact-head review and required CI
+  (#12541, merged `16f10b7f`).
 - [x] Fresh checker preparation and a credential-free local subprocess check exercise the real developer command without executing product code or collecting tests.
 - [x] Required source gate actually rejects a type regression on activated code.
 - [x] Required exact-candidate release gate rejects a type regression on activated code.
@@ -3180,3 +3253,46 @@ composition prerequisites, and review/validation rules.
   explicit resolution of every Plan/Validation item before Done. #9807 and
   this effort remain **Active**; no archive, finalization, release or rollout
   is authorized by this reconciliation.
+
+### 2026-11-14 - Whole-file new-code ratchet prepared
+
+- The selected contract requires every added or modified Python file to pass
+  strict MyPy in full, including old errors in a touched legacy file.
+  `--new-code` includes staged, unstaged and untracked changes, expands existing
+  composed inputs, rejects missing physical owners and requires Invocation's
+  full-body analysis target. Module-wide directives cannot hide the file.
+  Untouched pending projects retain their admission status.
+- The focused initial twenty-case packet passes all sixty phases with no
+  skips. Real Git covers developer edits, and real MyPy rejects missing
+  annotations and an old error outside an edited line. The first analysis
+  attempt stops at an ownership overlap; the checker manifest now excludes
+  its two new files from the fallback tooling owner.
+- The corrected nine-file checker passes strict Linux analysis. Windows
+  remains unfinished after the residual work boundary reduces its outer
+  allowance to thirty-three seconds. Preserve that timeout and the verified
+  SDK, process/admission and test-sandbox cleanup, rather than count it as a
+  pass or replay the completed cases. Required exact-head CI must check the
+  final source on both declared analysis targets and execute the final unit
+  packet; five additional composed-boundary controls join that packet.
+- Validation tiers include focused units and synthetic real-Git/MyPy consumer
+  checks. No installer or machine-provisioning behavior changes, so no
+  fresh-machine or external product-venue test applies. Required hosted CI and
+  review remain publication gates. Arbitrary emitted programs, release-candidate
+  ratchet parity and the whole strict-portfolio goal remain open before further
+  legacy admission. This draft adds no merged strict coverage.
+
+### 2026-11-15 - Copied checker startup and PR comparison correction
+
+- The first exact-head CI passes all 5,010 admitted units and both strict
+  checker targets. Review identifies two independent integration defects:
+  isolated fixtures omit the new checker import, and PR comparison uses the
+  unmerged feature tip rather than the checked-out merge.
+- Both copied fixture closures include the new module. The CI step now pins
+  the checked-out merge SHA; a real diverged-branch Git regression proves
+  base-only Python is excluded while feature changes remain selected.
+  The affected source/frozen version matrix, source and frozen catalog
+  frontdoors, and Git regression pass all twelve phases in 212.859 seconds,
+  without replaying the completed packet. SDK/source integrity and exact
+  process/admission/sandbox cleanup remain verified. Fresh final-head CI and
+  a passing subsequent review still gate this open PR; Phase 1a and the
+  overall campaign remain Active.

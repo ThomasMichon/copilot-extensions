@@ -2278,8 +2278,8 @@
       "sha256": "f8efdcf610048e5ce7bcf224c74ec8a4149697d4358ef29d753c81d3764f27fd"
     },
     "plugins/agent-bridge/docs/retained-acquisition-writer.md": {
-      "blob": "c83ccb50e22d9cfa57a50f5e7192c52a9b4a8c6d",
-      "sha256": "e7de21e88fc66765401a24dbdca54d849b7e468ae59c8dce2fc26b4d0285ef57"
+      "blob": "1d407232d30990382eee1877e598b2fa3419f371",
+      "sha256": "c92f1a2d1c3f00365a1588efd6ad311623754524e98080a20c369ebd4aec7305"
     },
     "plugins/agent-bridge/docs/session-observations.md": {
       "blob": "d439eb67101607e58182ff6171f14dcd82ae57fc",
@@ -2558,8 +2558,8 @@
       "sha256": "95527cdf37dfec1157665f4b7e066fdcd15ecafeadfe1e76f439ca0119828185"
     },
     "plugins/agent-bridge/src/agent_bridge/acquisition_authority.py": {
-      "blob": "332cdccbef2a6cffe7e417c19874b5326927e78c",
-      "sha256": "bdc58c25a5e82d4eb91ba22b4e6e4367af1895a3d3f0d0ecaa7eb13d01cae626"
+      "blob": "6ff881f022252058268535f4933006f29cfcf7f2",
+      "sha256": "e7d98ac1ac628a5ea6b2d114bbf97f847b87fdd71c80543d2f188693490211d7"
     },
     "plugins/agent-bridge/src/agent_bridge/acquisition_cli.py": {
       "blob": "cf28779e24607a0911b23ae8fe8ecd6471940b34",
@@ -4042,8 +4042,8 @@
       "sha256": "556fa22da36b45a92edaf8c4dc497b3a599be383eb911355bc55fadaef1f9be6"
     },
     "plugins/agent-bridge/src/agent_bridge/venue_plugins.py": {
-      "blob": "d5129545d74c5e0e9db7b81db8b6e82928b7ee0d",
-      "sha256": "563f8f92838d8c5e8d42130751ab4e11a0f518aad91dc467c53c28a31659abc2"
+      "blob": "009f0eea9acd3c8d106c22b05c02d5d87d6c855c",
+      "sha256": "660e703f7a355448f85c3072dc5bff1acb0e5d5f30c6cf1b945472ecc608c9e6"
     },
     "plugins/agent-bridge/src/agent_bridge/watchdog.py": {
       "blob": "75dd4fe237a38e50163706783cb2201d7ace6bbe",
@@ -9622,8 +9622,8 @@
       "sha256": "471c670a77d933f4e4cc4de0b4aafb1193c7be5ca1b8fdc3991a5e70a6b6dbdd"
     },
     "tools/test_standalone_python_artifacts.py": {
-      "blob": "02878dc6919a6d20101ccec5be1d816047702536",
-      "sha256": "fc210e1d8e8243e1be60c4ac9c229664b8cc8ae81148cbd2489e3347d6daf2e3"
+      "blob": "ba3f348f55e12f90574b5b12a3aa1d977b741928",
+      "sha256": "bd761e6883684fb9e87c48b3850f8a5958ebdde48f18d167e20a49a255fd9ab0"
     },
     "tools/test_standalone_qualification.py": {
       "blob": "6a52e8731f00304bcaf0f4d4ac2597eed4f8a1f7",
@@ -9826,7 +9826,7 @@
       "sha256": "a9925c3f74fe1e6a3adf3450d58af86260ccfa52eb63ccd88b98316c02409bf9"
     }
   },
-  "execution_closure_sha256": "ded63314fc949f0ca0ef7f90d8dc671340d7bf812b73570cb6d52dc873c5311f",
+  "execution_closure_sha256": "ffdc3fdda07fbb7ebb3912b1a4e992618650823b4243f4acdf351c5a917f9bd3",
   "runtime_binding_policy": "every-owned-interpreter-source-and-entrypoint-v1",
   "runtime_roles": [
     "observer"
@@ -10063,7 +10063,7 @@
   },
   "scope": "model-free native-send and known-session observation ASGI/journal evidence; not SDK/native qualification; membership transcripts use a virtual reader clock; separate deadline-expiry and actual SQLite VM-cutoff probes; not wall-clock read qualification; portable launch joins actual archive/policy readers, ASGI/SQLite and driver HTTP with controlled SDK, native mux, provider process, SSH, Owner, claims, forwards and POSIX-to-private-scratch namespace fixtures; discovery consumes controlled source stdout with live reporter rename, withdrawal and malformed-envelope retention controls; native SDK receiving joins real Node/API/SQLite with controlled SDK events, without installation or process admission; not native Copilot, mux, remote authentication or installed qualification",
   "captured_from": {
-    "commit": "10ec138ab5e226257b33653182eec0d4dd9af10f",
+    "commit": "68ada2aaa9cefce453af4255f12d9bc170164b0f",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 52,
     "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",

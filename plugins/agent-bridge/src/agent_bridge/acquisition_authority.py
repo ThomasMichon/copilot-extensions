@@ -47,6 +47,22 @@ async def worktree_command(
 
     require_scope(args, project=project)
     args = session_write_args(args)
+    return await _run_worktree_command(
+        args, project, before_spawn=before_spawn, timeout=timeout, owner_prefix=owner_prefix,
+    )
+
+
+async def read_controller_inventory(worktree_id: str, project: str) -> dict[str, Any]:
+    """Observe a controller without granting effects outside the retained target."""
+    return await _run_worktree_command(
+        ["list", "--json", "--cache-only", "--worktree-id", worktree_id], project,
+    )
+
+
+async def _run_worktree_command(
+    args: list[str], project: str | None, *, before_spawn: Callable[[], None] | None = None,
+    timeout: float = 120, owner_prefix: tuple[str, ...] | None = None,
+) -> dict[str, Any]:
     try:
         prefix = _agent_worktrees_launch_prefix() if owner_prefix is None else owner_prefix
     except ContextRefused as exc:

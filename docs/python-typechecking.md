@@ -33,6 +33,8 @@ From the source repository root, with Python and UV available:
 python tools/typecheck.py --prepare
 python tools/typecheck.py --enforced
 python tools/typecheck.py --changed --base origin/dev
+python tools/typecheck.py --new-code --base origin/dev --prepare
+python tools/typecheck.py --new-code --base origin/dev
 python tools/typecheck.py lib-worktree-identity
 python tools/typecheck.py lib-bootstrap-killswitch
 python tools/typecheck.py lib-config-migrate --prepare
@@ -66,6 +68,22 @@ python tools/typecheck.py agent-roles
 python tools/typecheck.py --inventory
 python tools/typecheck.py --inventory --json
 ```
+
+`--new-code` is a whole-file strict ratchet, including files under pending
+owners. Every selected file must pass strict checking; existing diagnostics are
+not grandfathered or filtered to changed lines. Staged, unstaged and untracked
+files are included, even when `--head` pins the comparison. Deleted files are
+not checked. PR CI compares its base with the checked-out merge commit, not
+the unmerged feature tip, so unrelated base-only files are not treated as
+developer drift. Known Installation Context, Harness and Payload Invocation
+compositions expand to their existing complete checker programs and declared
+analysis targets; changed shell/template inputs cannot omit those views.
+Missing physical owners refuse selection, and Invocation requires a full-body
+Python 3.11-or-later analysis target rather than only its Python 3.10 exit guard.
+Module-wide checker directives are refused. A successful ratchet qualifies
+these files only, without admitting their unchanged project or certifying
+unmodeled emitted programs. `--enforced` remains the independent admitted-cohort
+gate; exact-candidate enforcement of the ratchet is not yet activated.
 
 `--prepare` explicitly installs the checked-in hash-locked checker dependencies
 using the existing seven-day seasoning policy and environment-scoped admission.

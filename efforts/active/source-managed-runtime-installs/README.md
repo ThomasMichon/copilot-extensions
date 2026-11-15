@@ -510,6 +510,13 @@ retains the operator's wording. Manifest recognition is not an update-permission
 receipt; unknown compatibility selects fresh installation within declared
 disposable scope while preserving config and durable data.
 
+## Scope Approvals
+
+The [Manager/Worktrees native consumer slice](manager-worktrees-native-consumer.md#scope-approval)
+retains the operator's explicit reviewed, fixture-only Windows qualification
+approval. Production rollout, maintenance enrollment and installation-survival
+testing remain paused; original owners and validation bounds are unchanged.
+
 ## Plan
 
 **Reviewed consolidated acceptance (#11708).** Existing checked foundations below retain only their
@@ -550,6 +557,8 @@ preserves the complete pre-amendment record.
   Fresh and update entries use that same path, retaining the bootstrap
   environment override, explicit source/ref and repository context, and
   Manager-owned dependency/downstream-installable discovery.
+  The [bounded native consumer qualification](manager-worktrees-native-consumer.md)
+  tests this real path without claiming whole-inventory or productive adoption.
 - [ ] W2: Integrate stage/readiness and activation through existing app adapters
   for the declared installed inventory. Retain the selected activation strategy;
   qualify coordinated toolset selection only where that strategy is used.
