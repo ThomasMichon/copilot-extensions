@@ -66,10 +66,12 @@ older acceptance language this amendment supersedes.
 
 ## Receiving plan and validation - agent-recommended
 
-- [ ] C1: Review the revised Installer, Plugin Service and Runtime Assembly
+- [x] C1: Review the revised Installer, Plugin Service and Runtime Assembly
   intent plus the shared install/application/cutover contracts. This replaces
   preferred start-first, mandatory graceful drain and delayed-force-only policy,
   not completed evidence, real input authentication or data preservation.
+  #12684 merged after current-head approval, successful required CI and
+  resolution of the lower-invariant/cross-platform consistency finding.
 - [ ] C2: Through the existing construction and ordinary-caller owners,
   consume selected copyable inputs once, construct the physical environment
   with the canonical pure UV/wheel path and run simple app setup before cutover.
@@ -98,3 +100,19 @@ continues under its explicit bounded approval. Its implementation and native
 evidence must be reconciled with this current direction rather than qualifying
 obsolete fingerprint, mandatory handoff or drain behavior. No completed parent
 row, live installation, cleanup or native result is claimed by this record.
+
+## Journal
+
+### 2026-11-15 - Current construction and cutoff contract reviewed
+
+#12684 merged as `bcc8667a5a5a5e4c11a9568aec191490bff37817` after exact-head
+approval with no active findings and successful required CI. The review aligned
+the cutover pattern's lower invariants and cross-platform target as well as its
+entry sequence. Effort/vision structure, documentation consistency and diff
+checks passed. This resolves C1 only; C2-C4, the real Manager/Worktrees
+qualification and the complete parent Goal remain open.
+
+Next, extend the existing hosted fixture's actual ordinary-caller seam without
+synthetic version artifacts or a second constructor. The separate per-app audit
+retains its app-specific findings/fixes. No native run or installed operation
+occurred for this intent amendment.

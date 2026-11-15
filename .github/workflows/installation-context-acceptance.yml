@@ -1395,6 +1395,61 @@ jobs:
           --test-file tests/test_native_daemon.py
           --test-timeout 60 --timeout 600 --plugin-timeout 720
 
+  wmi-durable-launch-windows:
+    if: ${{ inputs.native_daemon_exit }}
+    name: WMI durable launch (disposable Windows)
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Prepare the canonical process-library test environment
+        run: python tools/run-plugin-tests.py agent-procutil --prepare-only
+      - name: Qualify WMI breakaway and strict caller-Job loss
+        shell: python
+        run: |
+          import os
+          from pathlib import Path
+          import sys
+          root = Path.cwd()
+          sys.path.insert(0, str(root / "tools"))
+          from _admission_protocol import acquire
+          from plugin_test_cache import ordinary_cache_root
+          from plugin_test_containment import Limits, TestSandbox, isolated_environment, run_contained
+          from plugin_test_resources import record_owner, venv_root
+          from qualify_foundation_lifetime import report_fixture_logs
+          environment_root = ordinary_cache_root(venv_root(root) / "agent-procutil")
+          python = environment_root / "Scripts" / "python.exe"
+          assert python.is_file(), "the canonical process-library test environment is required"
+          lease = acquire(0, environment_root)
+          try:
+              with TestSandbox(prefix="wmi-", dir=Path(os.environ["RUNNER_TEMP"])) as temporary:
+                  sandbox = Path(temporary)
+                  record_owner(sandbox, root, retention="native WMI fixture until exact cleanup")
+                  env = isolated_environment(os.environ, sandbox, allow_explicit_tiers=True)
+                  env["PYTHONPATH"] = str(root / "tools")
+                  result = run_contained(
+                      [
+                          str(python), "-m", "pytest", "-q", "-s",
+                          str(root / "libs/agent-procutil/tests/test_durable_wmi_job_survival.py"),
+                          "--basetemp", str(sandbox / "t"),
+                          "-o", "cache_dir=" + str(sandbox / "pytest-cache"),
+                          "--timeout=60",
+                      ],
+                      cwd=root, env=env, sandbox=sandbox,
+                      limits=Limits(wall_seconds=120), native_application=True,
+                  )
+                  if result:
+                      report_fixture_logs(sandbox)
+                      raise SystemExit(result)
+          finally:
+              lease.release()
+
   windows-native-process:
     if: ${{ inputs.windows_broker_consumers && !inputs.watch_owner && !inputs.dispatch_delegation }}
     name: Native PowerShell owned-process lifetime (disposable Windows)

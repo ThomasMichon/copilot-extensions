@@ -104,6 +104,14 @@ proof of native model transmission, installed extension reload or deployment.
 Prepare the expanded source declarations before the genuine current-generation
 capture; hashes alone are not new execution evidence.
 
+Worktrees retained cold-resume registration now corroborates a fresh native
+activation before attaching to a closed interval. Its changed registered
+receiver sources retain semantic classification and receive fresh current
+HTTP-52 execution evidence. The wire generation, independent input vector,
+historical packets and prompt-acceptance semantics are unchanged. Separate
+Worktrees parser/kernel-hold controls cover the new activation and its refusals;
+this source evidence does not establish installed continuation.
+
 Owner membership introduces HTTP generation 52 and
 `OWNER_MEMBERSHIP_PROTOCOL_VERSION = 52`. Its named
 `bridge-owner-membership-v1` contract remains version 1. Both declarations are

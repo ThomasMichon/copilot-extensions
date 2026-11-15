@@ -211,7 +211,15 @@ to a resident whose ordinary verb version alone cannot prove this serializer.
 Because a qualified writer runs outside the native's process ancestry, it
 cannot present a registration source identity. A registration without one is
 accepted only as an idempotent attach to the session's still-open identified
-activation; ended or unidentified histories still refuse it as superseded.
+activation. The additive `retained_native_activation: 1` capability also permits
+the same head conversation's closed identified activation to be followed by a
+fresh native activation. The existing `--pid` then supplies a candidate process,
+not trusted lifecycle evidence: inside the record lock the owner corroborates
+that process's birth, execution epoch and open hold for the exact native UUID.
+The source must be new to the retained history. Missing or changed evidence,
+another head, reused sources and pruned or saturated histories still refuse.
+The old interval stays ended; its Start is never replayed. Unsupported providers
+retain their closed-activation refusal without retry through another writer.
 The opted-in command does not boot a monitor or status updater. This is a
 bounded session-write route, not a global daemon-disable setting, a replacement
 serializer, or permission to write a remote/frozen record.
