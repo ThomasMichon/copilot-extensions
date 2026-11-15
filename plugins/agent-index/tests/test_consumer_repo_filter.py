@@ -6,12 +6,14 @@ import ntpath
 import os
 from pathlib import Path
 from typing import SupportsIndex
+from unittest.mock import Mock
 
 import numpy as np
 import pytest
 
 from agent_index.chunking.base import Chunk
 from agent_index.index_config import ModelProfile
+from agent_index.store import multi_model_store
 from agent_index.store.content_store import ContentStore
 from agent_index.store.multi_model_store import MultiModelStore
 from agent_index.store.repo_filter import _like_pattern, path_glob_sql
@@ -150,8 +152,11 @@ def test_globs_preserve_source_repo_and_metadata_exclusions(
         )
         assert {hit.chunk_id for hit in faceted_hits} == {chunks[5].chunk_id}
     assert store.fts_available is with_fts
+    fusion = Mock(wraps=multi_model_store._reciprocal_rank_fusion)
+    monkeypatch.setattr(multi_model_store, "_reciprocal_rank_fusion", fusion)
 
     def retrieve(omit: str = "", limit: int = 10) -> set[str]:
+        fusion.reset_mock()
         hits = store.hybrid_search(
             "test", vectors[0], "searchable phrase", limit=limit,
             source=None if omit == "source" else "git",
@@ -160,7 +165,16 @@ def test_globs_preserve_source_repo_and_metadata_exclusions(
             labels=None if omit == "labels" else ["kept"],
             file_path_glob=None if omit == "glob" else "docs/keep-*.py",
         )
-        return {hit.chunk_id for hit in hits}
+        result_ids = {hit.chunk_id for hit in hits}
+        if with_fts:
+            fusion.assert_called_once()
+            assert fusion.call_args is not None
+            fts_results = fusion.call_args.args[1]
+            assert fts_results
+            assert {hit.chunk_id for hit in fts_results} == result_ids
+        else:
+            fusion.assert_not_called()
+        return result_ids
 
     for limit in (1, 10):
         assert retrieve(limit=limit) == {chunks[5].chunk_id}
