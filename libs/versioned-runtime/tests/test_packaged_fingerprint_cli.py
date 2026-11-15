@@ -49,6 +49,39 @@ def invoke(primitive: Path, root: Path, arguments: list[str]) -> subprocess.Comp
     )
 
 
+@pytest.mark.skipif(os.name != "nt", reason="native Windows component-source I/O")
+@pytest.mark.parametrize("extended_entry", [False, True])
+def test_shipped_components_load_beyond_max_path(
+    primitive: Path, tmp_path: Path, extended_entry: bool,
+) -> None:
+    native = runtime._leases._native_path
+    directory = tmp_path / "installed-components"
+    while len(str(directory)) < 290:
+        directory /= "runtime-assets-" + "x" * 25
+    shutil.copytree(primitive.parent, native(directory))
+    entry = directory / primitive.name
+    logical_entry = native(entry) if extended_entry else entry
+    source = tmp_path / "input.py"
+    source.write_bytes(b"VALUE = 7\n")
+    expected = runtime.fingerprint_source([source])
+    code = (
+        "import importlib.util,sys; from pathlib import Path; "
+        "entry=Path(sys.argv[1]); "
+        "spec=importlib.util.spec_from_file_location('runtime_probe',entry); "
+        "module=importlib.util.module_from_spec(spec); sys.modules[spec.name]=module; "
+        "exec(compile(Path(sys.argv[2]).read_bytes(),str(entry),'exec'),module.__dict__); "
+        "assert Path(module._leases.__file__)==entry.with_name('versioned_runtime_leases.py'); "
+        "print(module.fingerprint_source([Path(sys.argv[3])]))"
+    )
+    result = subprocess.run(
+        [sys.executable, "-I", "-B", "-c", code, str(logical_entry), str(native(entry)), str(source)],
+        cwd=LIBRARY, capture_output=True, text=True, timeout=10, creationflags=HEADLESS,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout == expected + "\n"
+    assert result.stderr == ""
+
+
 @pytest.mark.parametrize("json_output", [False, True])
 def test_fingerprint_cli_from_shipped_layout(
     primitive: Path, tmp_path: Path, json_output: bool,

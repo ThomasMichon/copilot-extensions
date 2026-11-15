@@ -93,7 +93,14 @@ def _runtime_component(name: str):
                 raise FileNotFoundError(f"Runtime component is unavailable: {name}")
             component = importlib.util.module_from_spec(spec)
             sys.modules[spec.name] = component
-            exec(compile(source.read_bytes(), str(source), "exec"), component.__dict__)
+            read_source = source
+            if os.name == "nt":
+                # The lease module's native-path helper is not loaded yet.
+                value = os.path.abspath(source)
+                if not value.startswith("\\\\?\\"):
+                    value = "\\\\?\\UNC\\" + value[2:] if value.startswith("\\\\") else "\\\\?\\" + value
+                read_source = Path(value)
+            exec(compile(read_source.read_bytes(), str(source), "exec"), component.__dict__)
             _runtime_components[name] = component
         return _runtime_components[name]
 

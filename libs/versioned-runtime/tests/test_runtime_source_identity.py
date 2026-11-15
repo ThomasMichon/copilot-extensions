@@ -320,14 +320,16 @@ def test_unreadable_versions_root_is_unavailable_to_read_only_resolution(tmp_pat
     runtime = identity._runtime()
     versions = tmp_path / "versions"
     versions.mkdir()
-    original = Path.iterdir
+    original = os.scandir
 
     def entries(path):
-        if path == versions:
+        if isinstance(path, (str, os.PathLike)) and (
+            runtime._leases._native_path(path) == runtime._leases._native_path(versions)
+        ):
             raise PermissionError("fixture versions are unreadable")
         return original(path)
 
-    monkeypatch.setattr(Path, "iterdir", entries)
+    monkeypatch.setattr(os, "scandir", entries)
     assert runtime.resolve_python(tmp_path) is None
     with pytest.raises(PermissionError, match="unreadable"):
         runtime.list_versions(tmp_path)
