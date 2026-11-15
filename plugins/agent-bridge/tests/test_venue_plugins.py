@@ -198,7 +198,7 @@ def controller(monkeypatch, tmp_path):
         "id": "controller", "repo": "control", "machine": "local",
         "path": str(tmp_path), "status": "active",
     }]})
-    monkeypatch.setattr("agent_bridge.acquisition_authority.worktree_command", owner)
+    monkeypatch.setattr("agent_bridge.acquisition_authority._run_worktree_command", owner)
     return caller, owner
 
 

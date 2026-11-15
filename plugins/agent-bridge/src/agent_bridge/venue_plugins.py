@@ -157,7 +157,7 @@ async def resolve_controller_cwd(
     caller, *, caller_session_id: str | None = None, affinity_id: str | None = None,
 ) -> str | None:
     """Honor explicit controller context without requiring managed adoption."""
-    from .acquisition_authority import worktree_command
+    from .acquisition_authority import read_controller_inventory
     from .caller_project import _OWNER_REF
     from .caller_session import normalize_caller_session_id
     from .routes.worktree_reporting import reported_machine
@@ -202,9 +202,7 @@ async def resolve_controller_cwd(
         ):
             raise ValueError("controller owner session differs from caller session")
         machine, project, worktree_id = owner.partition("#")[0].split("/")
-        result = await worktree_command(
-            ["list", "--json", "--cache-only", "--worktree-id", worktree_id], project,
-        )
+        result = await read_controller_inventory(worktree_id, project)
         listed = result.get("worktrees")
         if not isinstance(listed, list):
             raise ValueError("invalid controller owner response")
