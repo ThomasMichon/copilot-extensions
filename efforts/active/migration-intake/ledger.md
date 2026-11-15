@@ -285,3 +285,21 @@ Worktrees, agent-vault/trust and venue-parity custody unchanged. This appends
 one primary route without changing any prior ledger entry. Ledger publication
 or reviewed Plan intake is not technical completion or issue disposition;
 future technical acceptance is not a new physical-OPEN condition on #69.
+
+## Finite runtime-startup intake (2026-11-15 UTC)
+
+This appends a proposed route; it becomes effective only through normal
+reviewed delivery of the accompanying complete direct domain Plan amendment.
+Ledger publication alone is not domain acceptance. Prior rows and unresolved
+residuals remain unchanged.
+
+| Candidate | Source | Disposition | Primary canonical owner | Tracker outcome |
+|-----------|--------|-------------|-------------------------|-----------------|
+| Context-ingestion deferral OR streaming, same-type warm-up reuse, and explicit optional-only `--minimal`, with measured startup AND task-grounding latency and preserved required guidance | Public #4138, complete original and eligible discussion | routed (proposed; effective after normal reviewed direct Plan acceptance) | [progressive-context-disclosure](../progressive-context-disclosure/README.md), Phase 2 PC4138-P1/P2/P3/LV1-LV4/G only | Retain #4138 pending reviewed delivery, current receiving/source readback and separate judgment; no new issue, executor, measurement, native-session effect or source/resource transfer |
+
+Phase 8 remains the existing intake and ownership-review path, not a second
+primary phase. The ROOT's progressive-disclosure and grounding-latency scope
+supports this finite runtime contract; #4197's distinct documentation intake
+neither receives it nor prohibits separately admitting it. All new technical
+acceptance remains unchecked. Planned receiving does not require the features
+or a native activation to have happened first, and does not establish either.
