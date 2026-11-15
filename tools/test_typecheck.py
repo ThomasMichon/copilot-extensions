@@ -1398,6 +1398,9 @@ def test_git_comparison_and_physical_inventory_cover_developer_edits(tmp_path: P
     (tmp_path / "removed.py").unlink()
     assert set(typecheck.changed_paths(tmp_path, "HEAD")) == {"staged.py", "unstaged.py", "removed.py"}
     assert typecheck.changed_paths(tmp_path, "HEAD", "HEAD") == ()
+    assert set(typecheck.new_code_changes(tmp_path, "HEAD", "HEAD")) == {
+        "staged.py", "unstaged.py", "removed.py", "added.py",
+    }
     assert set(typecheck.python_paths(tmp_path)) == {"staged.py", "unstaged.py", "added.py"}
     with pytest.raises(typecheck.TypecheckError, match="Cannot resolve"):
         typecheck.changed_paths(tmp_path, "missing-comparison-base")
@@ -1826,6 +1829,44 @@ def test_actual_mypy_rejects_type_regressions(
     assert lease.released
     assert not (environment / "typecheck-targets.txt").exists()
     assert not (environment / "typecheck-mypy.ini").exists()
+
+
+@pytest.mark.parametrize(
+    ("source", "failure", "diagnostic"),
+    [
+        ("def missing(value):\n    return value\n", True, "[no-untyped-def]"),
+        ("value: int = 'old error'\n# newly added comment\n", True, "[assignment]"),
+        ("def accept(value: int) -> int:\n    return value\n", False, ""),
+    ],
+)
+def test_actual_new_code_frontdoor_strictly_checks_pending_whole_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    source: str, failure: bool, diagnostic: str,
+) -> None:
+    """Real MyPy sees the full pending file, including errors outside an edit."""
+    (tmp_path / "sample.py").write_text(source, encoding="utf-8")
+    environment = tmp_path / "environment"
+    environment.mkdir()
+    (environment / ".typecheck-prepared").write_text("fixture\n", encoding="utf-8")
+    item = project(level="pending")
+    lease = Lease()
+
+    def environment_path(
+        _root: Path, _project: typecheck.Project, *, captured_lock: bytes | None = None,
+    ) -> tuple[Path, str]:
+        return environment, "fixture"
+
+    monkeypatch.setattr(typecheck, "ROOT", tmp_path)
+    monkeypatch.setattr(typecheck, "load_projects", lambda: (item,))
+    monkeypatch.setattr(typecheck, "python_paths", lambda: ("sample.py",))
+    monkeypatch.setattr(typecheck, "new_code_changes", lambda *_args: ("sample.py",))
+    monkeypatch.setattr(typecheck, "environment_path", environment_path)
+    monkeypatch.setattr(typecheck, "environment_python", lambda _path: Path(sys.executable))
+    monkeypatch.setattr(typecheck, "acquire_environment", lambda *_args: lease)
+    assert typecheck.main(["--new-code"]) == int(failure)
+    assert diagnostic in capsys.readouterr().out
+    assert item.level == "pending" and lease.released
+    assert not list(environment.parent.glob("source-views-*/sample/*.py"))
 
 
 @pytest.mark.parametrize("platform", ["linux", "win32"])

@@ -1,0 +1,57 @@
+"""Whole-file strict selection without admitting an unchanged legacy project."""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+from tools.typecheck_bootstrap_views import INPUTS, SELECTOR_INPUTS, require_bootstrap_version
+from tools.typecheck_source_views import (
+    HARNESS_PREFIX, INSTALLATION_ENTRY, SourceViewError, _reject_directives,
+)
+
+if TYPE_CHECKING:
+    from tools.typecheck import Project
+
+
+def select_new_code(
+    root: Path, owners: dict[str, Project], changes: tuple[str, ...],
+) -> dict[str, tuple[str, ...]]:
+    """Expand changed physical files to the existing complete program contracts."""
+    touched = set(changes)
+    selected: dict[str, tuple[str, ...]] = {}
+    projects = {owner.name: owner for owner in owners.values()}
+    invocation = bool(touched.intersection((*INPUTS, *SELECTOR_INPUTS))) or any(
+        path.startswith("libs/payload-invocation/") and path.endswith((".tmpl", ".json"))
+        for path in touched
+    )
+    harness = any(
+        path.startswith(HARNESS_PREFIX) and path.endswith((".sh", ".ps1", ".json"))
+        for path in touched
+    )
+    for name, needed in (
+        ("lib-payload-invocation", invocation), ("copilot-extensions-harness", harness),
+    ):
+        if needed and name not in projects:
+            raise SourceViewError(f"{name}: changed program inputs lack their physical owner")
+    for name, project in projects.items():
+        files = tuple(path for path, owner in owners.items() if owner.name == name)
+        changed = tuple(path for path in files if path in touched)
+        complete = False
+        if name == "lib-payload-invocation":
+            complete = bool(changed) or invocation
+            if complete:
+                require_bootstrap_version(
+                    "strict", (project.python_version, *project.additional_python_versions),
+                )
+        elif name == "copilot-extensions-harness":
+            complete = bool(changed) or harness
+        if INSTALLATION_ENTRY in files and changed:
+            complete = True
+        if complete:
+            changed = files
+        if changed:
+            for path in changed:
+                _reject_directives(path, root.joinpath(*path.split("/")).read_bytes())
+            selected[project.name] = changed
+    return selected
