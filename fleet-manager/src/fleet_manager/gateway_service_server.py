@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from agent_procutil.daemon_instances import (
-    DaemonInstanceGuard, admit_daemon_instance, daemon_entrypoint,
+    DaemonInstanceGuard, admit_daemon_instance, daemon_entrypoint as legacy_daemon_entrypoint,
 )
 
 import asyncio
@@ -17,7 +17,7 @@ import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from aiohttp import HttpVersion11, WSMsgType, web
 
@@ -30,12 +30,15 @@ from .gateway_service_channel import (
 )
 from .gateway_service_context import ServiceContext, ServicePolicyError
 from .gateway_identity_provider import IdentityProvider
+from .gateway_legacy_interop import DaemonEntrypoint, OperationLedgerFactory, Settlement
 from .gateway_service_listener import Listener, read_bounded
 from .gateway_service_policy import ServiceAuthority, ServiceCandidate
 from .gateway_manifest import RouteSpec, ServiceSlot
 from .gateway_service_handler import PROFILE
 from .gateway_service_handler import CallerContext, RequestLifetime, ServiceRequest, ServiceResponse
-from .gateway_local_handler import LocalHandlerBinding, LocalServiceRequest, settled
+from .gateway_local_handler import (
+    LocalHandlerBinding, LocalServiceRequest, settled as legacy_settled,
+)
 from .gateway_service_policy import CallerGrant
 from .gateway_controller_services import (
     PROFILE as CONTROLLER_PROFILE, ConnectedService, ControllerService, admitted_services, services,
@@ -46,6 +49,8 @@ from .planning import PlanError
 from .private_state import create_private_file, private_directory, validate_private_file
 
 LOG = logging.getLogger(__name__)
+daemon_entrypoint = cast(DaemonEntrypoint, legacy_daemon_entrypoint)
+settled = cast(Settlement, legacy_settled)
 STATE: web.AppKey[ServiceRuntime] = web.AppKey("fleet-service-state")
 DISPATCHED = web.RequestKey("fleet-service-dispatched", bool)
 BUFFERED_BODY = web.RequestKey("fleet-service-buffered-body", bytes)
@@ -945,12 +950,13 @@ def serve(policy_path: Path, tls_path: Path, *, operation_journal: Path | None =
         if operation_journal is not None:
             check(operation_journal.is_absolute() and operation_authority is not None
                   and operation_installation is not None, "invalid-enrollment-journal")
+            assert operation_authority is not None and operation_installation is not None
             private_directory(operation_journal.parent)
             if not operation_journal.exists():
                 descriptor = create_private_file(operation_journal)
                 os.close(descriptor)
             validate_private_file(operation_journal)
-            journal = OperationLedger(
+            journal = cast(OperationLedgerFactory, OperationLedger)(
                 operation_journal, authority=operation_authority,
                 installation=operation_installation, enable_enrollment=True)
         web.run_app(build_app(listener, policy_path, enrollment_journal=journal), host=listener.host,

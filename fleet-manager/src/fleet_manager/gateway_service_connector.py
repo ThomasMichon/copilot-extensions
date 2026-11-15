@@ -22,6 +22,7 @@ from yarl import URL
 
 from .gateway_auth import make_proof
 from .gateway_connect_route import GatewayTCPConnector, LoopbackRoute
+from .gateway_legacy_interop import CanonicalJSON
 from .gateway_service_channel import (
     BODY_BYTES, CHANNEL_REQUESTS, CHUNK_BYTES, ClientSocket, DEADLINE, FRAME_BYTES,
     REQUEST_HEADERS, RESPONSE_BYTES, RESPONSE_HEADERS, TransportError,
@@ -30,7 +31,7 @@ from .gateway_service_channel import (
 )
 from .gateway_service_context import METHODS, ServicePolicyError, identifier
 from .machine_identity import PROFILE as MACHINE_PROFILE, machine_headers, make_machine_proof
-from .planning import canonical
+from .planning import canonical as legacy_canonical
 from .gateway_service_handler import (
     PROFILE, HandlerBinding, RelayOrigin, RequestLifetime, ServiceRequest, respond,
 )
@@ -39,6 +40,7 @@ from .gateway_controller_services import (
 )
 
 LOG = logging.getLogger(__name__)
+canonical = cast(CanonicalJSON, legacy_canonical)
 RequestSpec = tuple[str, str, dict[str, str], bytes, float, ServiceRequest | None]
 
 def verified_tls(ca: str | None) -> ssl.SSLContext:

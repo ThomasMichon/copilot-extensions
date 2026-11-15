@@ -1,9 +1,10 @@
 """A local TCP conduit does not become an HTTP or TLS authority."""
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import cast
 from urllib.parse import urlsplit
 
 import aiohttp
@@ -73,7 +74,7 @@ def connector(
     gateway_origin: str | None = None, gateway_ca: str | None,
 ) -> ServiceConnector:
     async def access() -> str:
-        return rig.access("service-a", 1)
+        return cast(Callable[[str, int], str], rig.access)("service-a", 1)
 
     async def handle(request: ServiceRequest) -> ServiceResponse:
         return ServiceResponse(200, body=b"routed")
