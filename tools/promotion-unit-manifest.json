@@ -4992,7 +4992,26 @@
         "tools/promotion_unit_tests/test_release_build_admission.py::test_containers_admits_exact_source_owned_resources[matching-included]",
         "tools/promotion_unit_tests/test_release_build_admission.py::test_runtime_commands_deliver_bound_resources_and_helper[canonical]",
         "tools/promotion_unit_tests/test_release_build_admission.py::test_runtime_commands_deliver_bound_resources_and_helper[sdist]",
-        "tools/promotion_unit_tests/test_release_build_admission.py::test_gateway_build_context_contains_the_canonical_runtime_and_cache_closure"
+        "tools/promotion_unit_tests/test_release_build_admission.py::test_gateway_build_context_contains_the_canonical_runtime_and_cache_closure",
+        "tools/promotion_unit_tests/test_typecheck_new_code.py::test_new_code_frontdoor_checks_whole_files_without_admitting_owner[False-pending]",
+        "tools/promotion_unit_tests/test_typecheck_new_code.py::test_new_code_frontdoor_checks_whole_files_without_admitting_owner[False-basic]",
+        "tools/promotion_unit_tests/test_typecheck_new_code.py::test_new_code_frontdoor_checks_whole_files_without_admitting_owner[False-strict]",
+        "tools/promotion_unit_tests/test_typecheck_new_code.py::test_new_code_frontdoor_checks_whole_files_without_admitting_owner[True-pending]",
+        "tools/promotion_unit_tests/test_typecheck_new_code.py::test_new_code_frontdoor_checks_whole_files_without_admitting_owner[True-basic]",
+        "tools/promotion_unit_tests/test_typecheck_new_code.py::test_new_code_frontdoor_checks_whole_files_without_admitting_owner[True-strict]",
+        "tools/promotion_unit_tests/test_typecheck_new_code.py::test_new_code_selection_preserves_complete_composed_bindings[lib-payload-invocation-libs/payload-invocation/templates/powershell-shim.tmpl]",
+        "tools/promotion_unit_tests/test_typecheck_new_code.py::test_new_code_selection_preserves_complete_composed_bindings[lib-payload-invocation-libs/agent-procutil/src/agent_procutil/python_cache.py]",
+        "tools/promotion_unit_tests/test_typecheck_new_code.py::test_new_code_selection_preserves_complete_composed_bindings[copilot-extensions-harness-plugins/copilot-extensions-harness/python-emitted-inputs.json]",
+        "tools/promotion_unit_tests/test_typecheck_new_code.py::test_new_code_selection_preserves_complete_composed_bindings[copilot-extensions-harness-plugins/copilot-extensions-harness/scripts/new.py]",
+        "tools/promotion_unit_tests/test_typecheck_new_code.py::test_new_code_selection_preserves_complete_composed_bindings[lib-installation-context-libs/installation-context/_installation_context_new.py]",
+        "tools/promotion_unit_tests/test_typecheck_new_code.py::test_new_code_cannot_hide_the_whole_file[# mypy: ignore-errors\\n]",
+        "tools/promotion_unit_tests/test_typecheck_new_code.py::test_new_code_cannot_hide_the_whole_file[# type: ignore\\n]",
+        "tools/promotion_unit_tests/test_typecheck_new_code.py::test_new_code_empty_or_deleted_scope_does_not_run_checker",
+        "tools/promotion_unit_tests/test_typecheck_new_code.py::test_new_code_selection_preserves_complete_composed_bindings[lib-payload-invocation-libs/payload-invocation/new.py]",
+        "tools/promotion_unit_tests/test_typecheck_new_code.py::test_new_code_refuses_program_inputs_without_physical_owner[libs/payload-invocation/templates/powershell-shim.tmpl]",
+        "tools/promotion_unit_tests/test_typecheck_new_code.py::test_new_code_refuses_program_inputs_without_physical_owner[plugins/copilot-extensions-harness/python-emitted-inputs.json]",
+        "tools/promotion_unit_tests/test_typecheck_new_code.py::test_new_code_invocation_requires_full_bootstrap_body_target[3.10]",
+        "tools/promotion_unit_tests/test_typecheck_new_code.py::test_new_code_invocation_requires_full_bootstrap_body_target[3.11]"
     ],
     "coverage_targets": [
         "plugins/agent-dispatch/src/agent_dispatch/queue_submission_consumer.py",
@@ -5306,7 +5325,8 @@
         "libs/installer-engine/install_source.py",
         "tools/runtime_application_project.py",
         "tools/source_preparation_process.py",
-        "tools/typecheck_bootstrap_views.py"
+        "tools/typecheck_bootstrap_views.py",
+        "tools/typecheck_new_code.py"
     ],
     "sources": {
         "tools/application_sources.py": "f03db26e7d29751ae319a767c1575dba8e6c54bdb036cfafbe1198ea43c97649",
@@ -5654,7 +5674,7 @@
         "services/chat/src/agent_chat_service/store.py": "59b7977bd429801796f58d5468fe3d4a6c90a158dde5325d1d511242603e8f29",
         "tools/_admission_protocol.py": "baa0c1a2af44616eedf02bf678c128fd3c07045bd8e5542d4fe8ece3df54dc21",
         "tools/cache_directory_paths.py": "31b3d122fcc46bc00415e0e7d8af837e5ec64624654230b75d599a75ca8b400f",
-        "tools/typecheck.py": "bc74f312693d43de6a827f91633a3ef7300258136031d48cca9187987ac221f4",
+        "tools/typecheck.py": "d9eefc4e30139ad866fdec9b87f95916f23ef275ec454fc3063087fbe36e29d8",
         "tools/typecheck_source_views.py": "e587064b9824bafcf7d219d93cac3e8e502942f8bf60d205867bd452600119f6",
         "tools/promotion_unit_tests/test_typecheck.py": "8ce4a807734345fd4665a15a75cfb6087a85878d445b958317fb42dcf5c431fe",
         "tools/promotion_unit_tests/test_typecheck_emitted.py": "3a92fd3fed6c7db24c133e29c20578c6fa9f806f9ea55786f5e69fa16a0452bd",
@@ -6083,6 +6103,8 @@
         "plugins/agent-worktrees/src/agent_worktrees/dispatch_cohort.py": "cf7cf2611b5a1a33883a84e3f5319f3c9b59088fc1701b6fc5ad38d7052a235c",
         "tools/typecheck_bootstrap_views.py": "ffa24829a4d9f638b3f3096e8df11c42f09678bbfa997708844415de5495fa37",
         "plugins/agent-worktrees/payload-invocation.json": "9e0dc64604bc87af7c08f6a18bd3d5612a710c3b3be9aa8eaa1885b0c38f9c11",
-        "tools/typecheck-projects.json": "baa202b71919b64310980bfcaf72b5ec5410c6cfad0649cadc3a8367578909e8"
+        "tools/typecheck-projects.json": "4a0d5134159d5a5010b15549d33da6d99dd3fccabba69b3cb054a9df65816f93",
+        "tools/promotion_unit_tests/test_typecheck_new_code.py": "2b086d280ff2d6de186672ce6d49eff16a413239a4deefe9fedc55c86c5ec7a2",
+        "tools/typecheck_new_code.py": "228bca779b906e0b37666f7985ad69a9132e8e473f76d2c2e8d532d2842e6016"
     }
 }

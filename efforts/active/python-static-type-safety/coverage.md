@@ -7,16 +7,16 @@ not a second checker configuration.
 
 ## Snapshot and counting rules
 
-Snapshot: **2026-11-13 (UTC)**, merged Dev policy
-`71cf4079bc60edd28ef3a97a8e1075b415245fcd`, reconciled with the existing
+Snapshot: **2026-11-14 (UTC)**, merged Dev policy
+`16f10b7fe867056deebcbdba25bb2080ea25b420`, reconciled with the existing
 `tools/typecheck.py` inventory/ownership functions over that pinned Git tree.
 The checker and project-manifest bytes match the source used for the count;
 unmerged proposals are not included.
 
 - **43 / 74 checker projects (58.1%)** have merged strict admission.
-- **478 / 9,310 physical Python files (5.1%)** belong to those strict scopes.
+- **478 / 9,329 physical Python files (5.1%)** belong to those strict scopes.
 - **31 projects remain pending; none are basic.**
-- All 9,310 tracked physical Python paths are classified; none are unclassified.
+- All 9,329 tracked physical Python paths are classified; none are unclassified.
   Classification,
   annotations, passing consumer tests and a prepared implementation do not
   count as strict enforcement.
@@ -29,13 +29,20 @@ unmerged proposals are not included.
   mapped source/frozen controls. Its new module grows the already strict
   checker owner by one physical file; it does not admit Invocation production
   or complete the program/native/minimum-runtime/candidate obligations.
+- #12541 delivers both actual shim selector views, the optional-prefix
+  contract and embedded-terminator rejection through exact-head approval and
+  required strict-checker/unit CI. Its nineteen pure controls and focused
+  source/frozen qualification do not admit production. No physical Python
+  file or strict project is added by this prerequisite.
 - The separately merged `lib-pr-filters` project (#12166) contributes two
-  strict files. Compared with the historical 413/8,681-file snapshot, 629
+  strict files. Compared with the historical 413/8,681-file snapshot, 648
   physical files have arrived. Beyond the 27 Invocation test files and two
   PR-filter files, the remaining 36 strict-file additions grow already strict
   owners, including the bootstrap checker module, not Invocation production.
-- The current pending file total is **8,832**. All 74 projects count in the
+- The current pending file total is **8,851**. All 74 projects count in the
   project metric, including the zero-physical-file vendored-library project.
+  Since `71cf4079`, nineteen additional files arrived under pending owners:
+  thirteen in Worktrees, four in Fleet Manager and two in repository tools.
 
 ### Prior admission notes (historical counts)
 
@@ -118,10 +125,10 @@ owned files; the manifest remains authoritative for their exact boundaries.
 | Area | Checker projects | Merged strict projects | Physical Python files | Files in merged strict scopes |
 |------|-----------------:|-----------------------:|----------------------:|------------------------------:|
 | Shared libraries | 40 | 32 | 812 | 325 |
-| Plugins | 22 | 4 | 6,630 | 40 |
-| Services and managers | 8 | 4 | 1,117 | 98 |
-| Tools and support | 4 | 3 | 751 | 15 |
-| **Total** | **74** | **43** | **9,310** | **478** |
+| Plugins | 22 | 4 | 6,643 | 40 |
+| Services and managers | 8 | 4 | 1,121 | 98 |
+| Tools and support | 4 | 3 | 753 | 15 |
+| **Total** | **74** | **43** | **9,329** | **478** |
 
 **Locked** means the complete declared project scope is admitted to strict
 MyPy on both declared analysis targets through a merged, reviewed change and
@@ -153,7 +160,7 @@ Admission decisions and validation details are retained in the
 | `lib-installer-readiness` | 10 | **Locked** | #10044 |
 | `lib-lazy-cli-dispatch` | 3 | **Locked** | #9951 |
 | `lib-machine-transport` | 20 | **Locked** | #10107; five consumer contracts and native qualification |
-| `lib-payload-invocation` | 4 | Pending | #10371; source/catalog/copy preparation merged #11165 and checker-only bootstrap view merged #12498, not strict admission; complete executed/emitted and consumer gates remain |
+| `lib-payload-invocation` | 4 | Pending | Active canonical Invocation clauses; retired token #10371, preparation #11165, bootstrap #12498 and selector views #12541 are not strict admission; complete executed/emitted and consumer gates remain |
 | `lib-payload-invocation-tests` | 27 | **Locked** | #12324; complete test-source scope, both Python 3.11 analysis targets, actual negative controls, exact-head approval and required source CI are complete; production/program/full-corpus/native/minimum/candidate gates under #10371 remain separate and open |
 | `lib-peer-launch` | 3 | **Locked** | #9967 |
 | `lib-plugin-activation` | 23 | **Locked** | #10108 / merged #10150; both targets, native fixtures and nine consumer contracts |
@@ -203,7 +210,7 @@ cross-cutting qualification gate below.
 | `agent-roles` | 14 | **Locked** | #11473 / merged #11485; both 3.10 analysis targets, unchanged 61-case contract suite and real type-regression rejection; no live-role qualification |
 | `agent-ssh` | 166 | Pending | Transport/configuration, native helpers, fixtures and copies |
 | `agent-vault` | 213 | Pending | Secret/runtime boundaries, native fixtures and copies |
-| `agent-worktrees` | 1,913 | Pending | Model/lifecycle/PR/launch subsystems, fixtures, installers and copies |
+| `agent-worktrees` | 1,926 | Pending | Model/lifecycle/PR/launch subsystems, fixtures, installers and copies |
 | `ai-attribution` | 8 | **Locked** | #10171 / merged #10176; both targets, native policy/hook controls and Python 3.9 helper compatibility |
 | `budget-guidance` | 101 | Pending | Reader/configuration/runtime contracts, fixtures and copies |
 | `context-handoff` | 6 | **Locked** | #10179 / merged #10192; both targets, native Python/Node controls and Python 3.10 helper qualification |
@@ -216,7 +223,7 @@ cross-cutting qualification gate below.
 
 | Project | Python files | Merged gate | Remaining work |
 |---------|-------------:|-------------|----------------|
-| `fleet-manager` | 246 | Pending | Model/control/runtime subsystems, native boundaries and tests |
+| `fleet-manager` | 250 | Pending | Model/control/runtime subsystems, native boundaries and tests |
 | `service-chat` | 29 | Pending | Service/storage/admission boundaries and tests |
 | `service-dispatch` | 7 | **Locked** | #10184 / merged #10189; both targets, complete unchanged source and native fixture qualification |
 | `service-index` | 27 | **Locked** | #10206 / merged #10327; both targets, Python 3.10 native/copy qualification and exact-input CI |
@@ -229,10 +236,10 @@ cross-cutting qualification gate below.
 
 | Project | Python files | Merged gate | Admission record or remaining work |
 |---------|-------------:|-------------|------------------------------------|
-| `checker` | 7 | **Locked** | #9831/#9853; #11165 adds catalog views and #12498 adds the bootstrap view under the existing strict owner, not library admission |
+| `checker` | 7 | **Locked** | #9831/#9853; #11165 catalog views, #12498 bootstrap and #12541 selectors remain under the existing strict owner, not library admission |
 | `devcontainer` | 3 | **Locked** | #10183 / merged #10193; both Python 3.11 targets, native Linux contracts and complete source/fixture correspondence |
 | `effort-helpers` | 5 | **Locked** | #10215 / merged #10360; both targets, Python 3.11 native controls and current source/composed qualification |
-| `repository-tools` | 736 | Pending | Repository/CI/release/installer tools and fixtures, excluding checker-owned files |
+| `repository-tools` | 738 | Pending | Repository/CI/release/installer tools and fixtures, excluding checker-owned files |
 
 ## Cross-cutting lockdown
 
@@ -240,13 +247,15 @@ cross-cutting qualification gate below.
 |------|-------|----------------------------------|
 | Physical Python ownership/classification | Established | Current inventory accounts for every tracked physical `.py` path; unknown paths must still fail |
 | Required source type gate | Established for admitted scopes | #9853; actual type-regression rejection recorded in the canonical effort |
+| Strict enforcement for all new Python | Open, next priority | Required CI must reject new unqualified Python inside pending owners and in reviewed new-code forms before further legacy admission |
 | Required exact-candidate type gate | Established for admitted scopes | #9862 and the reviewed Main adoption; actual candidate regression rejection recorded |
 | Shared import-root/additional-version prerequisite | Delivered, not consumer admission | #10400 / #10553; four exact-head source/frozen cases and 28 actual MyPy analyses qualify the version/TOML controls on both analysis platforms; consumer aliases, emitted copies and native/runtime gates remain independent |
 | Checker-only faithful guard alias | Delivered, not consumer admission | #10638 / #10866; hosted checker and CI-bound packet pass; actual merged-input drift remains explicitly distinguished |
 | Emitted-program visibility and binding completeness | Delivered, not consumer admission | #10938; four analysis cells and hosted 4,226-unit CI-bound packet; three actual merged-input differences, no whole-merge equivalence or native/copy claim |
 | Payload Invocation typing preparation | Delivered, not library/consumer admission | #11165; source/test split, four catalog witnesses and authorized output preparation; complete ordinary Linux 4,603-unit execution includes every head-manifest ID, with unchanged admission/coverage/budget contracts |
 | Invocation static test-source enforcement | Delivered independently | #12324; all 27 physical test-source files strictly checked on both declared Python 3.11 targets; production/program/runtime/native/minimum/candidate gates remain open under #10371 |
-| Catalog-binding bootstrap checker view | Delivered, not production admission | #12498; four declared strict probes, twenty real source/frozen cases and all four copied-fixture version-matrix cases pass; Python 3.10 guard-only and Python 3.11 full-body coverage remain distinct; shim selectors and parent gates stay open |
+| Catalog-binding bootstrap checker view | Delivered, not production admission | #12498; four declared strict probes, twenty real source/frozen cases and all four copied-fixture version-matrix cases pass; Python 3.10 guard-only and Python 3.11 full-body coverage remain distinct; remaining program and parent gates stay open |
+| Shim cache-selector checker views | Delivered, not production admission | #12541; actual PowerShell/POSIX transport, source maps/helper custody, nineteen pure controls, fallback preservation, 24 source/frozen frontdoors and exact-head strict/unit CI; complete native/minimum-runtime/candidate/program gates remain open |
 | Full composed-consumer qualification | Open | #9807 / #10362; the merged checker prerequisite does not qualify historical full frozen-candidate failures, actual consumer/copy/emitted/native gates or any consumer admission |
 | All fragments/templates/generated copies qualified | Open | Complete source-map/materialization correspondence and negative drift controls |
 | Every plugin, service and tool strictly admitted | Open | All project rows locked; no pending/basic scope or omitted fixture family |
