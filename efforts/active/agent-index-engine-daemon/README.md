@@ -33,6 +33,16 @@ role is resolved from machine-local (`~/.agent-index/`) or source-repo
 (`<repo>/.agent-index/config.yaml`) configuration. The model is the agent-bridge
 **session-host** analogue: a warm, long-lived worker the light coordinator talks to.
 
+## Coordination
+
+The proposed finite #3989/#3990 clarification below retains existing engine
+lifecycle, agent-index, installer/runtime, source, platform/native and adopter
+custodians. It appoints nobody and adds no owner-contact/ACK prerequisite to
+documentary intake. Reconcile actual claims/custody through existing authority
+before implementation or resource effects; no install, upgrade, runtime probe
+or native execution is authorized here. Historical direct-push references
+below do not replace the repository's current review/PR policy.
+
 ## Context
 
 `agent-index 0.1.0-dev16` shipped the foundation — configurable engine separation
@@ -209,6 +219,31 @@ never hardcoded machine names; torch confined to the host role).
       triplet dev17->dev18 (plugin.json + pyproject + marketplace); version
       consistency + full suite green; branch landed to `main`.
 
+### Proposed finite first-use and assigned-engine-endpoint clarification
+
+_Agent-recommended unresolved #3989/#3990 acceptance, not delivery or an
+approved supersession. Existing checked engine-generation/update credit and
+unchecked rollback acceptance remain unchanged._
+
+- [ ] **I3989-P1:** Preserve the original on-first-use/on-demand outcome.
+  Map absent-runtime first use against current host-role `install`, explicit
+  `engine` action and daemon-start behavior, recording the supported front
+  door and readiness/error result. Install-time provisioning is not missing-
+  runtime first use. Do not silently select a replacement policy, make every
+  client a host or bypass explicit heavy-engine lifecycle; the intended
+  mapping remains unresolved, not fulfilled.
+- [ ] **I3989-P2:** Distinguish the durable engine from the light service.
+  Bind the intended engine to an OS-assigned port, publish its actual bound
+  endpoint through existing authority/source/runtime/generation and wire
+  the real consumer to that discovery. Preserve configured fixed endpoints,
+  selected remote/shared precedence, role/admission and explicit upgrade
+  policy; no second registry or discovery-triggered heavy local provisioning.
+- [ ] **I3989-P3:** Preserve best-effort compatible handoff OR bounded
+  identity-checked cold recovery where applicable, with explicit outage,
+  unknown/retry and durable-index outcomes. Do not impose zero outage or
+  readiness-before-every-retirement; endpoint-file presence is not model/
+  inference readiness.
+
 ## Open Design Questions (Phases 6-8 — confirm before building)
 
 1. **Where the adoption flow lives:** a new interactive `agent-index setup`/`adopt`
@@ -258,7 +293,39 @@ never hardcoded machine names; torch confined to the host role).
       live-validation pass before this item, and this effort's archival, can
       close.
 
+### Validation of the proposed #3989/#3990 clarification
+
+- [ ] **I3989-V1:** At the supported first-use boundary, cover absent
+  runtime, selected host/client role, intended front door, readiness and
+  unavailable/error outcomes without changing standalone/client behavior.
+  Keep the original first-use outcome unresolved until its contract mapping
+  is clear; installation is not an inferred substitute.
+- [ ] **I3989-V2:** Prove actual assigned-port bind/publication/consumer
+  resolution through existing authority, with missing, stale, malformed
+  and foreign-generation negatives. Preserve fixed-endpoint compatibility
+  and selected remote precedence without unexpected local provisioning.
+- [ ] **I3989-V3:** Qualify compatible handoff OR bounded identity-checked
+  cold recovery, preserving outage/unknown/retry and durable recovery.
+  Retain the existing checked pin/update credit and unchecked rollback
+  gate rather than duplicating them or inferring completion.
+- [ ] **I3989-GV1:** Map all original #3989 and inherited #3990 clauses to
+  current Plan/Validation plus this clarification. Configured routing is
+  not assigned-port discovery; host-role installation is not automatically
+  the original on-demand outcome. Complete source adjudication remains
+  separate from this plan.
+
 ## Journal
+
+### 2026-11-15 - First-use and assigned-engine-endpoint clarification proposed
+
+Added seven unchecked #3989/#3990 Plan/local/global Validation rows.
+The original first-use outcome remains explicit and unresolved, not
+silently replaced by host-role install; actual OS-assigned engine bind,
+publication and consumer discovery remain distinct from configured routing.
+Keep existing pin/update credit and rollback gate, recovery OR and current
+custodians. No implementation, native proof or source disposition occurred.
+Historical shipping/status prose below records its original scope, not
+completion of these new unchecked acceptance rows.
 
 ### 2026-09-26 — Archive-sweep audit: corrected Status from Done to Active
 Found via a repo-wide "Done; pending archive" sweep: the Plan's Phase 2 item

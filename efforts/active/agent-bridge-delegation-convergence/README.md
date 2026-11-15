@@ -108,6 +108,11 @@ Durable fire-and-forget task ownership remains agent-dispatch's concern.
   Actual reviewed merge and complete current readback precede supersession of
   #1448; retain it if concrete custody still requires the live umbrella.
 
+The proposed #4029/#4191 residual below retains this Host, #1460/#1468,
+#1138, assigned #1266, #954 and provider/session/ACP/shell-process owners.
+It assigns no implementation or resource, creates no new ACK and does not
+apply #1448's source-specific supersession clause to unrelated trackers.
+
 ## Context
 
 The current bridge already exposes most required mechanisms: create, send, read,
@@ -441,7 +446,40 @@ https://github.com/ThomasMichon/copilot-extensions/pull/1588 ;
 https://github.com/ThomasMichon/copilot-extensions/pull/1899 ;
 https://github.com/ThomasMichon/copilot-extensions/pull/7593 .
 
+### Proposed finite #4029/#4191 named-definition and shell continuity
+
+The existing direct #1448 Plan/Validation already carries typed per-session
+MCP arguments/toolsets through actual child execution, real required-tool
+availability/isolation, stable identity, lifecycle and attention/results.
+Its bounded current/latest/incremental results and ordinary active steering
+retain #4171's scope. Reuse those rows; this supplement adds residuals only.
+
+- [ ] **D4029-P1:** Bind the named sub-agent definition selected through
+  `send`/`request` to the intended logical delegate/target, preserving
+  caller, target, session and venue identities. Crosswalk structured
+  create/stream/stop ACK/NACK to existing lifecycle/failure outcomes;
+  retain any unmatched exact outcome as a direct gap, not another protocol.
+- [ ] **D4029-P2:** Preserve #4191's alternative: keep attached shell work
+  across a root-turn boundary OR safely retire it through its actual owner
+  where the selected lifecycle permits. Expose ongoing/completed/unknown
+  and owner-supported wait for attributed completion, output and outcome;
+  preserve supported reattachment/cancellation and truthful refusal.
+- [ ] **D4029-LV1:** Through both caller operations, verify named-definition
+  selection and identity, structured lifecycle outcomes and unsupported/
+  malformed/refused cases. Reuse existing real tool-availability/isolation
+  and #4171 result/steer gates rather than substituting parser-only proof.
+- [ ] **D4029-LV2:** Exercise the selected shell OR alternative across the
+  root-turn boundary, attributed wait/completion/output/outcome, reattach/
+  cancel and unknown/refusal without misreporting transport exit as work
+  completion.
+
 ## Validation Plan
+
+- [ ] **D4029-G:** Resolve D4029-P1/P2 and local Validation alongside the
+  reused #1448 typed-MCP/actual-tool, #4171 result/active-steer and structured
+  lifecycle gates. Preserve original finite evidence tiers, compatibility,
+  serial writers and all custodians; no AHP/all-host/whole-parent
+  prerequisite or new transfer ceremony is introduced.
 
 - [ ] Complete every directly retained #1448 Plan/Validation row above at its
   original evidence tier and bounds, preserving existing owners and holds.
@@ -496,6 +534,15 @@ bridge does not absorb task claiming, recurring scheduling, or unattended goal
 ownership.
 
 ## Journal
+
+### 2026-11-15 - Named-definition and shell continuity residuals proposed
+
+Added five unchecked #4029/#4191 Plan/local/global Validation rows.
+Reuse direct typed-MCP/actual-tool, stable lifecycle and #4171 result/steer
+acceptance; only named-definition binding and shell keep-attached OR
+owner-retire/wait outcomes are new residual rows. All owners, serial writers,
+compatibility and source-specific #1448 conditions remain. No implementation,
+ACK ceremony, owner/resource transfer or source disposition occurred.
 
 ### 2026-10-22 - Complete retained acceptance from #1448
 
