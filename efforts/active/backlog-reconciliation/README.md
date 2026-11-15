@@ -4004,6 +4004,17 @@ preserves seventeen complete unions and a [complete planned #8312 intake into
 #7743](receiving-manager-engine-diagnostics.md). Direct receiving acceptance and
 the separate source-tracking judgment remain pending; no native retry,
 implementation, owner transfer or parent completion follows from the proposal.
+The [accepted diagnostic receiving](journal/2026/11.15-delegated-update-contracts.md#accepted-receiving-and-separately-verified-tracking-retirement)
+records #12747's actual merge, direct #7743 acceptance and #8312's separately
+audited `NOT_PLANNED` tracking retirement. One excluded inflow arrival offsets
+that departure: the complete queue remains 837 open, 108 above fixed 729.
+The [next five canonical contracts](journal/2026/11.15-delegated-update-contracts.md#five-canonical-contracts-and-a-bounded-current-source-discriminator)
+preserve expanded provider, daemon and namespace parents, reject a theme-only
+kill-switch fold and identify #9281's bounded current doctor-route gaps.
+No further disposition, native attempt or owner transfer is established.
+The [owned execution/release study](journal/2026/11.15-owned-release-boundaries.md)
+retains actual snapshot/maintenance/hosted-conversation reservations and
+#9481's corrective reopening with its original release/installed gate.
 
 ### Phase 2b - Vision-linked stabilization roadmap
 
