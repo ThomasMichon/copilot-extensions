@@ -672,6 +672,7 @@ remains unpublished and is not evidence of production readiness.
 
 ## Journal
 
+- [2026-11-15 - Same-canonical #5664 tracking reconciliation](journal/2026/11.15-tracking-reconciliation.md)
 - [2026-10-24 - Direct retained acceptance from #4127](<journal/2026/10.24 backlog-intake-85-86.md>)
 
 ### 2026-10-12 — Schema-bounded reads and monitoring eligibility clarified

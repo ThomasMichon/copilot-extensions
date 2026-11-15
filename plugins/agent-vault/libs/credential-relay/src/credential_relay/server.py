@@ -1,0 +1,683 @@
+"""Credential relay TCP server.
+
+Listens on a configurable port (default 9857) for git-credential-protocol
+connections. Parses incoming requests, applies policy checks (allowed
+hosts/actions), routes to the first matching credential source, and
+returns the response.
+
+Wire protocol::
+
+    <action>\\n          # optional -- defaults to 'get' if omitted
+    protocol=https\\n
+    host=github.com\\n
+    \\n                  # blank line terminates request
+
+The response is git-credential-protocol key=value text terminated by
+a blank line.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import fnmatch
+import hashlib
+import logging
+import os
+import time
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from typing import Protocol, TypedDict
+
+from .sources import CredentialSource
+
+log = logging.getLogger("agent-codespaces.relay")
+
+DEFAULT_PORT = 9857
+
+
+def _addr_in_use(exc: OSError) -> bool:
+    """True if an OSError is an 'address already in use' bind failure."""
+    import errno
+
+    codes = {errno.EADDRINUSE}
+    # Windows WSAEADDRINUSE (10048) is not always mapped to EADDRINUSE.
+    codes.add(getattr(errno, "WSAEADDRINUSE", 10048))
+    return exc.errno in codes
+
+
+def _pid_on_port(port: int) -> int | None:
+    """Best-effort: find the PID listening on 127.0.0.1:*port* (cross-platform)."""
+    import subprocess as sp
+    import sys
+
+    if sys.platform == "win32":
+        ps = (
+            f"(Get-NetTCPConnection -LocalPort {port} -State Listen "
+            "-ErrorAction SilentlyContinue | Select-Object -First 1)"
+            ".OwningProcess"
+        )
+        try:
+            out = sp.run(["powershell", "-NoProfile", "-Command", ps],  # noqa: S603, S607
+                         capture_output=True, text=True, timeout=15)
+            val = (out.stdout or "").strip()
+            return int(val) if val.isdigit() else None
+        except (OSError, sp.TimeoutExpired, ValueError):
+            return None
+    for cmd in (["ss", "-lptnH", f"sport = :{port}"], ["lsof", "-ti", f"tcp:{port}"]):
+        try:
+            out = sp.run(cmd, capture_output=True, text=True, timeout=15)  # noqa: S603
+        except (OSError, sp.TimeoutExpired):
+            continue
+        text = out.stdout or ""
+        if cmd[0] == "lsof":
+            lines = text.strip().splitlines()
+            if lines and lines[0].isdigit():
+                return int(lines[0])
+        else:
+            import re
+
+            m = re.search(r"pid=(\d+)", text)
+            if m:
+                return int(m.group(1))
+    return None
+
+
+def _terminate_pid(pid: int) -> None:
+    """Best-effort terminate a local process by pid (cross-platform)."""
+    import subprocess as sp
+    import sys
+
+    if sys.platform == "win32":
+        sp.run(["taskkill", "/PID", str(pid), "/F", "/T"],  # noqa: S603, S607
+               capture_output=True, text=True)
+    else:
+        import signal as _signal
+
+        try:
+            os.kill(pid, _signal.SIGTERM)
+        except OSError:
+            pass
+
+
+def _reclaim_port(port: int) -> bool:
+    """Evict a stale holder of the dedicated relay *port* and wait for release.
+
+    The relay port is dedicated, so a process holding it after our bind fails is
+    an orphaned previous relay (e.g. an ungracefully-killed agent-bridge daemon).
+    Terminate it and wait briefly for the OS to release the binding. Returns True
+    if the port appears free afterwards. Never evicts the current process.
+    """
+    pid = _pid_on_port(port)
+    if not pid or pid == os.getpid():
+        return False
+    log.warning(
+        "Relay port %d held by stale process pid %d -- evicting to reclaim it",
+        port, pid,
+    )
+    _terminate_pid(pid)
+    for _ in range(20):  # up to ~2s for the OS to release the binding
+        if _pid_on_port(port) != pid:
+            return True
+        time.sleep(0.1)
+    return _pid_on_port(port) != pid
+
+
+# Actions the relay recognizes
+_KNOWN_ACTIONS = frozenset({
+    "get", "store", "erase",
+    "fill", "approve", "reject",
+    "get-github-token",
+    "get-azure-token",
+    "get-access-token",
+    "ping",
+    "capabilities",
+})
+
+# Advertised by the ``capabilities`` action so a client can tell this relay
+# from an older one (which answers that unknown action with nothing).
+# ``git-credential-username-cache``: git credentials are cached per
+# (protocol, host, username), so a request naming a GitHub account never
+# receives another account's cached credential.
+RELAY_CAPABILITIES = ("git-credential-username-cache",)
+
+# git-credential "get" semantics -- a request asking for a username/password.
+# When one of these cannot be resolved we must FAIL FAST (see below) rather
+# than return nothing, because an empty response lets git fall through to an
+# interactive terminal prompt that blocks indefinitely.
+_GET_ACTIONS = frozenset({"get", "fill"})
+
+# Dedicated token actions that carry no ``host`` field -- the host allowlist
+# (which scopes git-credential requests) must not reject them.
+_HOSTLESS_ACTIONS = frozenset({"get-github-token", "get-azure-token"})
+
+# Fail-fast sentinel. Per the git-credential protocol, a helper that returns
+# ``quit=1`` makes git abort the whole credential-helper chain immediately
+# (``fatal: credential helper ... told us to quit``, exit 128) instead of
+# prompting. This converts a silent ~52-min ``git credential fill`` hang into a
+# prompt, explicit auth failure surfaced to the Copilot caller.
+_FAILFAST_RESPONSE = "quit=1\n\n"
+
+# Explicit, wire-visible denial for a *recognized* credential whose specific
+# resource/scope is not permitted (#4367) -- as opposed to an unknown/invalid
+# token, which stays fully silent (a bare closed connection) so an
+# unauthenticated caller learns nothing. Shared with
+# :mod:`credential_relay.sources.az_login`'s own allowlist denial so both
+# denial paths present one consistent response.
+ACCESS_DENIED_RESPONSE = "error=access_denied\nreason=resource_not_allowed\n\n"
+
+
+#: Denials for one token fingerprint (or for requests with no token) within
+#: this many seconds that are reported as a retry storm.
+TOKEN_DENIAL_STORM_THRESHOLD = 5
+TOKEN_DENIAL_STORM_WINDOW = 60.0
+_TOKEN_DENIAL_KEYS_MAX = 64
+
+
+def token_fingerprint(token: str) -> str:
+    """Return a short, non-reversible identifier for logging a relay token."""
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()[:8]
+
+
+class ScopeDenied(Exception):
+    """Raise from a ``token_authorizer`` to report an authenticated-but-
+    scope-denied request, distinct from returning ``False`` (an unknown/
+    invalid token). Only actions with a response-producing denial (currently
+    ``get-azure-token``) turn this into :data:`ACCESS_DENIED_RESPONSE`; other
+    actions are denied exactly as a plain ``False`` would (silently)."""
+
+
+@dataclass
+class RelayPolicy:
+    """Policy gate for credential relay requests.
+
+    Controls which actions and hosts are permitted. Requests that
+    don't match the policy are rejected before reaching any source.
+
+    Host patterns use fnmatch-style globbing (e.g., ``*.github.com``,
+    ``dev.azure.com``). An empty ``allowed_hosts`` list means all
+    hosts are allowed (open policy).
+    """
+
+    allowed_actions: frozenset[str] = field(
+        default_factory=lambda: _KNOWN_ACTIONS,
+    )
+    allowed_hosts: list[str] = field(default_factory=list)
+
+    def check(self, action: str, fields: dict[str, str]) -> str | None:
+        """Return None if allowed, or a rejection reason string."""
+        if action not in self.allowed_actions:
+            return f"action '{action}' not in allowed list"
+
+        # Host check only applies to host-scoped actions when allowed_hosts is
+        # non-empty. Dedicated token actions (get-azure-token/get-github-token)
+        # carry no host and must not be rejected by the git-credential host
+        # allowlist.
+        if self.allowed_hosts and action not in _HOSTLESS_ACTIONS:
+            host = fields.get("host", "")
+            if not any(fnmatch.fnmatch(host, pat) for pat in self.allowed_hosts):
+                return f"host '{host}' not in allowed list"
+
+        return None
+
+
+@dataclass
+class RelayStats:
+    """Operational statistics for the relay server."""
+
+    total_requests: int = 0
+    active_connections: int = 0
+    errors: int = 0
+    policy_rejections: int = 0
+    timeouts: int = 0
+    cache_hits: int = 0
+    failfast_responses: int = 0
+    token_rejections: int = 0
+    start_time: float | None = None
+    last_request_time: float | None = None
+
+
+class AccountRelayLifecycle(Protocol):
+    async def start(self) -> None: ...
+
+    async def stop(self) -> None: ...
+
+
+class RelayServerOptions(TypedDict, total=False):
+    sources: list[CredentialSource]
+    policy: RelayPolicy
+    account_relay: AccountRelayLifecycle
+    port: int
+    ado_host: str
+    token_authorizer: Callable[[str, str, dict[str, str]], bool]
+    token_validator: Callable[[str], bool]
+    token_required_actions: frozenset[str]
+
+
+class CredentialRelayServer:
+    """Async TCP server for git-credential-protocol relay.
+
+    Routes credential requests to pluggable sources (GCM, gh auth, etc.)
+    with policy enforcement, stats tracking, and graceful shutdown.
+
+    Usage::
+
+        from agent_codespaces.credential_relay.server import (
+            CredentialRelayServer, RelayPolicy,
+        )
+        from agent_codespaces.credential_relay.sources.git_credential import (
+            GitCredentialSource,
+        )
+
+        server = CredentialRelayServer(
+            sources=[GitCredentialSource()],
+            policy=RelayPolicy(allowed_hosts=["github.com", "*.github.com"]),
+        )
+        await server.start()
+        # ... server runs until stopped
+        await server.stop()
+    """
+
+    def __init__(
+        self,
+        port: int = DEFAULT_PORT,
+        sources: list[CredentialSource] | None = None,
+        policy: RelayPolicy | None = None,
+        ado_host: str | None = None,
+        token_validator: Callable[[str], bool] | None = None,
+        token_authorizer: Callable[[str, str, dict[str, str]], bool] | None = None,
+        token_required_actions: frozenset[str] | None = None,
+        account_relay: AccountRelayLifecycle | None = None,
+    ) -> None:
+        self.port = port
+        self.sources = sources or []
+        self.policy = policy or RelayPolicy()
+        self.stats = RelayStats()
+        self._server: asyncio.Server | None = None
+        # Optional per-connection shared-secret gate. When set, requests whose
+        # action is in ``token_required_actions`` must carry a matching
+        # ``auth=<token>`` field (validated by ``token_validator``) or they are
+        # denied. Used by container targets reached over host.docker.internal,
+        # which -- unlike the SSH-tunnel-isolated codespace path -- are network
+        # reachable. Open actions (git get/fill, get-github-token) are never
+        # gated, so the codespace relay behavior is unchanged.
+        self.token_validator = token_validator
+        # Optional request-scoped gate: ``token_authorizer(token, action,
+        # fields) -> bool`` supersedes ``token_validator`` when set, so a gate
+        # can enforce a per-token scope (e.g. the Azure resources a given token
+        # may mint) rather than a bare token check.
+        self.token_authorizer = token_authorizer
+        self.token_required_actions = token_required_actions or frozenset()
+        self.account_relay = account_relay
+        # Recent denial times per token fingerprint, so one client retrying a
+        # stale token is reported once as a storm rather than only as noise.
+        self._token_denials: dict[str, list[float]] = {}
+        self._token_denial_warned: set[str] = set()
+        # Default ADO host for bare `get-access-token` requests that carry no
+        # host (e.g. npm/nuget via ado-auth-helper). Resolved from the explicit
+        # arg or the CODESPACES_ADO_HOST env var; never hardcoded to a specific
+        # organization.
+        self.ado_host = ado_host or os.environ.get("CODESPACES_ADO_HOST")
+
+    def _note_token_denial(self, key: str, action: str, addr: object) -> None:
+        """Warn once when one credential keeps being denied in a short window.
+
+        A burst of identical denials usually means the client holds a token
+        from an older relay generation that was never re-delivered.
+        """
+        now = time.monotonic()
+        cutoff = now - TOKEN_DENIAL_STORM_WINDOW
+        for stale in [k for k, stamps in self._token_denials.items() if stamps[-1] < cutoff]:
+            del self._token_denials[stale]
+            self._token_denial_warned.discard(stale)
+        if key not in self._token_denials and len(self._token_denials) >= _TOKEN_DENIAL_KEYS_MAX:
+            oldest = min(self._token_denials, key=lambda k: self._token_denials[k][-1])
+            del self._token_denials[oldest]
+            self._token_denial_warned.discard(oldest)
+        stamps = [t for t in self._token_denials.get(key, []) if t >= cutoff]
+        stamps.append(now)
+        self._token_denials[key] = stamps[-TOKEN_DENIAL_STORM_THRESHOLD:]
+        if len(stamps) >= TOKEN_DENIAL_STORM_THRESHOLD and key not in self._token_denial_warned:
+            self._token_denial_warned.add(key)
+            log.warning(
+                "[%s] Token gate denied action=%s %d times in %.0fs (%s); the "
+                "client likely holds a stale or undelivered relay token. "
+                "Re-deliver the current relay token to that client or check "
+                "the relay token store.",
+                addr, action, len(stamps), TOKEN_DENIAL_STORM_WINDOW, key,
+            )
+
+    @property
+    def running(self) -> bool:
+        return self._server is not None and self._server.is_serving()
+
+    async def start(self) -> None:
+        """Start the TCP relay server, reclaiming the port from a stale holder.
+
+        The relay binds ``self.port``. When that is **0** (the dynamic default --
+        no fixed port was pinned) the OS assigns an ephemeral port and nothing
+        well-known is reserved (dotfiles #694). A pinned fixed port binds as
+        given; if a previous relay (e.g. an ungracefully-killed agent-bridge
+        daemon) still holds it, the first bind fails with "address already in
+        use" and we evict the stale owner (#19) and retry once so the relay --
+        and therefore ADO auth over the tunnel -- comes up instead of being
+        silently disabled.
+
+        If a pinned port is held by a *live* occupant that cannot be reclaimed
+        (a sibling/elevated daemon, or eviction failed), we fall back to an
+        OS-assigned ephemeral port rather than raising (#540). In every case the
+        **actually-bound** port is read back into ``self.port`` after the bind,
+        and consumers discover it via ``relay_state`` (which reads ``server.port``
+        after start), so auth works regardless of which port we ended up on.
+        """
+        try:
+            self._server = await asyncio.start_server(
+                self._handle_client,
+                host="127.0.0.1",
+                port=self.port,
+            )
+        except OSError as exc:
+            if not self.port or not _addr_in_use(exc):
+                raise
+            if _reclaim_port(self.port):
+                await asyncio.sleep(0.5)
+                self._server = await asyncio.start_server(
+                    self._handle_client,
+                    host="127.0.0.1",
+                    port=self.port,
+                )
+            else:
+                # A live occupant holds the preferred port and can't be evicted
+                # (e.g. a sibling/elevated daemon, or the current process). Bind
+                # an OS-assigned ephemeral port instead of failing (#540).
+                log.warning(
+                    "Relay port %d held by a live occupant -- binding an "
+                    "ephemeral port instead", self.port,
+                )
+                self._server = await asyncio.start_server(
+                    self._handle_client,
+                    host="127.0.0.1",
+                    port=0,
+                )
+        # Read back the actually-bound port for ALL paths: a pinned fixed port,
+        # a reclaimed one, an ephemeral fallback, or -- the common case now --
+        # the dynamic default (port 0 -> OS-assigned). relay_state publishes THIS
+        # to consumers, so discovery follows the real port (dotfiles #694/#540).
+        self.port = self._server.sockets[0].getsockname()[1]
+        if self.account_relay is not None:
+            try:
+                await self.account_relay.start()
+            except BaseException:
+                await self.stop()
+                raise
+        self.stats.start_time = time.time()
+        log.info(
+            "Credential relay started on 127.0.0.1:%d (%d sources, %d allowed hosts)",
+            self.port,
+            len(self.sources),
+            len(self.policy.allowed_hosts),
+        )
+
+    async def stop(self) -> None:
+        """Stop the relay server gracefully."""
+        legacy = self._server
+        if legacy:
+            legacy.close()
+        try:
+            if self.account_relay is not None:
+                await self.account_relay.stop()
+        finally:
+            if legacy:
+                await legacy.wait_closed()
+                if self._server is legacy:
+                    self._server = None
+                log.info("Credential relay stopped")
+
+    async def _handle_client(
+        self,
+        reader: asyncio.StreamReader,
+        writer: asyncio.StreamWriter,
+    ) -> None:
+        """Handle a single credential relay connection."""
+        self.stats.active_connections += 1
+        self.stats.total_requests += 1
+        self.stats.last_request_time = time.time()
+
+        addr = writer.get_extra_info("peername", ("?", 0))
+
+        try:
+            # Read request (key=value lines, terminated by blank line)
+            request_text = await self._read_request(reader)
+            if not request_text:
+                log.warning("[%s] Empty request", addr)
+                self.stats.errors += 1
+                return
+
+            # Parse action and fields
+            action, fields = self._parse_request(request_text)
+            log.info(
+                "[%s] action=%s host=%s",
+                addr, action, fields.get("host", "?"),
+            )
+
+            if action == "ping":
+                writer.write(b"pong\n\n")
+                await writer.drain()
+                return
+            if action == "capabilities":
+                caps = ",".join(RELAY_CAPABILITIES)
+                writer.write(f"capabilities={caps}\n\n".encode())
+                await writer.drain()
+                return
+
+            # Policy check
+            rejection = self.policy.check(action, fields)
+            if rejection:
+                log.warning("[%s] Policy rejected: %s", addr, rejection)
+                self.stats.policy_rejections += 1
+                # Fail fast for git `get`/`fill`: a policy-rejected host would
+                # otherwise leave git waiting on an interactive prompt.
+                await self._maybe_failfast(action, writer, addr, "policy rejected")
+                return
+
+            # Token gate: actions that require a shared-secret must present a
+            # valid ``auth=<token>``. Never logged. Stripped before routing so
+            # it can't leak into a source response or confuse a source.
+            token = fields.pop("auth", "")
+            if action in self.token_required_actions:
+                scope_denied = False
+                try:
+                    if self.token_authorizer:
+                        authorized = await asyncio.to_thread(
+                            self.token_authorizer, token, action, dict(fields),
+                        )
+                    else:
+                        authorized = bool(
+                            self.token_validator and await asyncio.to_thread(
+                                self.token_validator, token,
+                            )
+                        )
+                except ScopeDenied:
+                    authorized = False
+                    scope_denied = True
+                if not authorized:
+                    if scope_denied:
+                        denial = "recognized token, scope denied"
+                    elif not token:
+                        denial = "missing token"
+                    else:
+                        denial = f"unrecognized token fp={token_fingerprint(token)}"
+                    log.warning(
+                        "[%s] Token gate denied action=%s (%s)", addr, action, denial,
+                    )
+                    self.stats.token_rejections += 1
+                    if not scope_denied:
+                        self._note_token_denial(
+                            f"fp={token_fingerprint(token)}" if token else "no token",
+                            action, addr,
+                        )
+                    # A recognized token whose specific resource/scope is not
+                    # permitted gets the same wire-visible denial az_login's
+                    # own allowlist uses (#4367) -- an unknown/invalid token
+                    # (scope_denied is False here) stays fully silent.
+                    if scope_denied and action == "get-azure-token":
+                        writer.write(ACCESS_DENIED_RESPONSE.encode("utf-8"))
+                        await writer.drain()
+                    else:
+                        await self._maybe_failfast(action, writer, addr, "token rejected")
+                    return
+
+            # Handle get-access-token: synthesize a credential request for ADO
+            # and return just the raw token (password). Used by ado-auth-helper
+            # and non-git tools (npm, nuget) that need a bare PAT.
+            if action == "get-access-token":
+                ado_host = fields.get("host") or self.ado_host
+                if not ado_host:
+                    log.warning(
+                        "[%s] get-access-token: no host provided and no "
+                        "CODESPACES_ADO_HOST configured", addr,
+                    )
+                    self.stats.errors += 1
+                    return
+                ado_fields = {
+                    "protocol": "https",
+                    "host": ado_host,
+                }
+                response = await self._route_to_source("get", ado_fields)
+                if response:
+                    token = ""
+                    for line in response.strip().split("\n"):
+                        if line.startswith("password="):
+                            token = line[len("password="):]
+                            break
+                    if token:
+                        writer.write((token + "\n\n").encode("utf-8"))
+                        await writer.drain()
+                        log.info("[%s] get-access-token: token (%d chars)", addr, len(token))
+                    else:
+                        log.warning("[%s] get-access-token: no password in response", addr)
+                        self.stats.errors += 1
+                else:
+                    log.warning("[%s] get-access-token: no source resolved", addr)
+                    self.stats.errors += 1
+                return
+
+            # Route to source
+            response = await self._route_to_source(action, fields)
+            if response:
+                writer.write(response.encode("utf-8"))
+                await writer.drain()
+                log.info("[%s] Response sent (%d bytes)", addr, len(response))
+            else:
+                log.warning("[%s] No source could resolve request", addr)
+                self.stats.errors += 1
+                # Fail fast for git `get`/`fill` so git aborts immediately
+                # instead of dropping to an interactive prompt that hangs.
+                await self._maybe_failfast(action, writer, addr, "no source resolved")
+
+        except (TimeoutError, asyncio.TimeoutError):
+            log.error("[%s] Request timed out", addr)
+            self.stats.timeouts += 1
+        except Exception:
+            log.error("[%s] Error handling request", addr, exc_info=True)
+            self.stats.errors += 1
+        finally:
+            self.stats.active_connections -= 1
+            try:
+                writer.close()
+                await writer.wait_closed()
+            except Exception:
+                pass
+
+    async def _maybe_failfast(
+        self,
+        action: str,
+        writer: asyncio.StreamWriter,
+        addr: object,
+        reason: str,
+    ) -> None:
+        """Send a ``quit=1`` fail-fast response for unresolved git get requests.
+
+        Only git-credential ``get``/``fill`` actions get the sentinel: those are
+        the ones git would otherwise satisfy with an interactive prompt that
+        blocks. Non-git actions (``get-access-token`` etc.) handle failure via a
+        non-zero exit on the CodeSpace side and need no sentinel.
+        """
+        if action not in _GET_ACTIONS:
+            return
+        try:
+            writer.write(_FAILFAST_RESPONSE.encode("utf-8"))
+            await writer.drain()
+            self.stats.failfast_responses += 1
+            log.info("[%s] Fail-fast quit=1 sent (%s)", addr, reason)
+        except Exception:
+            log.debug("[%s] Could not send fail-fast response", addr, exc_info=True)
+
+    async def _read_request(
+        self, reader: asyncio.StreamReader, timeout: float = 90.0,
+    ) -> str:
+        """Read a git-credential-protocol request from the stream.
+
+        Reads until a blank line (``\\n\\n``) or EOF, with timeout.
+        """
+        data = b""
+        deadline = asyncio.get_event_loop().time() + timeout
+        try:
+            while True:
+                remaining = deadline - asyncio.get_event_loop().time()
+                if remaining <= 0:
+                    raise TimeoutError("Read timed out")
+                chunk = await asyncio.wait_for(reader.read(4096), timeout=remaining)
+                if not chunk:
+                    break
+                data += chunk
+                if b"\n\n" in data or data.endswith(b"\n\n"):
+                    break
+        except (TimeoutError, asyncio.TimeoutError):
+            if data:
+                log.warning("Read timed out with partial data (%d bytes)", len(data))
+            raise
+
+        return data.decode("utf-8", errors="replace").strip()
+
+    def _parse_request(self, text: str) -> tuple[str, dict[str, str]]:
+        """Parse action and fields from request text.
+
+        If the first line contains no ``=``, it is the action.
+        Otherwise, the action defaults to ``get``.
+        """
+        lines = text.split("\n")
+        action = "get"
+        field_lines = lines
+
+        if lines and lines[0].strip() and "=" not in lines[0]:
+            action = lines[0].strip()
+            field_lines = lines[1:]
+
+        fields: dict[str, str] = {}
+        for line in field_lines:
+            line = line.strip()
+            if not line:
+                continue
+            if "=" in line:
+                key, _, value = line.partition("=")
+                fields[key.strip()] = value.strip()
+
+        return action, fields
+
+    async def _route_to_source(
+        self, action: str, fields: dict[str, str],
+    ) -> str | None:
+        """Route a credential request to the first matching source."""
+        for source in self.sources:
+            if source.supports(action, fields):
+                log.debug("Routing to source: %s", source.name)
+                try:
+                    result = await source.resolve(action, fields)
+                    if result is not None:
+                        return result
+                except Exception:
+                    log.error(
+                        "Source %s failed for action=%s",
+                        source.name, action, exc_info=True,
+                    )
+        return None

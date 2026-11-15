@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import sys
 from typing import Any
 
@@ -13,6 +14,7 @@ _procutil = sys.modules[__package__]
 
 async def spawn_in_kill_on_close_job(
     *args: str,
+    require_job: bool = False,
     **kwargs: Any,
 ) -> tuple[asyncio.subprocess.Process, JobHandle | None]:
     """Spawn a child already contained by a kill-on-close Job Object.
@@ -25,8 +27,9 @@ async def spawn_in_kill_on_close_job(
     suspended (it never runs, so it opens no connection). Closing that window
     would need a hand-rolled ``CreateProcessW`` with ``PROC_THREAD_ATTRIBUTE_JOB_LIST``,
     which ``asyncio``'s subprocess transport (pipes, overlapped I/O) can't use.
-    If job creation or assignment fails, the child is still resumed and returned
-    with ``None`` so existing cleanup paths remain in charge. Off Windows this is
+    Optional job failure still resumes with ``None`` for compatibility.
+    With ``require_job=True``, failure kills and settles the suspended child
+    before raising, without ever resuming it. Off Windows this is
     a plain ``asyncio.create_subprocess_exec`` call returning ``(process, None)``.
     """
     if not _procutil._is_windows():
@@ -55,6 +58,8 @@ async def spawn_in_kill_on_close_job(
                 pass
             raise RuntimeError("spawned suspended process has no integer pid")
         job_handle = _procutil._assign_suspended_to_kill_on_close_job(pid, name=job_name)
+        if job_handle is None and require_job:
+            raise RuntimeError("Windows descendant Job assignment failed before child resume")
         if not _procutil._resume_suspended_process(pid):
             _procutil.log.debug("killing pid %s because suspended-start resume failed", pid)
             try:
@@ -67,6 +72,16 @@ async def spawn_in_kill_on_close_job(
     except BaseException:
         if job_handle is not None:
             job_handle.close()
+        if require_job:
+            with contextlib.suppress(ProcessLookupError):
+                process.kill()
+            cleanup = asyncio.create_task(process.wait())
+            while not cleanup.done():
+                try:
+                    await asyncio.shield(cleanup)
+                except asyncio.CancelledError:
+                    continue
+            await cleanup
         raise
     return process, job_handle
 

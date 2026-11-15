@@ -1,19 +1,28 @@
 from __future__ import annotations
 
 import importlib.util
+import ast
 import json
 import shutil
 import subprocess
 import sys
-import tomllib
+from collections.abc import Callable, Sequence
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any, cast
+from urllib.parse import quote, unquote
 
 import pytest
 from packaging.requirements import Requirement
+from packaging.utils import canonicalize_name
 from packaging.version import Version
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+if sys.version_info >= (3, 11):
+    import tomllib
+else:
+    import tomli as tomllib
+
 import dependency_age as age
 
 NOW = datetime(2026, 10, 13, tzinfo=timezone.utc)
@@ -27,23 +36,23 @@ REPOSITORY_NPM_FLOORS = {
 }
 
 
-def repository_npm_semver(spec, versions):
+def repository_npm_semver(spec: str, versions: Sequence[str]) -> tuple[list[str], list[str]]:
     """Controlled evidence for the repository's concrete ranges, not arbitrary npm."""
     floor = REPOSITORY_NPM_FLOORS[spec]
     return [floor], [floor] if floor in versions else []
 
 
-def release(timestamp=BOUNDARY, *, yanked=False):
+def release(timestamp: datetime | None = BOUNDARY, *, yanked: bool = False) -> list[dict[str, Any]]:
     return [{"upload_time_iso_8601": timestamp.isoformat() if timestamp else None, "yanked": yanked}]
 
 
 @pytest.mark.parametrize("seconds,expected", [(604800, True), (604799, False), (604801, True), (-1, False)])
-def test_inclusive_age_boundary(seconds, expected):
+def test_inclusive_age_boundary(seconds: int, expected: bool) -> None:
     assert age.aged((NOW - timedelta(seconds=seconds)).isoformat(), NOW) is expected
 
 
 @pytest.mark.parametrize("timestamp", [None, "", "unknown", "2026-10-01T00:00:00"])
-def test_unknown_timestamps(timestamp):
+def test_unknown_timestamps(timestamp: str | None) -> None:
     assert not age.aged(timestamp, NOW)
 
 
@@ -52,11 +61,11 @@ def test_unknown_timestamps(timestamp):
     release() + release(NOW), release() + release(None),
     release() + [{"upload_time_iso_8601": BOUNDARY.isoformat()}],
 ])
-def test_newest_file_missing_and_yanked_fail_closed(files):
+def test_newest_file_missing_and_yanked_fail_closed(files: list[dict[str, Any]] | None) -> None:
     assert not age.python_release_eligible(files, NOW)
 
 
-def test_python_normalized_literal_floor_and_compatible_specifier():
+def test_python_normalized_literal_floor_and_compatible_specifier() -> None:
     age.check_python(Requirement("demo>=1.0,<2"), {"releases": {"1.0.0": release()}}, NOW)
 
 
@@ -71,17 +80,17 @@ def test_python_normalized_literal_floor_and_compatible_specifier():
     ("demo==1.*", {"1.0": release(NOW), "1.1": release()}),
     ("demo==1.0", {"1.0": release(NOW + timedelta(seconds=1))}),
 ])
-def test_python_literals_and_unsatisfiable_specs(requirement, releases):
+def test_python_literals_and_unsatisfiable_specs(requirement: str, releases: dict[str, Any]) -> None:
     with pytest.raises(age.DeclarationError):
         age.check_python(Requirement(requirement), {"releases": releases}, NOW)
 
 
-def test_unbounded_upper_and_wildcard_declarations():
+def test_unbounded_upper_and_wildcard_declarations() -> None:
     for requirement in ("demo", "demo<2", "demo==1.*"):
         age.check_python(Requirement(requirement), {"releases": {"1.0": release()}}, NOW)
 
 
-def write(path, text):
+def write(path: Path, text: str) -> Path:
     if path.name == "pyproject.toml":
         data = tomllib.loads(text)
         if "exclude-newer" not in data.get("tool", {}).get("uv", {}):
@@ -94,7 +103,7 @@ def write(path, text):
     return path
 
 
-def test_reviewed_otlp_prerelease_pin_keeps_seasoning(tmp_path):
+def test_reviewed_otlp_prerelease_pin_keeps_seasoning(tmp_path: Path) -> None:
     write(tmp_path / "tools/typecheck-otlp-requirements.txt",
           "opentelemetry-semantic-conventions==0.66b1 --hash=sha256:" + "1" * 64 + "\n"
           "opentelemetry-sdk==1.45.1 --hash=sha256:" + "2" * 64 + "\n")
@@ -114,8 +123,8 @@ def test_reviewed_otlp_prerelease_pin_keeps_seasoning(tmp_path):
     ("typecheck-otlp-requirements.txt", "opentelemetry-semantic-conventions==0.66b1", 'opentelemetry-sdk==1.45.1; python_version < "3"'),
 ])
 def test_reviewed_otlp_pin_does_not_expand_to_other_declarations(
-    tmp_path, filename, dependency, parent,
-):
+    tmp_path: Path, filename: str, dependency: str, parent: str,
+) -> None:
     write(tmp_path / "tools" / filename, dependency + "\n" + parent + "\n")
     metadata = {"releases": {
         "0.66b1": release(), "0.67b1": release(), "1.45.1": release(), "1.45.2": release(),
@@ -129,11 +138,11 @@ def test_reviewed_otlp_pin_does_not_expand_to_other_declarations(
 @pytest.mark.parametrize("files", [
     release(NOW), release(yanked=True), release(None), release() + release(NOW),
 ])
-def test_reviewed_otlp_pin_never_waives_artifact_age_or_yank_checks(tmp_path, files):
+def test_reviewed_otlp_pin_never_waives_artifact_age_or_yank_checks(tmp_path: Path, files: list[dict[str, Any]]) -> None:
     write(tmp_path / "tools/typecheck-otlp-requirements.txt",
           "opentelemetry-semantic-conventions==0.66b1\nopentelemetry-sdk==1.45.1\n")
 
-    def fetch(url):
+    def fetch(url: str) -> str:
         return json.dumps({"releases": {
             "0.66b1": files if "semantic-conventions" in url else release(),
             "1.45.1": release(),
@@ -143,7 +152,9 @@ def test_reviewed_otlp_pin_never_waives_artifact_age_or_yank_checks(tmp_path, fi
     assert len(errors) == 1 and "opentelemetry-semantic-conventions:" in errors[0]
 
 
-def project(root, directory="plugins/demo", *, dependencies="", other=""):
+def project(
+    root: Path, directory: str = "plugins/demo", *, dependencies: str = "", other: str = "",
+) -> Path:
     return write(root / directory / "pyproject.toml", f"""
 [build-system]
 requires = ["builder>=1"]
@@ -154,7 +165,7 @@ dependencies = [{dependencies}]
 """)
 
 
-def test_full_inventory_requirements_npm_and_vendor_exclusion(tmp_path):
+def test_full_inventory_requirements_npm_and_vendor_exclusion(tmp_path: Path) -> None:
     project(tmp_path, dependencies='"runtime>=1"', other="""
 [project.optional-dependencies]
 feature = ["optional>=1; sys_platform == 'other'"]
@@ -179,7 +190,9 @@ lint = ["linter"]
 
 
 @pytest.mark.parametrize("timestamp,violations", [(BOUNDARY, 0), (NOW, 2)])
-def test_github_action_manifest_inventoried_and_age_audited(tmp_path, timestamp, violations):
+def test_github_action_manifest_inventoried_and_age_audited(
+    tmp_path: Path, timestamp: datetime, violations: int,
+) -> None:
     manifest = write(tmp_path / ".github" / "actions" / "package.json", json.dumps({
         "name": "trusted-pr-metadata-checks",
         "private": True,
@@ -199,7 +212,7 @@ def test_github_action_manifest_inventoried_and_age_audited(tmp_path, timestamp,
     ]
     calls = []
 
-    def fetch(url):
+    def fetch(url: str) -> str:
         calls.append(url)
         floor = {"commonmark": "0.31.2", "parse5": "7.2.1"}[url.rsplit("/", 1)[-1]]
         return json.dumps({"versions": {floor: {}}, "time": {floor: timestamp.isoformat()}})
@@ -216,7 +229,7 @@ def test_github_action_manifest_inventoried_and_age_audited(tmp_path, timestamp,
 
 
 @pytest.mark.parametrize("manifest_link", [False, True])
-def test_github_action_symlink_refused_before_manifest_read(tmp_path, manifest_link):
+def test_github_action_symlink_refused_before_manifest_read(tmp_path: Path, manifest_link: bool) -> None:
     root = tmp_path / "repo"
     outside = write(tmp_path / "outside" / "package.json", "not valid JSON")
     actions = root / ".github" / "actions"
@@ -233,7 +246,7 @@ def test_github_action_symlink_refused_before_manifest_read(tmp_path, manifest_l
         age.inventory(root)
 
 
-def test_local_exemption_requires_contained_path_and_audits_closure(tmp_path):
+def test_local_exemption_requires_contained_path_and_audits_closure(tmp_path: Path) -> None:
     path = project(tmp_path, dependencies='"owned"', other="""
 [tool.uv.sources]
 owned = {path = "../../libs/owned", editable = true}
@@ -245,7 +258,7 @@ dependencies = ["external>=1"]
 """)
     calls = []
 
-    def fetch(url):
+    def fetch(url: str) -> bytes:
         calls.append(url)
         return json.dumps({"releases": {"1.0": release(NOW) if "/external/" in url else release()}}).encode()
 
@@ -262,7 +275,7 @@ dependencies = ["external>=1"]
     '{path = "../../outside"}',
     '{path = "../../libs/wrong"}',
 ])
-def test_arbitrary_sources_do_not_exempt(tmp_path, source):
+def test_arbitrary_sources_do_not_exempt(tmp_path: Path, source: str) -> None:
     project(tmp_path, dependencies='"owned"', other=f"[tool.uv.sources]\nowned = {source}\n")
     write(tmp_path / "libs" / "wrong" / "pyproject.toml", '[project]\nname = "not-owned"\n')
     _, errors = age.audit(tmp_path, fetch=lambda _: json.dumps({"releases": {"1": release()}}), now=NOW)
@@ -270,7 +283,7 @@ def test_arbitrary_sources_do_not_exempt(tmp_path, source):
 
 
 @pytest.mark.parametrize("corrupt", [False, True])
-def test_bundled_dbus_next_still_requires_canonical_release_age(tmp_path, corrupt):
+def test_bundled_dbus_next_still_requires_canonical_release_age(tmp_path: Path, corrupt: bool) -> None:
     path = write(tmp_path / "worktree-manager" / "pyproject.toml", """
 [project]
 name = "copilot-extensions-worktree-manager"
@@ -284,7 +297,7 @@ dbus-next = {path = "vendor/dbus_next-0.2.3-py3-none-any.whl"}
     for timestamp, expected in ((BOUNDARY, 0 if not corrupt else 1), (NOW, 1)):
         calls = []
 
-        def fetch(url):
+        def fetch(url: str) -> str:
             calls.append(url)
             return json.dumps({"releases": {"0.2.3": release(timestamp)}})
 
@@ -294,12 +307,12 @@ dbus-next = {path = "vendor/dbus_next-0.2.3-py3-none-any.whl"}
             assert any("/dbus-next/" in url for url in calls)
 
 
-def test_name_alone_is_not_repository_source_attribution(tmp_path):
+def test_name_alone_is_not_repository_source_attribution(tmp_path: Path) -> None:
     project(tmp_path, dependencies='"owned"')
     write(tmp_path / "libs" / "owned" / "pyproject.toml", '[project]\nname = "owned"\n')
     calls = []
 
-    def fetch(url):
+    def fetch(url: str) -> str:
         calls.append(url)
         return json.dumps({"releases": {"1": release()}})
 
@@ -307,10 +320,10 @@ def test_name_alone_is_not_repository_source_attribution(tmp_path):
     assert any("/owned/" in url for url in calls)
 
 
-def test_direct_urls_and_metadata_errors_are_sanitized(tmp_path):
+def test_direct_urls_and_metadata_errors_are_sanitized(tmp_path: Path) -> None:
     project(tmp_path, dependencies='"demo-url @ https://private.example.invalid/path"')
 
-    def fetch(_):
+    def fetch(_: str) -> str:
         raise OSError("secret private URL")
 
     _, errors = age.audit(tmp_path, fetch=fetch, now=NOW)
@@ -318,12 +331,12 @@ def test_direct_urls_and_metadata_errors_are_sanitized(tmp_path):
     assert all("private" not in error and "secret" not in error for error in errors)
 
 
-def test_public_metadata_cached_and_host_markers_not_filtered(tmp_path):
+def test_public_metadata_cached_and_host_markers_not_filtered(tmp_path: Path) -> None:
     project(tmp_path, dependencies='"external>=1; sys_platform == \'other\'"',
             other='[project.optional-dependencies]\ndev = ["external>=1"]')
     calls = []
 
-    def fetch(url):
+    def fetch(url: str) -> str:
         calls.append(url)
         return json.dumps({"releases": {"1": release()}})
 
@@ -331,13 +344,13 @@ def test_public_metadata_cached_and_host_markers_not_filtered(tmp_path):
     assert len(calls) == 2
 
 
-def test_legacy_uv_dev_declarations_and_npm_audit(tmp_path):
+def test_legacy_uv_dev_declarations_and_npm_audit(tmp_path: Path) -> None:
     project(tmp_path, other='[tool.uv]\ndev-dependencies = ["legacy>=1"]')
     write(tmp_path / "tools" / "render" / "package.json",
           '{"dependencies":{"@example/renderer":"^2.6.2"}}')
     calls = []
 
-    def fetch(url):
+    def fetch(url: str) -> str:
         calls.append(url)
         if url.startswith("https://registry.npmjs.org/"):
             return json.dumps({"versions": {"2.6.2": {}},
@@ -349,7 +362,7 @@ def test_legacy_uv_dev_declarations_and_npm_audit(tmp_path):
     assert "https://registry.npmjs.org/%40example%2Frenderer" in calls
 
 
-def test_vendored_path_source_requires_canonical_external_closure(tmp_path):
+def test_vendored_path_source_requires_canonical_external_closure(tmp_path: Path) -> None:
     project(tmp_path, dependencies='"owned"', other="""
 [tool.uv.sources]
 owned = {path = "libs/owned"}
@@ -364,7 +377,7 @@ owned = {path = "libs/owned"}
     assert len(errors) == 1 and "canonical dependency closure" in errors[0]
 
 
-def test_includes_cycle_and_escape_are_rejected(tmp_path):
+def test_includes_cycle_and_escape_are_rejected(tmp_path: Path) -> None:
     write(tmp_path / "tools" / "validation_requirements.txt", "-r validation_requirements.txt\n")
     with pytest.raises(age.DeclarationError):
         age.inventory(tmp_path)
@@ -373,7 +386,24 @@ def test_includes_cycle_and_escape_are_rejected(tmp_path):
         age.inventory(tmp_path)
 
 
-def _assert_owned_source_contract_attribution(root):
+@pytest.mark.parametrize("name", ["agent-pull-requests", "agent-vault"])
+def test_account_service_sdk_uses_exact_attributed_runner_branch(name: str) -> None:
+    declarations, projects = age.inventory(REPO)
+    path = REPO / "plugins" / name / "pyproject.toml"
+    selected = [
+        row for row in declarations if row.path == path and row.ecosystem == "python"
+        and Requirement(row.requirement).name == "fleet-manager"
+    ]
+    assert selected
+    for row in selected:
+        requirement = Requirement(row.requirement)
+        assert age.contract_source(requirement, path, projects, REPO) == (
+            REPO / "fleet-manager" / "pyproject.toml"
+        )
+        assert age.local_source(requirement, path, projects, REPO)
+
+
+def _assert_owned_source_contract_attribution(root: Path) -> None:
     declarations, projects = age.inventory(root)
     refs = [
         (root / "plugins" / "agent-index" / "server" / "pyproject.toml", "agent-index"),
@@ -390,14 +420,14 @@ def _assert_owned_source_contract_attribution(root):
         assert age.attributed_project(Requirement(name), target.parent, projects, root)
         for declaration in declarations:
             req = Requirement(declaration.requirement) if declaration.ecosystem == "python" else None
-            if declaration.path == path and req.name == name:
+            if declaration.path == path and req is not None and req.name == name:
                 assert age.local_source(req, path, projects, root)
                 count += 1
     assert count == 7
 
 
 @pytest.mark.parametrize("materialized", [False, True])
-def test_owned_references_have_existing_source_contract_attribution(materialized):
+def test_owned_references_have_existing_source_contract_attribution(materialized: bool) -> None:
     if not materialized:
         _assert_owned_source_contract_attribution(REPO)
         return
@@ -417,7 +447,7 @@ def test_owned_references_have_existing_source_contract_attribution(materialized
     archive = subprocess.run(
         ["git", "-C", str(REPO), "archive", "--format=tar", "HEAD"],
         check=True, capture_output=True, timeout=120, env=environment,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if sys.platform == "win32" else 0,
     ).stdout
     with tempfile.TemporaryDirectory(prefix="da-") as temporary:
         root = Path(temporary) / "m"
@@ -436,7 +466,7 @@ def test_owned_references_have_existing_source_contract_attribution(materialized
         result = subprocess.run(
             [sys.executable, "-I", "-B", "-S", "-c", program, str(root)],
             check=True, capture_output=True, text=True, timeout=120, env=environment,
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if sys.platform == "win32" else 0,
         )
         log = json.loads(result.stdout)
         assert not any(entry.startswith("SKIP") for entry in log), log
@@ -453,7 +483,7 @@ def test_owned_references_have_existing_source_contract_attribution(materialized
 @pytest.mark.parametrize("mode", [
     "present", "removed", "other-plugin", "unguarded", "wrong-identity", "escaped",
 ])
-def test_plugin_source_contract_requires_exact_runner_and_canonical_identity(tmp_path, mode):
+def test_plugin_source_contract_requires_exact_runner_and_canonical_identity(tmp_path: Path, mode: str) -> None:
     path = project(tmp_path, dependencies='"owned[auth]>=1"')
     source = write(tmp_path / "fleet-manager" / "pyproject.toml",
                    '[project]\nname = "owned"\nversion = "1.0"\n')
@@ -489,7 +519,7 @@ def _ensure_venv(name, uv, reinstall=False):
     None, "undeclared", "missing", "identity", "version", "extra",
     "library-consumer", "unknown-project", "escape",
 ])
-def test_explicit_application_source_requires_canonical_attributable_input(tmp_path, fault):
+def test_explicit_application_source_requires_canonical_attributable_input(tmp_path: Path, fault: str) -> None:
     consumer = tmp_path / ("libs" if fault == "library-consumer" else "plugins") / "consumer"
     selector = {
         "unknown-project": "standalone:unregistered",
@@ -519,7 +549,7 @@ def test_explicit_application_source_requires_canonical_attributable_input(tmp_p
         )
         requested = []
 
-        def fetch(url):
+        def fetch(url: str) -> str:
             requested.append(url)
             return json.dumps({"releases": {"1": release()}})
 
@@ -533,7 +563,7 @@ def test_explicit_application_source_requires_canonical_attributable_input(tmp_p
 
 
 @pytest.mark.parametrize("relative", [".marketplace/owned-sdk", "applications/owned-sdk"])
-def test_declared_project_inventory_audits_dependencies_and_policy_without_core_roots(tmp_path, relative):
+def test_declared_project_inventory_audits_dependencies_and_policy_without_core_roots(tmp_path: Path, relative: str) -> None:
     from python_project_inventory import runtime_roots
 
     write(tmp_path / "pyproject.toml", (
@@ -554,7 +584,7 @@ def test_declared_project_inventory_audits_dependencies_and_policy_without_core_
     assert age.contract_source(Requirement("owned-sdk[feature]>=1,<2"), consumer, projects, tmp_path) == source
     assert runtime_roots(tmp_path, {"owned-sdk": (source.parent, {})})["core"] == []
 
-    def metadata(files):
+    def metadata(files: list[dict[str, Any]]) -> Callable[[str], str]:
         return lambda _: json.dumps({"releases": {"1": files}})
 
     assert age.audit(tmp_path, fetch=metadata(release()), now=NOW)[1] == []
@@ -566,7 +596,7 @@ def test_declared_project_inventory_audits_dependencies_and_policy_without_core_
 
 
 @pytest.mark.parametrize("relative", ["libs/consumer", "apps/other/libs/consumer"])
-def test_declared_library_cannot_gain_application_source_audit_exemptions(tmp_path, relative):
+def test_declared_library_cannot_gain_application_source_audit_exemptions(tmp_path: Path, relative: str) -> None:
     write(tmp_path / "pyproject.toml", (
         '[tool.copilot-extensions.python-projects]\n'
         f'consumer="{relative}"\n'
@@ -589,7 +619,7 @@ def test_declared_library_cannot_gain_application_source_audit_exemptions(tmp_pa
     ("agent-dispatch", "agent-pull-requests", "plugins/agent-pull-requests"),
     ("agent-dispatch", "fleet-manager", "fleet-manager"),
 ])
-def test_replay_preparation_keeps_attributable_source_branches(plugin, dependency, source):
+def test_replay_preparation_keeps_attributable_source_branches(plugin: str, dependency: str, source: str) -> None:
     _, projects = age.inventory(REPO)
     path = REPO / "plugins" / plugin / "pyproject.toml"
     assert age.contract_source(Requirement(dependency), path, projects, REPO) == (
@@ -608,7 +638,7 @@ def test_replay_preparation_keeps_attributable_source_branches(plugin, dependenc
     "after-nonmatching-return", "after-partial-branch",
     "branch-return", "branch-raise", "branch-true-return", "branch-partial-return",
 ])
-def test_plugin_contract_follows_only_invoked_canonical_preparation(tmp_path, mode):
+def test_plugin_contract_follows_only_invoked_canonical_preparation(tmp_path: Path, mode: str) -> None:
     path = project(tmp_path, dependencies='"owned"')
     source = write(tmp_path / "libs/owned/pyproject.toml", '[project]\nname="owned"\n')
     helper = """
@@ -709,7 +739,7 @@ def _prepare_venv(name, uv, *, reinstall, environment):
         } else None
     )
     if mode == "called":
-        trees = {}
+        trees: dict[Path, tuple[str, ast.Module]] = {}
         assert age.contract_source(
             Requirement("owned"), path, projects, tmp_path, source_trees=trees,
         ) == source
@@ -719,7 +749,7 @@ def _prepare_venv(name, uv, *, reinstall, environment):
         ) is None
 
 
-def test_standalone_source_contract_revoked_if_paths_or_registration_disappear(tmp_path):
+def test_standalone_source_contract_revoked_if_paths_or_registration_disappear(tmp_path: Path) -> None:
     project(tmp_path, "services/demo", dependencies='"owned"')
     write(tmp_path / "libs" / "owned" / "pyproject.toml", '[project]\nname = "owned"\n')
     registry = write(tmp_path / "tools" / "standalone_consumers.py", 'STANDALONE_CONSUMERS = ("services/demo",)\n')
@@ -738,7 +768,7 @@ def prepare(component, python):
     assert age.contract_source(Requirement("owned"), path, projects, tmp_path) is None
 
 
-def _plugin_source_evidence(root):
+def _plugin_source_evidence(root: Path) -> Path:
     project(root, dependencies='"owned"')
     write(root / "libs" / "owned" / "pyproject.toml", '[project]\nname = "owned"\n')
     return write(root / "tools" / "run-plugin-tests.py", """
@@ -749,7 +779,7 @@ def _ensure_venv(name, uv, reinstall=False):
 """)
 
 
-def test_audit_parses_each_identical_source_contract_once(tmp_path, monkeypatch):
+def test_audit_parses_each_identical_source_contract_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     plugin = _plugin_source_evidence(tmp_path)
     project(tmp_path, "services/demo", dependencies='"owned", "external>=1"')
     registry = write(
@@ -763,17 +793,17 @@ def prepare(component, python):
 """)
     sources = {path.read_text(encoding="utf-8"): path for path in (plugin, registry, standalone)}
     calls = []
-    parse = age.ast.parse
+    parse = ast.parse
 
-    def observed_parse(source, *args, **kwargs):
+    def observed_parse(source: str, *args: Any, **kwargs: Any) -> ast.AST:
         if source in sources:
             calls.append(sources[source])
-        return parse(source, *args, **kwargs)
+        return cast(ast.AST, parse(source, *args, **kwargs))
 
-    monkeypatch.setattr(age.ast, "parse", observed_parse)
+    monkeypatch.setattr(ast, "parse", observed_parse)
     fetched = []
 
-    def fetch(url):
+    def fetch(url: str) -> str:
         fetched.append(url)
         return json.dumps({"releases": {"1": release()}})
 
@@ -788,11 +818,11 @@ def prepare(component, python):
 
 
 @pytest.mark.parametrize("mode", ["changed", "syntax", "encoding", "read-error", "removed"])
-def test_source_evidence_is_reread_within_one_audit(tmp_path, monkeypatch, mode):
+def test_source_evidence_is_reread_within_one_audit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str) -> None:
     runner = _plugin_source_evidence(tmp_path)
     read_text = Path.read_text
 
-    def fetch(url):
+    def fetch(url: str) -> str:
         assert "/builder/" in url or "/owned/" in url
         if "/builder/" in url:
             if mode == "changed":
@@ -802,7 +832,7 @@ def test_source_evidence_is_reread_within_one_audit(tmp_path, monkeypatch, mode)
             elif mode == "encoding":
                 runner.write_bytes(b"\xff")
             elif mode == "read-error":
-                def denied(path, *args, **kwargs):
+                def denied(path: Path, *args: Any, **kwargs: Any) -> str:
                     if path == runner:
                         raise PermissionError("source evidence unreadable")
                     return read_text(path, *args, **kwargs)
@@ -822,11 +852,11 @@ def test_source_evidence_is_reread_within_one_audit(tmp_path, monkeypatch, mode)
                 else "specifier admits no seasoned stable, non-yanked public release") in errors[0]
 
 
-def test_later_audit_observes_source_contract_revocation(tmp_path):
+def test_later_audit_observes_source_contract_revocation(tmp_path: Path) -> None:
     runner = _plugin_source_evidence(tmp_path)
     fetched = []
 
-    def fetch(url):
+    def fetch(url: str) -> str:
         fetched.append(url)
         return json.dumps({"releases": {"1": release(NOW) if "/owned/" in url else release()}})
 
@@ -842,7 +872,7 @@ def test_later_audit_observes_source_contract_revocation(tmp_path):
     "canonical", "embedded", "removed-core", "unregistered", "undeclared", "missing-mapping",
     "wrong-identity", "escaped", "conditional", "duplicate", "changed-closure",
 ])
-def test_standalone_source_contract_follows_only_selected_core_mapping(tmp_path, mode):
+def test_standalone_source_contract_follows_only_selected_core_mapping(tmp_path: Path, mode: str) -> None:
     path = project(tmp_path, "services/demo", dependencies='"core", "owned"')
     core = write(
         tmp_path / "plugins" / "core" / "pyproject.toml",
@@ -895,7 +925,7 @@ def prepare(component, python):
         assert age.contract_source(req, path, projects, tmp_path) == expected
 
 
-def test_engine_source_contract_requires_both_platforms_and_canonical_parent(tmp_path):
+def test_engine_source_contract_requires_both_platforms_and_canonical_parent(tmp_path: Path) -> None:
     parent = project(tmp_path, "plugins/demo")
     child = project(tmp_path, "plugins/demo/server", dependencies='"demo"')
     sh = write(tmp_path / "plugins" / "demo" / "scripts" / "install.sh",
@@ -912,10 +942,10 @@ def test_engine_source_contract_requires_both_platforms_and_canonical_parent(tmp
     assert age.contract_source(Requirement("demo"), child, projects, tmp_path) is None
 
 
-def test_actual_repository_external_closure_with_controlled_metadata():
+def test_actual_repository_external_closure_with_controlled_metadata() -> None:
     declarations, projects = age.inventory(REPO)
-    releases = {}
-    npm_releases = {}
+    releases: dict[str, dict[str, list[dict[str, Any]]]] = {}
+    npm_releases: dict[str, dict[str, dict[str, Any]]] = {}
     for declaration in declarations:
         if declaration.ecosystem == "npm":
             name, spec = declaration.requirement.split(" ", 1)
@@ -925,16 +955,16 @@ def test_actual_repository_external_closure_with_controlled_metadata():
         req = Requirement(declaration.requirement)
         if declaration.path in projects and age.local_source(req, declaration.path, projects, REPO):
             continue
-        versions = releases.setdefault(age.canonicalize_name(req.name), {"1": release()})
-        for spec in req.specifier:
-            if spec.operator in {">=", ">", "~=", "==", "==="}:
-                versions[str(Version(spec.version.removesuffix(".*")))] = release()
+        versions = releases.setdefault(canonicalize_name(req.name), {"1": release()})
+        for specifier in req.specifier:
+            if specifier.operator in {">=", ">", "~=", "==", "==="}:
+                versions[str(Version(specifier.version.removesuffix(".*")))] = release()
     calls = []
 
-    def fetch(url):
+    def fetch(url: str) -> str:
         calls.append(url)
         if url.startswith("https://registry.npmjs.org/"):
-            versions = npm_releases[age.unquote(url.rsplit("/", 1)[-1])]
+            versions = npm_releases[unquote(url.rsplit("/", 1)[-1])]
             return json.dumps({"versions": versions,
                                "time": {v: BOUNDARY.isoformat() for v in versions}})
         return json.dumps({"releases": releases[url.split("/")[-2]]})
@@ -945,13 +975,13 @@ def test_actual_repository_external_closure_with_controlled_metadata():
     assert errors == []
     assert set(calls) == {
         *("https://pypi.org/pypi/" + name + "/json" for name in releases),
-        *("https://registry.npmjs.org/" + age.quote(name, safe="") for name in npm_releases),
+        *("https://registry.npmjs.org/" + quote(name, safe="") for name in npm_releases),
     }
     assert len(set(calls)) == len(calls)
 
 
 @pytest.mark.parametrize("manifest_link", [False, True])
-def test_symlink_escape_refused_before_project_read(tmp_path, manifest_link):
+def test_symlink_escape_refused_before_project_read(tmp_path: Path, manifest_link: bool) -> None:
     root = tmp_path / "repo"
     outside = write(tmp_path / "outside" / "pyproject.toml", '[project]\nname = "owned"\n')
     project(root, dependencies='"owned"', other='[tool.uv.sources]\nowned = {path = "../../libs/owned"}')
@@ -969,7 +999,7 @@ def test_symlink_escape_refused_before_project_read(tmp_path, manifest_link):
         age.inventory(root)
 
 
-def test_unowned_project_copy_is_not_an_attributable_vendor(tmp_path):
+def test_unowned_project_copy_is_not_an_attributable_vendor(tmp_path: Path) -> None:
     project(tmp_path, dependencies='"owned"', other='[tool.uv.sources]\nowned = {path = "../../copies/owned"}')
     text = '[project]\nname = "owned"\ndependencies = ["external>=1"]\n'
     write(tmp_path / "libs" / "owned" / "pyproject.toml", text)
@@ -978,11 +1008,11 @@ def test_unowned_project_copy_is_not_an_attributable_vendor(tmp_path):
     assert len(errors) == 1 and "canonical dependency closure" in errors[0]
 
 
-def test_python_proof_independent_of_npm_metadata_failure(tmp_path):
+def test_python_proof_independent_of_npm_metadata_failure(tmp_path: Path) -> None:
     project(tmp_path)
     write(tmp_path / "tools" / "render" / "package.json", '{"dependencies":{"renderer":"1.0.0"}}')
 
-    def fetch(url):
+    def fetch(url: str) -> str:
         if "registry.npmjs.org" in url:
             raise OSError("metadata unavailable")
         return json.dumps({"releases": {"1": release()}})
@@ -993,23 +1023,23 @@ def test_python_proof_independent_of_npm_metadata_failure(tmp_path):
 
 
 @pytest.mark.parametrize("strict", [True, False])
-def test_npm_cli_respects_ca_registry_and_tls(monkeypatch, strict):
+def test_npm_cli_respects_ca_registry_and_tls(monkeypatch: pytest.MonkeyPatch, strict: bool) -> None:
     monkeypatch.setattr(age, "npm_command", lambda: ["node", "attributed/npm-cli.js"])
     monkeypatch.delenv("NODE_TLS_REJECT_UNAUTHORIZED", raising=False)
     calls = []
 
-    def run(argv, **kwargs):
+    def run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         calls.append(argv)
         assert kwargs["env"]["NODE_USE_SYSTEM_CA"] == "1"
         assert argv[:2] == ["node", "attributed/npm-cli.js"]
         if argv[2:4] == ["config", "get"]:
             assert argv[4] == "strict-ssl"
-            value = strict
+            value: object = strict
         else:
             value = {"versions": ["1.0.0"], "time": {"1.0.0": BOUNDARY.isoformat()}}
         return subprocess.CompletedProcess(argv, 0, json.dumps(value), "")
 
-    monkeypatch.setattr(age.subprocess, "run", run)
+    monkeypatch.setattr(subprocess, "run", run)
     if strict:
         data = json.loads(age.npm_public_metadata("@example/renderer"))
         assert data["versions"] == {"1.0.0": {}}
@@ -1024,18 +1054,18 @@ def test_npm_cli_respects_ca_registry_and_tls(monkeypatch, strict):
     assert all("set" not in argv and "install" not in argv and "ci" not in argv for argv in calls)
 
 
-def test_npm_insecure_environment_refused(monkeypatch):
+def test_npm_insecure_environment_refused(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(age, "npm_command", lambda: pytest.fail("must reject before spawning"))
     monkeypatch.setenv("NODE_TLS_REJECT_UNAUTHORIZED", "0")
     with pytest.raises(age.DeclarationError):
         age.npm_public_metadata("renderer")
 
 
-def test_npm_selector_reuses_node_and_attributable_cli_without_cmd_spawn(tmp_path, monkeypatch):
+def test_npm_selector_reuses_node_and_attributable_cli_without_cmd_spawn(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     node = write(tmp_path / "node-bin" / "node", "")
     shim = write(node.parent / "npm.cmd", "")
     cli = write(node.parent / "node_modules" / "npm" / "bin" / "npm-cli.js", "")
-    monkeypatch.setattr(age.shutil, "which", lambda name: str(node if name == "node" else shim))
+    monkeypatch.setattr(shutil, "which", lambda name: str(node if name == "node" else shim))
     assert age.npm_command() == [str(node), str(cli)]
     cli.unlink()
     with pytest.raises(age.DeclarationError):
@@ -1043,11 +1073,11 @@ def test_npm_selector_reuses_node_and_attributable_cli_without_cmd_spawn(tmp_pat
 
 
 @pytest.mark.parametrize("failure", ["timeout", "bad-json", "missing-versions"])
-def test_npm_metadata_transport_bounded_and_fail_closed(monkeypatch, failure):
+def test_npm_metadata_transport_bounded_and_fail_closed(monkeypatch: pytest.MonkeyPatch, failure: str) -> None:
     monkeypatch.setattr(age, "npm_command", lambda: ["node", "attributed/npm-cli.js"])
     monkeypatch.delenv("NODE_TLS_REJECT_UNAUTHORIZED", raising=False)
 
-    def run(argv, **kwargs):
+    def run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         if "config" in argv:
             assert kwargs["timeout"] == 15
             return subprocess.CompletedProcess(argv, 0, "true", "")
@@ -1056,13 +1086,13 @@ def test_npm_metadata_transport_bounded_and_fail_closed(monkeypatch, failure):
             raise subprocess.TimeoutExpired(argv, 40)
         return subprocess.CompletedProcess(argv, 0, "invalid" if failure == "bad-json" else "{}", "")
 
-    monkeypatch.setattr(age.subprocess, "run", run)
+    monkeypatch.setattr(subprocess, "run", run)
     with pytest.raises(age.DeclarationError):
         age.npm_public_metadata("renderer")
 
 
-def test_npm_ca_transport_skips_urllib_only_for_authoritative_public_url(monkeypatch):
-    def unavailable(_):
+def test_npm_ca_transport_skips_urllib_only_for_authoritative_public_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    def unavailable(_: str) -> bytes:
         raise OSError("TLS")
 
     monkeypatch.setattr(age, "_default_fetch", unavailable)
@@ -1072,7 +1102,7 @@ def test_npm_ca_transport_skips_urllib_only_for_authoritative_public_url(monkeyp
         age.fetch_release_metadata("https://pypi.org/pypi/example/json")
 
 
-def test_dynamic_and_unsupported_requirements_fail_closed(tmp_path):
+def test_dynamic_and_unsupported_requirements_fail_closed(tmp_path: Path) -> None:
     path = project(tmp_path, other='dynamic = ["dependencies"]')
     with pytest.raises(age.DeclarationError):
         age.inventory(tmp_path)
@@ -1082,9 +1112,9 @@ def test_dynamic_and_unsupported_requirements_fail_closed(tmp_path):
         age.inventory(tmp_path)
 
 
-def test_npm_controlled_metadata():
+def test_npm_controlled_metadata() -> None:
     semver = lambda *_: (["2.6.2"], ["2.6.2", "2.7.0"])
-    metadata = {"versions": {"2.6.2": {}, "2.7.0": {}},
+    metadata: dict[str, Any] = {"versions": {"2.6.2": {}, "2.7.0": {}},
                 "time": {"2.6.2": BOUNDARY.isoformat(), "2.7.0": NOW.isoformat()}}
     age.check_npm("^2.6.2", metadata, NOW, semver)
     for timestamp in (NOW.isoformat(), None, (NOW + timedelta(seconds=1)).isoformat()):
@@ -1093,7 +1123,7 @@ def test_npm_controlled_metadata():
             age.check_npm("^2.6.2", metadata, NOW, semver)
 
 
-def test_npm_yanked_missing_and_incompatible():
+def test_npm_yanked_missing_and_incompatible() -> None:
     metadata = {"versions": {"1.0.0": {"yanked": True}}, "time": {"1.0.0": BOUNDARY.isoformat()}}
     with pytest.raises(age.DeclarationError):
         age.check_npm("1.0.0", metadata, NOW, lambda *_: (["1.0.0"], ["1.0.0"]))
@@ -1104,7 +1134,7 @@ def test_npm_yanked_missing_and_incompatible():
 
 
 @pytest.mark.skipif(not shutil.which("node") or not shutil.which("npm"), reason="requires npm toolchain")
-def test_real_npm_semver_toolchain_without_network():
+def test_real_npm_semver_toolchain_without_network() -> None:
     assert age.npm_versions("^2.6.2", ["2.6.2", "2.7.0", "3.0.0", "2.8.0-beta.1"]) == (
         ["2.6.2"], ["2.6.2", "2.7.0"])
     assert age.npm_versions("1.0.0 || >=2.0.0 <3", ["1.0.0", "2.1.0", "3.0.0"]) == (
@@ -1113,7 +1143,7 @@ def test_real_npm_semver_toolchain_without_network():
         age.npm_versions("https://example.invalid/package.tgz", [])
 
 
-def test_canonical_manifest_syntax_fastapi_floor_and_cooldown():
+def test_canonical_manifest_syntax_fastapi_floor_and_cooldown() -> None:
     import yaml
 
     declarations, projects = age.inventory(REPO)
@@ -1149,8 +1179,12 @@ def test_canonical_manifest_syntax_fastapi_floor_and_cooldown():
 
 
 @pytest.mark.parametrize("violations,expected", [([], 0), (["unseasoned declaration"], 1)])
-def test_cli_exit_status_without_network(monkeypatch, capsys, violations, expected):
+def test_cli_exit_status_without_network(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    violations: list[str], expected: int,
+) -> None:
     spec = importlib.util.spec_from_file_location("dependency_age_cli", REPO / "tools" / "check-dependency-age.py")
+    assert spec is not None and spec.loader is not None
     cli = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(cli)
     monkeypatch.setattr(sys, "argv", ["check-dependency-age.py"])
@@ -1161,25 +1195,25 @@ def test_cli_exit_status_without_network(monkeypatch, capsys, violations, expect
 
 @pytest.mark.parametrize("value", ["7 days", "14 days", "1 week", "168 hours", "604800 seconds", "6 days 24 hours",
                                          "2026-10-06", "2026-10-06T00:00:00Z"])
-def test_native_uv_seven_day_boundary_and_stronger_settings(value):
+def test_native_uv_seven_day_boundary_and_stronger_settings(value: str) -> None:
     age.check_uv_policy({"tool": {"uv": {"exclude-newer": value}}}, NOW)
 
 
 @pytest.mark.parametrize("value", [None, False, "", "0", "6 days", "604799 seconds", "tomorrow",
                                          "-7 days", "2026-10-07", "2026-10-06T00:00:00"])
-def test_native_uv_missing_disabled_weaker_or_unknown_policy(value):
+def test_native_uv_missing_disabled_weaker_or_unknown_policy(value: str | bool | None) -> None:
     with pytest.raises(age.DeclarationError):
         age.check_uv_policy({"tool": {"uv": {"exclude-newer": value}}}, NOW)
 
 
 @pytest.mark.parametrize("override", [False, "", "0 days", "6 days", "2026-10-07"])
-def test_native_uv_package_override_cannot_disable_or_weaken(override):
+def test_native_uv_package_override_cannot_disable_or_weaken(override: str | bool) -> None:
     with pytest.raises(age.DeclarationError):
         age.check_uv_policy({"tool": {"uv": {"exclude-newer": "7 days",
                                            "exclude-newer-package": {"demo": override}}}}, NOW)
 
 
-def test_native_uv_stronger_global_and_pip_policy_cannot_be_weakened():
+def test_native_uv_stronger_global_and_pip_policy_cannot_be_weakened() -> None:
     for settings in ({"exclude-newer-package": {"demo": "7 days"}},
                      {"pip": {"exclude-newer": "7 days"}},
                      {"pip": {"exclude-newer": "21 days", "exclude-newer-package": {"demo": "14 days"}}},
@@ -1191,13 +1225,13 @@ def test_native_uv_stronger_global_and_pip_policy_cannot_be_weakened():
 
 
 @pytest.mark.parametrize("override", [False, "", "1 day", "21 days", "2026-09-01"])
-def test_index_specific_cutoffs_rejected_even_if_nominally_stronger(override):
+def test_index_specific_cutoffs_rejected_even_if_nominally_stronger(override: str | bool) -> None:
     with pytest.raises(age.DeclarationError, match="index-specific"):
         age.check_uv_policy({"tool": {"uv": {"exclude-newer": "7 days",
                                            "index": [{"name": "example", "exclude-newer": override}]}}}, NOW)
 
 
-def test_native_policy_enforced_by_live_guard_without_network(tmp_path):
+def test_native_policy_enforced_by_live_guard_without_network(tmp_path: Path) -> None:
     path = project(tmp_path)
     data = path.read_text()
     path.write_text(data.replace('exclude-newer = "7 days"', 'exclude-newer = "1 day"'))
@@ -1205,13 +1239,13 @@ def test_native_policy_enforced_by_live_guard_without_network(tmp_path):
     assert len(errors) == 1 and "[tool.uv]" in errors[0]
 
 
-def test_local_file_urls_only_exempt_attributable_canonical_sources(tmp_path):
+def test_local_file_urls_only_exempt_attributable_canonical_sources(tmp_path: Path) -> None:
     target = write(tmp_path / "libs" / "owned" / "pyproject.toml",
                    '[project]\nname = "owned"\ndependencies = ["external>=1"]\n')
     project(tmp_path, dependencies=f'"owned @ {target.parent.as_uri()}"')
     calls = []
 
-    def fetch(url):
+    def fetch(url: str) -> str:
         calls.append(url)
         return json.dumps({"releases": {"1": release()}})
 
@@ -1227,7 +1261,7 @@ def test_local_file_urls_only_exempt_attributable_canonical_sources(tmp_path):
             age.local_source(req, path, projects, tmp_path)
 
 
-def test_uv_resolution_inputs_inventory_actual_table_shapes(tmp_path):
+def test_uv_resolution_inputs_inventory_actual_table_shapes(tmp_path: Path) -> None:
     path = project(tmp_path, other="""
 [tool.uv]
 constraint-dependencies = ["constrained>=1.0"]
@@ -1243,7 +1277,7 @@ requires-python = ">=3.8"
 provides-extras = ["optional"]
 """)
     declarations, _ = age.inventory(tmp_path)
-    by_section = {}
+    by_section: dict[str, list[str]] = {}
     for declaration in declarations:
         by_section.setdefault(declaration.section, []).append(declaration.requirement)
     assert by_section["tool.uv.constraint-dependencies"] == ["constrained>=1.0"]
@@ -1261,7 +1295,7 @@ provides-extras = ["optional"]
         result = subprocess.run(
             ["uv", "pip", "list", "--show-settings", "--python", sys.executable],
             cwd=path.parent, capture_output=True, text=True, timeout=15,
-            **({"creationflags": subprocess.CREATE_NO_WINDOW} if age.os.name == "nt" else {}),
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if sys.platform == "win32" else 0,
         )
         assert result.returncode == 0, "actual UV parser rejected the resolution-input fixture"
 
@@ -1277,10 +1311,10 @@ provides-extras = ["optional"]
     ('[[tool.uv.dependency-metadata]]\nname = "metadata-target"\nrequires-dist = ["new>=1"]',
      "dependency-metadata"),
 ])
-def test_new_uv_resolution_inputs_cannot_hide_unseasoned_literals(tmp_path, table, section):
+def test_new_uv_resolution_inputs_cannot_hide_unseasoned_literals(tmp_path: Path, table: str, section: str) -> None:
     project(tmp_path, other=table)
 
-    def fetch(url):
+    def fetch(url: str) -> str:
         return json.dumps({"releases": {"1": release(NOW) if "/new/" in url else release(), "2": release()}})
 
     _, errors = age.audit(tmp_path, now=NOW, fetch=fetch)
@@ -1296,7 +1330,7 @@ def test_new_uv_resolution_inputs_cannot_hide_unseasoned_literals(tmp_path, tabl
     '[[tool.uv.dependency-metadata]]\nname = "external"\nversion = ">=1"',
     '[[tool.uv.dependency-metadata]]\nname = "external"\ndependencies = ["hidden>=1"]',
 ])
-def test_unsupported_uv_resolution_input_shapes_fail_closed(tmp_path, table):
+def test_unsupported_uv_resolution_input_shapes_fail_closed(tmp_path: Path, table: str) -> None:
     project(tmp_path, other=table)
     with pytest.raises(age.DeclarationError):
         age.inventory(tmp_path)

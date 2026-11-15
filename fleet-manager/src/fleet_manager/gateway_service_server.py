@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from agent_procutil.daemon_instances import (
-    DaemonInstanceGuard, admit_daemon_instance, daemon_entrypoint,
+    DaemonInstanceGuard, admit_daemon_instance,
 )
 
 import asyncio
@@ -17,7 +17,7 @@ import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from aiohttp import HttpVersion11, WSMsgType, web
 
@@ -30,12 +30,15 @@ from .gateway_service_channel import (
 )
 from .gateway_service_context import ServiceContext, ServicePolicyError
 from .gateway_identity_provider import IdentityProvider
+from .gateway_legacy_interop import OperationLedgerFactory, Settlement
 from .gateway_service_listener import Listener, read_bounded
 from .gateway_service_policy import ServiceAuthority, ServiceCandidate
 from .gateway_manifest import RouteSpec, ServiceSlot
 from .gateway_service_handler import PROFILE
 from .gateway_service_handler import CallerContext, RequestLifetime, ServiceRequest, ServiceResponse
-from .gateway_local_handler import LocalHandlerBinding, LocalServiceRequest, settled
+from .gateway_local_handler import (
+    LocalHandlerBinding, LocalServiceRequest, settled as legacy_settled,
+)
 from .gateway_service_policy import CallerGrant
 from .gateway_controller_services import (
     PROFILE as CONTROLLER_PROFILE, ConnectedService, ControllerService, admitted_services, services,
@@ -46,7 +49,8 @@ from .planning import PlanError
 from .private_state import create_private_file, private_directory, validate_private_file
 
 LOG = logging.getLogger(__name__)
-STATE = web.AppKey("fleet-service-state", object)
+settled = cast(Settlement, legacy_settled)
+STATE: web.AppKey[ServiceRuntime] = web.AppKey("fleet-service-state")
 DISPATCHED = web.RequestKey("fleet-service-dispatched", bool)
 BUFFERED_BODY = web.RequestKey("fleet-service-buffered-body", bytes)
 AUTH_URI = web.RequestKey("fleet-service-auth-uri", str)
@@ -117,6 +121,7 @@ class ServiceRuntime:
             channel = self.channels.get(slot.name)
             ready = channel is not None and not channel.closed and not self.stopping
             if ready:
+                assert channel is not None
                 try:
                     self.authority.revalidate_service(channel.grant)
                 except ServicePolicyError:
@@ -125,7 +130,7 @@ class ServiceRuntime:
             registered = local is not None and local.slot == slot and not self.stopping
             roles.append(RoleStatus(slot.name, "ready" if ready else (
                 "registered-local" if registered else "unavailable"),
-                                    channel.grant.generation if ready else None))
+                                    channel.grant.generation if ready and channel is not None else None))
         return RuntimeStatus(
             policy.revision, policy.generation, tuple(roles),
             self.last_error or policy.last_error)
@@ -233,6 +238,7 @@ class ServiceRuntime:
                 continue
             for item in channel.services:
                 if item.service == service:
+                    assert slot.principal is not None
                     result.append(ConnectedService(
                         name, channel.incarnation, channel.offer_epochs[item],
                         slot.principal, item.service, item.prefix))
@@ -244,7 +250,11 @@ class ServiceRuntime:
         check(not self.stopping and channel is not None and not channel.closed
               and channel.services is not None and channel.incarnation == offer.connection,
               "controller-service-unavailable", 503)
-        slot = self.authority.revalidate_service(channel.grant)
+        assert channel is not None and channel.services is not None
+        try:
+            slot = self.authority.revalidate_service(channel.grant)
+        except ServicePolicyError:
+            raise TransportError("controller-service-unavailable", 503) from None
         selected = ControllerService(offer.service, offer.prefix)
         check(slot.principal == offer.principal
               and selected in channel.services and type(offer.generation) is str
@@ -258,6 +268,7 @@ class ServiceRuntime:
         local.checkpoint()
         selected = next((item for item in binding.sources if item.service == service), None)
         check(selected is not None, "controller-source-denied", 403)
+        assert selected is not None
         result = []
         for offer in self.service_offers(service):
             if offer.controller not in selected.controllers:
@@ -487,6 +498,7 @@ class ServiceRuntime:
                 asyncio.CancelledError) as exc:
             LOG.warning("service-channel-refused code=attachment-refused")
             if channel:
+                assert grant is not None
                 await channel.close("attachment-refused")
                 if self.channels.get(grant.slot) is channel:
                     del self.channels[grant.slot]
@@ -558,6 +570,7 @@ class ServiceRuntime:
                 pending.service_offer = next(
                     (item for item in channel.services if item.prefix == route.prefix), None)
                 check(pending.service_offer is not None, "controller-service-unavailable", 503)
+                assert pending.service_offer is not None
                 pending.service_epoch = channel.offer_epochs[pending.service_offer]
             self.checkpoint(channel, pending)
             channel.admit(pending)
@@ -920,34 +933,35 @@ async def start(listener: Listener, policy_path: Path, **kwargs: Any) -> Serving
         raise
 
 
-@daemon_entrypoint(
-    "fleet-manager-service-gateway", source=__file__, purpose="production",
-    runtime_root=lambda policy_path, tls_path, **kwargs: Path(os.path.abspath(policy_path)).parent,
-)
 def serve(policy_path: Path, tls_path: Path, *, operation_journal: Path | None = None,
           operation_authority: str | None = None, operation_installation: str | None = None) -> int:
     """Foreground runner; the external service manager owns process lifetime."""
-    policy_path = Path(os.path.abspath(policy_path))
-    try:
-        listener = Listener.load(tls_path)
-        check(listener.port != 0, "ephemeral-listener-sdk-only")
-        context = listener.tls()
-        journal = None
-        if operation_journal is not None:
-            check(operation_journal.is_absolute() and operation_authority is not None
-                  and operation_installation is not None, "invalid-enrollment-journal")
-            private_directory(operation_journal.parent)
-            if not operation_journal.exists():
-                descriptor = create_private_file(operation_journal)
-                os.close(descriptor)
-            validate_private_file(operation_journal)
-            journal = OperationLedger(
-                operation_journal, authority=operation_authority,
-                installation=operation_installation, enable_enrollment=True)
-        web.run_app(build_app(listener, policy_path, enrollment_journal=journal), host=listener.host,
-                    port=listener.port, ssl_context=context, access_log=None,
-                    print=None, shutdown_timeout=5, handler_cancellation=True)
-        return 0
-    except (TransportError, ServicePolicyError, OSError, PlanError, sqlite3.Error):
-        LOG.error("service-start-refused code=invalid-bootstrap-or-policy")
-        return 1
+    with admit_daemon_instance(
+        "fleet-manager-service-gateway", source=__file__, purpose="production",
+        runtime_root=Path(os.path.abspath(policy_path)).parent,
+    ):
+        policy_path = Path(os.path.abspath(policy_path))
+        try:
+            listener = Listener.load(tls_path)
+            check(listener.port != 0, "ephemeral-listener-sdk-only")
+            context = listener.tls()
+            journal = None
+            if operation_journal is not None:
+                check(operation_journal.is_absolute() and operation_authority is not None
+                      and operation_installation is not None, "invalid-enrollment-journal")
+                assert operation_authority is not None and operation_installation is not None
+                private_directory(operation_journal.parent)
+                if not operation_journal.exists():
+                    descriptor = create_private_file(operation_journal)
+                    os.close(descriptor)
+                validate_private_file(operation_journal)
+                journal = cast(OperationLedgerFactory, OperationLedger)(
+                    operation_journal, authority=operation_authority,
+                    installation=operation_installation, enable_enrollment=True)
+            web.run_app(build_app(listener, policy_path, enrollment_journal=journal), host=listener.host,
+                        port=listener.port, ssl_context=context, access_log=None,
+                        print=None, shutdown_timeout=5, handler_cancellation=True)
+            return 0
+        except (TransportError, ServicePolicyError, OSError, PlanError, sqlite3.Error):
+            LOG.error("service-start-refused code=invalid-bootstrap-or-policy")
+            return 1

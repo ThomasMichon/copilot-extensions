@@ -1,0 +1,359 @@
+"""Git Credential Manager (GCM) proxy source.
+
+Proxies credential requests to the local ``git credential`` command,
+which typically resolves through Git Credential Manager. Includes
+WSL detection (routes through PowerShell when running under WSL),
+credential caching with TTL, and request coalescing for expensive
+GCM roundtrips.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import contextlib
+import logging
+import os
+import shutil
+import subprocess
+import sys
+import time
+from collections.abc import Callable
+
+log = logging.getLogger("agent-codespaces.relay.git-credential")
+
+# Fields that GCM accepts -- newer git sends capability[], wwwauth[],
+# etc. that older GCM versions don't understand and may hang on.
+_CORE_FIELDS = {"protocol", "host", "username", "password", "path"}
+
+# Action mapping: relay protocol -> git credential subcommand
+_ACTION_MAP = {"get": "fill", "store": "approve", "erase": "reject"}
+
+# WSL detection
+_IS_WSL = (
+    os.path.exists("/proc/sys/fs/binfmt_misc/WSLInterop")
+    or "WSL" in os.environ.get("WSL_DISTRO_NAME", "")
+)
+
+# Subprocess flags (suppress console windows on Windows)
+_SUBPROCESS_FLAGS: int = getattr(subprocess, "CREATE_NO_WINDOW") if sys.platform == "win32" else 0
+
+# Non-interactive environment for `git credential fill`. Without this, a host
+# Git Credential Manager with no cached/valid token may block on an interactive
+# prompt (browser/console) -- observed as a ~52-min `git credential fill` hang.
+# These force GCM/git to fail fast instead, so the relay can return quit=1 and
+# the CodeSpace caller gets a prompt auth error rather than an open-ended wait.
+_NONINTERACTIVE_ENV = {
+    "GIT_TERMINAL_PROMPT": "0",
+    "GCM_INTERACTIVE": "never",
+    "GCM_GUI_PROMPT": "false",
+}
+
+_DEFAULT_GITHUB_HOSTS = frozenset({"github.com"})
+
+
+def _normalize_host(host: str | None) -> str:
+    return (host or "").strip().lower()
+
+
+def _noninteractive_env() -> dict[str, str]:
+    """Return a copy of the process env with interactive prompts disabled."""
+    env = dict(os.environ)
+    env.update(_NONINTERACTIVE_ENV)
+    return env
+
+
+def _powershell() -> str | None:
+    """Resolve PowerShell lazily so tests can gate PATH access before use."""
+    return shutil.which("powershell.exe") if _IS_WSL else None
+
+
+async def _reap(proc: asyncio.subprocess.Process | None) -> None:
+    """Kill and reap a helper still running after a timeout or cancellation
+    (a no-op once it has exited). Safe to await from a cancelled task."""
+    if proc is None or proc.returncode is not None:
+        return
+    with contextlib.suppress(ProcessLookupError, OSError):
+        proc.kill()
+    with contextlib.suppress(Exception, asyncio.CancelledError):
+        await asyncio.wait_for(proc.wait(), timeout=5.0)
+
+
+class GitCredentialSource:
+    """Proxies git-credential requests to local Git Credential Manager.
+
+    Features:
+    - WSL: routes through ``powershell.exe`` to reach Windows-side GCM
+    - Caching: TTL-based cache for expensive GCM roundtrips (~25s via PS)
+    - Coalescing: concurrent requests for the same cache key share one
+      GCM invocation
+    - Field filtering: strips non-core fields to avoid GCM hangs
+    """
+
+    def __init__(
+        self,
+        cache_ttl: float = 300.0,
+        *,
+        github_username: str | None = None,
+        username_resolver: Callable[[dict[str, str]], str | None] | None = None,
+        github_hosts: list[str] | tuple[str, ...] | None = None,
+    ) -> None:
+        self._cache_ttl = cache_ttl
+        self._github_username = (github_username or "").strip() or None
+        self._username_resolver = username_resolver
+        self._github_hosts = frozenset(
+            _normalize_host(host) for host in (github_hosts or _DEFAULT_GITHUB_HOSTS)
+        )
+        # {cache_key: (response_text, expiry_time)}
+        self._cache: dict[tuple[str, ...], tuple[str, float]] = {}
+        # {cache_key: asyncio.Future} for in-flight request coalescing
+        self._inflight: dict[tuple[str, ...], asyncio.Future[str | None]] = {}
+        self._lock = asyncio.Lock()
+
+    @property
+    def name(self) -> str:
+        return "git-credential"
+
+    def supports(self, action: str, fields: dict[str, str]) -> bool:
+        """Supports standard git credential actions (get, store, erase)."""
+        return action in ("get", "store", "erase", "fill", "approve", "reject")
+
+    async def resolve(
+        self, action: str, fields: dict[str, str], *, timeout: float = 30.0,
+    ) -> str | None:
+        """Resolve a git credential request via local GCM."""
+        # Normalize action
+        git_action = _ACTION_MAP.get(action, action)
+        fields = self._fields_with_profile_username(git_action, fields)
+
+        # Build filtered input
+        filtered_input = self._filter_fields(fields)
+
+        # Store/erase: execute directly, invalidate cache
+        if git_action in ("approve", "reject"):
+            result = await self._run_git_credential(
+                git_action, filtered_input, timeout=timeout,
+            )
+            # Invalidate cache for this host
+            protocol, host, _username = self._cache_key(fields)
+            async with self._lock:
+                for key in list(self._cache):
+                    if key[0] == protocol and key[1] == host:
+                        self._cache.pop(key, None)
+            return result
+
+        # Fill: check cache, coalesce, call GCM
+        cache_key = self._cache_key(fields)
+        coalesced_future: asyncio.Future[str | None] | None = None
+
+        # Check cache and in-flight requests under lock
+        async with self._lock:
+            if cache_key in self._cache:
+                cached, expiry = self._cache[cache_key]
+                if time.time() < expiry:
+                    log.info(
+                        "Cache hit for %s (expires in %ds)",
+                        fields.get("host", "?"),
+                        int(expiry - time.time()),
+                    )
+                    return cached
+                del self._cache[cache_key]
+
+            # Check for in-flight request (coalescing)
+            if cache_key in self._inflight:
+                coalesced_future = self._inflight[cache_key]
+                log.info("Coalescing request for %s", fields.get("host", "?"))
+
+        if coalesced_future is not None:
+            return await coalesced_future
+
+        # No cache, no in-flight -- start resolution
+        loop = asyncio.get_running_loop()
+        future = loop.create_future()
+
+        async with self._lock:
+            self._inflight[cache_key] = future
+
+        try:
+            result = await self._run_git_credential(
+                "fill", filtered_input, timeout=max(timeout, 60.0),
+            )
+
+            # A `fill` result without a password line is not a usable credential.
+            # It happens when GCM produced no token non-interactively -- e.g. an
+            # expired/lapsed ADO (Entra) login it cannot silently refresh under
+            # GCM_INTERACTIVE=never. Treat it as UNRESOLVED (return None) so the
+            # relay sends a clean quit=1 fail-fast and git aborts with a clear
+            # error, instead of forwarding a password-less partial credential
+            # that makes git fail with a bare, undiagnosable exit 128 (the
+            # "relay serves nothing" symptom, dotfiles #1659). Log it so the
+            # cause is visible in the daemon log next time.
+            if result is not None and "password=" not in result:
+                log.warning(
+                    "git-credential fill for %s returned no password -- GCM "
+                    "produced no credential (likely an expired/lapsed login "
+                    "with no silent refresh under non-interactive mode); "
+                    "returning unresolved so the relay fails fast",
+                    fields.get("host", "?"),
+                )
+                result = None
+
+            # Cache successful responses
+            if result and "password=" in result:
+                async with self._lock:
+                    self._cache[cache_key] = (result, time.time() + self._cache_ttl)
+                    log.info(
+                        "Cached credential for %s (TTL: %ds)",
+                        fields.get("host", "?"),
+                        int(self._cache_ttl),
+                    )
+
+            future.set_result(result)
+            return result
+        except Exception as exc:
+            future.set_exception(exc)
+            return None
+        finally:
+            async with self._lock:
+                self._inflight.pop(cache_key, None)
+
+    def _filter_fields(self, fields: dict[str, str]) -> str:
+        """Build git-credential input with only core fields."""
+        lines = [
+            f"{k}={v}" for k, v in fields.items()
+            if k in _CORE_FIELDS
+        ]
+        return "\n".join(lines) + "\n"
+
+    def _fields_with_profile_username(
+        self, action: str, fields: dict[str, str],
+    ) -> dict[str, str]:
+        """Inject a profile-selected GitHub account before GCM is called."""
+        if action != "fill" or fields.get("username"):
+            return fields
+        if fields.get("protocol", "https").lower() != "https":
+            return fields
+        if _normalize_host(fields.get("host")) not in self._github_hosts:
+            return fields
+        username = (
+            self._github_username
+            or (self._username_resolver(fields) if self._username_resolver else None)
+        )
+        username = (username or "").strip()
+        if not username:
+            return fields
+        enriched = dict(fields)
+        enriched["username"] = username
+        log.info(
+            "Using profile-bound GitHub account for %s credential lookup",
+            fields.get("host", "?"),
+        )
+        return enriched
+
+    def _cache_key(self, fields: dict[str, str]) -> tuple[str, str, str]:
+        """Build a cache key from credential fields.
+
+        Includes username so profile-bound GitHub accounts cannot receive a
+        sibling account's cached credential. Store/erase invalidates every
+        username for the host.
+        """
+        return (
+            fields.get("protocol", ""),
+            fields.get("host", ""),
+            fields.get("username", ""),
+        )
+
+    async def _run_git_credential(
+        self, action: str, credential_input: str, *, timeout: float = 30.0,
+    ) -> str | None:
+        """Run ``git credential <action>`` as a subprocess."""
+        if _IS_WSL and _powershell() and action == "fill":
+            return await self._run_via_powershell(credential_input, timeout=timeout)
+        return await self._run_directly(action, credential_input, timeout=timeout)
+
+    async def _run_directly(
+        self, action: str, credential_input: str, *, timeout: float = 30.0,
+    ) -> str | None:
+        """Run git credential directly; a timed-out or cancelled helper is killed."""
+        proc = None
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "git", "credential", action,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                creationflags=_SUBPROCESS_FLAGS,
+                env=_noninteractive_env(),
+            )
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(input=credential_input.encode()),
+                timeout=timeout,
+            )
+        except (TimeoutError, asyncio.TimeoutError):
+            log.error("git credential %s timed out (%.0fs)", action, timeout)
+            return None
+        except FileNotFoundError:
+            log.error("git not found on PATH")
+            return None
+        finally:
+            await _reap(proc)
+
+        if proc.returncode != 0:
+            log.error(
+                "git credential %s failed (exit %d): %s",
+                action, proc.returncode,
+                stderr.decode(errors="replace").strip(),
+            )
+            return None
+
+        response = stdout.decode(errors="replace")
+        if response and not response.endswith("\n\n"):
+            response = response.rstrip("\n") + "\n\n"
+        return response
+
+    async def _run_via_powershell(
+        self, credential_input: str, *, timeout: float = 60.0,
+    ) -> str | None:
+        """Run git credential fill via PowerShell (WSL -> Windows GCM)."""
+        powershell = _powershell()
+        if not powershell:
+            log.error("PowerShell not found for WSL credential proxy")
+            return None
+
+        # Build PowerShell command with array piping
+        lines = [
+            line for line in credential_input.strip().split("\n")
+            if line.strip()
+        ]
+        ps_array = ",".join(f"'{line}'" for line in lines) + ",''"
+        ps_cmd = f"@({ps_array}) | git credential fill"
+
+        proc = None
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                powershell, "-NoProfile", "-Command", ps_cmd,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=_noninteractive_env(),
+            )
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(), timeout=timeout,
+            )
+        except (TimeoutError, asyncio.TimeoutError):
+            log.error("PowerShell git credential fill timed out (%.0fs)", timeout)
+            return None
+        finally:
+            await _reap(proc)
+
+        if proc.returncode != 0:
+            log.error(
+                "PowerShell git credential fill failed (exit %d): %s",
+                proc.returncode,
+                stderr.decode(errors="replace").strip(),
+            )
+            return None
+
+        response = stdout.decode(errors="replace")
+        if response and not response.endswith("\n\n"):
+            response = response.rstrip("\n") + "\n\n"
+        return response
