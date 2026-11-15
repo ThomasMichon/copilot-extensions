@@ -75,6 +75,31 @@ def _initialize_fixture_repository(checkout, environment):
         assert result.returncode == 0, result.stdout + result.stderr
 
 
+def _fixture_record_source():
+    return (
+        "import json,sys;from pathlib import Path;"
+        "from agent_worktrees import tracking,config as cfg,record_reporting;"
+        "checkout=Path(sys.argv[1]);project=cfg.project_dir('native-copilot');"
+        "project.mkdir(parents=True,exist_ok=True);"
+        "(project/'config.yaml').write_text(json.dumps({'repo_name':'native-copilot','machine':'fixture',"
+        "'repos':{'native-copilot':{'anchor':str(checkout),'worktree_root':str(checkout.parent),"
+        "'default_branch':'dev','session_path':{'windows':[sys.argv[4]]}}}}),encoding='utf-8');"
+        "managed=sys.argv[3].startswith('manager-') or sys.argv[3] in {'embody','copilot'};"
+        "tracking_path=project/'worktrees' if managed else checkout;"
+        "tracking_path.mkdir(parents=True,exist_ok=True);"
+        "record=tracking.create_new_record(sys.argv[2],'worktree/native-copilot',str(checkout),"
+        "'native-copilot','fixture',cfg.detect_platform() if managed else 'win32',"
+        "tracking_path)\n"
+        "if managed or sys.argv[5]=='1':\n"
+        "    authority=cfg.inrepo_config_path(checkout);authority.parent.mkdir(parents=True,exist_ok=True)\n"
+        "    authority.write_text(json.dumps({'default_branch':'dev'}),encoding='utf-8')\n"
+        "if managed:\n"
+        "    record_reporting.require_current_subject(record,cfg.load_config("
+        "path=project/'config.yaml',project='native-copilot'))\n"
+        "print(json.dumps(str(record.yaml_path)))"
+    )
+
+
 def _manager_decision_source():
     return (
         "import json,sys\n"
@@ -296,17 +321,20 @@ def _qualify_native_worktrees(
     site_packages = None if installed else sysconfig.get_paths()["purelib"]
     prefix = [str(worktrees_python) if installed else sys.executable, "-I", "-B", "-X", "utf8"]
     home = tmp_path / (".copilot" if public_caller else "copilot-home")
-    checkout = tmp_path / "checkout"
+    profile = home.parent if public_caller else home
+    worktree_id = "driver-fixture-" + uuid4().hex
+    checkout = tmp_path / (
+        worktree_id if control.startswith("manager-") or public_caller else "checkout"
+    )
     home.mkdir()
     checkout.mkdir()
     temporary = tmp_path / "temp"
     temporary.mkdir()
     local_app_data = tmp_path / "local-app-data"
     local_app_data.mkdir()
-    mux_data = tmp_path / "psmux-data"
+    mux_data = profile / ".psmux"
     mux_data.mkdir()
     manager = control.startswith("manager-")
-    worktree_id = "driver-fixture-" + uuid4().hex
     manager_target = "wt-" + worktree_id
     (home / "config.json").write_text(
         json.dumps({"trustedFolders": [str(checkout)]}), encoding="utf-8",
@@ -350,8 +378,7 @@ def _qualify_native_worktrees(
         COPILOT_OFFLINE="true", COPILOT_PROVIDER_TYPE="openai",
         COPILOT_PROVIDER_BASE_URL=f"http://127.0.0.1:{provider.server_port}",
         COPILOT_PROVIDER_MODEL_ID="gpt-4.1", COPILOT_MODEL="gpt-4.1", USE_TGREP="false",
-        HOME=str(home.parent if public_caller else home),
-        USERPROFILE=str(home.parent if public_caller else home),
+        HOME=str(profile), USERPROFILE=str(profile),
         PSMUX_DATA_DIR=str(mux_data), PSMUX_CONFIG_FILE=os.devnull,
         PSMUX_NO_WARM="1", PSMUX_SERVER_DEBUG="1",
         WORKTREE_PANE_MIN_RUNTIME="0", WORKTREE_PANE_WAIT_TIMEOUT="0",
@@ -495,26 +522,11 @@ def _qualify_native_worktrees(
     try:
         # New panes need the private adapter in the normalized setup's own PATH.
         initialized = runtime(
-            "import json,sys;from pathlib import Path;from agent_worktrees import tracking,config as cfg;"
-            "checkout=Path(sys.argv[1]);project=cfg.project_dir('native-copilot');"
-            "project.mkdir(parents=True,exist_ok=True);"
-            "(project/'config.yaml').write_text(json.dumps({'repo_name':'native-copilot','machine':'fixture',"
-            "'repos':{'native-copilot':{'anchor':str(checkout),'default_branch':'dev',"
-            "'session_path':{'windows':[sys.argv[4]]}}}}),encoding='utf-8');"
-            "managed=sys.argv[3].startswith('manager-') or sys.argv[3] in {'embody','copilot'};"
-            "tracking_path=project/'worktrees' if managed else checkout;"
-            "tracking_path.mkdir(parents=True,exist_ok=True);"
-            "record=tracking.create_new_record(sys.argv[2],'worktree/native-copilot',str(checkout),"
-            "'native-copilot','fixture',cfg.detect_platform() if managed else 'win32',"
-            "tracking_path)\n"
-            "if sys.argv[3] in {'embody','copilot'} or sys.argv[5]=='1':\n"
-            "    authority=cfg.inrepo_config_path(checkout);authority.parent.mkdir(parents=True,exist_ok=True)\n"
-            "    authority.write_text(json.dumps({'default_branch':'dev'}),encoding='utf-8')\n"
-            "print(json.dumps(str(record.yaml_path)))",
+            _fixture_record_source(),
             checkout, worktree_id, control, mux_directory, "1" if manager_picker else "0",
         )
         record = Path(initialized)
-        if public_caller or manager_picker:
+        if public_caller or manager:
             _initialize_fixture_repository(checkout, environment)
         if manager:
             selected = runtime(
@@ -563,7 +575,7 @@ def _qualify_native_worktrees(
             attempt = record.parent / "launch-attempts" / plan["attempt"]
             native_args = [
                 "--session-id" if leg == "fresh" else "--resume", native,
-                "--screen-reader", "--no-auto-update", "--disable-builtin-mcps",
+                "--no-auto-update", "--disable-builtin-mcps",
                 "--no-custom-instructions", "--no-color", "--no-ask-user",
                 "--log-dir", str(tmp_path / ("logs-" + leg)),
             ]
@@ -682,11 +694,31 @@ def _qualify_native_worktrees(
                     owner_log.read_text(encoding="utf-8") if owner_log.exists() else "owner not started",
                     query("capture-pane", "-p", "-t", outer_target).stdout[-8192:],
                     pane_process(outer_target),
+                    json.dumps(mux_coverage_diagnostics()),
                     *[
                         path.read_text(encoding="utf-8", errors="replace")[-8192:]
-                        for path in (temporary / "worktree-setup-logs").glob("setup-*.log")
+                        for path in (
+                            *(temporary / "worktree-setup-logs").glob("setup-*.log"),
+                            *(home / ".psmux").glob("*.log"),
+                        )
                     ],
                 ])
+
+            def mux_coverage_diagnostics():
+                return runtime(
+                    "import json,os,time;from pathlib import Path;"
+                    "from agent_remote_driver import mux_inventory,windows_mux_processes\n"
+                    "try:\n"
+                    "    deadline=time.monotonic()+5\n"
+                    "    servers=windows_mux_processes.servers()\n"
+                    "    rows=mux_inventory._registrations(Path(os.environ['PSMUX_DATA_DIR']),servers,deadline)\n"
+                    "    covered={mux_inventory._query(port,key,deadline)[2] for port,key,_ in rows.values()}\n"
+                    "    print(json.dumps({'native_mux_servers':len(servers),"
+                    "'fixture_registered_servers':len(covered.intersection(servers)),"
+                    "'servers_outside_fixture_registration':len(set(servers)-covered)}))\n"
+                    "except Exception as error:\n"
+                    "    print(json.dumps({'fixture_mux_coverage_unavailable':type(error).__name__}))",
+                )
 
             driver_prefix = (
                 f"with open({str(owner_log)!r},'w',encoding='utf-8') as log:\n"
@@ -695,7 +727,7 @@ def _qualify_native_worktrees(
                 "  try:\n"
                 "    import ctypes,msvcrt,os,site,json\n    from pathlib import Path\n"
                 "    log.write(json.dumps({key:os.environ.get(key) for key in "
-                "('TMUX','TEMP','LOCALAPPDATA','WORKTREE_NO_MUX')})+'\\n');log.flush()\n"
+                "('TMUX','TEMP','LOCALAPPDATA','HOME','USERPROFILE','WORKTREE_NO_MUX')})+'\\n');log.flush()\n"
                 "    import shutil\n"
                 f"    assert Path(os.environ['LOCALAPPDATA']) == Path({str(local_app_data)!r})\n"
                 f"    assert shutil.which('psmux.exe') == {str(mux_directory / 'psmux.exe')!r}\n"
@@ -748,9 +780,7 @@ def _qualify_native_worktrees(
                     "new-session", "-d", "-s", outer_target, "-c", str(checkout),
                     *caller_environment, "--", *caller_command,
                 )
-                assert launched.returncode == 0, launched.stderr + (
-                    owner_log.read_text(encoding="utf-8") if owner_log.exists() else ""
-                )
+                assert launched.returncode == 0, launched.stderr + caller_diagnostics()
                 observed = query(
                     "display-message", "-p", "-t", outer_target, "#{session_id}:#{session_created}|#{pane_id}",
                 )
@@ -808,6 +838,7 @@ def _qualify_native_worktrees(
                     + "\n" + pane_process()
                     + "\n" + query("capture-pane", "-p", "-t", outer_target).stdout[-8192:]
                     + "\n" + pane_process(outer_target)
+                    + "\n" + json.dumps(mux_coverage_diagnostics())
                     + "\n" + json.dumps([
                         {key: value for key, value in json.loads(
                             path.read_text(encoding="utf-8")
@@ -976,6 +1007,16 @@ def _qualify_native_worktrees(
             _until(
                 lambda: sum(event["type"] == "assistant.turn_end" for event in messages()) >= expected_before,
                 f"{leg}: native history did not restore or finish its original seed",
+                diagnostic=lambda: (
+                    f"Local fixture model requests: {len(requests)}\n"
+                    + "Native event types: "
+                    + json.dumps([event["type"] for event in messages()[-30:]])
+                    + "\n" + query("capture-pane", "-p", "-t", target).stdout[-8192:]
+                    + "\n" + "\n".join(
+                        path.read_text(encoding="utf-8", errors="replace")[-4096:]
+                        for path in (tmp_path / ("logs-" + leg)).glob("*.log")
+                    )
+                ),
             )
             if public_caller:
                 # This isolated application has no installed sessionStart plugin hook.

@@ -38,6 +38,7 @@ _NO_PROJECT_COMMANDS = {
     "reconcile-sessions",
     "status-monitor-restart",
     "restart",
+    "register-launch",
     "register-session",
     "handoff-trace",
     "session-lifecycle",

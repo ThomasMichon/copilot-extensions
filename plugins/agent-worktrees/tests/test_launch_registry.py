@@ -22,6 +22,33 @@ def test_register_launch_writes_a_lock_file_for_this_process(tmp_path):
     assert lock_path.exists()
 
 
+def test_register_launch_cli_protects_launcher_outside_an_adopted_checkout(tmp_path):
+    from agent_procutil.owned_process import run_caller_owned
+    from agent_worktrees import config, locks
+    from agent_worktrees.git_repository_environment import repository_identity_env
+
+    home = tmp_path / "copilot-home"
+    home.mkdir()
+    environment = repository_identity_env()
+    environment.update(HOME=str(home), USERPROFILE=str(home))
+    worktree_id = "driver-fixture-" + "a" * 32
+    result = run_caller_owned(
+        [sys.executable, "-m", "agent_worktrees", "register-launch",
+         "--worktree-id", worktree_id, "--pid", str(os.getpid()), "--launch-id", "fixture"],
+        env=environment, cwd=home, timeout=25,
+        max_stdout_bytes=8192, max_stderr_bytes=8192,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    path = launch_registry._lock_path(config.install_dir(), worktree_id, os.getpid())
+    try:
+        record = locks.read_lock(path)
+        assert record and record["pid"] == os.getpid()
+        assert record["launch_id"] == "fixture"
+        assert locks.lock_is_live(record)
+    finally:
+        path.unlink(missing_ok=True)
+
+
 def test_register_launch_rejects_empty_worktree_id(tmp_path):
     assert launch_registry.register_launch(tmp_path, "", pid=os.getpid()) is False
 

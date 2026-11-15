@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+from dataclasses import replace
 import json
 import os
 from pathlib import Path
@@ -185,6 +186,38 @@ def test_public_fixture_git_mutations_ignore_inherited_repository_selectors(tmp_
     assert command(checkout, "show", "HEAD:.copilot-extensions/agent-worktrees/config.yaml")
     assert (command(foreign, "rev-parse", "HEAD"), (foreign / ".git/index").read_bytes()) == before
     assert (foreign / "untouched.txt").read_text(encoding="utf-8") == "outside fixture"
+
+
+@pytest.mark.parametrize("control", ["manager-no-mux", "manager-mux", "embody", "copilot"])
+def test_fixture_record_matches_receiving_namespace_before_native_launch(tmp_path, monkeypatch, control):
+    from agent_worktrees import config, record_reporting, tracking
+    from agent_worktrees.execution_spaces import ExecutionSpaceError
+    from test_headed_worktrees_copilot import _fixture_record_source
+
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.setattr(config, "_home", lambda: home)
+    worktree_id = "driver-fixture-record"
+    checkout = tmp_path / worktree_id
+    checkout.mkdir()
+    monkeypatch.setattr(sys, "argv", [
+        "fixture", str(checkout), worktree_id, control, str(tmp_path / "discovery"), "0",
+    ])
+    exec(compile(_fixture_record_source(), "<fixture-record>", "exec"), {})
+    record = tracking.load_record(
+        config.project_dir("native-copilot") / "worktrees" / (worktree_id + ".yaml"),
+    )
+    receiving = config.load_config(
+        path=config.project_dir("native-copilot") / "config.yaml", project="native-copilot",
+    )
+    record_reporting.require_current_subject(record, receiving)
+    receiving = replace(receiving, repos={"native-copilot": replace(
+        receiving.repos["native-copilot"], worktree_root=str(tmp_path / "outside"),
+    )})
+    with pytest.raises(ExecutionSpaceError, match="receiving worktree namespace"):
+        record_reporting.require_current_subject(record, receiving)
 
 
 @pytest.mark.timeout(300)
