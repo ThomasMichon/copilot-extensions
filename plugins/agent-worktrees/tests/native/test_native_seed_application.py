@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import base64
+from collections.abc import Callable, Sequence
+from contextlib import AbstractContextManager
+from dataclasses import replace
 import json
 import os
 from pathlib import Path
@@ -11,10 +14,12 @@ import subprocess
 import sys
 import time
 from types import ModuleType, SimpleNamespace
+from typing import TYPE_CHECKING, Any, Protocol, TypedDict, cast
 
+import agent_procutil as pu
 from agent_procutil import no_window_kwargs
 from agent_procutil._interpreter import physical_executable
-from agent_procutil.daemon_instances import daemon_test_lifecycle
+from agent_procutil.daemon_instances import InstanceCleanupResult, daemon_test_lifecycle
 from agent_procutil.owned_process import run_caller_owned
 import pytest
 
@@ -22,7 +27,105 @@ ROOT = Path(__file__).resolve().parents[4]
 SOURCE = ROOT / "plugins" / "agent-worktrees"
 
 
-def _run(arguments, *, cwd, env, deadline):
+class _ReplacementOptions(TypedDict):
+    shell: str
+    cwd: Path
+    environment: dict[str, str]
+    expected_generation: int
+
+
+class _RestoreOptions(TypedDict):
+    shell: str
+    cwd: Path
+    environment: dict[str, str]
+
+
+class _PreparedDecision(TypedDict):
+    nonce: str
+    script: str
+    arguments: list[str]
+    completion: list[str]
+
+
+class _SandboxFactory(Protocol):
+    def __call__(self, *, prefix: str, dir: Path) -> AbstractContextManager[str]: ...
+
+
+class _SourceIdentity(Protocol):
+    source_commit: str
+    source_tree: str
+
+    def document(self) -> dict[str, object]: ...
+
+
+class _RuntimeSource(Protocol):
+    SourceIdentity: Callable[[str, str, str, str, str, str], _SourceIdentity]
+
+    def assembly_hash(self, source: Path) -> str: ...
+
+    def runtime_version(self, version: str, commit: str, source_hash: str) -> str: ...
+
+
+class _RuntimeMarkers(Protocol):
+    COMPLETE_MARKER: str
+
+
+class _InstallerEngine(Protocol):
+    runtime_source: _RuntimeSource
+    runtime: _RuntimeMarkers
+
+
+class _SourceInputs(Protocol):
+    engine: _InstallerEngine
+    MANIFEST: str
+    SCHEMA: str
+
+
+class _ProfileExports(Protocol):
+    source_inputs: _SourceInputs
+
+
+class _TomlReader(Protocol):
+    def loads(self, content: str) -> dict[str, Any]: ...
+
+
+class _BuilderExports(Protocol):
+    tomllib: _TomlReader
+
+
+class _ManagerEnvironment(Protocol):
+    def __call__(
+        self, home: Path, root: Path, tmp_path: Path, interpreter: str, *,
+        caller_jobs: bool, worktrees_environment: dict[str, str],
+    ) -> dict[str, str]: ...
+
+
+class _ManagerNative(Protocol):
+    def __call__(
+        self, directory: Path, control: str, *, script: Path, python: Path, root: Path,
+        environment: dict[str, str], picker_decision: bool,
+    ) -> None: ...
+
+
+class _ManagerApplication(Protocol):
+    def __call__(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, control: str, *,
+        worktrees_python: Path, worktrees_root: Path, worktrees_environment: dict[str, str],
+        caller_jobs: bool, replacement_slot: Path | None, rollback_application: Path | None,
+    ) -> None: ...
+
+
+class _NativeStartup(Protocol):
+    def __call__(
+        self, tmp_path: Path, normalized_setup: bool, *,
+        command_wrapper: Callable[[list[str], dict[str, str], Path], list[str]],
+        environment: dict[str, str],
+    ) -> None: ...
+
+
+def _run(
+    arguments: Sequence[str | Path | None], *, cwd: Path, env: dict[str, str], deadline: float,
+) -> subprocess.CompletedProcess[str]:
     result = subprocess.run(
         list(map(str, arguments)), cwd=cwd, env=env, capture_output=True,
         text=True, encoding="utf-8", timeout=max(0.01, deadline - time.monotonic()),
@@ -32,11 +135,11 @@ def _run(arguments, *, cwd, env, deadline):
     return result
 
 
-def _literal(value):
+def _literal(value: object) -> str:
     return "'" + str(value).replace("'", "''") + "'"
 
 
-def _copy_application_inputs(source, destination):
+def _copy_application_inputs(source: Path, destination: Path) -> None:
     for entry in source.iterdir():
         if entry.is_file():
             shutil.copyfile(entry, destination / entry.name)
@@ -49,10 +152,15 @@ def _copy_application_inputs(source, destination):
             )
 
 
-def test_application_inputs_preserve_materialized_local_dependencies(tmp_path, monkeypatch):
+def test_application_inputs_preserve_materialized_local_dependencies(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.syspath_prepend(str(ROOT / "tools"))
-    import build_python_artifacts as builder
-    import materialize_main as materializer
+    if TYPE_CHECKING:
+        from tools import build_python_artifacts as builder, materialize_main as materializer
+    else:
+        import build_python_artifacts as builder
+        import materialize_main as materializer
 
     original, copied = tmp_path / "materialized", tmp_path / "copied"
     module = original / "libs" / "widget" / "src" / "widget" / "__init__.py"
@@ -77,7 +185,7 @@ def test_application_inputs_preserve_materialized_local_dependencies(tmp_path, m
 
 
 @pytest.mark.parametrize("backends", [0, 1, 2])
-def test_native_backend_receipt_selection_preserves_launcher_stages(tmp_path, backends):
+def test_native_backend_receipt_selection_preserves_launcher_stages(tmp_path: Path, backends: int) -> None:
     from test_headed_worktrees_copilot import _backend_execution
 
     documents = {}
@@ -93,7 +201,7 @@ def test_native_backend_receipt_selection_preserves_launcher_stages(tmp_path, ba
         with pytest.raises(AssertionError, match="more than one native backend"):
             _backend_execution(tmp_path)
     elif backends:
-        path, receipt = _backend_execution(tmp_path)
+        path, receipt = cast(tuple[Path, dict[str, Any]], _backend_execution(tmp_path))
         assert path.name == "backend-0.execution.json"
         assert receipt["events"][0]["details"]["boundary"] == "backend-command"
     else:
@@ -102,7 +210,7 @@ def test_native_backend_receipt_selection_preserves_launcher_stages(tmp_path, ba
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Native Windows command-line quoting")
-def test_private_mux_adapter_preserves_census_command_shape(tmp_path):
+def test_private_mux_adapter_preserves_census_command_shape(tmp_path: Path) -> None:
     from agent_remote_driver import windows_mux_processes
     from test_headed_worktrees_copilot import _prepare_private_mux_adapter
 
@@ -146,7 +254,7 @@ def test_private_mux_adapter_preserves_census_command_shape(tmp_path):
     assert match[1] == "-L" and match[2] == "--version"
 
 
-def test_public_fixture_git_mutations_ignore_inherited_repository_selectors(tmp_path):
+def test_public_fixture_git_mutations_ignore_inherited_repository_selectors(tmp_path: Path) -> None:
     from agent_worktrees.git_repository_environment import repository_identity_env
     from test_headed_worktrees_copilot import _initialize_fixture_repository
 
@@ -154,13 +262,13 @@ def test_public_fixture_git_mutations_ignore_inherited_repository_selectors(tmp_
     git = shutil.which("git", path=environment.get("PATH"))
     assert git
 
-    def command(root, *arguments):
+    def command(root: Path, *arguments: str) -> str:
         result = run_caller_owned(
             [git, *arguments], cwd=root, env=environment, timeout=15,
             max_stdout_bytes=8192, max_stderr_bytes=8192,
         )
         assert result.returncode == 0, result.stdout + result.stderr
-        return result.stdout.strip()
+        return cast(str, result.stdout.strip())
 
     foreign, checkout = tmp_path / "foreign", tmp_path / "checkout"
     foreign.mkdir()
@@ -187,8 +295,44 @@ def test_public_fixture_git_mutations_ignore_inherited_repository_selectors(tmp_
     assert (foreign / "untouched.txt").read_text(encoding="utf-8") == "outside fixture"
 
 
+@pytest.mark.parametrize("control", ["manager-no-mux", "manager-mux", "embody", "copilot"])
+def test_fixture_record_matches_receiving_namespace_before_native_launch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, control: str,
+) -> None:
+    from agent_worktrees import config, record_reporting, tracking
+    from agent_worktrees.execution_spaces import ExecutionSpaceError
+    from test_headed_worktrees_copilot import _fixture_record_source
+
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.setattr(config, "_home", lambda: home)
+    worktree_id = "driver-fixture-record"
+    checkout = tmp_path / worktree_id
+    checkout.mkdir()
+    monkeypatch.setattr(sys, "argv", [
+        "fixture", str(checkout), worktree_id, control, str(tmp_path / "discovery"), "0",
+    ])
+    exec(compile(_fixture_record_source(), "<fixture-record>", "exec"), {})
+    record = tracking.load_record(
+        config.project_dir("native-copilot") / "worktrees" / (worktree_id + ".yaml"),
+    )
+    receiving = config.load_config(
+        path=config.project_dir("native-copilot") / "config.yaml", project="native-copilot",
+    )
+    record_reporting.require_current_subject(record, receiving)
+    receiving = replace(receiving, repos={"native-copilot": replace(
+        receiving.repos["native-copilot"], worktree_root=str(tmp_path / "outside"),
+    )})
+    with pytest.raises(ExecutionSpaceError, match="receiving worktree namespace"):
+        record_reporting.require_current_subject(record, receiving)
+
+
 @pytest.mark.timeout(300)
-def test_fresh_application_admits_its_current_native_runtime(tmp_path, monkeypatch):
+def test_fresh_application_admits_its_current_native_runtime(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     _qualify_native_application(tmp_path, monkeypatch)
 
 
@@ -197,7 +341,9 @@ def test_fresh_application_admits_its_current_native_runtime(tmp_path, monkeypat
     os.name != "nt" or os.environ.get("COPILOT_DRIVER_HEADED_MUX_E2E") != "1",
     reason="Explicitly select the installed native Windows Copilot broker lane",
 )
-def test_fresh_application_owns_native_broker_fresh_and_resume(tmp_path, monkeypatch):
+def test_fresh_application_owns_native_broker_fresh_and_resume(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     _qualify_native_application(tmp_path, monkeypatch, broker=True)
 
 
@@ -206,7 +352,7 @@ def test_fresh_application_owns_native_broker_fresh_and_resume(tmp_path, monkeyp
     os.name != "nt" or os.environ.get("COPILOT_DRIVER_HEADED_MUX_E2E") != "1",
     reason="Explicitly select the installed public Windows Worktrees embodiment lane",
 )
-def test_public_embody(monkeypatch):
+def test_public_embody(monkeypatch: pytest.MonkeyPatch) -> None:
     _qualify_public_application(monkeypatch, "embody")
 
 
@@ -215,7 +361,7 @@ def test_public_embody(monkeypatch):
     os.name != "nt" or os.environ.get("WORKTREES_NATIVE_CALLER_JOBS") != "1",
     reason="Explicitly select the leased native caller-Job lifetime owner",
 )
-def test_public_caller_job_lifetime(monkeypatch):
+def test_public_caller_job_lifetime(monkeypatch: pytest.MonkeyPatch) -> None:
     _qualify_public_application(monkeypatch, "embody", caller_jobs=True)
 
 
@@ -224,7 +370,7 @@ def test_public_caller_job_lifetime(monkeypatch):
     os.name != "nt" or os.environ.get("WORKTREES_NATIVE_CALLER_JOBS") != "1",
     reason="Explicitly select the leased native attached caller-Job lifetime owner",
 )
-def test_public_attached_caller_job_lifetime(monkeypatch):
+def test_public_attached_caller_job_lifetime(monkeypatch: pytest.MonkeyPatch) -> None:
     _qualify_public_application(monkeypatch, "copilot", caller_jobs=True)
 
 
@@ -233,12 +379,17 @@ def test_public_attached_caller_job_lifetime(monkeypatch):
     os.name != "nt" or os.environ.get("COPILOT_DRIVER_HEADED_MUX_E2E") != "1",
     reason="Explicitly select the installed public Windows Worktrees TTY lane",
 )
-def test_public_copilot(monkeypatch):
+def test_public_copilot(monkeypatch: pytest.MonkeyPatch) -> None:
     _qualify_public_application(monkeypatch, "copilot")
 
 
-def _qualify_public_application(monkeypatch, caller, *, caller_jobs=False):
-    from plugin_test_containment import TestSandbox
+def _qualify_public_application(
+    monkeypatch: pytest.MonkeyPatch, caller: str, *, caller_jobs: bool = False,
+) -> None:
+    if TYPE_CHECKING:
+        from tools.plugin_test_containment import TestSandbox
+    else:
+        from plugin_test_containment import TestSandbox
 
     sandbox = Path(os.environ["COPILOT_EXTENSIONS_TEST_SANDBOX"])
     if caller_jobs:
@@ -247,12 +398,18 @@ def _qualify_public_application(monkeypatch, caller, *, caller_jobs=False):
         directory.mkdir()
         _qualify_native_application(directory, monkeypatch, broker=caller, caller_jobs=True)
         return
-    with TestSandbox(prefix="p-", dir=sandbox) as directory:
-        _qualify_native_application(Path(directory), monkeypatch, broker=caller)
+    sandbox_factory = cast(_SandboxFactory, TestSandbox)
+    with sandbox_factory(prefix="p-", dir=sandbox) as temporary_directory:
+        _qualify_native_application(Path(temporary_directory), monkeypatch, broker=caller)
 
 
-def test_public_application_workspace_is_outside_source_only_repository(tmp_path, monkeypatch):
-    from plugin_test_command_safety import private_mux_args
+def test_public_application_workspace_is_outside_source_only_repository(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    if TYPE_CHECKING:
+        from tools.plugin_test_command_safety import private_mux_args
+    else:
+        from plugin_test_command_safety import private_mux_args
     from repository_policy import AgentHostingDenied, require_agent_hosting
 
     candidate = tmp_path / "candidate"
@@ -263,9 +420,9 @@ def test_public_application_workspace_is_outside_source_only_repository(tmp_path
     with pytest.raises(AgentHostingDenied, match="expose_agent: false"):
         require_agent_hosting(candidate, operation="fixture launch")
     monkeypatch.setitem(_qualify_public_application.__globals__, "ROOT", candidate)
-    observed = []
+    observed: list[tuple[Path, str]] = []
 
-    def qualify(root, _patch, *, broker):
+    def qualify(root: Path, _patch: pytest.MonkeyPatch, *, broker: str) -> None:
         caller = root / "caller"
         caller.mkdir()
         assert require_agent_hosting(caller, operation="fixture launch").expose_agent is None
@@ -282,10 +439,16 @@ def test_public_application_workspace_is_outside_source_only_repository(tmp_path
 @pytest.mark.parametrize("packet", [
     "native-worktrees-copilot", "native-worktrees-copilot-caller-jobs",
 ])
-def test_public_caller_packets_collect_exactly_the_declared_case(tmp_path, monkeypatch, packet):
+def test_public_caller_packets_collect_exactly_the_declared_case(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, packet: str,
+) -> None:
     monkeypatch.syspath_prepend(str(ROOT / "tools"))
-    from windows_qualification_contract import NATIVE_PACKETS
-    from windows_qualification_worker import native_command
+    if TYPE_CHECKING:
+        from tools.windows_qualification_contract import NATIVE_PACKETS
+        from tools.windows_qualification_worker import native_command
+    else:
+        from windows_qualification_contract import NATIVE_PACKETS
+        from windows_qualification_worker import native_command
 
     command = native_command(ROOT, tmp_path, packet)
     selected = command[command.index("-k") + 1]
@@ -303,13 +466,17 @@ def test_public_caller_packets_collect_exactly_the_declared_case(tmp_path, monke
 
 @pytest.mark.parametrize("failed", [False, True])
 @pytest.mark.parametrize("caller", ["embody", "copilot"])
-def test_native_fixture_directory_remains_owned_by_outer_settlement(tmp_path, monkeypatch, failed, caller):
+def test_native_fixture_directory_remains_owned_by_outer_settlement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failed: bool, caller: str,
+) -> None:
     sandbox = tmp_path / "outer-sandbox"
     sandbox.mkdir()
     monkeypatch.setenv("COPILOT_EXTENSIONS_TEST_SANDBOX", str(sandbox))
-    observed = []
+    observed: list[Path] = []
 
-    def qualify(directory, _patch, *, broker, caller_jobs):
+    def qualify(
+        directory: Path, _patch: pytest.MonkeyPatch, *, broker: str, caller_jobs: bool,
+    ) -> None:
         assert broker == caller and caller_jobs is True
         assert directory.is_relative_to(sandbox)
         observed.append(directory)
@@ -327,7 +494,9 @@ def test_native_fixture_directory_remains_owned_by_outer_settlement(tmp_path, mo
     assert (observed[0] / "resident-owned.log").read_text() == "held until outer settlement"
 
 
-def test_withdrawn_fixture_application_is_restored_after_broker_failure(tmp_path, monkeypatch):
+def test_withdrawn_fixture_application_is_restored_after_broker_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from public_caller_jobs_fixture import application_unavailable
 
     monkeypatch.setenv("COPILOT_EXTENSIONS_TEST_SANDBOX", str(tmp_path))
@@ -350,7 +519,9 @@ def test_withdrawn_fixture_application_is_restored_after_broker_failure(tmp_path
     assert python.is_file() and moved.is_dir()
 
 
-def test_application_withdrawal_refuses_an_unowned_slot(tmp_path, monkeypatch):
+def test_application_withdrawal_refuses_an_unowned_slot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from public_caller_jobs_fixture import application_unavailable
 
     sandbox = tmp_path / "sandbox"
@@ -371,8 +542,13 @@ def test_application_withdrawal_refuses_an_unowned_slot(tmp_path, monkeypatch):
     (None, 2), (None, 1), ("install", 2), ("selection", 2),
     ("generation", 2), ("prefix", 2), ("module", 2), ("retained", 2),
 ])
-def test_generation_replacement_keeps_installer_and_cleanup_owners(tmp_path, monkeypatch, failure, generation):
-    import public_caller_jobs_fixture as fixture
+def test_generation_replacement_keeps_installer_and_cleanup_owners(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str | None, generation: int,
+) -> None:
+    import public_caller_jobs_fixture
+    from test_headed_worktrees_copilot import _PublicCallerJobs
+
+    fixture = cast(_PublicCallerJobs, public_caller_jobs_fixture)
 
     monkeypatch.setenv("COPILOT_EXTENSIONS_TEST_SANDBOX", str(tmp_path))
     root = tmp_path / "runtime"
@@ -384,9 +560,9 @@ def test_generation_replacement_keeps_installer_and_cleanup_owners(tmp_path, mon
     (incoming / "application.json").write_text("fixture", encoding="utf-8")
     (root / "current-version").write_text(outgoing.name, encoding="utf-8")
     (root / "projects.yaml").write_text("projects: {fixture: retained}\n", encoding="utf-8")
-    calls = []
+    calls: list[list[str]] = []
 
-    def run(command, **kwargs):
+    def run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         calls.append(command)
         assert kwargs["env"] == {"FIXTURE": "selected"}
         if len(calls) == 1:
@@ -430,8 +606,8 @@ def test_generation_replacement_keeps_installer_and_cleanup_owners(tmp_path, mon
         shutil.rmtree(outgoing)
         return subprocess.CompletedProcess(command, 0, json.dumps({"removed": [outgoing.name]}), "")
 
-    monkeypatch.setattr(fixture.subprocess, "run", run)
-    arguments = dict(
+    monkeypatch.setattr(subprocess, "run", run)
+    arguments = _ReplacementOptions(
         shell="selected-pwsh", cwd=tmp_path, environment={"FIXTURE": "selected"},
         expected_generation=generation,
     )
@@ -451,8 +627,13 @@ def test_generation_replacement_keeps_installer_and_cleanup_owners(tmp_path, mon
         assert not outgoing.exists() and len(calls) == 3
 
 
-def test_generation_replacement_refuses_unowned_or_prebuilt_input(tmp_path, monkeypatch):
-    from public_caller_jobs_fixture import replace_application
+def test_generation_replacement_refuses_unowned_or_prebuilt_input(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import public_caller_jobs_fixture
+    from test_headed_worktrees_copilot import _PublicCallerJobs
+
+    replace_application = cast(_PublicCallerJobs, public_caller_jobs_fixture).replace_application
 
     sandbox = tmp_path / "sandbox"
     sandbox.mkdir()
@@ -473,8 +654,13 @@ def test_generation_replacement_refuses_unowned_or_prebuilt_input(tmp_path, monk
 
 
 @pytest.mark.parametrize("damage", [None, "foreign", "prebuilt", "occupied"])
-def test_application_restoration_uses_only_owned_unbuilt_artifact(tmp_path, monkeypatch, damage):
-    import public_caller_jobs_fixture as fixture
+def test_application_restoration_uses_only_owned_unbuilt_artifact(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, damage: str | None,
+) -> None:
+    import public_caller_jobs_fixture
+    from test_headed_worktrees_copilot import _PublicCallerJobs
+
+    fixture = cast(_PublicCallerJobs, public_caller_jobs_fixture)
 
     sandbox = tmp_path / "sandbox"
     sandbox.mkdir()
@@ -494,9 +680,9 @@ def test_application_restoration_uses_only_owned_unbuilt_artifact(tmp_path, monk
         (artifact / ".venv").mkdir()
     elif damage == "occupied":
         incoming.mkdir()
-    calls = []
+    calls: list[Path] = []
 
-    def replace(selected_python, selected_slot, **options):
+    def replace(selected_python: Path, selected_slot: Path, **options: object) -> str:
         calls.append(selected_slot)
         assert selected_python == python and selected_slot == incoming
         assert options == {
@@ -509,20 +695,24 @@ def test_application_restoration_uses_only_owned_unbuilt_artifact(tmp_path, monk
         return "selected original interpreter"
 
     monkeypatch.setattr(fixture, "replace_application", replace)
-    options = dict(shell="selected-pwsh", cwd=sandbox, environment={"FIXTURE": "selected"})
+    options = _RestoreOptions(shell="selected-pwsh", cwd=sandbox, environment={"FIXTURE": "selected"})
     if damage:
         with pytest.raises(AssertionError):
             fixture.restore_application(python, artifact, **options)
         assert not calls
         assert incoming.exists() is (damage == "occupied")
     else:
-        assert fixture.restore_application(python, artifact, **options) == "selected original interpreter"
+        assert cast(object, fixture.restore_application(
+            python, artifact, **options,
+        )) == "selected original interpreter"
         assert calls == [incoming]
     assert python.is_file() and (artifact / "wheel.whl").is_file()
 
 
 @pytest.mark.parametrize("caller", ["embody", "copilot"])
-def test_lifetime_selection_cannot_disable_an_existing_contained_owner(tmp_path, monkeypatch, caller):
+def test_lifetime_selection_cannot_disable_an_existing_contained_owner(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caller: str,
+) -> None:
     monkeypatch.setenv("COPILOT_EXTENSIONS_TEST_CONTAINED", "1")
     with pytest.raises(AssertionError):
         _qualify_native_application(tmp_path, monkeypatch, broker=caller, caller_jobs=True)
@@ -531,22 +721,25 @@ def test_lifetime_selection_cannot_disable_an_existing_contained_owner(tmp_path,
 
 @pytest.mark.parametrize("early_exit,exit_code", [(False, 0), (False, -1), (True, 0)])
 def test_attached_caller_jobs_close_before_claiming_caller_and_control_exit(
-    tmp_path, monkeypatch, early_exit, exit_code,
-):
-    import public_caller_jobs_fixture as fixture
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, early_exit: bool, exit_code: int,
+) -> None:
+    import public_caller_jobs_fixture
+    from test_headed_worktrees_copilot import _PublicCallerJobs
+
+    fixture = cast(_PublicCallerJobs, public_caller_jobs_fixture)
 
     monkeypatch.setattr(fixture, "_require_native_tty_owner", lambda *args: tmp_path)
-    monkeypatch.setattr(fixture.sys.stdin, "isatty", lambda: True)
-    monkeypatch.setattr(fixture.sys.stdout, "isatty", lambda: True)
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
     (tmp_path / "request.json").write_text(json.dumps({
         "command": ["installed-public-caller"], "cwd": str(tmp_path),
     }), encoding="utf-8")
     if not early_exit:
         (tmp_path / "close.json").write_text('{"close":true}', encoding="utf-8")
-    events = []
-    closed = set()
+    events: list[str] = []
+    closed: set[str] = set()
 
-    def wait_caller(timeout):
+    def wait_caller(timeout: float) -> int:
         assert timeout == 5 and "inner" in closed
         events.append("caller-exit")
         return exit_code
@@ -554,19 +747,19 @@ def test_attached_caller_jobs_close_before_claiming_caller_and_control_exit(
     caller = SimpleNamespace(pid=101, poll=lambda: 0 if early_exit else None, wait=wait_caller)
     control = SimpleNamespace(pid=102)
 
-    def bounded(command, **kwargs):
+    def bounded(command: list[str], **kwargs: object) -> SimpleNamespace:
         assert kwargs["stdin"] is kwargs["stdout"] is kwargs["stderr"] is subprocess.DEVNULL
         assert kwargs == {
             "stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL,
-            "stderr": subprocess.DEVNULL, **fixture.pu.no_window_kwargs(),
+            "stderr": subprocess.DEVNULL, **pu.no_window_kwargs(),
         }
         return control
 
-    def close(name):
+    def close(name: str) -> None:
         events.append(name + "-close")
         closed.add(name)
 
-    def spawn(command, **kwargs):
+    def spawn(command: list[str], **kwargs: object) -> tuple[SimpleNamespace, SimpleNamespace]:
         assert kwargs["require_job"] is kwargs["allow_breakaway"] is True
         assert not any(key in kwargs for key in ("stdin", "stdout", "stderr", "creationflags"))
         if command[0] == "installed-public-caller":
@@ -575,8 +768,8 @@ def test_attached_caller_jobs_close_before_claiming_caller_and_control_exit(
         fixture._tty_leaf(tmp_path)
         return SimpleNamespace(wait=lambda timeout: 0), SimpleNamespace(close=lambda: close("outer"))
 
-    monkeypatch.setattr(fixture.subprocess, "Popen", bounded)
-    monkeypatch.setattr(fixture.pu, "spawn_sync_in_kill_on_close_job", spawn)
+    monkeypatch.setattr(subprocess, "Popen", bounded)
+    monkeypatch.setattr(pu, "spawn_sync_in_kill_on_close_job", spawn)
     monkeypatch.setattr(fixture, "process_start_time", lambda pid: f"birth-{pid}")
     monkeypatch.setattr(
         fixture, "pid_alive",
@@ -597,8 +790,13 @@ def test_attached_caller_jobs_close_before_claiming_caller_and_control_exit(
         assert proof["control"] == {"pid": 102, "birth": "birth-102"}
 
 
-def test_attached_caller_fixture_refuses_contained_owner_before_creating_ticket(tmp_path, monkeypatch):
-    import public_caller_jobs_fixture as fixture
+def test_attached_caller_fixture_refuses_contained_owner_before_creating_ticket(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import public_caller_jobs_fixture
+    from test_headed_worktrees_copilot import _PublicCallerJobs
+
+    fixture = cast(_PublicCallerJobs, public_caller_jobs_fixture)
 
     monkeypatch.setenv("COPILOT_EXTENSIONS_TEST_CONTAINED", "1")
     ticket = tmp_path / "not-created"
@@ -610,9 +808,13 @@ def test_attached_caller_fixture_refuses_contained_owner_before_creating_ticket(
     assert not ticket.exists()
 
 
-def test_manager_install_retains_only_the_selected_runner_lifecycle(tmp_path, monkeypatch):
+def test_manager_install_retains_only_the_selected_runner_lifecycle(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from agent_procutil.daemon_instances import TEST_CONTEXT_ENV
-    from test_manager_application_launch import _manager_install_environment
+    from test_manager_application_launch import _manager_install_environment as environment_fixture
+
+    _manager_install_environment = cast(_ManagerEnvironment, environment_fixture)
 
     monkeypatch.setenv(TEST_CONTEXT_ENV, "unselected ambient context")
     arguments = tmp_path / "home", tmp_path / "manager", tmp_path, sys.executable
@@ -630,14 +832,16 @@ def test_manager_install_retains_only_the_selected_runner_lifecycle(tmp_path, mo
 
 
 @pytest.mark.parametrize("failure", ["exit", "timeout"])
-def test_manager_native_phase_propagates_owned_failures_without_inline_retry(tmp_path, monkeypatch, failure):
+def test_manager_native_phase_propagates_owned_failures_without_inline_retry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str,
+) -> None:
     import test_manager_application_launch as fixture
     from agent_procutil.daemon_instances import TEST_CONTEXT_ENV
 
-    calls = []
+    calls: list[list[str]] = []
     environment = {TEST_CONTEXT_ENV: "selected fixture lifecycle"}
 
-    def run(command, **kwargs):
+    def run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         calls.append(command)
         assert kwargs["env"] == environment and kwargs["cwd"] == tmp_path
         assert kwargs["timeout"] == 180
@@ -647,7 +851,7 @@ def test_manager_native_phase_propagates_owned_failures_without_inline_retry(tmp
             str(tmp_path / "python.exe"), str(tmp_path / "manager"), "1",
         ]
         if failure == "timeout":
-            raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+            raise subprocess.TimeoutExpired(command, cast(float, kwargs["timeout"]))
         return subprocess.CompletedProcess(command, 3, "native failed", "owned cleanup retained")
 
     monkeypatch.setattr(fixture, "run_caller_owned", run)
@@ -655,7 +859,7 @@ def test_manager_native_phase_propagates_owned_failures_without_inline_retry(tmp
         subprocess.TimeoutExpired if failure == "timeout" else AssertionError,
         match="timed out" if failure == "timeout" else "native failed",
     ):
-        fixture._run_manager_native(
+        cast(_ManagerNative, fixture._run_manager_native)(
             tmp_path, "manager-no-mux", script=tmp_path / "launch-session.ps1",
             python=tmp_path / "python.exe", root=tmp_path / "manager",
             environment=environment, picker_decision=True,
@@ -664,7 +868,9 @@ def test_manager_native_phase_propagates_owned_failures_without_inline_retry(tmp
 
 
 @pytest.mark.parametrize("valid_observations", [False, True])
-def test_manager_decision_proof_distinguishes_native_exit_from_assertion(tmp_path, monkeypatch, valid_observations):
+def test_manager_decision_proof_distinguishes_native_exit_from_assertion(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, valid_observations: bool,
+) -> None:
     from test_headed_worktrees_copilot import _manager_decision_source
 
     script, marker = tmp_path / "launch-session.ps1", tmp_path / "decision.json"
@@ -677,14 +883,14 @@ def test_manager_decision_proof_distinguishes_native_exit_from_assertion(tmp_pat
         "input": {"options": {"no_mux": True}},
     }
     manager = ModuleType("worktree_manager")
-    manager.__main__ = SimpleNamespace(_run_production_picker=lambda *args, **kwargs: 1)
-    manager.engine_client = SimpleNamespace(set_engine_command=lambda command: None)
+    setattr(manager, "__main__", SimpleNamespace(_run_production_picker=lambda *args, **kwargs: 1))
+    setattr(manager, "engine_client", SimpleNamespace(set_engine_command=lambda command: None))
     attempts = ModuleType("worktree_manager.launch_attempts")
-    attempts.LaunchAttempts = lambda: SimpleNamespace(
+    setattr(attempts, "LaunchAttempts", lambda: SimpleNamespace(
         record_intent=lambda *args, **kwargs: None, detail=lambda *args, **kwargs: detail,
-    )
+    ))
     relocated = ModuleType("worktree_manager.relocated_launch")
-    relocated._relocated_launch_script = lambda: script
+    setattr(relocated, "_relocated_launch_script", lambda: script)
     for module in (manager, attempts, relocated):
         monkeypatch.setitem(sys.modules, module.__name__, module)
     monkeypatch.setattr(sys, "argv", ["fixture", "engine", "worktree", "attempt", str(script), str(marker)])
@@ -692,20 +898,22 @@ def test_manager_decision_proof_distinguishes_native_exit_from_assertion(tmp_pat
     with pytest.raises(SystemExit if valid_observations else AssertionError) as error:
         exec(code, {"__name__": "__main__"})
     # Both subprocess outcomes are 1; only completed assertions produce proof.
-    assert (error.value.code if valid_observations else 1) == 1
+    assert (cast(SystemExit, error.value).code if valid_observations else 1) == 1
     assert marker.exists() is valid_observations
     if valid_observations:
         assert json.loads(marker.read_text(encoding="utf-8")) == {"attempt": "attempt", "exit_code": 1}
 
 
 @pytest.mark.parametrize("damage", ["none", "early-callback", "nonce", "callback", "arguments"])
-def test_manager_mux_decision_retains_proof_only_after_correlated_preparation(tmp_path, monkeypatch, damage):
+def test_manager_mux_decision_retains_proof_only_after_correlated_preparation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, damage: str,
+) -> None:
     from test_headed_worktrees_copilot import _manager_mux_decision_source
 
     script, marker = tmp_path / "launch-session.ps1", tmp_path / "decision.json"
     script.touch()
     request = tmp_path / "request.json"
-    prepared = {
+    prepared: _PreparedDecision = {
         "nonce": "offer", "script": str(script),
         "arguments": ["--project", "native-copilot", "--worktree-id", "worktree",
                       "--require-launch-attempt", "--launch-attempt-id", "attempt"],
@@ -723,21 +931,24 @@ def test_manager_mux_decision_retains_proof_only_after_correlated_preparation(tm
         prepared["arguments"].append("--no-mux")
     (tmp_path / "result.json").write_text(json.dumps(prepared), encoding="utf-8")
     manager = ModuleType("worktree_manager")
-    decisions = []
-    manager.__main__ = SimpleNamespace(
-        _run_production_picker=lambda *args, **kwargs: decisions.append(kwargs["initial_decision"]) or 0,
-    )
-    manager.engine_client = SimpleNamespace(set_engine_command=lambda command: None)
-    manager.terminal_launch = SimpleNamespace(validate=lambda: (request, {"nonce": "offer"}))
+    decisions: list[dict[str, Any]] = []
+
+    def pick(*args: object, **kwargs: dict[str, Any]) -> int:
+        decisions.append(kwargs["initial_decision"])
+        return 0
+
+    setattr(manager, "__main__", SimpleNamespace(_run_production_picker=pick))
+    setattr(manager, "engine_client", SimpleNamespace(set_engine_command=lambda command: None))
+    setattr(manager, "terminal_launch", SimpleNamespace(validate=lambda: (request, {"nonce": "offer"})))
     attempts = ModuleType("worktree_manager.launch_attempts")
-    attempts.LaunchAttempts = lambda: SimpleNamespace(
+    setattr(attempts, "LaunchAttempts", lambda: SimpleNamespace(
         record_intent=lambda *args, **kwargs: None,
         detail=lambda *args, **kwargs: {
             "events": [{"phase": phase} for phase in phases], "input": {"options": {}},
         },
-    )
+    ))
     relocated = ModuleType("worktree_manager.relocated_launch")
-    relocated._relocated_launch_script = lambda: script
+    setattr(relocated, "_relocated_launch_script", lambda: script)
     for module in (manager, attempts, relocated):
         monkeypatch.setitem(sys.modules, module.__name__, module)
     monkeypatch.setattr(sys, "argv", ["fixture", "engine", "worktree", "attempt", str(script), str(marker)])
@@ -747,17 +958,24 @@ def test_manager_mux_decision_retains_proof_only_after_correlated_preparation(tm
     assert decisions[0]["options"] == {}
     assert marker.exists() is (damage == "none")
     if damage == "none":
-        assert error.value.code == 0
+        assert cast(SystemExit, error.value).code == 0
         assert json.loads(marker.read_text()) == {
             "attempt": "attempt", "exit_code": 0, "request": str(request),
         }
 
 
-def _prepare_native_application(inputs, profile, *, monkeypatch, uv, interpreter, deadline, generation):
+def _prepare_native_application(
+    inputs: Path, profile: Path, *, monkeypatch: pytest.MonkeyPatch, uv: str,
+    interpreter: str, deadline: float, generation: int,
+) -> Path:
     started = time.monotonic()
-    import build_python_artifacts as builder
-    import materialize_main as materializer
-    import local_install_profile as profiles
+    if TYPE_CHECKING:
+        from tools import build_python_artifacts as builder, materialize_main as materializer
+        from tools import local_install_profile as profiles
+    else:
+        import build_python_artifacts as builder
+        import materialize_main as materializer
+        import local_install_profile as profiles
 
     source, artifacts = inputs / "plugins" / "agent-worktrees", inputs / "wheels"
     source.mkdir(parents=True)
@@ -785,16 +1003,17 @@ def _prepare_native_application(inputs, profile, *, monkeypatch, uv, interpreter
             out_dir=artifacts, python=interpreter, toolchain=None,
         )
     print(f"Application wheels built: {time.monotonic() - started:.2f}s", flush=True)
-    engine = profiles.source_inputs.engine
-    project = builder.tomllib.loads((source / "pyproject.toml").read_text())["project"]
+    source_inputs = cast(_ProfileExports, profiles).source_inputs
+    engine = source_inputs.engine
+    project = cast(_BuilderExports, builder).tomllib.loads((source / "pyproject.toml").read_text())["project"]
     source_hash = engine.runtime_source.assembly_hash(source)
     identity = engine.runtime_source.SourceIdentity(
         "agent-worktrees", project["version"], "a" * 40, "b" * 40, source_hash,
         engine.runtime_source.runtime_version(project["version"], "a" * 40, source_hash),
     )
     (source / "runtime-source.json").write_text(json.dumps(identity.document()), encoding="utf-8")
-    (inputs / profiles.source_inputs.MANIFEST).write_text(json.dumps({
-        "schema": profiles.source_inputs.SCHEMA, "version": 1, "kind": "source",
+    (inputs / source_inputs.MANIFEST).write_text(json.dumps({
+        "schema": source_inputs.SCHEMA, "version": 1, "kind": "source",
         "source_commit": identity.source_commit, "source_tree": identity.source_tree,
         "projects": {"agent-worktrees": {
             "payload": "plugins/agent-worktrees", "wheels": "wheels",
@@ -810,7 +1029,10 @@ def _prepare_native_application(inputs, profile, *, monkeypatch, uv, interpreter
     return Path(prepared["snapshot"]) / "applications" / "agent-worktrees"
 
 
-def _qualify_native_application(tmp_path, monkeypatch, *, broker=False, caller_jobs=False):
+def _qualify_native_application(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, broker: bool | str = False,
+    caller_jobs: bool = False,
+) -> None:
     if caller_jobs:
         from agent_procutil import contained_test_mode
         from agent_procutil.daemon_instances import TEST_CONTEXT_ENV
@@ -822,8 +1044,12 @@ def _qualify_native_application(tmp_path, monkeypatch, *, broker=False, caller_j
     deadline = started + construction_budget
     print("Application construction starting", flush=True)
     sys.path.insert(0, str(ROOT / "tools"))
-    import local_install_profile as profiles
-    from governed_feed_trust import _governed_feed_configured
+    if TYPE_CHECKING:
+        from tools import local_install_profile as profiles
+        from tools.governed_feed_trust import _governed_feed_configured
+    else:
+        import local_install_profile as profiles
+        from governed_feed_trust import _governed_feed_configured
 
     if not _governed_feed_configured():
         pytest.skip("native application construction requires the configured governed feed")
@@ -833,7 +1059,7 @@ def _qualify_native_application(tmp_path, monkeypatch, *, broker=False, caller_j
     assert uv and (os.name != "nt" or shell)
     interpreter = physical_executable(getattr(sys, "_base_executable", sys.executable))
     assert interpreter is not None
-    engine = profiles.source_inputs.engine
+    engine = cast(_ProfileExports, profiles).source_inputs.engine
     inputs = tmp_path / "source-inputs"
     application = _prepare_native_application(
         inputs, tmp_path / "profile", monkeypatch=monkeypatch, uv=uv,
@@ -934,12 +1160,12 @@ def _qualify_native_application(tmp_path, monkeypatch, *, broker=False, caller_j
     print(f"Application packaged admission checked: {time.monotonic() - started:.2f}s", flush=True)
     if broker in {"embody", "copilot"}:
         assert time.monotonic() < deadline, "Public caller preparation exceeded 420 seconds"
-        from test_manager_application_launch import _qualify_manager_application
+        from test_manager_application_launch import _qualify_manager_application as qualify_manager
 
         manager = tmp_path / "manager"
         manager.mkdir()
-        _qualify_manager_application(
-            manager, monkeypatch, broker, worktrees_python=python,
+        cast(_ManagerApplication, qualify_manager)(
+            manager, monkeypatch, cast(str, broker), worktrees_python=python,
             worktrees_root=root, worktrees_environment=environment,
             caller_jobs=caller_jobs, replacement_slot=replacement,
             rollback_application=application if replacement is not None else None,
@@ -948,7 +1174,7 @@ def _qualify_native_application(tmp_path, monkeypatch, *, broker=False, caller_j
         assert time.monotonic() < deadline, "Application construction exceeded 300 seconds"
         native_root = tmp_path / "native-flow"
         native_root.mkdir()
-        cleanup = []
+        cleanup: list[InstanceCleanupResult] = []
         try:
             with daemon_test_lifecycle(
                 owner="worktrees-application-broker-fixture",
@@ -978,9 +1204,11 @@ def _qualify_native_application(tmp_path, monkeypatch, *, broker=False, caller_j
             assert all(result.status == "settled" for result in cleanup), cleanup
         assert cleanup, "The installed broker did not admit its owned native processes"
     elif os.environ.get("COPILOT_NATIVE_TEST_EXECUTABLE"):
-        from test_native_startup_prompt import _qualify_native_startup
+        from test_native_startup_prompt import _qualify_native_startup as qualify_startup
 
-        def packaged_command(native, native_environment, directory):
+        def packaged_command(
+            native: list[str], native_environment: dict[str, str], directory: Path,
+        ) -> list[str]:
             selected = _run([
                 python, "-I", "-B", "-c",
                 "import argparse,json,os,sys;from pathlib import Path;"
@@ -994,11 +1222,11 @@ def _qualify_native_application(tmp_path, monkeypatch, *, broker=False, caller_j
                 "argparse.Namespace(recovery=True,copilot_args=native[1:]),cwd)))",
                 json.dumps(native),
             ], cwd=directory, env=native_environment, deadline=deadline)
-            return json.loads(selected.stdout)
+            return cast(list[str], json.loads(selected.stdout))
 
         native_root = tmp_path / "native-flow"
         native_root.mkdir()
-        _qualify_native_startup(
+        cast(_NativeStartup, qualify_startup)(
             native_root, False, command_wrapper=packaged_command, environment=environment,
         )
     if replacement is None:

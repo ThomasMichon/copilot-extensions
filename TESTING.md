@@ -3539,7 +3539,21 @@ environment flags and verify selection before invoking Manager; inherited
 profile variables alone can be rewritten by PSMux. Cleanup pins both caller
 and Manager session incarnations. The fixture preserves the
 runner's registry/lifecycle context while scrubbing Copilot settings and
-credentials. Its raw pane entrypoint uses the physical Python interpreter
+credentials. Native argv leaves optional screen-reader onboarding unrequested.
+Managed fixture checkouts match their configured root and ledger identity;
+the real receiving-subject guard runs before a pane starts. The source-only
+`test_fixture_record_matches_receiving_namespace_before_native_launch` controls
+in `test_native_seed_application.py` exercise that initialization and preserve
+foreign-namespace refusal without launching Copilot or mux.
+Manager controls also initialize real Git authority for CWD-based follow-up
+commands. Failure diagnostics report bounded private registration/census
+counts; incomplete coverage remains unknown, never permission to repair or
+query another root's registrations.
+The data-root override and private OS profile's `.psmux` path coincide,
+including callers whose Copilot home is the profile's `.copilot` directory.
+This aligns override-aware and fallback-based root selection; installed
+compatibility still requires its native qualification.
+Its raw pane entrypoint uses the physical Python interpreter
 with the same managed test packages, avoiding the
 Windows venv redirector and ambient Python site initialization. The fixture
 disables the wrapper's post-error display hold, not native execution or its

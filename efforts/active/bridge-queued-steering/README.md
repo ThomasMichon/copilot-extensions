@@ -96,7 +96,7 @@ not additional operator requirements.
 
 - [ ] Correct the confirmed admission-to-consumer failure without replacing a
   healthy session, replaying an uncertain effect or hiding unsupported state.
-- [ ] Add a bounded, coalesced post-tool notification with mute and ordering
+- [x] Add a bounded, coalesced post-tool notification with mute and ordering
   preserved; no network or child process on an in-process hook hot path.
 - [ ] Correlate actual root input to exact message IDs for consumption receipts;
   unrelated, nested, duplicate and earlier events cannot settle them.
@@ -262,3 +262,29 @@ delivery from an SDK promise or a timer.
   publication remain pending. Native model-facing receipts, enforceable
   duplicate-safe content fallback and installed qualification remain open;
   this extraction does not complete the queued-steering objective.
+
+### 2026-11-14 - Notification and evidence-retry source accepted
+
+- #12571 merged at head `75f6889ee8341cfffef484e785b307663a04002d`
+  after genuine approval `5902339573`, a full review with no open issues or
+  limitations, complete empty threads and green current-head CI `43566831199`.
+  Managed completion used the normal Maintainer additional-CODEOWNER
+  exception, not a CI bypass or a scan-limitation waiver.
+- Immediately reread this Goal, Plan and full Validation Plan after recording
+  the continuing Core parent's acceptance. The bounded notification source
+  item closes; actual native hook/model qualification, the complete admission
+  repair, exact prompt-submission receipts and duplicate-safe timed fallback
+  remain open. The effort stays Active.
+- All five actual SDK facade layouts passed, including ordinary wheel-only
+  resources after construction cleanup. Genuine HTTP-52 capture and a separate
+  no-write verification each passed all 531 cases without skips at public
+  source checkpoint `ef18c1f32585cb0199c381c620992c7d897adf19`.
+  The 203 outputs matched the exact compiler plan; strict validation passed
+  two contracts and 1,123 fixtures with historical evidence unchanged.
+- Isolated wheel construction and the physical reporter interpreter preserve
+  the strict contributing-source and parent-link proof. These are controlled
+  source/SDK-model results, not native input acceptance or installed adoption.
+  Continue through the existing native provider-contract boundary; no hook
+  return, send reply or later assistant activity supplies the missing receipt
+  or permission to replay an uncertain message. No rollout, new native probe,
+  resource transfer or credential operation occurred.
