@@ -274,8 +274,9 @@ requirements.
   engine, command ledger or prerequisite Fleet deployment.
 - [x] Qualify passive service-role construction through the canonical engine.
   #12153 proves installed hosting imports, role isolation, immutable reuse and
-  source-removed validation on native Linux/Windows Python3.10/3.11. It does not
-  select a service, open storage, acquire a writer or activate a host.
+  source-removed validation on native Linux/Windows Python3.11. Python3.10
+  qualifies constructor-floor refusal, not construction. This does not select
+  a service, open storage, acquire a writer or activate a host.
 - [ ] Add optional Manager/readiness discovery only after the independently
   runnable adapter and its readiness meanings are real. Keep the parent
   service, native, migration and adoption gates open until actually proved.
