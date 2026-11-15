@@ -117,6 +117,26 @@ def test_model_identity_invalidates_pairs(tmp_path: Path, change: dict[str, obje
     assert len(clients["a"].calls) == 2
 
 
+def test_model_readiness_retains_legacy_callback_and_skips_covered_pairs(tmp_path: Path) -> None:
+    profiles = {"a": profile(content_types=frozenset({"text"}))}
+    clients = {"a": Client()}
+    store, paths = Store(profiles), PathIndex(tmp_path / "paths.db")
+    run(paths, store, clients, profiles, [chunk()])
+    for model, types in (("b", {"text"}), ("c", {"function"})):
+        profiles[model] = profile(model, content_types=frozenset(types))
+        clients[model] = Client()
+        store.tables[model] = Table(profiles[model].table_name)
+    callbacks: list[str] = []
+    for expected in (["legacy", "b"], []):
+        callbacks.clear()
+        run(
+            paths, store, clients, profiles, [chunk()],
+            before_embed=lambda: callbacks.append("legacy"),
+            before_model_embed=callbacks.append,
+        )
+        assert callbacks == expected
+
+
 def test_raw_text_missing_vector_and_legacy_overwrite_are_not_reused(tmp_path: Path) -> None:
     profiles = {"a": profile()}
     clients = {"a": Client()}

@@ -380,16 +380,15 @@ def run_reindex(
     # Initialized before the try so the finally can always see it, even if
     # ensuring engines (or the migration) fails partway.
     started_engines: list[ModelProfile] = []
-    engines_ready = False
+    ready_models: set[str] = set()
 
-    def prepare_embedding() -> None:
-        nonlocal engines_ready
-        if engines_ready or not runtime.manage_engines:
+    def prepare_embedding(model_id: str) -> None:
+        if model_id in ready_models or not runtime.manage_engines:
             return
-        for profile in config.model_profiles.values():
-            if runtime.ensure_engine(profile, multi_clients[profile.model_id]):
-                started_engines.append(profile)
-        engines_ready = True
+        profile = config.model_profiles[model_id]
+        if runtime.ensure_engine(profile, multi_clients[model_id]):
+            started_engines.append(profile)
+        ready_models.add(model_id)
 
     total_chunks = 0
     total_deleted = 0
@@ -419,7 +418,7 @@ def run_reindex(
                     progress_cb=progress_cb,
                     resume_since=resume_since,
                     connector_kwargs=connector_kwargs,
-                    before_store=prepare_embedding,
+                    before_model_embed=prepare_embedding,
                     source_scope=source_scope_hash(spec),
                     connector=hinted_connector, change_hints=change_hints,
                 )
@@ -630,6 +629,7 @@ def _index_source(
     resume_since: float | None = None,
     connector_kwargs: dict[str, object] | None = None,
     before_store: Callable[[], None] | None = None,
+    before_model_embed: Callable[[str], None] | None = None,
     source_scope: str | None = None,
     connector: SourceConnector | None = None,
     change_hints: ChangeHints | None = None,
@@ -647,6 +647,7 @@ def _index_source(
         _apply_source_manifest, source_name, config=config, state=state,
         path_index=path_index, multi_store=multi_store, multi_clients=multi_clients,
         progress_cb=progress_cb, resume_since=resume_since, before_store=before_store,
+        before_model_embed=before_model_embed,
     )
 
     def prepare(*, manifest: CrawlManifest, full: bool) -> ApplyManifest:
@@ -660,7 +661,8 @@ def _index_source(
         prepared = PreparedApplication(
             manifest, scope=scope, config=config, paths=path_index, store=multi_store,
             clients=multi_clients, full=full, resume_since=resume_since,
-            before_embed=before_store, progress_cb=progress_cb,
+            before_embed=before_store, before_model_embed=before_model_embed,
+            progress_cb=progress_cb,
         )
         return partial(
             _publish_prepared_manifest, application=application,
@@ -719,6 +721,7 @@ def _apply_source_manifest(
     progress_cb: ProgressCallback | None = None,
     resume_since: float | None = None,
     before_store: Callable[[], None] | None = None,
+    before_model_embed: Callable[[str], None] | None = None,
     prepared: PreparedApplication | None = None,
 ) -> tuple[int, int, int]:
     """Index a single data source using the four-phase pipeline.
@@ -781,6 +784,7 @@ def _apply_source_manifest(
             resume_since=resume_since,
             force=full,
             before_store=before_store,
+            before_model_embed=before_model_embed,
             chunker_revision=getattr(config, "chunker_revision", "1"),
             prepared=prepared,
         )
@@ -875,6 +879,7 @@ def _embed_and_store_files(
     resume_since: float | None = None,
     force: bool = False,
     before_store: Callable[[], None] | None = None,
+    before_model_embed: Callable[[str], None] | None = None,
     chunker_revision: str = "1",
     prepared: PreparedApplication | None = None,
 ) -> tuple[int, set[tuple[str, str]]]:
@@ -934,6 +939,7 @@ def _embed_and_store_files(
                 batch, multi_store, multi_clients, model_profiles,
                 stream_batch_size=stream_batch_size, coverage=coverage,
                 force=force, before_embed=before_store, skip_identical_content=not force,
+                before_model_embed=before_model_embed,
             )
         else:
             from agent_index.indexing.embedding_batch import embed_and_store_batch
@@ -984,6 +990,7 @@ def _embed_and_store_batch(
     coverage: EmbeddingCoverage | None = None,
     force: bool = False,
     before_embed: Callable[[], None] | None = None,
+    before_model_embed: Callable[[str], None] | None = None,
     skip_identical_content: bool = False,
 ) -> int:
     """Compatibility seam for the routed batch writer."""
@@ -992,5 +999,6 @@ def _embed_and_store_batch(
     return embed_and_store_batch(
         chunks, multi_store, multi_clients, model_profiles,
         stream_batch_size=stream_batch_size, coverage=coverage, force=force,
-        before_embed=before_embed, skip_identical_content=skip_identical_content,
+        before_embed=before_embed, before_model_embed=before_model_embed,
+        skip_identical_content=skip_identical_content,
     )

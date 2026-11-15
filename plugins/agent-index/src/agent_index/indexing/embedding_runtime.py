@@ -20,6 +20,7 @@ class EmbeddingRuntime:
 
     Each factory result is owned by this run and closed on every exit. Return a
     fresh EngineClient (or compatible subclass), not a borrowed service client.
+    Readiness is requested once per model, only before an actual embedding call.
     Only engines reported as started by ``ensure_engine`` are stopped.
     """
 

@@ -181,20 +181,26 @@ def test_reuse_fingerprint_includes_metadata_models_and_chunker_revision() -> No
 def test_run_prepares_engines_only_when_embedding_is_needed(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, has_embedding_work: bool,
 ) -> None:
-    profile = ModelProfile(model_id="prose", model_name="fixture")
+    profile = ModelProfile(model_id="prose", model_name="fixture", table_name="vectors_prose")
     config = IndexConfig(
-        data_dir=tmp_path, model_profiles={"prose": profile}, cluster_enabled=False,
+        data_dir=tmp_path, cluster_enabled=False,
+        model_profiles={
+            "prose": profile,
+            "unused": ModelProfile("unused", "fixture", table_name="vectors_unused"),
+        },
     )
     calls: list[str] = []
-    client = SimpleNamespace(close=lambda: calls.append("close"))
     store = SimpleNamespace(register_model=lambda _profile: None)
     monkeypatch.setenv("AGENT_INDEX_INDEX_ENSURE_ENGINES", "1")
     monkeypatch.setattr("agent_index.index_config.IndexConfig", lambda: config)
-    monkeypatch.setattr("agent_index.engine.client.EngineClient", lambda **k: client)
+    monkeypatch.setattr(
+        "agent_index.engine.client.EngineClient",
+        lambda **k: SimpleNamespace(close=lambda: calls.append(f"close:{k['model_id']}")),
+    )
     monkeypatch.setattr("agent_index.store.multi_model_store.MultiModelStore", lambda *a, **k: store)
     monkeypatch.setattr(
         "agent_index.engine.lifecycle.ensure_engine",
-        lambda *a: calls.append("ensure") or False,
+        lambda model, _client: calls.append(f"ensure:{model.model_id}") or False,
     )
     monkeypatch.setattr(engine, "selected_layout", lambda: None)
     monkeypatch.setattr(
@@ -204,13 +210,15 @@ def test_run_prepares_engines_only_when_embedding_is_needed(
 
     def index_source(*args: object, **kwargs: object) -> tuple[int, int, int]:
         if has_embedding_work:
-            before_store = kwargs["before_store"]
-            assert callable(before_store)
-            before_store()
-            before_store()
+            before_model_embed = kwargs["before_model_embed"]
+            assert callable(before_model_embed)
+            before_model_embed("prose")
+            before_model_embed("prose")
         return (0, 0, 0)
 
     monkeypatch.setattr(engine, "_index_source", index_source)
     result = engine.run_reindex(source="git:fixture")
     assert "sources_failed" not in result
-    assert calls == (["ensure", "close"] if has_embedding_work else ["close"])
+    assert calls == (
+        (["ensure:prose"] if has_embedding_work else []) + ["close:unused", "close:prose"]
+    )

@@ -20,6 +20,7 @@ from agent_index.sources import register_connector
 from agent_index.sources.base import FileEntry
 from agent_index.sources.delta import SourceDelta
 from agent_index.store.multi_model_store import MultiModelStore
+from agent_index.store.source_layout import LAYOUT, initialize_source_store
 
 
 def forbidden(*args: object, **kwargs: object) -> None:
@@ -121,6 +122,85 @@ def test_injected_consumer_uses_shared_pipeline_and_reuses_metadata_pairs(
     assert MultiModelStore(config.lance_dir).get_document(connector.source_name, "one.md")
 
 
+@pytest.mark.parametrize("selected", [False, True])
+@pytest.mark.parametrize("manage", [False, True])
+def test_readiness_is_scoped_to_pending_model_pairs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, selected: bool, manage: bool,
+) -> None:
+    monkeypatch.setenv("AGENT_INDEX_STORE_LAYOUT", LAYOUT if selected else "")
+    config = IndexConfig(
+        data_dir=tmp_path, cluster_enabled=False, stream_batch_size=1,
+        model_profiles={
+            name: ModelProfile(name, "fixture", dim=2, table_name=f"vectors_{name}")
+            for name in ("a", "b")
+        },
+    )
+    connector = Connector("sample:repo")
+    connector.entries = [
+        FileEntry(f"{name}.md", f"# {name}\n\nUseful {name} text.", "markdown", connector.source_name)
+        for name in ("one", "two", "retained")
+    ]
+    from agent_index import sources
+
+    monkeypatch.setattr(sources, "_CONNECTORS", dict(sources._CONNECTORS))
+    register_connector("sample", lambda **kwargs: connector)
+    events: list[str] = []
+    clients: dict[str, Client] = {}
+
+    def create(profile: ModelProfile) -> Client:
+        client = Client(profile.model_id, events)
+        clients[profile.model_id] = client
+        return client
+
+    runtime = EmbeddingRuntime(
+        create,
+        lambda profile, _client: events.append(f"ensure:{profile.model_id}") or True,
+        lambda profile: events.append(f"stop:{profile.model_id}"),
+        manage_engines=manage,
+    )
+
+    def run() -> None:
+        result = engine.run_reindex(
+            config=config, source=connector.source_name,
+            source_specs=[engine.SourceSpec(connector.source_name, type="sample")],
+            embedding_runtime=runtime,
+        )
+        assert "sources_failed" not in result
+
+    run()
+    config.model_profiles["c"] = ModelProfile("c", "fixture", dim=2, table_name="vectors_c")
+    events.clear()
+    run()
+    assert not any(event.startswith(("ensure:", "stop:")) for event in events)
+    assert all(not client.texts for client in clients.values())
+
+    connector.entries = connector.entries[:2]
+    connector.cursor = "selected-pairs"
+    events.clear()
+    run()
+    assert [event for event in events if event.startswith("ensure:")] == (
+        ["ensure:c"] if manage else []
+    )
+    assert [event for event in events if event.startswith("stop:")] == (
+        ["stop:c"] if manage else []
+    )
+    assert not clients["a"].texts and not clients["b"].texts
+    assert [len(batch) for batch in clients["c"].texts] == [1, 1]
+
+    store = initialize_source_store(config) if selected else MultiModelStore(config.lance_dir)
+    for profile in config.model_profiles.values():
+        store.register_model(profile)
+    ids = {
+        path: store.content_store.get_chunk_ids_by_file(connector.source_name, f"{path}.md")
+        for path in ("one", "two", "retained")
+    }
+    vectors = store.get_vector_table("c").get_vectors(
+        [chunk_id for values in ids.values() for chunk_id in values], strict=True,
+    )
+    assert set(vectors) == set(ids["one"]) | set(ids["two"])
+    assert not set(vectors).intersection(ids["retained"])
+
+
 def test_client_construction_and_close_failures_keep_cleanup_owned() -> None:
     events: list[str] = []
     profiles = {name: ModelProfile(name, "fixture") for name in ("a", "b")}
@@ -172,7 +252,7 @@ def test_lifecycle_cleanup_on_source_failure_and_close_failure(
     )
 
     def fail_source(*args: object, **kwargs):
-        kwargs["before_store"]()
+        kwargs["before_model_embed"]("a")
         raise RuntimeError("source failed")
 
     monkeypatch.setattr(engine, "_index_source", fail_source)

@@ -46,6 +46,7 @@ def embed_and_store_batch(
     coverage: EmbeddingCoverage | None = None,
     force: bool = False,
     before_embed: Callable[[], None] | None = None,
+    before_model_embed: Callable[[str], None] | None = None,
     skip_identical_content: bool = False,
     prepared_vectors: Callable[[str, list[Chunk]], np.ndarray] | None = None,
 ) -> int:
@@ -69,6 +70,7 @@ def embed_and_store_batch(
             sub, multi_store, multi_clients, model_profiles,
             stream_batch_size=stream_batch_size, coverage=coverage,
             force=force, before_embed=before_embed,
+            before_model_embed=before_model_embed,
             prepared_vectors=prepared_vectors,
         )
     return total
@@ -84,6 +86,7 @@ def embed_and_store_pairs(
     coverage: EmbeddingCoverage | None = None,
     force: bool = False,
     before_embed: Callable[[], None] | None = None,
+    before_model_embed: Callable[[str], None] | None = None,
     bounded: bool = False,
     after_store: Callable[[VectorTable, int], None] | None = None,
     prepared_vectors: Callable[[str, list[Chunk]], np.ndarray] | None = None,
@@ -93,6 +96,8 @@ def embed_and_store_pairs(
     Bounded callers supply prepared canonical/coverage reads and an after-store
     callback for explicitly budgeted vector-index preparation. This is not a
     discovery, profile-selection, source-lease or progress authority.
+    The optional model callback receives only a model with missing pairs;
+    the existing zero-argument callback retains its original calling convention.
     """
     from agent_index.engine.client import EngineUnavailableError
     from agent_index.store.content_mutations import coalesce_chunks
@@ -136,6 +141,8 @@ def embed_and_store_pairs(
             try:
                 if before_embed and prepared_vectors is None:
                     before_embed()
+                if before_model_embed and prepared_vectors is None:
+                    before_model_embed(model_id)
                 if coverage and table is not None and not bounded:
                     coverage.invalidate(table, model_chunks)
                 if model_counts is not None and prepared_vectors is None:
