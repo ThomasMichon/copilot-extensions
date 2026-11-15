@@ -3734,6 +3734,17 @@ sources, transferring owners or turning partial/planning gains into completion.
   continue graph-backed consolidation with creation-oldest-first coverage until
   at most 729 issues remain.
 
+The [head, venue and journal receiving unit](journal/2026/11.14-head-venue-and-journal-receivers.md)
+adds direct planned #3584/#3585 and #3507 acceptance to their existing ROOTs,
+with 25 new unchecked Plan/local/global Validation rows and unchanged
+custodians. It also retains #3421's deliberate separate-review preference.
+The preceding #12669 Manager intake is reviewed and merged; #3323, #3372
+and #3582 have audited `NOT_PLANNED` tracking retirements, not technical
+completion. The latest complete census is 848 whole, 119 above fixed 729;
+467 original-cohort issues and 381 inflow remain open. No source retirement
+follows from this new proposal before actual receiving readback and separate
+source-specific adjudication.
+
 ### Phase 2b - Vision-linked stabilization roadmap
 
 - [x] _(Agent-recommended)_ Establish the reviewed research method and
