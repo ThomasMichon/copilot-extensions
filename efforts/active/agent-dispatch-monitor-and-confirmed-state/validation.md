@@ -4,6 +4,13 @@ Canonical component of [this same Active effort](README.md). This is not a child
 
 ## Validation Plan
 
+- [ ] **G3966:** Resolve every
+  [captured-owner/handoff Plan and local Validation clause](plan-core-lifecycle.md#finite-captured-owner-and-handoff-gc-acceptance-from-3966)
+  at its retained evidence tier, preserving all incumbent checked credit,
+  global gates and actual owner/claim conditions. A planned intake or source
+  merge is not native/installed proof, whole-effort completion or resource
+  release; unrelated parent work is not a new prerequisite for this finite slice.
+
 - [ ] Complete the [assignment/startup validation matrix](assignment-startup-amendment.md#validation-plan);
       documentation approval alone does not establish runtime conformance.
 

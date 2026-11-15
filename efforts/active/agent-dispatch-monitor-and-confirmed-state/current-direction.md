@@ -109,6 +109,16 @@ particularly for Phase 3's crash-recovery behavior.
 
 ## Coordination
 
+The finite #3966 captured-owner/handoff GC slice retains existing queue,
+owner-liveness, task/session/generation, handoff and resource custodians.
+The planning owner adds documentation only; #4202/#4214 backend, Tasks-pane/
+UI/native-hosting and #2879/#2887 source-specific reservations stay distinct.
+Normal review, complete direct Plan/local AND actual global Validation/
+Coordination/Journal delivery and permitted current receiving/custody readback
+precede separate source judgment. Current OPEN/claim status is not a new
+permanent-open veto. No assignment, generic ACK, second identity store,
+nonexpiry exception, writer failover or resource transfer is introduced.
+
 The proposed #4202/#4214 finite backend families retain existing task,
 writer/client, evaluator/history, steering, owner/session/generation,
 handoff and resource custodians. Planning remains documentation only;
