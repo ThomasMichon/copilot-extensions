@@ -3797,8 +3797,9 @@ record complete current relevant readback and separate audited
 under its literal whole-scope/validation condition; #3989 retains unresolved
 first-use meaning, and #4053 remains OPEN for independent #4046 work.
 #12703's reviewed scope correction preserves the independent relay admission.
-#3979 remains OPEN for direct retention of its original cooldown and existing
-interactive-unlock compatibility checks; no relay authority transfers to it.
+#3979 was retained OPEN pending direct cooldown and existing interactive-unlock
+compatibility retention; the later reviewed follow-through below records its
+separate tracking judgment. No relay authority transfers to that family.
 The complete 08:25:51 UTC census verifies 846 whole open, 117 above fixed
 729: 458 original-cohort and 388 inflow issues. Six metadata-only arrivals
 offset the two campaign retirements. All 50 receiving checks remain unchecked.
@@ -3811,6 +3812,17 @@ route, with eight new unchecked Plan/local/global Validation rows. The
 pending #3979 compatibility clarification is batched with it. Both complete
 original maps are admitted; partial discovery/producer mappings, actual
 source-owner conditions and unresolved meanings remain separate.
+The [reviewed runtime-startup follow-through](journal/2026/11.14-accepted-receivers-and-owner-frontier.md#reviewed-runtime-startup-receiving-and-separate-source-judgments)
+records #12707's actual merge, current relevant receiving readback and separate
+audited `NOT_PLANNED` retirements for #3979 and #4138. All eight new runtime
+checks and incumbent technical obligations remain unchecked. The complete
+09:27:07 UTC census verifies 844 whole open, 115 above fixed 729: 456
+original-cohort and 388 inflow issues. #4075 stays OPEN for its whole
+convergence AND inherited actual-work-receipt union.
+The [next scoped receiving proposal](journal/2026/11.14-accepted-receivers-and-owner-frontier.md#next-finite-provenance-and-conditional-input-receivers)
+adds ten unchecked Plan/local/global Validation rows for the Bridge and
+Manager consumer subsets of #4118 and a conditional #4122 input-boundary
+case. Neither source is retired or represented as a whole accepted receiver.
 
 ### Phase 2b - Vision-linked stabilization roadmap
 

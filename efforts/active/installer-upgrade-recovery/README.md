@@ -54,6 +54,14 @@ These are coordination dependencies, not new assignments or ownership transfers.
 
 ## Coordination
 
+The conditional #4122 intake below first resolves whether the reported
+Linux/WSL input belongs to this ROOT's existing supported incoming
+install/update path. Preserve the actual installer/source owner and #4123's
+separate fixture-cleanup scope; do not broaden the Goal or transfer
+implementation, cleanup or resource custody. #4122 remains OPEN until its
+exact supported-entry scope and receiving acceptance are established.
+Planned receipt does not require implementation or a native run first.
+
 The [installation convergence map](../source-managed-runtime-installs/installation-convergence.md)
 uses this effort's affected-installation cases to qualify the same incoming
 path as a fresh install, not a separate legacy reconstruction algorithm.
@@ -151,6 +159,23 @@ authorize production updates, recovery mutations or new access.
   Hoist only additional generic gaps that do not already have an upstream issue.
 
 ### Phase 2 - Priority fixes and latest-flow recovery
+
+- [ ] **IR4122-P0:** Establish whether the reported Linux/WSL dangling
+  generated `.pytmp` input occurs on the existing supported incoming
+  install/update entry covered by this ROOT, retaining the actual source
+  and installer owner. If it does not, keep #4122 outside this ROOT rather
+  than broadening the Goal or treating another receiver as absent.
+- [ ] **IR4122-P1:** If P0 confirms the boundary, safely exclude known
+  generated debris at an owned input boundary OR use another explicitly
+  accepted safe policy, without requiring manual deletion. Never follow,
+  read or delete a link target, or treat required missing/linked or foreign
+  inputs as harmless generated debris. If safe admission cannot be
+  established, preserve the prior healthy installation and precise refusal.
+- [ ] **IR4122-LV:** At the identified supported boundary, cover clean input,
+  known generated dangling `.pytmp` debris, unrelated/authored files,
+  required missing/linked inputs and failure. Verify prior healthy-state
+  preservation and truthful refusal without weakening incoming readiness,
+  ownership or required-payload admission.
 
 - [x] Select the first bounded, unclaimed reproducible source gap, or obtain
   explicit coordination with its existing owner. Record its old-footprint case
@@ -323,6 +348,13 @@ a new recovery/provenance veto on explicit incoming replacement.
   only when this parent gate is satisfied.
 
 ## Validation Plan
+
+- [ ] **IR4122-G:** Resolve P0 before claiming this ROOT receives #4122,
+  then qualify P1 and its local controls at the original finite source-input
+  recovery tier. Keep #4123 fixture cleanup, tracked-link removal, ignore
+  rules, source publication and installed/native evidence distinct.
+  No broader platform matrix, owner transfer or runtime operation is
+  supplied by this conditional plan.
 
 - [ ] Exercise the relevant [L1-L5 caller-loss/handoff cases](../source-managed-runtime-installs/update-service-lifetimes.md#validation-and-completion)
   through the latest normal entry with affected old footprints and same-boot
