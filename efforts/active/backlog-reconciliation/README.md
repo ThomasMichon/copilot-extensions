@@ -4040,6 +4040,12 @@ The [subsequent verified disposition](journal/2026/11.15-owned-release-boundarie
 records #12754's reviewed merge, the exact public acknowledgment and independently
 verified `COMPLETED` state for #10126. The whole queue is 837, still 108 above
 the fixed checkpoint; #10159's qualification pause and all parent gates remain.
+The [next bounded delta study](journal/2026/11.15-owned-release-boundaries.md#seven-deltas-and-their-actual-owner-boundaries)
+reuses unchanged evidence, retains #10968's actual owner-held gates and proposes
+a [finite #10951 source completion](journal/2026/11.15-owned-release-boundaries.md#proposed-finite-caller-context-completion).
+The [eight further retained outcomes](journal/2026/11.15-owned-release-boundaries.md#eight-retained-outcomes-without-fresh-runtime-claims)
+keep their history, source, receiving and custody gaps; no issue effect is
+claimed from this pending proposal.
 
 ### Phase 2b - Vision-linked stabilization roadmap
 
