@@ -3796,11 +3796,21 @@ record complete current relevant readback and separate audited
 `NOT_PLANNED` tracking retirements for #4029 and #4036. #3983 remains OPEN
 under its literal whole-scope/validation condition; #3989 retains unresolved
 first-use meaning, and #4053 remains OPEN for independent #4046 work.
-#3979 awaits reviewed correction of two stale whole-effort Draft assertions
-after the distinct relay admission; no relay authority transfers to it.
+#12703's reviewed scope correction preserves the independent relay admission.
+#3979 remains OPEN for direct retention of its original cooldown and existing
+interactive-unlock compatibility checks; no relay authority transfers to it.
 The complete 08:25:51 UTC census verifies 846 whole open, 117 above fixed
 729: 458 original-cohort and 388 inflow issues. Six metadata-only arrivals
 offset the two campaign retirements. All 50 receiving checks remain unchecked.
+The [next original-only frontier](journal/2026/11.14-accepted-receivers-and-owner-frontier.md#next-creation-oldest-original-only-frontier)
+has twelve stable qualified inputs in two disjoint research assignments,
+not twelve accepted receivers or additional closure credits.
+The [next receiving comparison](journal/2026/11.14-accepted-receivers-and-owner-frontier.md#next-finite-runtime-startup-receiving-proposal)
+adds a direct proposed #4138 runtime contract through its existing intake
+route, with eight new unchecked Plan/local/global Validation rows. The
+pending #3979 compatibility clarification is batched with it. Both complete
+original maps are admitted; partial discovery/producer mappings, actual
+source-owner conditions and unresolved meanings remain separate.
 
 ### Phase 2b - Vision-linked stabilization roadmap
 
