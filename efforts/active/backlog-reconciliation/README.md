@@ -4049,6 +4049,11 @@ claimed from that proposal itself. Its [subsequent verified disposition](journal
 records reviewed #12758, the exact acknowledgment and independently verified
 `COMPLETED` state for #10951. The complete whole queue is 836, still 107 above
 the fixed checkpoint; broader adoption, native acceptance and custody remain.
+The [next twelve retained outcomes](journal/2026/11.15-owned-release-boundaries.md#twelve-retained-outcomes-and-two-accepted-receiving-additions)
+distinguish two accepted Dispatch tracking additions from unresolved technical
+acceptance. Together with the preceding three delta studies, they preserve
+38 open outcomes without new issue effects, closure credit or parent check
+changes. Prior source pins remain distinct from current metadata qualification.
 
 ### Phase 2b - Vision-linked stabilization roadmap
 
