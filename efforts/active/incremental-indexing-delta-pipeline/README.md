@@ -180,11 +180,11 @@ After the reviewed proposal, the operator admitted execution:
   FTS and hydrated hybrid results, including wildcard and literal-path cases.
   Preserve source/repo/metadata filters; specify behavior rather than requiring
   a particular SQL or Python converter.
-- [ ] GP2 - Qualify matching eligibility and final result limits within the
+- [x] GP2 - Qualify matching eligibility and final result limits within the
   finite candidate window. Nonmatches must not consume final eligible slots;
   disclose window-induced underfill rather than claiming exhaustive top-N or
   adding an unbounded scan. FTS and hybrid rankings need not be identical.
-- [ ] GP3 - Keep this retrieval slice independent of acquisition, checkpoints,
+- [x] GP3 - Keep this retrieval slice independent of acquisition, checkpoints,
   deletion/reconciliation, upserts and embedding policy. Preserve the existing
   #4222/#4220/#8733/#5302 owners and separate source, consumer, native, release
   and serving evidence.
