@@ -3823,6 +3823,22 @@ The [next scoped receiving proposal](journal/2026/11.14-accepted-receivers-and-o
 adds ten unchecked Plan/local/global Validation rows for the Bridge and
 Manager consumer subsets of #4118 and a conditional #4122 input-boundary
 case. Neither source is retired or represented as a whole accepted receiver.
+The [reviewed scoped follow-through](journal/2026/11.14-accepted-receivers-and-owner-frontier.md#reviewed-scoped-delivery-with-whole-source-gaps-retained)
+records #12710's actual merge and equal reviewed/merged/current document
+blobs. All ten checks remain unchecked; #4118 and #4122 stay OPEN under their
+distinct whole-producer and conditional-scope gaps. The complete 09:48:11 UTC
+census remains 844 whole, 115 above fixed 729, with no arrivals or departures.
+The next two original-only studies continue; this is not campaign completion.
+Their [original-map admission](journal/2026/11.14-accepted-receivers-and-owner-frontier.md#next-original-maps-admitted-with-a-specific-coverage-gap)
+now preserves eleven complete primaries and one coverage-limited #4195 keeper.
+Two disjoint comparisons use nine qualified candidate ROOTs; neither an unread
+candidate nor a reported partial fix establishes fit, completion or transfer.
+The [next ordered-outcome receiving proposal](journal/2026/11.14-accepted-receivers-and-owner-frontier.md#next-ordered-outcome-and-consumer-receiving-proposal)
+adds nineteen unchecked acceptance rows: complete finite #4186/#4194/#4199
+contracts and two explicitly partial Manager consumer maps. #4199's literal
+implementation OR exact-complete-authorized-receiving condition remains.
+Other source claims, unfinished producer lanes and #4195's coverage gap are
+not retired by this proposal.
 
 ### Phase 2b - Vision-linked stabilization roadmap
 
