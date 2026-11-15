@@ -157,6 +157,9 @@ named accepted objective; a component's relocation does not complete it.
 
 - [ ] Complete [assignment/startup and submission integration](plan-assignment-startup.md).
 - [ ] Resolve the [core lifecycle phases](plan-core-lifecycle.md), preserving historical credit.
+- [ ] Resolve #3966's finite
+  [captured-owner/handoff GC acceptance](plan-core-lifecycle.md#finite-captured-owner-and-handoff-gc-acceptance-from-3966),
+  including its local and [actual global Validation](validation.md).
 - [ ] Resolve [all retained manual reliability acceptance](acceptance-manual-reliability.md).
 - [ ] Resolve [all suspension-reason/viewer acceptance](acceptance-suspension-reasons.md).
 - [ ] Resolve [all exact-owner delivery and intake acceptance](acceptance-delivery-and-intake.md).
@@ -213,6 +216,11 @@ COMPLETED/CONFIRMED terminology. Current work uses SUBMITTED/COMPLETED under the
 [task-conversation amendment](task-conversation-amendment.md); no old enum is restored.
 
 ## Journal
+
+The [2026-11-14 finite receiving record](../backlog-reconciliation/journal/2026/11.14-accepted-receivers-and-owner-frontier.md#bounded-current-source-and-receiving-comparisons)
+retains the #3966 comparison and ten new unchecked Plan/local/global/link rows.
+Existing crash-recovery credit, reason/viewer acceptance and custodians remain;
+no GC operation, implementation, source disposition or resource release occurred.
 
 Use the [dated journal index](journal.md), newest first. Historical receipts are
 preserved verbatim apart from relative links; they do not establish current permission.

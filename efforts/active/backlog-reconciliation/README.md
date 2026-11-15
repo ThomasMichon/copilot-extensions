@@ -342,6 +342,14 @@ the non-public approval conversation.
 
 ## Plan
 
+The [reviewed planned-intake and Manager-source unit](journal/2026/11.14-planned-intake-and-manager-source.md)
+verifies existing receiving delivery and retires #3323 and #3372 as redundant
+planned tracking, not technical completion. It proposes eighteen unchecked
+Manager Plan/local/global Validation rows for the finite #3418 consumer and
+source-only #3421 package contract; source causes and incumbent custody remain
+separate. The complete 2026-11-15 02:00:27Z census is 847 open, 118 above fixed
+729, with two audited campaign departures and no inflow.
+
 The [review-convergence and source-contract unit](journal/2026/11.14-review-convergence-and-source-keepers.md)
 retains ten complete original/discussion unions and two metadata-only stops.
 It proposes 24 unchecked reviewer-intake Plan/local/global Validation rows,
@@ -3725,6 +3733,34 @@ sources, transferring owners or turning partial/planning gains into completion.
 - [ ] Refresh live and original-cohort metrics, append journal checkpoints, and
   continue graph-backed consolidation with creation-oldest-first coverage until
   at most 729 issues remain.
+
+The [head, venue and journal receiving unit](journal/2026/11.14-head-venue-and-journal-receivers.md)
+adds direct planned #3584/#3585 and #3507 acceptance to their existing ROOTs,
+with 25 new unchecked Plan/local/global Validation rows and unchanged
+custodians. It also retains #3421's deliberate separate-review preference.
+The preceding #12669 Manager intake is reviewed and merged; #3323, #3372
+and #3582 have audited `NOT_PLANNED` tracking retirements, not technical
+completion. The latest complete census is 848 whole, 119 above fixed 729;
+467 original-cohort issues and 381 inflow remain open. No source retirement
+follows from this new proposal before actual receiving readback and separate
+source-specific adjudication.
+
+The [accepted-receiver follow-through](journal/2026/11.14-accepted-receivers-and-owner-frontier.md)
+records #12672's actual reviewed merge, complete relevant receiving readback
+and four independently audited `NOT_PLANNED` tracking retirements: #3421,
+#3507, #3584 and #3585. All 25 new acceptance checks remain unchecked;
+#954 and this campaign remain OPEN. The complete 04:43:32 UTC census is
+844 whole, 115 above fixed 729, with 463 original-cohort issues and 381
+inflow open. The next eleven complete original/discussion unions are
+current-bound research inputs, not eleven accepted receivers or fixes.
+Exact source holds and the acquisition errors remain explicit; neither
+tracking consolidation nor source qualification changes resource custody.
+The same unit adds 35 unchecked finite receiving rows across the existing
+Worktrees cutover, Manager theme, Dispatch held-log and captured-owner GC plans, preserving all
+incumbent acceptance and owners. #3938's whole programme stays OPEN;
+native/installed proof is planned, not manufactured or required before
+planned receiving. The monitor handoff intake retains the actual captured-owner
+and pending/acknowledged transition contract, not an implementation-first rejection.
 
 ### Phase 2b - Vision-linked stabilization roadmap
 

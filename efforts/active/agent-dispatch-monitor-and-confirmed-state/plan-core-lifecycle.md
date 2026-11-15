@@ -191,6 +191,47 @@ single phase that must land both together.
       assert the resumed task's audit trail / delivered message contains
       the honest failure note, not a bare unlabeled resume.
 
+#### Finite captured-owner and handoff GC acceptance from #3966
+
+The existing crash-recovery honesty and suspension-reason contracts remain.
+This additional planned slice retains #3966's specific owner-evidence and
+mutation-boundary requirements; it does not claim their implementation.
+
+- [ ] **P3966-1:** Resolve liveness for the captured rightful owner through
+  the admitted local, remote or satellite evidence route. Preserve
+  LIVE/UNKNOWN/GONE distinctions; failed, stale, malformed, missing or
+  uncaptured evidence cannot authorize a transition.
+- [ ] **P3966-2:** Defer claimed/started GC while that owner is live or its
+  handoff is pending. Distinguish pending, consumed and acknowledged
+  successor states; changed worktree occupancy is not an acknowledged
+  handoff or proof that the captured owner is gone.
+- [ ] **P3966-3:** At the owning write boundary, fence any reaping, requeue
+  or suspension transition against the captured owner, task/status,
+  generation/token and current relevant handoff evidence. Changed or
+  uncertain inputs retain the task and existing authority.
+- [ ] **P3966-4:** Preserve the existing owner protocol and nonexpiring
+  reservations. Age, missing heartbeat, failed observation, moved head or
+  worktree occupancy alone permits no expiry, release, requeue or takeover.
+  Compose existing lifecycle/owner APIs rather than a second identity store,
+  watchdog, writer or resource controller.
+
+##### Local Validation - captured-owner and handoff GC
+
+- [ ] **V3966-1:** Cover LIVE/UNKNOWN/GONE for the captured owner, including
+  admitted local/remote/satellite evidence and stale, malformed, missing,
+  failed and uncaptured observations. Only positively applicable GONE
+  evidence may proceed to the remaining owner-protocol checks.
+- [ ] **V3966-2:** Cover pending, consumed-but-unacknowledged, acknowledged,
+  changed-occupant and lost/unknown handoff observations. Neither a pending
+  handoff nor occupant replacement may cause premature reaping or requeue.
+- [ ] **V3966-3:** Race owner, status, generation/token and handoff changes
+  between observation and write; assert the existing mutation owner rejects
+  stale authority without duplicating an active or pending successor.
+- [ ] **V3966-4:** Prove age/heartbeat-only and failed-observation paths
+  preserve claims, resources and current custody. Distinguish these GC
+  controls from suspension-reason presentation and honest crash notes;
+  neither supplies missing owner evidence for the other.
+
 ### Phase 5 - Uniform submission and task-owned confirmation policy
 
 - [ ] Resolve emitter `auto_confirm` and manual per-task review choices into

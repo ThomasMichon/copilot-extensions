@@ -28,6 +28,14 @@ before declaring the capability delivered.
 
 ## Coordination
 
+The finite #3938 Worktrees/status-monitor Phase 2 intake below retains #5453's
+existing sole phase owner and resource custody. Phase 1/#5512 remains
+sequential and independently reviewed; #6600 recovery/update/diagnostic work
+and other adopters remain distinct. This is planned receiving, not a phase
+handoff or implementation assignment. Keep #3938 OPEN for its whole shared/
+adopter programme; a partial Worktrees intake cannot retire it. Normal review,
+current receiving readback and source-specific judgment remain separate.
+
 The proposed finite #5574 native restart-loop case retains the SAME shared
 implementation, Linux validation and lifecycle/installed-rollout custodians.
 Credit #6148's selected source repair; #6137 attribution and Windows/non-native
@@ -159,6 +167,39 @@ are complete, rather than stopping after the design PR.
   contradictory trust or cleanup claims without weakening the vision.
 - [ ] Resolve #5574 or explicitly transfer its separate validation obligation
   to a named tracked objective before closing this effort.
+
+#### Finite Worktrees/status-monitor Phase 2 intake from #3938
+
+- [ ] **P3938-WT-1:** Retain the existing #5453 sole-owner Phase 2 lane for
+  legitimate muxless/superseded-runtime replacement, losing candidates,
+  promotion/route-driven activation, rollback and recovery.
+- [ ] **P3938-WT-2:** Resolve successor publication versus predecessor
+  admission/drain at a confirmed safe boundary or reviewed equivalent.
+  Compose this ROOT's compatible health-gated handoff, bounded cold takeover
+  and retained-good recovery; do not require a stronger outage guarantee.
+- [ ] **P3938-WT-3:** Preserve exact owner/process-birth/generation/version/
+  address/config identity, admitted successor work, retained predecessor
+  custody and truthful route/reader state. Health, selected-version/manifest
+  agreement, updater exit, timeout, PID or unknown census alone is not
+  adoption or retirement authority.
+- [ ] **P3938-WT-4:** Include the matching CLI and installer-activation path
+  within this finite consumer lane. Preserve the broader #3938 shared/adopter
+  scope and consumer opt-in OR changed-contract qualification; neither this
+  intake nor a Worktrees-only result completes that whole programme.
+
+##### Local Validation - Worktrees Phase 2
+
+- [ ] **V3938-WT-1:** Exercise legitimate replacement, losing candidates,
+  promotion/cutover, identity-scoped cleanup and reader/route observation;
+  prove at-most-one correctly owned active server.
+- [ ] **V3938-WT-2:** Cover rollback/recovery after predecessor or successor
+  loss, non-terminal breadcrumbs, uncertain publication and repeated/
+  concurrent transitions. Distinguish exact exit and serving route/process
+  identity from helper, fixture, selected-slot and diagnostic evidence.
+- [ ] **V3938-WT-3:** Qualify the originally accounted Windows/Linux/macOS
+  paths and bounded intentional zero coverage OR record justified platform
+  exemptions. Preserve compatible handoff and accepted cold takeover;
+  unrelated adopters need not finish for this finite Worktrees lane.
 
 ### Phase D - Platform proof and release
 
@@ -429,6 +470,12 @@ _(Agent-recommended direct tracking under existing Phase C; all rows unchecked.)
 
 ## Validation Plan
 
+- [ ] **G3938-WT:** Resolve P3938-WT-1 through P3938-WT-4 and
+  V3938-WT-1 through V3938-WT-3 at their finite source/platform tiers.
+  Keep this lane distinct from incumbent Linux/systemd, Windows manager and
+  other-adopter gates. All incumbent global requirements remain; the whole
+  #3938 shared/adopter programme remains OPEN.
+
 - [ ] Complete EVERY directly retained #4022 P1-P8, V1-V7 and C1-C4 clause above at its
   original scope/evidence tier, preserving incumbent Plan/Validation/Journal, native
   families, accepted alternatives, all current owners/claims/holds and adjacent
@@ -559,6 +606,18 @@ above are **agent-recommended implementation hardening**, not new operator
 requirements or permission to weaken the existing vision.
 
 ## Journal
+
+### 2026-11-14 - Finite Worktrees Phase 2 receiving proposal
+
+Added eight unchecked Plan/local/global Validation rows and same-owner
+Coordination for #3938's Worktrees/status-monitor lane, without duplicating
+the shared manager contract. A bounded ordinary activation path differs from
+guarded recovery in predecessor-drain/publication ordering; this is not a
+claim about unread async or CLI paths. Preserve the
+[authoritative runtime-replacement target](../../../visions/installer/README.md#authoritative-runtime-replacement)
+and record implementation gaps rather than treating existing refusals as
+the intended end state. This research-only amendment performs no activation,
+native validation, phase handoff, source disposition or resource release.
 
 ### 2026-10-30 - Proposed accepted native restart-loop residual
 
