@@ -133,8 +133,10 @@ The bounded correction uses the existing runtime owner's `slot_python()`
 resolver, still bound to the exact `current-version` rather than last-good
 fallback. Three contained controls pass: actual subprocess launches from a
 legacy physical environment and a nested physical environment, plus refusal
-when the selected generation has no interpreter. Python lint and the install
-contract check pass.
+when the selected generation has no interpreter. The previous generation in
+that refusal control is a real completed environment, and the canonical
+fallback resolver must first prove it can select that environment. Python
+lint and the install contract check pass.
 
 The whole-file strict ratchet exposed missing annotations in the two touched
 fixture files. Typed dynamic/process boundaries, explicit imported helper

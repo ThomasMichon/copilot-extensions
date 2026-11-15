@@ -69,12 +69,18 @@ def test_native_probe_launches_the_selected_physical_environment(
 
 
 def test_native_probe_does_not_substitute_a_previous_generation(tmp_path: Path) -> None:
+    from worktree_manager.self_install import _runtime_installer
+
     root = tmp_path / "installed"
-    previous = root / "versions" / "1.0.0" / "Scripts"
-    previous.mkdir(parents=True)
-    (previous / "python.exe").touch()
+    previous = root / "versions" / "1.0.0"
+    venv.EnvBuilder(with_pip=False).create(previous)
     (root / "current-version").write_text("2.0.0", encoding="utf-8")
     (root / "last-known-good").write_text("1.0.0", encoding="utf-8")
+    installer_factory: Callable[[], Any] = _runtime_installer
+    runtime = installer_factory().runtime
+    runtime.mark_complete(root, "1.0.0")
+    fallback = runtime.slot_python(root, "1.0.0")
+    assert fallback is not None and runtime.resolve_python(root) == fallback
     with pytest.raises(RuntimeError, match="Selected fixture generation has no interpreter"):
         fixture._python(root)
 
