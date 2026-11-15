@@ -36,10 +36,11 @@ trusted upstream installer / explicit manual recovery entry
     -> copy complete application projects into immutable version slots
     -> stage selected apps with bounded parallelism (incumbents unchanged)
     -> qualify every member required by the chosen activation strategy
-    -> activate through preferred graceful cutover or bounded cold takeover
+    -> run simple app setup through its owner before cutover
+    -> kill outgoing service trees; one bounded handoff only when reliable
+    -> start selected incoming services through their existing lifecycle owner
     -> verify real command/service readiness and record installation result
-    -> outgoing central owners self-retire independently of install success
-    -> optional one finite long-grace async central-only retirement fallback
+    -> independently clean obsolete outgoing artifacts/registrations
     -> retain last-good state, recovery evidence and unfinished obligations
 ```
 
@@ -48,6 +49,39 @@ adds bootstrap, background preparation, atomic-toolset and failure sequencing.
 The sequence is a target, not executable CLI syntax. In particular, a
 portfolio-wide atomic selector and complete stage-time readiness are not
 established by today's generated per-app installers.
+
+### Construction and cutoff target
+
+After existing source/composition selection, installation quick-copies complete
+projects, constructs their physical environments through the existing pure
+UV/wheel-backed path and runs simple app setup before cutover. Do not insert or
+repeat fingerprint/admission gates during construction/setup, or disguise them
+as readiness checks. The detailed preparation/readback mechanisms below describe
+current producers; they are not a mandate for another whole-source or
+whole-portfolio validation pass in the consuming installer. Actual copy,
+environment, setup and incoming-health failures remain failures.
+
+Stage remains free of active-state effects. Setup that touches active state
+runs through its existing activation owner after the required-set stage barrier.
+If it needs the outgoing state handle, perform bounded cutoff before opening
+that handle, rather than waiting on an old drain/schema/handoff protocol.
+Preserve data; do not delete or reset it to evade a lock or migration failure.
+
+The activation target is kill by default, handoff only when reliable: no
+reliable handoff means forced outgoing-service/owned-daemon cutoff before
+incoming startup; a reliable path gets one bounded attempt and then forced
+cutoff if it does not settle. Reuse the native lifecycle/identity owner and
+original deadline, not nested retry allowances. The direction identifies MCP,
+Vault and Index as requiring no handoff, and Worktrees and Bridge as
+crash-tolerant. The existing per-app audit owns their implementation findings;
+these statements do not claim installed acceptance.
+
+Protect session hosts/keepers, session-owned processes, foreground clients,
+connectivity and unrelated or reselected generations. A daemon's parentage or
+name is not proof every descendant is an outgoing service daemon. Confirmed
+cutoff, incoming readiness/current selection and deferred artifact cleanup
+remain separate facts. Legacy start-first/long-drain descriptions are not
+exceptions to this target.
 
 ### Prepare a selected application portfolio without installing it
 

@@ -46,6 +46,12 @@ authorized. No other contributor's open PR is taken over. Missing boundary
 support or uncertain effects remain explicit; they are not permission to
 substitute another installer, hidden actor, current root or cleanup mechanism.
 
+The later [construction/cutoff direction](fast-construction-and-outgoing-cutoff.md)
+amends the behavior to qualify and separately permits release/install through
+the addressed owners. It does not erase the fixture approval above or make its
+resource bounds a universal production grant. Reconcile target-specific holds
+at the deployment boundary; this fixture remains disposable and two-application.
+
 ## Current evidence and dependencies
 
 - The original integration #11121 and containing Main #12353 retain their
@@ -70,9 +76,12 @@ name or previously green receipt is not an immutable source selection.
 
 ## Plan - agent-recommended
 
-- [ ] Q1: Review this bounded contract, reconcile the current producer/consumer
+- [x] Q1: Review this bounded contract, reconcile the current producer/consumer
   interfaces and agree the non-overlapping declaration-association handoff.
   Identify the existing executable acceptance owner and its unchanged budgets.
+  #12682 merged after exact-head approval and required CI; the
+  [recorded source split](https://github.com/ThomasMichon/copilot-extensions/issues/7028#issuecomment-6890789048)
+  retains the declaration adapter with its existing owner.
 - [ ] Q2: Extend that owner's fixture only where needed to exercise installed
   Manager's real ordinary caller, its complete application packet and the
   existing Worktrees receiver. Do not mock a producer, fabricate an association,
@@ -81,7 +90,9 @@ name or previously green receipt is not an immutable source selection.
   incoming construction. Prove the selected required set is staged before its
   activation and that a failed stage suppresses activation.
 - [ ] Q4: Prove actual selected commands/readiness and preserved fixture data,
-  retain source/removal and changed-input refusal controls where applicable,
+  retain source/removal and actual incompatible-input controls where applicable,
+  without repeated construction fingerprint rejection. Exercise the current
+  one-attempt reliable handoff/forced cutoff contract, not obsolete drain policy,
   and settle every fixture-owned process, registration and temporary artifact.
 - [ ] Q5: Land required source/test changes through normal review and CI,
   record exact native results and containing release separately, then reconcile
@@ -111,3 +122,22 @@ The slice finishes only when these selected results are established or an
 exact unresolved dependency/effect is recorded with its existing owner.
 The parent remains Active until its complete Plan and Validation Plan close;
 finishing this fixture cannot finalize the parent worktrees.
+
+## Journal
+
+### 2026-11-15 - Bounded contract accepted
+
+#12682 merged as `5290d7b3263a0a7f165ba7e3991e0aec983ef81d` after
+current-head approval with no findings and successful required CI.
+The existing `tools/run-manager-suite-acceptance.py` owns hosted-VM preparation,
+exercise, assertions and unconditional settlement: 1,800, 900, 300 and 90 seconds
+respectively, with its existing preparation/observation and workflow envelopes.
+These allocations are not additive permission to exceed an owner deadline.
+The installed-core lifecycle runner remains separate and cannot prove an
+ordinary update merely by being rerun.
+
+Before Q2, review the later construction/cutoff amendment. Then extend the
+existing acceptance owner for the real selected
+Manager/Worktrees source consumer, without synthetic version-only artifacts or
+a duplicate constructor. No native fixture or production operation ran for this
+contract review; Q2-Q5, VQ1-VQ6 and the parent acceptance remain open.

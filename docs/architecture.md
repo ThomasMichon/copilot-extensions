@@ -177,17 +177,24 @@ recovery.
 The target success boundary is all requested incoming versions actually ready
 and running where required, with every applicable current-version pointer,
 route, launcher and service/task registration selecting them. Outgoing central
-daemons self-retire on supersession. An optional single finite asynchronous
-fallback may retire remaining outgoing central daemons and obsolete central
-schedules after a longer-than-cutover grace period, never a periodic resident
-reaper or predecessor-exit success fence. At mutation time, current selection,
+services use kill-by-default replacement. Without reliable handoff, the
+outgoing service and its owned daemon tree are force-stopped before incoming
+startup; a reliable path gets one bounded attempt, then forced cutoff if it
+does not settle. Old locks, schema/handoff failure and drain delay cannot block
+startup. Artifact/registration cleanup remains independent, not a long-grace
+substitute for activation-time cutoff. At mutation time, current selection,
 native identity, installation and central-service role exclude later/reselected
 generations, session hosts/keepers, session-owned Bridge/agent processes,
 foreground clients and unrelated processes. Configuration, credentials,
 repositories, worktrees, sessions and databases are retained.
 Conflicting work admission may close/transfer or be excluded before incoming
 serving readiness; do not make that transfer wait for installation completion,
-final predecessor exit or indefinite old-lease release.
+voluntary predecessor exit or indefinite old-lease release.
+
+The incoming construction target is quick copying, a pure UV/wheel-backed
+physical environment and simple app setup before cutover, without repeated
+fingerprint/admission rejection gates during construction/setup. Authentic input
+selection and actual copy/setup/health failures remain separate obligations.
 
 **Current implementation, not target qualification:**
 Current Worktrees asynchronous installation already separates ready successor
@@ -199,9 +206,9 @@ separately from the legacy custody record. Its existing reconciliation loop
 attempts native forced retirement after expiry, under current cutover/route
 authority, without making installation wait for old exit. Unconfirmed cleanup
 retains runtime and process custody. Removal of incumbent-admission/queue fences
-and the optional finite central-only fallback remain realization work.
-Resident-owned retirement custody and grace are adoption details, not required
-target mechanisms.
+and adoption of the current kill-by-default cutoff remain realization work.
+Resident-owned retirement custody and grace describe the older implementation;
+they do not qualify the current bounded-attempt/forced-cutoff target.
 Current compatibility paths and native cleanup tests do not qualify the whole
 contract. The [install contract](install-contract.md#authoritative-replacement-and-completion)
 records this distinction; other services adopt independently. Real source/build,

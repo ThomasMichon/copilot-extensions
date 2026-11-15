@@ -5,7 +5,7 @@
   needs, from an approved artifact source, under one provenance identity.
 - **Scope:** leaf
 - **Status:** Active
-- **Last revised:** 2026-11-04
+- **Last revised:** 2026-11-15
 - **Reality docs:** [`docs/install-contract.md`](../../../docs/install-contract.md) ·
   [`docs/pipelines.md`](../../../docs/pipelines.md) ·
   [`docs/architecture.md`](../../../docs/architecture.md)
@@ -77,6 +77,13 @@ uv identities with existing release authority. Assembly does not add a parallel
 whole-source fingerprint or a full-suite attestation barrier merely to copy
 already-selected applications. Native ownership, package integrity, immutable
 completion and readiness remain independent obligations.
+
+Incoming installation is a fast copy, pure UV-based wheel-backed environment
+construction and simple per-application setup before cutover. It consumes the
+selected composition rather than repeating fingerprint, attestation or
+rejection gates during construction/setup. Source admission and governed
+dependency selection belong to their existing upstream owners; actual copy,
+environment, setup and incoming-health failures remain explicit.
 
 ### first-party-manager-artifact
 
