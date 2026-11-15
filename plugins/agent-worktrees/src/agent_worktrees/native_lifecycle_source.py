@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from . import native_source_context, tracking
 from .session_liveness import session_process_owns_hold
 
 
-def witness(payload: dict | None, *, resident: bool) -> object:
+def witness(payload: dict[str, Any] | None, *, resident: bool) -> object:
     """Use transported origin metadata; residents must never recapture it."""
     metadata = payload.get("_agentWorktrees") if isinstance(payload, dict) else None
     if isinstance(metadata, dict) and "nativeSource" in metadata:
@@ -32,7 +33,7 @@ def start_identity(session_id: str, source: object) -> str | None:
         return None
 
 
-def retained_start_identity(session_id: str, pid: int) -> str | None:
+def retained_start_identity(session_id: str, pid: int | None) -> str | None:
     """Corroborate an external writer's native PID, not its own ancestry."""
     try:
         if type(pid) is not int or pid <= 0:
