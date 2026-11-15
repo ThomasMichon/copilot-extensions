@@ -4059,6 +4059,15 @@ preserve changed owner/status records, bounded source deltas and the existing
 #12415-to-#12315 receiving disposition without claiming another retirement.
 The preceding reviewed publication is merged; all incumbent parent completion
 states and the fixed whole-queue target remain unchanged.
+The [finite telemetry-packaging proposal](journal/2026/11.15-owned-release-boundaries.md#proposed-finite-completion-of-embedded-telemetry-packaging)
+and [PowerShell identity proposal](journal/2026/11.15-owned-release-boundaries.md#proposed-finite-completion-of-the-powershell-interpreter-identity-probe)
+map two complete source/regression requests to actual merged delivery.
+Review, fresh qualification and separate source-specific tracker judgments
+still precede any acknowledgment or COMPLETED-state change.
+The [distinct-controller read proposal](journal/2026/11.15-owned-release-boundaries.md#proposed-finite-completion-of-the-distinct-controller-inventory-read)
+maps a third finite source/regression request independently of an excluded
+test-file history. Four later keepers retain their own acceptance; no issue
+effect, resource release or parent completion follows from the proposal.
 
 ### Phase 2b - Vision-linked stabilization roadmap
 
