@@ -33,6 +33,16 @@ driving the same objective elsewhere in the fleet.
 - **Delegates:** none currently.
 - **Handoff:** n/a (single participant today).
 
+The finite #3584/#3585 receiving additions below preserve this participant,
+independent per-phase PR topology and all incumbent Plan/Validation rows.
+The existing #912 nonexpiring claimant/reservation, #3000 target arbitration
+and #2467 rightful-source authority remain with their current custodians.
+Discovery, plan review and tracking consolidation neither expire those claims
+nor appoint a new execution owner. Each phase has its own acceptance path;
+neither depends on whole-parent completion or an unrelated native matrix.
+The creation-guard identity contract remains the existing open cross-plugin
+design question, not a mechanism supplied by this documentary intake.
+
 ## Context
 
 Operator-observed symptom: resuming a worktree that previously handed off
@@ -163,6 +173,51 @@ objective can be a worktree other than the one nearest at hand.
 - [ ] Reconcile with #912 and #3000's overlapping scope so the three don't
       land contradictory mechanisms.
 
+#### Direct retained #3584 recovery and admission contract
+
+_(Agent-recommended receiving detail; all incumbent Phase 1 rows remain.)_
+
+- [ ] **P3584-1:** Deterministically qualify the requested session and worktree
+  CWD; refuse to promote a failed resume. Handle stale-head and
+  wrong-but-nonempty registry states through explicit bounded recovery.
+  Ordinary reads must not reconstruct lineage or repair/promote a head.
+  Recency, turn counts, process liveness, new registration and incomplete
+  reads cannot override identified head authority.
+- [ ] **P3584-2:** For fresh or confirmed-recovered vacancy, distinguish
+  authorized interactive/embody, ACP front-door and admitted informal/resume
+  entrances from child/subagent hooks, one-off prompts, stray parallel
+  sessions and CWD coincidence. Positively establish never-held vacancy or
+  return by the existing confirmed-recovery procedure; launch/registration
+  alone is not admission or takeover.
+- [ ] **P3584-3:** After acknowledged succession, fence delayed Start/End or
+  reconciler mutations against the actual current head, source, activation
+  and revision. An older event must not clear, replace or demote the live
+  admitted head, including when its command lacks `--resume`.
+- [ ] **P3584-4:** Keep missing cache/command-line identity, failed reads,
+  partial tokens and incomplete lineage visibly unknown or ambiguous, not
+  empty/dead vacancy. On resume, compare requested identity, authoritative
+  head and lineage; contradictions or partial evidence must use the existing
+  explicit recovery/choice path rather than silently reopen stale context.
+
+##### Local validation retained for #3584
+
+- [ ] **V3584-1:** Cover authorized interactive/embody, ACP and admitted
+  informal/resume entrances, including neutral-CWD recovery, plus negative
+  child/subagent, stray prompt, competing-session, CWD-only and
+  failed-admission cases. Verify the correct initial head, qualified CWD
+  and failed-resume refusal.
+- [ ] **V3584-2:** Cover stale and wrong-but-nonempty explicit recovery without
+  promoting a failed candidate or reconstructing lineage during an ordinary
+  read. Unreadable/partial evidence must remain unknown, not empty/dead.
+- [ ] **V3584-3:** Deliver delayed older Start/End/reconciliation after another
+  successor becomes head, including a live head without `--resume`; verify
+  stable authority and no later reversion, including process-identity reuse.
+- [ ] **V3584-4:** Cover requested-session/head/lineage agreement,
+  contradiction and partial lineage on resume. Verify explicit recovery/
+  choice and independent full lineage, retaining the existing atomic
+  acknowledgement, failed-launch head retention, creation guard, legitimate
+  handoff and same-successor retry controls.
+
 ### Phase 2 — Duplicate-claimant discovery + root-claimant surfacing (#3585)
 - [ ] Strengthen the `worktree` skill's instructions to make an early
       `list --json` check (filtered on bound effort/objective) a routine step
@@ -171,7 +226,57 @@ objective can be a worktree other than the one nearest at hand.
       to the root claimant actually driving the objective, not the nearest or
       most-recently-touched member of the chain.
 
+#### Direct retained #3585 root-resolution contract
+
+_(Agent-recommended receiving detail; not a claim or takeover operation.)_
+
+- [ ] **P3585-1:** Resolve a supported typed claim identity to all qualified
+  direct holders, reporting each direct holder separately from the root
+  responsibility claimant.
+- [ ] **P3585-2:** Trace a bounded inspectable chain with qualified machine,
+  repository, worktree and session evidence where applicable. Use current
+  held/transferred responsibility or effort evidence; historical creator
+  ancestry alone does not establish who still drives the objective after a
+  valid transfer.
+- [ ] **P3585-3:** Preserve multiple candidates, cycle/depth limits,
+  conflicting identities, unreadable/skipped stores, unavailable remote
+  scope and out-of-band creation as explicit incomplete/ambiguous evidence.
+  Empty local results are not global no-owner proof; recency and bare ID
+  coincidence cannot manufacture a root.
+- [ ] **P3585-4:** Reuse existing scoped registry/provider/claimant-graph
+  interfaces and state actual coverage. A local diagnostic result is not
+  remote authorization and cannot bypass machine, repository, project or
+  source boundaries.
+- [ ] **P3585-5:** Surface the qualified root, direct holder, chain/evidence
+  and coordination route. Keep liveness distinct from ownership: discovery
+  grants no age expiry, forced reclaim, takeover or release of #912 or
+  another held reservation.
+
+##### Local validation retained for #3585
+
+- [ ] **V3585-1:** Cover zero/one/multiple direct holders, direct-holder/root
+  distinction, multi-hop responsibility and valid transfer where the
+  historical creator is no longer the current root.
+- [ ] **V3585-2:** Cover cycle/depth limits, conflicting identity,
+  unreadable/skipped stores, unavailable remote scope, out-of-band records,
+  empty local results and the same identifier in different scopes. Retain
+  explicit ambiguity/incompleteness, not fabricated roots or global absence.
+- [ ] **V3585-3:** Verify qualified-root coordination output and the existing
+  positive pre-work fleet/root display. Preserve legitimate concurrent
+  declared slices; stale age, liveness and missing local evidence must not
+  grant takeover or claim release.
+
 ## Validation Plan
+
+- [ ] **G3584:** Verify every direct #3584 Plan/local Validation clause and
+  incumbent Phase 1 condition at its stated tier. Keep admission, bounded
+  recovery, later-reversion fencing, full lineage, creation-guard design and
+  acknowledgement/retry semantics distinct; no head operation or technical
+  completion follows from this planned receiving contract.
+- [ ] **G3585:** Verify every direct #3585 Plan/local Validation clause and
+  incumbent Phase 2 condition independently of Phase 1. Retain all qualified
+  holders, current responsibility, explicit uncertainty, coverage boundaries
+  and existing claims; a root discovery result is not custody transfer.
 
 - [ ] Simulate a handoff: successor proves it can recover the baton and the
       single atomic acknowledgement both displaces the predecessor and seats

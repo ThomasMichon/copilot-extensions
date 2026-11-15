@@ -2894,6 +2894,8 @@ tiers without imposing every-host or native-on-every-leaf requirements.
 - **C3421-MGR:** The Manager package owner retains this finite version-reporting
   work. Installer, release, singleton and native ownership remain unchanged;
   this source-only intake does not authorize rollout or broaden their gates.
+  Keep future source implementation a deliberate, separately reviewed
+  version-reporting change rather than an unrelated bundle.
 
 The proposed #5611 finite deployment/readiness case retains actual installer,
 installation-status and relocated Manager-launcher/provider custodians.

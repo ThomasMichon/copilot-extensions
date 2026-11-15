@@ -372,6 +372,37 @@ receiving readback precede any separate source-specific disposition.
   docs-only record are not new execution or implemented fix;7157 plugin-preparation ACP/CLI proof is
   real but not this seed-file consumer. No every-venue/new whole-parent native matrix is added.
 
+### Finite Containers-pivot evidence retained from #3507
+
+_(Agent-recommended finite receiving detail; not whole-#954 completion.)_
+
+- [ ] **P3507-1:** At a separately authorized Docker-capable host, observe a
+  real managed fleet entry through the supported fleet JSON surface or the
+  equivalent Containers-pivot consumer. Verify the current row is actually
+  consumed/presented under its fleet/pivot contract, including applicable
+  grouping and lease/worktree/session/activity authority. A declaration,
+  fixture, unrelated container or unconsumed raw row is not this outcome.
+- [ ] **P3507-2:** Against an actual specimen established as non-fleet under
+  the current contract, verify it remains excluded from the Containers
+  pivot after the parity changes. An unlabeled legacy record alone does not
+  establish non-fleet status.
+- [ ] **P3507-3:** Retain admitted commands, sanitized outputs, pinned source/
+  runtime identity and host capability in the owning validation record.
+  Exclude private host/container identifiers. An unrelated live container
+  or archived transfer checkbox proves neither required case.
+
+#### Local validation retained for #3507
+
+- [ ] **V3507-1:** Exercise the actual positive managed-fleet row through the
+  selected supported consumer and retain its bounded sanitized result.
+- [ ] **V3507-2:** Exercise the actual negative non-fleet specimen; retain
+  evidence for both its non-fleet status and exclusion under the current
+  contract.
+- [ ] **V3507-3:** Distinguish source/fixture evidence, actual native
+  observation, runtime version and evidence-record readback. Mocked provider
+  results or filter unit tests may support but cannot replace the two
+  actual specimens.
+
 ### Conditional finite process-owned failed-start acceptance from #4031
 
 _(Agent-recommended WS-D tracking; no new native result or source disposition.)_
@@ -402,6 +433,11 @@ remains an explicit applicability gap, not silently reduced to a container case.
   daemon replacement grants arbitrary orphan reaping or resource release.
 
 ## Validation Plan
+
+- [ ] **G3507:** Verify all three finite #3507 Plan clauses and their local
+  validations, retaining the actual positive AND negative specimen and
+  evidence-record requirements. This is not a whole-#954 gate; source,
+  fixture and unrelated live-container progress remain partial evidence.
 
 - [ ] Complete every directly retained #2476 Plan/Validation clause above at
   its original evidence tier and bounds, preserving current owners, alternatives
@@ -713,6 +749,18 @@ programme token with migration-intake and actual P3 reservations. No generic
 acknowledgement, resource release, owner appointment or whole-#954 completion
 prerequisite is introduced for this finite case. Unknown original provider
 applicability stays unmatched rather than assigned to a different venue.
+
+### Continuing finite #3507 custody
+
+The existing #3507 keeper and host/fleet/resource custodians retain their
+responsibility unless a complete accepted landed transfer changes it under
+normal review/readback. #3507 remains OPEN until both native outcomes are
+recorded OR a complete accepted landed transfer carries both requirements
+to another named OPEN owner. Source/fixture progress alone is insufficient.
+#954 remains OPEN as the whole-programme token; this finite intake neither
+requires its completion nor adds an every-host, all-parent or generic-ACK
+gate. No Docker start, specimen creation, native test, venue operation,
+host/service change or resource transfer is authorized by this plan.
 
 ## Journal
 
