@@ -3563,6 +3563,34 @@ attached/new-window paths or the full embody planner, guarded-head or auth-wait
 recovery, physical keyboard input or survival
 after caller cleanup Jobs. Those remain separate acceptance lanes.
 
+Driver's `tests/native/test_session_host_copilot.py` also selects
+`copied-core` independently of its managed-environment WebSocket control.
+It relocates the existing compact Core export, removes its construction tree
+and invokes physical Python with `-I -S`. The target needs no Bridge,
+Worktrees or Manager package. It uses the existing private offline provider
+and profile, retaining runner containment while scrubbing ambient credentials.
+The copied artifact remains TCP-only: the control checks native ACP through
+that broker, disconnect/reconnect, cold same-session load, exact quoted
+history, model request counts and PID/birth identity, not WebSocket support.
+With `COPILOT_NATIVE_TEST_EXECUTABLE` naming the existing selected executable,
+run `python tools/run-plugin-tests.py agent-remote-driver --test-file tests/native/test_session_host_copilot.py -k copied-core --allow-explicit-tiers --timeout 300 --plugin-timeout 600 --test-timeout 180`.
+The source-only `copied_core_entrypoint`, `websocket_subprotocol` and
+`native_environment` selectors preflight this composition without Copilot or
+mux execution. Neither selection qualifies headed mode, Bridge pickup,
+caller-Job survival, installed rollout or the complete parent flow.
+
+Bridge's `tests/native/test_copied_core_pickup.py` composes that same Driver
+packet with the actual Bridge ACP client on reconnect. Run it through the
+Bridge runner with the same explicit executable and timeout options, selecting
+`native_bridge`. It adopts the retained native session, sends only the next
+input, and detaches before the original fixture owner terminates the child.
+The existing Driver packet's admission counter and limits still apply; the
+wrapper is not a new native allowance. The caller has Bridge's dependencies,
+but the copied target still has no suite packages. The two
+`bridge_pickup_uses_only` source controls exercise the real SDK/stream adapter
+against synthetic replies, including refusal cleanup, without Copilot or mux.
+This lane does not qualify headed mode, caller-Job survival or installed use.
+
 Driver's explicit `tests/native/test_headed_extension.py` lane uses the same
 canonical private mux routing, with raw pane argv separated from mux options
 by `--`. Two finite pane controls check actual script entry, PID and exit with
