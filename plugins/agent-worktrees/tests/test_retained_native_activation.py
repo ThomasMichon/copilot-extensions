@@ -100,7 +100,10 @@ def test_cli_corroborates_actual_native_hold(
 ) -> None:
     if not sys.platform.startswith("linux"):
         pytest.skip("Exact native hold proof requires Linux procfs")
-    from agent_worktrees import resource_relationship, session_binding_cli, sessions
+    from agent_worktrees import (
+        activity, launch_native_observation, profile_assignment, resource_relationship,
+        session_binding_cli, sessions, worktree_trust,
+    )
 
     args: dict[str, Any] = {
         "worktree_id": "wt-reg", "yaml_path": str(record_path),
@@ -122,11 +125,11 @@ def test_cli_corroborates_actual_native_hold(
     monkeypatch.setattr(sessions, "_session_state_dir", lambda: tmp_path / "native")
     monkeypatch.setattr(sessions, "mux_binding_for_session", lambda *_a, **_kw: None)
     monkeypatch.setattr(source, "witness", lambda *_a, **_kw: None)
-    monkeypatch.setattr(session_binding_cli.worktree_trust, "ensure_record_trusted", lambda *_: None)
-    monkeypatch.setattr(session_binding_cli.profile_assignment, "bind", lambda *_: None)
-    monkeypatch.setattr(session_binding_cli.profile_assignment, "maintain", lambda: None)
-    monkeypatch.setattr(session_binding_cli.launch_native_observation, "observe_registration", lambda *_a, **_k: None)
-    monkeypatch.setattr(session_binding_cli.activity, "log_event", lambda *_a, **_k: None)
+    monkeypatch.setattr(worktree_trust, "ensure_record_trusted", lambda *_: None)
+    monkeypatch.setattr(profile_assignment, "bind", lambda *_: None)
+    monkeypatch.setattr(profile_assignment, "maintain", lambda: None)
+    monkeypatch.setattr(launch_native_observation, "observe_registration", lambda *_a, **_k: None)
+    monkeypatch.setattr(activity, "log_event", lambda *_a, **_k: None)
     monkeypatch.setattr(
         session_binding_cli, "_ensure_status_monitor",
         lambda: pytest.fail("retained registration must not ensure infrastructure"),
