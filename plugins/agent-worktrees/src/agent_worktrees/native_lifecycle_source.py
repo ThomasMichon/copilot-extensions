@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from . import native_source_context, tracking
 from .session_liveness import session_process_owns_hold
 
 
-def witness(payload: dict | None, *, resident: bool) -> object:
+def witness(payload: dict[str, Any] | None, *, resident: bool) -> object:
     """Use transported origin metadata; residents must never recapture it."""
     metadata = payload.get("_agentWorktrees") if isinstance(payload, dict) else None
     if isinstance(metadata, dict) and "nativeSource" in metadata:
@@ -29,6 +30,27 @@ def start_identity(session_id: str, source: object) -> str | None:
         return matches[0]
     except (OSError, ValueError, TypeError, AttributeError) as exc:
         logging.getLogger(__name__).warning("Native session start source unconfirmed: %s", exc)
+        return None
+
+
+def retained_start_identity(session_id: str, pid: int | None) -> str | None:
+    """Corroborate an external writer's native PID, not its own ancestry."""
+    try:
+        if type(pid) is not int or pid <= 0:
+            raise ValueError("Retained native PID is unavailable")
+        observed_epoch = native_source_context.epoch()
+        observed = native_source_context.process(pid)
+        birth = observed["start_time"]
+        token = native_source_context.identity(session_id, pid, birth, observed_epoch)
+        if (
+            not session_process_owns_hold(session_id, pid, birth)
+            or native_source_context.process(pid) != observed
+            or native_source_context.epoch() != observed_epoch
+        ):
+            raise ValueError("Retained native UUID/process binding is unconfirmed")
+        return token
+    except (OSError, ValueError, TypeError, AttributeError, IndexError, KeyError) as exc:
+        logging.getLogger(__name__).warning("Retained native start source unconfirmed: %s", exc)
         return None
 
 

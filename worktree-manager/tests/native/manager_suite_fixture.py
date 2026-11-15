@@ -26,21 +26,23 @@ import re
 import runpy
 import shutil
 import sqlite3
+import subprocess
 import sys
 import threading
 import time
-import tomllib
-from typing import Any
+from typing import Any, Callable, cast
 from xml.etree import ElementTree
+
+tomllib = importlib.import_module("tomllib" if sys.version_info >= (3, 11) else "tomli")
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from manager_suite_artifacts import (
-    _DELIVERY, _MATERIALIZE, _command, _configuration, _env,
+    _DELIVERY, _MATERIALIZE, _command, _configuration as _configuration, _env as _env,
     _runtime_process_inventory_script, _task_inventory_script, _write,
 )
 from manager_suite_artifacts import _runtime_process_trace_script as _runtime_process_trace_script
 from manager_suite_diagnostics import (
-    MARKERS, _consumer_demand, _engine_probe, _record, _resident_probe, _snapshot, _snapshot_difference,
+    MARKERS, _consumer_demand, _engine_probe, _record as _record, _resident_probe, _snapshot, _snapshot_difference,
     activation_probe,
     retain_driver_logs,
     retain_resident_logs,
@@ -74,7 +76,7 @@ def _run(
     argv: list[Any], case: Path, *, timeout: float = 240, check: bool = True,
     extra_env: dict[str, str] | None = None,
     max_stderr_bytes: int = 4 * 1024 * 1024,
-) -> Any:
+) -> subprocess.CompletedProcess[str]:
     from agent_procutil._caller_owned import run
 
     # Same native owner as run_installation_owned, with explicit cwd/env so
@@ -118,14 +120,21 @@ def _commit(case: Path, root: Path) -> str:
 
 
 def _python(root: Path) -> Path:
+    from worktree_manager.self_install import _runtime_installer
+
     generation = (root / "current-version").read_text(encoding="utf-8").strip()
-    return root / "versions" / generation / "Scripts" / "python.exe"
+    installer_factory: Callable[[], Any] = _runtime_installer
+    installer = installer_factory()
+    selected = cast(Path | None, installer.runtime.slot_python(root, generation))
+    if selected is None:
+        raise RuntimeError(f"Selected fixture generation has no interpreter: {root}: {generation}")
+    return selected
 
 
 def _probe(case: Path, kind: str) -> dict[str, Any]:
     root = case / "h" / (".worktree-manager" if kind == "manager" else ".agent-worktrees")
     result = _run([_python(root), "-I", "-X", "utf8", "-B", __file__, "--probe", kind], case, timeout=30)
-    return json.loads(result.stdout)
+    return cast(dict[str, Any], json.loads(result.stdout))
 
 
 def _observe(case: Path, declared: dict[str, Any]) -> dict[str, Any]:
@@ -195,7 +204,7 @@ def _observe(case: Path, declared: dict[str, Any]) -> dict[str, Any]:
 
 
 def _phase_diagnostics(case: Path, before: dict[str, Any]) -> dict[str, Any]:
-    result = {
+    result: dict[str, Any] = {
         "sampled_at_ns": time.time_ns(),
         "retention_differences": {
             name: _snapshot_difference(before["sealed"][name], _snapshot(Path(slot)))
@@ -230,7 +239,7 @@ def _health(case: Path, before: dict[str, Any], name: str, pid: int) -> dict[str
         _python(interpreter_root), "-I", "-X", "utf8", "-B", __file__, "--probe", "resident",
         "--component", name, "--root", root, "--pid", pid,
     ], case, timeout=10)
-    health = json.loads(result.stdout)
+    health = cast(dict[str, Any], json.loads(result.stdout))
     with closing_process(pid) as process:
         created, _exited, code = process.times()
         if code != 259:
@@ -253,7 +262,13 @@ class closing_process:
 class Process:
     """Retain a handle to one marker-named process; never enumerate or kill."""
 
+    kernel: Any
+    handle: Any
+    pid: int
+
     def __init__(self, pid: int) -> None:
+        if sys.platform != "win32":
+            raise RuntimeError("Native process handles require Windows")
         self.kernel = ctypes.WinDLL("kernel32", use_last_error=True)
         self.kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
         self.kernel.OpenProcess.restype = wintypes.HANDLE
@@ -266,6 +281,8 @@ class Process:
         self.pid = pid
 
     def times(self) -> tuple[int, int, int]:
+        if sys.platform != "win32":
+            raise RuntimeError("Native process handles require Windows")
         values = [wintypes.FILETIME() for _ in range(4)]
         code = wintypes.DWORD()
         if not self.kernel.GetProcessTimes(self.handle, *(ctypes.byref(v) for v in values)):
@@ -296,7 +313,7 @@ def _exclusive(case: Path, root: Path) -> bool:
             sys.executable, "-I", "-X", "utf8", "-B", __file__, "--probe", "lease",
             "--helper", helper, "--root", root,
         ], case, timeout=30)
-    return json.loads(result.stdout)["contended"]
+    return cast(bool, json.loads(result.stdout)["contended"])
 
 
 def _frontdoors(case: Path, after: dict[str, Any]) -> dict[str, Any]:
@@ -715,7 +732,7 @@ def prepare(directory: Path, mode: str) -> None:
         manifest = _read(path)
         if manifest.get("runtimeScope", "none") != "none":
             declared[path.parent.name] = {"scope": manifest["runtimeScope"], "version": manifest["version"]}
-    setup = {
+    setup: dict[str, Any] = {
         "schema": SCHEMA, "mode": mode, "case_root": str(case), "base": base,
         "declared": declared, "ready": False, "input_policy": "clean worktree, staged-index snapshot",
         "source_index_sha256": hashlib.sha256(index.encode()).hexdigest(),
@@ -843,10 +860,13 @@ def exercise(directory: Path, mode: str) -> None:
             arguments = (["update"] if mode == "normal" else [
                 "--bootstrap-update", "update", "--force",
             ]) + ["--project", "example"]
+            pwsh = shutil.which("pwsh")
+            if pwsh is None:
+                raise RuntimeError("Native fixture prerequisite unavailable: pwsh")
             command = (
                 _command(case, "worktree-manager", *arguments) if mode == "normal" else [
-                    shutil.which("pwsh"), "-NoProfile", "-File",
-                    case / "published" / "worktree-manager" / "bootstrap.ps1", *arguments,
+                    pwsh, "-NoProfile", "-File",
+                    str(case / "published" / "worktree-manager" / "bootstrap.ps1"), *arguments,
                 ]
             )
             controls = {}

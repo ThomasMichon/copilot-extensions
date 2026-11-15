@@ -55,8 +55,10 @@ import dataclasses
 import logging
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from . import config_authority, obligations, retained_record_writer, tracking, tracking_write
+from . import tracking_claims as claims, tracking_lifecycle as lifecycle
 from .execution_spaces import ExecutionSpaceError
 from .tracking_session_activations import activation_token
 from .tracking_session_registry import _start_session_activation
@@ -89,7 +91,7 @@ def head_hold_note(session_id: str, head: str | None) -> str:
     return f"bind-session: {session_id} is bound but NOT the head; the head is still {head}{why}.\n"
 
 
-def apply_session_register(args: dict) -> dict:
+def apply_session_register(args: dict[str, Any]) -> dict[str, Any]:
     """Registered as the ``session_register`` verb. Delegates to
     :func:`_apply_session_register_locked` for the actual transaction and
     translates a cross-process lock-contention ``TimeoutError`` (the
@@ -112,7 +114,7 @@ def apply_session_register(args: dict) -> dict:
         }
 
 
-def _apply_session_register_locked(args: dict) -> dict:
+def _apply_session_register_locked(args: dict[str, Any]) -> dict[str, Any]:
     """Registered as the ``session_register`` verb. Mirrors the former
     ``tracking_session_registry.register_session`` transaction exactly --
     every branch, in the same order, under the same single
@@ -179,6 +181,25 @@ def _apply_session_register_locked(args: dict) -> dict:
                 logging.getLogger(__name__).warning("%s for %s", message, session_id)
                 return {"error": "lifecycle", "message": message}
             if (
+                source_identity is None and retained_record_writer.active()
+                and latest is not None and latest.source_identity is not None
+                and latest.ended_at is not None
+            ):
+                from .native_lifecycle_source import retained_start_identity
+
+                fresh_source = retained_start_identity(session_id, pid)
+                if (
+                    record.resolved_head_session != session_id
+                    or fresh_source is None or fresh_source in existing.pruned_sources
+                    or any(item.source_identity == fresh_source for item in existing.activations)
+                ):
+                    return {
+                        "error": "lifecycle",
+                        "message": "Fresh retained native activation is unconfirmed",
+                    }
+                source_identity = fresh_source
+                source = "retained-native"
+            if (
                 source_identity is not None and started_at is not None
                 and source.startswith("hook")
                 and any(
@@ -193,6 +214,8 @@ def _apply_session_register_locked(args: dict) -> dict:
                 for item in existing.activations
             ):
                 try:
+                    if not isinstance(started_at, str):
+                        raise TypeError("Hook timestamp is unavailable")
                     datetime.fromisoformat(started_at)
                 except (TypeError, ValueError):
                     message = "Hook reactivation timestamp is unavailable; possible Start replay"
@@ -217,8 +240,8 @@ def _apply_session_register_locked(args: dict) -> dict:
                     return {"error": "lifecycle", "message": message}
         event_at = started_at or tracking._now_iso()
         observed_at = recorded_at or tracking._now_iso()
-        tracking._ensure_head_ledger(record)
-        self_session_ref = tracking.format_claim_ref(
+        lifecycle._ensure_head_ledger(record)
+        self_session_ref = claims.format_claim_ref(
             record.execution_machine, record.repo, record.worktree_id, session=session_id
         )
         if existing is not None:
@@ -227,9 +250,9 @@ def _apply_session_register_locked(args: dict) -> dict:
             original_claims = self_claims(record, session_id)
             if len(original_claims) == 1:
                 self_session_ref = original_claims[0].ref
-        tracking.add_resource_claim(
+        claims.add_resource_claim(
             record,
-            tracking.ResourceClaim(
+            claims.ResourceClaim(
                 kind="session",
                 ref=self_session_ref,
                 created_at=event_at,
@@ -240,6 +263,7 @@ def _apply_session_register_locked(args: dict) -> dict:
         )
 
         def _link_if_fresh() -> tracking.SessionHandoff | None:
+            assert handoff_token is not None
             prior = next(
                 (h for h in record.handoffs if h.token == handoff_token), None,
             )
@@ -248,7 +272,7 @@ def _apply_session_register_locked(args: dict) -> dict:
                 and prior.state == "linked"
                 and prior.successor == session_id
             )
-            linked = tracking.link_handoff(
+            linked = lifecycle.link_handoff(
                 record, handoff_token, session_id, linked_at=event_at, save=False,
             )
             return None if already_linked else linked
@@ -264,21 +288,22 @@ def _apply_session_register_locked(args: dict) -> dict:
                 entry.pid = pid
             if pane_id:
                 entry.pane_id = pane_id
-            if handoff_token and tracking._handoff_state(record, handoff_token) == "cancelled":
+            if handoff_token and lifecycle._handoff_state(record, handoff_token) == "cancelled":
                 handoff_token = None
             if handoff_token:
                 try:
                     linked_handoff = _link_if_fresh()
-                except tracking.SessionLifecycleError as exc:
+                except lifecycle.SessionLifecycleError as exc:
                     if activation_added:
-                        tracking._next_lifecycle_revision(record, session_id)
+                        lifecycle._next_lifecycle_revision(record, session_id)
                     tracking.save_record(record, yaml_path)
                     return {"error": "lifecycle", "message": str(exc)}
                 if activation_added and linked_handoff is None:
-                    tracking._next_lifecycle_revision(record, session_id)
+                    lifecycle._next_lifecycle_revision(record, session_id)
                 tracking.save_record(record, yaml_path)
                 if linked_handoff is not None:
-                    tracking.record_pr_claims_reassigned(
+                    assert linked_handoff.successor is not None
+                    lifecycle.record_pr_claims_reassigned(
                         record,
                         predecessor_session_id=linked_handoff.predecessor,
                         successor_session_id=linked_handoff.successor,
@@ -316,7 +341,7 @@ def _apply_session_register_locked(args: dict) -> dict:
                 and (vacant_claim or dead_claim)
                 and (
                     source == "bind"
-                    or tracking._pending_handoffs_all_from_yielded(record)
+                    or lifecycle._pending_handoffs_all_from_yielded(record)
                 )
             ):
                 # A session reclaiming its OWN prior "yielded" state (it opened
@@ -336,14 +361,14 @@ def _apply_session_register_locked(args: dict) -> dict:
                 # process is gone, so the running session takes over.
                 if entry.state != "active":
                     entry.state = "active"
-                tracking._cancel_pending_handoffs(record)
-                tracking._append_head_transition(
+                lifecycle._cancel_pending_handoffs(record)
+                lifecycle._append_head_transition(
                     record, session_id,
                     reason="reclaim" if dead_claim and not vacant_claim else "rebind",
                     at=event_at,
                 )
             elif activation_added:
-                tracking._next_lifecycle_revision(record, session_id)
+                lifecycle._next_lifecycle_revision(record, session_id)
             tracking.save_record(record, yaml_path)
             return {"ok": True, "linked_handoff": None}
 
@@ -366,27 +391,27 @@ def _apply_session_register_locked(args: dict) -> dict:
             ],
         )
         record.sessions.append(new_entry)
-        tracking._next_lifecycle_revision(record, session_id)
+        lifecycle._next_lifecycle_revision(record, session_id)
         if initial_projection and record.controller_for_session(session_id) is None:
             initial_sessions = set(
                 getattr(record, "_session_projection_initial_registration", set())
             )
             initial_sessions.add(session_id)
-            record._session_projection_initial_registration = initial_sessions
+            setattr(record, "_session_projection_initial_registration", initial_sessions)
         linked_handoff = None
-        if handoff_token and tracking._handoff_state(record, handoff_token) == "cancelled":
+        if handoff_token and lifecycle._handoff_state(record, handoff_token) == "cancelled":
             handoff_token = None
         if handoff_token:
             try:
                 linked_handoff = _link_if_fresh()
-            except tracking.SessionLifecycleError as exc:
+            except lifecycle.SessionLifecycleError as exc:
                 tracking.save_record(record, yaml_path)
                 return {"error": "lifecycle", "message": str(exc)}
         elif not candidate_token and not had_active_head and (
-            source == "bind" or tracking._pending_handoffs_all_from_yielded(record)
+            source == "bind" or lifecycle._pending_handoffs_all_from_yielded(record)
         ):
-            tracking._cancel_pending_handoffs(record)
-            tracking._append_head_transition(
+            lifecycle._cancel_pending_handoffs(record)
+            lifecycle._append_head_transition(
                 record,
                 session_id,
                 reason=(
@@ -397,7 +422,8 @@ def _apply_session_register_locked(args: dict) -> dict:
             )
         tracking.save_record(record, yaml_path)
         if linked_handoff is not None:
-            tracking.record_pr_claims_reassigned(
+            assert linked_handoff.successor is not None
+            lifecycle.record_pr_claims_reassigned(
                 record,
                 predecessor_session_id=linked_handoff.predecessor,
                 successor_session_id=linked_handoff.successor,

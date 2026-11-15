@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import ctypes
 import json
 import os
+import secrets
 import socket
 import subprocess
 import sys
 import time
+from pathlib import Path
+from typing import Any, Callable, cast
 from unittest.mock import MagicMock, Mock
 
 import pytest
@@ -15,15 +19,18 @@ import pytest
 import agent_procutil as pu
 from agent_procutil import daemon, daemon_broker as broker
 
+BrokerChannel = tuple[dict[int, Mock], list[dict[str, Any]]]
+BootstrapChannel = tuple[Mock, dict[str, Any]]
 
-def _denied():
+
+def _denied() -> OSError:
     error = OSError("breakaway denied")
-    error.winerror = 5
+    setattr(error, "winerror", 5)
     return error
 
 
 @pytest.fixture(autouse=True)
-def no_native_caller_job(monkeypatch):
+def no_native_caller_job(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(broker, "caller_in_job", lambda: False)
     from agent_procutil import _daemon_instance_store
     monkeypatch.setattr(_daemon_instance_store, "bind_process", lambda *_: None)
@@ -31,7 +38,7 @@ def no_native_caller_job(monkeypatch):
     from pathlib import Path
     original = pu.spawn_daemon
 
-    def explicit_fixture(*args, **kwargs):
+    def explicit_fixture(*args: Any, **kwargs: Any) -> Any:
         if "instance" not in kwargs:
             kwargs["instance"] = DaemonInstanceSpec(
                 "fixture", Path(kwargs["cwd"]), Path(__file__).resolve(),
@@ -40,14 +47,18 @@ def no_native_caller_job(monkeypatch):
     monkeypatch.setattr(pu, "spawn_daemon", explicit_fixture)
 
 
-def _durable_launch(monkeypatch, *, side_effect=None):
+def _durable_launch(
+    monkeypatch: pytest.MonkeyPatch, *, side_effect: Any = None,
+) -> tuple[Mock, Mock]:
     process = Mock(pid=1234)
     launch = Mock(return_value=process, side_effect=side_effect)
     monkeypatch.setattr(daemon, "_durable_windows_launch", launch)
     return process, launch
 
 
-def test_durable_windows_launch_always_uses_wmi_even_outside_a_job(monkeypatch, tmp_path):
+def test_durable_windows_launch_always_uses_wmi_even_outside_a_job(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
     monkeypatch.setattr(pu, "_is_windows", lambda: True)
     popen = Mock(side_effect=AssertionError("native durable creation"))
@@ -67,7 +78,9 @@ def test_durable_windows_launch_always_uses_wmi_even_outside_a_job(monkeypatch, 
     assert "wmi-durable-launch" in log and "instance-bound" in log
 
 
-def test_durable_route_preserves_exact_arguments_and_environment(monkeypatch, tmp_path):
+def test_durable_route_preserves_exact_arguments_and_environment(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     from agent_procutil import windows_task_broker
 
     monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
@@ -96,7 +109,7 @@ def test_durable_route_preserves_exact_arguments_and_environment(monkeypatch, tm
     task.assert_not_called()
 
 
-def test_default_broker_missing_support_refuses_without_legacy_activation(tmp_path):
+def test_default_broker_missing_support_refuses_without_legacy_activation(tmp_path: Path) -> None:
     from pathlib import Path
     from agent_procutil.owned_process import run_caller_owned
 
@@ -130,31 +143,34 @@ def test_default_broker_missing_support_refuses_without_legacy_activation(tmp_pa
     assert result.stdout.strip() == "missing-support-refused"
 
 
-def _caller_kernel(monkeypatch, members, *, in_job=True, mode="complete"):
+def _caller_kernel(
+    monkeypatch: pytest.MonkeyPatch, members: list[int], *,
+    in_job: bool = True, mode: str = "complete",
+) -> Mock:
     kernel = Mock()
     error = [5]
     kernel.GetCurrentProcess.return_value = -1
 
-    def is_in_job(handle, job, result):
+    def is_in_job(handle: int, job: object, result: Any) -> bool:
         assert handle == -1 and job is None
         result._obj.value = in_job
         return mode != "query-error"
 
-    def query(job, kind, data, size, returned):
+    def query(job: object, kind: int, data: Any, size: int, returned: Any) -> bool:
         assert job is None and kind == 3
-        capacity = (size - 8) // broker.ctypes.sizeof(broker.ctypes.c_size_t)
+        capacity = (size - 8) // ctypes.sizeof(ctypes.c_size_t)
         assigned = len(members)
         count = min(capacity, assigned)
         if mode == "oversized":
             assigned = 65537
         if mode == "partial":
             assigned += 1
-        broker.ctypes.c_uint32.from_buffer(data, 0).value = assigned
-        broker.ctypes.c_uint32.from_buffer(data, 4).value = count
+        ctypes.c_uint32.from_buffer(data, 0).value = assigned
+        ctypes.c_uint32.from_buffer(data, 4).value = count
         if mode == "invalid":
-            broker.ctypes.c_uint32.from_buffer(data, 4).value = capacity + 1
+            ctypes.c_uint32.from_buffer(data, 4).value = capacity + 1
             return True
-        values = (broker.ctypes.c_size_t * count).from_buffer(data, 8)
+        values: Any = (ctypes.c_size_t * count).from_buffer(data, 8)
         values[:] = members[:count]
         if mode == "read-error":
             error[0] = 5
@@ -167,31 +183,33 @@ def _caller_kernel(monkeypatch, members, *, in_job=True, mode="complete"):
     kernel.IsProcessInJob.side_effect = is_in_job
     kernel.QueryInformationJobObject.side_effect = query
     monkeypatch.setattr(broker, "_kernel32", lambda: kernel)
-    monkeypatch.setattr(broker.ctypes, "get_last_error", lambda: error[0], raising=False)
+    monkeypatch.setattr(ctypes, "get_last_error", lambda: error[0], raising=False)
     monkeypatch.setattr(
-        broker.ctypes, "WinError", lambda code: OSError(code, "native Job query failed"), raising=False,
+        ctypes, "WinError", lambda code: OSError(code, "native Job query failed"), raising=False,
     )
     return kernel
 
 
 @pytest.mark.parametrize("same_job", [False, True])
-def test_caller_membership_distinguishes_ambient_jobs(monkeypatch, same_job):
-    target = Mock(pid=broker.os.getpid() + 1)
-    members = [broker.os.getpid()] + ([target.pid] if same_job else [])
+def test_caller_membership_distinguishes_ambient_jobs(
+    monkeypatch: pytest.MonkeyPatch, same_job: bool,
+) -> None:
+    target = Mock(pid=os.getpid() + 1)
+    members = [os.getpid()] + ([target.pid] if same_job else [])
     kernel = _caller_kernel(monkeypatch, members)
     assert broker._outside_caller_job(target) is not same_job
     kernel.IsProcessInJob.assert_called_once()
 
 
-def test_caller_without_a_job_has_no_job_cleanup_boundary(monkeypatch):
+def test_caller_without_a_job_has_no_job_cleanup_boundary(monkeypatch: pytest.MonkeyPatch) -> None:
     kernel = _caller_kernel(monkeypatch, [], in_job=False)
     assert broker._outside_caller_job(Mock(pid=99001))
     kernel.QueryInformationJobObject.assert_not_called()
 
 
-def test_caller_membership_resizes_without_truncating(monkeypatch):
-    monkeypatch.setattr(broker.os, "getpid", lambda: 99999)
-    members = [broker.os.getpid(), *range(1000, 1130)]
+def test_caller_membership_resizes_without_truncating(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(os, "getpid", lambda: 99999)
+    members = [os.getpid(), *range(1000, 1130)]
     kernel = _caller_kernel(monkeypatch, members)
     assert broker._outside_caller_job(Mock(pid=99001))
     assert kernel.QueryInformationJobObject.call_count == 2
@@ -207,16 +225,20 @@ def test_caller_membership_resizes_without_truncating(monkeypatch):
         ("invalid", [], "invalid membership"),
         ("complete", [], "identify the caller"),
         ("complete", [0], "invalid membership"),
-        ("complete", [broker.os.getpid(), broker.os.getpid()], "invalid membership"),
+        ("complete", [os.getpid(), os.getpid()], "invalid membership"),
     ],
 )
-def test_unknown_caller_membership_refuses_adoption(monkeypatch, mode, members, reason):
+def test_unknown_caller_membership_refuses_adoption(
+    monkeypatch: pytest.MonkeyPatch, mode: str, members: list[int], reason: str,
+) -> None:
     _caller_kernel(monkeypatch, members, mode=mode)
     with pytest.raises(OSError, match=reason):
         broker._outside_caller_job(Mock(pid=99001))
 
 
-def test_blocked_wmi_uses_only_explicit_contained_fallback(monkeypatch, tmp_path):
+def test_blocked_wmi_uses_only_explicit_contained_fallback(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
     monkeypatch.setattr(pu, "_is_windows", lambda: True)
     process = Mock(pid=1234)
@@ -248,7 +270,9 @@ def test_blocked_wmi_uses_only_explicit_contained_fallback(monkeypatch, tmp_path
         assert "arg with spaces" not in text and "value" not in text
 
 
-def test_blocked_wmi_without_fallback_is_explicit(monkeypatch, tmp_path):
+def test_blocked_wmi_without_fallback_is_explicit(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
     monkeypatch.setattr(pu, "_is_windows", lambda: True)
     popen = Mock()
@@ -266,7 +290,9 @@ def test_blocked_wmi_without_fallback_is_explicit(monkeypatch, tmp_path):
 
 
 @pytest.mark.parametrize("contained", [False, True])
-def test_containment_never_uses_the_broker(monkeypatch, tmp_path, contained):
+def test_containment_never_uses_the_broker(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, contained: bool,
+) -> None:
     monkeypatch.setattr(pu, "_is_windows", lambda: True)
     monkeypatch.setenv("COPILOT_EXTENSIONS_TEST_CONTAINED", "1" if contained else "0")
     monkeypatch.setattr(subprocess, "Popen", Mock(side_effect=_denied()))
@@ -286,7 +312,9 @@ def test_containment_never_uses_the_broker(monkeypatch, tmp_path, contained):
     "COPILOT_EXTENSIONS_TEST_CONTAINED", "copilot_extensions_test_contained",
 ])
 @pytest.mark.parametrize("route", ["env", "env_overrides"])
-def test_contained_child_environment_never_uses_wmi(monkeypatch, tmp_path, route, name):
+def test_contained_child_environment_never_uses_wmi(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, route: str, name: str,
+) -> None:
     if name != name.upper() and os.name != "nt":
         pytest.skip("environment names are case-insensitive only on Windows")
     monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
@@ -296,7 +324,7 @@ def test_contained_child_environment_never_uses_wmi(monkeypatch, tmp_path, route
     monkeypatch.setattr(subprocess, "Popen", popen)
     _, durable = _durable_launch(monkeypatch)
     marker = {name: "1"}
-    extra = (
+    extra: dict[str, Any] = (
         {"env": {**os.environ, **marker}} if route == "env" else {"env_overrides": marker}
     )
     pu.spawn_daemon(["py"], cwd=tmp_path, log_path=tmp_path / "out.log", **extra)
@@ -306,7 +334,9 @@ def test_contained_child_environment_never_uses_wmi(monkeypatch, tmp_path, route
     assert not flags & pu._CREATE_BREAKAWAY_FROM_JOB
 
 
-def test_broker_errors_are_sanitized_in_both_logs(monkeypatch, tmp_path):
+def test_broker_errors_are_sanitized_in_both_logs(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
     monkeypatch.setattr(pu, "_is_windows", lambda: True)
     monkeypatch.setattr(subprocess, "Popen", Mock(side_effect=_denied()))
@@ -323,7 +353,9 @@ def test_broker_errors_are_sanitized_in_both_logs(monkeypatch, tmp_path):
         assert "daemon not started" in text and "sensitive-fixture-detail" not in text
 
 
-def test_uncertain_cleanup_prohibits_a_contained_retry(monkeypatch, tmp_path):
+def test_uncertain_cleanup_prohibits_a_contained_retry(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
     monkeypatch.setattr(pu, "_is_windows", lambda: True)
     popen = Mock()
@@ -340,7 +372,7 @@ def test_uncertain_cleanup_prohibits_a_contained_retry(monkeypatch, tmp_path):
     popen.assert_not_called()  # uncertainty must not create a second daemon
 
 
-def test_frames_preserve_unicode_environment_and_embedded_newlines():
+def test_frames_preserve_unicode_environment_and_embedded_newlines() -> None:
     deadline = time.monotonic() + 5
     spec = {"env": {"VALUE": "quotes ' \" ; & \n \u65e5"}, "argv": ["spaced argument", ""]}
     left, right = socket.socketpair()
@@ -350,7 +382,7 @@ def test_frames_preserve_unicode_environment_and_embedded_newlines():
 
 
 @pytest.mark.parametrize("wire", [b"\0\0\0\0", b"\xff\xff\xff\xff", b"\0\0\0\2[]"])
-def test_invalid_frames_fail_without_unbounded_reads(wire):
+def test_invalid_frames_fail_without_unbounded_reads(wire: bytes) -> None:
     left, right = socket.socketpair()
     with left, right:
         left.sendall(wire)
@@ -358,7 +390,7 @@ def test_invalid_frames_fail_without_unbounded_reads(wire):
             broker._receive(right, time.monotonic() + 1)
 
 
-def test_closed_channel_is_an_explicit_error():
+def test_closed_channel_is_an_explicit_error() -> None:
     left, right = socket.socketpair()
     with left, right:
         left.close()
@@ -366,7 +398,7 @@ def test_closed_channel_is_an_explicit_error():
             broker._receive(right, time.monotonic() + 1)
 
 
-def test_expired_deadline_does_not_start_another_wait():
+def test_expired_deadline_does_not_start_another_wait() -> None:
     left, right = socket.socketpair()
     with left, right:
         with pytest.raises(TimeoutError, match="deadline"):
@@ -374,7 +406,9 @@ def test_expired_deadline_does_not_start_another_wait():
 
 
 @pytest.mark.parametrize("contained", [False, True])
-def test_wmi_activation_uses_json_stdin_not_shell_interpolation(monkeypatch, tmp_path, contained):
+def test_wmi_activation_uses_json_stdin_not_shell_interpolation(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, contained: bool,
+) -> None:
     monkeypatch.setattr(pu, "_is_windows", lambda: True)
     monkeypatch.setattr(pu, "contained_test_mode", lambda: contained)
     monkeypatch.setenv("SystemRoot", str(tmp_path))
@@ -399,14 +433,16 @@ def test_wmi_activation_uses_json_stdin_not_shell_interpolation(monkeypatch, tmp
     assert "ProcessStartupInformation" in command[-1]
     assert "EnvironmentVariables" in command[-1]
     assert "CreateFlags" in command[-1]
-    assert payload["creationflags"] == pu.detached_kwargs(breakaway=False)["creationflags"]
-    assert not payload["creationflags"] & pu._CREATE_BREAKAWAY_FROM_JOB
+    assert payload["creationflags"] == pu.detached_kwargs(breakaway=True)["creationflags"]
+    assert bool(payload["creationflags"] & pu._CREATE_BREAKAWAY_FROM_JOB) is not contained
 
 
 @pytest.mark.parametrize(
     ("status", "output"), [(1, "123"), (0, "not a pid"), (0, "-1"), (0, "0")],
 )
-def test_wmi_failure_does_not_claim_a_process(monkeypatch, tmp_path, status, output):
+def test_wmi_failure_does_not_claim_a_process(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, status: int, output: str,
+) -> None:
     monkeypatch.setenv("SystemRoot", str(tmp_path))
     monkeypatch.setattr(
         subprocess, "run", Mock(return_value=Mock(returncode=status, stdout=output)),
@@ -416,7 +452,7 @@ def test_wmi_failure_does_not_claim_a_process(monkeypatch, tmp_path, status, out
 
 
 @pytest.fixture()
-def broker_channel(monkeypatch):
+def broker_channel(monkeypatch: pytest.MonkeyPatch) -> BrokerChannel:
     listener = MagicMock()
     listener.__enter__.return_value = listener
     connection = MagicMock()
@@ -424,12 +460,12 @@ def broker_channel(monkeypatch):
     listener.accept.return_value = (connection, ("127.0.0.1", 123))
     listener.getsockname.return_value = ("127.0.0.1", 456)
     monkeypatch.setattr(socket, "socket", Mock(return_value=listener))
-    monkeypatch.setattr(broker.secrets, "token_hex", lambda _: "fixture-cookie")
+    monkeypatch.setattr(secrets, "token_hex", lambda _: "fixture-cookie")
     monkeypatch.setattr(broker, "_activate", Mock(return_value=100))
     monkeypatch.setattr(broker, "_bootstrap_python", lambda: "base-python-fixture")
-    processes = {}
+    processes: dict[int, Mock] = {}
 
-    def process(pid, args):
+    def process(pid: int, args: list[str]) -> Mock:
         result = Mock(pid=pid, args=args)
         result.wait.return_value = 0
         processes[pid] = result
@@ -438,12 +474,12 @@ def broker_channel(monkeypatch):
     monkeypatch.setattr(broker, "WindowsDaemonProcess", process)
     monkeypatch.setattr(broker, "_outside_job", Mock(return_value=True))
     monkeypatch.setattr(broker, "_send", Mock())
-    responses = [
+    responses: list[dict[str, Any]] = [
         {"pid": 100, "cookie": "fixture-cookie"}, {"pid": 200}, {"started": 200},
     ]
     monkeypatch.setattr(broker, "_receive", Mock(side_effect=responses))
 
-    def accept(listener, cookie, pid, deadline):
+    def accept(listener: Mock, cookie: str, pid: int, deadline: float) -> MagicMock:
         hello = broker._receive(connection, deadline)
         if not broker._authenticated(hello, cookie):
             raise TimeoutError("only unauthenticated clients connected")
@@ -455,15 +491,17 @@ def broker_channel(monkeypatch):
     return processes, responses
 
 
-def _launch(tmp_path):
-    return broker.spawn_brokered_daemon(
+def _launch(tmp_path: Path) -> Mock:
+    return cast(Mock, broker.spawn_brokered_daemon(
         ["actual-daemon", "private-arg"], cwd=str(tmp_path), env={"A": "B"},
         creationflags=pu._CREATE_NO_WINDOW, log_path=str(tmp_path / "out.log"),
         stderr_log_path=str(tmp_path / "err.log"),
-    )
+    ))
 
 
-def test_adopts_actual_child_and_releases_only_bootstrap(monkeypatch, broker_channel, tmp_path):
+def test_adopts_actual_child_and_releases_only_bootstrap(
+    monkeypatch: pytest.MonkeyPatch, broker_channel: BrokerChannel, tmp_path: Path,
+) -> None:
     processes, _ = broker_channel
     result = _launch(tmp_path)
     assert result is processes[200]
@@ -471,31 +509,33 @@ def test_adopts_actual_child_and_releases_only_bootstrap(monkeypatch, broker_cha
     result.close.assert_not_called()
     processes[100].close.assert_called_once()
     processes[100].terminate.assert_not_called()
-    sent = broker._send.call_args_list
+    sent = cast(Mock, broker._send).call_args_list
     assert sent[-1].args[1] == {"start": 200}
     assert sent[0].args[1]["env"] == {"A": "B"}
 
 
 @pytest.mark.parametrize("contained", [False, True])
 def test_broker_preserves_resident_creation_flags(
-    monkeypatch, broker_channel, tmp_path, contained,
-):
+    monkeypatch: pytest.MonkeyPatch, broker_channel: BrokerChannel, tmp_path: Path,
+    contained: bool,
+) -> None:
     monkeypatch.setattr(pu, "_is_windows", lambda: True)
     monkeypatch.setattr(pu, "contained_test_mode", lambda: contained)
     _launch(tmp_path)
-    spec = broker._send.call_args_list[0].args[1]
+    spec = cast(Mock, broker._send).call_args_list[0].args[1]
     assert spec["creationflags"] == pu._CREATE_NO_WINDOW
 
 
 @pytest.mark.parametrize("bootstrap_in_provider_job", [False, True])
 @pytest.mark.parametrize("child_outside_any_job", [False, True])
 def test_bounded_provider_job_bootstrap_does_not_replace_child_lifetime_check(
-    monkeypatch, broker_channel, tmp_path, child_outside_any_job, bootstrap_in_provider_job,
-):
+    monkeypatch: pytest.MonkeyPatch, broker_channel: BrokerChannel, tmp_path: Path,
+    child_outside_any_job: bool, bootstrap_in_provider_job: bool,
+) -> None:
     processes, _ = broker_channel
-    checked = []
+    checked: list[int] = []
 
-    def outside_job(process):
+    def outside_job(process: Mock) -> bool:
         checked.append(process.pid)
         if process.pid == 200:
             return child_outside_any_job
@@ -504,11 +544,11 @@ def test_bounded_provider_job_bootstrap_does_not_replace_child_lifetime_check(
     monkeypatch.setattr(broker, "_outside_job", outside_job)
     if child_outside_any_job:
         assert _launch(tmp_path) is processes[200]
-        assert broker._send.call_args_list[-1].args[1] == {"start": 200}
+        assert cast(Mock, broker._send).call_args_list[-1].args[1] == {"start": 200}
     else:
         with pytest.raises(pu.DaemonSpawnError, match="child-adoption"):
             _launch(tmp_path)
-        assert all(call.args[1] != {"start": 200} for call in broker._send.call_args_list)
+        assert all(call.args[1] != {"start": 200} for call in cast(Mock, broker._send).call_args_list)
         processes[200].terminate.assert_called_once()
     assert checked == [200], "a provider-Job bootstrap is allowed; only the resident must escape"
 
@@ -518,24 +558,27 @@ def test_bounded_provider_job_bootstrap_does_not_replace_child_lifetime_check(
     {"pid": 100, "cookie": "\u65e5"}, {"pid": 100, "cookie": ["fixture-cookie"]},
 ])
 def test_identity_mismatch_never_sends_environment(
-    monkeypatch, broker_channel, tmp_path, hello,
-):
+    monkeypatch: pytest.MonkeyPatch, broker_channel: BrokerChannel, tmp_path: Path,
+    hello: dict[str, Any],
+) -> None:
     processes, _ = broker_channel
     monkeypatch.setattr(broker, "_receive", Mock(return_value=hello))
     with pytest.raises(pu.DaemonSpawnError, match="lifetime broker failed"):
         _launch(tmp_path)
-    broker._send.assert_not_called()
+    cast(Mock, broker._send).assert_not_called()
     assert set(processes) == {100}
     processes[100].close.assert_called_once()
 
 
 @pytest.mark.parametrize("max_pending", [4, 32])
-def test_competing_local_clients_cannot_block_bootstrap_admission(monkeypatch, max_pending):
+def test_competing_local_clients_cannot_block_bootstrap_admission(
+    monkeypatch: pytest.MonkeyPatch, max_pending: int,
+) -> None:
     # Serial two-second reads of 20 silent peers would far exceed this
     # 3-second deadline; concurrent bounded handling admits the bootstrap at once.
     monkeypatch.setattr(broker, "_MAX_PENDING", max_pending)
     cookie, pid = "fixture-cookie", 4242
-    clients = []
+    clients: list[socket.socket] = []
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
         listener.listen(64)
@@ -564,7 +607,7 @@ def test_competing_local_clients_cannot_block_bootstrap_admission(monkeypatch, m
     assert elapsed < 1.5, "silent peers delayed a ready authenticated bootstrap"
 
 
-def test_only_silent_clients_fail_at_the_deadline():
+def test_only_silent_clients_fail_at_the_deadline() -> None:
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
         listener.listen(8)
@@ -573,7 +616,7 @@ def test_only_silent_clients_fail_at_the_deadline():
                 broker._accept_bootstrap(listener, "cookie", 1, time.monotonic() + 0.3)
 
 
-def test_authenticated_client_with_wrong_pid_is_an_identity_failure():
+def test_authenticated_client_with_wrong_pid_is_an_identity_failure() -> None:
     cookie = "fixture-cookie"
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
@@ -584,12 +627,14 @@ def test_authenticated_client_with_wrong_pid_is_an_identity_failure():
                 broker._accept_bootstrap(listener, cookie, 2, time.monotonic() + 5)
 
 
-def test_bootstrap_uses_base_python_even_without_a_gui_sibling(monkeypatch, tmp_path):
+def test_bootstrap_uses_base_python_even_without_a_gui_sibling(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     base = tmp_path / "base"
     base.mkdir()
     python = base / "python.exe"
     python.write_bytes(b"base-interpreter-fixture")
-    monkeypatch.setattr(broker.sys, "base_prefix", str(base))
+    monkeypatch.setattr(sys, "base_prefix", str(base))
     monkeypatch.setattr(pu, "windowless_python", lambda _: "venv-redirector/pythonw.exe")
     assert broker._bootstrap_python() == str(python)
     assert not (base / "pythonw.exe").exists()
@@ -597,8 +642,9 @@ def test_bootstrap_uses_base_python_even_without_a_gui_sibling(monkeypatch, tmp_
 
 @pytest.mark.parametrize("failure", ["contained", "confirmation", "bootstrap-exit"])
 def test_partial_start_reaps_pinned_child_before_releasing_handles(
-    monkeypatch, broker_channel, tmp_path, failure,
-):
+    monkeypatch: pytest.MonkeyPatch, broker_channel: BrokerChannel, tmp_path: Path,
+    failure: str,
+) -> None:
     processes, _ = broker_channel
     if failure == "contained":
         monkeypatch.setattr(broker, "_outside_job", lambda process: process.pid != 200)
@@ -607,9 +653,9 @@ def test_partial_start_reaps_pinned_child_before_releasing_handles(
             {"pid": 100, "cookie": "fixture-cookie"}, {"pid": 200}, {"started": 999},
         ]))
     else:
-        original = broker.WindowsDaemonProcess
+        original = cast(Callable[[int, list[str]], Mock], broker.WindowsDaemonProcess)
 
-        def process(pid, args):
+        def process(pid: int, args: list[str]) -> Mock:
             result = original(pid, args)
             result.wait.return_value = 1
             return result
@@ -627,12 +673,13 @@ def test_partial_start_reaps_pinned_child_before_releasing_handles(
     (100, "wait"), (200, "wait"), (100, "close"), (200, "close"),
 ])
 def test_cleanup_failures_are_normalized_and_do_not_skip_other_cleanup(
-    monkeypatch, broker_channel, tmp_path, pid, method,
-):
+    monkeypatch: pytest.MonkeyPatch, broker_channel: BrokerChannel, tmp_path: Path,
+    pid: int, method: str,
+) -> None:
     processes, _ = broker_channel
-    original = broker.WindowsDaemonProcess
+    original = cast(Callable[[int, list[str]], Mock], broker.WindowsDaemonProcess)
 
-    def process(number, args):
+    def process(number: int, args: list[str]) -> Mock:
         result = original(number, args)
         if number == pid:
             error = subprocess.TimeoutExpired(args, 5) if method == "wait" else OSError("close")
@@ -648,7 +695,7 @@ def test_cleanup_failures_are_normalized_and_do_not_skip_other_cleanup(
     if (pid, method) == (200, "wait"):
         # An unconfirmed child exit keeps its pinned handle for the caller.
         processes[200].close.assert_not_called()
-        assert caught.value.process is processes[200]
+        assert getattr(caught.value, "process") is processes[200]
     else:
         processes[200].close.assert_called_once()
         assert getattr(caught.value, "process", None) is None
@@ -656,12 +703,12 @@ def test_cleanup_failures_are_normalized_and_do_not_skip_other_cleanup(
 
 
 def test_failed_child_termination_transfers_live_process_control(
-    monkeypatch, broker_channel, tmp_path,
-):
+    monkeypatch: pytest.MonkeyPatch, broker_channel: BrokerChannel, tmp_path: Path,
+) -> None:
     processes, _ = broker_channel
-    original = broker.WindowsDaemonProcess
+    original = cast(Callable[[int, list[str]], Mock], broker.WindowsDaemonProcess)
 
-    def process(number, args):
+    def process(number: int, args: list[str]) -> Mock:
         result = original(number, args)
         if number == 200:
             result.terminate.side_effect = OSError("access denied")
@@ -673,19 +720,20 @@ def test_failed_child_termination_transfers_live_process_control(
     with pytest.raises(pu.DaemonSpawnError) as caught:
         _launch(tmp_path)
     assert caught.value.cleanup_confirmed is False
-    assert caught.value.process is processes[200]
+    assert getattr(caught.value, "process") is processes[200]
     processes[200].close.assert_not_called()
     processes[100].close.assert_called_once()
 
 
 @pytest.mark.parametrize("child_exit_confirmed", [True, False])
 def test_interrupt_after_admission_cleans_up_and_preserves_process_control(
-    monkeypatch, broker_channel, tmp_path, child_exit_confirmed,
-):
+    monkeypatch: pytest.MonkeyPatch, broker_channel: BrokerChannel, tmp_path: Path,
+    child_exit_confirmed: bool,
+) -> None:
     processes, _ = broker_channel
-    original = broker.WindowsDaemonProcess
+    original = cast(Callable[[int, list[str]], Mock], broker.WindowsDaemonProcess)
 
-    def process(number, args):
+    def process(number: int, args: list[str]) -> Mock:
         result = original(number, args)
         if number == 100:
             # Ctrl-C lands while waiting for the bootstrap after admission.
@@ -697,7 +745,7 @@ def test_interrupt_after_admission_cleans_up_and_preserves_process_control(
     monkeypatch.setattr(broker, "WindowsDaemonProcess", process)
     with pytest.raises(KeyboardInterrupt) as caught:
         _launch(tmp_path)
-    failure = caught.value.daemon_spawn_failure
+    failure = getattr(caught.value, "daemon_spawn_failure")
     assert isinstance(failure, pu.DaemonSpawnError)
     assert failure.admission_sent is True and failure.process_created is True
     assert failure.cleanup_confirmed is child_exit_confirmed
@@ -708,17 +756,18 @@ def test_interrupt_after_admission_cleans_up_and_preserves_process_control(
         assert getattr(failure, "process", None) is None
     else:
         processes[200].close.assert_not_called()
-        assert failure.process is processes[200]
+        assert getattr(failure, "process") is processes[200]
 
 
 @pytest.mark.parametrize("failure", ["lost-pid", "adoption"])
 def test_unadopted_staged_child_cleanup_is_not_proven_by_bootstrap_exit(
-    monkeypatch, broker_channel, tmp_path, failure,
-):
+    monkeypatch: pytest.MonkeyPatch, broker_channel: BrokerChannel, tmp_path: Path,
+    failure: str,
+) -> None:
     processes, _ = broker_channel
-    original = broker.WindowsDaemonProcess
+    original = cast(Callable[[int, list[str]], Mock], broker.WindowsDaemonProcess)
 
-    def process(pid, args):
+    def process(pid: int, args: list[str]) -> Mock:
         if pid == 200:
             raise OSError("cannot adopt child")
         result = original(pid, args)
@@ -738,13 +787,13 @@ def test_unadopted_staged_child_cleanup_is_not_proven_by_bootstrap_exit(
 
 
 @pytest.fixture()
-def bootstrap_channel(monkeypatch, tmp_path):
+def bootstrap_channel(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> BootstrapChannel:
     monkeypatch.setenv(broker._BOOT_COOKIE, "fixture-cookie")
     monkeypatch.setenv(broker._BOOT_PORT, "123")
     connection = MagicMock()
     connection.__enter__.return_value = connection
     monkeypatch.setattr(socket, "create_connection", Mock(return_value=connection))
-    spec = {
+    spec: dict[str, Any] = {
         "argv": ["py", "quoted argument"], "cwd": str(tmp_path),
         "log_path": str(tmp_path / "out.log"), "stderr_log_path": str(tmp_path / "err.log"),
         "env": {"VALUE": "kept", broker._BOOT_COOKIE: "not-in-child"},
@@ -759,10 +808,12 @@ def bootstrap_channel(monkeypatch, tmp_path):
     return process, spec
 
 
-def test_bootstrap_preserves_split_logs_and_removes_private_environment(bootstrap_channel):
+def test_bootstrap_preserves_split_logs_and_removes_private_environment(
+    bootstrap_channel: BootstrapChannel,
+) -> None:
     process, spec = bootstrap_channel
     assert broker._bootstrap() == 0
-    _, kwargs = subprocess.Popen.call_args
+    _, kwargs = cast(Mock, subprocess.Popen).call_args
     assert kwargs["env"] == {"VALUE": "kept"}
     assert kwargs["creationflags"] == pu._CREATE_NO_WINDOW | broker._CREATE_SUSPENDED
     assert kwargs["cwd"] == spec["cwd"]
@@ -770,13 +821,13 @@ def test_bootstrap_preserves_split_logs_and_removes_private_environment(bootstra
     assert kwargs["stderr"].name == spec["stderr_log_path"]
     assert kwargs["stdout"].closed and kwargs["stderr"].closed
     process.kill.assert_not_called()
-    broker._resume.assert_called_once()
+    cast(Mock, broker._resume).assert_called_once()
 
 
 @pytest.mark.parametrize("fault", ["lost-channel", "adoption", "resume"])
 def test_bootstrap_kills_its_uncommitted_suspended_child(
-    monkeypatch, bootstrap_channel, fault,
-):
+    monkeypatch: pytest.MonkeyPatch, bootstrap_channel: BootstrapChannel, fault: str,
+) -> None:
     process, spec = bootstrap_channel
     if fault == "resume":
         monkeypatch.setattr(broker, "_resume", Mock(side_effect=OSError("resume failed")))
@@ -788,7 +839,9 @@ def test_bootstrap_kills_its_uncommitted_suspended_child(
     process.wait.assert_called_once_with(timeout=5)
 
 
-def test_stdio_transfer_failure_never_stages_a_child(monkeypatch, broker_channel, tmp_path):
+def test_stdio_transfer_failure_never_stages_a_child(
+    monkeypatch: pytest.MonkeyPatch, broker_channel: BrokerChannel, tmp_path: Path,
+) -> None:
     processes, _ = broker_channel
     monkeypatch.setattr(broker, "_duplicate_into", Mock(side_effect=OSError("dup failed")))
     with pytest.raises(pu.DaemonSpawnError, match="child-staging") as raised:
@@ -798,24 +851,30 @@ def test_stdio_transfer_failure_never_stages_a_child(monkeypatch, broker_channel
             stdio_handles=(11, 12, 13),
         )
     assert raised.value.process_created is False
-    broker._send.assert_not_called()
+    cast(Mock, broker._send).assert_not_called()
     assert set(processes) == {100}
     processes[100].close.assert_called_once()
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows handle duplication")
-def test_partial_handle_duplication_closes_copies_in_the_bootstrap(monkeypatch):
-    closed_in_target, duplicated = [], []
+def test_partial_handle_duplication_closes_copies_in_the_bootstrap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    closed_in_target: list[int] = []
+    duplicated: list[int] = []
 
     class Kernel:
-        def __init__(self):
+        def __init__(self) -> None:
             self.GetCurrentProcess = Mock(return_value=-1)
             self.OpenProcess = Mock(return_value=99)
             self.CloseHandle = Mock(return_value=True)
             self.DuplicateHandle = Mock(side_effect=self.duplicate)
 
         @staticmethod
-        def duplicate(source, handle, target, copy, access, inherit, options):
+        def duplicate(
+            source: int, handle: int, target: int | None, copy: Any,
+            access: int, inherit: bool, options: int,
+        ) -> bool:
             if options == broker._DUPLICATE_CLOSE_SOURCE:
                 assert source == 99 and copy is None
                 closed_in_target.append(handle)
@@ -836,15 +895,15 @@ def test_partial_handle_duplication_closes_copies_in_the_bootstrap(monkeypatch):
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows handle reconstruction")
 def test_bootstrap_handle_reconstruction_failure_starts_nothing(
-    monkeypatch, bootstrap_channel,
-):
+    monkeypatch: pytest.MonkeyPatch, bootstrap_channel: BootstrapChannel,
+) -> None:
     import msvcrt
 
     process, spec = bootstrap_channel
     spec["stdio_handles"] = [11, 12, 13]
-    opened = []
+    opened: list[int] = []
 
-    def open_osfhandle(handle, flags):
+    def open_osfhandle(handle: int, flags: int) -> int:
         if handle == 12:
             raise OSError("invalid handle")
         descriptor = os.open(os.devnull, os.O_RDONLY)
@@ -853,7 +912,7 @@ def test_bootstrap_handle_reconstruction_failure_starts_nothing(
 
     monkeypatch.setattr(msvcrt, "open_osfhandle", open_osfhandle)
     assert broker._bootstrap() == 1
-    subprocess.Popen.assert_not_called()
+    cast(Mock, subprocess.Popen).assert_not_called()
     process.kill.assert_not_called()
     assert len(opened) == 1
     with pytest.raises(OSError):
