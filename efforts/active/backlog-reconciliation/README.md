@@ -3929,6 +3929,15 @@ implementation umbrellas. The routing journal now distinguishes verified
 historical merge identities from reported feature/proof details and remaining
 integration, provider, lifecycle and production gates. No phase or source
 token is completed by that synchronization.
+The [reviewed reconciliation and parent return](journal/2026/11.15-portable-receiving-boundaries.md#reviewed-reconciliation-and-current-parent-return)
+records #12731's merge and the complete 841-open census, including one excluded
+arrival and zero campaign departures. The [next nine complete maps](journal/2026/11.15-portable-receiving-boundaries.md#nine-complete-maps-and-two-precise-receiving-boundaries)
+retain #5956's stopped discussion and the separate Manager receiving-root
+boundary without whole-map or receiving credit. [Detailed canonical children](journal/2026/11.15-portable-receiving-boundaries.md#existing-detailed-keepers-and-one-provenance-clarification)
+already cover #5930/#5972; only #5900's existing opt-in provenance Plan/Validation
+receives a clarification. No additional source token is retired; incumbent
+technical checkbox states, actual claim/owner conditions and remaining parent
+completion gates are unchanged.
 
 ### Phase 2b - Vision-linked stabilization roadmap
 

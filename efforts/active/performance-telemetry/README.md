@@ -121,6 +121,9 @@ sample/drop/missing evidence and the later structured-signal/hook work.
   incomplete samples and unknown measurements.
 - [ ] Complete native run envelopes and process measurements through the owning
   producers, including roster and source/installed/serving identity (#7935/#5900).
+  For a real opted-in spawn, retain low-cardinality plugin/verb/stable-source
+  identity and causal parent lineage through the existing telemetry seam,
+  with honest availability/provenance for best-effort resource measurements.
 - [x] Document the performance-impact contract and reproducible native flow
   under #7935, without adding native effects to required unit CI.
 
@@ -260,6 +263,9 @@ afterward it is provenance, not a closed live implementation claim.
   registration/counter races and actual buffered JSONL/OTLP delivery.
 - [ ] Complete real spawn/cancellation/producer-exit adoption through the
   independently owned process-provenance slice (#5900).
+  Verify the opted-in producer's plugin/verb/stable-source identity and causal
+  parent lineage without raw prompts, argv dumps or credentials. Unsupported
+  resource measurements remain explicitly unavailable, not fabricated zero.
 - [x] Optional SDK absent works; actual local export delivers valid SDK spans;
   unavailable receiver cannot block producers or cause unbounded retries.
 - [ ] Windows/Linux process lifecycle measurements include short-lived children
