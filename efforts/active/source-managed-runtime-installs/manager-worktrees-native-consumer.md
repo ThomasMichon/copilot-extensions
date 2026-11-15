@@ -136,6 +136,17 @@ legacy physical environment and a nested physical environment, plus refusal
 when the selected generation has no interpreter. Python lint and the install
 contract check pass.
 
+The whole-file strict ratchet exposed missing annotations in the two touched
+fixture files. Typed dynamic/process boundaries, explicit imported helper
+exports, platform-aware ctypes access and checked executable selection now
+pass the existing Python 3.10 Linux and Windows targets without exemptions.
+The broader contained fixture run passes 64 tests, excluding only the two
+hosted whole-suite evidence assertions. It also refreshes stale expectations:
+the output-budget control advances a synthetic clock past progress throttling,
+the minimal Index slot uses the supported no-bytecode fallback without procutil,
+and completion retains the helper exit code and diagnostic across a closed pipe.
+No production implementation or native effect boundary changed.
+
 This is the first Q2 fixture prerequisite, not Q2 completion or a hosted
 ordinary-update result. No service, Scheduled Task or installed operator
 runtime was started or changed. The required authentic selected-source case,
