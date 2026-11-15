@@ -342,6 +342,14 @@ the non-public approval conversation.
 
 ## Plan
 
+The [review-convergence and source-contract unit](journal/2026/11.14-review-convergence-and-source-keepers.md)
+retains ten complete original/discussion unions and two metadata-only stops.
+It proposes 24 unchecked reviewer-intake Plan/local/global Validation rows,
+preserves parked execution and existing ownership, and confirms the finite
+same-name hoister write gap statically. Existing #2847/#2965/#3002/#3115 rows are
+not duplicated. No source is closed or reassigned; the complete 00:54:38Z
+census is 849 open, 120 above fixed 729, including the new inflow record.
+
 The [lifecycle and selector frontier](journal/2026/11.14-lifecycle-and-selector-frontier.md)
 retains twelve source-specific records: ten admitted whole original/discussion
 unions, one metadata-only stop and one excluded copied-source original.
