@@ -39,6 +39,14 @@ Preserve the owning ground-layer, installer and configuration authorities.
 
 ## Coordination
 
+The finite #3957 held-log launch-recovery intake below retains the current
+launcher, installer, logging, service and process custodians. #8051 owns only
+its separate communication/process-clock slice; its annex is unchanged.
+The Coordinator retains integration, not new launch or recovery authority.
+Current source OPEN/claim state remains pending normal review/merge, complete
+relevant current receiving readback and separate source judgment; this adds
+no permanent-open veto or owner-transfer permission.
+
 The proposed finite #5493 four-signature startup characterization stays with
 the SAME Coordinator/startup-attempt/container/native and ground/lifecycle
 custodians. Preserve #6467/#7486/#8051/#6793/#6470, scalar repair and all
@@ -406,6 +414,51 @@ contract within Phase 3, not as another supervisor or automatic failover.
 - [ ] **V6189-A:** Review transaction cases: target acceptance, source outcome/provenance, failure before/after target creation, uncertain/lost response, retry/idempotence, duplicate submission and concurrent claim. Documentation must not manufacture acceptance or choose unresolved semantics.
 - [ ] **V6189-B:** Qualify chosen narrowing trigger's NEW-production stop AND continued local updates/evaluation, including terminal/legitimately quiet work and changed/unknown ownership; retain existing confirmation/claim authority.
 - [ ] **V6189-C:** Read back both complete designs, corrected transport/motivation and all contributor, assignment, reservation, literal-condition and source/release/isolated/native/installed boundaries. Preserve WHOLE source OPEN; reviewed design/receiving text is not execution, custody transfer or automatic disposition.
+
+#### Finite held-log launch recovery from #3957
+
+- [ ] **P3957-1:** Identify the actual supported Windows launcher, selected
+  interpreter/runtime, output-log path, service-token/held-handle boundary and
+  owning process. A hung label or failed open does not prove the prior
+  coordinator died or may be stopped.
+- [ ] **P3957-2:** While the canonical old log remains held/unwritable, let
+  only the existing authorized launch owner select a fresh writable,
+  attributable output path. Do not rename, truncate, change permissions on,
+  delete or overwrite the old owner's file; introduce no second resolver or
+  launch owner.
+- [ ] **P3957-3:** Preserve truthful startup/readiness and diagnostics across
+  banner failure, lock-after-path-selection, stream/tee failure and the
+  distinct persistent application-handler boundary. Attempted launch is not
+  coordinator readiness.
+- [ ] **P3957-4:** Preserve exact singleton/service/routing/process identity
+  and admitted work. Log failure authorizes neither a duplicate active
+  coordinator, kill, forced restart, lease expiry, ownership transfer nor
+  replacement of a healthy selection.
+- [ ] **P3957-5:** Qualify the actual generated Windows launch under relevant
+  noninteractive/service-token conditions and supported on-demand/service
+  paths. Source strings or parser checks alone do not satisfy that acceptance.
+- [ ] **P3957-6:** Keep recovery bounded and diagnosable. If a fresh log path
+  cannot be prepared, report failure without weakening the prior owner's
+  custody or silently counting startup as successful.
+
+##### Local Validation - held-log launch recovery
+
+- [ ] **V3957-1:** In an existing authorized isolated lane, retain the original
+  log-handle/unwritable condition under the relevant Windows token; demonstrate
+  the generated launcher using a fresh attributable path and the old
+  file/path remaining unchanged.
+- [ ] **V3957-2:** Cover the lock-after-selection race and banner, stream/tee
+  and persistent-handler failures with truthful ready/failed outcomes and
+  useful bounded diagnostics.
+- [ ] **V3957-3:** Cover supported service and on-demand generated-launch
+  paths, including noninteractive/S4U behavior; verify singleton identity and
+  no duplicate active owner.
+- [ ] **V3957-4:** Preserve a healthy selected coordinator and admitted work
+  when replacement logging fails. The case grants no kill, restart,
+  permission change, file cleanup, replay or overwrite authority.
+- [ ] **V3957-5:** Keep source, release, actual native launch/readiness and any
+  authorized installed-consumer observation separate. Synthetic assertions
+  do not replace the original native boundary.
 
 ### Phase 3a - Startup progress and timeout adoption
 
@@ -902,6 +955,14 @@ _(Agent-recommended direct Phase3/Phase7 consumer case; all rows unchecked.)_
 
 ## Validation Plan
 
+- [ ] **G3957:** Resolve P3957-1 through P3957-6 and V3957-1 through V3957-5
+  at their stated tiers, preserving all incumbent Plan/global Validation,
+  check states, owners and holds. Read back the complete relevant current
+  receiving/custody contract after reviewed merge. This finite planned slice
+  neither completes the ROOT nor proves native/installed acceptance; plan
+  approval, merge or elapsed time grants no service action, source closure
+  or resource release.
+
 - [ ] **G5675:** Resolve EVERY P5675-D/R/W and V5675-D/R/W clause together
   with continuing #5675 custody: delivered diagnostic/recovery credit,
   report-first holder AND renewal fencing, no-old-command safeguard and
@@ -1080,6 +1141,16 @@ named-resource resolution so an older peer cannot silently accept but ignore a
 requested contract.
 
 ## Journal
+
+### 2026-11-14 - Finite held-log launch-recovery receiving proposal
+
+Added twelve unchecked Plan/local/global Validation rows retaining #3957's
+fresh attributable path, original held-file preservation, distinct persistent
+handler and actual generated Windows/S4U acceptance. This is independent of
+#8051's startup-clock scope and leaves its annex unchanged. Missing native
+proof is retained as planned work, not an implementation-first bar to
+consolidation. No process, log, service, runtime, native fixture, owner or
+issue state changed.
 
 ### Proposed complete #7116 acquisition-startup receiving
 
