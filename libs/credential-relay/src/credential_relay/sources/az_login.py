@@ -336,6 +336,7 @@ class AzLoginSource:
         try:
             proc, job = await spawn_in_kill_on_close_job(
                 *args,
+                require_job=True,
                 stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -354,6 +355,9 @@ class AzLoginSource:
             return None
         except FileNotFoundError:
             log.error("az CLI not found on PATH")
+            return None
+        except RuntimeError:
+            log.error("az CLI could not start with required process-tree containment")
             return None
         finally:
             if proc is not None:

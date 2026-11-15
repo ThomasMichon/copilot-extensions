@@ -64,6 +64,21 @@ def _mock_process(stdout: str = "", stderr: str = "", returncode: int = 0) -> Ma
 # ---------------------------------------------------------------------------
 class TestAzLoginSourceBasic:
 
+    @pytest.mark.asyncio
+    async def test_required_job_failure_returns_unavailable(self) -> None:
+        source = AzLoginSource(allowed_resources=["https://management.azure.com/"])
+        with patch(
+            "credential_relay.sources.az_login.spawn_in_kill_on_close_job",
+            new=AsyncMock(side_effect=RuntimeError("Job assignment failed")),
+        ) as spawn:
+            result = await source.resolve(
+                "get-azure-token", {"resource": "https://management.azure.com/"},
+            )
+        assert result is None
+        assert spawn.await_args is not None
+        assert spawn.await_args.kwargs["require_job"] is True
+        assert not source._cache
+
     def test_name(self) -> None:
         source = AzLoginSource()
         assert source.name == "az-login"
