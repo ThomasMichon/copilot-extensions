@@ -4989,7 +4989,7 @@ items; both retain the complete original dependency graph and production checks.
 The existing managed `agent-worktrees` test environment must already be prepared;
 this contract never bootstraps tooling or prepares an application outside that group.
 It is a changed per-phase allocation, **not** an original single-30-second pass.
-The runner supplies exact node order and requires all 16 unique, successful
+The runner supplies exact node order and requires all 18 unique, successful
 JUnit cases before accepting the journey. A later phase without its predecessors
 refuses; an independently selected phase reports only partial coverage.
 Function-scoped environment restoration and canonical group cleanup retain

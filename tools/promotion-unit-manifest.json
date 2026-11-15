@@ -6127,7 +6127,7 @@
         "tools/typecheck-projects.json": "1df1dd970eaee7fdf78927e72644011f5c7656ade95f2b6275ed73755d39689b",
         "tools/promotion_unit_tests/test_typecheck_new_code.py": "2b086d280ff2d6de186672ce6d49eff16a413239a4deefe9fedc55c86c5ec7a2",
         "tools/typecheck_new_code.py": "228bca779b906e0b37666f7985ad69a9132e8e473f76d2c2e8d532d2842e6016",
-        "tools/promotion_unit_tests/test_application_callback_deadlines.py": "f0e0321baff434941e8af324923113ec130f468cf331372f8b677f430f737667",
+        "tools/promotion_unit_tests/test_application_callback_deadlines.py": "680a3389cd1226effb5e29658ba61671db64d72a3cda41145e0769fa34c14eaa",
         "plugins/agent-worktrees/src/agent_worktrees/repository_ssh_setup.py": "7ef0c4cbaaa1954a6ce64332b4ab6da4c148013c41a4404e0025442f87ff5268"
     }
 }

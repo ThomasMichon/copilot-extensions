@@ -123,9 +123,14 @@ def test_existing_ssh_receiver_accepts_the_actual_unchanged_base_contract(
         if isinstance(node, ast.FunctionDef) and node.name == "_installer"
     ]
     assert len(body) == 1
+
+    def owner_path(filename: str) -> Path:
+        assert filename == str(receiver)
+        return owner / "repository_ssh_setup.py"
+
     namespace: dict[str, Any] = {
-        "Path": Path, "importlib": importlib, "sys": sys,
-        "__file__": str(owner / "repository_ssh_setup.py"),
+        "Path": owner_path, "importlib": importlib, "sys": sys,
+        "__name__": "unit_ssh_contract_receiver", "__file__": str(receiver),
         "protocol": SimpleNamespace(_plain=lambda _path: None, SetupError=RuntimeError),
     }
     exec(compile(ast.Module(body=body, type_ignores=[]), str(receiver), "exec"), namespace)
