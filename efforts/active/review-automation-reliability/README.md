@@ -97,6 +97,35 @@ each separate redundant-tracking judgment. Keep #5183/#5211 OPEN now. No
 generic new ACK, implementation completion, all-parent/native gate or new owner
 is added, and no existing explicit condition is waived by this proposal.
 
+### Proposed Phase 11 tracking intake: #2887 and #2899
+
+This additive candidate uses the existing Phase 11/migration-intake
+deduplication, ownership and domain-acceptance route. Applying that route to
+#2887 is a proposal, not proof of acceptance or permission to resume the
+parked execution programme. Preserve the current status and every incumbent
+Plan, Validation and custody condition.
+
+- **C2887-1:** Keep the existing lifecycle host as tracking owner and the
+  registrar as sole owner of declaration schema, discovery and profile
+  validation. Do not assign an implementer, second schema or competing engine.
+- **C2887-2:** Preserve the generic/consumer seam. Consumers retain target
+  eligibility, ACL, acting forge identity, rubric/guidance, provider writeback,
+  merge/landing authority, scheduling and organizational telemetry.
+- **C2887-3:** Consume admitted knowledge-set and reviewer-persona references
+  with explicit provenance, applicability, access and unavailable/error
+  outcomes. Corpus content, persona authoring/tuning and private content stay
+  consumer-owned. A pointer grants neither disclosure nor write authority.
+- **C2887-4:** Keep repository/critical-area/topic approval or steer optional
+  and configurable, including explicitly autonomous cases. Landing ownership
+  and a generic human ACK are not substitutes for that policy.
+- **C2887-5:** Preserve independent #2878/#2885 scope and #2899's existing
+  source owner, implementers, provider ACL, verdict and landing boundaries.
+  The direct #2899 receiving condition below remains separate from this
+  candidate's review. No issue, claim or resource transfers by association.
+- **C2887-6:** This is tracking only. Execution remains parked under the
+  existing explicit maintainer-resumption and source/owner reconciliation
+  conditions. No provider operation, runtime change or rollout is authorized.
+
 ## Context
 
 Review automation crosses asynchronous systems that can delay, duplicate, lose,
@@ -589,7 +618,124 @@ _Correlated via a facility-driven sweep of open `bug`-labeled issues against act
 - [ ] **#2914** reviewer-recipe CodeSpace fallback stall: task never progresses after local-container-failure fallback decision (3rd recurrence)
   - A recurring reviewer-recipe stall is squarely this effort's review-automation reliability scope.
 
+### Phase 11 additive candidate - #2887 generic review convergence
+
+These proposed rows extend tracking before implementation through the existing
+Phase 11 intake rule. They preserve all incumbent phase rows and the parked
+execution state.
+
+- [ ] **P2887-1 - Optional steer/approval policy.** Specify configurable
+  operator steer or approval before consequential review writes by repository
+  and user-defined critical area/topic, with explicitly autonomous cases.
+  Bind approval to the authorized action and revision. `land=self|author`
+  remains landing ownership, not the steering policy; steering is not universal.
+- [ ] **P2887-2 - Knowledge-set references.** Define the generic input contract
+  for consumer-selected conventions, prior decisions or domain knowledge,
+  including provenance, applicability, access/trust and explicit unavailable
+  or error outcomes. Referenced corpora and consumer-specific content stay
+  downstream.
+- [ ] **P2887-3 - Reviewer-persona references.** Define the generic input
+  contract for consumer-selected persona/voice/priority sources, including
+  provenance, applicability, access/trust and explicit unavailable/error
+  outcomes. Persona authoring, tuning and private content stay consumer-owned.
+- [ ] **P2887-4 - Existing lifecycle and ownership.** Compose evidence,
+  investigation, draft, optional steer/approval and postback through the
+  existing registrar, reviewer lifecycle, driver and result-applicator/consumer
+  adapter. Preserve one review owner, resumable state, render-or-report
+  failures, eligibility, ACL, identity and forge/landing authority; no parallel
+  engine or declaration schema.
+- [ ] **P2887-5 - Finite and independent scope.** Retain long-term convergence
+  without directing immediate implementation. A finite #2899 repair need not
+  wait for independent #2887 capabilities or whole-parent completion. Do not
+  dispose of #2878, #2885 or consumer-owned work by association.
+
+#### Complete direct #2899 located-finding postback family
+
+- [ ] **P2899-1 - Actual finding location.** Carry structured file path,
+  available valid line/side/range and analyzed comparison/native iteration
+  context through the actual generic result applicator to the ADO thread-write
+  seam. A Markdown file mention, read-side `threadContext` or successful
+  general `post_comment` is not a located finding.
+- [ ] **P2899-2 - Supported anchored threads.** Emit actual supported ADO
+  `threadContext`/file/left-or-right ranges and necessary comparison/iteration
+  context when a valid location is known, including supported file-level
+  anchoring. Never fabricate lines or discard a valid location merely because
+  an adapter lacks a location parameter.
+- [ ] **P2899-3 - Classification and fallback.** Resolve rename, deleted-file,
+  side and range semantics against the analyzed comparison. Explicitly classify
+  stale, unavailable, unsupported and invalid locations. Preserve native
+  comparison policy without an unrelated latest-head gate. Use general-PR
+  fallback only when no valid specific location is available, expose the
+  reason, and never report anchored success for an unanchored result.
+- [ ] **P2899-4 - Policy and authority.** Preserve optional action/revision-bound
+  steer/approval, autonomous cases, acting reviewer identity, provider ACL and
+  verdict/landing boundaries. Thread creation grants neither vote/landing
+  authority nor permission to publish private guidance/content; no universal
+  human ACK.
+- [ ] **P2899-5 - Idempotent application.** Preserve finding/application
+  identity through retry, resume and comparison changes. Prevent duplicate or
+  wrong-location threads and success-shaped refusal, transport or partial-write
+  outcomes through the existing applicator/lifecycle, not another engine.
+- [ ] **P2899-6 - Finite validation.** Qualify structured finding to outgoing
+  payload to resulting location, both sides/ranges, file-only, rename/delete,
+  stale/unavailable fallback, negative validation, policy denial, idempotent
+  retry and general-comment compatibility. Preserve fixture, contract/provider
+  and native evidence tiers. Intake authorizes no live post or private-consumer
+  inspection.
+
+#### Paired local behavior Validation
+
+- [ ] **V2887-1:** Exercise approval-required and autonomous repository and
+  critical-area/topic cases, action/revision binding and distinction from
+  `land=self|author`; introduce no universal ACK.
+- [ ] **V2887-2:** Verify actual knowledge/persona reference consumption with
+  provenance, applicability, access and unavailable outcomes, preserving
+  consumer content, authoring, ACL, identity, rubric and landing authority.
+- [ ] **V2887-3:** Verify evidence/investigation/draft/steer/postback composition
+  through the existing driver/applicator with classified render-or-report
+  failures and no second schema or engine.
+- [ ] **V2899-1:** Verify structured finding data reaches the real applicator
+  and ADO write seam with supported anchored file/line/side/range, file-only
+  outcomes and comparison/iteration context.
+- [ ] **V2899-2:** Verify rename/delete/stale/unavailable/unsupported/invalid
+  classification, native comparison policy, fallback only without a valid
+  location, visible reasons and no fabricated anchored-success result.
+- [ ] **V2899-3:** Verify retry/resume across comparison changes, no duplicate
+  or wrong-location writes, explicit denial/refusal/transport/partial-write
+  outcomes and general-comment compatibility.
+- [ ] **V2899-4:** Keep fixtures, contract/provider evidence and native ADO
+  behavior distinct. No new live posting, private-consumer inspection or
+  unrelated latest-head requirement follows from this acceptance.
+- [ ] **V2887-R:** Apply the exact separate #2899 receiving/disposition gate
+  below. Preserve complete incumbent #2887 content, acceptance and custody;
+  tracking text, a link/title, generic helper or proposal alone earns no
+  source retirement.
+
 ## Validation Plan
+
+- [ ] **G2887-1:** Crosswalk every P2887-1..5 row to V2887-1..3 and the existing
+  registrar, lifecycle, applicator and consumer seam. Metadata presence alone
+  does not prove reference consumption.
+- [ ] **G2887-2:** Crosswalk every P2899-1..6 row to V2899-1..4, retaining valid
+  specific locations, fallback alternatives, optional/autonomous approval,
+  idempotency, exact source custody and fixture/contract/native evidence tiers.
+- [ ] **G2887-3:** After reviewed intake delivery, read back the complete
+  current ROOT Plan, local and ROOT-global Validation, Coordination, dated
+  Journal and incumbent phase/source ownership. Preserve the existing
+  migration-intake/domain-acceptance gate and parked state. Documentary
+  tracking is not implementation, resumption or parent completion.
+- [ ] **G2887-4:** Administratively supersede #2899 only after its complete
+  additive checklist is delivered directly into final-open/unlocked/eligible
+  #2887 and the full current #2887 body, incumbent acceptance and unchanged
+  custody are read back. A link/title/proposal/general-thread helper is not
+  receipt. Retain the source if any clause, owner or gate is lost. A finite
+  adapter repair need not await independent #2887 capabilities or whole-parent
+  completion.
+- [ ] **G2887-5:** Keep #2887's long-term objective separate from finite #2899
+  incorporation. Its own goal and applicable Plan/Validation/ownership must
+  be resolved or explicitly transferred under existing rules; incorporating
+  one child does not complete it, and does not require the independent parent
+  capabilities before that child's finite repair can be tracked or completed.
 
 - [ ] Concurrent claim attempts yield exactly one review owner.
 - [ ] Duplicate request and response delivery produces one analysis and at most
@@ -635,6 +781,22 @@ drivers and prove reliability with deterministic interruption and duplication
 scenarios.
 
 ## Journal
+
+### 2026-11-14 - Proposed parked #2887/#2899 tracking intake
+
+Added a finite Phase 11 candidate for optional repository/critical-area
+review steering, knowledge/persona references with consumer-owned content,
+and the complete direct ADO located-finding postback family. The direct
+Coordination, Plan, local behavior Validation and ROOT-global crosswalk retain
+all incumbent rows, the registrar/lifecycle/applicator and consumer boundaries,
+and the exact separate #2899 receiving/disposition condition.
+
+The existing Phase 11/migration-intake domain-acceptance and complete current
+receiving readback remain separate gates. This is a proposed tracking intake,
+not evidence that those gates passed. The effort remains Blocked/parked;
+implementation still requires the existing explicit maintainer resumption.
+No implementation, source disposition, assignment, claim/resource transfer,
+provider action, rollout or parent completion is claimed.
 
 ### 2026-11-13 - Proposed parked tracking of semantic findings and round visibility
 
