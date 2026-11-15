@@ -7,14 +7,22 @@ import re
 import shutil
 import stat
 import sys
-import tomllib
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from standalone_consumers import standalone_build_resources
-if __package__:
+if sys.version_info >= (3, 11):
+    import tomllib
+else:
+    import tomli as tomllib
+
+if TYPE_CHECKING:
+    from tools.standalone_consumers import standalone_build_resources
+    from tools.native_test_paths import native_test_path
+elif __package__:
+    from standalone_consumers import standalone_build_resources
     from .native_test_paths import native_test_path
 else:
+    from standalone_consumers import standalone_build_resources
     from native_test_paths import native_test_path
 
 _ROOT = Path(__file__).resolve().parents[1]
@@ -44,7 +52,7 @@ def has_dev_extra(project: Path) -> bool:
 def declared_test_requirements(plugin: Path, additional: tuple[str, ...]) -> tuple[str, ...]:
     """Select test-only declarations, never application runtime/core dependencies."""
     manifest = plugin / "pyproject.toml"
-    declared = []
+    declared: list[str] = []
     if manifest.is_file():
         data = tomllib.loads(manifest.read_text(encoding="utf-8"))
         project = data.get("project", {})
@@ -54,9 +62,10 @@ def declared_test_requirements(plugin: Path, additional: tuple[str, ...]) -> tup
         groups = data.get("dependency-groups", {})
         if not isinstance(extras, dict) or not isinstance(groups, dict):
             raise ValueError("Test tooling requires optional-dependencies and dependency-groups tables")
-        declared = extras.get("dev", groups.get("dev", []))
-        if not isinstance(declared, list) or any(not isinstance(value, str) for value in declared):
+        selected = extras.get("dev", groups.get("dev", []))
+        if not isinstance(selected, list) or any(not isinstance(value, str) for value in selected):
             raise ValueError("Test tooling requires a flat declared dev requirement list")
+        declared = selected
     return tuple(dict.fromkeys(("pytest", *declared, *additional)))
 
 
@@ -287,10 +296,10 @@ def clear_cache_contents(path: Path) -> None:
         if child.is_symlink():
             child.unlink()
         elif (
-            callable(getattr(child, "is_junction", None)) and child.is_junction()
+            callable(is_junction := getattr(child, "is_junction", None)) and is_junction()
         ) or (
             os.name == "nt"
-            and getattr(child.lstat(), "st_reparse_tag", 0) == stat.IO_REPARSE_TAG_MOUNT_POINT
+            and getattr(child.lstat(), "st_reparse_tag", 0) == getattr(stat, "IO_REPARSE_TAG_MOUNT_POINT")
         ):
             child.rmdir()
         elif child.is_dir():
