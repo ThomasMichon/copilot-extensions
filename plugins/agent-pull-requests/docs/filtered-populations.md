@@ -61,6 +61,9 @@ Large fan-out commits complete registration projections until the event/byte
 budget fills; remaining projections resume after consumers acknowledge retained
 events. A persisted last-projected sequence prioritizes older projections, so a
 hot first subscriber cannot repeatedly take the newly available event budget.
+A blocked larger projection does not prevent another registration that fits
+from progressing. If no registration can complete a bounded projection, the
+transaction retains its existing backpressure rollback behavior.
 Acknowledged or otherwise unprotected old events can be reclaimed independently
 of an earlier event retained for another consumer. Unsettled delivery and events
 created in the current transaction remain protected.

@@ -388,9 +388,9 @@ def test_byte_backpressure_accounts_for_shared_cache_before_partial_projection(s
     assert execute(selected, "consumer-0", "query", registration(registrations[0]))["baseline"]["pulls"]
     assert not execute(selected, "consumer-1", "query", registration(registrations[1]))["baseline"]["pulls"]
     before = selected[1].path.read_bytes()
-    with pytest.raises(RepositoryBackpressure):
-        observe(selected, population)
+    observe(selected, population)
     assert selected[1].path.read_bytes() == before
+    assert not execute(selected, "consumer-1", "query", registration(registrations[1]))["baseline"]["pulls"]
     for consumer, registration_value in enumerate(registrations):
         if consumer:
             observe(selected, population)
@@ -499,3 +499,19 @@ def test_slow_consumer_does_not_pin_other_consumers_acknowledged_event_space(sel
     pending = events(selected, "slow", slow)
     assert pending[:len(retained)] == retained
     assert [event["kind"] for event in events(selected, "fast", fast)] == ["change"]
+
+
+def test_blocked_large_projection_does_not_prevent_smaller_owner_from_progressing(selected, monkeypatch):
+    from agent_pull_requests import filtered_state
+
+    broad = subscribe(selected, "broad", {"repo": ["owner/repo"]})
+    narrow = subscribe(selected, "narrow", {"tags": {"any": ["special"]}})
+    monkeypatch.setattr(filtered_state, "MAX_EVENTS", 3)
+    observe(selected, {7: facts()})
+    retained = events(selected, "broad", broad)
+    initial = events(selected, "narrow", narrow)
+    execute(selected, "narrow", "acknowledge", {**registration(narrow), "event_id": initial[-1]["event_id"]})
+    observe(selected, {7: facts(tags=["changed"]), 8: facts(tags=["special"])})
+    assert events(selected, "broad", broad) == retained
+    result = execute(selected, "narrow", "query", registration(narrow))["baseline"]
+    assert [pull["number"] for pull in result["pulls"]] == [8]

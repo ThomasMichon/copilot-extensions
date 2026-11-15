@@ -212,10 +212,10 @@ class FilteredProjection:
                     row.update(before)
                     del state["events"][event_count:]
                     state["next_sequence"] = sequence
-                    if not progressed:
-                        raise
-                    break
+                    continue
                 progressed = True
+            if not progressed:
+                raise RepositoryBackpressure("filtered projections await delivery capacity")
             trim(state, new_sequence=first_new, now=now)
             return {"status": "projected", "observed": len(prepared)}
         return self.store._review_transaction(apply, persist=True, **authority)
