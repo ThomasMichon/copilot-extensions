@@ -153,7 +153,8 @@ def add_parsers(sub) -> None:
         help="Read the Copilot sessionStart JSON payload from stdin",
     )
     sp.add_argument(
-        "--pid", type=int, default=None, help="PID of the Copilot process (diagnostic only)"
+        "--pid", type=int, default=None,
+        help="Copilot PID; a qualified retained writer corroborates its fresh native activation",
     )
     sp.add_argument("--pane", default=None, help="Mux pane id (defaults to TMUX_PANE/PSMUX_PANE)")
     sp.add_argument(

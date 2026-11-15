@@ -179,6 +179,25 @@ def _apply_session_register_locked(args: dict) -> dict:
                 logging.getLogger(__name__).warning("%s for %s", message, session_id)
                 return {"error": "lifecycle", "message": message}
             if (
+                source_identity is None and retained_record_writer.active()
+                and latest is not None and latest.source_identity is not None
+                and latest.ended_at is not None
+            ):
+                from .native_lifecycle_source import retained_start_identity
+
+                fresh_source = retained_start_identity(session_id, pid)
+                if (
+                    record.resolved_head_session != session_id
+                    or fresh_source is None or fresh_source in existing.pruned_sources
+                    or any(item.source_identity == fresh_source for item in existing.activations)
+                ):
+                    return {
+                        "error": "lifecycle",
+                        "message": "Fresh retained native activation is unconfirmed",
+                    }
+                source_identity = fresh_source
+                source = "retained-native"
+            if (
                 source_identity is not None and started_at is not None
                 and source.startswith("hook")
                 and any(

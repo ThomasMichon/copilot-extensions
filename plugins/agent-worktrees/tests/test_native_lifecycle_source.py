@@ -123,10 +123,26 @@ def test_actual_held_file_start_binding(tmp_path, monkeypatch, witness):
     hold = directory / f"inuse.{pid}.hold"
     hold.touch()
     assert source.start_identity(SID, witness) is None
+    assert source.retained_start_identity(SID, pid) is None
     with hold.open("r"):
         assert source.start_identity(SID, witness) == context.identity(SID, pid, birth, EPOCH)
+        assert source.retained_start_identity(SID, pid) == context.identity(SID, pid, birth, EPOCH)
+        assert source.retained_start_identity(OTHER_SID, pid) is None
         witness["ancestors"][0]["start_time"] = str(int(birth) + 1)
         assert source.start_identity(SID, witness) is None
+
+
+@pytest.mark.parametrize("change", ["birth", "epoch", "hold", "pid"])
+def test_retained_native_source_refuses_changed_or_unconfirmed_process(monkeypatch, change):
+    observations = iter([
+        {"pid": 101, "start_time": "100", "parent_pid": 1},
+        {"pid": 101, "start_time": "200" if change == "birth" else "100", "parent_pid": 1},
+    ])
+    epochs = iter([EPOCH, {**EPOCH, "boot_id": OTHER_SID} if change == "epoch" else EPOCH])
+    monkeypatch.setattr(context, "process", lambda _: next(observations))
+    monkeypatch.setattr(context, "epoch", lambda: next(epochs))
+    monkeypatch.setattr(source, "session_process_owns_hold", lambda *_: change != "hold")
+    assert source.retained_start_identity(SID, True if change == "pid" else 101) is None
 
 
 @pytest.mark.parametrize("release,platform", [("6.8.0", "linux"), ("microsoft", "wsl")])

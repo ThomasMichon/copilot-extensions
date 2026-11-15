@@ -32,6 +32,27 @@ def start_identity(session_id: str, source: object) -> str | None:
         return None
 
 
+def retained_start_identity(session_id: str, pid: int) -> str | None:
+    """Corroborate an external writer's native PID, not its own ancestry."""
+    try:
+        if type(pid) is not int or pid <= 0:
+            raise ValueError("Retained native PID is unavailable")
+        observed_epoch = native_source_context.epoch()
+        observed = native_source_context.process(pid)
+        birth = observed["start_time"]
+        token = native_source_context.identity(session_id, pid, birth, observed_epoch)
+        if (
+            not session_process_owns_hold(session_id, pid, birth)
+            or native_source_context.process(pid) != observed
+            or native_source_context.epoch() != observed_epoch
+        ):
+            raise ValueError("Retained native UUID/process binding is unconfirmed")
+        return token
+    except (OSError, ValueError, TypeError, AttributeError, IndexError, KeyError) as exc:
+        logging.getLogger(__name__).warning("Retained native start source unconfirmed: %s", exc)
+        return None
+
+
 def end_identity(
     session_id: str, source: object, entry: tracking.SessionEntry | None,
 ) -> str | None:

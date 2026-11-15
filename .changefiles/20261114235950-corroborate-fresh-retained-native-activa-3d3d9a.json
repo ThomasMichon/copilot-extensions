@@ -1,0 +1,9 @@
+{
+  "comment": "Corroborate fresh retained native activations without reopening ended history",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
