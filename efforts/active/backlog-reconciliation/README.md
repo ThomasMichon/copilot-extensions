@@ -342,6 +342,14 @@ the non-public approval conversation.
 
 ## Plan
 
+The [lifecycle and selector frontier](journal/2026/11.14-lifecycle-and-selector-frontier.md)
+retains twelve source-specific records: ten admitted whole original/discussion
+unions, one metadata-only stop and one excluded copied-source original.
+Existing #2335/#4231/#2295 receiving rows are not duplicated; #2551's writer,
+#2612's current acceptance and installer integration remain unverified.
+No source is closed or reassigned. The complete 2026-11-15 00:09:53Z census
+is 848 open, 119 above fixed 729, with zero new disposition credit.
+
 The [runtime-contract discriminator refresh](journal/2026/11.14-runtime-contract-discriminators.md)
 retains twelve unfinished objectives with distinct source, receiving and
 custody gaps. Existing #1843/#2295 planned coverage is not duplicated; #2320's
