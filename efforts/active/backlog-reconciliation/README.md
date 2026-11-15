@@ -3967,6 +3967,17 @@ later source-specific tracking disposition; #6177 stays canonical and #6190's
 opposing expectation remains unresolved. #6236's canonical V2 receiver gains
 only paired unchecked PR-service interface acceptance; it does not absorb
 #6189's distinct Dispatch behaviors or transfer the serving owner's work.
+The [reviewed receiving and separate dispositions](journal/2026/11.15-portable-receiving-boundaries.md#reviewed-receiving-and-three-separate-tracking-retirements)
+records #12739's actual merge and the independently audited #6184/#6187/#6189
+planned-tracking retirements. The complete census is 838 whole open, 109 above
+fixed 729. Six further original maps are complete; one precise discussion
+gap and every parent completion gate remain.
+The [next original-contract and provider comparison](journal/2026/11.15-portable-receiving-boundaries.md#next-original-contracts-and-windows-provider-receiving)
+adds fifteen complete source maps and compares #6804 with the entire current
+Fleet V2 receiver and authentication detail. Only the existing Windows provider
+Plan and paired Validation receive direct planned acceptance. Other finite
+native, owner, deferred-effect and source gaps remain; no new disposition,
+implementation or resource release follows from the proposal.
 
 ### Phase 2b - Vision-linked stabilization roadmap
 

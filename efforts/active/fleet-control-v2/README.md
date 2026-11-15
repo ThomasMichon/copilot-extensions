@@ -379,10 +379,21 @@ All detailed slices are **agent-recommended** and remain subject to review.
   static Gateway enrollment or claiming resident/provider adoption (#7099).
   This includes the separately authorized bounded address fallback and
   controller acquisition-expiry corrections, not the broader integration item.
-- [ ] Review and implement the selected
+- [ ] `P.6804.provider-enrollment`: Review and implement the selected
   [Windows/Entra application adapter](runtime-authentication.md#selected-windowsentra-application-adapter)
   with the retained auth owner: actual broker/API proof compatibility,
   provider renewal and scoped enrollment, without changing management/SSH.
+  Retain all six adapter clauses and four local validation gates: protect
+  exposed application APIs and non-management Linux listeners while private
+  backends stay private; use maintained broker acquisition and protected keys;
+  prove the actual provider/token/proof profile before selecting it. Keep
+  enrollment/grants, source-credential delivery and narrowed backend delegation
+  independent. API/public-client registration and consent are conditional on
+  the selected OAuth path and need their own authority, not every Windows-backed
+  design. Preserve current profiles, real challenge/revocation/unavailability,
+  silent renewal and no extra presence timer, account fallback or ad hoc issuer.
+  #5789 retains shared verifier/profile authority and #6443 Gateway/client/
+  credential-worker integration; agree actual overlapping paths before coding.
 - [x] Review and deliver the bounded
   [RS256 application-token plus enrolled-proof service prerequisite](rs256-enrolled-service-profile.md),
   preserving existing profiles and caller-only bearer semantics. Common source
@@ -526,6 +537,17 @@ All entries are **agent-recommended implementation gates**, not completed tests.
 - [x] Complete the bounded [RS256 enrolled-service source controls](rs256-enrolled-service-profile.md#validation-and-stopping-boundary)
   with real synthetic-token/proof verification and contained TLS service-path
   tests; retain actual provider/protected-key/enrollment and live-adoption gates.
+- [ ] `V.6804.provider-enrollment`: Complete the selected adapter's four local
+  validation gates with actual approved-API Windows broker acquisition/renewal,
+  exact account/tenant/audience and protected key custody; verified-TLS server
+  interoperability, nonce/restart/replay and wrong-resource/tenant/client/
+  expired-or-revoked-enrollment refusals; distinct challenge/unavailability
+  without unattended UI or source-token substitution; and approved Linux
+  listener exposure with unchanged management/SSH authentication. Synthetic
+  JWTs, fixture keys, common verifier primitives and #12335's version-6
+  enrolled-RS256 source/TLS controls are finite credit, not this provider proof.
+  Preserve existing enrollment, trust and integration owners; this acceptance
+  transfers no claim, credential, directory, listener or deployment authority.
 - [ ] Real first-touch Windows/Linux install with no Copilot/plugin/runtime cache;
   offline installed use and precise missing/incompatible/unauthorized failures.
 - [ ] Concurrent activation/admission: one authoritative writer, unique resource
@@ -573,6 +595,21 @@ All entries are **agent-recommended implementation gates**, not completed tests.
 [Architecture and migration contract](architecture.md).
 
 ## Journal
+
+### 2026-11-15 - Direct Windows provider and enrollment receiving contract
+
+- Made the existing selected Windows/Entra Plan and its paired Validation
+  explicit for #6804's complete original and refinements. The linked six-clause
+  adapter and four local proof gates remain authoritative; no new provider
+  choice, implementation assignment or technical completion is introduced.
+- Credit #12335's bounded enrolled-RS256 source prerequisite without treating
+  synthetic service-path acceptance as real provider/key/enrollment adoption.
+  Keep the original conditional OAuth-registration alternative and retained
+  #5789/#6443 source and serving-interface responsibilities.
+- This is a proposed planned-work receiving clarification. Required review
+  and complete current readback precede any separate judgment about redundant
+  #6804 tracking. Unfinished technical checks and actual source/resource
+  obligations remain; checked prerequisite credit is unchanged.
 
 ### 2026-11-13 - Proposed retained #6443 source-only refinements
 
