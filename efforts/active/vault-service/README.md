@@ -59,6 +59,13 @@ still owns planning publication ONLY; P0 design/operator review and
 implementation-owner admission for that family remain pending. A plan neither grants
 unlock permission nor transfers master material, credentials or resources.
 
+The inherited #3980/#3981/#5918/#5940/#5959 lanes retain their separate
+machine/SSH-routing, endpoint/provenance/cell, installer/runtime/singleton,
+transport and adopter custodians. This documentary intake assigns nobody
+and moves no claim. P0 operator design review and implementation admission
+remain design/execution gates, not prerequisites to recording these
+unchecked requirements.
+
 - **Topology:** one planning PR, then bounded per-slice PRs; source branches
   target `dev` and follow normal review and CI.
 - **Host (owns PRs):** `patient-dial` owned the initial planning publication;
@@ -247,6 +254,33 @@ Draft; no runtime, interaction, credential or implementation admission._
   federation/platform portfolio prerequisite is introduced for this
   finite branch.
 
+- [ ] **U3979-P5:** Resolve authorized tunnel targets (#3980) from existing
+  machine/SSH routing authority, not another registry. Fan out only after
+  verified source Vault unlock, retaining source/target authorization and
+  per-target success, denied, unknown, unreachable and partial outcomes.
+  Discovery, enrollment or an open port never authorizes master-material
+  broadcast.
+- [ ] **U3979-P6:** Preserve intentional origin-Vault selection over general
+  SSH reverse tunnels (#3981), correct database/provider-group storage
+  context, local/origin coexistence and selected-origin failure without
+  substitution of an unrelated local Vault. Keep unconfigured standalone use.
+- [ ] **U3979-P7:** For explicitly cell-scoped operations (#5918), carry and
+  validate attributable same-cell peer identity OR report unavailable.
+  Newest/unscoped advertisements, load order and missing identity are not
+  authority. Preserve ordinary unconfigured legacy WSL discovery and
+  evidenced deliberate recovery/management override.
+- [ ] **U3979-P8:** Acquire/reconcile cell-scoped process ownership before
+  socket removal, bind or endpoint/PID publication (#5940); preserve a
+  matching live incumbent. Revalidate exact owner, generation and
+  process-birth identity before retirement/cleanup, including contention,
+  PID reuse and mixed native-IPC/TCP outcomes. Preserve cold start,
+  explicit recovery and warm-secret handoff without exposing secret state.
+- [ ] **U3979-P9:** Carry bounded, secret-safe literal built-in and extension
+  transport failures through actual final command consumers (#5959).
+  Preserve later successful alternate transport and distinguish genuine
+  absence from denied, malformed, timed-out or failed routes. Generic
+  not-running output is not the cause; unknown effects permit no replay.
+
 ## Validation Plan
 
 - [ ] Qualify the [federated-relay matrix](federated-relay.md#validation):
@@ -289,6 +323,26 @@ The [validation matrix](validation.md) is the detailed, agent-recommended plan.
   operator ceremony, credential operation or policy selection is performed
   by this planning retention.
 
+- [ ] **U3979-V3:** Prove authorized dynamic target selection and fan-out
+  only after successful source unlock, including per-target success,
+  denied, unknown, unreachable and partial outcomes plus standalone use.
+  Plan with synthetic routing/descriptors; no live enumeration, SSH or unlock.
+- [ ] **U3979-V4:** Prove reverse-tunnel origin selection, local/origin
+  coexistence, selected-origin failure, correct storage context and
+  unconfigured standalone behavior.
+- [ ] **U3979-V5:** Cover explicit same-cell, unrelated-cell, unattributed
+  legacy, missing/corrupt record, unconfigured legacy and explicit-override
+  cases. Missing identity is not a pass.
+- [ ] **U3979-V6:** Prove custody precedes endpoint mutation under concurrent
+  acquisition, matching live incumbent, PID reuse, stale/partial/foreign
+  identity and mixed IPC/TCP binding; old cleanup cannot erase a successor.
+  Keep contained/source and separately authorized installed/native proof
+  distinct.
+- [ ] **U3979-V7:** Through actual final command consumers, cover successful
+  fallback and exhausted absent/denied/malformed/timed-out/failed routes,
+  bounded redaction and locked/scoped refusals. Installer diagnostics or
+  mocks bypassing the consumer do not satisfy this gate.
+
 ## Proposal
 
 [Architecture](architecture.md), [validation](validation.md) and
@@ -299,6 +353,14 @@ qualification sequence. Outside it, operator design review and explicit
 implementation admission remain the next gate; publication does not start P1.
 
 ## Journal
+
+### 2026-11-15 - Inherited tunnel, cell and transport lanes proposed
+
+Added ten unchecked U3979 Plan/global Validation rows and five supporting
+detailed-matrix cases for the inherited #3980/#3981/#5918/#5940/#5959 union.
+Existing headless OR acceptance, V1-V10, qualification levels, owners and
+P0/D1-D6 gates remain unchanged. Documentary review is not implementation,
+credential/native interaction, source retirement or resource transfer.
 
 <!-- backlog-reconciliation:7556:qualified-sixteen:3979:Journal -->
 

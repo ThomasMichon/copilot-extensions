@@ -53,6 +53,24 @@ For V2/V5, cancellation of one shared consumer must leave a continuing consumer'
 need alive; cancellation acknowledgement cannot falsely prove an external
 browser/native effect stopped.
 
+## Inherited finite provider/transport cases
+
+These detailed cases support the ROOT's U3979-V3 through V7; they neither
+replace those direct gates nor add a second global completion framework.
+Existing qualification levels, V1-V10 and architecture/owner admission remain.
+
+| ROOT gate | Required finite observations |
+|-----------|------------------------------|
+| U3979-V3 / #3980 | Existing routing authority selects authorized targets; source unlock precedes fan-out; success, denied, unknown, unreachable and partial outcomes remain attributable. Discovery cannot authorize broadcast. Preserve standalone use. |
+| U3979-V4 / #3981 | General reverse tunnels retain intentional origin selection, correct database/provider-group context and local/origin coexistence; selected-origin failure cannot silently choose an unrelated local Vault. Preserve unconfigured use. |
+| U3979-V5 / #5918 | Explicit same-cell success differs from unrelated, unattributed, missing/corrupt and unavailable records. Preserve ordinary unconfigured legacy WSL discovery and evidenced deliberate recovery/management override. |
+| U3979-V6 / #5940 | Ownership admission precedes socket removal, bind and publication; contention, live incumbent, PID reuse, stale/partial/foreign identity and mixed IPC/TCP preserve the rightful owner and successor. Cold start/recovery and warm-secret handoff retain secret custody. |
+| U3979-V7 / #5959 | Actual final consumers preserve successful alternate transport and literal exhausted absent/denied/malformed/timed-out/failed causes, bounded secret-safe output and scoped refusals. Generic failure, installer-only output and consumer-bypassing mocks do not suffice. |
+
+Recording these cases authorizes no live enumeration, SSH, unlock, credential,
+native or service operation. Source/contained and separately authorized
+installed/native results remain different evidence tiers.
+
 ## Complete vision coverage
 
 The canonical [vision](../../../visions/vault/README.md) remains unchanged by

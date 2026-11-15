@@ -83,6 +83,13 @@ delivery, actual direct issue receiving and complete current source/custody
 readback precede a separate #4231 tracking judgment. No generic ACK, claim
 expiry, reassignment, activation or operational authority is introduced.
 
+The proposed #4053 ACP/#4031 lane below retains session/provider/process,
+relay, Host/resource and native-reconnect custodians; #7237's external
+relationship remains distinct. This is PARTIAL receiving only. The whole
+#4053 tracker remains OPEN for independent #4046 direct-command DC1-DC4
+acceptance, which this session/turn ROOT does not absorb. No owner, claim
+or cleanup authority moves and no new ACK is required.
+
 ## Context
 
 `#22` and the `#2445`/`#2378`/`#2379` cluster surfaced independently, from two
@@ -181,6 +188,36 @@ retains the whole wrapper and its separate source-specific receiving gate.
   where applicable and retain original actual-consumer/native tiers;
   no new every-platform, every-host or whole-programme gate is added.
 
+### Proposed partial ACP disconnect, stop and reconnect from #4053
+
+These are unchecked session/turn requirements, not arbitrary-command
+ownership, native proof or permission to resume this Draft effort.
+
+- [ ] **T4053-P1:** Disconnect leaves the same supported remote conversation
+  running/resumable; explicit stop requires actual owner-authorized remote
+  termination/cleanup. Preserve dormancy, retained Host and refusal, with
+  far-side confirmed stop distinct from UNKNOWN. No fake STOPPED,
+  replacement conversation or replay of accepted-unknown work.
+- [ ] **T4053-P2:** For #4031 failed start, settle the exact attempt's child
+  AND SSH management channel OR retain explicit unknown before retry.
+  Transport exit alone is not child cleanup confirmation.
+- [ ] **T4053-P3:** Deliver same-native reconnect for the original supported
+  disconnected-IDLE case. Distinct unsupported refusal/unknown cases cannot
+  replace that success outcome; preserve explicit cancellation and current
+  process/provider/native authority.
+- [ ] **T4053-LV:** Exercise same-conversation/same-native reconnect, retained
+  running/resumable work, refusal/cancellation, effective remote stop with
+  far-side confirmation versus unknown and attempt-bound child/channel
+  settlement. Prove no replacement, false STOPPED or UNKNOWN replay.
+
+#4053 independently retains #4046's DC1 progress/output without pinning the
+management call; DC2 bounded return while the same admitted owned command
+survives with custody/state classification; DC3 same-work detach/reattach,
+durable output and attributed exit/completion plus supported cleanup; and
+DC4 existing owned tool OR finite missing command surface under actual
+direct-command owners. These are not ACP acceptance or a prerequisite to
+this finite ACP lane. #12472 remains a non-text reference, not delivery proof.
+
 ### Bug sweep — linked open bugs (2026-09-24)
 
 _Correlated via a facility-driven sweep of open `bug`-labeled issues against active efforts (VEI + direct review). Not yet triaged into a numbered phase — listed here as upcoming work for whoever picks this effort back up._
@@ -195,6 +232,12 @@ _Correlated via a facility-driven sweep of open `bug`-labeled issues against act
   - Daemon flapping / wedged remote-session-host recovery is the same lifecycle-truthfulness scope this effort closes.
 
 ## Validation Plan
+
+- [ ] **T4053-G:** Resolve T4053-P1/P2/P3/local Validation at the original
+  supported ACP/remote-child/native-reconnect tier, preserving truthful
+  terminal/dormancy and provider/process/relay/Host custody. Keep #4231
+  diagnostics distinct and whole #4053 OPEN for #4046 DC1-DC4; no unrelated
+  phase/all-host gate or implementation credit follows from planned intake.
 
 - [ ] A running turn whose transport drops mid-turn always produces exactly
       one terminal event, never zero, never duplicated.
@@ -220,6 +263,15 @@ _Correlated via a facility-driven sweep of open `bug`-labeled issues against act
   cleanup, original native and current claimant conditions remain intact.
 
 ## Journal
+
+### 2026-11-15 - Partial ACP disconnect/stop/reconnect acceptance proposed
+
+Added five unchecked #4053/#4031 Plan/local/global Validation rows without
+changing Draft or incumbent terminal/dormancy/diagnostic acceptance. Same
+conversation/native reconnect and far-side stop confirmation remain
+unfinished. The whole #4053 source stays OPEN for independent #4046
+direct-command DC1-DC4; this ROOT is not that command owner. No native test,
+cleanup, resource transfer or technical completion is claimed.
 
 ### 2026-11-12 - Direct child-diagnostic tracking received
 
