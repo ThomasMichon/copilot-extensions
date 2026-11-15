@@ -2029,6 +2029,21 @@ The following outcomes remain independently tracked:
 
 #### Paired parent and indented companion rows from #4204
 
+- [ ] **M13-4204-P3:** For a sessionless child, display truthful state using
+  inherited lineage OR parent activity. Preserve own-session precedence,
+  visibility, exact controller navigation, orphan recovery and a genuinely
+  empty/unowned Open. Never copy parent conversation or fabricate child
+  history. Adjacent-lineage versus own-zero meaning remains an explicit
+  future decision before feature acceptance; tests must not choose it.
+- [ ] **M13-4204-V2:** Exercise the supported consumer path and empty/unowned
+  case, preserving precedence, visibility, exact navigation, orphan
+  recovery and no fabricated/copied history. Do not silently resolve the
+  lineage-versus-own-zero question in a test.
+- [ ] **M13-4204-C2:** Preserve the existing #4182 claimant and row/controller
+  owners. This is consumer display only, not a source/API custody transfer.
+  Keep #3791's real second-consumer/independent-width demand gate separate;
+  no hypothetical consumer or feature completion is claimed.
+
 <!-- backlog-reconciliation:7556:transfer:4204:to:efforts/active/worktree-manager-control-plane/README.md -->
 
 ##### Plan
@@ -2054,6 +2069,18 @@ The following outcomes remain independently tracked:
   This intake performs no pair mutation or implementation claim.
 
 #### Unavailable versus empty history from #5908
+
+- [ ] **M13-5908-P4:** Where results supply source, epoch, continuity, unknown
+  or truncation facts, preserve them through adapters, workers and both
+  consumers; never render unknown, truncated or unavailable history as
+  genuine empty. This does not take ownership of the source API.
+- [ ] **M13-5908-V2:** Exercise true empty and distinct unavailable,
+  malformed, failed, unknown and truncated results through the actual
+  consumer boundary. Preserve supplied source/epoch distinctions, without
+  render-triggered venue connection or API qualification claims.
+- [ ] **M13-5908-C2:** Keep Bridge history/API and database owners separate
+  from the Manager display consumer. No cursor, range, continuity or
+  cold-store ownership transfers.
 
 <!-- backlog-reconciliation:7556:transfer:5908:to:efforts/active/worktree-manager-control-plane/README.md -->
 
@@ -2669,6 +2696,15 @@ version-consistency guard; do not build competing mechanisms.
   native or running-state acceptance.
 
 ## Validation Plan
+
+- [ ] **M13-G4204-4182:** Resolve P3/V2/C2 as the #4182 consumer-display
+  slice only. Preserve its separate source claim, unresolved semantic
+  decision and #3791's conditional demand/materialization/readback duties.
+  This row establishes neither whole-source acceptance nor closure.
+- [ ] **M13-G5908-4193-consumer:** Resolve P4/V2/C2 as downstream result
+  rendering only, preserving truthful source/epoch/unknown/truncation
+  distinctions and current API/database/cold-store custodians. It does
+  not receive #4193's producer, paging, continuity or latency contract.
 
 - [ ] **WM4118-G:** Resolve only the Manager Picker Plan/local Validation
   consumer slice of #4118. Preserve the existing engine/API boundary and
