@@ -4031,6 +4031,11 @@ The [next nine complete unions](journal/2026/11.15-owned-release-boundaries.md#n
 retain completed-write versus preparation diagnostics, live CLI and registered-
 checkout distinctions, deferred baseline qualification and standalone application
 acceptance. The later qualification pause and unpublished candidate stay parked.
+The [next six owners and preparation discriminator](journal/2026/11.15-owned-release-boundaries.md#reviewed-finite-discriminators-and-six-continuing-owners)
+preserve distinct configuration, reattachment, native-read and portable-allocation
+acceptance. A [finite #10126 completion proposal](journal/2026/11.15-owned-release-boundaries.md#proposed-finite-completion-of-manager-preparation-progress)
+connects its source delivery to separately admitted installed producer evidence;
+review and the source-specific provider judgment remain pending.
 
 ### Phase 2b - Vision-linked stabilization roadmap
 
