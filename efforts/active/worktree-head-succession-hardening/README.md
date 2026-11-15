@@ -202,15 +202,16 @@ _(Agent-recommended receiving detail; all incumbent Phase 1 rows remain.)_
 ##### Local validation retained for #3584
 
 - [ ] **V3584-1:** Cover authorized interactive/embody, ACP and admitted
-  informal/resume entrances, plus negative child/subagent, stray prompt,
-  competing-session, CWD-only and failed-admission cases. Verify qualified
-  CWD and failed-resume refusal.
+  informal/resume entrances, including neutral-CWD recovery, plus negative
+  child/subagent, stray prompt, competing-session, CWD-only and
+  failed-admission cases. Verify the correct initial head, qualified CWD
+  and failed-resume refusal.
 - [ ] **V3584-2:** Cover stale and wrong-but-nonempty explicit recovery without
   promoting a failed candidate or reconstructing lineage during an ordinary
   read. Unreadable/partial evidence must remain unknown, not empty/dead.
 - [ ] **V3584-3:** Deliver delayed older Start/End/reconciliation after another
   successor becomes head, including a live head without `--resume`; verify
-  no later reversion of its authority.
+  stable authority and no later reversion, including process-identity reuse.
 - [ ] **V3584-4:** Cover requested-session/head/lineage agreement,
   contradiction and partial lineage on resume. Verify explicit recovery/
   choice and independent full lineage, retaining the existing atomic
