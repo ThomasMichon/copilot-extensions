@@ -4054,6 +4054,11 @@ distinguish two accepted Dispatch tracking additions from unresolved technical
 acceptance. Together with the preceding three delta studies, they preserve
 38 open outcomes without new issue effects, closure credit or parent check
 changes. Prior source pins remain distinct from current metadata qualification.
+The [next 33 retained outcomes](journal/2026/11.15-owned-release-boundaries.md#fifteen-retained-outcomes-with-three-changed-acceptance-records)
+preserve changed owner/status records, bounded source deltas and the existing
+#12415-to-#12315 receiving disposition without claiming another retirement.
+The preceding reviewed publication is merged; all incumbent parent completion
+states and the fixed whole-queue target remain unchanged.
 
 ### Phase 2b - Vision-linked stabilization roadmap
 
