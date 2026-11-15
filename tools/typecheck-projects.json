@@ -662,7 +662,8 @@
       "import_roots": [
         "tools",
         "libs/installer-engine",
-        "libs/versioned-runtime"
+        "libs/versioned-runtime",
+        "worktree-manager/tests"
       ],
       "exclude": [
         "tools/typecheck.py",
