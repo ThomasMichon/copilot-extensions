@@ -373,6 +373,23 @@ def test_includes_cycle_and_escape_are_rejected(tmp_path):
         age.inventory(tmp_path)
 
 
+@pytest.mark.parametrize("name", ["agent-pull-requests", "agent-vault"])
+def test_account_service_sdk_uses_exact_attributed_runner_branch(name):
+    declarations, projects = age.inventory(REPO)
+    path = REPO / "plugins" / name / "pyproject.toml"
+    selected = [
+        row for row in declarations if row.path == path and row.ecosystem == "python"
+        and Requirement(row.requirement).name == "fleet-manager"
+    ]
+    assert selected
+    for row in selected:
+        requirement = Requirement(row.requirement)
+        assert age.contract_source(requirement, path, projects, REPO) == (
+            REPO / "fleet-manager" / "pyproject.toml"
+        )
+        assert age.local_source(requirement, path, projects, REPO)
+
+
 def _assert_owned_source_contract_attribution(root):
     declarations, projects = age.inventory(root)
     refs = [
