@@ -1,9 +1,9 @@
 {
   "kind": "in-process-catalog-v1",
-  "module": "ff448d0c5442895186f11a3ff5e44aec1b7df9e64421d2ede189424fc371b71e",
+  "module": "28528273cf71570ff97f1981021591788cdab8e535f75c9b590cf75f77c35da1",
   "functions": {
     "_load_command": "76011bf59a00ec95fe6df935d3fa46331f01c2d3ef9ae04b273d1e060e643a10",
-    "load_manifest": "13c38a7df20fa3eae4cfb149e482ba9e97d8d5ff6cdc2666607c2cd977204830",
+    "load_manifest": "cf8c996ba231d53aaeda3e01bedde5305845b480a70f72d22d1890cc0667d326",
     "render": "edb27da92bc690b896c59a275537b4b89be16bb4f86929349cd60629c9ccdbb7",
     "expected_files": "6b3d3cd9e2ad94f82554c63e78076f2622a805a5198b1cfe1973d28ab70a0dce"
   }
