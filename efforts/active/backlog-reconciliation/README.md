@@ -3996,6 +3996,14 @@ preserves eighteen complete current unions, separates released bounded source
 claims from retained native/operational acceptance and records the finite
 registration-writer evidence gap. Existing transfers are not replayed; no
 new disposition, implementation, rollout or resource release is established.
+The [reviewed acceptance checkpoint](journal/2026/11.15-portable-receiving-boundaries.md#reviewed-acceptance-checkpoint-and-continuing-receiver-work)
+records #12745's actual merge, the unchanged 837-open observation and the
+next independent research with existing receiving ownership preserved.
+The [delegated-update contract study](journal/2026/11.15-delegated-update-contracts.md)
+preserves seventeen complete unions and a [complete planned #8312 intake into
+#7743](receiving-manager-engine-diagnostics.md). Direct receiving acceptance and
+the separate source-tracking judgment remain pending; no native retry,
+implementation, owner transfer or parent completion follows from the proposal.
 
 ### Phase 2b - Vision-linked stabilization roadmap
 
