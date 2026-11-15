@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from contextlib import nullcontext
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
@@ -36,6 +36,7 @@ class PreparedApplication:
         paths: PathIndex, store: MultiModelStore, clients: dict[str, EngineClient],
         full: bool, resume_since: float | None = None,
         before_embed: Callable[[], None] | None = None,
+        before_model_embed: Callable[[str], None] | None = None,
         progress_cb: ProgressCallback | None = None,
     ) -> None:
         profiles = dict(config.model_profiles)
@@ -67,6 +68,7 @@ class PreparedApplication:
                     self._prepare_pairs(
                         model, selected, store, client, coverage, force=full,
                         before_embed=before_embed,
+                        before_model_embed=before_model_embed,
                     )
             self.journal.put_batch(self.batch_count, batch)
             self.batch_count += 1
@@ -86,6 +88,7 @@ class PreparedApplication:
         self, model: str, chunks: list[Chunk], store: MultiModelStore,
         client: EngineClient, coverage: EmbeddingCoverage, *, force: bool,
         before_embed: Callable[[], None] | None,
+        before_model_embed: Callable[[str], None] | None = None,
     ) -> None:
         if not chunks:
             return
@@ -111,6 +114,8 @@ class PreparedApplication:
             return
         if before_embed:
             before_embed()
+        if before_model_embed:
+            before_model_embed(model)
         counts = current_counts()
         model_counts = counts.model(model) if counts is not None else None
         if model_counts is not None:
@@ -139,7 +144,7 @@ class PreparedApplication:
     def batches(self) -> Iterator[FileBatch]:
         return self.journal.batches(self.batch_count)
 
-    def vectors(self, model: str, chunks: list[Chunk]) -> np.ndarray:
+    def vectors(self, model: str, chunks: list[Chunk]) -> np.ndarray[Any, Any]:
         profile = self.profiles[model]
         keys = self._keys(model, chunks)
         cached = self.journal.vectors(keys, profile.dim)

@@ -10,6 +10,29 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from functools import wraps
 from pathlib import Path
+from typing import ParamSpec, Protocol, TypeVar, cast
+
+P = ParamSpec("P")
+R = TypeVar("R")
+
+
+class _WindowsFileLock(Protocol):
+    """The msvcrt surface absent from non-Windows checker stubs."""
+
+    LK_NBLCK: int
+    LK_UNLCK: int
+
+    def locking(self, fd: int, mode: int, count: int, /) -> None: ...
+
+
+class _PosixFileLock(Protocol):
+    """The fcntl surface absent from Windows checker stubs."""
+
+    LOCK_EX: int
+    LOCK_NB: int
+    LOCK_UN: int
+
+    def flock(self, fd: int, operation: int, /) -> None: ...
 
 _guard = threading.Lock()
 _threads: dict[Path, threading.RLock] = {}
@@ -51,12 +74,14 @@ def _try_lock(fd: int) -> bool:
         if os.name == "nt":
             import msvcrt
 
+            windows_lock = cast(_WindowsFileLock, msvcrt)
             os.lseek(fd, 0, os.SEEK_SET)
-            msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+            windows_lock.locking(fd, windows_lock.LK_NBLCK, 1)
         else:
             import fcntl
 
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            posix_lock = cast(_PosixFileLock, fcntl)
+            posix_lock.flock(fd, posix_lock.LOCK_EX | posix_lock.LOCK_NB)
     except OSError as error:
         busy = {errno.EACCES, errno.EAGAIN} if os.name == "nt" else {
             errno.EAGAIN, errno.EWOULDBLOCK,
@@ -71,12 +96,14 @@ def _unlock(fd: int) -> None:
     if os.name == "nt":
         import msvcrt
 
+        windows_lock = cast(_WindowsFileLock, msvcrt)
         os.lseek(fd, 0, os.SEEK_SET)
-        msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+        windows_lock.locking(fd, windows_lock.LK_UNLCK, 1)
     else:
         import fcntl
 
-        fcntl.flock(fd, fcntl.LOCK_UN)
+        posix_lock = cast(_PosixFileLock, fcntl)
+        posix_lock.flock(fd, posix_lock.LOCK_UN)
 
 
 @contextmanager
@@ -143,15 +170,15 @@ def source_writer(
             mutex.release()
 
 
-def own_reindex(function):
+def own_reindex(function: Callable[P, R]) -> Callable[P, R]:
     """Acquire before even resolving connectors or loading the shared state."""
     @wraps(function)
-    def call(*args, **kwargs):
+    def call(*args: P.args, **kwargs: P.kwargs) -> R:
         from agent_index.index_config import IndexConfig
 
         config = kwargs.get("config")
         if config is None:
             config = kwargs["config"] = IndexConfig()
-        with source_writer(config.data_dir):
+        with source_writer(cast(IndexConfig, config).data_dir):
             return function(*args, **kwargs)
     return call
