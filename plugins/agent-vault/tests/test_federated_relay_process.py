@@ -72,8 +72,18 @@ def test_admission_loss_reaps_native_cli_before_return(
                 kernel: Any = None
                 try:
                     await runtime.tick()
-                    await eventually(marker.exists)
-                    observed = json.loads(marker.read_text())
+                    observed: dict[str, Any] | None = None
+
+                    def readable_marker() -> bool:
+                        nonlocal observed
+                        try:
+                            observed = json.loads(marker.read_text())
+                        except (FileNotFoundError, PermissionError):
+                            return False
+                        return True
+
+                    await eventually(readable_marker)
+                    assert observed is not None
                     assert len(owned) == 1
                     process, job = owned[0]
                     assert process.returncode is None
