@@ -86,7 +86,7 @@ old/new coexistence. Index/Logger do not gate those independently releasable sli
 
 **Ideal flow:** trusted source/promotion inputs -> Manager first -> repo-derived
 wanted apps -> bounded parallel staging -> app/optional whole-toolset readiness
---> simple app setup and bounded outgoing cutoff -> selected incoming startup
+-> simple app setup and bounded outgoing cutoff -> selected incoming startup
 -> verified serving result -> independent obsolete-artifact cleanup
 and retained last-good recovery. Background preparation and cheap subsequent
 launches complete the target; they are not all implemented by the first pair.
@@ -804,6 +804,7 @@ onto one branch.
 
 ## Journal
 
+- [2026-11-15 - Fast construction and bounded service cutoff reviewed](fast-construction-and-outgoing-cutoff.md#journal)
 - [2026-11-15 - Bounded Manager/Worktrees consumer qualification accepted](manager-worktrees-native-consumer.md#journal)
 - [2026-11-13 - Foreground update and service-start lifetime clarification](journal/2026/11.13%20foreground-update-service-startup.md)
 

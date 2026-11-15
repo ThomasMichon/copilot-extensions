@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import argparse
 import ast
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager, nullcontext
+import importlib
 import json
 import os
 from pathlib import Path
@@ -18,7 +20,9 @@ import sys
 import shutil
 import subprocess
 import time
+import venv
 from types import ModuleType, SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -29,10 +33,56 @@ import manager_suite_fixture as fixture
 import manager_suite_diagnostics as diagnostics
 
 
+def _executable(name: str) -> str:
+    executable = shutil.which(name)
+    if executable is None:
+        raise RuntimeError(f"Native fixture prerequisite unavailable: {name}")
+    return executable
+
+
 def test_fullsuite_refuses_execution_outside_the_disposable_venue(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
     with pytest.raises(RuntimeError, match="disposable GitHub-hosted Windows VM"):
         require_venue()
+
+
+@pytest.mark.parametrize("nested", (False, True), ids=("legacy", "application"))
+def test_native_probe_launches_the_selected_physical_environment(
+    tmp_path: Path, nested: bool,
+) -> None:
+    from agent_procutil import no_window_kwargs
+
+    root = tmp_path / "installed"
+    slot = root / "versions" / "1.2.3"
+    environment = slot / ".venv" if nested else slot
+    venv.EnvBuilder(with_pip=False).create(environment)
+    (root / "current-version").write_text(slot.name, encoding="utf-8")
+    selected = fixture._python(root)
+    result = subprocess.run(
+        [selected, "-I", "-B", "-c",
+         "import json,sys;print(json.dumps({'prefix':sys.prefix,'executable':sys.executable}))"],
+        capture_output=True, text=True, timeout=15, check=True, **no_window_kwargs(),
+    )
+    observed = json.loads(result.stdout)
+    assert Path(observed["prefix"]).resolve() == environment.resolve()
+    assert Path(observed["executable"]).resolve() == selected.resolve()
+
+
+def test_native_probe_does_not_substitute_a_previous_generation(tmp_path: Path) -> None:
+    from worktree_manager.self_install import _runtime_installer
+
+    root = tmp_path / "installed"
+    previous = root / "versions" / "1.0.0"
+    venv.EnvBuilder(with_pip=False).create(previous)
+    (root / "current-version").write_text("2.0.0", encoding="utf-8")
+    (root / "last-known-good").write_text("1.0.0", encoding="utf-8")
+    installer_factory: Callable[[], Any] = _runtime_installer
+    runtime = installer_factory().runtime
+    runtime.mark_complete(root, "1.0.0")
+    fallback = runtime.slot_python(root, "1.0.0")
+    assert fallback is not None and runtime.resolve_python(root) == fallback
+    with pytest.raises(RuntimeError, match="Selected fixture generation has no interpreter"):
+        fixture._python(root)
 
 
 @pytest.mark.parametrize("mutation", ("none", "same-stat-content", "added", "removed"))
@@ -76,7 +126,9 @@ def test_phase_diagnostics_report_pre_update_mutation_without_resealing(
     slot.mkdir()
     code = slot / "module.py"
     code.write_bytes(b"source")
-    before = {"slots": {"component": str(slot)}, "sealed": {"component": diagnostics._snapshot(slot)}}
+    before: dict[str, Any] = {
+        "slots": {"component": str(slot)}, "sealed": {"component": diagnostics._snapshot(slot)},
+    }
     cached = slot / "__pycache__"
     cached.mkdir()
     (cached / "module.pyc").write_bytes(b"derived")
@@ -98,7 +150,7 @@ def test_assembled_update_capture_preserves_genuine_progress_with_a_finite_budge
 
     original = _caller_owned.run
 
-    def contained(*args, **options):
+    def contained(*args: Any, **options: Any) -> subprocess.CompletedProcess[str]:
         options["allow_daemon_breakaway"] = False
         return original(*args, **options)
 
@@ -107,6 +159,8 @@ def test_assembled_update_capture_preserves_genuine_progress_with_a_finite_budge
     program = (
         "import sys;sys.path.insert(0,sys.argv[1]);"
         "import installer_source_build as builds;"
+        "from itertools import count;from types import SimpleNamespace;"
+        "builds.time=SimpleNamespace(monotonic=count().__next__);"
         "progress=builds._SourceProgress('source-selection',180,0);"
         "[progress.renew() for _ in range(100000)];print('settled')"
     )
@@ -156,7 +210,7 @@ def test_process_trace_scopes_birth_identity_and_omits_argument_values(tmp_path:
         "CreationDate=$birth;CommandLine='python -m foreign_module private'};}"
     )
     result = subprocess.run(
-        [shutil.which("pwsh"), "-NoProfile", "-NonInteractive", "-Command",
+        [_executable("pwsh"), "-NoProfile", "-NonInteractive", "-Command",
          prefix + _runtime_process_trace_script(home, ready, stop, report)],
         capture_output=True, text=True, timeout=15, **no_window_kwargs(),
     )
@@ -187,7 +241,7 @@ def test_process_trace_does_not_consume_its_bound_before_the_baseline_window(tmp
         f"[IO.File]::WriteAllText('{str(stop).replace(chr(39), chr(39) * 2)}','stop');}}"
     )
     result = subprocess.run(
-        [shutil.which("pwsh"), "-NoProfile", "-NonInteractive", "-Command",
+        [_executable("pwsh"), "-NoProfile", "-NonInteractive", "-Command",
          prefix + _runtime_process_trace_script(tmp_path / "h", ready, stop, report)],
         capture_output=True, text=True, timeout=15, **no_window_kwargs(),
     )
@@ -209,7 +263,7 @@ def test_runtime_process_inventory_reports_flags_without_argument_values(tmp_pat
     )
     try:
         result = subprocess.run(
-            [shutil.which("pwsh"), "-NoProfile", "-NonInteractive", "-Command",
+            [_executable("pwsh"), "-NoProfile", "-NonInteractive", "-Command",
              _runtime_process_inventory_script({"fixture": str(tmp_path)})],
             check=False, capture_output=True, text=True, timeout=10, **no_window_kwargs(),
         )
@@ -225,7 +279,9 @@ def test_runtime_process_inventory_reports_flags_without_argument_values(tmp_pat
         process.wait(timeout=5)
 
 
-def test_baseline_owner_demand_uses_the_installed_startup_contract(monkeypatch):
+def test_baseline_owner_demand_uses_the_installed_startup_contract(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import inspect
 
     tree = ast.parse(inspect.getsource(fixture.prepare))
@@ -236,14 +292,14 @@ def test_baseline_owner_demand_uses_the_installed_startup_contract(monkeypatch):
     package = ModuleType("agent_codespaces")
     package.__path__ = []
     owner = ModuleType("agent_codespaces.connection_owner")
-    calls = []
-    owner.hold = lambda name, tenant: calls.append(("hold", name, tenant))
+    calls: list[tuple[Any, ...]] = []
+    monkeypatch.setattr(owner, "hold", lambda name, tenant: calls.append(("hold", name, tenant)), raising=False)
 
-    def ensure(config):
+    def ensure(config: object) -> bool:
         calls.append(("ensure", config))
         return True
 
-    owner.ensure_owner_running = ensure
+    monkeypatch.setattr(owner, "ensure_owner_running", ensure, raising=False)
     monkeypatch.setitem(sys.modules, package.__name__, package)
     monkeypatch.setitem(sys.modules, owner.__name__, owner)
     exec(compile(script, "installed-baseline", "exec"), {})
@@ -265,7 +321,7 @@ def test_stdio_frontdoor_qualifies_its_actual_version_without_a_resolver_trace(
     }
     calls = []
 
-    def run(argv: list[str], case: Path, **kwargs) -> SimpleNamespace:
+    def run(argv: list[str], case: Path, **kwargs: Any) -> SimpleNamespace:
         calls.append(argv[-1])
         return SimpleNamespace(returncode=0, stdout=f"{component} {reported_version}\n")
 
@@ -288,7 +344,7 @@ def test_fixture_configures_host_for_native_and_dependency_free_index_readers(tm
     fixture._configuration(tmp_path, {})
     scripts = fixture.REPO / "plugins" / "agent-index" / "scripts"
     initialized = subprocess.run(
-        [shutil.which("git"), "init", "-q", "--template=", "-b", "main", str(tmp_path / "project")],
+        [_executable("git"), "init", "-q", "--template=", "-b", "main", str(tmp_path / "project")],
         env=env, capture_output=True, text=True, timeout=30, **no_window_kwargs(),
     )
     assert initialized.returncode == 0, initialized.stdout + initialized.stderr
@@ -307,7 +363,7 @@ def test_fixture_configures_host_for_native_and_dependency_free_index_readers(tm
         f"$InstallDir={quote(tmp_path / 'h' / '.agent-index')}; Get-MachineRole"
     )
     commands = [
-        [shutil.which("pwsh"), "-NoProfile", "-NonInteractive", "-Command", script],
+        [_executable("pwsh"), "-NoProfile", "-NonInteractive", "-Command", script],
         [sys.executable, "-I", "-S", "-B", str(scripts / "resolve-activation-role.py"),
          "--repo", str(tmp_path / "project"),
          "--machine", socket.gethostname().split(".")[0].strip().lower()],
@@ -338,7 +394,7 @@ def test_observer_follows_successor_before_incumbent_releases_work_lease(
         tmp_path / routing_name, bind="127.0.0.1", port=12345, pid=os.getpid(), version="successor",
     )
 
-    def refuse_redundant_probe(*args, **kwargs):
+    def refuse_redundant_probe(*args: Any, **kwargs: Any) -> None:
         raise AssertionError("Metadata polling must not allocate another TCP socket")
 
     monkeypatch.setattr(routing, "_listening", refuse_redundant_probe)
@@ -420,7 +476,8 @@ def test_native_stop_uses_installed_selection_when_payload_generation_is_not_ins
         "import json,sys;from pathlib import Path;"
         f"p=Path({str(record)!r});"
         "p.open('a',encoding='utf-8').write(json.dumps("
-        "{'prefix':sys.prefix,'args':sys.argv[1:],'cache':sys.pycache_prefix})+'\\n')"
+        "{'prefix':sys.prefix,'args':sys.argv[1:],'cache':sys.pycache_prefix,"
+        "'no_bytecode':sys.dont_write_bytecode})+'\\n')"
     )
     (package / ("service.py" if component == "agent-vault" else "__main__.py")).write_text(code)
 
@@ -442,7 +499,7 @@ def test_native_stop_uses_installed_selection_when_payload_generation_is_not_ins
         "function Write-Ok {};function Write-Skip {};Invoke-Stop"
     )
     result = subprocess.run(
-        [shutil.which("pwsh"), "-NoProfile", "-NonInteractive", "-Command", script],
+        [_executable("pwsh"), "-NoProfile", "-NonInteractive", "-Command", script],
         capture_output=True, text=True, timeout=30, **no_window_kwargs(),
     )
     assert result.returncode == 0, result.stdout + result.stderr
@@ -453,7 +510,7 @@ def test_native_stop_uses_installed_selection_when_payload_generation_is_not_ins
         [["stop"], ["engine", "stop"]] if component == "agent-index" else [["--stop"]]
     )
     if component == "agent-index":
-        assert all(Path(call["cache"]).samefile(root / "cache" / "python") for call in calls)
+        assert all(call["cache"] is None and call["no_bytecode"] for call in calls)
 
 
 @pytest.mark.skipif(os.name != "nt" or shutil.which("pwsh") is None, reason="Native Bridge task resolver")
@@ -487,13 +544,13 @@ def test_bridge_task_resolves_actual_selected_slot_without_startup(tmp_path: Pat
         f"[IO.File]::WriteAllText({quote(launcher)},$launcherBody)"
     )
     rendered = subprocess.run(
-        [shutil.which("pwsh"), "-NoProfile", "-NonInteractive", "-Command", render],
+        [_executable("pwsh"), "-NoProfile", "-NonInteractive", "-Command", render],
         capture_output=True, text=True, timeout=30, **no_window_kwargs(),
     )
     assert rendered.returncode == 0, rendered.stdout + rendered.stderr
     before = {str(path.relative_to(root)): path.read_bytes() for path in root.rglob("*") if path.is_file()}
     resolved = subprocess.run(
-        [shutil.which("pwsh"), "-NoProfile", "-NonInteractive", "-File", str(launcher), "-ResolveOnly"],
+        [_executable("pwsh"), "-NoProfile", "-NonInteractive", "-File", str(launcher), "-ResolveOnly"],
         capture_output=True, text=True, timeout=30, **no_window_kwargs(),
     )
     assert resolved.returncode == 0, resolved.stdout + resolved.stderr
@@ -537,7 +594,7 @@ def test_native_broker_task_requires_current_code_and_its_exact_owned_registrati
     }])
     calls = []
 
-    def run(argv, case, **kwargs):
+    def run(argv: list[str], case: Path, **kwargs: Any) -> SimpleNamespace:
         calls.append(argv)
         return SimpleNamespace(stdout=(
             "agent-procutil.windows-launch-broker.runtime-ready.v1\n"
@@ -600,7 +657,7 @@ def test_dispatch_tasks_probe_the_actual_resolver_without_startup(
         f"[IO.File]::WriteAllText({quote(launcher)},$launcherBody)"
     )
     rendered = subprocess.run(
-        [shutil.which("pwsh"), "-NoProfile", "-NonInteractive", "-Command", render],
+        [_executable("pwsh"), "-NoProfile", "-NonInteractive", "-Command", render],
         capture_output=True, text=True, timeout=30, **no_window_kwargs(),
     )
     assert rendered.returncode == 0, rendered.stdout + rendered.stderr
@@ -639,7 +696,7 @@ def test_retained_engine_attests_original_health_and_native_lifetime(
               "runtime_generation": "retained", "dependencies": {}}
     probes = []
 
-    def probe(name: str, root: Path, pid: int) -> dict:
+    def probe(name: str, root: Path, pid: int) -> dict[str, Any]:
         probes.append((name, root, pid))
         return health
 
@@ -677,10 +734,10 @@ def test_observer_pins_successor_until_final_native_observation(
               "runtime_generation": "g1", "dependencies": {}, "ready_observed_ns": 10}
 
     @contextmanager
-    def process(pid):
+    def process(pid: int) -> Iterator[SimpleNamespace]:
         held.add(pid)
 
-        def times():
+        def times() -> tuple[int, int, int]:
             reads.append((pid, (tmp_path / "stop").exists()))
             assert pid in held
             return (pid, 0, final_code if pid == 202 and (tmp_path / "stop").exists() else 259)
@@ -690,14 +747,14 @@ def test_observer_pins_successor_until_final_native_observation(
         finally:
             held.remove(pid)
 
-    def stop_after_ready(_delay):
+    def stop_after_ready(_delay: float) -> None:
         assert held == {101, 202}
         (tmp_path / "stop").touch()
 
     monkeypatch.setattr(fixture, "closing_process", process)
     monkeypatch.setattr(fixture, "_resident_probe", lambda *args: health)
     monkeypatch.setattr(fixture, "_record", lambda *args: ({"pid": 202}, 0))
-    monkeypatch.setattr(fixture.time, "sleep", stop_after_ready)
+    monkeypatch.setattr(time, "sleep", stop_after_ready)
     row = fixture._watch_resident("agent-dispatch", tmp_path, 101, tmp_path)["observation"]
     assert row["new_exit_code_at_ready"] == 259
     assert row["new_exit_code"] == final_code
@@ -709,19 +766,19 @@ def test_observer_pins_successor_until_final_native_observation(
 def test_observer_keeps_consumer_demand_after_successor_readiness(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str,
 ) -> None:
-    refreshes = []
+    refreshes: list[int | str] = []
     health = {"pid": 101, "version": "v1", "ready": True,
               "runtime_generation": "g1", "dependencies": {}, "ready_observed_ns": 10}
 
     @contextmanager
-    def demand(component, root):
+    def demand(component: str, root: Path) -> Iterator[Callable[[], None]]:
         assert (component, root) == (name, tmp_path)
         try:
             yield lambda: refreshes.append(len(refreshes))
         finally:
             refreshes.append("closed")
 
-    def stop_after_ready(_delay):
+    def stop_after_ready(_delay: float) -> None:
         assert len(refreshes) >= 3
         (tmp_path / "stop").touch()
 
@@ -730,7 +787,7 @@ def test_observer_keeps_consumer_demand_after_successor_readiness(
                         lambda pid: nullcontext(SimpleNamespace(times=lambda: (pid, 0, 259))))
     monkeypatch.setattr(fixture, "_resident_probe", lambda *args: health)
     monkeypatch.setattr(fixture, "_record", lambda *args: ({"pid": 202}, 0))
-    monkeypatch.setattr(fixture.time, "sleep", stop_after_ready)
+    monkeypatch.setattr(time, "sleep", stop_after_ready)
     row = fixture._watch_resident(name, tmp_path, 101, tmp_path)["observation"]
     assert row["new_exit_code"] == 259
     assert refreshes[-1] == "closed"
@@ -754,7 +811,7 @@ def test_bridge_incumbent_logs_are_captured_before_successor_truncation(
               "runtime_generation": "g1", "dependencies": {}, "ready_observed_ns": 10}
     old_samples = iter(((101, 0, 259), (101, 15, 70), (101, 15, 70)))
 
-    def record(*args):
+    def record(*args: Any) -> tuple[dict[str, int], int]:
         stderr.write_text("successor startup", encoding="utf-8")
         return {"pid": 202}, 0
 
@@ -763,7 +820,7 @@ def test_bridge_incumbent_logs_are_captured_before_successor_truncation(
     )))
     monkeypatch.setattr(fixture, "_resident_probe", lambda *args: health)
     monkeypatch.setattr(fixture, "_record", record)
-    monkeypatch.setattr(fixture.time, "sleep", lambda _: (control / "stop").touch())
+    monkeypatch.setattr(time, "sleep", lambda _: (control / "stop").touch())
     fixture._watch_resident("agent-bridge", root, 101, control)
     diagnostics.retain_resident_logs(tmp_path)
     retained = tmp_path / "resident-logs" / "agent-bridge"
@@ -783,7 +840,7 @@ def test_manager_fixture_subscriber_follows_route_and_releases_both_generations(
     from worktree_manager import mux_daemon_cutover as control
 
     now = [0.0]
-    monkeypatch.setattr(diagnostics.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(time, "monotonic", lambda: now[0])
     token = control.load_or_create_control_token(tmp_path)
     with ExitStack() as owned:
         servers = [
@@ -794,7 +851,7 @@ def test_manager_fixture_subscriber_follows_route_and_releases_both_generations(
             server.start()
             owned.callback(server.close)
 
-        def select(server):
+        def select(server: CoalescingServer) -> None:
             port = int(server.rendezvous()["endpoint"].rsplit(":", 1)[1])
             control.publish_route(port, root=tmp_path, pid=os.getpid(), version="fixture")
 
@@ -828,7 +885,7 @@ def test_task_inventory_captures_only_owned_unicode_records(
         "}else{'<Task>foreign'+('x'*65536)+'</Task>'}};"
     )
 
-    def run(argv: list[str], case: Path, **options: object) -> object:
+    def run(argv: list[str], case: Path, **options: Any) -> subprocess.CompletedProcess[str]:
         result = execute([*argv[:-1], prefix + argv[-1]], case, **options)
         captured.append(result.stdout)
         return result
@@ -913,9 +970,9 @@ def test_failed_commands_retain_driver_evidence_without_changing_their_outcome(
 
 @pytest.mark.skipif(os.name != "nt", reason="Native Windows scoped handoff pipes")
 def test_scoped_engine_handoff_keeps_inherited_pipes_without_showing_windows() -> None:
-    import mux_windows_observer as observer
     from agent_procutil import no_window_kwargs
 
+    observer = importlib.import_module("mux_windows_observer")
     child = (
         "import sys,time;"
         "print('engine progress',flush=True);"
@@ -978,11 +1035,15 @@ def test_construction_owner_failure_survives_closed_input_pipe(tmp_path: Path, o
         "$script:RuntimeConstructionSession.Process.Dispose()}\n"
     )
     result = subprocess.run(
-        [shutil.which("pwsh"), "-NoProfile", "-NonInteractive", "-Command", script],
+        [_executable("pwsh"), "-NoProfile", "-NonInteractive", "-Command", script],
         capture_output=True, text=True, timeout=30, **no_window_kwargs(),
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "Construction owner exited (9): fixture owner failure" in result.stdout
+    expected = (
+        "construction helper exit 9" if operation == "Complete-RuntimeConstruction"
+        else "Construction owner exited (9)"
+    )
+    assert expected in result.stdout and "fixture owner failure" in result.stdout
 
 
 @pytest.mark.parametrize("mode", ("normal", "repair"))
