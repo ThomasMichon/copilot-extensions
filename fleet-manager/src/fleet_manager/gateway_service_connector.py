@@ -15,7 +15,7 @@ from collections import deque
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 import aiohttp
 from yarl import URL
@@ -55,10 +55,12 @@ async def channel_socket(
         uri, ssl=tls, heartbeat=10, max_msg_size=FRAME_BYTES, compress=0,
         autoclose=False, timeout=aiohttp.ClientWSTimeout(ws_close=2),
     ) as ws:
+        # aiohttp's decode_text=True overload is only published for Python 3.11+.
+        text_socket = cast("aiohttp.ClientWebSocketResponse", ws)
         try:
-            yield ws
+            yield text_socket
         finally:
-            await close_socket(ws)
+            await close_socket(text_socket)
 
 
 @dataclass(eq=False)
@@ -130,7 +132,7 @@ class ServiceConnector:
         self._connecting = False
         self._attached_lifetime = 0.0
 
-    async def _json(self, response: aiohttp.ClientResponse) -> dict:
+    async def _json(self, response: aiohttp.ClientResponse) -> dict[str, Any]:
         check(response.status == 200, "gateway-admission-refused", 401)
         raw = bytearray()
         async for chunk in response.content.iter_chunked(4096):
@@ -161,11 +163,12 @@ class ServiceConnector:
             check(not self._machine or challenge["profile"] == MACHINE_PROFILE,
                   "unsupported-profile")
         uri = self.gateway + "/_fleet/service-admit"
-        payload = {"slot": self.slot, **(
+        payload: dict[str, object] = {"slot": self.slot, **(
             {"profile": CONTROLLER_PROFILE, "services": service_values(self.services)}
-            if controller else ({"profile": PROFILE} if self.handler else {}))}
+            if self.services is not None else ({"profile": PROFILE} if self.handler else {}))}
         authenticated = {}
         if self._machine:
+            assert self._principal is not None and self._audience is not None
             body = canonical(payload)
             proof = make_machine_proof(
                 self._key, principal=self._principal, audience=self._audience,
@@ -182,10 +185,12 @@ class ServiceConnector:
                                 ssl=self._gateway_tls, allow_redirects=False) as response:
             ticket = await self._json(response)
         shape(ticket, {"ticket"})
-        check(isinstance(ticket["ticket"], str) and len(ticket["ticket"]) == 64)
-        return ticket["ticket"]
+        token = ticket["ticket"]
+        check(isinstance(token, str) and len(token) == 64)
+        assert isinstance(token, str)
+        return token
 
-    def _request(self, value: dict) -> RequestSpec:
+    def _request(self, value: dict[str, Any]) -> RequestSpec:
         names = {"type", "id", "method", "target", "headers", "body", "timeout"}
         if self.services is not None:
             names.update({"service", "origin"})
@@ -223,8 +228,9 @@ class ServiceConnector:
                   "controller-channel-unavailable", 503)
             self.services = selected
             self._services_revision += 1
-            ack = asyncio.get_running_loop().create_future()
+            ack: asyncio.Future[bool] = asyncio.get_running_loop().create_future()
             self._services_ack = ack
+            assert ws is not None
             try:
                 await send(ws, {"type": "services", "revision": self._services_revision,
                                 "services": service_values(selected)})
@@ -384,9 +390,12 @@ class ServiceConnector:
                                   and value["revision"] == self._services_revision
                                   and self._services_ack is not None
                                   and not self._services_ack.done())
+                            assert self._services_ack is not None
                             self._services_ack.set_result(True)
                             continue
                         check(isinstance(correlation, str) and len(correlation) == 48)
+                        assert isinstance(correlation, str)
+                        exchange: Exchange | None
                         if kind == "request":
                             request = self._request(value)
                             check(correlation not in self.active and correlation not in self.retired
@@ -405,6 +414,7 @@ class ServiceConnector:
                             check(type(value["seq"]) is int
                                   and value["seq"] == exchange.sequence
                                   and exchange.ack is not None and not exchange.ack.done())
+                            assert exchange.ack is not None
                             exchange.ack.set_result(None)
                         elif kind == "cancel":
                             shape(value, {"type", "id"})

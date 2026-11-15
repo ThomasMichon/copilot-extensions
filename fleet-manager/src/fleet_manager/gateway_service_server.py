@@ -46,7 +46,7 @@ from .planning import PlanError
 from .private_state import create_private_file, private_directory, validate_private_file
 
 LOG = logging.getLogger(__name__)
-STATE = web.AppKey("fleet-service-state", object)
+STATE: web.AppKey[ServiceRuntime] = web.AppKey("fleet-service-state")
 DISPATCHED = web.RequestKey("fleet-service-dispatched", bool)
 BUFFERED_BODY = web.RequestKey("fleet-service-buffered-body", bytes)
 AUTH_URI = web.RequestKey("fleet-service-auth-uri", str)
@@ -117,6 +117,7 @@ class ServiceRuntime:
             channel = self.channels.get(slot.name)
             ready = channel is not None and not channel.closed and not self.stopping
             if ready:
+                assert channel is not None
                 try:
                     self.authority.revalidate_service(channel.grant)
                 except ServicePolicyError:
@@ -125,7 +126,7 @@ class ServiceRuntime:
             registered = local is not None and local.slot == slot and not self.stopping
             roles.append(RoleStatus(slot.name, "ready" if ready else (
                 "registered-local" if registered else "unavailable"),
-                                    channel.grant.generation if ready else None))
+                                    channel.grant.generation if ready and channel is not None else None))
         return RuntimeStatus(
             policy.revision, policy.generation, tuple(roles),
             self.last_error or policy.last_error)
@@ -233,6 +234,7 @@ class ServiceRuntime:
                 continue
             for item in channel.services:
                 if item.service == service:
+                    assert slot.principal is not None
                     result.append(ConnectedService(
                         name, channel.incarnation, channel.offer_epochs[item],
                         slot.principal, item.service, item.prefix))
@@ -244,6 +246,7 @@ class ServiceRuntime:
         check(not self.stopping and channel is not None and not channel.closed
               and channel.services is not None and channel.incarnation == offer.connection,
               "controller-service-unavailable", 503)
+        assert channel is not None and channel.services is not None
         try:
             slot = self.authority.revalidate_service(channel.grant)
         except ServicePolicyError:
@@ -261,6 +264,7 @@ class ServiceRuntime:
         local.checkpoint()
         selected = next((item for item in binding.sources if item.service == service), None)
         check(selected is not None, "controller-source-denied", 403)
+        assert selected is not None
         result = []
         for offer in self.service_offers(service):
             if offer.controller not in selected.controllers:
@@ -490,6 +494,7 @@ class ServiceRuntime:
                 asyncio.CancelledError) as exc:
             LOG.warning("service-channel-refused code=attachment-refused")
             if channel:
+                assert grant is not None
                 await channel.close("attachment-refused")
                 if self.channels.get(grant.slot) is channel:
                     del self.channels[grant.slot]
@@ -561,6 +566,7 @@ class ServiceRuntime:
                 pending.service_offer = next(
                     (item for item in channel.services if item.prefix == route.prefix), None)
                 check(pending.service_offer is not None, "controller-service-unavailable", 503)
+                assert pending.service_offer is not None
                 pending.service_epoch = channel.offer_epochs[pending.service_offer]
             self.checkpoint(channel, pending)
             channel.admit(pending)

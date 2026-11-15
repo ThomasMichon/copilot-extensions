@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import socket
+from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Any
 
 import aiohttp
+from aiohttp.abc import ResolveResult
+from aiohttp.tracing import Trace
 from yarl import URL
 
 
@@ -23,13 +27,15 @@ class LoopbackRoute:
 class GatewayTCPConnector(aiohttp.TCPConnector):
     """Only DNS/TCP destination changes; aiohttp retains URL Host and TLS name."""
 
-    def __init__(self, gateway: str, route: LoopbackRoute, **kwargs) -> None:
+    def __init__(self, gateway: str, route: LoopbackRoute, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         uri = URL(gateway)
         self._gateway_address = (uri.raw_host, uri.port)
         self._gateway_route = route
 
-    async def _resolve_host(self, host, port, traces=None):
+    async def _resolve_host(
+        self, host: str, port: int, traces: Sequence[Trace] | None = None,
+    ) -> list[ResolveResult]:
         if (host, port) != self._gateway_address:
             raise OSError("gateway-connect-route-target-denied")
         route = self._gateway_route
