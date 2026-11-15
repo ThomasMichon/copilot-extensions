@@ -170,6 +170,13 @@ Confirmed operator responses:
   180-second aggregate permits just the two unfinished strict checker targets,
   with ninety seconds for work and ninety for cleanup. Preserve the original
   preflight failure, all passing cases, the existing SDK and other limits.
+- `new_code_review_four_cases_600=true`: one fresh 600-second batch, with
+  510 seconds for work and ninety for cleanup, permits only the affected
+  copied source/frozen version-matrix case, one source and one frozen catalog
+  frontdoor, and the real-Git merge-comparison regression. Run one case per
+  120-second cohort with a ninety-second case limit; helpers retain thirty
+  seconds and analyzers 120. Preserve the existing SDK, earlier results and
+  all resource, protected-IPC and deployment limits.
 - The complete Invocation test-source project may be admitted independently
   through normal review and required CI, with fresh checks of both declared
   targets, actual negative controls and directly relevant behavior evidence.
@@ -3273,3 +3280,19 @@ composition prerequisites, and review/validation rules.
   review remain publication gates. Arbitrary emitted programs, release-candidate
   ratchet parity and the whole strict-portfolio goal remain open before further
   legacy admission. This draft adds no merged strict coverage.
+
+### 2026-11-15 - Copied checker startup and PR comparison correction
+
+- The first exact-head CI passes all 5,010 admitted units and both strict
+  checker targets. Review identifies two independent integration defects:
+  isolated fixtures omit the new checker import, and PR comparison uses the
+  unmerged feature tip rather than the checked-out merge.
+- Both copied fixture closures include the new module. The CI step now pins
+  the checked-out merge SHA; a real diverged-branch Git regression proves
+  base-only Python is excluded while feature changes remain selected.
+  The affected source/frozen version matrix, source and frozen catalog
+  frontdoors, and Git regression pass all twelve phases in 212.859 seconds,
+  without replaying the completed packet. SDK/source integrity and exact
+  process/admission/sandbox cleanup remain verified. Fresh final-head CI and
+  a passing subsequent review still gate this open PR; Phase 1a and the
+  overall campaign remain Active.

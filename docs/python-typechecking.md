@@ -73,7 +73,9 @@ python tools/typecheck.py --inventory --json
 owners. Every selected file must pass strict checking; existing diagnostics are
 not grandfathered or filtered to changed lines. Staged, unstaged and untracked
 files are included, even when `--head` pins the comparison. Deleted files are
-not checked. Known Installation Context, Harness and Payload Invocation
+not checked. PR CI compares its base with the checked-out merge commit, not
+the unmerged feature tip, so unrelated base-only files are not treated as
+developer drift. Known Installation Context, Harness and Payload Invocation
 compositions expand to their existing complete checker programs and declared
 analysis targets; changed shell/template inputs cannot omit those views.
 Missing physical owners refuse selection, and Invocation requires a full-body

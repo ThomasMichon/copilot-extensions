@@ -537,7 +537,7 @@ def test_real_source_and_frozen_candidate_frontdoors_enforce_version_matrix(
         "tools/typecheck.py", "tools/_admission_protocol.py", "tools/cache_directory_paths.py",
         "tools/plugin_test_resources.py",
         "tools/typecheck_source_views.py", "tools/typecheck_catalog_views.py",
-        "tools/typecheck_bootstrap_views.py",
+        "tools/typecheck_bootstrap_views.py", "tools/typecheck_new_code.py",
         "tools/native_test_paths.py", "tools/typecheck-requirements.txt",
         *(
             "libs/installer-engine/" + name
@@ -733,7 +733,7 @@ def _real_catalog_frontdoors(
         "tools/typecheck.py", "tools/_admission_protocol.py", "tools/cache_directory_paths.py",
         "tools/plugin_test_resources.py",
         "tools/typecheck_source_views.py", "tools/typecheck_catalog_views.py",
-        "tools/typecheck_bootstrap_views.py",
+        "tools/typecheck_bootstrap_views.py", "tools/typecheck_new_code.py",
         "tools/native_test_paths.py", "tools/typecheck-requirements.txt",
         catalog.DECLARATION, *catalog.MEMBERS, *bootstrap_views.INPUTS,
         *(
@@ -1440,6 +1440,33 @@ def test_changed_selection_conservatively_checks_all_admitted_consumers(
     assert typecheck.main(["--changed"]) == 0
     assert checked == ["sample", "caller"]
     assert "conservative dependency impact" in capsys.readouterr().out
+
+
+def test_new_code_merge_comparison_excludes_base_only_python(tmp_path: Path) -> None:
+    """The actual merge tree, not the feature tip, isolates the PR contribution."""
+    for args in (
+        ("init",), ("config", "user.name", "Example"),
+        ("config", "user.email", "example@example.com"),
+    ):
+        _matrix_git(tmp_path, *args)
+    (tmp_path / "initial.py").write_text("value: int = 1\n", encoding="utf-8")
+    _matrix_git(tmp_path, "add", ".")
+    _matrix_git(tmp_path, "-c", "commit.gpgsign=false", "commit", "-m", "Common source")
+    common = _matrix_git(tmp_path, "rev-parse", "HEAD")
+    _matrix_git(tmp_path, "switch", "-c", "feature")
+    (tmp_path / "feature.py").write_text("value: int = 2\n", encoding="utf-8")
+    _matrix_git(tmp_path, "add", ".")
+    _matrix_git(tmp_path, "-c", "commit.gpgsign=false", "commit", "-m", "Feature source")
+    feature = _matrix_git(tmp_path, "rev-parse", "HEAD")
+    _matrix_git(tmp_path, "switch", "-c", "base", common)
+    (tmp_path / "base_only.py").write_text("def legacy(value):\n    return value\n", encoding="utf-8")
+    _matrix_git(tmp_path, "add", ".")
+    _matrix_git(tmp_path, "-c", "commit.gpgsign=false", "commit", "-m", "Base-only source")
+    base = _matrix_git(tmp_path, "rev-parse", "HEAD")
+    _matrix_git(tmp_path, "-c", "commit.gpgsign=false", "merge", "--no-edit", "feature")
+    merged = _matrix_git(tmp_path, "rev-parse", "HEAD")
+    assert set(typecheck.new_code_changes(tmp_path, base, merged)) == {"feature.py"}
+    assert set(typecheck.new_code_changes(tmp_path, base, feature)) == {"feature.py", "base_only.py"}
 
 
 def test_missing_preparation_is_actionable_and_does_not_create_environment(
