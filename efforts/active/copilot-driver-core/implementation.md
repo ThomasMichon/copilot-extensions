@@ -1,7 +1,8 @@
 # Copilot Driver implementation map
 
 Parent and completion gate: [main effort](README.md).
-This is the reviewed-before-code implementation proposal, not runtime support.
+This reviewed implementation map distinguishes accepted source from remaining
+runtime and installed qualification; it does not advertise unqualified operations.
 
 ## Extend the existing owners
 
@@ -37,9 +38,11 @@ plugin root to the private in-process activation. Source mode uses the canonical
 Core; released mode uses the existing multi-root packaged-asset projection.
 Portable receiving reads the selected Core's package resources without a target
 suite installation. Partial native projections refuse before activation rather
-than selecting source. This source checkpoint preserves native root/loadout
-checks and the queued-delivery candidate; current source capture, publication,
-ordinary wheel qualification and native/installed adoption remain separate gates.
+than selecting source. The [#12571 source acceptance](journal/2026/11.12%20original-owner%20recovery%20store.md#canonical-extension-closure-source-accepted)
+includes ordinary wheel/copy controls, genuine source capture and independent
+verification, required review and CI. Native root/loadout checks remain intact.
+Native/installed adoption and the queued-delivery model-input/fallback contract
+remain separate gates; source publication does not complete them.
 
 The core must not import Bridge, Worktrees or Manager to launch or survive.
 Small client/compatibility surfaces may compose the app, but its process must
