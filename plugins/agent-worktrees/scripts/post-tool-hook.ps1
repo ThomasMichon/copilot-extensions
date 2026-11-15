@@ -174,9 +174,9 @@ function Invoke-PostToolHook {
         return
     }
     if ($contextual) {
-        $Raw | & $python $script postToolUse
+        $Raw | & $python -B $script postToolUse
     } else {
         # The advisory fallback must not resend a possibly delivered request.
-        $Raw | & $python $script postToolUse --local-fallback
+        $Raw | & $python -B $script postToolUse --local-fallback
     }
 }
