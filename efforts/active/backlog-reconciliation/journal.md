@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-14 - Lifecycle, selector and custody frontier](journal/2026/11.14-lifecycle-and-selector-frontier.md)
+
 - [2026-11-14 - Runtime contracts and bounded receiving discriminators](journal/2026/11.14-runtime-contract-discriminators.md)
 
 - [2026-11-14 - Host inspection and reference-boundary proposal](journal/2026/11.14-host-proof-receiving.md)
