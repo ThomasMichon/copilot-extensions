@@ -1,8 +1,12 @@
 {
-  "comment": "Corroborate fresh retained native activations without reopening ended history",
+  "comment": "Corroborate fresh retained native activations and retain current source-bound contract evidence",
   "changes": [
     {
       "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-bridge",
       "type": "patch"
     }
   ]
