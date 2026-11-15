@@ -231,8 +231,10 @@ not narrow the complete effort.
 
 ### Proposed finite headless provider-miss transaction contract
 
-_Agent-recommended P1/local transaction clarification. This effort stays
-Draft; no runtime, interaction, credential or implementation admission._
+_Agent-recommended P1/local transaction clarification. This finite family
+remains proposed outside the separately admitted federated-relay slice;
+no runtime, interaction, credential or implementation admission follows
+from retaining it._
 
 - [ ] **U3979-P1:** Keep provider-available, interactive controlling-terminal
   SSH and fully headless non-WSL SSH/provider-miss branches distinct.
@@ -316,7 +318,7 @@ The [validation matrix](validation.md) is the detailed, agent-recommended plan.
   needs-unlock/error/next-action counterpart, with no secret-bearing
   presentation. Boolean false/exit failure or invisible-dialog avoidance
   alone is not the result; neither is a daemon-only mock.
-- [ ] **U3979-V2:** Keep Draft/P0 design and implementation-owner admission,
+- [ ] **U3979-V2:** Keep this family's P0 design and implementation-owner admission,
   optional standalone/broker/transport and credential/native custody
   intact. Separate source/fixture/native/installed results without making
   every unrelated parent item a finite-case prerequisite. No real unlock,
@@ -353,6 +355,14 @@ qualification sequence. Outside it, operator design review and explicit
 implementation admission remain the next gate; publication does not start P1.
 
 ## Journal
+
+### 2026-11-15 - Local transaction and admitted relay scopes distinguished
+
+The effort is Active for the separately admitted federated-relay slice.
+The finite U3979 family remains proposed under its own P0 design and
+implementation-owner admission; retaining its unchecked contract does not
+grant the relay implementer that other work or resume the whole campaign.
+The independent relay Goal, owner and Plan/Validation remain unchanged.
 
 ### 2026-11-15 - Inherited tunnel, cell and transport lanes proposed
 
