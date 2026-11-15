@@ -158,7 +158,7 @@ def test_builder_failure_cleans_owned_context_and_preserves_wheel_custody(tmp_pa
                 context = result.path
                 raise RuntimeError("builder failed")
         assert not context.exists()
-        cast(Callable[[], None], snapshot.verify)()
+        snapshot.verify()
 
 
 def test_closed_snapshot_cannot_supply_context(tmp_path: Path) -> None:
@@ -305,8 +305,8 @@ def test_separate_native_profile_composes_without_inventing_merged_approval(tmp_
             assert len(lock) == len(NAMES)
             context = result.path
         assert not context.exists()
-        cast(Callable[[], None], service_wheels.verify)()
-        cast(Callable[[], None], native_wheels.verify)()
+        service_wheels.verify()
+        native_wheels.verify()
 
 
 @pytest.mark.parametrize("budget", ["archive", "expanded"])

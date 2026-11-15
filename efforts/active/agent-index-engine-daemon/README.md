@@ -43,6 +43,13 @@ before implementation or resource effects; no install, upgrade, runtime probe
 or native execution is authorized here. Historical direct-push references
 below do not replace the repository's current review/PR policy.
 
+The finite #5549 clarification retains the same daemon-manager, engine,
+configuration, installer/runtime and platform custodians. #5549 remains OPEN
+with unresolved product acceptance unchecked. Separate #5686 tracking has its
+own full direct-parent-receipt/readback condition; this documentary intake
+neither performs nor establishes that disposition. It adds no generic ACK or
+universal implementer requirement and transfers no process, config or service.
+
 ## Context
 
 `agent-index 0.1.0-dev16` shipped the foundation — configurable engine separation
@@ -125,6 +132,13 @@ never hardcoded machine names; torch confined to the host role).
       engine never restarted on re-register). A new `engine` action provisions +
       registers explicitly; `install` runs both; **`update` calls neither** (engine
       stays warm). Live-validated on a torch host (Borealis).
+- [ ] **DE5549-PID:** Reconcile a healthy endpoint with stale or missing PID
+      metadata through ONE OR MORE of the original remedies: explicit
+      inconsistent/untracked status, verified adoption on a natural start/ensure
+      touch, OR safe stopping of the actual engine owner. Adoption or signaling
+      requires positive engine identity and ownership, not healthy-port evidence
+      alone. Preserve unrelated-listener and ambiguous-identity negative
+      controls for the selected action; do not silently require all remedies.
 
 ### Phase 4 — Role-aware install
 - [x] `host` role installs the engine daemon + heavy stack; `client` role installs
@@ -158,6 +172,14 @@ never hardcoded machine names; torch confined to the host role).
       daemon** (`agent-index search` → clean empty result, no torch-in-service),
       config resolved `search_in_process=False`/`engine_mode=external`,
       `engine-update` restarted the daemon (pid changed). Full suite **120 green**.
+- [ ] **DE5549-ENV:** Apply the durable engine's saved `engine.env` contract to
+      supported startup/restart paths, including the actual Windows user-mode
+      update/start route and direct daemon start where supported. Define
+      precedence among invoking values, saved defaults and application defaults;
+      verify the effective environment reaches the spawned engine and caller
+      state is restored. A generated launcher string or a different ensure path
+      is not acceptance. Preserve existing service/engine lifecycle separation:
+      ordinary service update is not a rebuild or restart workaround.
 
 ### Phase 6 — Adoption & onboarding (designate the indexer)
 - [x] An explicit adoption/setup flow designates **one machine as the indexer**
@@ -299,6 +321,18 @@ unchecked rollback acceptance remain unchanged._
       unchecked rather than assumed; needs an explicit rollback-path
       live-validation pass before this item, and this effort's archival, can
       close.
+- [ ] **DE5549-VPID:** Qualify the selected one-or-more PID/status remedies
+      against the healthy-endpoint/stale-or-missing-PID case. For any adoption
+      or termination, require positive engine identity/ownership and preserve
+      unrelated-process/listener and ambiguous-identity refusals. Status-only
+      handling does not silently authorize adoption or signaling.
+- [ ] **DE5549-VENV:** Verify saved-environment precedence, actual spawned-engine
+      environment and caller restoration through the supported Windows
+      user-mode update/start and direct daemon-start paths. Retain the checked
+      service-update/engine-generation separation without reopening it; the
+      separate unchecked rollback item is not an added prerequisite for these
+      finite #5549 clauses. Planned receiving precedes, but does not prove,
+      source/native/configuration or lifecycle acceptance.
 
 ### Validation of the proposed #3989/#3990 clarification
 
@@ -330,6 +364,18 @@ unchecked rollback acceptance remain unchanged._
   inference acceptance; this documentary intake runs none of them.
 
 ## Journal
+
+### 2026-11-15 - PID and saved-environment acceptance proposed
+
+Added four unchecked #5549 Plan/Validation clauses for the selected one-or-more
+PID remedies and the saved-environment contract across the actual supported
+startup paths. Positive engine identity, negative controls, precedence,
+spawned-child environment and caller restoration are direct acceptance rather
+than inferred from endpoint health or a launcher string. Existing lifecycle
+separation credit and the independent rollback gate remain unchanged.
+#5549 stays OPEN; #5686's distinct full parent-receipt condition is preserved,
+not exercised. No implementation, config/process operation, source/native
+proof, resource transfer or issue disposition occurred.
 
 ### 2026-11-15 - First-use and assigned-engine-endpoint clarification proposed
 

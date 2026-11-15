@@ -57,6 +57,14 @@ automatic-recovery enrollment are not implied by that direction.
 - **Continuity:** use native context continuation where supported. Do not
   replace the implementing conversation merely to refresh context.
 
+The #4564 candidate-set clarification below is planned acceptance, not a new
+implementation assignment. Retain the existing native restart-recovery
+reservation and its source-specific acknowledgment/closure conditions.
+Neither reviewed plan intake nor its readback releases that reservation or
+closes #4564. Reachability/history and manual batch restoration remain distinct
+from automatic restart recovery. No claim transfer, startup enrollment,
+restart, host rollout or fresh owner acknowledgment is authorized here.
+
 ## Context
 
 The Manager already has a singleton mux daemon, a disk-backed mapping registry,
@@ -162,6 +170,23 @@ means of fulfilling the operator's request. They require normal source review.
   admits only the exact original active producer-free, nonopaque self-session
   claim through the existing owner fences, retaining the claim unchanged.
   It does not qualify other claim or task-bound restoration.
+- [ ] **R4564-P1 - Unexpected-restart candidates:** maintain an independently
+  durable set of positively identified, still-eligible last-seen-active
+  conversations. Later clean-exit evidence, changed ownership, supersession
+  or uncertain identity rejects automatic launch; absence of an exit hook is
+  not positive eligibility.
+- [ ] **R4564-P2 - Prepared-restart candidates:** maintain a separate durable
+  set carrying explicit restart intent recorded **before quiescing**. Retain
+  that intent across the planned graceful exit; an ordinary deliberate exit
+  without restart intent remains dormant.
+- [ ] **R4564-P3 - Shared exact-conversation restoration:** feed both sets into
+  one deduplicated path for the original conversation, preferring corroborated
+  survivors and otherwise using the existing fenced native Resume in the proper
+  mux. Preserve task, approval and owner holds, durable uncertainty and bounded
+  independent admission. Require STATUS-FIRST acknowledgment by that original
+  conversation before reporting it restored; a PID, registration, launch or
+  plan receipt is insufficient. Keep cancelled, satisfied, failed and unknown
+  delivery outcomes distinct.
 - [ ] Reuse a proven surviving session first. Otherwise request supported
   native cold Resume of the exact original conversation in its proper mux.
   Never substitute a new conversation, raw process spawn or a global repair
@@ -258,6 +283,18 @@ All items below are **agent-recommended** validation obligations.
 - [ ] Complete documentation-impact review, required test/installation gates,
   provider review and actual merges. Resolve or transfer every remaining item
   to a named tracked objective before recording this slice complete.
+
+- [ ] **R4564-V1 - Candidate-source matrix:** qualify both independently durable
+  sets, including unexpected-restart positive eligibility and later clean-exit,
+  owner-change, supersession and uncertain-identity rejection; prepared intent
+  recorded before quiescing and surviving graceful exit; and ordinary exit
+  remaining dormant. Cover cross-set deduplication, corroborated-survivor
+  preference, fenced exact-original Resume and all retained holds.
+- [ ] **R4564-V2 - Truthful restoration:** qualify bounded independent admission,
+  durable uncertainty, cancellation/satisfaction versus failure/unknown and
+  original-conversation STATUS-FIRST acknowledgment before restored. Record
+  Windows and WSL outcomes separately, preserving existing native-Linux and
+  unsupported-platform boundaries; an unavailable tier is not success.
 
 ## Completion Gate
 

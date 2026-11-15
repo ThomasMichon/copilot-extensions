@@ -1385,6 +1385,13 @@ fixed with a dedicated `_applescript_quote` helper and regression test.
       and an explicit restart/status-check seed. Implementation starts only
       after this plan clears review; host rollout remains separately authorized.
 
+    - [ ] **M4564-P - Independent restart-candidate sets:** retain the focused
+      plan's separately durable unexpected- and prepared-restart sets and their
+      shared exact-original restoration path. Prepared intent precedes quiescing;
+      ordinary deliberate exit stays dormant. Preserve the existing recovery
+      reservation, manual-restoration ownership, task/approval/owner holds and
+      separate rollout gate. This is planned receiving only; #4564 stays OPEN.
+
 ### Bug sweep — linked open bugs (2026-09-24)
 
 _Correlated via a repository-wide sweep of open `bug`-labeled issues against active efforts (semantic discovery + direct review). Not yet triaged into a numbered phase — listed here as upcoming work for whoever picks this effort back up._
@@ -2799,6 +2806,15 @@ version-consistency guard; do not build competing mechanisms.
 - [ ] Complete the [restart-recovery validation matrix](machine-restart-recovery.md#validation-plan),
       including clean exits, abrupt restart, daemon-only replacement and
       concurrent recovery. A process-launch receipt is not successful recovery.
+- [ ] **M4564-G - Candidate-set recovery:** exercise both independently durable
+      candidate sources and their distinct positive/negative exit, ownership,
+      supersession and identity cases; prepared intent before quiescing and
+      ordinary-exit dormancy; cross-set deduplication and survivor preference;
+      fenced original-conversation Resume, preserved holds, durable uncertain
+      outcomes, bounded independent admission and original-conversation
+      STATUS-FIRST acknowledgment before restored. Keep Windows and WSL results
+      separate and existing native/unsupported tiers explicit. This is scoped
+      #4564 acceptance, not a whole-Manager prerequisite or completion claim.
 
 - [ ] Complete the wave-specific [Configuration validation matrix](phase-5-configuration-workbench.md#validation-plan).
       No implementation wave is complete from a parser test or rendered

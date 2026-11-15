@@ -183,6 +183,8 @@ producer's built-in callback map:
 [tool.copilot-extensions.application]
 setup = ["prepare"]
 start = ["serve"]
+# Optional finite process budgets; omitted phases retain 180 seconds.
+callback_timeout_seconds = { setup = 180, start = 600 }
 ```
 
 Both lists are required when the table is present; an empty list explicitly
@@ -190,6 +192,30 @@ means no action. These arguments invoke the existing primary application entry
 point through the shared installer's normal setup/start boundaries. Stage still
 does not execute them. Missing declarations retain existing built-in behavior
 or an unsupported callback result for an unknown application.
+
+`callback_timeout_seconds` is optional and accepts only `setup` and `start`
+numeric process budgets, each finite, greater than zero and at most 3600 seconds.
+The producer copies the declaration into the retained application. Each callback
+uses its own budget; an omitted phase remains at 180 seconds. When the table is
+present, the enclosing prepared-application installer allows the sum of enabled
+callback budgets, the existing 600-second qualification allowance and 60 seconds
+for publication. Without the table, both legacy callback and enclosing 180-second limits
+are unchanged. Stage executes no callbacks. These are execution ceilings, not
+silence timers, a service drain policy or authority to replay uncertain startup.
+An app selecting them must still qualify its real control and recovery path.
+Independently deployed callers can require `callback-timeouts/v1` in the
+selected producer module's `APPLICATION_INSTALL_CAPABILITIES` before
+preparing an application that uses this extension. The base install contract
+remains the unchanged two-field version-1 declaration, so existing consumers
+that validate its exact shape still work. Older application receivers keep
+their strict unknown-field rejection.
+
+Opted-in source installation also separates retained-input lifetime from
+acquisition: copying and admitting wheel inputs keeps its original deadline,
+then those same immutable inputs remain verifiable through the finite enclosing
+installation allowance plus acquisition/construction room. Qualification still
+expires after its own 600 seconds. Only its post-qualification evidence checks
+use the enclosing callback allowance, without bypassing byte/identity checks.
 
 ### Common forward environment contract
 
