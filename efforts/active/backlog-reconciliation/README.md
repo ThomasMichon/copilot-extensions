@@ -3761,6 +3761,13 @@ incumbent acceptance and owners. #3938's whole programme stays OPEN;
 native/installed proof is planned, not manufactured or required before
 planned receiving. The monitor handoff intake retains the actual captured-owner
 and pending/acknowledged transition contract, not an implementation-first rejection.
+The [reviewed four-family follow-through](journal/2026/11.14-accepted-receivers-and-owner-frontier.md#reviewed-four-family-delivery-and-separate-follow-through)
+records #12674's actual merge, complete relevant receiving readback and
+separately audited #3939/#3957 planned-tracking retirements. #3966 remains
+OPEN pending direct retained-detail clarification and normal receiving review;
+#3938's whole programme remains OPEN. The complete 06:02:55 UTC census is
+843 whole, 114 above fixed 729: 461 original-cohort and 382 inflow issues,
+including excluded arrival #12673. All 35 new acceptance checks remain unchecked.
 
 ### Phase 2b - Vision-linked stabilization roadmap
 
