@@ -12,7 +12,9 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Any, Callable, TypeVar, cast
+
+_windows_ctypes: Any = ctypes
 
 _BOOT_PORT = "_CE_DAEMON_BROKER_PORT"
 _BOOT_COOKIE = "_CE_DAEMON_BROKER_COOKIE"
@@ -65,7 +67,7 @@ WMI_POLICY_HINT = (
 def _kernel32() -> Any:
     from ctypes import wintypes
 
-    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel = _windows_ctypes.WinDLL("kernel32", use_last_error=True)
     kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
     kernel.OpenProcess.restype = wintypes.HANDLE
     kernel.CloseHandle.argtypes = [wintypes.HANDLE]
@@ -93,7 +95,7 @@ class WindowsDaemonProcess:
         self.returncode: int | None = None
         self._handle = _kernel32().OpenProcess(_PROCESS_ACCESS, False, pid)
         if not self._handle:
-            raise ctypes.WinError(ctypes.get_last_error())
+            raise _windows_ctypes.WinError(_windows_ctypes.get_last_error())
 
     @classmethod
     def from_handle(cls: type[_ProcessT], handle: int, pid: int, args: list[str]) -> _ProcessT:
@@ -113,10 +115,10 @@ class WindowsDaemonProcess:
         if result == _WAIT_TIMEOUT:
             return None
         if result != 0:
-            raise ctypes.WinError(ctypes.get_last_error())
+            raise _windows_ctypes.WinError(_windows_ctypes.get_last_error())
         code = wintypes.DWORD()
         if not kernel.GetExitCodeProcess(self._handle, ctypes.byref(code)):
-            raise ctypes.WinError(ctypes.get_last_error())
+            raise _windows_ctypes.WinError(_windows_ctypes.get_last_error())
         self.returncode = code.value
         return self.returncode
 
@@ -128,7 +130,7 @@ class WindowsDaemonProcess:
         milliseconds = 0xFFFFFFFF if timeout is None else min(math.ceil(timeout * 1000), 0xFFFFFFFE)
         result = _kernel32().WaitForSingleObject(self._handle, milliseconds)
         if result == _WAIT_TIMEOUT:
-            raise subprocess.TimeoutExpired(self.args, timeout)
+            raise subprocess.TimeoutExpired(self.args, cast(float, timeout))
         code = self.poll()
         if code is None:
             raise OSError("daemon wait did not observe process exit")
@@ -137,7 +139,7 @@ class WindowsDaemonProcess:
     def terminate(self) -> None:
         if self.poll() is None and not _kernel32().TerminateProcess(self._handle, 1):
             if self.poll() is None:
-                raise ctypes.WinError(ctypes.get_last_error())
+                raise _windows_ctypes.WinError(_windows_ctypes.get_last_error())
 
     kill = terminate
 
@@ -145,7 +147,7 @@ class WindowsDaemonProcess:
         handle = getattr(self, "_handle", None)
         if handle:
             if not _kernel32().CloseHandle(handle):
-                raise ctypes.WinError(ctypes.get_last_error())
+                raise _windows_ctypes.WinError(_windows_ctypes.get_last_error())
             self._handle = None
 
     def __del__(self) -> None:
@@ -165,7 +167,7 @@ def _remaining(deadline: float) -> float:
     return remaining
 
 
-def _send(connection: socket.socket, message: dict, deadline: float) -> None:
+def _send(connection: socket.socket, message: dict[str, Any], deadline: float) -> None:
     payload = json.dumps(message, ensure_ascii=True).encode("ascii")
     if len(payload) > _MAX_FRAME:
         raise ValueError("daemon broker request exceeds frame limit")
@@ -184,7 +186,7 @@ def _read_exact(connection: socket.socket, size: int, deadline: float) -> bytes:
     return bytes(payload)
 
 
-def _receive(connection: socket.socket, deadline: float) -> dict:
+def _receive(connection: socket.socket, deadline: float) -> dict[str, Any]:
     size = int.from_bytes(_read_exact(connection, 4, deadline), "big")
     if not 0 < size <= _MAX_FRAME:
         raise ValueError("daemon broker response exceeds frame limit")
@@ -194,14 +196,14 @@ def _receive(connection: socket.socket, deadline: float) -> dict:
     return result
 
 
-def _authenticated(hello: dict, cookie: str) -> bool:
+def _authenticated(hello: dict[str, Any], cookie: str) -> bool:
     received = hello.get("cookie")
     return isinstance(received, str) and secrets.compare_digest(
         received.encode("utf-8"), cookie.encode(),
     )
 
 
-def _hello_frame(buffer: bytearray) -> dict | None:
+def _hello_frame(buffer: bytearray) -> dict[str, Any] | None:
     """Return a complete hello frame, ``None`` if incomplete; raise if invalid."""
     if len(buffer) < 4:
         return None
@@ -249,7 +251,7 @@ def _accept_bootstrap(
             wake = min([deadline, *(expiry for _, expiry in pending.values())])
             _remaining(deadline)
             for key, _ in selector.select(max(0.0, wake - now)):
-                connection = key.fileobj
+                connection = cast(socket.socket, key.fileobj)
                 if connection is listener:
                     try:
                         accepted = listener.accept()[0]
@@ -277,7 +279,7 @@ def _accept_bootstrap(
                     continue
                 except (OSError, ValueError, UnicodeError):
                     authenticated = False
-                if not authenticated:
+                if not authenticated or hello is None:
                     drop(connection)
                     continue
                 pending.pop(connection)
@@ -302,10 +304,11 @@ def _outside_caller_job(process: WindowsDaemonProcess) -> bool:
     kernel.GetCurrentProcess.restype = wintypes.HANDLE
     in_job = wintypes.BOOL()
     if not kernel.IsProcessInJob(kernel.GetCurrentProcess(), None, ctypes.byref(in_job)):
-        raise ctypes.WinError(ctypes.get_last_error())
+        raise _windows_ctypes.WinError(_windows_ctypes.get_last_error())
     if not in_job.value:
         return True
-    members = _job_pids(None, kernel=kernel)
+    job_pids: Callable[..., list[int]] = _job_pids
+    members = job_pids(None, kernel=kernel)
     if os.getpid() not in members:
         raise OSError("caller Job membership did not identify the caller")
     # The process's native handle pins this PID throughout adoption.
@@ -317,7 +320,7 @@ def _outside_job(process: WindowsDaemonProcess) -> bool:
 
     in_job = wintypes.BOOL()
     if not _kernel32().IsProcessInJob(process._handle, None, ctypes.byref(in_job)):
-        raise ctypes.WinError(ctypes.get_last_error())
+        raise _windows_ctypes.WinError(_windows_ctypes.get_last_error())
     return not in_job.value
 
 
@@ -333,7 +336,7 @@ def caller_in_job() -> bool:
 def _resume(process: WindowsDaemonProcess) -> None:
     from ctypes import wintypes
 
-    ntdll = ctypes.WinDLL("ntdll", use_last_error=True)
+    ntdll = _windows_ctypes.WinDLL("ntdll", use_last_error=True)
     ntdll.NtResumeProcess.argtypes = [wintypes.HANDLE]
     ntdll.NtResumeProcess.restype = ctypes.c_long
     if ntdll.NtResumeProcess(process._handle) != 0:
@@ -350,7 +353,7 @@ def _activate(command: list[str], env: dict[str, str], cwd: str, deadline: float
         "command": subprocess.list2cmdline(command),
         "cwd": cwd,
         "environment": [f"{key}={value}" for key, value in env.items()],
-        "creationflags": detached_kwargs(breakaway=False).get("creationflags", 0),
+        "creationflags": detached_kwargs(breakaway=True).get("creationflags", 0),
     }
     result = subprocess.run(
         [str(powershell), "-NoProfile", "-NonInteractive", "-Command", _WMI_CREATE],
@@ -422,7 +425,7 @@ def _duplicate_into(process: WindowsDaemonProcess, handles: list[int]) -> list[i
     kernel.DuplicateHandle.restype = wintypes.BOOL
     target = kernel.OpenProcess(_PROCESS_DUP_HANDLE, False, process.pid)
     if not target:
-        raise ctypes.WinError(ctypes.get_last_error())
+        raise _windows_ctypes.WinError(_windows_ctypes.get_last_error())
     try:
         duplicated: list[int] = []
         try:
@@ -432,7 +435,7 @@ def _duplicate_into(process: WindowsDaemonProcess, handles: list[int]) -> list[i
                     kernel.GetCurrentProcess(), handle, target, ctypes.byref(copy),
                     0, False, _DUPLICATE_SAME_ACCESS,
                 ):
-                    raise ctypes.WinError(ctypes.get_last_error())
+                    raise _windows_ctypes.WinError(_windows_ctypes.get_last_error())
                 duplicated.append(int(copy.value or 0))
         except OSError:
             # Close the copies already placed in the bootstrap so a partial
@@ -450,7 +453,7 @@ def _duplicate_into(process: WindowsDaemonProcess, handles: list[int]) -> list[i
 def spawn_brokered_daemon(
     command: list[str], *, cwd: str, env: dict[str, str], creationflags: int,
     log_path: str, stderr_log_path: str | None,
-    instance_receipt=None, stdio_handles: tuple[int, int, int] | None = None,
+    instance_receipt: Any = None, stdio_handles: tuple[int, int, int] | None = None,
 ) -> WindowsDaemonProcess:
     """Durably launch a resident daemon through WMI ``Win32_Process.Create``.
 
@@ -571,9 +574,9 @@ def spawn_brokered_daemon(
             process_identity=child_identity,
         )
         if child_retained:
-            failure.process = child
+            setattr(failure, "process", child)
         if interrupted is not None:
-            interrupted.daemon_spawn_failure = failure
+            setattr(interrupted, "daemon_spawn_failure", failure)
             raise interrupted
         raise failure from None
     if child is None:
@@ -606,7 +609,8 @@ def _bootstrap() -> int:
                         import msvcrt
 
                         for name, handle in zip(("stdin", "stdout", "stderr"), stdio):
-                            descriptor = msvcrt.open_osfhandle(int(handle), 0)
+                            open_handle: Callable[[int, int], int] = getattr(msvcrt, "open_osfhandle")
+                            descriptor = open_handle(int(handle), 0)
                             descriptors.append(descriptor)
                             streams[name] = descriptor
                     child = subprocess.Popen(
