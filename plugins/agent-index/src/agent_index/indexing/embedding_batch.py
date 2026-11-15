@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from agent_index.indexing.work_counts import current_counts
 
@@ -48,7 +48,7 @@ def embed_and_store_batch(
     before_embed: Callable[[], None] | None = None,
     before_model_embed: Callable[[str], None] | None = None,
     skip_identical_content: bool = False,
-    prepared_vectors: Callable[[str, list[Chunk]], np.ndarray] | None = None,
+    prepared_vectors: Callable[[str, list[Chunk]], np.ndarray[Any, Any]] | None = None,
 ) -> int:
     from agent_index.store.content_mutations import coalesce_chunks
 
@@ -89,7 +89,7 @@ def embed_and_store_pairs(
     before_model_embed: Callable[[str], None] | None = None,
     bounded: bool = False,
     after_store: Callable[[VectorTable, int], None] | None = None,
-    prepared_vectors: Callable[[str, list[Chunk]], np.ndarray] | None = None,
+    prepared_vectors: Callable[[str, list[Chunk]], np.ndarray[Any, Any]] | None = None,
 ) -> int:
     """Write routed vector pairs without content writes; return rows upserted.
 
@@ -193,7 +193,9 @@ def embed_and_store_pairs(
 
 
 def _require_current_input(store: MultiModelStore, chunks: list[Chunk]) -> None:
-    from agent_index.store.chunk_id_index import ChunkIdIndexPreparationRequired
+    from agent_index.store.scalar_index import (
+        ScalarIndexPreparationRequired as ChunkIdIndexPreparationRequired,
+    )
     from agent_index.store.source_projection import projection_records
 
     content = store.content_store

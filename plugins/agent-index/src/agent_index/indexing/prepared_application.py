@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from contextlib import nullcontext
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
@@ -144,7 +144,7 @@ class PreparedApplication:
     def batches(self) -> Iterator[FileBatch]:
         return self.journal.batches(self.batch_count)
 
-    def vectors(self, model: str, chunks: list[Chunk]) -> np.ndarray:
+    def vectors(self, model: str, chunks: list[Chunk]) -> np.ndarray[Any, Any]:
         profile = self.profiles[model]
         keys = self._keys(model, chunks)
         cached = self.journal.vectors(keys, profile.dim)

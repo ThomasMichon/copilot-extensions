@@ -23,7 +23,7 @@ import os
 import time
 from dataclasses import asdict, dataclass
 from functools import partial
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from agent_index.store.source_layout import selected_layout
 from agent_index.indexing.work_counts import current_counts, measure_reindex
@@ -52,6 +52,7 @@ if TYPE_CHECKING:
     from agent_index.indexing.state import IndexState
     from agent_index.sources.base import FileEntry, SourceConnector
     from agent_index.store.multi_model_store import MultiModelStore
+    from agent_index.store.source_layout import SourceDomain
 
 logger = logging.getLogger(__name__)
 
@@ -326,6 +327,7 @@ def run_reindex(
     """
     from agent_index.index_config import IndexConfig
     from agent_index.indexing.embedding_runtime import (
+        _model_readiness,
         default_embedding_runtime,
         open_embedding_clients,
     )
@@ -368,27 +370,20 @@ def run_reindex(
     # Multi-model store + clients
     from agent_index.store.source_layout import initialize_source_store
 
+    initialize_store = cast(
+        "Callable[[IndexConfig], MultiModelStore]", initialize_source_store,
+    )
     multi_store = (
-        initialize_source_store(config) if selected_layout() else
+        initialize_store(config) if selected_layout() else
         MultiModelStore(config.lance_dir, content_table=config.content_table)
     )
     multi_clients, client_cleanup = open_embedding_clients(
         multi_store, config.model_profiles, runtime,
     )
 
-    # Track which on-demand engines we start so we can stop them afterwards.
-    # Initialized before the try so the finally can always see it, even if
-    # ensuring engines (or the migration) fails partway.
-    started_engines: list[ModelProfile] = []
-    ready_models: set[str] = set()
-
-    def prepare_embedding(model_id: str) -> None:
-        if model_id in ready_models or not runtime.manage_engines:
-            return
-        profile = config.model_profiles[model_id]
-        if runtime.ensure_engine(profile, multi_clients[model_id]):
-            started_engines.append(profile)
-        ready_models.add(model_id)
+    prepare_embedding, started_engines = _model_readiness(
+        config.model_profiles, multi_clients, runtime,
+    )
 
     total_chunks = 0
     total_deleted = 0
@@ -593,7 +588,8 @@ def run_reindex(
         result["clusters"] = cluster_stats["clusters"]
 
     if selected_layout():
-        with multi_store._source_domain.read(multi_store.content_store.db):
+        domain = cast("SourceDomain", multi_store._source_domain)
+        with domain.read(multi_store.content_store.db):
             pass
     print(f"\nIndexing complete: {total_chunks} chunks in {elapsed:.1f}s")
     return result

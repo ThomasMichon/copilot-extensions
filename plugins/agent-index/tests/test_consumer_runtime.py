@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, NoReturn, cast
 
 import numpy as np
 import pytest
@@ -22,8 +24,10 @@ from agent_index.sources.delta import SourceDelta
 from agent_index.store.multi_model_store import MultiModelStore
 from agent_index.store.source_layout import LAYOUT, initialize_source_store
 
+initialize_store = cast(Callable[[IndexConfig], MultiModelStore], initialize_source_store)
 
-def forbidden(*args: object, **kwargs: object) -> None:
+
+def forbidden(*args: object, **kwargs: object) -> NoReturn:
     raise AssertionError("consumer used ambient defaults instead of its explicit selection")
 
 
@@ -33,7 +37,7 @@ class Client(EngineClient):
         self.events = events
         self.texts: list[list[str]] = []
 
-    def embed_texts(self, texts: list[str]) -> np.ndarray:
+    def embed_texts(self, texts: list[str]) -> np.ndarray[Any, Any]:
         self.texts.append(texts)
         return np.array([[len(text), 1] for text in texts], dtype=np.float32)
 
@@ -76,7 +80,7 @@ def test_injected_consumer_uses_shared_pipeline_and_reuses_metadata_pairs(
     from agent_index import sources
 
     monkeypatch.setattr(sources, "_CONNECTORS", dict(sources._CONNECTORS))
-    register_connector("sample", lambda **kwargs: connector)
+    register_connector("sample", cast(Any, lambda **kwargs: connector))
     monkeypatch.setattr(engine, "configured_source_specs", forbidden)
     monkeypatch.setattr("agent_index.indexing.embedding_runtime.default_embedding_runtime", forbidden)
     events: list[str] = []
@@ -94,7 +98,7 @@ def test_injected_consumer_uses_shared_pipeline_and_reuses_metadata_pairs(
 
     runtime = EmbeddingRuntime(create, ensure, lambda profile: events.append(f"stop:{profile.model_id}"))
 
-    def run(**kwargs: object) -> dict[str, object]:
+    def run(**kwargs: Any) -> dict[str, object]:
         return engine.run_reindex(
             config=config, source_specs=[engine.SourceSpec("sample:repo", type="sample")],
             embedding_runtime=runtime, **kwargs,
@@ -143,7 +147,7 @@ def test_readiness_is_scoped_to_pending_model_pairs(
     from agent_index import sources
 
     monkeypatch.setattr(sources, "_CONNECTORS", dict(sources._CONNECTORS))
-    register_connector("sample", lambda **kwargs: connector)
+    register_connector("sample", cast(Any, lambda **kwargs: connector))
     events: list[str] = []
     clients: dict[str, Client] = {}
 
@@ -152,9 +156,12 @@ def test_readiness_is_scoped_to_pending_model_pairs(
         clients[profile.model_id] = client
         return client
 
+    def ensure(profile: ModelProfile, _client: EngineClient) -> bool:
+        events.append(f"ensure:{profile.model_id}")
+        return True
+
     runtime = EmbeddingRuntime(
-        create,
-        lambda profile, _client: events.append(f"ensure:{profile.model_id}") or True,
+        create, ensure,
         lambda profile: events.append(f"stop:{profile.model_id}"),
         manage_engines=manage,
     )
@@ -187,7 +194,7 @@ def test_readiness_is_scoped_to_pending_model_pairs(
     assert not clients["a"].texts and not clients["b"].texts
     assert [len(batch) for batch in clients["c"].texts] == [1, 1]
 
-    store = initialize_source_store(config) if selected else MultiModelStore(config.lance_dir)
+    store = initialize_store(config) if selected else MultiModelStore(config.lance_dir)
     for profile in config.model_profiles.values():
         store.register_model(profile)
     ids = {
@@ -204,7 +211,7 @@ def test_readiness_is_scoped_to_pending_model_pairs(
 def test_client_construction_and_close_failures_keep_cleanup_owned() -> None:
     events: list[str] = []
     profiles = {name: ModelProfile(name, "fixture") for name in ("a", "b")}
-    store = SimpleNamespace(register_model=lambda _profile: None)
+    store = cast(MultiModelStore, SimpleNamespace(register_model=lambda _profile: None))
 
     def create(profile: ModelProfile) -> Client:
         if profile.model_id == "b":
@@ -245,18 +252,22 @@ def test_lifecycle_cleanup_on_source_failure_and_close_failure(
             if bad_close:
                 raise RuntimeError("close failed")
 
+    def ensure(_profile: ModelProfile, _client: EngineClient) -> bool:
+        events.append("ensure")
+        return True
+
     runtime = EmbeddingRuntime(
         lambda profile: OwnedClient(profile.model_id, events),
-        lambda profile, client: events.append("ensure") or True,
+        ensure,
         lambda profile: events.append("stop"), manage_engines=manage,
     )
 
-    def fail_source(*args: object, **kwargs):
+    def fail_source(*args: object, **kwargs: Any) -> NoReturn:
         kwargs["before_model_embed"]("a")
         raise RuntimeError("source failed")
 
     monkeypatch.setattr(engine, "_index_source", fail_source)
-    kwargs = {
+    kwargs: dict[str, Any] = {
         "config": config, "source_specs": [engine.SourceSpec("sample:repo", type="sample")],
         "source": "sample:repo", "embedding_runtime": runtime,
     }
@@ -264,7 +275,9 @@ def test_lifecycle_cleanup_on_source_failure_and_close_failure(
         with pytest.raises(RuntimeError, match="close failed"):
             engine.run_reindex(**kwargs)
     else:
-        assert engine.run_reindex(**kwargs)["sources_failed"][0]["source"] == "sample:repo"
+        failures = engine.run_reindex(**kwargs)["sources_failed"]
+        assert isinstance(failures, list)
+        assert failures[0]["source"] == "sample:repo"
     assert events == (["ensure", "close:a", "stop"] if manage else ["close:a"])
 
 
@@ -291,14 +304,16 @@ def test_worker_checks_exact_injected_callable_and_uses_injected_queue(
         return {"chunks_total": 1, "custom_stat": 2}
 
     if capable:
-        indexer.change_hints_versions = (1,)
+        setattr(indexer, "change_hints_versions", (1,))
     assert worker.run_worker(task.id, config=config, indexer=indexer) == (0 if capable else 2)
     result = store.get_task(task.id)
+    assert result is not None
     assert result.status == ("complete" if capable else "queued_hints")
     assert len(calls) == int(capable)
     assert priorities == ([7] if capable else [])
     if capable:
         assert calls[0]["change_hints"] == hints
+        assert result.result_stats is not None
         assert result.result_stats["custom_stat"] == 2
 
 
@@ -316,12 +331,13 @@ def test_injected_worker_preserves_terminal_status_and_progress(
     monkeypatch.setattr(worker, "_install_signal_handlers", lambda _cancelled: None)
     monkeypatch.setattr("agent_index.indexing.priority.lower_current_process_priority", lambda _: None)
 
-    def indexer(**kwargs):
+    def indexer(**kwargs: Any) -> dict[str, object]:
         kwargs["progress_cb"].phase("fixture", msg="consumer running")
         return result
 
     assert worker.run_worker(task.id, config=config, indexer=indexer) == 0
-    assert store.get_task(task.id).status == expected
+    stored = store.get_task(task.id)
+    assert stored is not None and stored.status == expected
     assert worker.run_worker(task.id, config=config, indexer=forbidden) == 0
 
 
