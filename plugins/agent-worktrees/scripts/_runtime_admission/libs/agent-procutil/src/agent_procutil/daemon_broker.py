@@ -350,7 +350,7 @@ def _activate(command: list[str], env: dict[str, str], cwd: str, deadline: float
         "command": subprocess.list2cmdline(command),
         "cwd": cwd,
         "environment": [f"{key}={value}" for key, value in env.items()],
-        "creationflags": detached_kwargs(breakaway=False).get("creationflags", 0),
+        "creationflags": detached_kwargs(breakaway=True).get("creationflags", 0),
     }
     result = subprocess.run(
         [str(powershell), "-NoProfile", "-NonInteractive", "-Command", _WMI_CREATE],

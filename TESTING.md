@@ -1,5 +1,11 @@
 # Testing copilot-extensions
 
+The manual `installation-context-acceptance.yml` `native_daemon_exit` lane also
+runs `test_durable_wmi_job_survival.py` through the leased disposable Windows
+owner. It proves WMI daemon survival after strict caller-Job closure, bounded
+child termination and exact fixture cleanup; ordinary local containment is
+not relaxed to obtain that evidence.
+
 The manual foundation portfolio separates contained functional checks from
 Windows production caller-Job loss. After the ordinary runner prepares its
 test environment, `tools/qualify_foundation_lifetime.py foundation` or

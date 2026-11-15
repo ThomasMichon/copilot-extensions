@@ -399,8 +399,8 @@ def test_wmi_activation_uses_json_stdin_not_shell_interpolation(monkeypatch, tmp
     assert "ProcessStartupInformation" in command[-1]
     assert "EnvironmentVariables" in command[-1]
     assert "CreateFlags" in command[-1]
-    assert payload["creationflags"] == pu.detached_kwargs(breakaway=False)["creationflags"]
-    assert not payload["creationflags"] & pu._CREATE_BREAKAWAY_FROM_JOB
+    assert payload["creationflags"] == pu.detached_kwargs(breakaway=True)["creationflags"]
+    assert bool(payload["creationflags"] & pu._CREATE_BREAKAWAY_FROM_JOB) is not contained
 
 
 @pytest.mark.parametrize(

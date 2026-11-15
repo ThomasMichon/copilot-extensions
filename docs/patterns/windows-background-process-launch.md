@@ -167,10 +167,16 @@ workers keep native suspended breakaway and refuse under a strict Job.
 
 WMI creation inherits nothing: no environment, standard handles, console or
 handles. The launcher passes the complete environment block, working directory
-and log destinations explicitly. A small no-Job bootstrap creates the daemon
+and log destinations explicitly. The WMI startup request itself specifies
+`CREATE_BREAKAWAY_FROM_JOB`: [the provider otherwise applies its Job
+limits](https://learn.microsoft.com/en-us/windows/win32/cimwin32prov/create-method-in-class-win32-process).
+Requesting breakaway only when that bootstrap creates the resident child is
+insufficient for a restrictive nested ancestor. A small bootstrap creates the daemon
 suspended with its logs attached, pins its identity by PID and creation time,
 returns a handle to the caller's `WindowsDaemonProcess` and then resumes it, so
 instance descriptors and admission receipts keep their existing contract.
+The resident child must still pass the independent outside-every-Job check
+before admission; flags alone never establish durable lifetime.
 
 WMI process creation can be blocked by policy, notably the Microsoft Defender
 attack surface reduction rule "Block process creations originating from PSExec
