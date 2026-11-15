@@ -511,8 +511,13 @@ databases start without coverage and conservatively embed each presented pair
 once. These are optimization receipts, not new source-lock, checkpoint,
 committed-reader or global missing-vector-repair authorities.
 
-Engine readiness is deferred until missing-pair selection produces a nonempty
-embedding plan. An empty delta, wholly reused file set or metadata-only update
+Engine readiness is deferred per model until missing-pair selection produces
+a nonempty embedding plan for that model. A managed run ensures each needed
+model once, even across multiple batches; covered and inapplicable models are
+not ensured or stopped. Cleanup still stops only engines the runtime reports
+as started and closes every client owned by the run. The additive model-aware
+batch callback leaves existing zero-argument callbacks compatible.
+An empty delta, wholly reused file set or metadata-only update
 with verified pair coverage does not start embedding engines. Full reindexing
 forces pair writes, except for files already committed within its retry window.
 Completed changed files reconcile against their explicit retained chunk IDs
