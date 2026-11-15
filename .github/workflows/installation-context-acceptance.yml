@@ -2400,7 +2400,7 @@ jobs:
     if: ${{ inputs.dependency_compile }}
     name: Admitted source build (Windows, ${{ matrix.suite }})
     runs-on: windows-latest
-    timeout-minutes: 6
+    timeout-minutes: ${{ matrix.suite == 'profiles' && 8 || 6 }}
     strategy:
       fail-fast: false
       matrix: *source-build-matrix

@@ -2737,8 +2737,11 @@ constructor/cache reuse across `profiles`, `refusals` and `normal`. Their
 selections preserve all 75 constructor/cache cases; the standalone
 `source_cache` selector still runs the complete selection. A separate `toolkit`
 row carries all copied-admission and fresh-interpreter witnesses, leaving
-profile/refusal selection to the source-build and cache files. The five rows
-retain the same six-minute source-build limits and unchanged Manager row.
+profile/refusal selection to the source-build and cache files. The source-build rows retain six-minute outer guards, except the Windows
+`profiles` row's explicitly approved eight-minute envelope for setup and both
+serial test steps. Selection, per-test and constructor deadlines, concurrency,
+the ordinary 300-second packet and the 900-second native-cold boundary are
+unchanged. Prior six-minute cancellations remain nonpasses, not a speedup claim.
 Profile and refusal constructor controls use the same hash-pinned real backend
 as the normal row; the toolkit row does not acquire that unrelated fixture.
 The Logger Linux fixture explicitly qualifies its daemon-supervision interpreter
@@ -6338,8 +6341,10 @@ execution and require zero package requests for implicit public indexes and
 unsupported index, credential, TLS and proxy settings.
 These tests do not qualify persistent offline discovery, activation, ordinary
 consumer enablement or live private-feed operations. The build checks have
-their own six-minute Linux/Windows jobs under `dependency_compile=true`, rather
-than extending the existing compile job's budget or required unit CI.
+their own Linux/Windows jobs under `dependency_compile=true`, rather than
+extending the existing compile job's budget or required unit CI. Only Windows
+`profiles` has the approved eight-minute outer guard; the other source-build
+rows keep six minutes without changing test selection or child deadlines.
 
 The same optional `dependency_compile=true` selector also runs independent
 six-minute Linux/Windows installer-latency contract jobs. They check the
