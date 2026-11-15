@@ -103,6 +103,10 @@ on:
         description: Qualify native daemon status, application cleanup and refusal without other runtime consumers
         type: boolean
         default: false
+      wmi_durable_launch:
+        description: Qualify the WMI bootstrap, strict caller-Job loss and exact fixture cleanup
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -1394,6 +1398,22 @@ jobs:
           --test-file tests/test_native_daemon_cleanup.py
           --test-file tests/test_native_daemon.py
           --test-timeout 60 --timeout 600 --plugin-timeout 720
+
+  wmi-durable-launch-windows:
+    if: ${{ inputs.wmi_durable_launch }}
+    name: WMI durable launch (disposable Windows)
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Prepare the canonical process-library test environment
+        run: python tools/run-plugin-tests.py agent-procutil --prepare-only
       - name: Qualify WMI breakaway and strict caller-Job loss
         shell: python
         run: |
@@ -1409,7 +1429,7 @@ jobs:
           from qualify_foundation_lifetime import report_fixture_logs
           environment_root = ordinary_cache_root(venv_root(root) / "agent-procutil")
           python = environment_root / "Scripts" / "python.exe"
-          assert python.is_file(), "the preceding native packet must prepare the test environment"
+          assert python.is_file(), "the canonical process-library test environment is required"
           lease = acquire(0, environment_root)
           try:
               with TestSandbox(prefix="wmi-", dir=Path(os.environ["RUNNER_TEMP"])) as temporary:
