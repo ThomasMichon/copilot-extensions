@@ -173,10 +173,11 @@ function Invoke-PostToolHook {
         [Console]::Error.WriteLine('agent-worktrees postToolUse: advisory fallback unavailable')
         return
     }
+    $env:PYTHONDONTWRITEBYTECODE = '1'
     if ($contextual) {
-        $Raw | & $python -B $script postToolUse
+        $Raw | & $python $script postToolUse
     } else {
         # The advisory fallback must not resend a possibly delivered request.
-        $Raw | & $python -B $script postToolUse --local-fallback
+        $Raw | & $python $script postToolUse --local-fallback
     }
 }
