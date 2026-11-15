@@ -7,19 +7,27 @@ import re
 import shutil
 import stat
 import sys
-import tomllib
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if sys.version_info >= (3, 11):
+    import tomllib
+else:
+    import tomli as tomllib
 
 from standalone_consumers import standalone_build_resources
-if __package__:
-    from .native_test_paths import native_test_path
-else:
+# Static consumers use the declared tools root; runtime keeps both entry modes.
+if TYPE_CHECKING or not __package__:
     from native_test_paths import native_test_path
+else:
+    from .native_test_paths import native_test_path
 
 _ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_ROOT))
-from tools.cache_directory_paths import ordinary_cache_root as ordinary_cache_root  # noqa: E402
+if TYPE_CHECKING:
+    from cache_directory_paths import ordinary_cache_root as ordinary_cache_root
+else:
+    from tools.cache_directory_paths import ordinary_cache_root as ordinary_cache_root  # noqa: E402
 
 sys.path.insert(0, str(_ROOT / "libs" / "installer-engine"))
 sys.path.insert(0, str(_ROOT / "libs" / "versioned-runtime"))
@@ -28,6 +36,7 @@ from versioned_runtime import fingerprint_source  # noqa: E402
 
 FLEET_TEST_CONSUMERS = frozenset({
     "agent-index", "agent-pull-requests", "agent-dispatch", "agent-ssh", "agent-worktrees",
+    "agent-vault",
 })
 
 
@@ -43,7 +52,7 @@ def has_dev_extra(project: Path) -> bool:
 def declared_test_requirements(plugin: Path, additional: tuple[str, ...]) -> tuple[str, ...]:
     """Select test-only declarations, never application runtime/core dependencies."""
     manifest = plugin / "pyproject.toml"
-    declared = []
+    declared: list[str] = []
     if manifest.is_file():
         data = tomllib.loads(manifest.read_text(encoding="utf-8"))
         project = data.get("project", {})
@@ -53,9 +62,10 @@ def declared_test_requirements(plugin: Path, additional: tuple[str, ...]) -> tup
         groups = data.get("dependency-groups", {})
         if not isinstance(extras, dict) or not isinstance(groups, dict):
             raise ValueError("Test tooling requires optional-dependencies and dependency-groups tables")
-        declared = extras.get("dev", groups.get("dev", []))
-        if not isinstance(declared, list) or any(not isinstance(value, str) for value in declared):
+        selected = extras.get("dev", groups.get("dev", []))
+        if not isinstance(selected, list) or any(not isinstance(value, str) for value in selected):
             raise ValueError("Test tooling requires a flat declared dev requirement list")
+        declared = selected
     return tuple(dict.fromkeys(("pytest", *declared, *additional)))
 
 
@@ -71,6 +81,7 @@ def _dependency_entries(name: str, plugin: Path, repo: Path) -> list[tuple[Path,
         extra = {
             "agent-index": ("auth",), "agent-pull-requests": ("service-gateway",),
             "agent-dispatch": ("service-gateway",), "agent-ssh": (), "agent-worktrees": ("auth",),
+            "agent-vault": ("service-gateway",),
         }[name]
         entries.append((repo / "fleet-manager", extra))
     if name == "agent-dispatch":
@@ -285,10 +296,10 @@ def clear_cache_contents(path: Path) -> None:
         if child.is_symlink():
             child.unlink()
         elif (
-            callable(getattr(child, "is_junction", None)) and child.is_junction()
+            callable(is_junction := getattr(child, "is_junction", None)) and is_junction()
         ) or (
             os.name == "nt"
-            and getattr(child.lstat(), "st_reparse_tag", 0) == stat.IO_REPARSE_TAG_MOUNT_POINT
+            and getattr(child.lstat(), "st_reparse_tag", 0) == getattr(stat, "IO_REPARSE_TAG_MOUNT_POINT")
         ):
             child.rmdir()
         elif child.is_dir():

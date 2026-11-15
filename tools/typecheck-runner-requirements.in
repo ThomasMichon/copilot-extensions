@@ -1,0 +1,2 @@
+-r typecheck-yaml-requirements.txt
+tomli==2.5.0

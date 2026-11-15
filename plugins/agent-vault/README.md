@@ -2,6 +2,10 @@
 
 [Configuration reference](docs/configuration.md)
 
+[Opt-in federated account-source relay](docs/federated-relay.md) documents the
+existing service's Controller-channel source slice and its remaining native
+distribution/adoption gates. Local-only setup remains independent.
+
 Enabling this plugin exposes its guidance and commands, not its runtime.
 Automatic bootstrap, install/update participation and ordinary command
 provisioning require `"enabled": true` in the owning configuration. Without

@@ -16,6 +16,15 @@ from credential_relay.sources.az_login import (
 )
 
 
+@pytest.fixture(autouse=True)
+def unit_cli_owner(monkeypatch: pytest.MonkeyPatch) -> None:
+    def argv(rest: list[str]) -> list[str]:
+        return ["synthetic-az-unit-only", *rest]
+
+    monkeypatch.setattr("agent_procutil._is_windows", lambda: False)
+    monkeypatch.setattr("credential_relay.sources.az_login._az_argv", argv)
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -54,6 +63,21 @@ def _mock_process(stdout: str = "", stderr: str = "", returncode: int = 0) -> Ma
 # Basic Behavior
 # ---------------------------------------------------------------------------
 class TestAzLoginSourceBasic:
+
+    @pytest.mark.asyncio
+    async def test_required_job_failure_returns_unavailable(self) -> None:
+        source = AzLoginSource(allowed_resources=["https://management.azure.com/"])
+        with patch(
+            "credential_relay.sources.az_login.spawn_in_kill_on_close_job",
+            new=AsyncMock(side_effect=RuntimeError("Job assignment failed")),
+        ) as spawn:
+            result = await source.resolve(
+                "get-azure-token", {"resource": "https://management.azure.com/"},
+            )
+        assert result is None
+        assert spawn.await_args is not None
+        assert spawn.await_args.kwargs["require_job"] is True
+        assert not source._cache
 
     def test_name(self) -> None:
         source = AzLoginSource()
@@ -263,12 +287,16 @@ class TestAzLoginErrors:
         resource = "https://management.azure.com/"
         source = AzLoginSource(allowed_resources=[resource])
 
+        stopped = asyncio.Event()
+
         async def slow_communicate() -> tuple[bytes, bytes]:
-            await asyncio.sleep(999)
+            await stopped.wait()
             return (b"", b"")
 
         proc = MagicMock()
+        proc.returncode = None
         proc.communicate = slow_communicate
+        proc.kill.side_effect = lambda: stopped.set()
 
         with patch("asyncio.create_subprocess_exec", return_value=proc):
             result = await source.resolve(
@@ -278,6 +306,7 @@ class TestAzLoginErrors:
             )
 
         assert result is None
+        proc.kill.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_invalid_json_response(self) -> None:

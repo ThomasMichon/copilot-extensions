@@ -15,12 +15,14 @@ from collections import deque
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 import aiohttp
 from yarl import URL
 
 from .gateway_auth import make_proof
+from .gateway_connect_route import GatewayTCPConnector, LoopbackRoute
+from .gateway_legacy_interop import CanonicalJSON
 from .gateway_service_channel import (
     BODY_BYTES, CHANNEL_REQUESTS, CHUNK_BYTES, ClientSocket, DEADLINE, FRAME_BYTES,
     REQUEST_HEADERS, RESPONSE_BYTES, RESPONSE_HEADERS, TransportError,
@@ -29,7 +31,7 @@ from .gateway_service_channel import (
 )
 from .gateway_service_context import METHODS, ServicePolicyError, identifier
 from .machine_identity import PROFILE as MACHINE_PROFILE, machine_headers, make_machine_proof
-from .planning import canonical
+from .planning import canonical as legacy_canonical
 from .gateway_service_handler import (
     PROFILE, HandlerBinding, RelayOrigin, RequestLifetime, ServiceRequest, respond,
 )
@@ -38,6 +40,7 @@ from .gateway_controller_services import (
 )
 
 LOG = logging.getLogger(__name__)
+canonical = cast(CanonicalJSON, legacy_canonical)
 RequestSpec = tuple[str, str, dict[str, str], bytes, float, ServiceRequest | None]
 
 def verified_tls(ca: str | None) -> ssl.SSLContext:
@@ -54,10 +57,12 @@ async def channel_socket(
         uri, ssl=tls, heartbeat=10, max_msg_size=FRAME_BYTES, compress=0,
         autoclose=False, timeout=aiohttp.ClientWSTimeout(ws_close=2),
     ) as ws:
+        # aiohttp's decode_text=True overload is only published for Python 3.11+.
+        text_socket = cast("aiohttp.ClientWebSocketResponse", ws)
         try:
-            yield ws
+            yield text_socket
         finally:
-            await close_socket(ws)
+            await close_socket(text_socket)
 
 
 @dataclass(eq=False)
@@ -93,7 +98,8 @@ class ServiceConnector:
                  methods: frozenset[str] = METHODS,
                  handler: HandlerBinding | None = None,
                  machine_principal: str | None = None, machine_audience: str | None = None,
-                 services: tuple[ControllerService, ...] | None = None) -> None:
+                 services: tuple[ControllerService, ...] | None = None,
+                 gateway_route: LoopbackRoute | None = None) -> None:
         check(isinstance(slot, str) and 0 < len(slot) <= 128, "invalid-slot")
         check(bool(methods) and methods <= METHODS, "invalid-methods")
         self._machine = isinstance(machine_principal, str) and bool(machine_principal) \
@@ -104,6 +110,10 @@ class ServiceConnector:
         self._principal, self._audience = machine_principal, machine_audience
         check((backend_origin is None) != (handler is None), "select-one-backend")
         check(handler is None or type(handler) is HandlerBinding, "invalid-handler")
+        check(gateway_route is None or (
+            type(gateway_route) is LoopbackRoute and handler is not None),
+            "invalid-gateway-connect-route")
+        self._gateway_route = gateway_route
         check(services is None or handler is not None, "controller-handler-required")
         self.services = (parse_services(service_values(services))
                          if services is not None else None)
@@ -124,7 +134,7 @@ class ServiceConnector:
         self._connecting = False
         self._attached_lifetime = 0.0
 
-    async def _json(self, response: aiohttp.ClientResponse) -> dict:
+    async def _json(self, response: aiohttp.ClientResponse) -> dict[str, Any]:
         check(response.status == 200, "gateway-admission-refused", 401)
         raw = bytearray()
         async for chunk in response.content.iter_chunked(4096):
@@ -155,11 +165,12 @@ class ServiceConnector:
             check(not self._machine or challenge["profile"] == MACHINE_PROFILE,
                   "unsupported-profile")
         uri = self.gateway + "/_fleet/service-admit"
-        payload = {"slot": self.slot, **(
+        payload: dict[str, object] = {"slot": self.slot, **(
             {"profile": CONTROLLER_PROFILE, "services": service_values(self.services)}
-            if controller else ({"profile": PROFILE} if self.handler else {}))}
+            if self.services is not None else ({"profile": PROFILE} if self.handler else {}))}
         authenticated = {}
         if self._machine:
+            assert self._principal is not None and self._audience is not None
             body = canonical(payload)
             proof = make_machine_proof(
                 self._key, principal=self._principal, audience=self._audience,
@@ -176,10 +187,12 @@ class ServiceConnector:
                                 ssl=self._gateway_tls, allow_redirects=False) as response:
             ticket = await self._json(response)
         shape(ticket, {"ticket"})
-        check(isinstance(ticket["ticket"], str) and len(ticket["ticket"]) == 64)
-        return ticket["ticket"]
+        token = ticket["ticket"]
+        check(isinstance(token, str) and len(token) == 64)
+        assert isinstance(token, str)
+        return token
 
-    def _request(self, value: dict) -> RequestSpec:
+    def _request(self, value: dict[str, Any]) -> RequestSpec:
         names = {"type", "id", "method", "target", "headers", "body", "timeout"}
         if self.services is not None:
             names.update({"service", "origin"})
@@ -217,8 +230,9 @@ class ServiceConnector:
                   "controller-channel-unavailable", 503)
             self.services = selected
             self._services_revision += 1
-            ack = asyncio.get_running_loop().create_future()
+            ack: asyncio.Future[bool] = asyncio.get_running_loop().create_future()
             self._services_ack = ack
+            assert ws is not None
             try:
                 await send(ws, {"type": "services", "revision": self._services_revision,
                                 "services": service_values(selected)})
@@ -333,7 +347,11 @@ class ServiceConnector:
     async def _connect(self) -> None:
         check(not self.active and not self.connected.is_set(), "connector-already-running")
         timeout = aiohttp.ClientTimeout(total=DEADLINE, connect=5, sock_read=15)
-        connector = aiohttp.TCPConnector(limit=CHANNEL_REQUESTS + 2)
+        connector = (
+            aiohttp.TCPConnector(limit=CHANNEL_REQUESTS + 2)
+            if self._gateway_route is None else GatewayTCPConnector(
+                self.gateway, self._gateway_route, limit=CHANNEL_REQUESTS + 2)
+        )
         trace = aiohttp.TraceConfig()
 
         async def refuse_redirect(*args: object) -> None:
@@ -374,9 +392,12 @@ class ServiceConnector:
                                   and value["revision"] == self._services_revision
                                   and self._services_ack is not None
                                   and not self._services_ack.done())
+                            assert self._services_ack is not None
                             self._services_ack.set_result(True)
                             continue
                         check(isinstance(correlation, str) and len(correlation) == 48)
+                        assert isinstance(correlation, str)
+                        exchange: Exchange | None
                         if kind == "request":
                             request = self._request(value)
                             check(correlation not in self.active and correlation not in self.retired
@@ -395,6 +416,7 @@ class ServiceConnector:
                             check(type(value["seq"]) is int
                                   and value["seq"] == exchange.sequence
                                   and exchange.ack is not None and not exchange.ack.done())
+                            assert exchange.ack is not None
                             exchange.ack.set_result(None)
                         elif kind == "cancel":
                             shape(value, {"type", "id"})
