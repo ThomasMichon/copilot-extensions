@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
-import fnmatch
 import ntpath
+import os
 from pathlib import Path
-from types import SimpleNamespace
+from typing import SupportsIndex
+from unittest.mock import Mock
 
 import numpy as np
 import pytest
 
 from agent_index.chunking.base import Chunk
+from agent_index.index_config import ModelProfile
+from agent_index.store import multi_model_store
 from agent_index.store.content_store import ContentStore
 from agent_index.store.multi_model_store import MultiModelStore
 from agent_index.store.repo_filter import _like_pattern, path_glob_sql
@@ -87,7 +90,7 @@ def test_path_globs_filter_real_fts_candidates_before_limit(
             "searchable phrase", source="git:repo", file_path_glob=pattern, limit=limit,
         )
         assert [chunk_id for chunk_id, _score in hits] == [chunks[0].chunk_id]
-    multi.register_model(SimpleNamespace(model_id="test", table_name="vectors_test", dim=2))
+    multi.register_model(ModelProfile("test", "test", table_name="vectors_test", dim=2))
     vectors = np.array([[1.0, 0.0], [0.0, 1.0]], dtype=np.float32)
     multi.upsert_vectors("test", chunks, vectors)
     assert multi.fts_available
@@ -104,7 +107,7 @@ def test_unmatched_bracket_globs_use_linear_character_scans(prefix: str) -> None
     class CountedPattern(str):
         reads = 0
 
-        def __getitem__(self, key):
+        def __getitem__(self, key: SupportsIndex | slice) -> str:
             self.reads += 1
             return super().__getitem__(key)
 
@@ -114,13 +117,78 @@ def test_unmatched_bracket_globs_use_linear_character_scans(prefix: str) -> None
     assert pattern.reads < 10 * len(pattern)
 
 
+@pytest.mark.parametrize("with_fts", [True, False])
+def test_globs_preserve_source_repo_and_metadata_exclusions(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, with_fts: bool,
+) -> None:
+    monkeypatch.delenv("AGENT_INDEX_STORE_LAYOUT", raising=False)
+    store = MultiModelStore(tmp_path / "lance")
+    store.register_model(ModelProfile("test", "test", table_name="vectors_test", dim=2))
+    sources = ["other:owner/repo", "git:owner/other", *["git:owner/repo"] * 4]
+    chunks = [
+        Chunk(
+            f"searchable phrase item {index}",
+            f"{'other' if index == 4 else 'docs'}/keep-{index}.py",
+            "code", "markdown" if index == 2 else "python", 1, 1,
+            source=source, metadata={"labels": ["other" if index == 3 else "kept"]},
+        )
+        for index, source in enumerate(sources)
+    ]
+    angles = np.linspace(0.0, 1.0, len(chunks), dtype=np.float32)
+    vectors = np.column_stack((np.cos(angles), np.sin(angles)))
+    store.upsert("test", chunks, vectors)
+    if with_fts:
+        assert store.ensure_fts_index()
+        fts_hits = store.content_store.fts_search(
+            "searchable phrase", source="git", repo="owner/repo", language="python",
+            file_path_glob="docs/keep-*.py", limit=10,
+        )
+        assert {chunk_id for chunk_id, _ in fts_hits} == {
+            chunks[3].chunk_id, chunks[5].chunk_id,
+        }
+        faceted_hits = store.fts_search(
+            "searchable phrase", source="git", repo="owner/repo", language="python",
+            file_path_glob="docs/keep-*.py", labels=["kept"], limit=10,
+        )
+        assert {hit.chunk_id for hit in faceted_hits} == {chunks[5].chunk_id}
+    assert store.fts_available is with_fts
+    fusion = Mock(wraps=multi_model_store._reciprocal_rank_fusion)
+    monkeypatch.setattr(multi_model_store, "_reciprocal_rank_fusion", fusion)
+
+    def retrieve(omit: str = "", limit: int = 10) -> set[str]:
+        fusion.reset_mock()
+        hits = store.hybrid_search(
+            "test", vectors[0], "searchable phrase", limit=limit,
+            source=None if omit == "source" else "git",
+            repo=None if omit == "repo" else "owner/repo",
+            language=None if omit == "language" else "python",
+            labels=None if omit == "labels" else ["kept"],
+            file_path_glob=None if omit == "glob" else "docs/keep-*.py",
+        )
+        result_ids = {hit.chunk_id for hit in hits}
+        if with_fts:
+            fusion.assert_called_once()
+            assert fusion.call_args is not None
+            fts_results = fusion.call_args.args[1]
+            assert fts_results
+            assert {hit.chunk_id for hit in fts_results} == result_ids
+        else:
+            fusion.assert_not_called()
+        return result_ids
+
+    for limit in (1, 10):
+        assert retrieve(limit=limit) == {chunks[5].chunk_id}
+    for index, omitted in enumerate(("source", "repo", "language", "labels", "glob")):
+        assert retrieve(omitted) == {chunks[index].chunk_id, chunks[5].chunk_id}
+
+
 @pytest.mark.parametrize("limit", [1, 10])
 @pytest.mark.parametrize("inside_window", [True, False])
 def test_hybrid_glob_limits_preserve_the_finite_vector_window(
     tmp_path: Path, limit: int, inside_window: bool,
 ) -> None:
     store = MultiModelStore(tmp_path / "lance")
-    store.register_model(SimpleNamespace(model_id="test", table_name="vectors_test", dim=2))
+    store.register_model(ModelProfile("test", "test", table_name="vectors_test", dim=2))
     first_match = 50 - limit if inside_window else 50
     chunks = [
         Chunk(
@@ -146,7 +214,7 @@ def test_hybrid_glob_does_not_apply_windows_path_normalization(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     store = MultiModelStore(tmp_path / "lance")
-    store.register_model(SimpleNamespace(model_id="test", table_name="vectors_test", dim=2))
+    store.register_model(ModelProfile("test", "test", table_name="vectors_test", dim=2))
     chunks = [
         Chunk(f"searchable phrase {index}", path, "text", "text", 1, 1, source="git:repo")
         for index, path in enumerate([r"docs/end\Z.md", r"docs/end\z.md"])
@@ -154,7 +222,7 @@ def test_hybrid_glob_does_not_apply_windows_path_normalization(
     vectors = np.array([[1.0, 0.0], [0.0, 1.0]], dtype=np.float32)
     store.upsert("test", chunks, vectors)
     assert store.ensure_fts_index()
-    monkeypatch.setattr(fnmatch.os.path, "normcase", ntpath.normcase)
+    monkeypatch.setattr(os.path, "normcase", ntpath.normcase)
     pattern = r"docs/end\Z.md"
     fts_hits = store.content_store.fts_search("searchable phrase", file_path_glob=pattern)
     assert [chunk_id for chunk_id, _ in fts_hits] == [chunks[0].chunk_id]
