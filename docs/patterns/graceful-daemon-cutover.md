@@ -1,7 +1,7 @@
 # Pattern: graceful daemon cutover and bounded cold takeover
 
 > **Serves the vision:** best-effort service handoff with crash-tolerant recovery;
-> seamless compatible cutover is preferred, not a veto on replacement.
+> kill by default; one bounded handoff attempt only when reliable.
 > **Embodied by:** `agent-bridge`, `agent-dispatch`, `agent-index`,
 > `agent-mcp`, `agent-worktrees`, and `worktree-manager`; `agent-vault`
 > remains the main planned adopter still to land.
@@ -21,13 +21,14 @@
 
 ## The problem
 
-**Ordinary update and repair prefer incoming-start-first cutover** in the
+**Ordinary update and repair use kill-by-default replacement** in the
 [authoritative replacement contract](../../visions/installer/README.md#authoritative-runtime-replacement):
-publish and start the
-selected generation independently of the incumbent, then let the displaced
-owner observe supersession and retire itself. A working old IPC contract is
-not a replacement prerequisite. An authorized update includes the bounded cold
-fallback below when the predecessor cannot cooperate or settle; it does not
+without reliable handoff, force-stop the addressed outgoing service and its
+owned daemons before starting the selected incoming service. A reliable
+compatible path gets one bounded handoff attempt, then forced cutoff if the
+outgoing tree does not settle. A working old IPC contract is
+not a replacement prerequisite. An authorized update includes this bounded cold
+path when the predecessor cannot cooperate or settle; it does not
 require another force/repair flag solely for missing graceful support. Report
 the selected path and any interruption rather than silently claiming seamless
 cutover. Broad historical cleanup remains a separate explicit operation.
@@ -52,11 +53,12 @@ handle blocks the swap, and a mid-turn kill loses a non-resumable Copilot turn.
 
 The current rule:
 
-> Handoff is best effort, not permission to install. Success is incoming
+> Handoff is optional and bounded, not permission to install. Success is incoming
 > readiness and complete current selection, independent of predecessor drain,
-> exit and cleanup. Outgoing central daemons self-retire; an optional finite
-> asynchronous fallback after a longer grace period excludes session-keeping
-> processes. Consumers must tolerate interrupted central-service work without
+> cooperation and artifact cleanup. Outgoing locks, schema/handoff failures and
+> drain delays cannot block incoming startup: apply the one-attempt/forced-cutoff
+> rule through the existing lifecycle owner. Consumers tolerate interrupted
+> central-service work without
 > treating protected sessions as disposable.
 
 This is the target contract. The API and per-plugin adoption sections below
@@ -66,39 +68,38 @@ This rule concerns daemon replacement, not Copilot context/session succession.
 
 ## The protocol (the shape)
 
-### Successor-first replacement target
+### Kill-by-default replacement target
 
 Ordinary replacement converges on this sequence, independently of whether the
 old wire contract still works:
 
 ```text
-START NEW (prepared, not a second exclusive writer)
-  -> NEW attempts handoff / announces the selected replacement to OLD
-  -> OLD observes the announcement and independently recognizes staleness
-  -> selected incoming authority closes/transfers or excludes conflicting work
+PREPARE NEW (fast copy, wheel-backed environment, simple setup before cutover)
+  -> if reliable, ONE bounded handoff attempt through the existing owner
+  -> otherwise, or if that attempt does not settle, force-stop OLD service/daemons
+  -> close/transfer or exclude conflicting work; open incoming state safely
+  -> START NEW through its independent service lifecycle owner
   -> all requested NEW runtimes are ready; all current selections name NEW
   -> NEW declares installation complete, without waiting for OLD
-  -> OLD finishes best-effort drain, self-retires and self-cleans independently
-  -> optionally, one finite async fallback waits a longer-than-cutover grace
-  -> fallback revalidates current selection and retires only outgoing central roles
+  -> obsolete artifacts/registrations are cleaned independently
 ```
 
-The announcement flows new-to-old; transferred state flows through the owning
-handoff contract. Conflicting admission can close/transfer or be excluded before
-serving readiness: otherwise an old exclusive lease could prevent the readiness
-needed to trigger its own release. Do not wait for final old-process exit or
-successful old IPC to establish this incoming transition. Announcement receipt
-alone is not permission for final retirement, and absence of a receipt is not an
-installation veto.
+On the reliable path, the announcement flows new-to-old and transferred state
+uses the existing handoff contract. Otherwise cutoff precedes incoming startup.
+Conflicting admission closes/transfers or is excluded before serving readiness:
+an old exclusive lease must not withhold the readiness needed to release it.
+Do not wait for voluntary old-process exit, successful old IPC or another drain
+grace before applying cutoff. Announcement receipt alone is not cutoff authority;
+absence of a receipt is not an installation veto.
 Full current-generation identity, not numeric version ordering, lets the old
 owner recognize supersession even if notification is lost.
 
 Installation completion and predecessor retirement are different outcomes.
 The installer returns after all requested incoming readiness and selections,
-not predecessor settlement. No periodic resident retirement reconciler is
-required. Accepted central-service work gets a best-effort drain opportunity;
-the optional fallback may interrupt it only after the longer grace and must
-retain truthful recovery/unknown outcomes. Recheck then-current selection,
+not independent artifact cleanup. No periodic resident retirement reconciler is
+required. Accepted central-service work gets at most the one reliable bounded
+handoff opportunity, never an additional drain grace before forced cutoff.
+Retain truthful recovery/unknown outcomes. Recheck then-current selection,
 registration contents, explicit central-service role, installation and native
 birth at each mutation. Never kill a later/reselected generation, session
 host/keeper, session-owned Bridge/agent process, foreground client, protected
@@ -110,6 +111,11 @@ This is the target architecture, not a claim that every current adopter has
 implemented this complete completion/retirement contract.
 
 ### Existing compatible active/passive protocol
+
+This section describes the established compatible mechanism, not the default
+replacement policy or proof of its reliability. Use it only within the single
+bounded handoff attempt above; its historical drain/retirement conditions do not
+delay the required forced cutoff.
 
 The established synchronous path below is triggered by the installer
 **automatically** during activation (see *Wiring* below) —
@@ -639,19 +645,18 @@ agent-bridge needs.
    > trigger, has soaked enough to be trusted end to end), demote that
    > plugin's verb back to an installer-internal seam per this invariant --
    > don't treat its present existence as the target state.
-2. **Construct independently; prefer start-first retirement.** Ordinary update
-   and repair build the incoming generation without incumbent cooperation. On
-   the compatible path, start it beside the incumbent, confirm promotion and
-   let the outgoing owner retire. Incompatible, unavailable or non-settling
-   predecessors instead permit bounded cold takeover by the same authorized
-   replacement owner after incoming startup. Fence exclusive resource acquisition
-   separately from starting the new process. Missing graceful support needs no extra repair flag;
+2. **Construct independently; replace kill by default.** Ordinary update and
+   repair build the incoming generation without incumbent cooperation. Without
+   reliable handoff, the same authorized lifecycle owner force-stops the exact
+   outgoing service/owned-daemon tree before incoming startup. A reliable
+   compatible path may start the candidate beside the incumbent for the one
+   bounded handoff attempt; if that does not settle, force cutoff without
+   another drain wait. Missing graceful support needs no extra repair flag;
    exclusive work remains fenced on either path.
-3. **Outgoing drain is best effort and bounded.** Prefer the displaced owner's
-   admission closure, checkpoint and self-retirement after successor readiness.
-   If that contract is unsupported, unavailable or does not settle, authorized
-   normal update and repair may use identity-bound termination within the
-   bounded cold-takeover contract. Interrupted non-resumable work requires
+3. **One reliable handoff attempt, not repeated drain.** The attempt and forced
+   cutoff share the existing deadline. No nested callback, shutdown grace or
+   retry layer may extend it or preserve an outgoing state lock that blocks
+   incoming startup. Interrupted non-resumable work requires
    durable recovery and honest outcome reporting, never a false graceful claim.
 4. **Do not strand recovery.** On the compatible path after the commit point, if the old endpoint is
    unreachable, **commit-forward** to the healthy new one (never roll back into a
@@ -689,10 +694,12 @@ agent-bridge needs.
 The cutover **mechanism** is the OS-agnostic `zdd` library + the daemon's own
 Python seam (`_cutover` / `deploy`), so the *hard part is shared*. What
 legitimately differs is the **service-manager integration**, and the two
-platforms share the **same target**: prefer compatible graceful replacement,
-permit bounded cold takeover, and recover interruption through durable state
-and retriable consumers. The existing graceful routes use different,
-OS-appropriate mechanisms:
+platforms share the **same target**: kill by default, allow one bounded handoff
+attempt only when reliable, and force outgoing cutoff before startup when
+reliable handoff is absent. Recover interruption through durable state and
+retriable consumers. The existing graceful routes below use different,
+OS-appropriate mechanisms; the table records current adoption, not qualification
+or an exception to that target:
 
 For non-marketplace peers such as **worktree-manager**, read the
 `install.ps1`/`install.sh` shorthand here as "the equivalent update activation
@@ -702,7 +709,7 @@ cutover behavior on both platforms even though it has no plugin manifest.
 | | Windows (`install.ps1`) | POSIX (`install.sh`) |
 |---|---|---|
 | Service manager | Scheduled Task, but `conhost --headless` **detaches** the daemon — the task never tracks the live process | systemd `--user` unit **tracks** the daemon (its `ExecStart` PID) |
-| A plain "stop" is… | a **hard kill** (no clean SIGTERM-drain path) — so the zdd cutover is **required** to avoid dropping in-flight work | a **SIGTERM**: `Type=simple` + `Restart=on-failure`, and the daemons drain on SIGTERM (uvicorn for the coordinator/index service; a signal handler for agent-vault). So `systemctl restart` is already **graceful** (drains in-flight work, exits 0 → no resurrect), just with a brief API-unavailable blip |
+| A plain "stop" is… | a **hard kill** (no clean SIGTERM-drain path); the existing zdd path attempts to preserve in-flight work, but is not required by the replacement target | a **SIGTERM**: `Type=simple` + `Restart=on-failure`, and the daemons drain on SIGTERM (uvicorn for the coordinator/index service; a signal handler for agent-vault). The existing `systemctl restart` path drains in-flight work with a brief API-unavailable blip; drain cannot extend the target cutoff deadline |
 | Default update path | in-process zdd cutover (no opt-in) | **zdd cutover when a live routed daemon is serving** (agent-bridge, agent-dispatch, agent-index), **falling back** to the SIGTERM-graceful `systemctl restart` when a cutover can't run or fails |
 | Post-cutover reconcile | idempotently ensure the existing boot-task definition **without starting** it (`-NoStart`): no-op when unchanged, update in place for an intentional definition migration, and register only when absent; the detached daemon serves and the next boot resolves the new slot through the stable launcher | refresh the unit **without restarting** (`_install_service --no-restart`); the old (unit-tracked) daemon exits cleanly so `Restart=on-failure` never resurrects it; the detached survivor serves; next boot starts the new slot |
 
