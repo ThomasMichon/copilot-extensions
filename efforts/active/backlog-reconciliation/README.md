@@ -3784,6 +3784,24 @@ and #4053 receives only its ACP subset with the whole source OPEN for
 gaps remain. No source retirement follows before normal reviewed delivery,
 actual current readback and separate source-specific judgment.
 
+The [reviewed delivery follow-through](journal/2026/11.14-accepted-receivers-and-owner-frontier.md#reviewed-fifty-row-delivery-and-current-receiving-boundary)
+records #12694's actual merge after both substantive review gaps were
+corrected. All 50 campaign checks remain unchecked. Concurrent #12690
+activates a distinct Vault relay slice under its own owner; that is neither
+this campaign's authority nor completion of #3979. Current receiving
+readback, independent source judgments and a new whole census remain next.
+
+The [source-specific receiving judgments](journal/2026/11.14-accepted-receivers-and-owner-frontier.md#current-receiving-readback-and-independent-source-judgments)
+record complete current relevant readback and separate audited
+`NOT_PLANNED` tracking retirements for #4029 and #4036. #3983 remains OPEN
+under its literal whole-scope/validation condition; #3989 retains unresolved
+first-use meaning, and #4053 remains OPEN for independent #4046 work.
+#3979 awaits reviewed correction of two stale whole-effort Draft assertions
+after the distinct relay admission; no relay authority transfers to it.
+The complete 08:25:51 UTC census verifies 846 whole open, 117 above fixed
+729: 458 original-cohort and 388 inflow issues. Six metadata-only arrivals
+offset the two campaign retirements. All 50 receiving checks remain unchecked.
+
 ### Phase 2b - Vision-linked stabilization roadmap
 
 - [x] _(Agent-recommended)_ Establish the reviewed research method and
