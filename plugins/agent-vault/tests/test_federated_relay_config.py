@@ -1,11 +1,13 @@
 import json
+from pathlib import Path
+from typing import Any
 
 import pytest
 
 from agent_vault.federated_relay_config import load
 
 
-def selection(root):
+def selection(root: Path) -> dict[str, Any]:
     return {
         "schema": "agent-vault.federated-relay", "version": 1, "mode": "federated-relay",
         "fleet": "fleet-a", "gateway": "gateway-a", "slot": "service-a",
@@ -21,7 +23,7 @@ def selection(root):
     }
 
 
-def test_absent_and_explicit_disabled_require_no_optional_runtime(tmp_path):
+def test_absent_and_explicit_disabled_require_no_optional_runtime(tmp_path: Path) -> None:
     assert load(tmp_path) is None
     (tmp_path / "federated-relay.json").write_text(json.dumps({
         "schema": "agent-vault.federated-relay", "version": 1, "mode": "disabled",
@@ -37,13 +39,15 @@ def test_absent_and_explicit_disabled_require_no_optional_runtime(tmp_path):
     {"auth": {"kind": "az-login", "resource": "*", "tenant": "tenant"}},
     {"grants": []},
 ])
-def test_explicit_invalid_selection_never_silently_disables(tmp_path, change):
+def test_explicit_invalid_selection_never_silently_disables(
+    tmp_path: Path, change: dict[str, Any],
+) -> None:
     (tmp_path / "federated-relay.json").write_text(json.dumps(selection(tmp_path) | change))
     with pytest.raises(ValueError):
         load(tmp_path)
 
 
-def test_native_selection_retains_exact_references_and_rejects_duplicate_fields(tmp_path):
+def test_native_selection_retains_exact_references_and_rejects_duplicate_fields(tmp_path: Path) -> None:
     path = tmp_path / "federated-relay.json"
     expected = selection(tmp_path)
     path.write_text(json.dumps(expected))

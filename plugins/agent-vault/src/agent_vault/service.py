@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from agent_procutil.daemon_instances import admit_daemon_instance, daemon_entrypoint
+from agent_procutil.daemon_instances import admit_daemon_instance
 
 import asyncio
 import contextlib
@@ -13,46 +13,54 @@ import signal
 import sys
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
+from argparse import Namespace
+from collections.abc import Callable
 from pathlib import Path
+from types import FrameType
+from typing import Any
 
 from .service_cache import get_cache
-from .cache_warm import CacheWarmQueue, CacheWarmRuntime
+from .cache import PersistentCache
+from .cache_warm import CacheWarmQueue, CacheWarmRuntime as CacheWarmRuntime
 from .credential_fields import canonical_field
 from . import __version__ as _PROCESS_VERSION
 from .config import (
     DEFAULT_TCP_PORT as DEFAULT_TCP_PORT,
     ENDPOINT_ENV,
-    IS_WINDOWS,
+    IS_WINDOWS as IS_WINDOWS,
     LOG_FILE,
-    PID_FILE,
-    SOCKET_PATH,
+    PID_FILE as PID_FILE,
+    SOCKET_PATH as SOCKET_PATH,
     load_config,
     normalize_entry,
     resolve_kpdb,
-    run_dir,
+    run_dir as run_dir,
 )
 from .config import PIPE_PATH as PIPE_PATH, resolve_context as resolve_context, daemon_bind_port
 from .config import (
     tcp_port as configured_tcp_port,
 )
 from .config import within_group as _within_group
-from .extensions import ActionContext, UnlockContext, get_registry
+from .extensions import ActionContext, UnlockContext, get_registry as get_registry
 from .extensions import StartupContext as StartupContext
 from .gcm import git_credential_action
 from .keepassxc import KeePassXCBackend, PasswordMutationAmbiguous
+from .federated_relay import RelayRuntime
 from .prompt import prompt_password
 from .rendezvous import (
     EndpointUnavailable,
-    clear_endpoint,
+    clear_endpoint as clear_endpoint,
     connect_probe,
     resolve,
 )
 from .rendezvous import write_endpoint as write_endpoint
 from .service_endpoints import advertised_endpoint as advertised_endpoint
-from .service_connections import VaultConnections, settle_owned
+from .service_connections import Closable as PipeServer, VaultConnections, settle_owned
+from .service_runtime import (
+    daemon_entrypoint, serve as _serve,
+)
 from . import service_cache
-from .service_generation import PROCESS_GENERATION, PROTOCOL, ServiceGeneration
+from .service_generation import PROCESS_GENERATION, PROTOCOL, ServiceGeneration as ServiceGeneration
 from .service_handoff import supported_versions
 from .winpipe import pipe_send
 from .winpipe import pipe_absent as pipe_absent
@@ -88,8 +96,13 @@ log = logging.getLogger("agent-vault.service")  # marketplace-isolation: allow l
 
 
 class VaultService:
+    _generation: ServiceGeneration
+    _federated_relay: RelayRuntime | None
+    _instance_registry_root: Path
+
     def __init__(self) -> None:
-        self.cli = KeePassXCBackend()
+        backend_factory: Callable[[], KeePassXCBackend] = KeePassXCBackend
+        self.cli = backend_factory()
         self.cache: dict[tuple[str, str, str], str] = {}
         self._credential_generations: dict[tuple[str, str, str], int] = {}
         self._blocked_service_cache: set[str] = set()
@@ -117,7 +130,7 @@ class VaultService:
         entry: str,
         password: str,
         operation: int,
-    ):
+    ) -> tuple[PersistentCache, int]:
         persistent = get_cache()
         if not persistent.enabled:
             return persistent, operation
@@ -147,7 +160,7 @@ class VaultService:
         kpdb: str,
         entry: str,
         password: str,
-        persistent,
+        persistent: PersistentCache,
         generation: int,
         operation: int | None = None,
     ) -> int:
@@ -163,7 +176,7 @@ class VaultService:
         vault_name: str,
         reason: str,
         max_queue_seconds: float = PASSWORD_MUTATION_MAX_QUEUE_SECONDS,
-    ) -> dict:
+    ) -> dict[str, Any]:
         deadline = time.monotonic() + max_queue_seconds
         if not self._credential_lock.acquire(timeout=max_queue_seconds):
             return {
@@ -463,9 +476,9 @@ class VaultService:
 
                 log.info("Prompting for master password (cancel_streak=%d, wrong_streak=%d)%s",
                          cancel_streak, wrong_streak, f" [{reason}]" if reason else "")
-                pw = prompt_password(message)
+                prompted_password = prompt_password(message)
 
-                if not pw:
+                if not prompted_password:
                     cancel_streak += 1
                     wrong_streak = 0
                     log.warning("Empty/cancelled prompt (%d/%d)%s",
@@ -475,6 +488,7 @@ class VaultService:
 
                 cancel_streak = 0
 
+                pw = prompted_password
                 if self.cli.verify_password(kpdb, pw):
                     self.cli.set_password(kpdb, pw)
                     self._password_set_at[kpdb] = time.time()
@@ -545,15 +559,15 @@ class VaultService:
 
     # -- request handler -----------------------------------------------------
 
-    def handle_request(self, request: dict, peer: str = "?",
-                       transport: str = "unknown") -> dict:
+    def handle_request(self, request: dict[str, Any], peer: str = "?",
+                       transport: str = "unknown") -> dict[str, Any]:
         if not self._runtime_can_work and request.get("action") not in {
             "ping", "stop", "handoff-export",
         }:
             return {"ok": False, "error": "service_transition", "retryable": True}
         return self._handle_admitted_request(request, peer, transport)
 
-    def _generation_health(self) -> dict:
+    def _generation_health(self) -> dict[str, Any]:
         return {
             "ok": True,
             "pid": os.getpid(),
@@ -580,8 +594,8 @@ class VaultService:
             ),
         }
 
-    def _handle_admitted_request(self, request: dict, peer: str = "?",
-                                 transport: str = "unknown") -> dict:
+    def _handle_admitted_request(self, request: dict[str, Any], peer: str = "?",
+                                 transport: str = "unknown") -> dict[str, Any]:
         """Dispatch work whose lifecycle admission was decided by the server."""
         with self._cache_warm.foreground():
             try:
@@ -596,15 +610,15 @@ class VaultService:
             except service_cache.ServiceCacheUnavailable:
                 return {"ok": False, "error": service_cache.UNAVAILABLE}
 
-    def _dispatch_request(self, request: dict, peer: str,
-                          transport: str) -> dict:
+    def _dispatch_request(self, request: dict[str, Any], peer: str,
+                          transport: str) -> dict[str, Any]:
         self.keepalive()
-        action = request.get("action")
+        action: Any = request.get("action")
         if action == "ping" and request.get("health_only") is True:
             return self._generation_health()
         self._check_password_ttl()
         client = request.get("_client", "")
-        kpdb = request.get("kpdb")
+        kpdb: Any = request.get("kpdb")
         if not kpdb:
             kpdb = self._default_kpdb if action == "ping" else resolve_kpdb(required=False)
         group = request.get("group")
@@ -837,17 +851,17 @@ class VaultService:
             if not self.ensure_unlocked(kpdb, vault_name, reason):
                 error_msg = self._last_error(kpdb) or self._last_error("") or "Vault locked"
                 return {"ok": False, "error": error_msg, "needs_unlock": True}
-            key_data, msg = self.cli.export_attachment(kpdb, entry, key_name)
-            if key_data is None:
+            exported_key, msg = self.cli.export_attachment(kpdb, entry, key_name)
+            if exported_key is None:
                 return {"ok": False, "error": f"Private key export failed: {msg}"}
             pub_name = key_name + ".pub"
-            pub_data, msg = self.cli.export_attachment(kpdb, entry, pub_name)
-            if pub_data is None:
+            exported_public, msg = self.cli.export_attachment(kpdb, entry, pub_name)
+            if exported_public is None:
                 return {"ok": False, "error": f"Public key export failed: {msg}"}
             return {
                 "ok": True,
-                "key_data": base64.b64encode(key_data).decode(),
-                "pub_data": base64.b64encode(pub_data).decode(),
+                "key_data": base64.b64encode(exported_key).decode(),
+                "pub_data": base64.b64encode(exported_public).decode(),
             }
 
         if action in ("list", "ls"):
@@ -989,7 +1003,8 @@ class VaultService:
                 kpdb=kpdb, group=group, vault_name=vault_name, reason=reason
             )
             try:
-                return handler(self, request, ext_ctx)
+                extension_result: dict[str, Any] = handler(self, request, ext_ctx)
+                return extension_result
             except Exception as exc:
                 log.warning("Extension action %r raised: %s", action, exc)
                 return {"ok": False, "error": f"Extension action failed: {action}"}
@@ -1029,9 +1044,10 @@ async def handle_client(
                 None, service.handle_request, request, str(peer), transport
             )
         else:
-            worker = _connections.request(writer, request, str(peer), transport)
-            if worker is None:
+            accepted = _connections.request(writer, request, str(peer), transport)
+            if accepted is None:
                 return
+            worker = accepted
         response = await settle_owned(worker)
 
         ok = response.get("ok", False)
@@ -1059,8 +1075,8 @@ async def run_server(service: VaultService, tcp_port: int | None = None) -> None
     # The outer entrypoint retains this same admission through shutdown.
     with admit_daemon_instance("agent-vault") as custody:
         service._instance_registry_root = custody.receipt.registry_root
-    servers = []
-    pipe_servers: list = []
+    servers: list[asyncio.Server] = []
+    pipe_servers: list[PipeServer] = []
     connections = VaultConnections(service, handle_client)
     try:
         await _serve(service, tcp_port, servers, pipe_servers, connections)
@@ -1081,34 +1097,6 @@ async def run_server(service: VaultService, tcp_port: int | None = None) -> None
             ))
 
 
-async def _serve(service, tcp_port, servers, pipe_servers, connections):
-    from .federated_relay import selected_relay
-
-    generation = service._generation = ServiceGeneration(service, connections, servers, pipe_servers)
-    relay = service._federated_relay = selected_relay()
-    try:
-        await generation.start(tcp_port)
-        loop = asyncio.get_running_loop()
-        warmer = CacheWarmRuntime(service, service._cache_warm, connections)
-        with ThreadPoolExecutor(max_workers=1, thread_name_prefix="vault-expiry") as expiry:
-            try:
-                while not service._shutdown and not service.is_expired:
-                    await settle_owned(loop.run_in_executor(expiry, service._check_password_ttl))
-                    await generation.tick()
-                    warmer.tick()
-                    if relay is not None:
-                        await relay.tick(serving=(
-                            generation.hooks_started and service._runtime_can_work
-                            and not service._shutdown
-                        ))
-                    await asyncio.sleep(0.5)
-            finally:
-                await settle_owned(warmer.close())
-    finally:
-        if relay is not None:
-            await settle_owned(relay.close())
-
-
 def cleanup() -> None:
     with contextlib.suppress(OSError):
         clear_endpoint(run_dir())
@@ -1117,7 +1105,7 @@ def cleanup() -> None:
             os.unlink(path)
 
 
-def _dial_unix(request: dict, path: str, timeout: float = 5.0) -> dict | None:
+def _dial_unix(request: dict[str, Any], path: str, timeout: float = 5.0) -> dict[str, Any] | None:
     """Send a command over a Unix socket at ``path``; ``None`` on any failure."""
     import socket as sock_mod
 
@@ -1133,12 +1121,15 @@ def _dial_unix(request: dict, path: str, timeout: float = 5.0) -> dict | None:
                 break
             buf += chunk
         s.close()
-        return json.loads(buf.decode().strip())
+        response: dict[str, Any] = json.loads(buf.decode().strip())
+        return response
     except Exception:
         return None
 
 
-def _dial_tcp(request: dict, host: str, port: int, timeout: float = 5.0) -> dict | None:
+def _dial_tcp(
+    request: dict[str, Any], host: str, port: int, timeout: float = 5.0,
+) -> dict[str, Any] | None:
     """Send a command over TCP to ``host:port``; ``None`` on any failure."""
     import socket as sock_mod
 
@@ -1154,12 +1145,13 @@ def _dial_tcp(request: dict, host: str, port: int, timeout: float = 5.0) -> dict
                 break
             buf += chunk
         s.close()
-        return json.loads(buf.decode().strip())
+        response: dict[str, Any] = json.loads(buf.decode().strip())
+        return response
     except Exception:
         return None
 
 
-def send_command(request: dict) -> dict | None:
+def send_command(request: dict[str, Any]) -> dict[str, Any] | None:
     """Send a command to a running service (client helper).
 
     Discovery-first: dial the endpoint advertised in the rendezvous file
@@ -1184,8 +1176,8 @@ def send_command(request: dict) -> dict | None:
             try:
                 d_host, d_port = ep.tcp_host_port
             except ValueError:
-                d_host = d_port = None
-            if d_host is not None:
+                pass
+            else:
                 result = _dial_tcp(request, d_host, d_port)
                 if result is not None:
                     return result
@@ -1204,7 +1196,7 @@ def is_process_alive(pid: int) -> bool:
         try:
             import ctypes
 
-            kernel32 = ctypes.windll.kernel32
+            kernel32 = getattr(ctypes, "windll").kernel32
             handle = kernel32.OpenProcess(0x100000, False, pid)  # SYNCHRONIZE
             if handle:
                 kernel32.CloseHandle(handle)
@@ -1261,7 +1253,9 @@ def daemonize_windows(argv: list[str]) -> None:
     spawn_service([*argv[2:], "--foreground"])
 
 
-def _prepare_service(args, *, handoff_payload=None, handoff_consumed=False):
+def _prepare_service(
+    args: Namespace, *, handoff_payload: dict[str, Any] | None = None, handoff_consumed: bool = False,
+) -> VaultService:
     from .service_logging import configure_logging
 
     configure_logging(log, str(LOG_FILE), verbose=args.verbose)
@@ -1282,7 +1276,9 @@ def _prepare_service(args, *, handoff_payload=None, handoff_consumed=False):
 
 
 @daemon_entrypoint("agent-vault", source=__file__, purpose="production")
-def _run_resident(args, *, handoff_payload=None, handoff_consumed=False):
+def _run_resident(
+    args: Namespace, *, handoff_payload: dict[str, Any] | None = None, handoff_consumed: bool = False,
+) -> None:
     """Admit the actual resident before initialization and retain it through shutdown."""
     service = _prepare_service(
         args, handoff_payload=handoff_payload, handoff_consumed=handoff_consumed,
@@ -1293,7 +1289,7 @@ def _run_resident(args, *, handoff_payload=None, handoff_consumed=False):
             f"TCP bind 127.0.0.1:{args.tcp_port if args.tcp_port is not None else daemon_bind_port(resolve_context())})"
         )
 
-    def sig_handler(signum, frame):
+    def sig_handler(signum: int, frame: FrameType | None) -> None:
         service._shutdown = True
 
     signal.signal(signal.SIGTERM, sig_handler)

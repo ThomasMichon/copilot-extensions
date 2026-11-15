@@ -13,7 +13,7 @@ import re
 import socket
 import sys
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from single_instance_lease import AlreadyRunningError, SingleInstance
 from single_instance_lease.supersession import pid_alive as _pid_exists
@@ -22,10 +22,14 @@ from agent_procutil._daemon_instance_identity import runtime_slot_paths
 from . import __version__, config
 from .config import home_dir, installation_id
 from .rendezvous import Endpoint, read_endpoint
-from .service_connections import settle_owned
+from .service_connections import Closable, VaultConnections, settle_owned
 from .service_handoff import AuthReceiver, send_auth_state
 from .service_selection import SelectionCustodyUnavailable, selection_custody
 from .service_unix_alias import UnixAlias, socket_identity
+
+if TYPE_CHECKING:
+    from .service import VaultService
+    from .service_predecessor import Predecessor
 
 log = logging.getLogger(__name__)
 PROTOCOL = 1
@@ -43,7 +47,7 @@ def pid_alive(pid: int | None) -> bool:
     if not handle:
         return api.error() != 87
     try:
-        return api.k.WaitForSingleObject(handle, 0) != 0
+        return bool(api.k.WaitForSingleObject(handle, 0) != 0)
     finally:
         api.close(handle)
 
@@ -76,7 +80,7 @@ def valid_generation_health(response: object) -> bool:
     )
 
 
-def same_generation(response: dict | None) -> bool:
+def same_generation(response: dict[str, Any] | None) -> bool:
     return bool(
         response and valid_generation_health(response)
         and response["runtime_generation"] == PROCESS_GENERATION
@@ -115,7 +119,7 @@ def generation_running() -> bool:
     return False
 
 
-def endpoint_health(endpoint: Endpoint | None) -> dict | None:
+def endpoint_health(endpoint: Endpoint | None) -> dict[str, Any] | None:
     """Probe the captured endpoint, never re-resolve it to a different process."""
     from . import service
 
@@ -144,7 +148,10 @@ def endpoint_health(endpoint: Endpoint | None) -> dict | None:
 
 
 class ServiceGeneration:
-    def __init__(self, service: Any, connections: Any, servers: list, pipes: list) -> None:
+    def __init__(
+        self, service: VaultService, connections: VaultConnections,
+        servers: list[asyncio.Server], pipes: list[Closable],
+    ) -> None:
         from . import service as api
 
         self.api = api
@@ -165,16 +172,16 @@ class ServiceGeneration:
         self.previous: Endpoint | None = None
         self.legacy_predecessor = False
         self.superseded = 0
-        self.retiring: dict | None = None
+        self.retiring: dict[str, Any] | None = None
         self.hooks_started = False
         self.receiver: AuthReceiver | None = None
         self.handoff_result = "not-requested"
-        self.predecessor = None
+        self.predecessor: Predecessor | None = None
         self.predecessor_deadline = 0.0
         self.predecessor_retirement = "not-requested"
         self.aliases_after_exit = False
         self.writer_candidate_pid: int | None = None
-        self.writer_predecessor = None
+        self.writer_predecessor: Predecessor | None = None
         self.writer_predecessor_retirement = "not-requested"
         self.unix_alias = UnixAlias(self.root, api.SOCKET_PATH)
         self.owned_sockets: dict[str, tuple[int, int]] = {}
@@ -245,7 +252,8 @@ class ServiceGeneration:
             self.legacy_predecessor = bool(
                 self.previous and pid_alive(self.previous.pid)
             )
-            if self.legacy_predecessor:
+            if (self.legacy_predecessor and self.previous is not None
+                    and self.previous.pid is not None):
                 from .service_predecessor import Predecessor
 
                 self.predecessor = await asyncio.to_thread(
@@ -475,7 +483,7 @@ class ServiceGeneration:
                 previous_exited = bool(
                     self.predecessor and self.predecessor.exited()
                 )
-        if self.writer_predecessor_retirement == "grace":
+        if self.writer_predecessor_retirement == "grace" and self.writer_predecessor is not None:
             if self.writer_predecessor.exited():
                 self.writer_predecessor_retirement = "exited"
             elif time.monotonic() >= self.predecessor_deadline:
@@ -549,7 +557,7 @@ class ServiceGeneration:
         self.has_writer = False
         return True
 
-    def _retire_previous(self, predecessor=None, writer: bool = False) -> str:
+    def _retire_previous(self, predecessor: Predecessor | None = None, writer: bool = False) -> str:
         predecessor = predecessor if predecessor is not None else self.predecessor
         if predecessor is None:
             return "refused-owner"
@@ -585,7 +593,7 @@ class ServiceGeneration:
         finally:
             self.publication.release()
 
-    def handoff_advertisement(self) -> dict | None:
+    def handoff_advertisement(self) -> dict[str, Any] | None:
         return self.receiver.advertisement() if self.receiver is not None else None
 
     async def close_handoff(self) -> None:
@@ -634,7 +642,7 @@ def ensure_selected(timeout: float = 60.0) -> bool:
     from .launch import spawn_service
 
     status = endpoint_health(read_endpoint(service.run_dir()))
-    if same_generation(status) and status.get("accepting_work") is True:
+    if status is not None and same_generation(status) and status.get("accepting_work") is True:
         return True
     if not selected():
         return False
@@ -642,7 +650,7 @@ def ensure_selected(timeout: float = 60.0) -> bool:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         status = endpoint_health(read_endpoint(service.run_dir()))
-        if same_generation(status) and status.get("accepting_work") is True:
+        if status is not None and same_generation(status) and status.get("accepting_work") is True:
             return True
         time.sleep(0.1)
     return False

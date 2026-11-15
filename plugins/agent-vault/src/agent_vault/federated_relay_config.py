@@ -6,7 +6,48 @@ import json
 import os
 import stat
 from pathlib import Path
+from typing import Any, Literal, TypedDict
 from urllib.parse import urlsplit
+
+
+class MachineAuth(TypedDict):
+    kind: Literal["machine"]
+    principal: str
+    audience: str
+
+
+class AzureAuth(TypedDict):
+    kind: Literal["az-login"]
+    resource: str
+    tenant: str
+
+
+class Grant(TypedDict):
+    principal: str
+    source: str
+    account: str
+    recipient: str
+    host: str
+    action: str
+
+
+class Selection(TypedDict):
+    schema: str
+    version: int
+    mode: str
+    fleet: str
+    gateway: str
+    slot: str
+    installation: str
+    service: str
+    prefix: str
+    gateway_origin: str
+    conduit_file: str
+    gateway_ca: str | None
+    proof_key_file: str
+    account_policy_file: str
+    grants: list[Grant]
+    auth: MachineAuth | AzureAuth
 
 
 def read_reference(path: Path, limit: int = 65536) -> bytes:
@@ -26,8 +67,8 @@ def read_reference(path: Path, limit: int = 65536) -> bytes:
     return body
 
 
-def _pairs(pairs):
-    value = {}
+def _pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    value: dict[str, Any] = {}
     for key, item in pairs:
         if key in value:
             raise ValueError("relay-duplicate-field")
@@ -35,7 +76,7 @@ def _pairs(pairs):
     return value
 
 
-def document(path: Path) -> dict:
+def document(path: Path) -> dict[str, Any]:
     value = json.loads(read_reference(path), object_pairs_hook=_pairs,
                        parse_constant=lambda _: None)
     if type(value) is not dict:
@@ -59,7 +100,7 @@ def reference(value: object) -> Path:
     return path
 
 
-def load(root: Path) -> dict | None:
+def load(root: Path) -> Selection | None:
     path = root / "federated-relay.json"
     if not os.path.lexists(path):
         return None
@@ -105,4 +146,26 @@ def load(root: Path) -> dict | None:
     for grant in grants:
         for item in grant.values():
             text(item)
-    return value
+    selected_auth: MachineAuth | AzureAuth
+    if auth["kind"] == "machine":
+        selected_auth = {
+            "kind": "machine", "principal": text(auth["principal"]),
+            "audience": text(auth["audience"]),
+        }
+    else:
+        selected_auth = {
+            "kind": "az-login", "resource": text(auth["resource"]), "tenant": text(auth["tenant"]),
+        }
+    return {
+        "schema": value["schema"], "version": value["version"], "mode": value["mode"],
+        "fleet": value["fleet"], "gateway": value["gateway"], "slot": value["slot"],
+        "installation": value["installation"], "service": value["service"],
+        "prefix": value["prefix"], "gateway_origin": value["gateway_origin"],
+        "conduit_file": value["conduit_file"], "gateway_ca": value["gateway_ca"],
+        "proof_key_file": value["proof_key_file"], "account_policy_file": value["account_policy_file"],
+        "grants": [{
+            "principal": grant["principal"], "source": grant["source"], "account": grant["account"],
+            "recipient": grant["recipient"], "host": grant["host"], "action": grant["action"],
+        } for grant in grants],
+        "auth": selected_auth,
+    }

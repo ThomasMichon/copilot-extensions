@@ -16,13 +16,45 @@ import sys
 import time
 import threading
 from types import SimpleNamespace
+from typing import Any, Protocol, cast
+from io import BytesIO
 
 import pytest
 
-from agent_procutil import no_window_kwargs
+from agent_procutil import JobHandle, no_window_kwargs
+from agent_procutil.daemon_instances import DaemonInstanceReceipt, DaemonInstanceSpec
 from agent_vault import service_generation as generation
+from agent_vault.config import installation_id
+from agent_vault.rendezvous import read_endpoint
+from agent_vault.service_connections import Closable, VaultConnections
+from agent_vault.service_predecessor import Predecessor
+from agent_vault.service_selection import selection_custody
 from zdd.private_peer import PeerProcess
 from single_instance_lease import AlreadyRunningError
+
+
+controller_factory: Callable[
+    [Any, Any, list[asyncio.Server], list[Closable]], generation.ServiceGeneration,
+] = generation.ServiceGeneration
+connection_factory: Callable[[Any, Any], VaultConnections] = VaultConnections
+
+
+class OwnedChild(Protocol):
+    pid: int
+    returncode: int | None
+    instance_receipt: DaemonInstanceReceipt
+
+    def poll(self) -> int | None: ...
+    def kill(self) -> None: ...
+    def communicate(
+        self, input: str | None = None, timeout: float | None = None,
+    ) -> tuple[str, str]: ...
+
+
+class SpawnChild(Protocol):
+    def __call__(
+        self, argv: list[str], *, instance: DaemonInstanceSpec, **kwargs: Any,
+    ) -> OwnedChild: ...
 
 
 @pytest.mark.parametrize("source,client_port,explicit,expected", [
@@ -45,12 +77,12 @@ def test_direct_generation_start_applies_listener_default_before_binding(
         config, "resolve_context",
         lambda: SimpleNamespace(port=client_port, sources={"port": source}),
     )
-    controller = generation.ServiceGeneration(SimpleNamespace(), SimpleNamespace(), [], [])
+    controller = controller_factory(SimpleNamespace(), SimpleNamespace(), [], [])
 
     def stop_before_binding() -> None:
-        raise AlreadyRunningError("synthetic generation; no endpoint may be opened", holder_pid=123)
+        raise AlreadyRunningError(tmp_path / "synthetic-generation.lock", holder_pid=123)
 
-    controller.generation_lease = SimpleNamespace(acquire=stop_before_binding)
+    monkeypatch.setattr(controller, "generation_lease", SimpleNamespace(acquire=stop_before_binding))
     asyncio.run(controller.start(explicit))
     assert controller.requested_port == expected
     assert not controller.servers and not controller.pipes
@@ -68,12 +100,12 @@ def test_direct_generation_rejects_invalid_bind_default_before_custody(
         config, "resolve_context",
         lambda: SimpleNamespace(port=19999, sources={"port": "default"}),
     )
-    controller = generation.ServiceGeneration(
+    controller = controller_factory(
         SimpleNamespace(_runtime_can_work=True), SimpleNamespace(), [], [],
     )
-    controller.generation_lease = SimpleNamespace(
+    monkeypatch.setattr(controller, "generation_lease", SimpleNamespace(
         acquire=lambda: pytest.fail("invalid default must not acquire generation custody"),
-    )
+    ))
     with pytest.raises(ValueError, match="AGENT_VAULT_BIND_PORT"):
         asyncio.run(controller.start(None))
     assert controller.service._runtime_can_work
@@ -87,7 +119,7 @@ def test_retirement_releases_writer_before_nonsettling_transport_cleanup(
 
     monkeypatch.setattr(service, "run_dir", lambda: tmp_path / "run")
     monkeypatch.setattr(generation, "home_dir", lambda: tmp_path)
-    controller = generation.ServiceGeneration(
+    controller = controller_factory(
         SimpleNamespace(_runtime_can_work=True, _shutdown=False),
         SimpleNamespace(work=set()), [], [],
     )
@@ -98,7 +130,9 @@ def test_retirement_releases_writer_before_nonsettling_transport_cleanup(
     monkeypatch.setattr(cutover, "build_auth_state", lambda _: {"fixture": True})
     sent = []
 
-    def transfer(status: dict, payload: dict, *, writer_released: bool = False) -> bool:
+    def transfer(
+        status: dict[str, Any], payload: dict[str, Any], *, writer_released: bool = False,
+    ) -> bool:
         assert not controller.has_writer
         assert not controller.service._runtime_can_work
         assert not controller.connections.work
@@ -113,10 +147,10 @@ def test_retirement_releases_writer_before_nonsettling_transport_cleanup(
         assert controller.service._shutdown
         assert not controller.service._runtime_can_work
         # The predecessor remains alive and its transport cleanup has not run.
-        incoming = generation.ServiceGeneration(SimpleNamespace(), SimpleNamespace(), [], [])
-        incoming.previous = SimpleNamespace(pid=os.getpid())
+        incoming = controller_factory(SimpleNamespace(), SimpleNamespace(), [], [])
+        monkeypatch.setattr(incoming, "previous", SimpleNamespace(pid=os.getpid()))
         incoming.legacy_predecessor = True
-        incoming.receiver = SimpleNamespace(writer_released=lambda: True)
+        monkeypatch.setattr(incoming, "receiver", SimpleNamespace(writer_released=lambda: True))
         assert incoming._take_writer()
         incoming.writer.release()
     finally:
@@ -141,24 +175,27 @@ def test_ready_writer_supersedes_while_retaining_unsettled_resume_custody(
     monkeypatch.setattr(cutover, "build_auth_state", lambda _: {"fixture": True})
     vault = service.VaultService()
     work = {object()}
-    controller = generation.ServiceGeneration(vault, SimpleNamespace(work=work), [], [])
+    controller = controller_factory(vault, SimpleNamespace(work=work), [], [])
     controller.writer.acquire()
     controller.has_writer = True
     pin = object()
     recovered = False
 
     def recover() -> bool:
-        assert controller.predecessor.custody is pin
+        assert predecessor.custody is pin
         if recovered:
-            controller.predecessor.custody = None
+            predecessor.custody = None
         return recovered
 
-    controller.predecessor = SimpleNamespace(custody=pin, recover=recover)
+    predecessor = SimpleNamespace(custody=pin, recover=recover)
+    monkeypatch.setattr(controller, "predecessor", predecessor)
     transfers = []
 
-    def transfer(status: dict, payload: dict, *, writer_released: bool = False) -> bool:
+    def transfer(
+        status: dict[str, Any], payload: dict[str, Any], *, writer_released: bool = False,
+    ) -> bool:
         assert not controller.has_writer and not vault._runtime_can_work and not work
-        assert controller.predecessor.custody is pin
+        assert predecessor.custody is pin
         transfers.append(writer_released)
         return True
 
@@ -176,18 +213,18 @@ def test_ready_writer_supersedes_while_retaining_unsettled_resume_custody(
         work.clear()
         await controller.tick()
         assert transfers == [True] and vault._shutdown
-        assert controller.predecessor.custody is pin
-        incoming = generation.ServiceGeneration(SimpleNamespace(), SimpleNamespace(), [], [])
+        assert predecessor.custody is pin
+        incoming = controller_factory(SimpleNamespace(), SimpleNamespace(), [], [])
         incoming.writer.acquire()
         incoming.writer.release()
         settling = asyncio.create_task(controller.settle_retirements())
         try:
             await asyncio.sleep(.01)
             assert not settling.done()
-            assert controller.predecessor.custody is pin
+            assert predecessor.custody is pin
             recovered = True
             await asyncio.wait_for(settling, 2)
-            assert controller.predecessor.custody is None
+            assert predecessor.custody is None
         finally:
             if not settling.done():
                 settling.cancel()
@@ -215,13 +252,13 @@ def test_current_controller_cannot_retire_after_selection_or_discovery_changes(
         pid=123 if change == "endpoint" else os.getpid(),
         installation_id="foreign" if change == "installation" else "fixture-installation",
     ))
-    controller = generation.ServiceGeneration(SimpleNamespace(), SimpleNamespace(), [], [])
+    controller = controller_factory(SimpleNamespace(), SimpleNamespace(), [], [])
 
     def retire(current: Callable[[], bool]) -> str:
         assert not current()
         return "refused-owner-or-selection"
 
-    controller.predecessor = SimpleNamespace(retire=retire)
+    monkeypatch.setattr(controller, "predecessor", SimpleNamespace(retire=retire))
     assert controller._retire_previous() == "refused-owner-or-selection"
 
 
@@ -239,7 +276,7 @@ def test_older_writer_target_requires_current_contention_from_that_same_owner(
     monkeypatch.setattr(generation, "read_endpoint", lambda _: SimpleNamespace(
         pid=os.getpid(), installation_id="fixture-installation",
     ))
-    controller = generation.ServiceGeneration(SimpleNamespace(), SimpleNamespace(), [], [])
+    controller = controller_factory(SimpleNamespace(), SimpleNamespace(), [], [])
     controller.has_writer = change == "self-writer"
     events = []
 
@@ -256,9 +293,9 @@ def test_older_writer_target_requires_current_contention_from_that_same_owner(
         assert not current()
         return "refused-owner-or-selection"
 
-    controller.writer = Writer()
+    monkeypatch.setattr(controller, "writer", Writer())
     target = SimpleNamespace(pid=123, retire=retire)
-    assert controller._retire_previous(target, True) == "refused-owner-or-selection"
+    assert controller._retire_previous(cast(Predecessor, target), True) == "refused-owner-or-selection"
     assert events == {
         "holder": ["probe"], "available": ["probe", "release"], "self-writer": [],
     }[change]
@@ -273,8 +310,8 @@ def test_confirmed_predecessor_exit_does_not_repeat_native_process_probes(
     monkeypatch.setattr(generation, "home_dir", lambda: tmp_path)
     monkeypatch.setattr(generation, "selected", lambda: True)
     monkeypatch.setattr(generation, "read_endpoint", lambda _: SimpleNamespace(pid=os.getpid()))
-    controller = generation.ServiceGeneration(SimpleNamespace(), SimpleNamespace(), [], [])
-    controller.previous = SimpleNamespace(pid=123)
+    controller = controller_factory(SimpleNamespace(), SimpleNamespace(), [], [])
+    monkeypatch.setattr(controller, "previous", SimpleNamespace(pid=123))
     controller.predecessor_retirement = "exited"
     controller.has_writer = controller.hooks_started = controller.aliases_after_exit = True
 
@@ -298,10 +335,12 @@ def test_unix_alias_reclaims_only_the_captured_dead_listener(
     controller.pipe = None
     controller.port = controller.requested_port = 0
     controller.servers = []
-    controller.unix_alias = SimpleNamespace(
+    monkeypatch.setattr(controller, "unix_alias", SimpleNamespace(
         dead_identity=lambda: None if condition == "owner-live" else (1, 2),
+    ), raising=False)
+    monkeypatch.setattr(
+        controller, "connections", SimpleNamespace(callback=lambda _: object()), raising=False,
     )
-    controller.connections = SimpleNamespace(callback=lambda _: object())
 
     def stale(path: str) -> bool:
         assert path == legacy
@@ -309,25 +348,27 @@ def test_unix_alias_reclaims_only_the_captured_dead_listener(
             state["identity"] = (3, 4)
         return condition != "live"
 
-    controller.api = SimpleNamespace(SOCKET_PATH=legacy)
+    monkeypatch.setattr(controller, "api", SimpleNamespace(SOCKET_PATH=legacy), raising=False)
     monkeypatch.setattr(generation, "socket_identity", lambda _: state["identity"])
     monkeypatch.setattr(controller, "_record_socket", lambda _: None)
     monkeypatch.setattr(controller, "_unix_stale", stale)
-    monkeypatch.setattr(generation.os.path, "lexists", lambda _: state["exists"])
+    monkeypatch.setattr(os.path, "lexists", lambda _: state["exists"])
 
     def unlink(path: str) -> None:
         assert path == legacy and state["identity"] == (1, 2)
         state["exists"] = False
         events.append("unlink")
 
-    async def listen(callback, *, path):
+    async def listen(
+        callback: Callable[[asyncio.StreamReader, asyncio.StreamWriter], None], *, path: str,
+    ) -> object:
         assert path == legacy and not state["exists"]
         events.append("listen")
         return object()
 
-    monkeypatch.setattr(generation.os, "unlink", unlink)
-    monkeypatch.setattr(generation.os, "chmod", lambda *args: None)
-    monkeypatch.setattr(generation.asyncio, "start_unix_server", listen, raising=False)
+    monkeypatch.setattr(os, "unlink", unlink)
+    monkeypatch.setattr(os, "chmod", lambda *args: None)
+    monkeypatch.setattr(asyncio, "start_unix_server", listen, raising=False)
     asyncio.run(controller._bind_legacy_aliases())
     assert events == (["unlink", "listen"] if condition == "stale" else [])
     assert len(controller.servers) == (1 if condition == "stale" else 0)
@@ -341,10 +382,10 @@ def test_unix_stale_probe_does_not_confuse_denied_or_unknown_with_no_listener(
     monkeypatch: pytest.MonkeyPatch, error: int | None, expected: bool,
 ) -> None:
     class Peer:
-        def __enter__(self):
+        def __enter__(self) -> Peer:
             return self
 
-        def __exit__(self, *_):
+        def __exit__(self, *_: object) -> None:
             pass
 
         def settimeout(self, value: float) -> None:
@@ -355,8 +396,8 @@ def test_unix_stale_probe_does_not_confuse_denied_or_unknown_with_no_listener(
             if error is not None:
                 raise OSError(error, "fixture probe")
 
-    monkeypatch.setattr(generation.socket, "AF_UNIX", object(), raising=False)
-    monkeypatch.setattr(generation.socket, "socket", lambda *args: Peer())
+    monkeypatch.setattr(socket, "AF_UNIX", object(), raising=False)
+    monkeypatch.setattr(socket, "socket", lambda *args: Peer())
     assert generation.ServiceGeneration._unix_stale("fixture.sock") is expected
 
 
@@ -370,13 +411,17 @@ def test_only_valid_native_handoff_records_writer_release(
     from agent_vault.cutover import AUTH_STATE_CONTRACT
 
     receiver = object.__new__(handoff.AuthReceiver)
-    receiver.peer = object()
+    monkeypatch.setattr(receiver, "peer", object(), raising=False)
     receiver.generation = "fixture-generation"
     receiver.cancelled = threading.Event()
     receiver._lock = threading.Lock()
     receiver._payload = None
     receiver._writer_released = False
-    receiver.listener = SimpleNamespace(accept=lambda *args, **kwargs: SimpleNamespace(close=lambda: None))
+    monkeypatch.setattr(
+        receiver, "listener",
+        SimpleNamespace(accept=lambda *args, **kwargs: SimpleNamespace(close=lambda: None)),
+        raising=False,
+    )
     frame = dict(
         contract=AUTH_STATE_CONTRACT, version=version, target_generation="fixture-generation",
         auth={"contract": AUTH_STATE_CONTRACT, "version": version},
@@ -430,6 +475,7 @@ def test_imported_generation_preserves_installed_selection(
     spec = importlib.util.spec_from_file_location(
         "agent_vault._fixture_generation", generation.__file__,
     )
+    assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     monkeypatch.setattr(module, "home_dir", lambda: root)
@@ -495,8 +541,10 @@ def test_confirmed_retirement_is_not_reactivated_when_the_successor_disappears(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     controller = object.__new__(generation.ServiceGeneration)
-    controller.service = SimpleNamespace(_runtime_can_work=True, _shutdown=False)
-    controller.connections = SimpleNamespace(work={object()})
+    monkeypatch.setattr(
+        controller, "service", SimpleNamespace(_runtime_can_work=True, _shutdown=False), raising=False,
+    )
+    monkeypatch.setattr(controller, "connections", SimpleNamespace(work={object()}), raising=False)
     controller.predecessor = controller.writer_predecessor = None
     controller.retiring = {"runtime_generation": "displaced-successor"}
     monkeypatch.setattr(generation, "selected_generation", lambda: "next-successor")
@@ -539,18 +587,23 @@ def test_retirement_settles_admitted_queued_dispatch_but_rejects_late_arrivals(
 
     async def exercise() -> None:
         loop = asyncio.get_running_loop()
-        queued = []
+        queued: list[tuple[
+            Callable[..., dict[str, Any]], tuple[object, ...], asyncio.Future[dict[str, Any]],
+        ]] = []
 
-        def enqueue(executor: object, callback: Callable, *args: object) -> asyncio.Future:
-            future = loop.create_future()
+        def enqueue(
+            executor: object, callback: Callable[..., dict[str, Any]], *args: object,
+        ) -> asyncio.Future[dict[str, Any]]:
+            future: asyncio.Future[dict[str, Any]] = loop.create_future()
             queued.append((callback, args, future))
             return future
 
         monkeypatch.setattr(loop, "run_in_executor", enqueue)
-        writer = object()
+        writer = cast(asyncio.StreamWriter, object())
         request = {"action": "has", "kpdb": "fixture.kdbx", "entry": "fixture",
                    "group": "fixture-group", "allow_prompt": False}
         pending = connections.request(writer, request, "fixture-peer", transport)
+        assert pending is not None
         assert pending in connections.work and pending in connections.workers
         assert writer in connections.busy
         assert len(queued) == 1 and not dispatched and not ttl_checks
@@ -558,8 +611,9 @@ def test_retirement_settles_admitted_queued_dispatch_but_rejects_late_arrivals(
         await controller.tick()
         assert not vault._runtime_can_work and not vault._shutdown
         assert pending in connections.work and not pending.done()
-        late_writer = object()
+        late_writer = cast(asyncio.StreamWriter, object())
         late = connections.request(late_writer, request, "late-peer", transport)
+        assert late is not None
         assert await late == {"ok": False, "error": "service_transition", "retryable": True}
         assert len(queued) == 1 and late_writer not in connections.busy
         assert connections.work == connections.workers == {pending}
@@ -582,14 +636,14 @@ def test_retirement_settles_admitted_queued_dispatch_but_rejects_late_arrivals(
     {"health_only": True},
 ))
 def test_public_request_cannot_forge_retired_lifecycle_admission(
-    monkeypatch: pytest.MonkeyPatch, metadata: dict,
+    monkeypatch: pytest.MonkeyPatch, metadata: dict[str, Any],
 ) -> None:
     from agent_vault.service import VaultService
 
     vault = VaultService()
     vault._runtime_can_work = False
 
-    def unexpected_dispatch(*args: object) -> dict:
+    def unexpected_dispatch(*args: object) -> dict[str, Any]:
         pytest.fail("Client metadata bypassed the public lifecycle guard")
 
     monkeypatch.setattr(vault, "_handle_admitted_request", unexpected_dispatch)
@@ -611,7 +665,9 @@ def test_malformed_successor_health_cannot_retire_the_incumbent(
     controller.retiring = None
     controller.superseded = 0
     controller.predecessor = controller.writer_predecessor = None
-    controller.service = SimpleNamespace(_runtime_can_work=True, _shutdown=False)
+    monkeypatch.setattr(
+        controller, "service", SimpleNamespace(_runtime_can_work=True, _shutdown=False), raising=False,
+    )
     monkeypatch.setattr(generation, "read_endpoint", lambda _: SimpleNamespace(pid=123))
     monkeypatch.setattr(generation, "endpoint_health", lambda _: response)
     monkeypatch.setattr(generation, "selected_generation", lambda: None)
@@ -637,10 +693,14 @@ def test_publication_contention_retries_and_rechecks_selection(
             events.append("release")
 
     controller = object.__new__(generation.ServiceGeneration)
-    controller.api = SimpleNamespace()
-    controller.service = SimpleNamespace(_runtime_can_work=True, _shutdown=False)
-    controller.generation_lease = SimpleNamespace(acquire=lambda: None)
-    controller.publication = Publication()
+    monkeypatch.setattr(controller, "api", SimpleNamespace(), raising=False)
+    monkeypatch.setattr(
+        controller, "service", SimpleNamespace(_runtime_can_work=True, _shutdown=False), raising=False,
+    )
+    monkeypatch.setattr(
+        controller, "generation_lease", SimpleNamespace(acquire=lambda: None), raising=False,
+    )
+    monkeypatch.setattr(controller, "publication", Publication(), raising=False)
     selections = iter((True, False))
     monkeypatch.setattr(generation, "selected", lambda: next(selections))
     asyncio.run(controller.start(0))
@@ -653,7 +713,7 @@ def test_publication_contention_retries_and_rechecks_selection(
 def test_unix_health_deadline_covers_connect(monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_vault import service
 
-    events = []
+    events: list[tuple[str, float | str]] = []
 
     class Probe:
         def settimeout(self, value: float) -> None:
@@ -680,7 +740,7 @@ def test_native_generation_ping_does_not_resolve_configuration_or_backend(
     vault = service.VaultService()
     vault._runtime_can_work = accepting
 
-    def unavailable(*args, **kwargs):
+    def unavailable(*args: object, **kwargs: object) -> None:
         pytest.fail("Native generation health entered configuration or backend work")
 
     monkeypatch.setattr(service, "resolve_kpdb", unavailable)
@@ -694,10 +754,11 @@ def test_native_generation_ping_does_not_resolve_configuration_or_backend(
         )
         endpoint = Endpoint(
             "tcp", f"127.0.0.1:{server.sockets[0].getsockname()[1]}",
-            pid=os.getpid(), installation_id=generation.installation_id(),
+            pid=os.getpid(), installation_id=installation_id(),
         )
         try:
             response = await asyncio.to_thread(generation.endpoint_health, endpoint)
+            assert response is not None
             assert generation.valid_generation_health(response)
             assert response["pid"] == os.getpid()
             assert response["accepting_work"] is accepting
@@ -721,7 +782,7 @@ def test_connections_close_does_not_wait_forever_on_stalled_server(
             await asyncio.Event().wait()
 
     vault = SimpleNamespace(_shutdown=False)
-    connections = VaultConnections(vault, None)
+    connections = connection_factory(vault, None)
     monkeypatch.setattr(VaultConnections, "SERVER_CLOSE_GRACE", .05)
     cleaned = []
 
@@ -749,7 +810,7 @@ def test_connections_close_still_retries_and_reports_server_close_errors() -> No
                 raise OSError("fixture close failure")
 
     server = FlakyServer()
-    connections = VaultConnections(SimpleNamespace(_shutdown=False), None)
+    connections = connection_factory(SimpleNamespace(_shutdown=False), None)
     cleaned = []
     with pytest.raises(OSError, match="fixture close failure"):
         asyncio.run(connections.close([server], [], lambda: cleaned.append(True)))
@@ -769,7 +830,9 @@ def test_native_generation_ping_accepts_legacy_full_response(
         "cli": "locked",
     }
 
-    def legacy_ping(request, host, port, timeout):
+    def legacy_ping(
+        request: dict[str, Any], host: str, port: int, timeout: float,
+    ) -> dict[str, Any]:
         assert request["action"] == "ping"
         assert timeout == .25
         return response
@@ -777,7 +840,7 @@ def test_native_generation_ping_accepts_legacy_full_response(
     monkeypatch.setattr(service, "_dial_tcp", legacy_ping)
     endpoint = Endpoint(
         "tcp", "127.0.0.1:12345", pid=123,
-        installation_id=generation.installation_id(),
+        installation_id=installation_id(),
     )
     assert generation.endpoint_health(endpoint) is response
 
@@ -791,12 +854,14 @@ def test_contextual_ping_retains_backend_status_and_expiration(
     vault = service.VaultService()
     monkeypatch.setattr(vault, "_check_password_ttl", lambda: calls.append("expiry"))
     monkeypatch.setattr(service, "resolve_kpdb", lambda **kwargs: "fixture.kdbx")
-    monkeypatch.setattr(
-        vault.cli, "status", lambda kpdb: calls.append(kpdb) or "locked",
-    )
+    def status(kpdb: str) -> str:
+        calls.append(kpdb)
+        return "locked"
+
+    monkeypatch.setattr(vault.cli, "status", status)
     response = vault.handle_request({"action": "ping", "kpdb": "fixture.kdbx"})
     assert response["cli"] == "locked"
-    assert response["runtime_generation"] == service.PROCESS_GENERATION
+    assert response["runtime_generation"] == generation.PROCESS_GENERATION
     assert calls == ["expiry", "fixture.kdbx"]
 
 
@@ -819,7 +884,7 @@ def test_legacy_ping_uses_the_resident_default_without_an_owner_lookup(
     monkeypatch.setattr(service, "resolve_kpdb", lambda **kwargs: str(database))
     vault.initialize()
 
-    def unavailable(**kwargs):
+    def unavailable(**kwargs: object) -> None:
         pytest.fail("Legacy generation ping repeated the configuration-owner lookup")
 
     monkeypatch.setattr(service, "resolve_kpdb", unavailable)
@@ -836,14 +901,16 @@ def test_legacy_ping_uses_the_resident_default_without_an_owner_lookup(
     )
     response = vault.handle_request({"action": "ping"})
     assert response["cli"] == "locked"
-    assert response["runtime_generation"] == service.PROCESS_GENERATION
+    assert response["runtime_generation"] == generation.PROCESS_GENERATION
     assert configuration_calls == []
     selections = iter(("first.kdbx", "second.kdbx"))
     monkeypatch.setattr(service, "resolve_kpdb", lambda **kwargs: next(selections))
     selected = []
-    monkeypatch.setattr(
-        vault, "has", lambda kpdb, *args: selected.append(kpdb) or True,
-    )
+    def has(kpdb: str, *args: object) -> bool:
+        selected.append(kpdb)
+        return True
+
+    monkeypatch.setattr(vault, "has", has)
     for _ in range(2):
         assert vault.handle_request({"action": "has", "entry": "fixture"})["exists"]
     assert selected == ["first.kdbx", "second.kdbx"]
@@ -1026,14 +1093,22 @@ asyncio.run(main())
 """
 
 
-def _endpoint(root: Path) -> dict | None:
-    endpoint = generation.read_endpoint(root / "run")
+def _endpoint(root: Path) -> dict[str, Any] | None:
+    endpoint = read_endpoint(root / "run")
     return endpoint.to_record() if endpoint is not None else None
 
 
-def _target(endpoint: dict) -> int | str:
+def _required_endpoint(root: Path) -> dict[str, Any]:
+    endpoint = _endpoint(root)
+    assert endpoint is not None
+    return endpoint
+
+
+def _target(endpoint: dict[str, Any] | None) -> int | str:
+    assert endpoint is not None
     if endpoint["transport"] == "unix":
-        return endpoint["endpoint"]
+        address: str = endpoint["endpoint"]
+        return address
     candidates = [endpoint, *endpoint.get("alt", [])]
     return next(
         int(item["endpoint"].rsplit(":", 1)[1])
@@ -1041,7 +1116,9 @@ def _target(endpoint: dict) -> int | str:
     )
 
 
-def _send(target: int | str, request: dict, *, timeout: float = 10) -> dict:
+def _send(
+    target: int | str, request: dict[str, Any], *, timeout: float = 10,
+) -> dict[str, Any]:
     if isinstance(target, str):
         connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         try:
@@ -1056,36 +1133,39 @@ def _send(target: int | str, request: dict, *, timeout: float = 10) -> dict:
         connection.settimeout(timeout)
         connection.sendall((json.dumps(request) + "\n").encode())
         with connection.makefile("rb") as stream:
-            return json.loads(stream.readline())
+            response: dict[str, Any] = json.loads(stream.readline())
+            return response
 
 
 def _serving(port: int | str, pid: int) -> bool:
     try:
-        return _send(port, {"action": "ping"}).get("pid") == pid
+        return bool(_send(port, {"action": "ping"}).get("pid") == pid)
     except (OSError, ValueError):
         return False
 
 
-def test_unix_only_discovery_uses_the_advertised_native_transport(monkeypatch):
+def test_unix_only_discovery_uses_the_advertised_native_transport(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     events = []
 
     class Connection:
-        def __enter__(self):
+        def __enter__(self) -> Connection:
             return self
 
-        def __exit__(self, *_):
+        def __exit__(self, *_: object) -> None:
             pass
 
-        def settimeout(self, value):
+        def settimeout(self, value: float) -> None:
             pass
 
-        def connect(self, target):
+        def connect(self, target: str) -> None:
             events.append(target)
 
-        def sendall(self, payload):
+        def sendall(self, payload: bytes) -> None:
             assert json.loads(payload)["action"] == "ping"
 
-        def makefile(self, mode):
+        def makefile(self, mode: str) -> BytesIO:
             from io import BytesIO
             return BytesIO(b'{"ok":true,"pid":123}\n')
 
@@ -1096,7 +1176,7 @@ def test_unix_only_discovery_uses_the_advertised_native_transport(monkeypatch):
     assert events == ["fixture.sock"]
 
 
-def _until(predicate: Callable[[], bool], processes: list[subprocess.Popen], timeout: float = 15) -> None:
+def _until(predicate: Callable[[], object], processes: list[OwnedChild], timeout: float = 15) -> None:
     deadline = time.monotonic() + timeout
     while not predicate():
         for process in processes:
@@ -1108,7 +1188,7 @@ def _until(predicate: Callable[[], bool], processes: list[subprocess.Popen], tim
         time.sleep(.02)
 
 
-def _start(root: Path, identity: str, port: int, mode: str = "normal") -> subprocess.Popen:
+def _start(root: Path, identity: str, port: int, mode: str = "normal") -> OwnedChild:
     from agent_procutil.daemon_instances import DaemonInstanceSpec, spawn_instance
 
     env = {
@@ -1125,7 +1205,8 @@ def _start(root: Path, identity: str, port: int, mode: str = "normal") -> subpro
         }
         else Path(generation.__file__).with_name("service.py")
     )
-    return spawn_instance(
+    spawn: SpawnChild = spawn_instance
+    return spawn(
         [sys.executable, "-c", CHILD, str(root), identity, str(port), mode],
         instance=DaemonInstanceSpec("agent-vault", root, source, purpose="unattended-test"),
         stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -1133,7 +1214,7 @@ def _start(root: Path, identity: str, port: int, mode: str = "normal") -> subpro
     )
 
 
-def _settle(root: Path, processes: list[subprocess.Popen]) -> list[str]:
+def _settle(root: Path, processes: list[OwnedChild]) -> list[str]:
     from agent_procutil.daemon_instances import cleanup_instance
 
     (root / "backend.release").touch()
@@ -1183,12 +1264,12 @@ def _capture_process(pid: int) -> PeerProcess:
         handle = api.k.OpenProcess(0x1000 | 0x100000, False, pid)
         assert handle
         return PeerProcess(handle, api.identity(handle, pid), api=api)
-    return PeerProcess(
-        os.pidfd_open(pid), PeerIdentity(pid, process_start_time(pid), str(os.geteuid())),
-    )
+    identity = process_start_time(pid)
+    assert identity is not None
+    return PeerProcess(os.pidfd_open(pid), PeerIdentity(pid, identity, str(os.geteuid())))
 
 
-def _retain_fixture_job(name: str):
+def _retain_fixture_job(name: str) -> JobHandle:
     import ctypes
     from ctypes import wintypes
     from agent_procutil import JobHandle, _kernel32
@@ -1197,7 +1278,7 @@ def _retain_fixture_job(name: str):
     kernel.OpenJobObjectW.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.LPCWSTR]
     kernel.OpenJobObjectW.restype = wintypes.HANDLE
     handle = kernel.OpenJobObjectW(0x0004, False, name)
-    assert handle, ctypes.get_last_error()
+    assert handle, getattr(ctypes, "get_last_error")()
     return JobHandle(handle, name=name)
 
 
@@ -1224,7 +1305,7 @@ def test_real_successor_is_ready_before_self_retirement_and_cannot_overlap_write
     old_lifetime = None
     try:
         _until(lambda: _endpoint(tmp_path) is not None, children)
-        initial = _endpoint(tmp_path)
+        initial = _required_endpoint(tmp_path)
         old_pid = initial["pid"]
         old_identity = process_start_time(old_pid)
         assert old_identity
@@ -1241,7 +1322,7 @@ def test_real_successor_is_ready_before_self_retirement_and_cannot_overlap_write
             new = _start(tmp_path, "older", fixed_port, incoming_mode)
             children.append(new)
             _until(lambda: (_endpoint(tmp_path) or {}).get("pid") not in {None, old_pid}, children)
-            endpoint = _endpoint(tmp_path)
+            endpoint = _required_endpoint(tmp_path)
             new_pid = endpoint["pid"]
             assert process_start_time(new_pid)
             new_port = _target(endpoint)
@@ -1266,7 +1347,7 @@ def test_real_successor_is_ready_before_self_retirement_and_cannot_overlap_write
         assert _send(new_port, {"action": "ping"})["unlocked_vaults"] == (
             [str(durable)] if warm else []
         )
-        assert _endpoint(tmp_path)["pid"] == new_pid
+        assert _required_endpoint(tmp_path)["pid"] == new_pid
         assert int((tmp_path / "vault.pid").read_text()) == new_pid
         (tmp_path / "older.release").touch()
         assert _send(new_port, {"action": "has", "kpdb": str(durable), "entry": "fixture"})["ok"]
@@ -1327,7 +1408,7 @@ assert (root / "current-version").read_text().strip() == "newer"
     with ThreadPoolExecutor(max_workers=2) as worker:
         try:
             _until(lambda: _endpoint(tmp_path) is not None, children)
-            endpoint = _endpoint(tmp_path)
+            endpoint = _required_endpoint(tmp_path)
             pid = endpoint["pid"]
             birth = birth_identity(pid)
             pending = worker.submit(
@@ -1340,13 +1421,12 @@ assert (root / "current-version").read_text().strip() == "newer"
             new = _start(tmp_path, "older", 0, "rollback-successor")
             children.append(new)
             _until(lambda: (tmp_path / "retire.ready").exists(), children)
-            competing = worker.submit(
-                subprocess.run,
+            competing = worker.submit(lambda: subprocess.run(
                 [sys.executable, "-c", rollback, str(tmp_path),
                  str(Path(__file__).parent.parent / "scripts" / "versioned_runtime.py"),
                  str(pid), birth],
                 capture_output=True, text=True, timeout=12, **no_window_kwargs(),
-            )
+            ))
             _until(lambda: (tmp_path / "rollback.blocked").exists(), [new])
             assert old.poll() is None
             assert not (tmp_path / "rollback.acquired").exists()
@@ -1424,7 +1504,7 @@ def test_native_resume_pin_survives_reselection_and_shutdown_until_settled(
     with ThreadPoolExecutor(max_workers=1) as worker:
         try:
             _until(lambda: _endpoint(tmp_path) is not None, children)
-            first = _endpoint(tmp_path)
+            first = _required_endpoint(tmp_path)
             pending = worker.submit(
                 _send, _target(first),
                 {"action": "has", "kpdb": str(tmp_path / "fixture.kdbx"), "entry": "fixture"},
@@ -1435,7 +1515,7 @@ def test_native_resume_pin_survives_reselection_and_shutdown_until_settled(
             new = _start(tmp_path, "older", 0, "resume-failure-successor")
             children.append(new)
             _until(lambda: (_endpoint(tmp_path) or {}).get("pid") not in {None, first["pid"]}, children)
-            incoming = _endpoint(tmp_path)
+            incoming = _required_endpoint(tmp_path)
             target = _target(incoming)
             _until(
                 lambda: _send(target, {"action": "ping"})["predecessor_retirement"] == "refused-native-resume",
@@ -1491,7 +1571,7 @@ def test_invalid_relay_successor_preserves_running_predecessor_endpoints(tmp_pat
     children = [old]
     try:
         _until(lambda: _endpoint(tmp_path) is not None, children)
-        before = _endpoint(tmp_path)
+        before = _required_endpoint(tmp_path)
         pid_file = tmp_path / "vault.pid"
         previous_pid = pid_file.read_bytes()
         (tmp_path / "federated-relay.json").write_text(json.dumps({
@@ -1538,11 +1618,11 @@ def test_missing_or_unattributable_sdk_cannot_retire_a_predecessor(
     monkeypatch.setattr(service, "run_dir", lambda: tmp_path / "run")
     monkeypatch.setattr(generation, "home_dir", lambda: tmp_path)
     monkeypatch.setattr(generation, "PROCESS_SLOT", tmp_path if layout == "foreign-slot" else slot)
-    controller = generation.ServiceGeneration(SimpleNamespace(), SimpleNamespace(), [], [])
-    controller.predecessor = SimpleNamespace(
+    controller = controller_factory(SimpleNamespace(), SimpleNamespace(), [], [])
+    monkeypatch.setattr(controller, "predecessor", SimpleNamespace(
         retire=lambda *_: pytest.fail("No selector custody permits native retirement"),
-    )
-    guard = generation.selection_custody(tmp_path, slot) if layout == "busy" else nullcontext()
+    ))
+    guard = selection_custody(tmp_path, slot) if layout == "busy" else nullcontext()
     with guard:
         assert controller._retire_previous() == "refused-selection-custody"
     controller.publication.acquire()
@@ -1566,7 +1646,7 @@ def test_native_repeated_replacement_excludes_the_actual_older_writer(
     lifetime = None
     try:
         _until(lambda: _endpoint(tmp_path) is not None, children)
-        first = _endpoint(tmp_path)
+        first = _required_endpoint(tmp_path)
         lifetime = _capture_process(first["pid"])
         with ThreadPoolExecutor(max_workers=1) as worker:
             pending = worker.submit(
@@ -1578,7 +1658,7 @@ def test_native_repeated_replacement_excludes_the_actual_older_writer(
             middle = _start(tmp_path, "middle", 0, "passive-legacy")
             children.append(middle)
             _until(lambda: (_endpoint(tmp_path) or {}).get("pid") not in {None, first["pid"]}, children)
-            second = _endpoint(tmp_path)
+            second = _required_endpoint(tmp_path)
             assert not _send(_target(second), {"action": "ping"})["accepting_work"]
             (tmp_path / "current-version").write_text("older")
             new = _start(tmp_path, "older", 0, "bounded-successor")
@@ -1587,7 +1667,7 @@ def test_native_repeated_replacement_excludes_the_actual_older_writer(
                 lambda: (_endpoint(tmp_path) or {}).get("pid") not in {None, first["pid"], second["pid"]},
                 [new],
             )
-            incoming = _endpoint(tmp_path)
+            incoming = _required_endpoint(tmp_path)
             port = _target(incoming)
             _until(lambda: _send(port, {"action": "ping"})["accepting_work"], [new], timeout=8)
             lifetime.wait_exit(Deadline(1))
@@ -1599,7 +1679,7 @@ def test_native_repeated_replacement_excludes_the_actual_older_writer(
             (tmp_path / "older.release").touch()
             assert _send(port, {"action": "has", "kpdb": str(durable), "entry": "fixture"})["ok"]
             assert durable.read_bytes() == b"fixture durable bytes"
-            assert _endpoint(tmp_path)["pid"] == incoming["pid"]
+            assert _required_endpoint(tmp_path)["pid"] == incoming["pid"]
             if os.name != "nt":
                 _until(lambda: _serving(str(tmp_path / "vault.sock"), incoming["pid"]), [new])
     finally:
@@ -1623,7 +1703,7 @@ def test_successive_cold_replacements_recover_the_fixed_unix_alias(tmp_path: Pat
     fixed = str(tmp_path / "vault.sock")
     try:
         _until(lambda: _endpoint(tmp_path) is not None, children)
-        endpoint = _endpoint(tmp_path)
+        endpoint = _required_endpoint(tmp_path)
         for outgoing, incoming in zip(identities, identities[1:]):
             _until(lambda: _serving(fixed, endpoint["pid"]), [children[-1]])
             with ThreadPoolExecutor(max_workers=1) as worker:
@@ -1638,7 +1718,7 @@ def test_successive_cold_replacements_recover_the_fixed_unix_alias(tmp_path: Pat
                 children.append(new)
                 old_pid = endpoint["pid"]
                 _until(lambda: (_endpoint(tmp_path) or {}).get("pid") not in {None, old_pid}, [new])
-                endpoint = _endpoint(tmp_path)
+                endpoint = _required_endpoint(tmp_path)
                 assert endpoint["endpoint"] != fixed
                 _until(lambda: _send(_target(endpoint), {"action": "ping"})["accepting_work"], [new])
                 previous.communicate(timeout=2)
@@ -1671,7 +1751,7 @@ def test_windows_alias_retries_after_discovery_exit_while_older_transport_surviv
     children = [old]
     try:
         _until(lambda: _endpoint(tmp_path) is not None, children)
-        first = _endpoint(tmp_path)
+        first = _required_endpoint(tmp_path)
         assert first["transport"] == "pipe"
         with ThreadPoolExecutor(max_workers=1) as worker:
             pending = worker.submit(
@@ -1683,7 +1763,7 @@ def test_windows_alias_retries_after_discovery_exit_while_older_transport_surviv
             middle = _start(tmp_path, "middle", fixed_port, "passive-legacy")
             children.append(middle)
             _until(lambda: (_endpoint(tmp_path) or {}).get("pid") not in {None, first["pid"]}, children)
-            second = _endpoint(tmp_path)
+            second = _required_endpoint(tmp_path)
             (tmp_path / "newer.release").touch()
             assert pending.result(timeout=10)["ok"]
             _until(lambda: (tmp_path / "cleanup.entered").exists(), children)
@@ -1695,7 +1775,7 @@ def test_windows_alias_retries_after_discovery_exit_while_older_transport_surviv
             lambda: (_endpoint(tmp_path) or {}).get("pid") not in {None, first["pid"], second["pid"]},
             [new],
         )
-        incoming = _endpoint(tmp_path)
+        incoming = _required_endpoint(tmp_path)
         _until(lambda: _send(_target(incoming), {"action": "ping"})["accepting_work"], [new])
         middle.communicate(timeout=3)
         assert middle.returncode == 0 and old.poll() is None
@@ -1723,7 +1803,7 @@ def test_failed_successor_does_not_remove_or_stop_the_incumbent(tmp_path: Path) 
     children = [old]
     try:
         _until(lambda: _endpoint(tmp_path) is not None, children)
-        endpoint = _endpoint(tmp_path)
+        endpoint = _required_endpoint(tmp_path)
         old_port = _target(endpoint)
         (tmp_path / "current-version").write_text("older")
         failed = _start(tmp_path, "older", 0, "fail")
@@ -1758,7 +1838,7 @@ def test_native_hung_predecessor_preserves_grace_then_excludes_only_its_writer(
     lifetime = None
     try:
         _until(lambda: _endpoint(tmp_path) is not None, children)
-        initial = _endpoint(tmp_path)
+        initial = _required_endpoint(tmp_path)
         old_pid, old_port = initial["pid"], _target(initial)
         lifetime = _capture_process(old_pid)
         if old_mode == "backend-work":
@@ -1780,7 +1860,7 @@ def test_native_hung_predecessor_preserves_grace_then_excludes_only_its_writer(
                 new = _start(tmp_path, "older", 0, "bounded-successor")
                 children.append(new)
             _until(lambda: (_endpoint(tmp_path) or {}).get("pid") not in {None, old_pid}, children)
-            incoming = _endpoint(tmp_path)
+            incoming = _required_endpoint(tmp_path)
             port, pid = _target(incoming), incoming["pid"]
             assert old.poll() is None
             assert not _send(port, {"action": "ping"})["accepting_work"]
@@ -1827,7 +1907,7 @@ def test_native_hung_predecessor_preserves_grace_then_excludes_only_its_writer(
             health = _send(port, {"action": "ping"})
             assert health["predecessor_retirement"] in {"cold-retired", "exited"}
             assert health["unlocked_vaults"] == ([str(durable)] if old_mode != "hung-work" else [])
-            assert _endpoint(tmp_path)["pid"] == pid
+            assert _required_endpoint(tmp_path)["pid"] == pid
             if os.name != "nt":
                 from agent_vault import service
 

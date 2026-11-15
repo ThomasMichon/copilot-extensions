@@ -4,10 +4,15 @@ import asyncio
 import hashlib
 import json
 import sys
+import threading
 import time
+from collections.abc import Awaitable, Callable
+from contextlib import AbstractAsyncContextManager
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, Protocol
 
+import aiohttp
 import pytest
 
 REPO = Path(__file__).resolve().parents[3]
@@ -17,9 +22,35 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from agent_vault import config, service, service_generation
 from credential_relay.sources.az_login import AzLoginSource
 from credential_relay.sources.gh_auth import GhAuthSource
-from gateway_service_transport_fixtures import eventually, running
-from test_gateway_connect_route import conduit
+from fleet_manager.gateway_connect_route import LoopbackRoute
+from gateway_service_transport_fixtures import Rig, eventually as _eventually, running as _running
+from test_gateway_connect_route import conduit as _conduit
 from test_federated_relay_config import selection
+
+running: Callable[[Path], AbstractAsyncContextManager[Rig]] = _running
+conduit: Callable[
+    [str], AbstractAsyncContextManager[tuple[LoopbackRoute, list[asyncio.StreamWriter]]],
+] = _conduit
+_wait: Callable[[Callable[[], object], float], Awaitable[None]] = _eventually
+
+
+async def eventually(predicate: Callable[[], object], timeout: float = 3) -> None:
+    await _wait(predicate, timeout)
+
+
+class Publisher(Protocol):
+    def __call__(self, **changes: object) -> None: ...
+
+
+class GatewayRequest(Protocol):
+    def __call__(
+        self, path: str = "/api", method: str = "GET", **kwargs: Any,
+    ) -> Awaitable[aiohttp.ClientResponse]: ...
+
+
+def gateway_request(rig: Rig) -> GatewayRequest:
+    request: GatewayRequest = rig.request
+    return request
 
 CAPABILITY = "synthetic-explicit-source-capability-0001"
 FIELDS = {
@@ -28,7 +59,53 @@ FIELDS = {
 }
 
 
-def isolate_vault(root, monkeypatch):
+@pytest.mark.parametrize("cancel", [False, True])
+def test_federated_shutdown_withdraws_before_pending_warm_worker_settles(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, cancel: bool,
+) -> None:
+    from agent_vault.cache_warm import CacheWarmRuntime, WarmRequest
+
+    root = tmp_path / "vault"
+    isolate_vault(root, monkeypatch)
+    started, release = threading.Event(), threading.Event()
+
+    def pending_worker(self: CacheWarmRuntime, request: WarmRequest) -> None:
+        started.set()
+        assert release.wait(15)
+
+    monkeypatch.setattr(CacheWarmRuntime, "_run", pending_worker)
+
+    async def scenario() -> None:
+        async with running(tmp_path) as rig:
+            async with conduit(rig.origin) as (route, _):
+                configure(root, rig, route, monkeypatch)
+                vault = service.VaultService()
+                vault.ttl_override = 0
+                request = WarmRequest("synthetic.kdbx", "", 0, object(), time.monotonic() + 60, ())
+                pending = [request]
+                monkeypatch.setattr(vault._cache_warm, "take", lambda: pending.pop() if pending else None)
+                task = asyncio.create_task(service.run_server(vault, tcp_port=0))
+                try:
+                    await eventually(started.is_set)
+                    await eventually(lambda: bool(rig.state.service_offers("vault-available-v1")), 5)
+                    vault._shutdown = True
+                    if cancel:
+                        task.cancel()
+                    await eventually(lambda: vault._cache_warm.closed)
+                    await eventually(lambda: not rig.state.service_offers("vault-available-v1"))
+                    assert not task.done()
+                    assert vault._generation.has_writer
+                    assert not release.is_set()
+                finally:
+                    release.set()
+                    vault._shutdown = True
+                    await asyncio.gather(task, return_exceptions=cancel)
+                assert not vault._generation.has_writer
+
+    asyncio.run(scenario())
+
+
+def isolate_vault(root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root.mkdir()
     monkeypatch.setenv(config.HOME_ENV, str(root))
     monkeypatch.setattr(service, "run_dir", lambda: root / "run")
@@ -42,17 +119,25 @@ def isolate_vault(root, monkeypatch):
     monkeypatch.setattr(service.VaultService, "_check_password_ttl", lambda _: None)
 
 
-def configure(root, rig, route, monkeypatch, *, native_admission=False):
+def configure(
+    root: Path, rig: Rig, route: LoopbackRoute, monkeypatch: pytest.MonkeyPatch,
+    *, native_admission: bool = False,
+) -> tuple[list[tuple[str | None, str, dict[str, Any]]], Publisher]:
     from cryptography.hazmat.primitives import serialization
 
-    calls = []
+    calls: list[tuple[str | None, str, dict[str, Any]]] = []
 
-    async def azure(self, action, fields, *, timeout):
+    async def azure(
+        self: AzLoginSource, action: str, fields: dict[str, Any], *, timeout: float,
+    ) -> str:
         assert action == "get-azure-token" and fields == {
             "resource": "gateway-admission", "tenant": "test-tenant"}
-        return "token=" + rig.access("service-a", 1) + "\n"
+        access: Callable[[str, int], str] = rig.access
+        return "token=" + access("service-a", 1) + "\n"
 
-    async def github(self, action, fields, *, timeout):
+    async def github(
+        self: GhAuthSource, action: str, fields: dict[str, Any], *, timeout: float,
+    ) -> str:
         calls.append((self._account, action, fields))
         return "protocol=https\nhost=github.com\nusername=account-a\ntoken=synthetic-secret\n\n"
 
@@ -80,7 +165,7 @@ def configure(root, rig, route, monkeypatch, *, native_admission=False):
     (root / "policy.json").write_text(json.dumps(policy))
     (root / "federated-relay.json").write_text(json.dumps(value))
 
-    def publish(**changes):
+    def publish(**changes: object) -> None:
         (root / "conduit.json").write_text(json.dumps({
             "schema": "fleet-manager.gateway-conduit", "version": 2,
             "gateway_origin": rig.origin, "connect_host": route.host, "connect_port": route.port,
@@ -93,12 +178,12 @@ def configure(root, rig, route, monkeypatch, *, native_admission=False):
 
 
 def test_running_vault_authorized_consumer_denial_conduit_loss_and_shutdown(
-    tmp_path, monkeypatch, caplog,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture,
+) -> None:
     root = tmp_path / "vault"
     isolate_vault(root, monkeypatch)
 
-    async def scenario():
+    async def scenario() -> None:
         async with running(tmp_path) as rig:
             async with conduit(rig.origin) as (route, _):
                 calls, publish = configure(root, rig, route, monkeypatch)
@@ -109,11 +194,13 @@ def test_running_vault_authorized_consumer_denial_conduit_loss_and_shutdown(
                     await eventually(lambda: bool(rig.state.service_offers("vault-available-v1")), 5)
                     assert not task.done()
                     assert vault._generation.has_writer and vault._generation.hooks_started
-                    await eventually(lambda: vault._federated_relay.status()["channel_attached"])
+                    relay = vault._federated_relay
+                    assert relay is not None
+                    await eventually(lambda: relay.status()["channel_attached"])
                     pin = {"X-Agent-Index-Installation-Id": "vault-test"}
 
-                    async def request(expected=200, **changes):
-                        async with await rig.request(
+                    async def request(expected: int = 200, **changes: object) -> dict[str, Any]:
+                        async with await gateway_request(rig)(
                             "/api/source-credentials", "POST", headers=pin,
                             json=FIELDS | {"capability": CAPABILITY,
                                            "lease_contract": "credential-relay.account-source-lease/v1"}
@@ -121,9 +208,10 @@ def test_running_vault_authorized_consumer_denial_conduit_loss_and_shutdown(
                         ) as response:
                             assert response.status == expected
                             assert response.headers["Cache-Control"] == "no-store"
-                            return await response.json()
+                            body: dict[str, Any] = await response.json()
+                            return body
 
-                    async with await rig.request("/api/health", headers=pin) as response:
+                    async with await gateway_request(rig)("/api/health", headers=pin) as response:
                         assert response.status == 200 and calls == []
                     result = await request()
                     assert result["token"] == "synthetic-secret"
@@ -144,7 +232,7 @@ def test_running_vault_authorized_consumer_denial_conduit_loss_and_shutdown(
                     vault._shutdown = True
                     await asyncio.wait_for(task, 5)
                 await eventually(lambda: not rig.state.service_offers("vault-available-v1"))
-                assert vault._federated_relay.status() == {
+                assert relay.status() == {
                     "state": "stopped", "channel_attached": False}
                 assert not (root / "account-relay-port.json").exists()
                 assert rig.backends[0].requests == []
@@ -153,23 +241,33 @@ def test_running_vault_authorized_consumer_denial_conduit_loss_and_shutdown(
     assert CAPABILITY not in caplog.text and "synthetic-secret" not in caplog.text
 
 
-@pytest.mark.parametrize("observation", ["expired", "foreign", "unsupported"])
-def test_invalid_conduit_never_authenticates_or_advertises(tmp_path, monkeypatch, observation):
+@pytest.mark.parametrize("observation", [
+    "expired", "foreign", "unsupported", "huge-integer", "infinite", "nan", "boolean",
+])
+def test_invalid_conduit_never_authenticates_or_advertises(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, observation: str,
+) -> None:
     from agent_vault.federated_relay import selected_relay
 
     root = tmp_path / "vault"
     isolate_vault(root, monkeypatch)
 
-    async def scenario():
+    async def scenario() -> None:
         async with running(tmp_path) as rig:
             async with conduit(rig.origin) as (route, connections):
                 calls, publish = configure(root, rig, route, monkeypatch)
-                publish(**{
+                invalid: dict[str, dict[str, object]] = {
                     "expired": {"expires_at": time.time() - 1},
                     "foreign": {"gateway_origin": "https://foreign.invalid"},
                     "unsupported": {"version": 3},
-                }[observation])
+                    "huge-integer": {"expires_at": 10**400},
+                    "infinite": {"expires_at": float("inf")},
+                    "nan": {"expires_at": float("nan")},
+                    "boolean": {"expires_at": True},
+                }
+                publish(**invalid[observation])
                 runtime = selected_relay()
+                assert runtime is not None
                 try:
                     await runtime.tick()
                     assert runtime.status() == {
@@ -181,14 +279,14 @@ def test_invalid_conduit_never_authenticates_or_advertises(tmp_path, monkeypatch
 
 
 def test_unchanged_observation_cannot_outlive_monotonic_cap_after_clock_regression(
-    tmp_path, monkeypatch,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from agent_vault import federated_relay
 
     root = tmp_path / "vault"
     isolate_vault(root, monkeypatch)
 
-    async def scenario():
+    async def scenario() -> None:
         async with running(tmp_path) as rig:
             async with conduit(rig.origin) as (route, _):
                 _, publish = configure(root, rig, route, monkeypatch)
@@ -197,6 +295,7 @@ def test_unchanged_observation_cannot_outlive_monotonic_cap_after_clock_regressi
                     time=lambda: wall, monotonic=lambda: monotonic)
                 monkeypatch.setattr(federated_relay, "time", clock)
                 runtime = federated_relay.selected_relay()
+                assert runtime is not None
                 try:
                     publish(expires_at=wall + 8)
                     runtime._conduit()
@@ -210,30 +309,32 @@ def test_unchanged_observation_cannot_outlive_monotonic_cap_after_clock_regressi
 
 
 def test_failed_channel_budget_is_bounded_and_new_controller_generation_can_retry(
-    tmp_path, monkeypatch,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import aiohttp
     from agent_vault import federated_relay
 
     root = tmp_path / "vault"
     isolate_vault(root, monkeypatch)
 
-    async def scenario():
+    async def scenario() -> None:
         async with running(tmp_path) as rig:
             unused = await asyncio.start_server(lambda r, w: w.close(), "127.0.0.1", 0)
             port = unused.sockets[0].getsockname()[1]
             unused.close()
             await unused.wait_closed()
-            route = SimpleNamespace(host="127.0.0.1", port=port)
+            route = LoopbackRoute(host="127.0.0.1", port=port)
             calls, publish = configure(root, rig, route, monkeypatch)
             wall, monotonic = time.time(), time.monotonic()
             monkeypatch.setattr(federated_relay, "time", SimpleNamespace(
                 time=lambda: wall, monotonic=lambda: monotonic))
             runtime = federated_relay.selected_relay()
+            assert runtime is not None
             try:
                 await runtime.tick()
                 for failure in range(5):
                     with pytest.raises((aiohttp.ClientError, OSError)):
+                        assert runtime._task is not None
                         await runtime._task
                     await runtime.tick()
                     previous = runtime._task

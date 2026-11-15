@@ -7,6 +7,11 @@ import logging
 import math
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from fleet_manager.gateway_connect_route import LoopbackRoute
+    from fleet_manager.gateway_service_connector import ServiceConnector
 
 from . import federated_relay_config as config
 from .config import home_dir
@@ -14,13 +19,13 @@ from .config import home_dir
 LOG = logging.getLogger(__name__)
 
 
-def selected_relay():
+def selected_relay() -> RelayRuntime | None:
     selected = config.load(home_dir())
     return RelayRuntime(selected) if selected is not None else None
 
 
 class RelayRuntime:
-    def __init__(self, selected: dict) -> None:
+    def __init__(self, selected: config.Selection) -> None:
         try:
             from cryptography.hazmat.primitives import serialization
             from cryptography.hazmat.primitives.asymmetric import ec
@@ -35,12 +40,13 @@ class RelayRuntime:
         self._origin = origin(selected["gateway_origin"])
         if self._origin != selected["gateway_origin"]:
             raise ValueError("relay-gateway-origin-not-canonical")
-        self._key = serialization.load_pem_private_key(
+        key = serialization.load_pem_private_key(
             config.read_reference(Path(selected["proof_key_file"]), 16384), password=None)
-        if not isinstance(self._key, ec.EllipticCurvePrivateKey) or not isinstance(
-            self._key.curve, ec.SECP256R1,
+        if not isinstance(key, ec.EllipticCurvePrivateKey) or not isinstance(
+            key.curve, ec.SECP256R1,
         ):
             raise ValueError("relay-proof-key-invalid")
+        self._key = key
         verified_tls(selected["gateway_ca"])
         self._source = AccountRelay(selected["account_policy_file"])
         self._handler = AccountSourceHandler(
@@ -54,23 +60,26 @@ class RelayRuntime:
         if auth["kind"] == "az-login":
             from credential_relay.sources.az_login import AzLoginSource
             self._access = AzLoginSource(allowed_resources=[auth["resource"]])
-        self._connector = None
-        self._task: asyncio.Task | None = None
-        self._generation = None
-        self._route = None
+        self._connector: ServiceConnector | None = None
+        self._task: asyncio.Task[None] | None = None
+        self._generation: str | None = None
+        self._route: LoopbackRoute | None = None
         self._failures = 0
         self._retry_at = 0.0
-        self._attached_at = None
-        self._observation = None
+        self._attached_at: float | None = None
+        self._observation: tuple[object, object, object, object] | None = None
         self._observation_deadline = 0.0
         self._closing = False
-        self._status = {"state": "waiting-conduit", "channel_attached": False}
+        self._status: dict[str, str | bool] = {
+            "state": "waiting-conduit", "channel_attached": False}
 
-    def status(self) -> dict:
+    def status(self) -> dict[str, str | bool]:
         return dict(self._status)
 
     async def _access_token(self) -> str:
         auth = self._selected["auth"]
+        if auth["kind"] != "az-login" or self._access is None:
+            raise ValueError("relay-admission-token-unavailable")
         raw = await self._access.resolve(
             "get-azure-token", {"resource": auth["resource"], "tenant": auth["tenant"]},
             timeout=5,
@@ -87,7 +96,7 @@ class RelayRuntime:
             raise ValueError("relay-admission-token-unavailable")
         return token
 
-    def _conduit(self):
+    def _conduit(self) -> tuple[str, LoopbackRoute]:
         from fleet_manager.gateway_connect_route import LoopbackRoute
         value = config.document(Path(self._selected["conduit_file"]))
         fields = {
@@ -99,8 +108,8 @@ class RelayRuntime:
                 or type(value["version"]) is not int or value["version"] != 2
                 or value["gateway_origin"] != self._origin or value["state"] != "ready"
                 or type(value["expires_at"]) not in (int, float)
-                or not math.isfinite(value["expires_at"])
-                or not now < value["expires_at"] <= now + 10):
+                or not now < value["expires_at"] <= now + 10
+                or not math.isfinite(value["expires_at"])):
             raise ValueError("relay-conduit-unavailable")
         observed = (value["generation"], value["connect_host"], value["connect_port"],
                     value["expires_at"])
@@ -113,17 +122,17 @@ class RelayRuntime:
         generation = config.text(value["generation"])
         return generation, LoopbackRoute(value["connect_host"], value["connect_port"])
 
-    def _connect(self, route):
+    def _connect(self, route: LoopbackRoute) -> None:
         from fleet_manager.gateway_service_connector import ServiceConnector
         auth, selected = self._selected["auth"], self._selected
-        identity = (
-            {"machine_principal": auth["principal"], "machine_audience": auth["audience"]}
-            if auth["kind"] == "machine" else {"access_token_callback": self._access_token}
-        )
         self._connector = ServiceConnector(
             slot=selected["slot"], gateway_origin=self._origin, gateway_route=route,
             gateway_ca=selected["gateway_ca"], proof_key=self._key, handler=self._handler,
-            services=self._services, **identity)
+            services=self._services,
+            machine_principal=auth["principal"] if auth["kind"] == "machine" else None,
+            machine_audience=auth["audience"] if auth["kind"] == "machine" else None,
+            access_token_callback=self._access_token if auth["kind"] == "az-login" else None,
+        )
         self._task = asyncio.create_task(self._connector.connect_once())
 
     async def _disconnect(self) -> None:
@@ -169,7 +178,8 @@ class RelayRuntime:
             return
         if self._task is None and now >= self._retry_at:
             self._connect(route)
-        attached = self._task is not None and self._connector.connected.is_set()
+        attached = (self._task is not None and self._connector is not None
+                    and self._connector.connected.is_set())
         if attached and self._attached_at is None:
             self._attached_at = now
         self._status = {
