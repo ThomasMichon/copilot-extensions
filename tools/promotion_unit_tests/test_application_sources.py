@@ -5,6 +5,7 @@ import ast
 from pathlib import Path
 import sys
 import time
+from typing import Any, Callable, cast
 
 import pytest
 from packaging.utils import canonicalize_name
@@ -20,7 +21,7 @@ from runtime_profile import ProfileError, _requirement
 
 
 @pytest.fixture(autouse=True)
-def marker_environment(monkeypatch):
+def marker_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "packaging.markers.default_environment",
         lambda: {"extra": "", "python_full_version": "3.12.0"},
@@ -28,22 +29,22 @@ def marker_environment(monkeypatch):
 
 
 @pytest.fixture(scope="module")
-def registry_roots():
+def registry_roots() -> Callable[..., list[str]]:
     source = ROOT / "tools" / "local_install_profile.py"
     tree = ast.parse(source.read_bytes(), filename=str(source))
-    selected = [
+    selected: list[ast.stmt] = [
         node for node in tree.body
         if isinstance(node, ast.ImportFrom) and node.module == "__future__"
         or isinstance(node, ast.FunctionDef) and node.name == "registry_roots"
     ]
     assert len(selected) == 2
-    namespace = {
+    namespace: dict[str, Any] = {
         "__name__": "unit_application_sources", "_check_deadline": _check_deadline,
         "_requirement": _requirement, "canonicalize_name": canonicalize_name,
         "ProfileError": ProfileError,
     }
     exec(compile(ast.Module(body=selected, type_ignores=[]), str(source), "exec"), namespace)
-    return namespace["registry_roots"]
+    return cast(Callable[..., list[str]], namespace["registry_roots"])
 
 
 @pytest.mark.parametrize(("selected", "owner"), [
@@ -52,11 +53,13 @@ def registry_roots():
     (True, None),
     (True, "different"),
 ], ids=["default", "selected", "missing", "different"])
-def test_declared_application_is_required_only_when_selected(registry_roots, selected, owner):
+def test_declared_application_is_required_only_when_selected(
+    registry_roots: Callable[..., list[str]], selected: bool, owner: str | None,
+) -> None:
     sources = application_sources({"tool": {"copilot-extensions": {
         "application-sources": {"sdk": "standalone:fleet-manager"},
     }}})
-    wheels = {"consumer": {
+    wheels: dict[str, dict[str, Any]] = {"consumer": {
         "version": "1", "provides_extras": ["feature"],
         "requires_dist": ['sdk>=1; extra == "feature"'],
         "application_sources": sources,
@@ -81,14 +84,16 @@ def test_declared_application_is_required_only_when_selected(registry_roots, sel
     {"sdk": "../outside"},
     {"some-sdk": "plugin", "SOME_SDK": "plugin"},
 ], ids=["table", "selector", "collision"])
-def test_application_source_declaration_refuses_invalid_or_ambiguous_values(sources):
+def test_application_source_declaration_refuses_invalid_or_ambiguous_values(sources: object) -> None:
     with pytest.raises(ValueError):
         application_sources({"tool": {"copilot-extensions": {
             "application-sources": sources,
         }}})
 
 
-def test_undeclared_application_name_is_not_a_source_exemption(registry_roots):
+def test_undeclared_application_name_is_not_a_source_exemption(
+    registry_roots: Callable[..., list[str]],
+) -> None:
     assert registry_roots({
         "consumer": {
             "version": "1", "provides_extras": [], "requires_dist": ["sdk>=1"],
@@ -97,7 +102,9 @@ def test_undeclared_application_name_is_not_a_source_exemption(registry_roots):
     }, "consumer==1", {}, deadline=time.monotonic() + 5) == ["sdk>=1"]
 
 
-def test_repository_declares_independent_projects_without_scanning_their_marketplace(tmp_path):
+def test_repository_declares_independent_projects_without_scanning_their_marketplace(
+    tmp_path: Path,
+) -> None:
     from promotion_python_artifacts import candidate_projects
 
     (tmp_path / "pyproject.toml").write_text(
@@ -134,7 +141,7 @@ def test_repository_declares_independent_projects_without_scanning_their_marketp
     {"app": ".git/example"}, {"app": "apps/example/"},
     {"first": "apps/example", "second": "apps/example"},
 ])
-def test_project_declarations_refuse_unsafe_or_aliased_locations(locations):
+def test_project_declarations_refuse_unsafe_or_aliased_locations(locations: object) -> None:
     with pytest.raises(ValueError):
         project_locations({"tool": {"copilot-extensions": {"python-projects": locations}}})
 
@@ -144,7 +151,9 @@ def test_project_declarations_refuse_unsafe_or_aliased_locations(locations):
     ("renamed", "plugins/ordinary"),
     ("worktree-manager", "apps/replacement"),
 ])
-def test_project_declarations_cannot_replace_builtin_identity(tmp_path, name, relative):
+def test_project_declarations_cannot_replace_builtin_identity(
+    tmp_path: Path, name: str, relative: str,
+) -> None:
     directory = tmp_path / "plugins/ordinary"
     directory.mkdir(parents=True)
     (directory / "pyproject.toml").write_text('[project]\nname="ordinary"\nversion="1"\n')
@@ -159,7 +168,9 @@ def test_project_declarations_cannot_replace_builtin_identity(tmp_path, name, re
     {"setup": [], "start": []},
     {"setup": ["prepare", "--existing-config"], "start": ["serve"]},
 ])
-def test_project_owned_callbacks_use_declared_arguments_without_a_central_app_name(declaration):
+def test_project_owned_callbacks_use_declared_arguments_without_a_central_app_name(
+    declaration: dict[str, list[str]],
+) -> None:
     from runtime_application_project import install_callbacks
 
     metadata = {"tool": {"copilot-extensions": {"application": declaration}}}
@@ -175,10 +186,38 @@ def test_project_owned_callbacks_use_declared_arguments_without_a_central_app_na
     {"setup": "prepare", "start": []}, {"setup": [], "start": [False]},
     {"setup": [], "start": ["serve\0"]},
 ])
-def test_project_owned_callbacks_refuse_incomplete_or_nonargument_values(declaration):
+def test_project_owned_callbacks_refuse_incomplete_or_nonargument_values(declaration: object) -> None:
     from runtime_application_project import install_callbacks
 
     with pytest.raises(ValueError, match="requires setup and start"):
         install_callbacks("example-worker", metadata={
             "tool": {"copilot-extensions": {"application": declaration}},
         })
+
+
+@pytest.mark.parametrize("budgets", [
+    None, [], False, {"other": 60}, {"start": False}, {"start": "600"},
+    {"start": 0}, {"setup": -1}, {"start": float("inf")},
+    {"start": float("nan")}, {"setup": 3601}, {"start": 10 ** 400},
+])
+def test_project_callback_budgets_refuse_invalid_values_before_emission(budgets: object) -> None:
+    from runtime_application_project import install_callbacks
+
+    with pytest.raises(ValueError, match="callback timeouts"):
+        install_callbacks("example-worker", metadata={
+            "tool": {"copilot-extensions": {"application": {
+                "setup": ["prepare"], "start": ["serve"],
+                "callback_timeout_seconds": budgets,
+            }}},
+        })
+
+
+def test_project_callback_budgets_preserve_declared_arguments() -> None:
+    from runtime_application_project import install_callbacks
+
+    assert install_callbacks("example-worker", metadata={
+        "tool": {"copilot-extensions": {"application": {
+            "setup": ["prepare"], "start": ["serve"],
+            "callback_timeout_seconds": {"start": 600},
+        }}},
+    }) == (["prepare"], ["serve"])

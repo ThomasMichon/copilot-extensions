@@ -46,7 +46,7 @@ if (-not (Test-Path -LiteralPath (Join-Path $_payloadRoot 'plugin.json'))) {
     exit 126
 }
 
-$_location = Get-Location
+@@CALLER_CWD_POWERSHELL@@$_location = Get-Location
 $_cwd = $_location.Path
 $_nativeCwd = [IO.Directory]::GetCurrentDirectory()
 $_separators = [char[]]@(
