@@ -16,9 +16,10 @@ fixtures permit durable children to leave their caller Jobs; each packet also
 runs the queued-installer restrictive-Job negative and bounded-child cleanup.
 Ordinary runner containment remains unchanged. Contained hook fixtures retain
 their caller Job until owned work settles and do not claim Job-loss survival.
-The native Windows owner samples only its own instance registry in the existing
-resource-poll loop and retains birth-matched process handles through strict
-daemon cleanup, within the original process-count budget. This prevents a
+Ordinary contained Windows runs and the explicit native Windows owner sample
+only their own instance registry in the existing resource-poll loop and retain
+birth-matched process handles through strict daemon cleanup, within the original
+process-count budget. This prevents a
 released fixture PID from being reused before cleanup; it neither signals a
 process nor relaxes unknown or reused-identity holds for unpinned records.
 Default-service acceptance uses the explicit leased native profile too:

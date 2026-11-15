@@ -181,6 +181,25 @@ The canonical parent remains Active until its own full Plan/Validation resolves.
 
 ## Journal
 
+### 2026-11-15 - Preserve Windows qualification fixture custody
+
+The final reviewed-source run passed the entire Linux service portfolio.
+Windows passed all test assertions but failed subsequent cleanup for two
+finished records whose PIDs had been reused; that is not clean acceptance.
+The runner now selects its existing bounded native handle pins for ordinary
+contained Windows tests too, without relaxing unknown/reused identity holds.
+Already-pinned records do not require repeated full decoding.
+
+A local full portfolio then exposed one short-lived refusal fixture that
+polling alone could miss, plus a terminal-workspace 503. The command fixture
+now uses the existing direct-interpreter owner, retains the actual created
+process handle, and settles only its same-run birth-matched receipt with
+termination disabled before closing that handle. The affected terminal case
+passes with clean teardown; 16 focused runner/real-handle controls and the
+33-file Linux/Windows strict ratchet pass. The retained failed fixture is not
+reaped or reinterpreted. Fresh hosted qualification remains pending under
+#12717, with no automatic reuse of the consumed two-run approval.
+
 ### 2026-11-15 - Preserve deferred departures across backpressure and outage
 
 A review counterexample reproduced stale membership when a complete scan

@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 import json
 import os
@@ -13,9 +14,11 @@ import sys
 import time
 from pathlib import Path
 from importlib import import_module
-from typing import TYPE_CHECKING, Any, TypedDict, cast
+from types import SimpleNamespace
+from typing import TYPE_CHECKING, Any, Protocol, TypedDict, cast
 
 import pytest
+from agent_procutil import direct_python
 from cryptography.hazmat.primitives import serialization
 
 from agent_pull_requests_service.hosting import ready
@@ -30,6 +33,102 @@ else:
 
 class ProcessFlags(TypedDict, total=False):
     creationflags: int
+
+
+class _CommandPin(Protocol):
+    _handle: int
+
+    def close(self) -> None: ...
+
+
+@asynccontextmanager
+async def command_custody(
+    process: asyncio.subprocess.Process, *, admitted: bool,
+) -> AsyncIterator[None]:
+    pin: _CommandPin | None = None
+    created: tuple[int, str] | None = None
+    try:
+        if os.name == "nt":
+            from agent_procutil import _daemon_instance_identity as identity
+            created = cast(Callable[[object], tuple[int, str] | None], identity.created_process_identity)(
+                getattr(process, "_transport").get_extra_info("subprocess"),
+            )
+            assert created is not None and created[0] == process.pid
+            pin = cast(Callable[[int], _CommandPin], identity._windows_handle)(created[0])
+            assert cast(Callable[[int], str], identity._windows_birth)(pin._handle) == created[1]
+        yield
+    finally:
+        try:
+            if process.returncode is None:
+                process.kill()
+                await process.wait()
+            if pin is not None and created is not None:
+                from agent_procutil import _daemon_instance_store as store
+                from agent_procutil.daemon_instances import DaemonInstanceReceipt, cleanup_instance, inspect_instances
+                context = cast(Callable[[], dict[str, Any] | None], store._test_context)()
+                assert context is not None or not admitted
+                if context is not None:
+                    root = Path(context["registry_root"])
+                    matched = False
+                    for record in inspect_instances(root):
+                        if record.get("run_id") == context["run_id"] and (
+                            record.get("pid"), record.get("birth")
+                        ) == (str(created[0]), created[1]):
+                            matched = True
+                            result = cleanup_instance(
+                                DaemonInstanceReceipt(record["instance_id"], root), terminate=False,
+                            )
+                            assert result.status == "settled", result
+                    assert matched or not admitted, "foreground admission must bind the actual created interpreter"
+        finally:
+            if pin is not None:
+                pin.close()
+
+
+@pytest.mark.parametrize(("run_id", "birth"), [
+    ("owned", "expected"), ("foreign", "expected"), ("owned", "different"),
+])
+def test_command_custody_never_settles_another_run_or_birth(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, run_id: str, birth: str,
+) -> None:
+    from agent_procutil import _daemon_instance_identity as identity, _daemon_instance_store as store
+    from agent_procutil import daemon_instances
+
+    effects: list[str] = []
+    pin = SimpleNamespace(_handle=123, close=lambda: effects.append("close"))
+    process = SimpleNamespace(
+        pid=99, returncode=0,
+        _transport=SimpleNamespace(get_extra_info=lambda _name: object()),
+    )
+    monkeypatch.setattr(sys.modules[__name__], "os", SimpleNamespace(name="nt"))
+    monkeypatch.setattr(identity, "created_process_identity", lambda _process: (99, "expected"))
+    monkeypatch.setattr(identity, "_windows_handle", lambda _pid: pin)
+    monkeypatch.setattr(identity, "_windows_birth", lambda _handle: "expected")
+    monkeypatch.setattr(store, "_test_context", lambda: {
+        "registry_root": str(tmp_path), "run_id": "owned",
+    })
+    monkeypatch.setattr(daemon_instances, "inspect_instances", lambda _root: [{
+        "instance_id": "a" * 32, "run_id": run_id, "pid": "99", "birth": birth,
+    }])
+
+    def cleanup(_receipt: object, *, terminate: bool) -> SimpleNamespace:
+        assert not terminate and effects == []
+        effects.append("settle")
+        return SimpleNamespace(status="settled")
+
+    monkeypatch.setattr(daemon_instances, "cleanup_instance", cleanup)
+
+    async def scenario() -> None:
+        async with command_custody(cast(Any, process), admitted=True):
+            pass
+
+    matching = (run_id, birth) == ("owned", "expected")
+    if matching:
+        asyncio.run(scenario())
+    else:
+        with pytest.raises(AssertionError, match="actual created interpreter"):
+            asyncio.run(scenario())
+    assert effects == (["settle", "close"] if matching else ["close"])
 
 _WORKSPACE_NATIVE = """
 import argparse,json,pathlib,sys
@@ -62,10 +161,19 @@ else:
 """
 
 _EMBEDDED = """
-import asyncio,sys
+import asyncio,sys,traceback
 from pathlib import Path
+from agent_pull_requests import workspace_terminal_read
 from agent_pull_requests_service.config import load_config
 from agent_pull_requests_service.hosting import run
+original_serve=workspace_terminal_read.serve
+def traced_serve(*args,**kwargs):
+    try:
+        return original_serve(*args,**kwargs)
+    except Exception:
+        traceback.print_exc(file=sys.stderr)
+        raise
+workspace_terminal_read.serve=traced_serve
 async def main():
     stop=asyncio.Event()
     async def input_stop():
@@ -278,20 +386,18 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(
         flags: ProcessFlags = {
             "creationflags": cast(int, getattr(subprocess, "CREATE_NO_WINDOW")),
         } if os.name == "nt" else {}
+        python, python_environment = direct_python(sys.executable)
+        child_environment = {**os.environ, **python_environment}
 
         async def command(*arguments: str) -> tuple[int | None, bytes, bytes]:
             process = await asyncio.create_subprocess_exec(
-                sys.executable, "-I", "-m", "agent_pull_requests_service", *arguments,
+                python, "-I", "-m", "agent_pull_requests_service", *arguments,
                 cwd=tmp_path, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-                **flags,
+                env=child_environment, **flags,
             )
-            try:
+            async with command_custody(process, admitted=arguments[0] == "serve"):
                 stdout, stderr = await asyncio.wait_for(process.communicate(), 15)
                 return process.returncode, stdout, stderr
-            finally:
-                if process.returncode is None:
-                    process.kill()
-                    await process.wait()
 
         async def launch() -> asyncio.subprocess.Process:
             # Windows cannot deliver POSIX SIGTERM. Its control uses the public
@@ -301,9 +407,9 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(
                 else ["-I", "-m", "agent_pull_requests_service", "serve", "--config", str(path)]
             )
             return await asyncio.create_subprocess_exec(
-                sys.executable, *arguments, cwd=tmp_path,
+                python, *arguments, cwd=tmp_path,
                 stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE, **flags,
+                stderr=asyncio.subprocess.PIPE, env=child_environment, **flags,
             )
 
         async def close(process: asyncio.subprocess.Process) -> None:
@@ -317,7 +423,7 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(
             try:
                 stdout, stderr = await asyncio.wait_for(process.communicate(), 10)
                 if stderr:
-                    print(stderr.decode("utf-8", errors="replace")[-2048:])
+                    print(stderr.decode("utf-8", errors="replace")[-8192:])
                 assert process.returncode == 0, (stdout, stderr)
             finally:
                 if process.returncode is None:

@@ -3,23 +3,35 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from collections.abc import Callable, Iterator
 import os
 from pathlib import Path
 import stat
 import sys
+from typing import Any, Protocol, cast
+
+
+class _PinnedProcess(Protocol):
+    _handle: int
+
+    def close(self) -> None: ...
+
+
+class _CleanupOutcome(Protocol):
+    status: str
 
 
 class _NativeInstancePins:
-    def __init__(self, root, limit):
+    def __init__(self, root: Path, limit: int) -> None:
         self.root = root
         self.limit = limit
-        self.run_id = None
-        self.processes = {}
+        self.run_id: str | None = None
+        self.processes: dict[str, _PinnedProcess] = {}
 
-    def bind(self, environment):
+    def bind(self, environment: dict[str, str]) -> None:
         from agent_procutil._daemon_instance_store import _test_context
 
-        context = _test_context(environment)
+        context = cast(Callable[[dict[str, str]], dict[str, Any] | None], _test_context)(environment)
         if (
             context is None or int(context["pid"]) != os.getpid()
             or Path(context["registry_root"]).resolve() != self.root
@@ -27,13 +39,18 @@ class _NativeInstancePins:
             raise ValueError("Native instance observation requires its existing lifecycle owner.")
         self.run_id = context["run_id"]
 
-    def observe(self):
+    def observe(self) -> None:
         from agent_procutil._daemon_instance_identity import _windows_birth, _windows_handle
         from agent_procutil.daemon_instances import inspect_instances
 
-        for count, _entry in enumerate(self.root.iterdir(), 1):
+        unpinned = False
+        for count, entry in enumerate(self.root.iterdir(), 1):
             if count > self.limit * 4:
                 raise RuntimeError("Native instance inventory exceeded its existing process budget.")
+            if entry.name.endswith(".instance") and entry.stem not in self.processes:
+                unpinned = True
+        if self.processes and not unpinned:
+            return
         for record in inspect_instances(self.root):
             key = record["instance_id"]
             if (
@@ -56,7 +73,7 @@ class _NativeInstancePins:
                 if process is not None:
                     process.close()
 
-    def close(self):
+    def close(self) -> None:
         error = None
         for process in reversed(tuple(self.processes.values())):
             try:
@@ -69,7 +86,9 @@ class _NativeInstancePins:
 
 
 @contextmanager
-def _native_instance_pins(selected, sandbox, limit):
+def _native_instance_pins(
+    selected: bool, sandbox: Path, limit: int,
+) -> Iterator[_NativeInstancePins | None]:
     pins = _NativeInstancePins(sandbox.resolve() / "daemon-instances", limit) if (
         selected and os.name == "nt"
     ) else None
@@ -80,7 +99,7 @@ def _native_instance_pins(selected, sandbox, limit):
             pins.close()
 
 
-def _native_scope_environment(environment):
+def _native_scope_environment(environment: dict[str, str]) -> dict[str, str]:
     if sys.platform != "linux":
         return environment
     from agent_procutil.linux_daemon_scope import caller_unit
@@ -100,9 +119,10 @@ def _native_scope_environment(environment):
 
 
 def run_contained(
-    owner, command, *, cwd, env, sandbox, limits, daemon_purpose,
-    daemon_lease, qualification, native_application,
-):
+    owner: Any, command: list[str], *, cwd: Path, env: dict[str, str], sandbox: Path,
+    limits: Any, daemon_purpose: str, daemon_lease: Any, qualification: Any,
+    native_application: bool,
+) -> int:
     # Keep the original owner's native operations and instrumentation seams.
     if type(native_application) is not bool:
         raise ValueError("native application testing must be explicitly selected")
@@ -120,7 +140,7 @@ def run_contained(
         env = dict(env)
         env.pop(owner.CONTAINED_ENV, None)
         env = _native_scope_environment(env)
-    lifecycle_results = []
+    lifecycle_results: list[_CleanupOutcome] = []
     if qualification is not None:
         if owner.os.name != "nt":
             raise owner.QualificationError("Absolute native qualification requires the original Windows Job owner.")
@@ -132,14 +152,14 @@ def run_contained(
     environment_snapshot = owner._read_registry_environment()
     if qualification is not None:
         qualification.boundary.require(owner.time.monotonic, work=True)
-    unreaped = None
+    unreaped: Any = None
     try:
         execution_error = None
         controller_error = None
         teardown_complete = False
         try:
             with _native_instance_pins(
-                native_application, sandbox, limits.max_processes,
+                native_application or owner.os.name == "nt", sandbox, limits.max_processes,
             ) as pins, owner.daemon_test_lifecycle(
                 owner=f"contained-test-runner:{owner.os.getpid()}",
                 registry_root=sandbox.resolve() / "daemon-instances",
@@ -153,7 +173,7 @@ def run_contained(
                 if pins is not None:
                     pins.bind(daemon_environment)
                 try:
-                    result = owner._run_contained_process(
+                    result: int = owner._run_contained_process(
                         command, cwd=cwd, env={**env, **daemon_environment},
                         sandbox=sandbox, limits=limits,
                         **({"qualification": qualification} if qualification is not None else {}),
@@ -188,7 +208,7 @@ def run_contained(
         try:
             if qualification is not None:
                 qualification.boundary.require(owner.time.monotonic)
-            changed = owner._registry_environment_drift(environment_snapshot)
+            changed: list[str] = owner._registry_environment_drift(environment_snapshot)
             if changed:
                 print(
                     "[HOST-STATE] contained test changed persistent Windows "
