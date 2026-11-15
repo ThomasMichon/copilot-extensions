@@ -3839,6 +3839,23 @@ contracts and two explicitly partial Manager consumer maps. #4199's literal
 implementation OR exact-complete-authorized-receiving condition remains.
 Other source claims, unfinished producer lanes and #4195's coverage gap are
 not retired by this proposal.
+The [reviewed ordered-outcome follow-through](journal/2026/11.14-accepted-receivers-and-owner-frontier.md#reviewed-ordered-outcomes-and-three-separate-tracking-judgments)
+records #12716's actual merge, current relevant receiving readback and three
+separately audited `NOT_PLANNED` retirements: #4186, #4194 and #4199. All
+nineteen acceptance checks remain unchecked. The complete 10:42:55 UTC
+census verifies 842 whole open, 113 above fixed 729: 453 original-cohort and
+389 inflow issues. One metadata-only arrival offsets part of the three
+campaign departures; no implementation, query, credential or landing occurred.
+The [title-bound ready frontier](journal/2026/11.15-title-bound-ready-frontier.md)
+preserves three current metadata-only keepers and assigns twelve next ready
+original/title/discussion unions in two disjoint studies. Research and
+bookkeeping receipts neither transfer custody nor add closure credit.
+Its [finite receiving clarification](journal/2026/11.15-title-bound-ready-frontier.md#two-source-restart-candidate-clarification)
+adds seven unchecked #4564 Plan/local/global Validation rows to the existing
+Manager restart plan. Unexpected and prepared restarts retain distinct durable
+candidate sets, shared exact-original restoration and original-conversation
+acknowledgment. #4564 and the other eleven sources remain OPEN; the existing
+reservation, source-admission gaps and independent programmes are unchanged.
 
 ### Phase 2b - Vision-linked stabilization roadmap
 
