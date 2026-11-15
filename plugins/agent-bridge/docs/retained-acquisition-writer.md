@@ -47,6 +47,12 @@ unqualified historical acquisition cannot be retrofitted. Missing or conflicting
 recovery facts refuse with the existing custody intact.
 
 Acquisition reads, delegated registration and binding use the retained owner.
+Controller qualification uses that same command for a fixed cached inventory
+read, independently of the execution target's write scope. It retains the
+controller's owner, session, project, machine and canonical-path checks; missing
+or conflicting evidence still refuses. This observation does not release or
+broaden the retained target scope: registration, binding, succession and other
+target operations remain confined to the original workspace.
 The native target stores only a pointer to the original acquisition journal.
 Later native resume and handoff recover and requalify that same command, check
 the original workspace, and use it for registration, succession and lineage

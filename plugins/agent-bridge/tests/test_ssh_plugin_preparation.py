@@ -190,7 +190,7 @@ async def test_ssh_planner_verifies_session_qualified_controller_owner(receiver,
         "id": "controller", "repo": "control", "machine": "local",
         "path": str(controller), "status": "active",
     }]})
-    monkeypatch.setattr("agent_bridge.acquisition_authority.worktree_command", owner)
+    monkeypatch.setattr("agent_bridge.acquisition_authority._run_worktree_command", owner)
     if matching:
         assert await ssh_plugin_preparation.prepare_ssh_plugins(target, manager, environment={})
         assert target.prepared_plugins["plugins"][0]["projected_source"] == "sample@local"

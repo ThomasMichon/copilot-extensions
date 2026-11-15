@@ -537,7 +537,7 @@ def test_real_source_and_frozen_candidate_frontdoors_enforce_version_matrix(
         "tools/typecheck.py", "tools/_admission_protocol.py", "tools/cache_directory_paths.py",
         "tools/plugin_test_resources.py",
         "tools/typecheck_source_views.py", "tools/typecheck_catalog_views.py",
-        "tools/typecheck_bootstrap_views.py",
+        "tools/typecheck_bootstrap_views.py", "tools/typecheck_new_code.py",
         "tools/native_test_paths.py", "tools/typecheck-requirements.txt",
         *(
             "libs/installer-engine/" + name
@@ -733,7 +733,7 @@ def _real_catalog_frontdoors(
         "tools/typecheck.py", "tools/_admission_protocol.py", "tools/cache_directory_paths.py",
         "tools/plugin_test_resources.py",
         "tools/typecheck_source_views.py", "tools/typecheck_catalog_views.py",
-        "tools/typecheck_bootstrap_views.py",
+        "tools/typecheck_bootstrap_views.py", "tools/typecheck_new_code.py",
         "tools/native_test_paths.py", "tools/typecheck-requirements.txt",
         catalog.DECLARATION, *catalog.MEMBERS, *bootstrap_views.INPUTS,
         *(
@@ -1398,6 +1398,9 @@ def test_git_comparison_and_physical_inventory_cover_developer_edits(tmp_path: P
     (tmp_path / "removed.py").unlink()
     assert set(typecheck.changed_paths(tmp_path, "HEAD")) == {"staged.py", "unstaged.py", "removed.py"}
     assert typecheck.changed_paths(tmp_path, "HEAD", "HEAD") == ()
+    assert set(typecheck.new_code_changes(tmp_path, "HEAD", "HEAD")) == {
+        "staged.py", "unstaged.py", "removed.py", "added.py",
+    }
     assert set(typecheck.python_paths(tmp_path)) == {"staged.py", "unstaged.py", "added.py"}
     with pytest.raises(typecheck.TypecheckError, match="Cannot resolve"):
         typecheck.changed_paths(tmp_path, "missing-comparison-base")
@@ -1437,6 +1440,33 @@ def test_changed_selection_conservatively_checks_all_admitted_consumers(
     assert typecheck.main(["--changed"]) == 0
     assert checked == ["sample", "caller"]
     assert "conservative dependency impact" in capsys.readouterr().out
+
+
+def test_new_code_merge_comparison_excludes_base_only_python(tmp_path: Path) -> None:
+    """The actual merge tree, not the feature tip, isolates the PR contribution."""
+    for args in (
+        ("init",), ("config", "user.name", "Example"),
+        ("config", "user.email", "example@example.com"),
+    ):
+        _matrix_git(tmp_path, *args)
+    (tmp_path / "initial.py").write_text("value: int = 1\n", encoding="utf-8")
+    _matrix_git(tmp_path, "add", ".")
+    _matrix_git(tmp_path, "-c", "commit.gpgsign=false", "commit", "-m", "Common source")
+    common = _matrix_git(tmp_path, "rev-parse", "HEAD")
+    _matrix_git(tmp_path, "switch", "-c", "feature")
+    (tmp_path / "feature.py").write_text("value: int = 2\n", encoding="utf-8")
+    _matrix_git(tmp_path, "add", ".")
+    _matrix_git(tmp_path, "-c", "commit.gpgsign=false", "commit", "-m", "Feature source")
+    feature = _matrix_git(tmp_path, "rev-parse", "HEAD")
+    _matrix_git(tmp_path, "switch", "-c", "base", common)
+    (tmp_path / "base_only.py").write_text("def legacy(value):\n    return value\n", encoding="utf-8")
+    _matrix_git(tmp_path, "add", ".")
+    _matrix_git(tmp_path, "-c", "commit.gpgsign=false", "commit", "-m", "Base-only source")
+    base = _matrix_git(tmp_path, "rev-parse", "HEAD")
+    _matrix_git(tmp_path, "-c", "commit.gpgsign=false", "merge", "--no-edit", "feature")
+    merged = _matrix_git(tmp_path, "rev-parse", "HEAD")
+    assert set(typecheck.new_code_changes(tmp_path, base, merged)) == {"feature.py"}
+    assert set(typecheck.new_code_changes(tmp_path, base, feature)) == {"feature.py", "base_only.py"}
 
 
 def test_missing_preparation_is_actionable_and_does_not_create_environment(
@@ -1826,6 +1856,44 @@ def test_actual_mypy_rejects_type_regressions(
     assert lease.released
     assert not (environment / "typecheck-targets.txt").exists()
     assert not (environment / "typecheck-mypy.ini").exists()
+
+
+@pytest.mark.parametrize(
+    ("source", "failure", "diagnostic"),
+    [
+        ("def missing(value):\n    return value\n", True, "[no-untyped-def]"),
+        ("value: int = 'old error'\n# newly added comment\n", True, "[assignment]"),
+        ("def accept(value: int) -> int:\n    return value\n", False, ""),
+    ],
+)
+def test_actual_new_code_frontdoor_strictly_checks_pending_whole_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    source: str, failure: bool, diagnostic: str,
+) -> None:
+    """Real MyPy sees the full pending file, including errors outside an edit."""
+    (tmp_path / "sample.py").write_text(source, encoding="utf-8")
+    environment = tmp_path / "environment"
+    environment.mkdir()
+    (environment / ".typecheck-prepared").write_text("fixture\n", encoding="utf-8")
+    item = project(level="pending")
+    lease = Lease()
+
+    def environment_path(
+        _root: Path, _project: typecheck.Project, *, captured_lock: bytes | None = None,
+    ) -> tuple[Path, str]:
+        return environment, "fixture"
+
+    monkeypatch.setattr(typecheck, "ROOT", tmp_path)
+    monkeypatch.setattr(typecheck, "load_projects", lambda: (item,))
+    monkeypatch.setattr(typecheck, "python_paths", lambda: ("sample.py",))
+    monkeypatch.setattr(typecheck, "new_code_changes", lambda *_args: ("sample.py",))
+    monkeypatch.setattr(typecheck, "environment_path", environment_path)
+    monkeypatch.setattr(typecheck, "environment_python", lambda _path: Path(sys.executable))
+    monkeypatch.setattr(typecheck, "acquire_environment", lambda *_args: lease)
+    assert typecheck.main(["--new-code"]) == int(failure)
+    assert diagnostic in capsys.readouterr().out
+    assert item.level == "pending" and lease.released
+    assert not list(environment.parent.glob("source-views-*/sample/*.py"))
 
 
 @pytest.mark.parametrize("platform", ["linux", "win32"])
