@@ -198,7 +198,7 @@ native qualification and activation need their existing separate admission.
 
 ### Next outcome - portable consumer acceptance
 
-- [ ] Prove the smallest admitted standalone artifact flow for ACP and mux,
+- [x] Prove the smallest admitted standalone artifact flow for ACP and mux,
   then Bridge pickup, with suite services absent from the target. Reuse
   existing owned fixtures; preserve separate admission for native effects.
 - [ ] Correlate that flow with the actual Worktrees/Bridge caller paths and
@@ -206,6 +206,14 @@ native qualification and activation need their existing separate admission.
   than duplicate the mux-launch implementation.
 - [ ] Publish the first complete functional outcome through normal gates and
   update this root acceptance record, retaining all remaining obligations.
+
+The bounded native checkpoint combines copied-Core ACP with the actual
+Bridge Python client (#12714) and the built-Core headed coordinator with
+Bridge's canonical retained-session client. Both run the target artifact
+under physical Python with site packages disabled and retain exact native
+conversation/input identity. Headed source publication is still pending.
+This closes only the smallest artifact/consumer flow above, not each named
+caller, all modes, installed adoption, lifetime or readiness stability.
 
 The source-complete actor-free recovery-intent adapter supports original-owner
 persistence but does not prove this outcome. Its bounded source acceptance is
