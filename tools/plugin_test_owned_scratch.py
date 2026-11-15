@@ -2,41 +2,92 @@
 
 from __future__ import annotations
 
+import argparse
 import json
-from contextlib import contextmanager
+import os
+from collections.abc import Callable, Iterator
+from contextlib import AbstractContextManager, contextmanager
 from pathlib import Path
 import secrets
 import sys
+from types import TracebackType
+from typing import TYPE_CHECKING, Any, Literal, Protocol, TypedDict, TypeVar, cast, overload
 
 from plugin_test_containment import ContainmentError, Limits, UnreapedProcessError, run_contained
 
+_Sandbox = TypeVar("_Sandbox", bound=AbstractContextManager[str])
 
-def test_sandbox(owner, repository, fallback, *, stage: str, **options):
+
+class _GroupResult(TypedDict):
+    group: int
+    exit_code: int
+
+
+class _ScratchProvider(Protocol):
+    def allocate(
+        self, path: Path, owner: str, *, root_path: Path, forbidden: tuple[Path, ...],
+        operation_id: str, failure_evidence: dict[str, Any] | None = None,
+    ) -> dict[str, Any]: ...
+
+    def settle_after_cleanup(
+        self, path: Path, owner: str, token: str, *, forbidden: tuple[Path, ...],
+        diagnostic: bytes | None = None,
+    ) -> dict[str, Any]: ...
+
+    def dispose_consumed(
+        self, path: Path, owner: str, token: str, *, forbidden: tuple[Path, ...],
+    ) -> dict[str, Any]: ...
+
+
+@overload
+def test_sandbox(
+    owner: None, repository: Path, fallback: Callable[..., _Sandbox], *, stage: str, **options: Any,
+) -> _Sandbox: ...
+
+
+@overload
+def test_sandbox(
+    owner: str, repository: Path, fallback: Callable[..., AbstractContextManager[str]],
+    *, stage: str, **options: Any,
+) -> OwnedTestSandbox: ...
+
+
+def test_sandbox(
+    owner: str | None, repository: Path, fallback: Callable[..., AbstractContextManager[str]],
+    *, stage: str, **options: Any,
+) -> AbstractContextManager[str]:
     return fallback(**options) if owner is None else OwnedTestSandbox(owner, repository, stage=stage)
 
 
-def add_cli_argument(parser):
+def add_cli_argument(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--owned-scratch-owner", metavar="MACHINE/PROJECT/WORKTREE",
         help="opt-in source pilot using an already-available compatible Worktrees Python owner; no rollout",
     )
 
 
-def admit_owned_root(owner, repository):
+def admit_owned_root(owner: str, repository: Path) -> None:
     OwnedTestSandbox(owner, repository, stage="admission")
 
 
 @contextmanager
-def finish_owned_run(owner, scope, outcome, deadline, clock):
+def finish_owned_run(
+    owner: str | None, scope: AbstractContextManager[str], outcome: Callable[[], int],
+    deadline: float, clock: Callable[[], float],
+) -> Iterator[None]:
     yield
     if owner is not None:
+        owned_scope = cast(OwnedTestSandbox, scope)
         code = 124 if clock() > deadline else outcome()
         if code == 124:
-            scope.record_result(0, code)
-        scope.record_outcome(code)
+            owned_scope.record_result(0, code)
+        owned_scope.record_outcome(code)
 
 
-def prepare_owned(name, uv, reinstall, *, retained, environment, sandbox, limits=None, wall_seconds=None):
+def prepare_owned(
+    name: str, uv: str, reinstall: bool, *, retained: Path, environment: dict[str, str],
+    sandbox: str | os.PathLike[str], limits: Limits | None = None, wall_seconds: float | None = None,
+) -> None:
     import subprocess
     from dataclasses import replace
     selected = limits or Limits()
@@ -57,16 +108,16 @@ def prepare_owned(name, uv, reinstall, *, retained, environment, sandbox, limits
 
 
 class OwnedTestSandbox:
-    def __init__(self, owner: str, repository: Path, *, stage: str):
+    def __init__(self, owner: str, repository: Path, *, stage: str) -> None:
         try:
             from agent_worktrees import artifact_scratch, artifact_storage, config, config_sources
             from agent_worktrees import claims_cli, sessions, tracking
             from agent_worktrees.execution_spaces import resolve_owner_record_path
-        except ImportError as error:
+        except ImportError as import_error:
             raise ContainmentError(
                 "owned scratch requires an already-available compatible Worktrees Python owner; "
                 "no bootstrap or ordinary sandbox fallback"
-            ) from error
+            ) from import_error
         declaration = getattr(artifact_scratch, "capabilities", None)
         support = declaration() if callable(declaration) else {}
         if (
@@ -75,9 +126,14 @@ class OwnedTestSandbox:
                    for key in ("allocator", "artifact_retention"))
         ):
             raise ContainmentError("loaded scratch owner does not support allocation and retained disposition")
-        parsed = tracking.parse_claim_ref(owner)
+        if TYPE_CHECKING:
+            from agent_worktrees.tracking_claims import parse_claim_ref
+        else:
+            parse_claim_ref = tracking.parse_claim_ref
+        parsed = parse_claim_ref(owner)
         if parsed is None or not parsed.is_qualified or parsed.session:
             raise ContainmentError("owned scratch requires a qualified worktree owner without a session")
+        assert parsed.project is not None
         selected = config.load_project_config(parsed.project)
         readiness = claims_cli._coordination_readiness_for_owner_ref(owner, selected)
         if not readiness.ready:
@@ -99,12 +155,13 @@ class OwnedTestSandbox:
             forbidden=(*self.forbidden, *artifact_scratch._boundaries(record)), create=True,
         ):
             pass
-        self.provider, self.owner, self.ledger = artifact_scratch, owner, path
+        self.provider: _ScratchProvider = artifact_scratch
+        self.owner, self.ledger = owner, path
         self.stage, self.operation_id = stage, secrets.token_urlsafe(24)
-        self.results: list[dict] = []
+        self.results: list[_GroupResult] = []
         self.group_count = 0
         self.failed = False
-        self.allocation: dict | None = None
+        self.allocation: dict[str, Any] | None = None
 
     def __enter__(self) -> str:
         self.allocation = self.provider.allocate(
@@ -112,7 +169,7 @@ class OwnedTestSandbox:
             forbidden=self.forbidden, operation_id=self.operation_id,
             failure_evidence=self.policy["failure_evidence"],
         )
-        return self.allocation["path"]
+        return cast(str, self.allocation["path"])
 
     def record_result(self, group: int, code: int) -> None:
         # A fixed producer-owned summary, not arbitrary captured stdout/files.
@@ -124,7 +181,10 @@ class OwnedTestSandbox:
     def record_outcome(self, code: int) -> None:
         self.failed = code != 0
 
-    def __exit__(self, exc_type, exc_value, traceback):
+    def __exit__(
+        self, exc_type: type[BaseException] | None, exc_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> Literal[False]:
         allocation = self.allocation
         assert allocation is not None
         if isinstance(exc_value, UnreapedProcessError):

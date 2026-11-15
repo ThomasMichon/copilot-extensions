@@ -76,11 +76,16 @@ python tools/typecheck.py lib-credential-relay --prepare
 python tools/typecheck.py lib-credential-relay
 ```
 
-The library remains dependency-free at runtime and supports Python 3.10 and
-newer. Its four consumers (`agent-bridge`, `agent-codespaces`,
-`agent-containers`, and `agent-mcp`) resolve editable canonical sources on Dev;
+The library supports Python 3.10 and newer and uses the shared, stdlib-only
+`agent-procutil` library for native CLI process ownership. No resident service
+or plugin is required. Consumers resolve editable canonical sources on Dev;
 the release materializer owns their self-contained copies. Canonical admission
 does not admit those consumers or qualify their fresh installation.
+
+Azure token acquisition owns its native CLI until communication and cleanup
+settle, including timeout and caller cancellation. Windows wrapper descendants
+are contained through the existing kill-on-close Job owner. Closing the source
+does not leave a token helper running for a later reconnect to duplicate.
 
 The account listener's lifecycle and publication record, builder keyword
 options, source callbacks, and test fixtures have explicit contracts. Account

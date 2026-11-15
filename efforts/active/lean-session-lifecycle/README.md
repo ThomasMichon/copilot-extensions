@@ -34,6 +34,13 @@ recovery, process ownership, terminal behavior, or handoff mode gates.
 - Do not take over #5637's active implementation or broaden this effort into
   all monitor scheduling, transcript archival, or a new process-host framework.
 
+The finite #5579 clarification retains the Lifecycle driver, the existing
+installed-acceptance owner and #8669's separate installation-independent-session
+scope. It grants no competing shared-module implementation or ownership
+transfer; silence neither abandons #8669's scope nor accepts a transfer of its
+custody. Existing
+single-writer and installed lifecycle obligations keep their original scope.
+
 ## Context
 
 Representative nonblocking `py-spy` dumps established:
@@ -140,12 +147,26 @@ open in the mini-effort, including the flagged CMD resident-picker entry found
 during live process observation; no retained session is migrated by this source
 continuation.
 
+- [ ] **LS5579-P1:** Retain the broader command-shim and nested-PowerShell
+  depth-reduction outcome separately from the two credited Python forwarding
+  roles. Define the representative supported Windows launch paths and measure
+  persistent ancestry separately from transient helpers. Preserve literal
+  arguments including `--`, the interactive-profile decision, terminal I/O,
+  Ctrl+C, exit/receipt bookkeeping, Job containment and safe reaping. A warm
+  broker or direct PSMux attachment is not a mandated architecture.
+
 ### Phase 4 - Release and measured completion
 
 - [ ] Update consumers through the normal release/deploy flow and projection sync.
 - [ ] Repeat single-session and concurrent-session inventories, distinguishing
   interactive host processes, transient helpers, trampolines, and shared daemons.
 - [ ] Compare measured CPU and process counts with the pre-change evidence.
+- [ ] **LS5579-P2:** Explicitly account for the retained grouped-process
+  diagnostic wish: deliver it OR record a scoped deferral to a named tracked
+  outcome under its existing owner. The suggested lightweight view of one's
+  live processes grouped by purpose is not silently satisfied by internal
+  qualification inventories, silently dropped, or made a mandatory new
+  implementation architecture.
 - [ ] Resolve all validation items, journal results, and mark this effort Done.
 
 The diagnostic prerequisite in #10514 removes Windows daemon-status probe
@@ -185,6 +206,13 @@ are still separate. No Phase 4 or Validation item closes from that source merge.
   with log size or number of unrelated worktrees.
 - [ ] Ordinary Windows launches retain zero Python workers in the two
   forwarding roles solely to wait; compare actual process trees, not argv text.
+- [ ] **LS5579-V1:** Qualify the remaining shim/PowerShell depth outcome on
+  representative supported Windows paths, distinguishing persistent ancestry
+  from transient helpers and preserving argument/profile, terminal, receipt,
+  Job and reaping behavior. Record the diagnostic wish as delivered OR
+  explicitly deferred to its named tracked outcome. Keep credited Python-role
+  removal, source/release proof and authorized installed acceptance distinct;
+  no mandatory warm broker, direct PSMux path or expanded platform gate follows.
 - [ ] One and several concurrent sessions retain exactly one live holder of each
   shared daemon role after bounded generation cutover.
 - [ ] Launch parity tests cover mux/no-mux, local/remote, resume/new-window,
@@ -205,6 +233,17 @@ _(Agent-recommended validation detail: zero wait-only Python workers in the
 two measured forwarding roles, with live process-tree evidence.)_
 
 ## Journal
+
+### 2026-11-15 - Broader shim scope and diagnostic wish retained
+
+Added three unchecked #5579 Plan/Validation clauses without reopening the
+credited two-role Python handoff. The remaining command-shim/nested-PowerShell
+outcome and persistent-versus-transient evidence are direct acceptance.
+The operator-facing grouped diagnostic remains a suggested direction with
+an explicit delivered-or-tracked-deferral outcome, not a silently discarded
+wish or a mandated architecture. Existing driver, #8669, single-writer and
+installed-acceptance boundaries remain; no implementation, rollout, source
+retirement or resource effect is claimed.
 
 ### 2026-10-08 - Evidence and scope
 

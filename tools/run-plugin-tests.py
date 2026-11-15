@@ -25,7 +25,6 @@ Design notes:
 
 from __future__ import annotations
 
-import argparse
 import hashlib
 import json
 import math
@@ -39,9 +38,14 @@ from collections.abc import Iterator
 from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import contextmanager
 from pathlib import Path
+from typing import TYPE_CHECKING, TypedDict, cast
 
+from plugin_test_cli import build_argument_parser
 from codespaces_test_profile import validate_profile
-from seasoned_uv import run_uv_install
+if TYPE_CHECKING:
+    from installer_dependency_policy import run_uv_install
+else:
+    from seasoned_uv import run_uv_install
 from standalone_consumers import standalone_build_resources as standalone_build_resources
 from plugin_test_cache import (
     clear_cache_contents, declared_test_requirements, dependency_fingerprint, has_dev_extra,
@@ -68,7 +72,9 @@ from plugin_test_containment import (
     run_contained,
 )
 from plugin_test_command_safety import UnsafeTestCommand, check_test_sources
-from plugin_test_owned_scratch import add_cli_argument, admit_owned_root, finish_owned_run, prepare_owned, test_sandbox
+from plugin_test_owned_scratch import (
+    OwnedTestSandbox, add_cli_argument, admit_owned_root, finish_owned_run, prepare_owned, test_sandbox,
+)
 
 REPO = Path(__file__).resolve().parents[1]
 PLUGINS = REPO / "plugins"
@@ -83,6 +89,15 @@ EXTERNAL_TEST_DEPENDENCIES = {
 LEASE_LIB = REPO / "libs" / "single-instance-lease" / "src"
 TOOLS_DIR = REPO / "tools"
 OWNED_SCRATCH_OWNER: str | None = None
+
+
+class _InstallOptions(TypedDict, total=False):
+    non_editable: bool
+
+
+class _PreparationOptions(TypedDict, total=False):
+    limits: Limits
+    wall_seconds: float
 
 
 # Plugins whose OWN test suites assert properties about OTHER plugins (a
@@ -280,7 +295,10 @@ def declared_test_tooling_requirements(name: str) -> tuple[str, ...]:
     )
 
 
-def _ensure_venv(name: str, uv: str, *, reinstall: bool, limits=None, wall_seconds=None) -> Path:
+def _ensure_venv(
+    name: str, uv: str, *, reinstall: bool,
+    limits: Limits | None = None, wall_seconds: float | None = None,
+) -> Path:
     """Detach build children before preparation, not only before pytest."""
     started = time.monotonic() if OWNED_SCRATCH_OWNER is not None else 0
     parent = runs_root(REPO) if OWNED_SCRATCH_OWNER is None else None
@@ -358,6 +376,8 @@ def _prepare_venv(name: str, uv: str, *, reinstall: bool, environment: dict[str,
                 cmd.extend(["-e", str(REPO / "fleet-manager") + "[service-gateway]"])
             if name == "agent-pull-requests":
                 cmd.extend(["-e", str(REPO / "fleet-manager") + "[service-gateway]"])
+            if name == "agent-vault":
+                cmd.extend(["-e", str(REPO / "fleet-manager") + "[service-gateway]"])
             if name == "agent-ssh":
                 cmd.extend(["-e", str(REPO / "fleet-manager")])
             cmd.extend(source_resolution_arguments(name, _plugin_dir(name), REPO, venv))
@@ -371,9 +391,10 @@ def _prepare_venv(name: str, uv: str, *, reinstall: bool, environment: dict[str,
                 # Native installer fixtures need registry metadata and build
                 # dependencies after the container loses network access.
                 cmd.extend(["--cache-dir", str(venv / ".bootstrap-uv-cache")])
+            install_options: _InstallOptions = {"non_editable": True} if name == "worktree-manager" else {}
             run_uv_install(
                 uv, cmd[3:], env=environment, cwd=_plugin_dir(name), trusted_source_roots=(REPO,), check=True,
-                **({"non_editable": True} if name == "worktree-manager" else {}),
+                **install_options,
                 retained_resource_roots=retained_build_resources(name, REPO),
             )
             if name == "worktree-manager":
@@ -442,7 +463,7 @@ def _group_cleanup_worker() -> Iterator[tuple[ThreadPoolExecutor, list[Future[No
     try:
         yield pool, cleanups
     finally:
-        pending = sys.exception()
+        pending = sys.exc_info()[1]
         failure: BaseException | None = None
         cancellation: KeyboardInterrupt | SystemExit | None = None
         for cleanup in cleanups:
@@ -544,10 +565,11 @@ def run_plugin(
         # "dependency preparation" pass can safely run before network
         # access is removed for the real test pass.
         print(f"[RUN ] {name}: preparing venv only (--prepare-only) ...")
-        _ensure_venv(name, uv, reinstall=reinstall, **(
+        preparation_options: _PreparationOptions = (
             {"limits": limits, "wall_seconds": plugin_timeout}
             if OWNED_SCRATCH_OWNER is not None else {}
-        ))
+        )
+        _ensure_venv(name, uv, reinstall=reinstall, **preparation_options)
         print(f"[PASS] {name} (prepared)")
         return 0
     plugin_started = time.monotonic()
@@ -567,13 +589,15 @@ def run_plugin(
         report_directory = junit_dir.expanduser().resolve() / name
         # A fresh plugin directory prevents retries from overwriting prior evidence.
         report_directory.mkdir(mode=0o700, parents=True, exist_ok=False)
-    preparation = {}
+    preparation: _PreparationOptions = {}
     if OWNED_SCRATCH_OWNER is not None:
         preparation = {"limits": limits, "wall_seconds": plugin_timeout - (time.monotonic() - plugin_started)}
     py = _ensure_venv(name, uv, reinstall=reinstall, **preparation)
     sandbox_scope = test_sandbox(OWNED_SCRATCH_OWNER, REPO, _TestSandbox, stage="tests",
         prefix=run_prefix(name), dir=runs_root(REPO) if OWNED_SCRATCH_OWNER is None else None,
     )
+    skipped_guards = False
+    returncode = 0
     with (sandbox_scope as raw_sandbox, finish_owned_run(
         OWNED_SCRATCH_OWNER, sandbox_scope, lambda: 0 if skipped_guards else returncode,
         plugin_started + plugin_timeout, time.monotonic,
@@ -614,7 +638,7 @@ def run_plugin(
                 )
                 returncode = 124
                 if OWNED_SCRATCH_OWNER is not None:
-                    sandbox_scope.record_result(index, returncode)
+                    cast(OwnedTestSandbox, sandbox_scope).record_result(index, returncode)
                 break
             group_limits = Limits(
                 wall_seconds=min(limits.wall_seconds, remaining),
@@ -678,7 +702,7 @@ def run_plugin(
                 limits=group_limits,
             )
             if OWNED_SCRATCH_OWNER is not None:
-                sandbox_scope.record_result(index, returncode)
+                cast(OwnedTestSandbox, sandbox_scope).record_result(index, returncode)
             if returncode == 0 and report is not None and not report.is_file():
                 raise ContainmentError(f"{name}: successful group produced no requested JUnit report: {report}")
             # Only this group's pytest files are disposable after verified
@@ -723,87 +747,7 @@ def run_plugin(
 
 def main(argv: list[str] | None = None) -> int:
     global OWNED_SCRATCH_OWNER
-    ap = argparse.ArgumentParser(description="Run plugin pytest suites in managed venvs.")
-    ap.add_argument("plugins", nargs="*", help="plugin names (default: --changed)")
-    ap.add_argument("--all", action="store_true", help="every plugin with a suite")
-    ap.add_argument("--changed", action="store_true", help="plugins changed vs --base")
-    ap.add_argument("--base", default="origin/main", help="diff base for --changed")
-    ap.add_argument("--reinstall", action="store_true", help="rebuild the venv(s)")
-    add_cli_argument(ap)
-    ap.add_argument("-k", dest="kexpr", default=None, help="pytest -k filter")
-    ap.add_argument(
-        "--selection-file", type=Path, help="validated exact-node JSON selection; "
-        "union whole test files and guards (requires exactly one named plugin)",
-    )
-    ap.add_argument(
-        "--junit-dir", type=Path, help="retain per-group JUnit XML under a fresh PLUGIN "
-        "subdirectory; never changes selection, admission or time/resource limits",
-    )
-    ap.add_argument(
-        "--test-file", action="append", default=[], metavar="PATH",
-        help="collect only this plugin-relative tests/test_*.py file (repeatable; "
-             "requires exactly one named plugin)",
-    )
-    ap.add_argument("--guards", action="store_true",
-                    help="run only @pytest.mark.guard tests (fast structural/contract checks)")
-    ap.add_argument("--collect-only", dest="collect_only", action="store_true",
-                    help="build the venv and collect tests but do not run them "
-                         "(cheap import/collection smoke)")
-    ap.add_argument("--prepare-only", dest="prepare_only", action="store_true",
-                    help="build/update the venv(s) ONLY -- never imports a single test "
-                         "module or conftest.py (unlike --collect-only, which still runs "
-                         "pytest's own collection); for a network-enabled dependency-"
-                         "preparation pass ahead of a network-disconnected real run")
-    ap.add_argument(
-        "--admission-wait",
-        type=float,
-        default=0.0,
-        metavar="SECONDS",
-        help="wait up to SECONDS for each target's environment (default: fail fast)",
-    )
-    ap.add_argument(
-        "--allow-host-state",
-        action="store_true",
-        help="explicitly let tests use the caller's HOME/config/state; intended only "
-             "for opt-in end-to-end checks that require host credentials",
-    )
-    ap.add_argument("--exclude", action="append", default=[], metavar="PLUGIN",
-                    help="drop a plugin from the resolved set (repeatable)")
-    ap.add_argument("--list", dest="list_only", action="store_true",
-                    help="print the resolved target plugins as a JSON array and exit "
-                         "(feeds a CI matrix); honors --all/--changed/names and --exclude")
-    ap.add_argument("--pre-push", action="store_true",
-                    help="hook mode: skip (exit 0) if uv is absent instead of failing")
-    ap.add_argument("--timeout", "--subsuite-timeout", dest="subsuite_timeout",
-                    type=float, default=None, metavar="SECONDS",
-                    help="wall-clock budget per file-group sub-suite (default: 300, "
-                         "higher for certain plugins -- see _SUBSUITE_TIMEOUT_OVERRIDES; "
-                         "an explicit value here always wins)")
-    ap.add_argument("--plugin-timeout", type=float, default=None, metavar="SECONDS",
-                    help="aggregate wall-clock budget per plugin (default: 900, higher "
-                         "for certain plugins -- see _PLUGIN_TIMEOUT_OVERRIDES; an "
-                         "explicit value here always wins)")
-    ap.add_argument("--test-timeout", type=float, default=None, metavar="SECONDS",
-                    help="timeout for each individual pytest item (default: 30, higher "
-                         "for certain plugins -- see _TEST_TIMEOUT_OVERRIDES; an "
-                         "explicit value here always wins)")
-    ap.add_argument(
-        "--test-profile", choices=("standard", "busy-host-functional"), default="standard",
-        help="explicit Codespaces installer or SSH snapshot functional qualification profile; "
-             "busy-host-functional is not original-budget or performance evidence",
-    )
-    ap.add_argument("--max-files-per-sub-suite", type=int, default=None,
-                    metavar="COUNT",
-                    help="maximum test files per sequential sub-suite "
-                         "(default: 25, or 10 for agent-pull-requests)")
-    ap.add_argument("--max-processes", type=int, default=128, metavar="COUNT",
-                    help="maximum contained processes per suite (default: 128)")
-    ap.add_argument("--max-memory-mb", type=int, default=4096, metavar="MIB",
-                    help="maximum process-tree memory per suite (default: 4096)")
-    ap.add_argument("--max-temp-mb", type=int, default=2048, metavar="MIB",
-                    help="maximum runner-owned temporary storage per suite (default: 2048)")
-    ap.add_argument("--allow-explicit-tiers", action="store_true",
-                    help="allow T3/T4 tests that are otherwise skipped by default")
+    ap = build_argument_parser(add_cli_argument)
     args = ap.parse_args(argv)
     OWNED_SCRATCH_OWNER = args.owned_scratch_owner
     if args.junit_dir is not None and (args.prepare_only or args.list_only):

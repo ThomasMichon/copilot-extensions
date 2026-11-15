@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** Independent, serially landed per-slice PRs against `dev`
 - **Created:** 2026-10-08
-- **Status:** Active; architecture reviewed, runtime implementation pending
+- **Status:** Active; contract slices merged, authentication-delivery receipts reconciled; integration and whole acceptance open
 - **Vision:** [machine-fleet](../../../visions/machine-fleet/README.md):
   `driver-based-fleet-adoption`, `shell-independent-service-control`,
   `discoverable-service-routing`, `standalone-service-installation`
@@ -320,3 +320,34 @@ They remain vision deltas, not features claimed by this routing foundation.
 - This closes the native DTO compatibility slice, not the runtime campaign.
   Standalone controller/connector lifecycle, authenticated registration,
   authorized live backend adapters and real routed search remain open.
+
+### 2026-11-15 - Later authentication-delivery receipts reconciled
+
+- The complete qualified #5789 discussion reports later bounded delivery:
+  #6743 identity verification, #6809 opt-in TLS Gateway/index/credential
+  service, #7099 isolated current-policy admission, #7795 optional provider
+  qualification tooling, #7835 public-trust preparation, #8475 explicitly
+  selected enrolled-key proof, and #8484 the corresponding fixture extension.
+  Current provider metadata independently confirms all seven PRs merged
+  under the reported commit identities. This reconciliation did not read
+  their product source or rerun their tests; feature/proof details retain
+  the discussion's reported-evidence tier.
+- Do not repeat the obsolete claim that no resident authenticated service
+  exists. Equally, a verifier, public-trust callback, serialized Permit or
+  successful factory construction is not current enrollment or authority.
+  The reported issuer-bound provider incompatibility and later positive
+  enrolled-profile fixture result concern different selected profiles;
+  neither is a universal provider-support or production-adoption verdict.
+- Keep authenticated trust/current-policy publication, durable first-admin
+  and revision custody, real provider acquisition/renewal/revocation, human/
+  browser flows, enrollment, execution/emission fences, connector/routing
+  interoperability, lifecycle and installed delivery with their existing
+  owners. Preserve provider/OS session longevity, authorized silent renewal
+  and opt-in/off dead-man control; no universal token countdown, bearer
+  fallback, claim rewriting, mandatory vendor or replacement issuer follows.
+- Exact interface and ownership agreement precedes consumer wiring under the
+  [runtime-authentication contract](../fleet-control-v2/runtime-authentication.md),
+  not unrelated work or whole-parent completion. Existing reservations and
+  the #5768/#6030/#6236/#6443/#5862 boundaries remain. #5789 stays OPEN; no
+  Plan/Validation checkbox, implementation assignment, source claim or
+  operational authority changes in this documentary reconciliation.
