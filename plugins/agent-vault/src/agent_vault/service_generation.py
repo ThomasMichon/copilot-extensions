@@ -26,6 +26,7 @@ from .service_connections import Closable, VaultConnections, settle_owned
 from .service_handoff import AuthReceiver, send_auth_state
 from .service_selection import SelectionCustodyUnavailable, selection_custody
 from .service_unix_alias import UnixAlias, socket_identity
+from .service_runtime import unix_server
 
 if TYPE_CHECKING:
     from .service import VaultService
@@ -273,7 +274,7 @@ class ServiceGeneration:
                 self.socket = api.SOCKET_PATH + suffix if replacing else api.SOCKET_PATH
                 if os.path.exists(self.socket):
                     self.socket = api.SOCKET_PATH + suffix
-                listener = await asyncio.start_unix_server(
+                listener = await unix_server(
                     self.connections.callback("unix"), path=self.socket,
                 )
                 self.servers.append(listener)
@@ -387,7 +388,7 @@ class ServiceGeneration:
                     log.warning("Legacy Unix alias unavailable; generation discovery remains active")
         if self.socket and self.socket != api.SOCKET_PATH and not os.path.lexists(api.SOCKET_PATH):
             try:
-                listener = await asyncio.start_unix_server(
+                listener = await unix_server(
                     self.connections.callback("unix"), path=api.SOCKET_PATH,
                 )
                 self.servers.append(listener)
@@ -417,7 +418,7 @@ class ServiceGeneration:
 
     @staticmethod
     def _unix_stale(path: str) -> bool:
-        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as peer:
+        with socket.socket(getattr(socket, "AF_UNIX"), socket.SOCK_STREAM) as peer:
             peer.settimeout(.25)
             try:
                 peer.connect(path)

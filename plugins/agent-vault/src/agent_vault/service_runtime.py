@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING, Literal, ParamSpec, Protocol, TypeVar
 
@@ -20,6 +20,19 @@ R = TypeVar("R")
 
 class EntrypointDecorator(Protocol):
     def __call__(self, function: Callable[P, R]) -> Callable[P, R]: ...
+
+
+class UnixServerFactory(Protocol):
+    def __call__(
+        self, callback: Callable[[asyncio.StreamReader, asyncio.StreamWriter], None], *, path: str,
+    ) -> Awaitable[asyncio.Server]: ...
+
+
+async def unix_server(
+    callback: Callable[[asyncio.StreamReader, asyncio.StreamWriter], None], *, path: str,
+) -> asyncio.Server:
+    start: UnixServerFactory = getattr(asyncio, "start_unix_server")
+    return await start(callback, path=path)
 
 
 def daemon_entrypoint(

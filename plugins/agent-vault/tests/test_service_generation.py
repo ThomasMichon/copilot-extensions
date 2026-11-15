@@ -1120,7 +1120,7 @@ def _send(
     target: int | str, request: dict[str, Any], *, timeout: float = 10,
 ) -> dict[str, Any]:
     if isinstance(target, str):
-        connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        connection = socket.socket(getattr(socket, "AF_UNIX"), socket.SOCK_STREAM)
         try:
             connection.settimeout(1)
             connection.connect(target)
@@ -1266,7 +1266,9 @@ def _capture_process(pid: int) -> PeerProcess:
         return PeerProcess(handle, api.identity(handle, pid), api=api)
     identity = process_start_time(pid)
     assert identity is not None
-    return PeerProcess(os.pidfd_open(pid), PeerIdentity(pid, identity, str(os.geteuid())))
+    pidfd_open: Callable[[int], int] = getattr(os, "pidfd_open")
+    geteuid: Callable[[], int] = getattr(os, "geteuid")
+    return PeerProcess(pidfd_open(pid), PeerIdentity(pid, identity, str(geteuid())))
 
 
 def _retain_fixture_job(name: str) -> JobHandle:

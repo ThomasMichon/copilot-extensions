@@ -1110,7 +1110,7 @@ def _dial_unix(request: dict[str, Any], path: str, timeout: float = 5.0) -> dict
     import socket as sock_mod
 
     try:
-        s = sock_mod.socket(sock_mod.AF_UNIX, sock_mod.SOCK_STREAM)
+        s = sock_mod.socket(getattr(sock_mod, "AF_UNIX"), sock_mod.SOCK_STREAM)
         s.settimeout(timeout)
         s.connect(path)
         s.sendall((json.dumps(request) + "\n").encode())
@@ -1220,18 +1220,20 @@ def read_pid() -> int | None:
 
 def daemonize_unix() -> bool:
     """Double-fork into a background daemon (Linux/WSL)."""
-    pid = os.fork()
+    fork: Callable[[], int] = getattr(os, "fork")
+    pid = fork()
     if pid > 0:
         time.sleep(0.5)
         return False
-    os.setsid()
+    setsid: Callable[[], None] = getattr(os, "setsid")
+    setsid()
     # Neutral cwd: a detached daemon must not hold the caller's directory
     # (which may be a worktree or the plugin payload) open.
     try:
         os.chdir(str(Path.home()))
     except OSError:
         pass
-    pid2 = os.fork()
+    pid2 = fork()
     if pid2 > 0:
         os._exit(0)
     devnull = os.open(os.devnull, os.O_RDWR)
