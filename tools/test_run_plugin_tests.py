@@ -319,10 +319,9 @@ def test_plugin_budget_includes_final_sandbox_cleanup(
 ) -> None:
     clock = [0.0]
     class Directory(_TestSandbox):
-        def __exit__(self, *args: Any) -> bool | None:
-            result = cast(Callable[..., bool | None], super().__exit__)(*args)
+        def __exit__(self, *args: Any) -> None:
+            cast(Callable[..., object], super().__exit__)(*args)
             clock[0] = 61.0
-            return result
 
     monkeypatch.setattr(runner.time, "monotonic", lambda: clock[0])
     monkeypatch.setattr(runner, "_TestSandbox", Directory)
@@ -336,10 +335,9 @@ def test_budget_exhausted_between_groups_still_reports_final_cleanup(
     clock = [0.0]
     calls = []
     class Directory(_TestSandbox):
-        def __exit__(self, *args: Any) -> bool | None:
-            result = cast(Callable[..., bool | None], super().__exit__)(*args)
+        def __exit__(self, *args: Any) -> None:
+            cast(Callable[..., object], super().__exit__)(*args)
             clock[0] = 65.0
-            return result
 
     def run(*args: Any, **kwargs: Any) -> int:
         calls.append(args)
@@ -920,14 +918,14 @@ def test_preparation_selects_same_checkout_fleet_dependency(
     before = runner._dep_fingerprint(name)
     metadata.write_text('[project]\nname = "fleet-manager"\nversion = "0.1.0.dev2"\n', encoding="utf-8")
     assert runner._dep_fingerprint(name) != before
-    calls = []
+    calls: list[list[str]] = []
     monkeypatch.setattr(
         runner.subprocess, "run",
         lambda command, **kwargs: recorded(calls, command, subprocess.CompletedProcess(command, 0)),
     )
     retained = []
 
-    def prepare(uv: str, arguments: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+    def prepare(uv: str, arguments: list[str], **kwargs: Any) -> subprocess.CompletedProcess[bytes]:
         retained.append(kwargs["retained_resource_roots"])
         return subprocess.run([uv, "pip", "install", *arguments])
 
@@ -1238,7 +1236,7 @@ def test_manager_provider_prepares_only_declared_tooling(
     tmp_path: Path, tooling_failure: bool,
 ) -> None:
     acceptance, releases = manager_acceptance
-    requirements = runner.declared_test_tooling_requirements("worktree-manager")
+    requirements = cast(tuple[str, ...], runner.declared_test_tooling_requirements("worktree-manager"))
     selected = []
     commands = []
 
@@ -1633,7 +1631,7 @@ def test_explicit_test_files_reach_contained_pytest_without_unrelated_modules(
     selectable_tests: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(runner, "_ensure_venv", lambda *a, **kw: Path(sys.executable))
-    calls = []
+    calls: list[list[str]] = []
     monkeypatch.setattr(runner, "run_contained", lambda command, **kw: recorded(calls, command, 0))
     assert runner.run_plugin(
         "example", "unused", reinstall=False, kexpr="example",
@@ -1735,7 +1733,7 @@ def test_bridge_historical_partitions_share_the_original_plugin_deadline(
 ) -> None:
     clock = iter([0, 0, 0, 250, 650, 901, 901])
     monkeypatch.setattr(runner, "time", SimpleNamespace(monotonic=lambda: next(clock)))
-    seen = []
+    seen: list[float] = []
     monkeypatch.setattr(
         runner, "run_contained",
         lambda _command, **kwargs: recorded(seen, kwargs["limits"].wall_seconds, 0),
@@ -1983,7 +1981,7 @@ def test_codespaces_partitions_share_the_unchanged_plugin_aggregate(
 ) -> None:
     clock = iter([0, 0, 0, 250, 650, 901, 901])
     monkeypatch.setattr(runner, "time", SimpleNamespace(monotonic=lambda: next(clock)))
-    seen = []
+    seen: list[containment.Limits] = []
     monkeypatch.setattr(
         runner, "run_contained",
         lambda command, **kw: recorded(seen, kw["limits"], first_result),
@@ -2002,7 +2000,7 @@ def test_assertion_aggregation_does_not_mask_fatal_group_status(
     codespaces_native_plan: CodespacesPlan, monkeypatch: pytest.MonkeyPatch, fatal: int,
 ) -> None:
     returns = iter([1, fatal])
-    calls = []
+    calls: list[list[str]] = []
     monkeypatch.setattr(
         runner, "run_contained",
         lambda command, **kwargs: recorded(calls, command, next(returns)),
@@ -2059,7 +2057,7 @@ def test_real_contained_partition_assertion_runs_later_passing_partition(
     real_run = runner.run_contained
     statuses = []
     def execute(command: list[str], **kwargs: Any) -> int:
-        code = real_run(command, **kwargs)
+        code = cast(int, real_run(command, **kwargs))
         statuses.append(code)
         return code
     monkeypatch.setattr(runner, "run_contained", execute)
@@ -2922,7 +2920,7 @@ def test_explicit_file_group_limit_must_remain_positive(size: int) -> None:
 def test_codespaces_functional_profile_preparation_strips_test_only_flags(
     monkeypatch: pytest.MonkeyPatch, profile_arguments: list[str],
 ) -> None:
-    commands = []
+    commands: list[list[str]] = []
     monkeypatch.setattr(
         subprocess, "run",
         lambda command: recorded(commands, command, SimpleNamespace(returncode=0)),
@@ -2958,7 +2956,7 @@ def test_codespaces_functional_profile_budgets_and_caps(
 
     monkeypatch.setattr(runner.shutil, "which", lambda _name: "uv")
     monkeypatch.setattr(runner, "_acquire_admission", lambda *_args: Lease())
-    observed = []
+    observed: list[dict[str, Any]] = []
     monkeypatch.setattr(runner, "run_plugin", lambda *a, **kw: recorded(observed, kw, 0))
     files = [target]
     arguments = [plugin, "--test-file", files[0], "--junit-dir", str(tmp_path / "reports")]

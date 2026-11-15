@@ -116,11 +116,11 @@ class OwnedTestSandbox:
             from agent_worktrees import artifact_scratch, artifact_storage, config, config_sources
             from agent_worktrees import claims_cli, sessions, tracking
             from agent_worktrees.execution_spaces import resolve_owner_record_path
-        except ImportError as error:
+        except ImportError as import_error:
             raise ContainmentError(
                 "owned scratch requires an already-available compatible Worktrees Python owner; "
                 "no bootstrap or ordinary sandbox fallback"
-            ) from error
+            ) from import_error
         declaration = getattr(artifact_scratch, "capabilities", None)
         support = declaration() if callable(declaration) else {}
         if (
@@ -129,9 +129,14 @@ class OwnedTestSandbox:
                    for key in ("allocator", "artifact_retention"))
         ):
             raise ContainmentError("loaded scratch owner does not support allocation and retained disposition")
-        parsed = tracking.parse_claim_ref(owner)
+        if TYPE_CHECKING:
+            from agent_worktrees.tracking_claims import parse_claim_ref
+        else:
+            parse_claim_ref = tracking.parse_claim_ref
+        parsed = parse_claim_ref(owner)
         if parsed is None or not parsed.is_qualified or parsed.session:
             raise ContainmentError("owned scratch requires a qualified worktree owner without a session")
+        assert parsed.project is not None
         selected = config.load_project_config(parsed.project)
         readiness = claims_cli._coordination_readiness_for_owner_ref(owner, selected)
         if not readiness.ready:
