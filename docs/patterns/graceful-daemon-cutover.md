@@ -645,19 +645,18 @@ agent-bridge needs.
    > trigger, has soaked enough to be trusted end to end), demote that
    > plugin's verb back to an installer-internal seam per this invariant --
    > don't treat its present existence as the target state.
-2. **Construct independently; prefer start-first retirement.** Ordinary update
-   and repair build the incoming generation without incumbent cooperation. On
-   the compatible path, start it beside the incumbent, confirm promotion and
-   let the outgoing owner retire. Incompatible, unavailable or non-settling
-   predecessors instead permit bounded cold takeover by the same authorized
-   replacement owner after incoming startup. Fence exclusive resource acquisition
-   separately from starting the new process. Missing graceful support needs no extra repair flag;
+2. **Construct independently; replace kill by default.** Ordinary update and
+   repair build the incoming generation without incumbent cooperation. Without
+   reliable handoff, the same authorized lifecycle owner force-stops the exact
+   outgoing service/owned-daemon tree before incoming startup. A reliable
+   compatible path may start the candidate beside the incumbent for the one
+   bounded handoff attempt; if that does not settle, force cutoff without
+   another drain wait. Missing graceful support needs no extra repair flag;
    exclusive work remains fenced on either path.
-3. **Outgoing drain is best effort and bounded.** Prefer the displaced owner's
-   admission closure, checkpoint and self-retirement after successor readiness.
-   If that contract is unsupported, unavailable or does not settle, authorized
-   normal update and repair may use identity-bound termination within the
-   bounded cold-takeover contract. Interrupted non-resumable work requires
+3. **One reliable handoff attempt, not repeated drain.** The attempt and forced
+   cutoff share the existing deadline. No nested callback, shutdown grace or
+   retry layer may extend it or preserve an outgoing state lock that blocks
+   incoming startup. Interrupted non-resumable work requires
    durable recovery and honest outcome reporting, never a false graceful claim.
 4. **Do not strand recovery.** On the compatible path after the commit point, if the old endpoint is
    unreachable, **commit-forward** to the healthy new one (never roll back into a
@@ -695,10 +694,12 @@ agent-bridge needs.
 The cutover **mechanism** is the OS-agnostic `zdd` library + the daemon's own
 Python seam (`_cutover` / `deploy`), so the *hard part is shared*. What
 legitimately differs is the **service-manager integration**, and the two
-platforms share the **same target**: prefer compatible graceful replacement,
-permit bounded cold takeover, and recover interruption through durable state
-and retriable consumers. The existing graceful routes use different,
-OS-appropriate mechanisms:
+platforms share the **same target**: kill by default, allow one bounded handoff
+attempt only when reliable, and force outgoing cutoff before startup when
+reliable handoff is absent. Recover interruption through durable state and
+retriable consumers. The existing graceful routes below use different,
+OS-appropriate mechanisms; the table records current adoption, not qualification
+or an exception to that target:
 
 For non-marketplace peers such as **worktree-manager**, read the
 `install.ps1`/`install.sh` shorthand here as "the equivalent update activation
@@ -708,7 +709,7 @@ cutover behavior on both platforms even though it has no plugin manifest.
 | | Windows (`install.ps1`) | POSIX (`install.sh`) |
 |---|---|---|
 | Service manager | Scheduled Task, but `conhost --headless` **detaches** the daemon — the task never tracks the live process | systemd `--user` unit **tracks** the daemon (its `ExecStart` PID) |
-| A plain "stop" is… | a **hard kill** (no clean SIGTERM-drain path) — so the zdd cutover is **required** to avoid dropping in-flight work | a **SIGTERM**: `Type=simple` + `Restart=on-failure`, and the daemons drain on SIGTERM (uvicorn for the coordinator/index service; a signal handler for agent-vault). So `systemctl restart` is already **graceful** (drains in-flight work, exits 0 → no resurrect), just with a brief API-unavailable blip |
+| A plain "stop" is… | a **hard kill** (no clean SIGTERM-drain path); the existing zdd path attempts to preserve in-flight work, but is not required by the replacement target | a **SIGTERM**: `Type=simple` + `Restart=on-failure`, and the daemons drain on SIGTERM (uvicorn for the coordinator/index service; a signal handler for agent-vault). The existing `systemctl restart` path drains in-flight work with a brief API-unavailable blip; drain cannot extend the target cutoff deadline |
 | Default update path | in-process zdd cutover (no opt-in) | **zdd cutover when a live routed daemon is serving** (agent-bridge, agent-dispatch, agent-index), **falling back** to the SIGTERM-graceful `systemctl restart` when a cutover can't run or fails |
 | Post-cutover reconcile | idempotently ensure the existing boot-task definition **without starting** it (`-NoStart`): no-op when unchanged, update in place for an intentional definition migration, and register only when absent; the detached daemon serves and the next boot resolves the new slot through the stable launcher | refresh the unit **without restarting** (`_install_service --no-restart`); the old (unit-tracked) daemon exits cleanly so `Restart=on-failure` never resurrects it; the detached survivor serves; next boot starts the new slot |
 
