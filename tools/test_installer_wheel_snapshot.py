@@ -10,12 +10,9 @@ import time
 from collections.abc import Callable
 from contextlib import AbstractContextManager
 from types import TracebackType
-from typing import TYPE_CHECKING, Any, BinaryIO, IO, Protocol, TypedDict, cast
+from typing import Any, BinaryIO, IO, Protocol, TypedDict, cast
 
 import pytest
-
-if TYPE_CHECKING:
-    from typing_extensions import Unpack
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "libs" / "installer-engine"))
 import installer_wheel_snapshot as snapshots
@@ -47,15 +44,16 @@ def inputs(tmp_path: Path) -> tuple[dict[str, Path], dict[str, str]]:
 
 
 def retain(
-    paths: dict[str, Path], hashes: dict[str, str], **options: Unpack[_RetainOptions],
+    paths: dict[str, Path], hashes: dict[str, str], *,
+    max_wheels: int = 2, max_archive_bytes: int = 6, max_total_bytes: int = 11,
+    max_snapshot_bytes: int = 11, deadline: float | None = None,
+    retention_deadline: float | None = None,
 ) -> AbstractContextManager[snapshots.WheelSnapshot]:
-    limits: snapshots._RetainedLimits = {
-        "max_wheels": 2, "max_archive_bytes": 6, "max_total_bytes": 11,
-        "max_snapshot_bytes": 11, "deadline": time.monotonic() + 10,
-    }
-    limits.update(options)
     return snapshots.retain_wheel_inputs(
-        paths, hashes, **limits,
+        paths, hashes, max_wheels=max_wheels, max_archive_bytes=max_archive_bytes,
+        max_total_bytes=max_total_bytes, max_snapshot_bytes=max_snapshot_bytes,
+        deadline=time.monotonic() + 10 if deadline is None else deadline,
+        retention_deadline=retention_deadline,
     )
 
 

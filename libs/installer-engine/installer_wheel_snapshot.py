@@ -14,12 +14,9 @@ import re
 import stat
 import sys
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, BinaryIO, Mapping, TypedDict
+from typing import Any, BinaryIO, Mapping
 import zipfile
 import zlib
-
-if TYPE_CHECKING:
-    from typing_extensions import Unpack
 
 from installer_wheel_inputs import (
     WheelError, WheelLimits, _check_deadline, _identity, _member_chunks, _ordinary,
@@ -27,26 +24,11 @@ from installer_wheel_inputs import (
 )
 
 
-class _SnapshotLimits(TypedDict):
-    max_wheels: int
-    max_archive_bytes: int
-    max_total_bytes: int
-    max_snapshot_bytes: int
-    deadline: float
-
-
-class _RetainedLimits(_SnapshotLimits, total=False):
-    retention_deadline: float | None
-
-
-class _BundleLimits(_SnapshotLimits):
-    bundle_sha256: str
-    max_bundle_bytes: int
-
-
 @contextmanager
 def retain_wheel_inputs(
-    archives: Mapping[str, Path], expected: Mapping[str, str], **limits: Unpack[_RetainedLimits],
+    archives: Mapping[str, Path], expected: Mapping[str, str], *,
+    max_wheels: int, max_archive_bytes: int, max_total_bytes: int,
+    max_snapshot_bytes: int, deadline: float, retention_deadline: float | None = None,
 ) -> Iterator[WheelSnapshot]:
     """Own exact byte snapshots, not profile approval or an installation."""
     import installer_dependency_policy as policy
@@ -55,13 +37,21 @@ def retain_wheel_inputs(
     private_root: Callable[[Path], Path] = policy._private_retained_root
     with temporary_inputs(None) as temporary:
         root = private_root(Path(temporary)).resolve()
-        with open_wheel_snapshot(root, archives, expected, **limits) as snapshot:
+        with open_wheel_snapshot(
+            root, archives, expected, max_wheels=max_wheels,
+            max_archive_bytes=max_archive_bytes, max_total_bytes=max_total_bytes,
+            max_snapshot_bytes=max_snapshot_bytes, deadline=deadline,
+            retention_deadline=retention_deadline,
+        ) as snapshot:
             yield snapshot
 
 
 @contextmanager
 def retain_wheel_bundle(
-    bundle: Path, expected: Mapping[str, str], **limits: Unpack[_BundleLimits],
+    bundle: Path, expected: Mapping[str, str], *,
+    bundle_sha256: str, max_bundle_bytes: int, max_wheels: int,
+    max_archive_bytes: int, max_total_bytes: int, max_snapshot_bytes: int,
+    deadline: float,
 ) -> Iterator[WheelSnapshot]:
     """Unpack an already selected transport into the existing snapshot owner."""
     import installer_dependency_policy as policy
@@ -70,7 +60,12 @@ def retain_wheel_bundle(
     private_root: Callable[[Path], Path] = policy._private_retained_root
     with temporary_inputs(None) as temporary:
         root = private_root(Path(temporary)).resolve()
-        with open_wheel_bundle_snapshot(root, bundle, expected, **limits) as snapshot:
+        with open_wheel_bundle_snapshot(
+            root, bundle, expected, bundle_sha256=bundle_sha256,
+            max_bundle_bytes=max_bundle_bytes, max_wheels=max_wheels,
+            max_archive_bytes=max_archive_bytes, max_total_bytes=max_total_bytes,
+            max_snapshot_bytes=max_snapshot_bytes, deadline=deadline,
+        ) as snapshot:
             yield snapshot
 
 
