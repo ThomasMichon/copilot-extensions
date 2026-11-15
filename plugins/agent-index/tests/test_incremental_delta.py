@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
+from sqlite3 import Connection
 from types import SimpleNamespace
+from typing import Any, NoReturn, cast
 
 import pytest
 
@@ -22,7 +25,7 @@ def entry(*, source: str = "forge:repo") -> FileEntry:
     return FileEntry(path="one.md", content="one", source=source, language="markdown")
 
 
-def forbidden(*args: object, **kwargs: object) -> None:
+def forbidden(*args: object, **kwargs: object) -> NoReturn:
     raise AssertionError("ordinary delta attempted a whole-corpus operation")
 
 
@@ -44,7 +47,9 @@ def test_delta_acquisition_does_not_enumerate_existing_corpus(
         commit="next",
     )
 
-    def discover(last_commit: str | None, cancel_check=None) -> SourceDelta:
+    def discover(
+        last_commit: str | None, cancel_check: Callable[[], None] | None = None,
+    ) -> SourceDelta:
         calls.append(last_commit)
         return result
 
@@ -58,7 +63,7 @@ def test_delta_acquisition_does_not_enumerate_existing_corpus(
     state = IndexState(sources={"configured": SourceState(last_commit="previous")})
     state.sources["configured"].acquisition_scope = recovery_scope("configured", connector)
     manifest = engine._crawl_source(
-        "configured", config=None, state=state, path_index=paths, full=False,
+        "configured", config=cast(IndexConfig, None), state=state, path_index=paths, full=False,
     )
     assert calls == ["previous"]
     assert manifest.commit == "next"
@@ -75,7 +80,7 @@ def test_delta_acquisition_does_not_enumerate_existing_corpus(
 
     connect = paths._connect
 
-    def measured_connection():
+    def measured_connection() -> Connection:
         conn = connect()
         conn.set_progress_handler(count_step, 1)
         return conn
@@ -110,7 +115,7 @@ def test_unsafe_delta_fails_before_indexing(
     state.sources["configured"].acquisition_scope = recovery_scope("configured", connector)
     with pytest.raises(ValueError):
         engine._crawl_source(
-            "configured", config=None, state=state, path_index=paths, full=False,
+            "configured", config=cast(IndexConfig, None), state=state, path_index=paths, full=False,
         )
     assert paths.get_entry("forge:repo", "retained.md") == before
     assert state.sources["configured"].last_commit == "previous"
@@ -152,11 +157,11 @@ def test_compatible_upsert_skips_chunker_engine_and_stale_cleanup(
     state.sources["configured"].acquisition_scope = recovery_scope("configured", connector)
     result = engine._index_source(
         "configured",
-        config=SimpleNamespace(
+        config=cast(Any, SimpleNamespace(
             model_profiles={}, stream_batch_size=2, state_file=tmp_path / "state.json",
-        ),
+        )),
         state=state, path_index=paths,
-        multi_store=SimpleNamespace(reconcile_file_chunks=forbidden),
+        multi_store=cast(Any, SimpleNamespace(reconcile_file_chunks=forbidden)),
         multi_clients={}, full=False, before_store=forbidden,
     )
     assert result == (0, 0, 1)
@@ -181,21 +186,28 @@ def test_reuse_fingerprint_includes_metadata_models_and_chunker_revision() -> No
 def test_run_prepares_engines_only_when_embedding_is_needed(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, has_embedding_work: bool,
 ) -> None:
-    profile = ModelProfile(model_id="prose", model_name="fixture")
+    profile = ModelProfile(model_id="prose", model_name="fixture", table_name="vectors_prose")
     config = IndexConfig(
-        data_dir=tmp_path, model_profiles={"prose": profile}, cluster_enabled=False,
+        data_dir=tmp_path, cluster_enabled=False,
+        model_profiles={
+            "prose": profile,
+            "unused": ModelProfile("unused", "fixture", table_name="vectors_unused"),
+        },
     )
     calls: list[str] = []
-    client = SimpleNamespace(close=lambda: calls.append("close"))
     store = SimpleNamespace(register_model=lambda _profile: None)
     monkeypatch.setenv("AGENT_INDEX_INDEX_ENSURE_ENGINES", "1")
     monkeypatch.setattr("agent_index.index_config.IndexConfig", lambda: config)
-    monkeypatch.setattr("agent_index.engine.client.EngineClient", lambda **k: client)
-    monkeypatch.setattr("agent_index.store.multi_model_store.MultiModelStore", lambda *a, **k: store)
     monkeypatch.setattr(
-        "agent_index.engine.lifecycle.ensure_engine",
-        lambda *a: calls.append("ensure") or False,
+        "agent_index.engine.client.EngineClient",
+        lambda **k: SimpleNamespace(close=lambda: calls.append(f"close:{k['model_id']}")),
     )
+    monkeypatch.setattr("agent_index.store.multi_model_store.MultiModelStore", lambda *a, **k: store)
+    def ensure(model: ModelProfile, _client: object) -> bool:
+        calls.append(f"ensure:{model.model_id}")
+        return False
+
+    monkeypatch.setattr("agent_index.engine.lifecycle.ensure_engine", ensure)
     monkeypatch.setattr(engine, "selected_layout", lambda: None)
     monkeypatch.setattr(
         engine, "configured_source_specs", lambda: [engine.SourceSpec("git:fixture")],
@@ -204,13 +216,15 @@ def test_run_prepares_engines_only_when_embedding_is_needed(
 
     def index_source(*args: object, **kwargs: object) -> tuple[int, int, int]:
         if has_embedding_work:
-            before_store = kwargs["before_store"]
-            assert callable(before_store)
-            before_store()
-            before_store()
+            before_model_embed = kwargs["before_model_embed"]
+            assert callable(before_model_embed)
+            before_model_embed("prose")
+            before_model_embed("prose")
         return (0, 0, 0)
 
     monkeypatch.setattr(engine, "_index_source", index_source)
     result = engine.run_reindex(source="git:fixture")
     assert "sources_failed" not in result
-    assert calls == (["ensure", "close"] if has_embedding_work else ["close"])
+    assert calls == (
+        (["ensure:prose"] if has_embedding_work else []) + ["close:unused", "close:prose"]
+    )
