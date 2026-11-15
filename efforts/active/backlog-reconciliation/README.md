@@ -3907,9 +3907,10 @@ The complete 14:26:06 UTC census verifies 840 whole open, 111 above fixed 729.
 Nine next original studies continue while provenance and whole-chain keepers
 remain metadata-only; this is not parent effort completion.
 The [next raw-source admission](journal/2026/11.15-title-bound-ready-frontier.md#next-raw-source-admission-with-a-precise-protected-unit)
-retains eight complete maps and #5851's precise source-unit gap. Actual
-implementation-design holds, parent/child receipt conditions and custody
-remain scoped to their operations; requirement admission is not technical
+retains eight complete maps and #5851's precise source-unit gap. Current accepted
+decisions supersede historical design conditions within their slices;
+parent/child receipt conditions and custody remain scoped to their operations.
+Requirement admission is not technical
 completion, receiving acceptance or a new source disposition.
 The [portable receiving-boundary study](journal/2026/11.15-portable-receiving-boundaries.md)
 qualifies eight receiving documents for five admitted contracts. #5785's
