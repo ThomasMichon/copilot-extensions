@@ -101,6 +101,12 @@ explicit service restart permits a new budget. Existing daemon inactivity and
 password-lifetime settings are unchanged. Configure the normal persistent
 service mode when continuous relay availability is intended.
 
+Selected CA material is validated before listener publication; an invalid
+initial CA preserves a running predecessor. Reconnect re-reads trust inside the
+owned channel task. Later CA setup failures consume the same retry budget and
+leave local Vault consumers available, without disabling TLS verification or
+using a direct-network fallback.
+
 `ping` adds only `federated_relay.state` and `channel_attached`; it performs no
 discovery or credential acquisition. States distinguish disabled, waiting for
 the current Vault generation, waiting for conduit, connecting, attached,
