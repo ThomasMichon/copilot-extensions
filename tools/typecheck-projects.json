@@ -508,6 +508,10 @@
       "include": [
         "plugins/agent-vault"
       ],
+      "import_roots": [
+        "fleet-manager/tests",
+        "plugins/agent-vault/tests"
+      ],
       "exclude": [],
       "level": "pending",
       "requirements": "tools/typecheck-service-ssh-requirements.txt"
@@ -672,7 +676,7 @@
         "tools/promotion_unit_tests/test_typecheck_new_code.py"
       ],
       "level": "pending",
-      "requirements": "tools/typecheck-yaml-requirements.txt"
+      "requirements": "tools/typecheck-runner-requirements.txt"
     },
     {
       "name": "worktree-manager",
