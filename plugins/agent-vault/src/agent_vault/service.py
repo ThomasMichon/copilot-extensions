@@ -56,9 +56,7 @@ from .rendezvous import (
 from .rendezvous import write_endpoint as write_endpoint
 from .service_endpoints import advertised_endpoint as advertised_endpoint
 from .service_connections import Closable as PipeServer, VaultConnections, settle_owned
-from .service_runtime import (
-    daemon_entrypoint, serve as _serve,
-)
+from .service_runtime import serve as _serve
 from . import service_cache
 from .service_generation import PROCESS_GENERATION, PROTOCOL, ServiceGeneration as ServiceGeneration
 from .service_handoff import supported_versions
@@ -1070,31 +1068,29 @@ async def handle_client(
             await settle_owned(writer.wait_closed())
 
 
-@daemon_entrypoint("agent-vault", source=__file__, purpose="production")
 async def run_server(service: VaultService, tcp_port: int | None = None) -> None:
-    # The outer entrypoint retains this same admission through shutdown.
-    with admit_daemon_instance("agent-vault") as custody:
+    with admit_daemon_instance("agent-vault", source=__file__, purpose="production") as custody:
         service._instance_registry_root = custody.receipt.registry_root
-    servers: list[asyncio.Server] = []
-    pipe_servers: list[PipeServer] = []
-    connections = VaultConnections(service, handle_client)
-    try:
-        await _serve(service, tcp_port, servers, pipe_servers, connections)
-    finally:
-        reason = (
-            "shutdown requested" if service._shutdown
-            else "inactivity timeout" if service.is_expired else "server stopped"
-        )
-        log.info("Stopping: %s", reason)
-        generation = getattr(service, "_generation", None)
+        servers: list[asyncio.Server] = []
+        pipe_servers: list[PipeServer] = []
+        connections = VaultConnections(service, handle_client)
         try:
-            if generation is not None:
-                await settle_owned(generation.settle_retirements())
-                await generation.close_handoff()
+            await _serve(service, tcp_port, servers, pipe_servers, connections)
         finally:
-            await settle_owned(connections.close(
-                servers, pipe_servers, generation.cleanup if generation is not None else cleanup,
-            ))
+            reason = (
+                "shutdown requested" if service._shutdown
+                else "inactivity timeout" if service.is_expired else "server stopped"
+            )
+            log.info("Stopping: %s", reason)
+            generation = getattr(service, "_generation", None)
+            try:
+                if generation is not None:
+                    await settle_owned(generation.settle_retirements())
+                    await generation.close_handoff()
+            finally:
+                await settle_owned(connections.close(
+                    servers, pipe_servers, generation.cleanup if generation is not None else cleanup,
+                ))
 
 
 def cleanup() -> None:
@@ -1277,26 +1273,26 @@ def _prepare_service(
     return service
 
 
-@daemon_entrypoint("agent-vault", source=__file__, purpose="production")
 def _run_resident(
     args: Namespace, *, handoff_payload: dict[str, Any] | None = None, handoff_consumed: bool = False,
 ) -> None:
     """Admit the actual resident before initialization and retain it through shutdown."""
-    service = _prepare_service(
-        args, handoff_payload=handoff_payload, handoff_consumed=handoff_consumed,
-    )
-    if args.foreground:
-        print(
-            f"Vault service starting (cli={service.cli.status(resolve_kpdb(required=False))}, "
-            f"TCP bind 127.0.0.1:{args.tcp_port if args.tcp_port is not None else daemon_bind_port(resolve_context())})"
+    with admit_daemon_instance("agent-vault", source=__file__, purpose="production"):
+        service = _prepare_service(
+            args, handoff_payload=handoff_payload, handoff_consumed=handoff_consumed,
         )
+        if args.foreground:
+            print(
+                f"Vault service starting (cli={service.cli.status(resolve_kpdb(required=False))}, "
+                f"TCP bind 127.0.0.1:{args.tcp_port if args.tcp_port is not None else daemon_bind_port(resolve_context())})"
+            )
 
-    def sig_handler(signum: int, frame: FrameType | None) -> None:
-        service._shutdown = True
+        def sig_handler(signum: int, frame: FrameType | None) -> None:
+            service._shutdown = True
 
-    signal.signal(signal.SIGTERM, sig_handler)
-    signal.signal(signal.SIGINT, sig_handler)
-    asyncio.run(run_server(service, tcp_port=args.tcp_port))
+        signal.signal(signal.SIGTERM, sig_handler)
+        signal.signal(signal.SIGINT, sig_handler)
+        asyncio.run(run_server(service, tcp_port=args.tcp_port))
 
 
 def main() -> None:

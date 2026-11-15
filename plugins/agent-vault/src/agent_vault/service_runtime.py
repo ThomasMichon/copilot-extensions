@@ -5,22 +5,12 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable
 from concurrent.futures import ThreadPoolExecutor
-from typing import TYPE_CHECKING, Literal, ParamSpec, Protocol, TypeVar
-
-from agent_procutil.daemon_instances import daemon_entrypoint as _daemon_entrypoint
+from typing import TYPE_CHECKING, Protocol
 
 from .service_connections import Closable as PipeServer, VaultConnections, settle_owned
 
 if TYPE_CHECKING:
     from .service import VaultService
-
-P = ParamSpec("P")
-R = TypeVar("R")
-
-
-class EntrypointDecorator(Protocol):
-    def __call__(self, function: Callable[P, R]) -> Callable[P, R]: ...
-
 
 class UnixServerFactory(Protocol):
     def __call__(
@@ -33,14 +23,6 @@ async def unix_server(
 ) -> asyncio.Server:
     start: UnixServerFactory = getattr(asyncio, "start_unix_server")
     return await start(callback, path=path)
-
-
-def daemon_entrypoint(
-    plugin: str, *, source: str,
-    purpose: Literal["production", "unattended-test", "interactive-test"],
-) -> EntrypointDecorator:
-    decorator: EntrypointDecorator = _daemon_entrypoint(plugin, source=source, purpose=purpose)
-    return decorator
 
 
 async def serve(
