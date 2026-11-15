@@ -51,6 +51,7 @@ on:
           - manager-suite
           - manager-lifecycle
           - manager-engine-routing
+          - manager-installed-tty
           - worktrees-git-probes
           - related-knowledge
           - registration-inspection
@@ -1470,8 +1471,8 @@ jobs:
           retention-days: 2
 
   manager-engine-routing-windows:
-    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'manager-engine-routing'
-    name: Installed Manager and engine routing (isolated Windows)
+    if: github.event_name == 'workflow_dispatch' && (inputs.portfolio == 'manager-engine-routing' || inputs.portfolio == 'manager-installed-tty')
+    name: Installed Manager native contract (isolated Windows)
     runs-on: windows-latest
     timeout-minutes: 25
     env:
@@ -1480,6 +1481,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
+          fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
@@ -1487,11 +1489,12 @@ jobs:
       - uses: astral-sh/setup-uv@v9.0.0
         with:
           version: "0.12.6"
-      - name: Qualify the canonical routing contract at an exact source
+      - name: Qualify the canonical Manager contract at an exact source
         id: routing
         shell: python
         env:
           REQUESTED_SOURCE: ${{ inputs.source_sha }}
+          REQUESTED_PORTFOLIO: ${{ inputs.portfolio }}
         run: |
           import json, os, re, subprocess, sys
           from pathlib import Path
@@ -1500,9 +1503,32 @@ jobs:
           actual = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
           if not re.fullmatch(r"[0-9a-f]{40}", expected) or expected != actual or expected != os.environ["GITHUB_SHA"]:
               raise ValueError("Routing qualification requires its exact published source")
-          root = Path(".validation/engine-routing")
+          portfolio = os.environ.get("REQUESTED_PORTFOLIO", "manager-engine-routing")
+          if portfolio not in ("manager-engine-routing", "manager-installed-tty"):
+              raise ValueError("Unsupported Manager native portfolio")
+          installed_tty = portfolio == "manager-installed-tty"
+          root = Path(".validation/installed-tty" if installed_tty else ".validation/engine-routing")
           if root.exists():
               raise ValueError("Routing qualification refuses retained preparation or result data")
+          if installed_tty:
+              identity = []
+              receipt = Path("worktree-manager/runtime-source.json")
+              source = json.loads(receipt.read_text(encoding="utf-8"))["source_commit"] if receipt.is_file() else actual
+              for key, value in (
+                  ("candidate-commit", actual),
+                  ("candidate-tree", subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], text=True).strip()),
+                  ("source-commit", source),
+                  ("main-before", subprocess.check_output(["git", "rev-parse", "origin/main"], text=True).strip()),
+                  ("run-id", os.environ["GITHUB_RUN_ID"]),
+                  ("run-attempt", os.environ["GITHUB_RUN_ATTEMPT"]),
+              ):
+                  identity.extend(["--" + key, value])
+              command = [sys.executable, "tools/run-manager-runtime-acceptance.py", "--contract", "installed-tty"]
+              report = str(root / "installed-tty-result.json")
+              subprocess.run([*command, "--root", str(root), "--output", report, *identity], check=True)
+              subprocess.run([*command, "--validate-result", report, *identity], check=True)
+              print("Exact-source installed TTY qualified; promotion and productive-host rollout remain separate.")
+              raise SystemExit(0)
           subprocess.run([
               sys.executable, "tools/run-manager-runtime-acceptance.py",
               "--contract", "engine-routing", "--root", str(root),
@@ -1511,12 +1537,15 @@ jobs:
           if result.get("prepared") is not True or result.get("timed_runner_exit") != 0:
               raise ValueError("Routing preparation and every timed consumer must pass")
           print("Prepared installed routing qualified; cold-first-touch and deployment are not exercised.")
-      - name: Retain routing preparation and consumer diagnostics
+      - name: Retain Manager preparation and consumer diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: manager-engine-routing-${{ github.run_id }}-${{ github.run_attempt }}
-          path: .validation/engine-routing
+          name: ${{ inputs.portfolio }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            .validation/engine-routing
+            .validation/installed-tty/installed-tty-result.json
+            .validation/installed-tty/diagnostics
           if-no-files-found: warn
           retention-days: 2
 

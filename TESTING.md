@@ -1101,6 +1101,14 @@ live enforcement depends on the independently governed Main controller.
 Installed Manager TTY qualification is a separate, positively selected native
 contract, not part of unit coverage:
 
+The existing manual `Installation context full` workflow also exposes this
+same owner as portfolio `manager-installed-tty`. Dispatch at the published
+candidate ref and supply its exact commit as `source_sha`. It runs and
+revalidates the existing identity-bound contract on disposable Windows; it
+does not promote, install on an operator machine, or relax the original
+720-second budget and 30-second cleanup reserve. The source-owned receipt and
+bounded diagnostics are retained even on failure.
+
 ```powershell
 python tools\run-manager-runtime-acceptance.py --contract installed-tty --root <fresh-private-root> --candidate-commit <candidate-sha> --candidate-tree <candidate-tree> --source-commit <dev-source-sha> --main-before <pinned-main-sha> --run-id <run-id> --run-attempt <attempt> --output <result-json>
 ```
@@ -1116,6 +1124,14 @@ source provenance kept distinct from transformed candidate bytes. Missing,
 skipped, failed, timed-out, incomplete or stale results refuse promotion.
 Fixture diagnostics and cleanup remain privately owned and bounded; no operator
 installation, credentials, sessions or service registrations are borrowed.
+Windows source preparation uses the shared native filesystem spelling without
+moving roots or changing Git operands. On an observed Python access violation,
+the failed witness additionally makes one bounded Application Error query for
+only its own fault-file PIDs, startup window and matching process incarnation.
+Only that identity, module basename/version, exception code and module offset
+can be retained; unrelated events, paths and
+unexpected fields are refused. Unavailable metadata never turns the original
+failure into acceptance, and cleanup failures remain fatal.
 Source workflow wiring alone is not activation: the preserved Main controller
 requires its own reviewed adoption and exact-candidate native run.
 

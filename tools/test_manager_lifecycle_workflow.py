@@ -27,11 +27,13 @@ def test_hosted_routing_uses_exact_fresh_canonical_contract(tmp_path, monkeypatc
     workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
     job = workflow["jobs"]["manager-engine-routing-windows"]
     assert job["if"] == (
-        "github.event_name == 'workflow_dispatch' && inputs.portfolio == 'manager-engine-routing'"
+        "github.event_name == 'workflow_dispatch' && "
+        "(inputs.portfolio == 'manager-engine-routing' || inputs.portfolio == 'manager-installed-tty')"
     )
     step = next(row for row in job["steps"] if row.get("id") == "routing")
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("GITHUB_SHA", "a" * 40)
+    monkeypatch.setenv("REQUESTED_PORTFOLIO", "manager-engine-routing")
     monkeypatch.setenv("REQUESTED_SOURCE", (
         "" if outcome == "missing-source" else "b" * 40 if outcome == "wrong-source" else "a" * 40
     ))
@@ -65,6 +67,54 @@ def test_hosted_routing_uses_exact_fresh_canonical_contract(tmp_path, monkeypatc
         with pytest.raises(ValueError):
             exec(step["run"], {})
     assert len(calls) == int(outcome in {"passed", "failed", "partial"})
+
+
+@pytest.mark.parametrize("failure", [None, "construction", "validation"])
+def test_hosted_installed_tty_reuses_the_identity_bound_owner(tmp_path, monkeypatch, failure):
+    workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    job = workflow["jobs"]["manager-engine-routing-windows"]
+    step = next(row for row in job["steps"] if row.get("id") == "routing")
+    assert job["steps"][0]["with"]["fetch-depth"] == 0
+    monkeypatch.chdir(tmp_path)
+    for key, value in {
+        "GITHUB_SHA": "a" * 40, "REQUESTED_SOURCE": "a" * 40,
+        "REQUESTED_PORTFOLIO": "manager-installed-tty",
+        "GITHUB_RUN_ID": "123", "GITHUB_RUN_ATTEMPT": "2",
+    }.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setattr(
+        subprocess, "check_output",
+        lambda arguments, **_kwargs: (
+            "b" if arguments[-1] == "HEAD^{tree}" else
+            "c" if arguments[-1] == "origin/main" else "a"
+        ) * 40 + "\n",
+    )
+    calls = []
+
+    def run(arguments, **options):
+        calls.append(arguments)
+        assert options == {"check": True}
+        assert arguments[:4] == [
+            sys.executable, "tools/run-manager-runtime-acceptance.py", "--contract", "installed-tty",
+        ]
+        for flag, value in {
+            "--candidate-commit": "a" * 40, "--candidate-tree": "b" * 40,
+            "--source-commit": "a" * 40, "--main-before": "c" * 40,
+            "--run-id": "123", "--run-attempt": "2",
+        }.items():
+            assert arguments[arguments.index(flag) + 1] == value
+        if failure == ("construction" if len(calls) == 1 else "validation"):
+            raise subprocess.CalledProcessError(1, arguments)
+
+    monkeypatch.setattr(subprocess, "run", run)
+    if failure:
+        with pytest.raises(subprocess.CalledProcessError):
+            exec(step["run"], {})
+    else:
+        with pytest.raises(SystemExit) as result:
+            exec(step["run"], {})
+        assert result.value.code == 0
+    assert len(calls) == (1 if failure == "construction" else 2)
 
 
 @pytest.mark.parametrize("outcome", [

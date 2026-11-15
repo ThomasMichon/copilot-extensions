@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify and diagnose native installed Manager TTY launches at immutable Windows sources",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
