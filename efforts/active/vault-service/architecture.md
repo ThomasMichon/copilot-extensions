@@ -21,11 +21,12 @@ These are bounded source observations, not installed-readiness claims.
 | [Manager progress screen](../../../worktree-manager/src/worktree_manager/pivot_progress.py), [action streaming](../../../worktree-manager/src/worktree_manager/production_picker/picker_tui/tasks.py), [pivot manifest](../../../worktree-manager/src/worktree_manager/production_picker/picker_tui/pivot_manifest.py) | Generic contributed actions/progress; cancellation and runtime close kill the locally owned CLI child | Adapt presentation to short client commands/subscriptions; never place durable Vault execution in that child |
 | Candidate coordination capabilities | Durable queue, deduplication, conditional updates, attempt generations, expiry, presence and consumer-driven outcomes are extraction candidates, not an asserted public implementation | Review source provenance, licensing, ownership and contract compatibility before reuse; extract generic capabilities without adopting an unrelated service wholesale |
 
-The new home is proposed as `services/vault`, with independently usable
-service/CLI packaging and thin optional integrations. That path names intended
-source organization only: no runtime is created by this proposal. Backend
-independence is retained; the new service is not a blanket rewrite of
-`agent-vault`, the Gateway or Manager.
+The initial proposal suggested `services/vault`. The subsequently assigned
+[federated-relay slice](federated-relay.md) instead reuses the existing
+`agent-vault` service, CLI and native lifecycle, without adding another daemon.
+That selected source placement does not claim the entire transaction/UI
+architecture implemented or authorize live adoption. Backend independence and
+the existing Gateway/Manager owners remain unchanged.
 
 ## Contracts and ownership
 
