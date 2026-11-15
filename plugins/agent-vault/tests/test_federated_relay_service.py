@@ -3,6 +3,7 @@
 import asyncio
 import hashlib
 import json
+import os
 import sys
 import threading
 import time
@@ -310,6 +311,94 @@ def test_running_machine_relay_signs_real_tls_admission_and_authorized_source_re
                 await eventually(lambda: not rig.state.service_offers("vault-available-v1"))
         finally:
             await close()
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("damage", ["missing", "malformed", "unreadable"])
+def test_reconnect_ca_failure_is_bounded_and_preserves_local_vault(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, damage: str,
+) -> None:
+    from agent_vault import federated_relay
+
+    root = tmp_path / "vault"
+    isolate_vault(root, monkeypatch)
+
+    async def scenario() -> None:
+        async with running(tmp_path) as rig:
+            async with conduit(rig.origin) as (route, _):
+                calls, publish = configure(root, rig, route, monkeypatch)
+                wall, monotonic = time.time(), time.monotonic()
+                monkeypatch.setattr(federated_relay, "time", SimpleNamespace(
+                    time=lambda: wall, monotonic=lambda: monotonic,
+                ))
+                ca = Path(rig.ca)
+                trusted = ca.read_bytes()
+                vault = service.VaultService()
+                vault.ttl_override = 0
+                task = asyncio.create_task(service.run_server(vault, tcp_port=0))
+
+                async def local_health() -> None:
+                    health = await asyncio.to_thread(service.send_command, {
+                        "action": "ping", "health_only": True,
+                    })
+                    assert health is not None and health["ok"] is True
+                    assert health["pid"] == os.getpid() and health["accepting_work"] is True
+                    assert not task.done()
+
+                try:
+                    await eventually(lambda: bool(rig.state.service_offers("vault-available-v1")), 5)
+                    await local_health()
+                    identity = Path(service.PID_FILE).read_bytes()
+                    runtime = vault._federated_relay
+                    assert runtime is not None
+                    if damage == "malformed":
+                        ca.write_bytes(b"synthetic invalid CA material")
+                    else:
+                        ca.unlink()
+                        if damage == "unreadable":
+                            ca.mkdir()
+                    publish(generation="ca-failure-generation", expires_at=wall + 9)
+                    await eventually(lambda: task.done() or runtime._failures == 1)
+                    assert not task.done(), repr(task.exception())
+                    await eventually(lambda: not rig.state.service_offers("vault-available-v1"))
+                    await local_health()
+                    assert runtime.status()["channel_attached"] is False
+                    await asyncio.sleep(0.6)
+                    assert runtime._failures == 1 and runtime._task is None
+                    for failures in range(2, 6):
+                        elapsed = runtime._retry_at - monotonic
+                        wall += elapsed
+                        monotonic += elapsed
+                        publish(generation="ca-failure-generation", expires_at=wall + 9)
+                        await eventually(lambda: runtime._failures == failures)
+                        await local_health()
+                    assert runtime.status() == {
+                        "state": "reconnect-exhausted", "channel_attached": False,
+                    }
+                    if ca.is_dir():
+                        ca.rmdir()
+                    ca.write_bytes(trusted)
+                    wall += 100
+                    monotonic += 100
+                    publish(generation="ca-failure-generation", expires_at=wall + 9)
+                    await asyncio.sleep(0.6)
+                    assert runtime._failures == 5 and runtime._task is None
+                    assert not rig.state.service_offers("vault-available-v1")
+                    await local_health()
+                    publish(generation="restored-trust-generation", expires_at=wall + 9)
+                    await eventually(lambda: bool(rig.state.service_offers("vault-available-v1")), 5)
+                    await local_health()
+                    assert runtime._failures == 0
+                    assert runtime._origin == rig.origin and runtime._route == route
+                    assert Path(service.PID_FILE).read_bytes() == identity
+                    assert not calls and rig.backends[0].requests == []
+                finally:
+                    if ca.is_dir():
+                        ca.rmdir()
+                    ca.write_bytes(trusted)
+                    vault._shutdown = True
+                    await asyncio.gather(task, return_exceptions=True)
 
     asyncio.run(scenario())
 

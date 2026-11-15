@@ -1563,7 +1563,10 @@ def test_native_resume_pin_survives_reselection_and_shutdown_until_settled(
 
 
 @pytest.mark.skipif(os.name != "nt" and sys.platform != "linux", reason="Native successor cleanup")
-@pytest.mark.parametrize("failure", ["invalid-mode", "oversized-slot", "invalid-proof-key"])
+@pytest.mark.parametrize("failure", [
+    "invalid-mode", "oversized-slot", "invalid-proof-key",
+    "missing-ca", "malformed-ca", "unreadable-ca",
+])
 def test_invalid_relay_successor_preserves_running_predecessor_endpoints(
     tmp_path: Path, failure: str,
 ) -> None:
@@ -1581,7 +1584,7 @@ def test_invalid_relay_successor_preserves_running_predecessor_endpoints(
             "schema": "agent-vault.federated-relay", "version": 1, "mode": "invalid",
         }
         expected_error = "relay-configuration-invalid"
-        if failure in {"oversized-slot", "invalid-proof-key"}:
+        if failure != "invalid-mode":
             from cryptography.hazmat.primitives import serialization
             from cryptography.hazmat.primitives.asymmetric import ec
             grant = {
@@ -1626,6 +1629,14 @@ def test_invalid_relay_successor_preserves_running_predecessor_endpoints(
             expected_error = (
                 "relay-proof-key-invalid" if failure == "invalid-proof-key" else "relay-slot-invalid"
             )
+            if failure.endswith("-ca"):
+                ca = tmp_path / "invalid-ca.pem"
+                if failure == "malformed-ca":
+                    ca.write_bytes(b"synthetic invalid CA material")
+                elif failure == "unreadable-ca":
+                    ca.mkdir()
+                relay["gateway_ca"] = str(ca)
+                expected_error = "verified_tls"
         (tmp_path / "federated-relay.json").write_text(json.dumps(relay))
         (tmp_path / "current-version").write_text("older")
         failed = _start(tmp_path, "older", 0, "bounded-successor")

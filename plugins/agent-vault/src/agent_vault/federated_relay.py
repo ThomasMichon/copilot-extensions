@@ -124,6 +124,9 @@ class RelayRuntime:
         return generation, LoopbackRoute(value["connect_host"], value["connect_port"])
 
     def _connect(self, route: LoopbackRoute) -> None:
+        self._task = asyncio.create_task(self._connect_once(route))
+
+    async def _connect_once(self, route: LoopbackRoute) -> None:
         from fleet_manager.gateway_service_connector import ServiceConnector
         auth, selected = self._selected["auth"], self._selected
         self._connector = ServiceConnector(
@@ -134,7 +137,7 @@ class RelayRuntime:
             machine_audience=auth["audience"] if auth["kind"] == "machine" else None,
             access_token_callback=self._access_token if auth["kind"] == "az-login" else None,
         )
-        self._task = asyncio.create_task(self._connector.connect_once())
+        await self._connector.connect_once()
 
     async def _disconnect(self) -> None:
         task, self._task = self._task, None
