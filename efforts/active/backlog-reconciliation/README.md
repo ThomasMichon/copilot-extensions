@@ -3987,6 +3987,15 @@ preserves eighteen complete original/discussion unions, including the expanded
 #7116 acquisition and #7117 interrupted-installation parents. It separates
 actual source credit from retained installed, hosted, causal and owner-bound
 acceptance; it adds no disposition or technical-completion credit.
+The [reviewed source-contract checkpoint](journal/2026/11.15-portable-receiving-boundaries.md#reviewed-source-frontier-and-unchanged-whole-queue)
+records #12743's actual merge and the complete unchanged 837-open observation.
+The next twelve-identity metadata frontier is qualified, not a new whole-source
+or receiving acceptance; all parent gates remain open.
+The [next acceptance-contract study](journal/2026/11.15-portable-receiving-boundaries.md#current-acceptance-after-bounded-source-releases)
+preserves eighteen complete current unions, separates released bounded source
+claims from retained native/operational acceptance and records the finite
+registration-writer evidence gap. Existing transfers are not replayed; no
+new disposition, implementation, rollout or resource release is established.
 
 ### Phase 2b - Vision-linked stabilization roadmap
 
