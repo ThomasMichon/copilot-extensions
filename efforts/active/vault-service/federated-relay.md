@@ -21,7 +21,7 @@ the remaining durable-transaction obligations rather than declaring them done.
 
 ## Delivery
 
-- [ ] **R1 - Real federated service flow.** Add explicit opt-in federated-relay
+- [x] **R1 - Real federated service flow.** Add explicit opt-in federated-relay
   configuration to the existing independently installed Vault runtime. Its
   service lifetime owns connection, bounded reconnect and shutdown. Consume
   the Controller's local Gateway conduit without creating a tunnel, proxy
@@ -100,16 +100,16 @@ accepted work must not die with the updater/client cleanup boundary.
 
 ## Validation
 
-- [ ] Actual isolated TLS Gateway + Controller connector + running Vault
+- [x] Actual isolated TLS Gateway + Controller connector + running Vault
   service + real account custodian + bound consumer flow with synthetic
   credentials; this must cover the service entry/lifetime, not only a library.
-- [ ] Canonical-origin/Host/SNI/proof preservation over a distinct localhost
+- [x] Canonical-origin/Host/SNI/proof preservation over a distinct localhost
   TCP route, wrong identity/CA refusal, unavailable/stale conduit and no
   implicit direct-network or environment-proxy fallback.
-- [ ] Exact independent source/account/recipient/host/action/capability grants,
+- [x] Exact independent source/account/recipient/host/action/capability grants,
   denied caller/source, installation replacement, expiry, provider miss/error,
   bounded request counts/deadlines and no secret-bearing logs/status.
-- [ ] Offer publication/withdrawal, tunnel/channel loss, reconnect, service
+- [x] Offer publication/withdrawal, tunnel/channel loss, reconnect, service
   shutdown, cancellation and uncertain accepted replies without automatic replay.
 - [ ] Local-only old/new clients, disabled mode, unsupported active peers,
   optional dependency absence and current standalone/native service tests.
@@ -122,6 +122,32 @@ accepted work must not die with the updater/client cleanup boundary.
 No live credential, account login, unlock, provider/browser interaction, host
 installation, tunnel creation or shared-service rollout is authorized by this
 plan. Keep those adopter decisions and native custody with their current owners.
+
+## R1 source acceptance
+
+PR #12709 merged to `dev` at `2026-11-15T15:13:53Z` as
+`a16a6ef0f4ea405fad6fdd38118d77192e5f533d`, from exact head
+`732cc405bde17d4b0d5952989d5f7808faca655e`. Required CI
+`43726497310` passed; the fresh owner-authored Comment review
+`5911423447` recorded no open findings. The managed merge used the
+repository-authorized exception to the additional code-owner vote, not a CI
+exception or a claim of human security review.
+
+The independent Windows service/lifetime/relay packet passed 143 tests with
+one platform skip; the real TLS Gateway/route/source packet passed 134.
+Machine authentication uses the validated key representation required by its
+actual signer. Native controls retain the original cleanup owner through
+repeated cancellation, confirm CLI/descendant exit, preserve a predecessor
+after invalid selected trust, and keep later CA failures inside bounded
+reconnect without taking local Vault consumers down. All 25 changed Python
+files passed strict Linux/Windows analysis with the Python 3.10 target retained.
+The exact admitted Linux unit packet passed with coverage; source and generated
+archive/producer guards passed without weakening their inventory or policies.
+
+This accepts R1's isolated service/provider/consumer source flow only. It does
+not qualify installed optional profiles, every mixed-version platform lane,
+live credentials, release/adoption, R2/R3, or the full Vault parent. The remaining
+validation items and R2-R4 stay open; publication is not runtime readiness.
 
 ## Documentation and performance impact
 
