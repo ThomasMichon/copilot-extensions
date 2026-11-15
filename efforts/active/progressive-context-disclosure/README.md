@@ -47,6 +47,16 @@ upfront context and unnecessary exploration.
 
 ## Coordination
 
+The finite #4138 runtime-startup intake uses Phase 8 for deduplication and
+normal domain-plan review, with Phase 2 as its single primary Plan home.
+It is separate from #4197's documentation-only acceptance. Proposed routing
+becomes effective through normal reviewed delivery of the direct Plan and
+paired validation below, not ledger publication alone. Existing owners,
+incumbent checks and required guidance remain unchanged; this appoints no
+executor and grants no implementation, measurement or native-session action.
+Receiving readback and a separate source-specific judgment precede any
+tracking retirement.
+
 - **Topology:** one reviewed intent/plan PR, followed by serial contract and
   guidance changes; clean-room variants may run in parallel only after their
   fixture and rubric commit is frozen.
@@ -178,6 +188,35 @@ prompts the primary context channel.
   running behavioral comparisons.
 
 ### Phase 2 - Deferral and reference experiments
+
+**Finite runtime-startup contract from #4138**
+
+- [ ] **PC4138-P1:** Select and deliver context-ingestion deferral OR streaming
+  while preserving required safety, ownership and task-grounding guidance at
+  the point it is needed. Retain the alternative; both mechanisms are not
+  required.
+- [ ] **PC4138-P2:** Reuse warm-up artifacts between sessions of the same type,
+  with source-qualified currentness and invalidation. Cached artifacts do not
+  replace current required guidance.
+- [ ] **PC4138-P3:** Provide explicit `--minimal` startup behavior that skips
+  optional context only; required safety, ownership and applicable task
+  grounding remain available.
+- [ ] **PC4138-LV1:** For the selected deferral OR streaming route, verify task
+  correctness, required-guidance availability, attribution and currentness;
+  distinguish unknown or unavailable outcomes.
+- [ ] **PC4138-LV2:** Exercise same-type current cache hits, misses,
+  changed-source invalidation and cross-type controls. A cache hit alone is
+  not correctness or model-admission evidence.
+- [ ] **PC4138-LV3:** Verify `--minimal` omits optional context without dropping
+  required constraints or task-appropriate grounding.
+- [ ] **PC4138-LV4:** Compare actual startup AND task-grounding latency against
+  a comparable baseline; distinguish measured results from estimates,
+  file/byte/token counts and delivery observations.
+
+These are planned technical obligations, not delivered runtime behavior.
+Phase 8 is the intake path, not a second primary implementation phase;
+normal reviewed receiving need not wait for implementation or native
+activation, and unrelated phases are not newly made prerequisites.
 
 - [x] Implement the experiment matrix in
   [`experiments.md`](experiments.md) without changing production authoring
@@ -671,6 +710,14 @@ no implementation driver, runtime/native/activation/model-selection authority
 and creates no replacement umbrella or competing effort.
 
 ## Validation Plan
+
+- [ ] **PC4138-G:** Verify the complete finite Phase 2 contract: the selected
+  ingestion alternative, same-type warm-up reuse and optional-only
+  `--minimal`, including actual startup AND task-grounding latency and task
+  correctness. Preserve source attribution, freshness and required guidance.
+  Counts, static inventories or successful delivery are not performance
+  improvement or model-admission proof. Direct Plan acceptance, technical
+  completion and source-issue disposition remain separate.
 
 - [ ] **G5896:** Resolve every B5896-1 through B5896-4 and BV5896 clause at
   the finite measurement-correctness boundary. Preserve attributable

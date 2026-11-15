@@ -252,6 +252,8 @@ from retaining it._
   exposing or relocating master material.
 - [ ] **U3979-P4:** Preserve narrowly owned local/provider/browser/native
   transactions, redacted input and honest unavailable/refused controls.
+  Preserve existing interactive unlock and cooldown behavior while
+  correcting the headless provider-miss branch.
   No mandatory broker, new executor/credential grant or whole central/
   federation/platform portfolio prerequisite is introduced for this
   finite branch.
@@ -318,6 +320,8 @@ The [validation matrix](validation.md) is the detailed, agent-recommended plan.
   needs-unlock/error/next-action counterpart, with no secret-bearing
   presentation. Boolean false/exit failure or invisible-dialog avoidance
   alone is not the result; neither is a daemon-only mock.
+  Cover existing interactive unlock and cooldown controls without
+  weakening their behavior to make the headless case pass.
 - [ ] **U3979-V2:** Keep this family's P0 design and implementation-owner admission,
   optional standalone/broker/transport and credential/native custody
   intact. Separate source/fixture/native/installed results without making
