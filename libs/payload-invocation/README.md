@@ -40,6 +40,11 @@ object pipelines from native redirected stdin and preserve raw native bytes;
 Windows PowerShell's `ExpectingInput` alone does not distinguish those paths.
 The opted-in launcher suppresses PowerShell progress records, not errors, so
 module auto-loading cannot add CLIXML to its stderr transport.
+`callerCwdEnv` optionally names an environment variable that receives the
+caller's working directory before a delegating shim leaves the payload.
+The payload dispatcher uses that value to resolve relative path arguments
+without keeping its child process in a replaceable directory. Each invocation
+overwrites inherited values; dispatchers should consume it before further calls.
 `provisionMode` defaults to `snapshot`, where first use stamps the owning
 payload and provisions through its published snapshot. A self-staging installer
 may select `direct`; the payload shim then invokes that same installer with

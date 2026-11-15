@@ -229,6 +229,11 @@ def load_manifest(path: Path, *, canonical_root: Path | None = None) -> dict[str
         raise ValueError(f"{path}: powershellPipelineInput must be a boolean")
     if powershell_pipeline_input and not normalized_dispatcher["windows"]:
         raise ValueError(f"{path}: powershellPipelineInput requires a payloadDispatcher")
+    caller_cwd_env = data.get("callerCwdEnv", "")
+    if not isinstance(caller_cwd_env, str) or caller_cwd_env and not _ENV.fullmatch(caller_cwd_env):
+        raise ValueError(f"{path}: invalid callerCwdEnv: {caller_cwd_env!r}")
+    if caller_cwd_env and not normalized_dispatcher["windows"]:
+        raise ValueError(f"{path}: callerCwdEnv requires a payloadDispatcher")
     catalog_gate = data.get("catalogGate", "")
     if not isinstance(catalog_gate, str) or (
         catalog_gate
@@ -306,6 +311,7 @@ def load_manifest(path: Path, *, canonical_root: Path | None = None) -> dict[str
     data["bootTraceLogFile"] = boot_trace_log_file
     data["payloadDispatcher"] = normalized_dispatcher
     data["powershellPipelineInput"] = powershell_pipeline_input
+    data["callerCwdEnv"] = caller_cwd_env
     data["catalogGate"] = catalog_gate
     data["catalogBinding"] = catalog_binding
     data["inProcessCatalog"] = in_process_catalog
@@ -675,6 +681,13 @@ def render(
             )
             if data["payloadDispatcher"]["posix"]
             else ""
+        ),
+        "CALLER_CWD_POSIX": (
+            f'export {data["callerCwdEnv"]}="$PWD"\n' if data["callerCwdEnv"] else ""
+        ),
+        "CALLER_CWD_POWERSHELL": (
+            f"$env:{data['callerCwdEnv']} = (Get-Location).ProviderPath\n"
+            if data["callerCwdEnv"] else ""
         ),
         "PAYLOAD_DISPATCH_POWERSHELL": (
             (
