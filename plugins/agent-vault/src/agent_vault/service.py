@@ -1084,8 +1084,8 @@ async def run_server(service: VaultService, tcp_port: int | None = None) -> None
 async def _serve(service, tcp_port, servers, pipe_servers, connections):
     from .federated_relay import selected_relay
 
-    relay = service._federated_relay = selected_relay()
     generation = service._generation = ServiceGeneration(service, connections, servers, pipe_servers)
+    relay = service._federated_relay = selected_relay()
     try:
         await generation.start(tcp_port)
         loop = asyncio.get_running_loop()

@@ -356,7 +356,7 @@ def _prepare_venv(name: str, uv: str, *, reinstall: bool, environment: dict[str,
             if name == "agent-dispatch":
                 cmd.extend(["-e", str(REPO / "plugins" / "agent-pull-requests") + "[fleet]"])
                 cmd.extend(["-e", str(REPO / "fleet-manager") + "[service-gateway]"])
-            if name == "agent-pull-requests":
+            if name in {"agent-pull-requests", "agent-vault"}:
                 cmd.extend(["-e", str(REPO / "fleet-manager") + "[service-gateway]"])
             if name == "agent-ssh":
                 cmd.extend(["-e", str(REPO / "fleet-manager")])

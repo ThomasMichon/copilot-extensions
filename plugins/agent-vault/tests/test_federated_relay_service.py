@@ -42,7 +42,7 @@ def isolate_vault(root, monkeypatch):
     monkeypatch.setattr(service.VaultService, "_check_password_ttl", lambda _: None)
 
 
-def configure(root, rig, route, monkeypatch):
+def configure(root, rig, route, monkeypatch, *, native_admission=False):
     from cryptography.hazmat.primitives import serialization
 
     calls = []
@@ -56,7 +56,8 @@ def configure(root, rig, route, monkeypatch):
         calls.append((self._account, action, fields))
         return "protocol=https\nhost=github.com\nusername=account-a\ntoken=synthetic-secret\n\n"
 
-    monkeypatch.setattr(AzLoginSource, "resolve", azure)
+    if not native_admission:
+        monkeypatch.setattr(AzLoginSource, "resolve", azure)
     monkeypatch.setattr(GhAuthSource, "resolve", github)
     value = selection(root)
     value["gateway_origin"] = rig.origin

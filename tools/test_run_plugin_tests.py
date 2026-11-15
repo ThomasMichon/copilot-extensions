@@ -760,6 +760,7 @@ def test_source_only_cache_invalidates_the_previous_tooling_selection():
 @pytest.mark.parametrize("name,extra", [
     ("agent-index", "auth"), ("agent-pull-requests", "service-gateway"),
     ("agent-dispatch", "service-gateway"), ("agent-ssh", ""), ("agent-worktrees", "auth"),
+    ("agent-vault", "service-gateway"),
 ])
 def test_preparation_selects_same_checkout_fleet_dependency(tmp_path, monkeypatch, name, extra):
     import plugin_test_environment as preparation
@@ -918,6 +919,14 @@ def test_ssh_optional_sdk_is_not_misattributed_as_a_canonical_library():
     assert "fleet-manager" not in metadata["tool"]["uv"]["sources"]
     assert any(item.startswith("fleet-manager>=") for item in metadata["project"]["optional-dependencies"]["fleet"])
     assert any(item.startswith("fleet-manager>=") for item in metadata["project"]["optional-dependencies"]["dev"])
+
+
+def test_vault_sdk_preserves_canonical_library_attribution():
+    from installer_dependency_policy import _anchor_roots
+
+    roots = _anchor_roots()
+    assert runner.REPO / "plugins" / "agent-vault" in roots
+    assert runner.REPO / "fleet-manager" not in roots
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="native Windows editable staging contract")

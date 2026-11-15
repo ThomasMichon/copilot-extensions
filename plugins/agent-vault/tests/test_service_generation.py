@@ -1482,6 +1482,36 @@ def test_native_resume_pin_survives_reselection_and_shutdown_until_settled(
     assert old.returncode == 0
 
 
+@pytest.mark.skipif(os.name != "nt" and sys.platform != "linux", reason="Native successor cleanup")
+def test_invalid_relay_successor_preserves_running_predecessor_endpoints(tmp_path: Path) -> None:
+    for identity in ("newer", "older"):
+        _stage_generation(tmp_path, identity)
+    (tmp_path / "current-version").write_text("newer")
+    old = _start(tmp_path, "newer", 0, "hung-work")
+    children = [old]
+    try:
+        _until(lambda: _endpoint(tmp_path) is not None, children)
+        before = _endpoint(tmp_path)
+        pid_file = tmp_path / "vault.pid"
+        previous_pid = pid_file.read_bytes()
+        (tmp_path / "federated-relay.json").write_text(json.dumps({
+            "schema": "agent-vault.federated-relay", "version": 1, "mode": "invalid",
+        }))
+        (tmp_path / "current-version").write_text("older")
+        failed = _start(tmp_path, "older", 0, "bounded-successor")
+        children.append(failed)
+        _, error = failed.communicate(timeout=10)
+        assert failed.returncode != 0 and "relay-configuration-invalid" in error
+        assert old.poll() is None
+        assert pid_file.read_bytes() == previous_pid
+        assert _endpoint(tmp_path) == before
+        assert _send(_target(before), {"action": "ping"})["pid"] == before["pid"]
+        if os.name != "nt":
+            assert (tmp_path / "vault.sock").is_socket()
+    finally:
+        _settle(tmp_path, children)
+
+
 @pytest.mark.parametrize("layout", (
     "missing", "foreign-slot", "directory-helper", "corrupt", "truncated", "busy",
 ))

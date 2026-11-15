@@ -13,6 +13,7 @@ bearer credentials that grant cloud control equivalent to the host's
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import re
@@ -21,6 +22,8 @@ import subprocess
 import sys
 import time
 from typing import Any
+
+from agent_procutil import JobHandle, spawn_in_kill_on_close_job
 
 from ..server import ACCESS_DENIED_RESPONSE
 
@@ -57,6 +60,35 @@ _NEEDS_LOGIN_MARKERS = (
     "aadsts",
     "please run 'az login'",
 )
+
+
+async def _settle_process(
+    proc: asyncio.subprocess.Process, job: JobHandle | None, *, drain: bool,
+) -> None:
+    try:
+        if job is not None:
+            job.close()
+    finally:
+        if drain:
+            if proc.returncode is None:
+                with contextlib.suppress(ProcessLookupError):
+                    proc.kill()
+            await proc.communicate()
+
+
+async def _finish_process(
+    proc: asyncio.subprocess.Process, job: JobHandle | None, *, drain: bool,
+) -> None:
+    cleanup = asyncio.create_task(_settle_process(proc, job, drain=drain))
+    cancelled = False
+    while not cleanup.done():
+        try:
+            await asyncio.shield(cleanup)
+        except asyncio.CancelledError:
+            cancelled = True
+    await cleanup
+    if cancelled:
+        raise asyncio.CancelledError
 
 
 def _to_scope(target: str) -> str:
@@ -300,8 +332,9 @@ class AzLoginSource:
             tenant or "default",
         )
 
+        proc, job, communicated = None, None, False
         try:
-            proc = await asyncio.create_subprocess_exec(
+            proc, job = await spawn_in_kill_on_close_job(
                 *args,
                 stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE,
@@ -311,6 +344,7 @@ class AzLoginSource:
             stdout, stderr = await asyncio.wait_for(
                 proc.communicate(), timeout=timeout,
             )
+            communicated = True
         except (TimeoutError, asyncio.TimeoutError):
             log.error(
                 "az account get-access-token timed out (%.0fs) for target=%s",
@@ -321,6 +355,9 @@ class AzLoginSource:
         except FileNotFoundError:
             log.error("az CLI not found on PATH")
             return None
+        finally:
+            if proc is not None:
+                await _finish_process(proc, job, drain=not communicated)
 
         if proc.returncode != 0:
             err = stderr.decode(errors="replace").strip()
