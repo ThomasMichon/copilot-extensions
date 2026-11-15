@@ -4015,6 +4015,14 @@ No further disposition, native attempt or owner transfer is established.
 The [owned execution/release study](journal/2026/11.15-owned-release-boundaries.md)
 retains actual snapshot/maintenance/hosted-conversation reservations and
 #9481's corrective reopening with its original release/installed gate.
+The [reviewed owned-boundary checkpoint](journal/2026/11.15-owned-release-boundaries.md#reviewed-publication-and-unchanged-whole-queue)
+records #12749's actual merge and unchanged 837-open census. The next five
+complete contracts retain the later watchdog cause, unexecuted removal,
+provenance and control-only recovery boundaries without new disposition credit.
+The [next eight current unions](journal/2026/11.15-owned-release-boundaries.md#eight-current-contracts-after-historical-snapshot-refusals)
+preserve pool-startup custody, live-unknown census refusal, serial-publication
+acceptance, distinct original-attempt recoveries and the complete typing/guidance
+parents. Shared recovery vocabulary does not establish duplicate acceptance.
 
 ### Phase 2b - Vision-linked stabilization roadmap
 
