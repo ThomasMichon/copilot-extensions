@@ -6,20 +6,43 @@ import copy
 import hashlib
 import importlib
 import json
-from pathlib import Path
 import threading
 import time
+from collections.abc import Callable, Iterator
+from pathlib import Path
+from typing import Any, Protocol, cast
 
 import pytest
 
-from agent_pull_requests import watch_replay_store as storage
 from agent_pull_requests import review_intent
+from agent_pull_requests import watch_replay_store as storage
 from agent_pull_requests.review_workspace import _digest
 from agent_pull_requests.watch_replay import ConsumerScope
-from agent_pull_requests.watch_replay_store import ReplayStore, ReplayStoreInvalid, ReplayServiceIdentity
+from agent_pull_requests.watch_replay_store import (
+    ReplayServiceIdentity,
+    ReplayStore,
+    ReplayStoreInvalid,
+)
 from agent_pull_requests.watch_storage import StateCommitUncertain
 
-SCOPE = {
+
+class OwnedLock(Protocol):
+    def assert_owned(self) -> None: ...
+
+
+class ReviewAdopter(Protocol):
+    def __call__(
+        self, *, lifecycle_checkpoint: Callable[[], None], expires_at: int,
+    ) -> dict[str, Any]: ...
+
+
+class IntentParser(Protocol):
+    def __call__(
+        self, value: object, *, persisted: bool = False, versions: tuple[int, ...] = (1,),
+    ) -> dict[str, Any]: ...
+
+
+SCOPE: dict[str, Any] = {
     "provider": "azure-devops", "endpoint": "https://dev.azure.com/example",
     "project_id": "project", "repository_id": "repository", "principal_id": "native-principal",
     "number": 42,
@@ -27,11 +50,11 @@ SCOPE = {
 CONSUMER = ConsumerScope("synthetic-consumer", "synthetic-account", "example/project")
 
 
-def expires():
+def expires() -> int:
     return int(time.time()) + 600
 
 
-def selected(operation_id="selected-review"):
+def selected(operation_id: str = "selected-review") -> dict[str, Any]:
     return {
         "schema": "agent-pull-requests.review-intent", "version": 1,
         "operation_id": operation_id, "scope": copy.deepcopy(SCOPE),
@@ -43,7 +66,7 @@ def selected(operation_id="selected-review"):
 
 
 @pytest.fixture
-def store(tmp_path):
+def store(tmp_path: Path) -> ReplayStore:
     result = ReplayStore(tmp_path.resolve(), "existing-owner-namespace")
     result.provision()
     result.adopt_review_operations(lifecycle_checkpoint=lambda: None, expires_at=expires())
@@ -51,12 +74,15 @@ def store(tmp_path):
 
 
 @pytest.mark.parametrize("withdraw", [False, True])
-def test_review_transaction_waits_for_custody_without_repeating_operation(store, withdraw):
+def test_review_transaction_waits_for_custody_without_repeating_operation(
+    store: ReplayStore, withdraw: bool,
+) -> None:
     waiting, withdrawn = threading.Event(), threading.Event()
-    calls, failures = [], []
+    calls: list[str] = []
+    failures: list[Exception] = []
     checkpoints = 0
 
-    def checkpoint():
+    def checkpoint() -> None:
         nonlocal checkpoints
         checkpoints += 1
         if checkpoints >= 3:
@@ -64,11 +90,11 @@ def test_review_transaction_waits_for_custody_without_repeating_operation(store,
         if withdrawn.is_set():
             raise RuntimeError("caller withdrawn")
 
-    def operation(_document):
+    def operation(_document: dict[str, Any]) -> str:
         calls.append("once")
         return "complete"
 
-    def request():
+    def request() -> None:
         try:
             assert store._review_transaction(
                 operation, expires_at=expires(), checkpoint=checkpoint, persist=False,
@@ -91,13 +117,15 @@ def test_review_transaction_waits_for_custody_without_repeating_operation(store,
     assert [str(error) for error in failures] == (["caller withdrawn"] if withdraw else [])
 
 
-def test_review_transaction_never_retries_contention_from_inside_the_operation(store):
+def test_review_transaction_never_retries_contention_from_inside_the_operation(
+    store: ReplayStore,
+) -> None:
     from single_instance_lease import OperationLockedError
 
-    calls = []
+    calls: list[str] = []
     before = store.path.read_bytes()
 
-    def operation(_document):
+    def operation(_document: dict[str, Any]) -> None:
         calls.append("once")
         raise OperationLockedError("separate operation unavailable")
 
@@ -108,7 +136,7 @@ def test_review_transaction_never_retries_contention_from_inside_the_operation(s
 
 
 @pytest.fixture
-def prepared_intent(monkeypatch: pytest.MonkeyPatch) -> dict:
+def prepared_intent(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     root = Path(__file__).resolve().parents[3]
     monkeypatch.syspath_prepend(str(root / "plugins/ai-attribution/scripts"))
     attribution_profile = importlib.import_module("attribution_profile")
@@ -132,11 +160,12 @@ def prepared_intent(monkeypatch: pytest.MonkeyPatch) -> dict:
 
 
 def test_prepared_intent_requires_explicit_owner_extension_and_keeps_old_parser_strict(
-    store: ReplayStore, prepared_intent: dict,
+    store: ReplayStore, prepared_intent: dict[str, Any],
 ) -> None:
     before = store.path.read_bytes()
+    parse_intent = cast(IntentParser, review_intent.intent)
     with pytest.raises(ValueError, match="invalid review intent"):
-        review_intent.intent(prepared_intent)
+        parse_intent(prepared_intent)
     with pytest.raises(ReplayStoreInvalid, match="explicit storage adoption"):
         store.admit_review(prepared_intent, expires_at=expires())
     assert store.path.read_bytes() == before
@@ -153,10 +182,10 @@ def test_prepared_intent_requires_explicit_owner_extension_and_keeps_old_parser_
 
 
 def test_prepared_extension_preserves_unknown_legacy_receipts_and_excludes_old_readers(
-    store: ReplayStore, prepared_intent: dict,
+    store: ReplayStore, prepared_intent: dict[str, Any],
 ) -> None:
     class LegacyReader(ReplayStore):
-        def _validate_owner(self, document: dict) -> None:
+        def _validate_owner(self, document: dict[str, Any]) -> None:
             if "review_intent_version" in document:
                 raise ReplayStoreInvalid("old strict envelope does not support prepared reviews")
             super()._validate_owner(document)
@@ -188,7 +217,7 @@ def test_prepared_extension_preserves_unknown_legacy_receipts_and_excludes_old_r
 
 @pytest.mark.parametrize("change", ["body", "guid", "source", "hash", "extra"])
 def test_prepared_binding_refuses_mismatched_metadata_without_mutating_owner(
-    store: ReplayStore, prepared_intent: dict, change: str,
+    store: ReplayStore, prepared_intent: dict[str, Any], change: str,
 ) -> None:
     store.adopt_prepared_reviews(lifecycle_checkpoint=lambda: None, expires_at=expires())
     action = prepared_intent["actions"][0]
@@ -216,7 +245,7 @@ def test_prepared_binding_refuses_mismatched_metadata_without_mutating_owner(
     "<!-- harmless ` --> <!-- agent-comment:v1 c=foreign w=foreign --> ` -->\n\n{marker}",
 ])
 def test_prepared_admission_rejects_literal_boundaries_the_shared_producer_refuses(
-    store: ReplayStore, prepared_intent: dict, layout: str,
+    store: ReplayStore, prepared_intent: dict[str, Any], layout: str,
 ) -> None:
     comment_preparation = importlib.import_module("comment_preparation")
     store.adopt_prepared_reviews(lifecycle_checkpoint=lambda: None, expires_at=expires())
@@ -237,7 +266,7 @@ def test_prepared_admission_rejects_literal_boundaries_the_shared_producer_refus
 
 
 def test_actual_shared_preparation_literal_examples_remain_admissible_and_repeatable(
-    store: ReplayStore, prepared_intent: dict,
+    store: ReplayStore, prepared_intent: dict[str, Any],
 ) -> None:
     comment_preparation = importlib.import_module("comment_preparation")
     attribution_profile = importlib.import_module("attribution_profile")
@@ -262,7 +291,7 @@ def test_actual_shared_preparation_literal_examples_remain_admissible_and_repeat
 
 
 def test_prepared_binding_remains_immutable_and_write_identity_cannot_move_to_new_operation(
-    store: ReplayStore, prepared_intent: dict,
+    store: ReplayStore, prepared_intent: dict[str, Any],
 ) -> None:
     store.adopt_prepared_reviews(lifecycle_checkpoint=lambda: None, expires_at=expires())
     store.admit_review(prepared_intent, expires_at=expires())
@@ -282,7 +311,7 @@ def test_prepared_binding_remains_immutable_and_write_identity_cannot_move_to_ne
 
 
 def test_prepared_metadata_is_not_accepted_in_a_legacy_intent_or_bodyless_vote(
-    store: ReplayStore, prepared_intent: dict,
+    store: ReplayStore, prepared_intent: dict[str, Any],
 ) -> None:
     store.adopt_prepared_reviews(lifecycle_checkpoint=lambda: None, expires_at=expires())
     legacy = copy.deepcopy(prepared_intent)
@@ -295,7 +324,7 @@ def test_prepared_metadata_is_not_accepted_in_a_legacy_intent_or_bodyless_vote(
 
 
 def test_prepared_extension_is_independent_of_existing_journal_attention_and_capture_layouts(
-    store: ReplayStore, prepared_intent: dict,
+    store: ReplayStore, prepared_intent: dict[str, Any],
 ) -> None:
     from agent_pull_requests.attention_store import AttentionStore
     from agent_pull_requests.conversation_store import ConversationStore
@@ -303,7 +332,7 @@ def test_prepared_extension_is_independent_of_existing_journal_attention_and_cap
 
     store.adopt_prepared_reviews(lifecycle_checkpoint=lambda: None, expires_at=expires())
     admitted = store.admit_review(prepared_intent, expires_at=expires())["operation"]
-    adopters = (
+    adopters: tuple[ReviewAdopter, ...] = (
         ConversationStore(store).adopt, AttentionStore(store).adopt,
         FeedbackCaptureStore(store).adopt, FeedbackCaptureStore(store).adopt_readback,
     )
@@ -317,7 +346,7 @@ def test_prepared_extension_is_independent_of_existing_journal_attention_and_cap
 
 
 def test_duplicate_prepared_logical_comment_or_write_in_one_selection_refuses(
-    store: ReplayStore, prepared_intent: dict,
+    store: ReplayStore, prepared_intent: dict[str, Any],
 ) -> None:
     store.adopt_prepared_reviews(lifecycle_checkpoint=lambda: None, expires_at=expires())
     duplicate = copy.deepcopy(prepared_intent["actions"][0])
@@ -331,7 +360,7 @@ def test_duplicate_prepared_logical_comment_or_write_in_one_selection_refuses(
 
 
 def test_prepared_bytes_count_toward_existing_review_capacity_without_starving_receipts(
-    tmp_path: Path, prepared_intent: dict,
+    tmp_path: Path, prepared_intent: dict[str, Any],
 ) -> None:
     limited = ReplayStore(tmp_path.resolve(), "limited-prepared")
     limited.provision()
@@ -363,12 +392,14 @@ def test_prepared_bytes_count_toward_existing_review_capacity_without_starving_r
     assert limited.execute(CONSUMER, "pending", {}, expires_at=expires()) == {"events": [], "more": False}
 
 
-def response(**ids):
+def response(**ids: str | int) -> dict[str, Any]:
     return {"origin": "response", "platform_ids": ids, "proof": None}
 
 
 @pytest.mark.parametrize("service", [False, True])
-def test_explicit_adoption_preserves_replay_and_owner_binding(tmp_path, service):
+def test_explicit_adoption_preserves_replay_and_owner_binding(
+    tmp_path: Path, service: bool,
+) -> None:
     identity = ReplayServiceIdentity("fleet", "gateway", "slot") if service else None
     store = ReplayStore(tmp_path.resolve(), "existing-owner-namespace", service_identity=identity)
     store.provision()
@@ -385,18 +416,18 @@ def test_explicit_adoption_preserves_replay_and_owner_binding(tmp_path, service)
     )["status"] == "already_adopted"
 
 
-def test_live_v1_reader_prevents_conversion_until_existing_owner_drains(tmp_path):
+def test_live_v1_reader_prevents_conversion_until_existing_owner_drains(tmp_path: Path) -> None:
     class LegacyReader(ReplayStore):
-        def _decode(self, state):
+        def _decode(self, state: dict[str, Any]) -> dict[str, Any]:
             return self._decode_legacy(state)
 
     store = ReplayStore(tmp_path.resolve(), "existing-owner-namespace")
     store.provision()
     legacy = LegacyReader(tmp_path.resolve(), store.namespace)
     active, stop = threading.Event(), threading.Event()
-    failures = []
+    failures: list[Exception] = []
 
-    def reader():
+    def reader() -> None:
         try:
             legacy.observation_targets(expires_at=expires())
             active.set()
@@ -411,7 +442,7 @@ def test_live_v1_reader_prevents_conversion_until_existing_owner_drains(tmp_path
         assert active.wait(5)
         before = store.path.read_bytes()
 
-        def lifecycle():
+        def lifecycle() -> None:
             if worker.is_alive():
                 raise RuntimeError("existing v1 reader has not drained")
 
@@ -428,7 +459,9 @@ def test_live_v1_reader_prevents_conversion_until_existing_owner_drains(tmp_path
     assert store.observation_targets(expires_at=expires()) == ()
 
 
-def test_registration_transactions_preserve_admitted_review_and_vice_versa(store):
+def test_registration_transactions_preserve_admitted_review_and_vice_versa(
+    store: ReplayStore,
+) -> None:
     store.admit_review(selected(), expires_at=expires())
     before = store.inspect_review("selected-review", SCOPE, expires_at=expires())
     store.execute(CONSUMER, "register", {
@@ -443,7 +476,9 @@ def test_registration_transactions_preserve_admitted_review_and_vice_versa(store
     assert store.observation_targets(expires_at=expires())
 
 
-def test_idempotent_intent_and_response_receipt_never_repeat_a_selected_effect(store):
+def test_idempotent_intent_and_response_receipt_never_repeat_a_selected_effect(
+    store: ReplayStore,
+) -> None:
     assert store.admit_review(selected(), expires_at=expires())["status"] == "admitted"
     assert store.admit_review(selected(), expires_at=expires())["status"] == "existing"
     altered = selected()
@@ -464,11 +499,13 @@ def test_idempotent_intent_and_response_receipt_never_repeat_a_selected_effect(s
 
 
 @pytest.mark.parametrize("uncertain", [False, True])
-def test_failed_inflight_persistence_performs_no_effect_or_blind_retry(store, monkeypatch, uncertain):
+def test_failed_inflight_persistence_performs_no_effect_or_blind_retry(
+    store: ReplayStore, monkeypatch: pytest.MonkeyPatch, uncertain: bool,
+) -> None:
     store.admit_review(selected(), expires_at=expires())
     original = storage._atomic_write_json
 
-    def fail(path, value):
+    def fail(path: Path, value: object) -> None:
         if uncertain:
             original(path, value)
             raise StateCommitUncertain("controlled persistence uncertainty")
@@ -484,14 +521,18 @@ def test_failed_inflight_persistence_performs_no_effect_or_blind_retry(store, mo
     assert result["new_attempt"] is not uncertain
 
 
-def test_unknown_vote_value_is_not_attributed_but_matching_native_event_can_be_retained(store):
+def test_unknown_vote_value_is_not_attributed_but_matching_native_event_can_be_retained(
+    store: ReplayStore,
+) -> None:
     store.admit_review(selected(), expires_at=expires())
     begun = store.begin_review_action("selected-review", SCOPE, "comment-a", expires_at=expires())
     operation = store.inspect_review("selected-review", SCOPE, expires_at=expires())
     proof = {"operation_id": "selected-review", "action_id": "comment-a",
              "scope_id": _digest(SCOPE), "intent_id": operation["intent_id"]}
-    current_value = {"origin": "attributable_readback", "platform_ids": {"reviewer_id": "native-principal"},
-                     "proof": proof}
+    current_value: dict[str, Any] = {
+        "origin": "attributable_readback", "platform_ids": {"reviewer_id": "native-principal"},
+        "proof": proof,
+    }
     with pytest.raises(ValueError, match="attribution"):
         store.record_review_receipt("selected-review", SCOPE, "comment-a", begun["action"]["attempt_id"],
                                     current_value, expires_at=expires())
@@ -503,7 +544,9 @@ def test_unknown_vote_value_is_not_attributed_but_matching_native_event_can_be_r
     assert confirmed["state"] == "confirmed"
 
 
-def test_reserved_receipts_and_replay_keep_working_when_review_admission_is_full(tmp_path):
+def test_reserved_receipts_and_replay_keep_working_when_review_admission_is_full(
+    tmp_path: Path,
+) -> None:
     store = ReplayStore(tmp_path.resolve(), "existing-owner-namespace")
     store.provision()
     store.adopt_review_operations(lifecycle_checkpoint=lambda: None, expires_at=expires(), review_bytes=13000)
@@ -517,12 +560,14 @@ def test_reserved_receipts_and_replay_keep_working_when_review_admission_is_full
     assert store.execute(CONSUMER, "pending", {}, expires_at=expires()) == {"events": [], "more": False}
 
 
-def test_owner_loss_after_synthetic_effect_preserves_unknown_and_original_denial(store):
+def test_owner_loss_after_synthetic_effect_preserves_unknown_and_original_denial(
+    store: ReplayStore,
+) -> None:
     store.admit_review(selected(), expires_at=expires())
     begun = store.begin_review_action("selected-review", SCOPE, "comment-a", expires_at=expires())
     denied = PermissionError("existing current owner withdrawn")
 
-    def checkpoint():
+    def checkpoint() -> None:
         raise denied
 
     with pytest.raises(PermissionError) as error:
@@ -533,7 +578,9 @@ def test_owner_loss_after_synthetic_effect_preserves_unknown_and_original_denial
     assert store.inspect_review("selected-review", SCOPE, expires_at=expires())["actions"][0]["state"] == "unknown"
 
 
-def test_receipt_cannot_confirm_an_action_without_its_durable_inflight_fence(store):
+def test_receipt_cannot_confirm_an_action_without_its_durable_inflight_fence(
+    store: ReplayStore,
+) -> None:
     store.admit_review(selected(), expires_at=expires())
     with pytest.raises(ValueError, match="admitted attempt"):
         store.record_review_receipt("selected-review", SCOPE, "comment-a", None,
@@ -541,7 +588,9 @@ def test_receipt_cannot_confirm_an_action_without_its_durable_inflight_fence(sto
     assert store.inspect_review("selected-review", SCOPE, expires_at=expires())["actions"][0]["state"] == "unattempted"
 
 
-def test_partial_native_response_retains_known_ids_without_confirming_or_repeating(store):
+def test_partial_native_response_retains_known_ids_without_confirming_or_repeating(
+    store: ReplayStore,
+) -> None:
     store.admit_review(selected(), expires_at=expires())
     begun = store.begin_review_action("selected-review", SCOPE, "comment-a", expires_at=expires())
     result = store.record_review_receipt("selected-review", SCOPE, "comment-a", begun["action"]["attempt_id"],
@@ -558,7 +607,7 @@ def test_partial_native_response_retains_known_ids_without_confirming_or_repeati
     assert completed["receipt"]["platform_ids"] == {"thread_id": 20, "comment_id": 1}
 
 
-def test_replay_admission_reserves_large_pending_growth_before_acceptance(tmp_path):
+def test_replay_admission_reserves_large_pending_growth_before_acceptance(tmp_path: Path) -> None:
     from agent_pull_requests.watch_contract import PRSnapshot
     store = ReplayStore(tmp_path.resolve(), "existing-owner-namespace")
     store.provision()
@@ -589,7 +638,9 @@ def test_replay_admission_reserves_large_pending_growth_before_acceptance(tmp_pa
     assert larger.inspect_review("selected-review", SCOPE, expires_at=expires())["intent"] == selected()
 
 
-def test_comment_only_selection_does_not_admit_a_nonexistent_vote_action(store):
+def test_comment_only_selection_does_not_admit_a_nonexistent_vote_action(
+    store: ReplayStore,
+) -> None:
     selection = selected()
     before = store.path.read_bytes()
     selection["actions"][1]["verdict"] = "COMMENTED"
@@ -600,8 +651,11 @@ def test_comment_only_selection_does_not_admit_a_nonexistent_vote_action(store):
     assert store.admit_review(selection, expires_at=expires())["status"] == "admitted"
 
 
-def test_cache_rebuild_cannot_erase_admitted_unknown_review_in_same_owner_root(store):
+def test_cache_rebuild_cannot_erase_admitted_unknown_review_in_same_owner_root(
+    store: ReplayStore,
+) -> None:
     from pathlib import Path
+
     from agent_pull_requests.generation_cache import GenerationCache
     from agent_pull_requests.review_workspace import build_generation
     store.admit_review(selected(), expires_at=expires())
@@ -618,7 +672,9 @@ def test_cache_rebuild_cannot_erase_admitted_unknown_review_in_same_owner_root(s
 
 
 @pytest.mark.parametrize("capacity", [90000, 150000])
-def test_retained_large_baseline_is_reserved_before_a_later_pending_event(tmp_path, capacity):
+def test_retained_large_baseline_is_reserved_before_a_later_pending_event(
+    tmp_path: Path, capacity: int,
+) -> None:
     from agent_pull_requests.watch_contract import PRSnapshot
     store = ReplayStore(tmp_path.resolve(), "existing-owner-namespace")
     store.provision()
@@ -639,7 +695,7 @@ def test_retained_large_baseline_is_reserved_before_a_later_pending_event(tmp_pa
     assert len(store.execute(CONSUMER, "pending", {}, expires_at=expires())["events"]) == 1
 
 
-def test_empty_baseline_to_large_firing_event_uses_reserved_growth_once(tmp_path):
+def test_empty_baseline_to_large_firing_event_uses_reserved_growth_once(tmp_path: Path) -> None:
     from agent_pull_requests.watch_contract import PRSnapshot
     store = ReplayStore(tmp_path.resolve(), "existing-owner-namespace")
     store.provision()
@@ -654,7 +710,9 @@ def test_empty_baseline_to_large_firing_event_uses_reserved_growth_once(tmp_path
 
 
 @pytest.mark.parametrize("unknown", [False, True])
-def test_existing_commented_intent_remains_readable_without_a_new_vote_attempt(store, unknown):
+def test_existing_commented_intent_remains_readable_without_a_new_vote_attempt(
+    store: ReplayStore, unknown: bool,
+) -> None:
     from agent_pull_requests.review_intent import encoded
     selection = selected()
     selection["actions"] = [selection["actions"][1]]
@@ -678,9 +736,13 @@ def test_existing_commented_intent_remains_readable_without_a_new_vote_attempt(s
 @pytest.mark.parametrize("kind,matching", [
     ("reply", True), ("reply", False), ("edit_owned_comment", True), ("edit_owned_comment", False),
 ])
-def test_reply_and_owned_edit_receipts_match_native_targets_and_survive_restart(store, kind, matching):
+def test_reply_and_owned_edit_receipts_match_native_targets_and_survive_restart(
+    store: ReplayStore, kind: str, matching: bool,
+) -> None:
     selection = selected()
-    action = {"id": "targeted", "kind": kind, "body": "Synthetic update", "thread_id": 20}
+    action: dict[str, Any] = {
+        "id": "targeted", "kind": kind, "body": "Synthetic update", "thread_id": 20,
+    }
     if kind == "edit_owned_comment":
         action.update(comment_id=1, expected_content_id="3" * 64)
     selection["actions"][0] = action
@@ -702,7 +764,9 @@ def test_reply_and_owned_edit_receipts_match_native_targets_and_survive_restart(
 @pytest.mark.parametrize("origin,matching", [
     ("response", True), ("response", False), ("attributable_readback", True), ("attributable_readback", False),
 ])
-def test_verdict_receipt_principal_and_attribution_are_action_specific(store, origin, matching):
+def test_verdict_receipt_principal_and_attribution_are_action_specific(
+    store: ReplayStore, origin: str, matching: bool,
+) -> None:
     selection = selected()
     selection["actions"].reverse()
     store.admit_review(selection, expires_at=expires())
@@ -727,7 +791,9 @@ def test_verdict_receipt_principal_and_attribution_are_action_specific(store, or
     assert restarted.begin_review_action("selected-review", SCOPE, "comment-a", expires_at=expires())["new_attempt"] is matching
 
 
-def test_mutation_rechecks_current_owner_after_lock_ownership_inspection(store, monkeypatch):
+def test_mutation_rechecks_current_owner_after_lock_ownership_inspection(
+    store: ReplayStore, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from contextlib import contextmanager
     before = store.path.read_bytes()
     denied = PermissionError("owner withdrawn during lock inspection")
@@ -735,15 +801,15 @@ def test_mutation_rechecks_current_owner_after_lock_ownership_inspection(store, 
     original_lock = store._lock
 
     @contextmanager
-    def lock():
+    def lock() -> Iterator[OwnedLock]:
         with original_lock() as actual:
             class Guard:
-                def assert_owned(self):
+                def assert_owned(self) -> None:
                     actual.assert_owned()
                     allowed[0] = False
             yield Guard()
 
-    def checkpoint():
+    def checkpoint() -> None:
         if not allowed[0]:
             raise denied
 
@@ -754,16 +820,18 @@ def test_mutation_rechecks_current_owner_after_lock_ownership_inspection(store, 
     assert store.path.read_bytes() == before
 
 
-def test_owner_loss_during_admitted_atomic_commit_is_denied_without_claiming_rollback(store, monkeypatch):
+def test_owner_loss_during_admitted_atomic_commit_is_denied_without_claiming_rollback(
+    store: ReplayStore, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     original = storage._atomic_write_json
     denied = PermissionError("owner withdrawn during admitted commit")
     allowed = [True]
 
-    def write(path, document):
+    def write(path: Path, document: object) -> None:
         original(path, document)
         allowed[0] = False
 
-    def checkpoint():
+    def checkpoint() -> None:
         if not allowed[0]:
             raise denied
 
@@ -775,18 +843,22 @@ def test_owner_loss_during_admitted_atomic_commit_is_denied_without_claiming_rol
     assert store.inspect_review("selected-review", SCOPE, expires_at=expires())["intent"] == selected()
 
 
-def test_replay_owner_encoding_finishes_before_the_final_mutation_check(store, monkeypatch):
+def test_replay_owner_encoding_finishes_before_the_final_mutation_check(
+    store: ReplayStore, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     original = store._encode
     denied = PermissionError("existing owner withdrawn during envelope encoding")
     allowed = [True]
     before = store.path.read_bytes()
 
-    def encode(state, **kwargs):
-        result = original(state, **kwargs)
+    def encode(
+        state: dict[str, Any], *, owner_state: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        result = original(state, owner_state=owner_state)
         allowed[0] = False
         return result
 
-    def checkpoint():
+    def checkpoint() -> None:
         if not allowed[0]:
             raise denied
 

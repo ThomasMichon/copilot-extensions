@@ -5,19 +5,53 @@ from __future__ import annotations
 import asyncio
 import os
 import threading
-from collections.abc import Awaitable, Callable
-from typing import Any
+from collections.abc import Awaitable, Callable, Iterable, Mapping
+from contextlib import AbstractContextManager
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from fleet_manager.gateway_service_connector import ServiceConnector
 from fleet_manager.gateway_service_channel import BODY_BYTES
-from fleet_manager.gateway_service_handler import RequestDisconnected
-from single_instance_lease import OperationLockedError, SingleInstance
+from fleet_manager.gateway_service_handler import BoundedServiceResponse, RequestDisconnected, ServiceResponse
+from fleet_manager.local_service_handler import LocalServiceRequest
+from single_instance_lease import OperationLock, OperationLockedError, SingleInstance
 
 from .watch_gateway import WatchGateway, WatchScopeBinding
 from .watch_notification import positive_seconds
 from .watch_observer import NativeObservationBinding, ReplayObserver
 from .watch_replay_store import ReplayCallerExpired, ReplayStore
 from .repository_contract import RepositoryBackpressure
+from .filtered_state import Authority, Checkpoint, Document
+
+if TYPE_CHECKING:
+    from pr_filters import Definitions
+    from .attention_read import AttentionReader
+    from .filtered_projection import FilteredProjection
+    from .report_read import ReportReader
+    from .workspace_operations import WorkspaceOperations
+
+
+class _Connector(Protocol):
+    connected: asyncio.Event
+
+    async def run(self, stop: asyncio.Event) -> None: ...
+
+
+class _LocalIngressFactory(Protocol):
+    def __call__(
+        self, *, path: Path | str, namespace: str, peers: Iterable[tuple[int, str]],
+        handler: Callable[[LocalServiceRequest], Awaitable[ServiceResponse | BoundedServiceResponse]],
+        operation_seconds: int,
+    ) -> _Connector: ...
+
+
+class _CacheValidation(Protocol):
+    def _transaction(self) -> AbstractContextManager[OperationLock]: ...
+    def _check(self, lock: OperationLock | None = None) -> None: ...
+
+
+class _LegacyQualify(Protocol):
+    def __call__(self, binding: NativeObservationBinding, *, checkpoint: Checkpoint) -> None: ...
 
 
 class WatchService:
@@ -36,12 +70,13 @@ class WatchService:
         gateway_origin: str | None, access_token_callback: Callable[[], Awaitable[str]] | None,
         proof_key: Any, authority: Callable[[], int], checkpoint: Callable[[], None],
         gateway_ca: str | None = None, interval: float = 5,
-        workspaces=None,
-        attention=None,
-        reports=None,
+        workspaces: Mapping[tuple[str, str], WorkspaceOperations] | None = None,
+        attention: Mapping[tuple[str, str], AttentionReader] | None = None,
+        reports: Mapping[tuple[str, str], ReportReader] | None = None,
         response_limit: int = BODY_BYTES,
-        local_socket=None, local_peers=(), operation_seconds: int = 60,
-        filter_definitions=None, filter_sponsors=(),
+        local_socket: Path | str | None = None, local_peers: Iterable[tuple[int, str]] = (),
+        operation_seconds: int = 60, filter_definitions: Definitions | None = None,
+        filter_sponsors: Iterable[Document] = (),
     ) -> None:
         if not callable(authority) or not callable(checkpoint):
             raise ValueError("current service authority is required")
@@ -56,15 +91,15 @@ class WatchService:
         self._started = False
         self._closed = False
         self._loop: asyncio.AbstractEventLoop | None = None
-        self._last_cycle: dict | None = None
-        self._disk: asyncio.Task | None = None
-        self._tasks: tuple[asyncio.Task, ...] = ()
+        self._last_cycle: Document | None = None
+        self._disk: asyncio.Task[Document | None] | None = None
+        self._tasks: tuple[asyncio.Task[None], ...] = ()
         self.observer = ReplayObserver(store, bindings=observations)
         self.filter_sponsors = tuple(filter_sponsors)
         if filter_definitions is not None:
             if not store.repository_filtered:
                 raise ValueError("filter definitions require selected filtered storage")
-            self.observer.repositories.definitions = filter_definitions
+            cast("FilteredProjection", self.observer.repositories).definitions = filter_definitions
         local = local_socket is not None
         if local and (not store.repository_continuing or self.observer.repositories is None):
             raise ValueError("local repository profile requires selected continuing storage")
@@ -77,7 +112,7 @@ class WatchService:
             local=local, repositories=self.observer.repositories,
         )
         if store.repository_filtered:
-            self.observer.repositories.sponsored_requests = frozenset(
+            cast("FilteredProjection", self.observer.repositories).sponsored_requests = frozenset(
                 (self.gateway.bindings[(s["principal"], s["target"])].consumer, s["request_id"])
                 for s in self.filter_sponsors
             )
@@ -86,15 +121,16 @@ class WatchService:
             for scope in self.gateway.bindings.values()
         ):
             raise ValueError("serving scope has no native observation binding")
+        self.connector: _Connector
         if local:
             from .watch_local import LocalIngress
-            self.connector = LocalIngress(
-                path=local_socket, namespace=store.namespace, peers=local_peers,
+            self.connector = cast(_LocalIngressFactory, LocalIngress)(
+                path=cast(Path | str, local_socket), namespace=store.namespace, peers=local_peers,
                 handler=self.gateway.handle_local, operation_seconds=operation_seconds,
             )
         else:
             self.connector = ServiceConnector(
-                slot=slot, gateway_origin=gateway_origin,
+                slot=cast(str, slot), gateway_origin=cast(str, gateway_origin),
                 access_token_callback=access_token_callback, proof_key=proof_key,
                 gateway_ca=gateway_ca, handler=self.gateway.handler_binding(
                     **({"response_limit": response_limit} if response_limit != BODY_BYTES else {}),
@@ -141,14 +177,14 @@ class WatchService:
             except asyncio.TimeoutError:
                 pass
 
-    def _observe_cycle(self):
-        authority = {"expires_at": self._authority(), "checkpoint": self._check}
+    def _observe_cycle(self) -> Document:
+        authority: Authority = {"expires_at": self._authority(), "checkpoint": self._check}
         conflicts = 0
         if self.store.repository_filtered:
             from pr_filters import FilterError
             from .filtered_subscriptions import FilteredSubscriptions
             from .repository_subscriptions import RepositoryRequestConflict
-            subscriptions = FilteredSubscriptions(self.observer.repositories)
+            subscriptions = FilteredSubscriptions(cast("FilteredProjection", self.observer.repositories))
             for sponsor in self.filter_sponsors:
                 scope = self.gateway.bindings[(sponsor["principal"], sponsor["target"])]
                 try:
@@ -193,37 +229,42 @@ class WatchService:
             if (self.store.root / "watch-subscriptions.json").exists():
                 raise ValueError("native and replay state roots must be separate")
             self._check()
-            def validate_storage():
+            def validate_storage() -> None:
                 self.store.observation_targets(
                     expires_at=self._authority(), checkpoint=self._check,
                 )
                 if self.observer.repositories is not None:
-                    if self.store.repository_filtered:
-                        from .filtered_native import qualify
-                    else:
-                        from .repository_native import qualify
                     for binding in self.observer.bindings.values():
                         if binding.repository_identity is not None:
-                            support = qualify(binding, checkpoint=self._check)
                             if self.store.repository_filtered:
-                                self.observer.repositories.capabilities[binding.account] = support
+                                from .filtered_native import qualify
+                                support = qualify(binding, checkpoint=self._check)
+                                cast("FilteredProjection", self.observer.repositories).capabilities[binding.account] = support
+                            else:
+                                from .repository_native import qualify as qualify_legacy
+                                cast(_LegacyQualify, qualify_legacy)(binding, checkpoint=self._check)
                     if self.store.repository_filtered:
                         for sponsor in self.filter_sponsors:
                             scope = self.gateway.bindings[(sponsor["principal"], sponsor["target"])]
-                            self.observer.repositories.require(
-                                scope.account, self.observer.repositories.definitions.resolve(sponsor["definition"]),
+                            cast("FilteredProjection", self.observer.repositories).require(
+                                scope.account, cast("FilteredProjection", self.observer.repositories).definitions.resolve(
+                                    sponsor["definition"],
+                                ),
                             )
-                for workspace in self.gateway.workspaces.values():
+                for workspace in cast(Mapping[tuple[str, str], "WorkspaceOperations"], self.gateway.workspaces).values():
                     # Attention has its own explicit layout contract; never relabel
                     # those bytes as the older conversation-serving layout.
-                    readers = [reader for reader in self.gateway.attention.values()
+                    readers = [reader for reader in cast(
+                        Mapping[tuple[str, str], "AttentionReader"], self.gateway.attention,
+                    ).values()
                                if reader.workspace is workspace]
                     if readers:
                         for reader in readers:
                             reader.execute("capabilities", {}, expires_at=self._authority(),
                                            checkpoint=self._check)
-                        with workspace.cache._transaction() as lock:
-                            workspace.cache._check(lock)
+                        cache = cast(_CacheValidation, workspace.cache)
+                        with cache._transaction() as lock:
+                            cache._check(lock)
                     else:
                         workspace.validate_storage(
                             expires_at=self._authority(), checkpoint=self._check,
@@ -254,7 +295,7 @@ class WatchService:
         self._begin_start()
         await self._adopt()
 
-    def status(self) -> dict:
+    def status(self) -> Document:
         """Report local readiness, not placement, provider or activation evidence."""
         current = True
         try:
@@ -314,7 +355,7 @@ class WatchService:
             raise
         drain = None
         try:
-            tasks = set(self._tasks)
+            tasks: set[asyncio.Task[object]] = set(self._tasks)
             if self._disk is not None:
                 tasks.add(self._disk)
             remaining = deadline - loop.time()

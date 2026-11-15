@@ -1,32 +1,53 @@
 """Selected population reads through the existing finite native-process owner."""
 
+from __future__ import annotations
+
 import json
 import os
 from pathlib import Path
+from subprocess import CompletedProcess
 import tempfile
+from typing import TYPE_CHECKING, Protocol, cast
 
 from agent_procutil.owned_process import OwnedCleanupError
 from pr_filters import Expression, PROTOCOL as FILTER_PROTOCOL
 from pr_filters.acquisition import plan
 
-from .filtered_state import facts as validate_facts
+from .filtered_state import Checkpoint, Document, facts as validate_facts
+from .repository_contract import RepositoryIdentity
 from .repository_native import (
-    RepositoryNativeUnavailable, RepositoryNativeUnsupported, _invoke,
+    RepositoryNativeUnavailable, RepositoryNativeUnsupported, _invoke as _legacy_invoke,
 )
 from .watch_replay_store import json_object
+
+if TYPE_CHECKING:
+    from .watch_observer import NativeObservationBinding
 
 PROTOCOL = "agent-worktrees.pr-population/v1"
 
 
-def qualify(binding, *, checkpoint):
-    identity = binding.repository_identity
+class _NativeInvoke(Protocol):
+    def __call__(
+        self, argv: list[str], *, timeout: int, checkpoint: Checkpoint, qualified: bool = False,
+    ) -> CompletedProcess[str]: ...
+
+
+class _UnavailableFactory(Protocol):
+    def __call__(self, *, qualified: bool) -> RepositoryNativeUnavailable: ...
+
+
+_invoke = cast(_NativeInvoke, _legacy_invoke)
+
+
+def qualify(binding: NativeObservationBinding, *, checkpoint: Checkpoint) -> Document:
+    identity = cast(RepositoryIdentity, binding.repository_identity)
     result = _invoke(
         [*(binding.prefix or (binding.command,)), "pr-watch", "population", "--contract", "--json"],
         timeout=15, checkpoint=checkpoint,
     )
     try:
         value = json_object(result.stdout.encode())
-        support = value["providers"][identity.provider]
+        support: Document = value["providers"][identity.provider]
         if result.returncode or value["protocol"] != PROTOCOL or value["filter_protocol"] != FILTER_PROTOCOL or (
             value["credential"] != "observe/per-request" or value["effects"] != "read-only"
             or value.get("query_rotation") != "offset/v1"
@@ -45,11 +66,14 @@ def qualify(binding, *, checkpoint):
     return support
 
 
-def population(binding, expression, *, root, checkpoint, start_checkpoint=None, query_offset=0):
+def population(
+    binding: NativeObservationBinding, expression: Expression, *, root: Path,
+    checkpoint: Checkpoint, start_checkpoint: Checkpoint | None = None, query_offset: int = 0,
+) -> Document:
     """Keep immutable input until the actual native reader and cleanup settle."""
     start_checkpoint = checkpoint if start_checkpoint is None else start_checkpoint
     support = qualify(binding, checkpoint=start_checkpoint)
-    identity = binding.repository_identity
+    identity = cast(RepositoryIdentity, binding.repository_identity)
     expression.require(support, {identity.repo})
     plan(expression, support["acquisition"])
     descriptor, filename = tempfile.mkstemp(prefix=".population-", suffix=".json", dir=root)
@@ -60,7 +84,7 @@ def population(binding, expression, *, root, checkpoint, start_checkpoint=None, 
         start_checkpoint()
         result = _invoke([
             *(binding.prefix or (binding.command,)), "pr-watch", "population", identity.repo,
-            "--config", binding.inventory_config,
+            "--config", cast(str, binding.inventory_config),
             "--credential-command", json.dumps(binding.credential_command),
             "--filter-file", filename,
             "--query-offset", str(query_offset),
@@ -101,6 +125,6 @@ def population(binding, expression, *, root, checkpoint, start_checkpoint=None, 
             numbers.add(pull["number"])
             validate_facts(pull["facts"], identity)
     except (ValueError, KeyError, TypeError, UnicodeError, RecursionError):
-        raise RepositoryNativeUnavailable(qualified=True) from None
+        raise cast(_UnavailableFactory, RepositoryNativeUnavailable)(qualified=True) from None
     checkpoint()
     return value

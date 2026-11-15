@@ -1,16 +1,34 @@
 """Owned immutable filter demand, using ReplayStore transaction and delivery custody."""
 
+from __future__ import annotations
+
+from collections.abc import Callable
 import copy
 import json
+from typing import TYPE_CHECKING, TypedDict, cast
 import uuid
 
 from pr_filters import Expression, PROTOCOL as FILTER_PROTOCOL
 
-from .filtered_state import BASELINE_BYTES, release_inactive, text, trim
+from .filtered_state import Authority, BASELINE_BYTES, Checkpoint, Document, release_inactive, text, trim
+from .repository_contract import RepositoryIdentity
 from .repository_contract import MAX_REGISTRATIONS
 from .repository_subscriptions import (
-    RESPONSE_BYTES, RepositoryHistoryGap, RepositoryRequestConflict, _integer,
+    RESPONSE_BYTES, RepositoryHistoryGap, RepositoryRequestConflict, _integer as _legacy_integer,
 )
+
+if TYPE_CHECKING:
+    from .filtered_projection import FilteredProjection
+
+
+class _FilterRequest(TypedDict):
+    filter: Document
+    definition: str | None
+    ttl: int
+
+
+def _integer(value: object, minimum: int = 0, maximum: int = 2**53 - 1) -> int:
+    return cast(Callable[[object, int, int], int], _legacy_integer)(value, minimum, maximum)
 
 PROTOCOL = "agent-pull-requests.filtered-population/v1"
 OPERATIONS = {
@@ -34,16 +52,18 @@ def contract() -> dict[str, object]:
     }
 
 
-def status(row, now):
+def status(row: Document, now: int) -> str:
     return "cancelled" if row["cancelled"] else "expired" if row["expires_at"] <= now else "active"
 
 
-def page(state, row, identity, *, after=0, limit=16):
+def page(
+    state: Document, row: Document, identity: RepositoryIdentity, *, after: int = 0, limit: int = 16,
+) -> Document:
     _integer(after)
     _integer(limit, 1, 16)
     pulls = sorted((p for p in row["projected"].values() if p["number"] > after),
                    key=lambda p: p["number"])
-    result = {
+    result: Document = {
         "identity": identity.document(), "inventory": copy.deepcopy(row["coverage"]),
         "pulls": [], "more": False, "cursor": state["next_sequence"] - 1,
         "filter_revision": Expression.parse(row["request"]["filter"]).revision,
@@ -59,34 +79,38 @@ def page(state, row, identity, *, after=0, limit=16):
 
 
 class FilteredSubscriptions:
-    def __init__(self, projection):
+    def __init__(self, projection: FilteredProjection) -> None:
         if not projection.store.repository_filtered:
             raise ValueError("filtered subscriptions require explicit generation-three storage")
         self.projection, self.store = projection, projection.store
 
-    def execute(self, key, consumer, operation, payload, **authority):
+    def execute(
+        self, key: str, consumer: str, operation: str, payload: Document, *,
+        expires_at: int, checkpoint: Checkpoint | None = None,
+    ) -> Document:
         if key not in self.projection.identities or operation not in OPERATIONS or not isinstance(payload, dict):
             raise ValueError("unsupported filtered request")
         required, optional = OPERATIONS[operation]
         if not required <= payload.keys() or payload.keys() - required - optional:
             raise ValueError("invalid filtered request fields")
         text(consumer)
+        authority: Authority = {"expires_at": expires_at, "checkpoint": checkpoint}
         identity = self.projection.identities[key]
         if operation == "subscribe":
             text(payload["request_id"])
             ttl = _integer(payload["ttl"], 1, 86400)
             if ("filter" in payload) == ("definition" in payload):
                 raise ValueError("select exactly one expression or named definition")
-            definition = payload.get("definition")
+            definition: str | None = payload.get("definition")
             if definition is not None:
                 text(definition)
 
-        def transact(document, commit):
+        def transact(document: Document, commit: Callable[[], None]) -> Document:
             state = document["repository_cache"]
             now = int(self.store.clock())
             changed = False
             if operation == "subscribe":
-                row = next((r for r in state["registrations"] if (
+                row: Document | None = next((r for r in state["registrations"] if (
                     r["consumer"], r["request_id"]
                 ) == (consumer, payload["request_id"])), None)
                 if row is not None:
@@ -106,7 +130,7 @@ class FilteredSubscriptions:
                         else Expression.parse(payload["filter"])
                     )
                     self.projection.require(key, selected)
-                    request = {"filter": selected.document(), "definition": definition, "ttl": ttl}
+                    request: _FilterRequest = {"filter": selected.document(), "definition": definition, "ttl": ttl}
                     retired = {r["registration_id"] for r in state["registrations"]
                                if r["expires_at"] + 86400 < now and r["delivered"] <= r["acknowledged"]
                                and (r["consumer"], r["request_id"]) not in self.projection.sponsored_requests}
@@ -131,7 +155,7 @@ class FilteredSubscriptions:
                     row["baseline"] = page(state, row, identity)
                     state["registrations"].append(row)
                     changed = True
-                result = {
+                result: Document = {
                     "status": status(row, now), "subscription": self.receipt(row),
                     "baseline": copy.deepcopy(row["baseline"]),
                 }
@@ -187,7 +211,7 @@ class FilteredSubscriptions:
                                  and e["sequence"] > after and (
                                      current == "active" or e["sequence"] <= row["delivered"]
                                  )]
-                    batch = []
+                    batch: list[Document] = []
                     for event in available[:limit]:
                         if len(json.dumps([*batch, event]).encode()) > RESPONSE_BYTES - 16384:
                             break
@@ -220,6 +244,6 @@ class FilteredSubscriptions:
         return self.store._review_transaction(transact, staged=True, persist=False, **authority)
 
     @staticmethod
-    def receipt(row):
+    def receipt(row: Document) -> Document:
         return copy.deepcopy({name: value for name, value in row.items()
                               if name not in ("members", "projected", "projected_sequence", "baseline")})

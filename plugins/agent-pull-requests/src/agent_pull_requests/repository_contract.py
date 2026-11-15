@@ -76,7 +76,7 @@ class RepositoryIdentity:
         return cls(**value)
 
 
-def capability() -> dict:
+def capability() -> dict[str, object]:
     """Source seam declaration, not a running host capability advertisement."""
     return {
         "protocol": PROTOCOL, "storage_extension": STORAGE_EXTENSION,

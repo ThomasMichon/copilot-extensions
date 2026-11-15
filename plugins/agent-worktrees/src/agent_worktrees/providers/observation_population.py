@@ -4,26 +4,29 @@ from __future__ import annotations
 
 import json
 import re
-import time
+import time as time
 from datetime import datetime
+from typing import Any, cast
 from urllib.parse import quote, urlencode, urlsplit
 
-from pr_filters import Expression, PROTOCOL
-from pr_filters.acquisition import PROTOCOL as ACQUISITION_PROTOCOL, plan
+from pr_filters import PROTOCOL, Expression
+from pr_filters.acquisition import PROTOCOL as ACQUISITION_PROTOCOL
+from pr_filters.acquisition import plan
 
 from .base import ProviderError, run_cli
-from .observation_credentials import ObservationCredentials
-from .observation_inventory import MAX_BYTES, MAX_PAGES, PAGE_SIZE
+from .observation_credentials import CredentialSource, ObservationCredentials
+from .observation_inventory import MAX_BYTES as MAX_BYTES
+from .observation_inventory import MAX_PAGES, PAGE_SIZE
 
 MAX_REQUESTS = 64
 MAX_PULLS = 1000
 MAX_IDENTITIES = 128
-ACQUISITION = {
+ACQUISITION: dict[str, Any] = {
     "protocol": ACQUISITION_PROTOCOL, "user_ids": "uuid-lowercase",
     "query_fields": {"from": "creatorId", "assigned": "reviewerId"},
     "max_query_branches": MAX_REQUESTS,
 }
-CAPABILITIES = {
+CAPABILITIES: dict[str, Any] = {
     "protocol": PROTOCOL,
     "fields": ["repo", "from", "assigned", "age", "tags", "publication"],
     "groups": [],
@@ -37,7 +40,7 @@ class _Limit(Exception):
     pass
 
 
-def contract() -> dict:
+def contract() -> dict[str, Any]:
     return {
         "protocol": "agent-worktrees.pr-population/v1", "filter_protocol": PROTOCOL,
         "providers": {"azure-devops": {
@@ -56,7 +59,10 @@ def contract() -> dict:
     }
 
 
-def validate(provider, repo, api_base, expression, max_pages, max_pulls):
+def validate(
+    provider: str, repo: object, api_base: object, expression: Expression,
+    max_pages: int, max_pulls: int,
+) -> list[tuple[str, str] | None]:
     if provider != "azure-devops" or (
         not isinstance(repo, str) or repo.count("/") != 1 or len(repo) > 256
         or any(not part or part in (".", "..") for part in repo.split("/"))
@@ -80,7 +86,7 @@ def validate(provider, repo, api_base, expression, max_pages, max_pulls):
     return plan(expression, ACQUISITION)
 
 
-def _read(url, credentials, deadline):
+def _read(url: str, credentials: ObservationCredentials, deadline: float) -> object:
     if time.monotonic() >= deadline:
         raise ProviderError("population deadline exhausted")
     authorization = credentials.authorization()
@@ -101,12 +107,13 @@ def _read(url, credentials, deadline):
     if not separator or status != "200" or len(body.encode("utf-8")) > MAX_BYTES:
         raise ProviderError("population read unavailable")
     try:
-        return json.loads(body)
+        value: object = json.loads(body)
+        return value
     except (ValueError, RecursionError):
         raise ProviderError("population returned invalid bounded JSON") from None
 
 
-def _instant(value):
+def _instant(value: object) -> float | None:
     if not isinstance(value, str):
         return None
     try:
@@ -116,22 +123,22 @@ def _instant(value):
         return None
 
 
-def _identity(value):
+def _identity(value: object) -> str | None:
     identity = value.get("id") if isinstance(value, dict) else None
     return identity.lower() if isinstance(identity, str) and _GUID.fullmatch(identity.lower()) else None
 
 
-def _facts(row, repo):
+def _facts(row: dict[str, Any], repo: str) -> dict[str, Any]:
     author = _identity(row.get("createdBy"))
     if isinstance(row.get("createdBy"), dict) and row["createdBy"].get("isContainer", False) is not False:
         author = None
     reviewers = row.get("reviewers")
-    assigned = None
+    assigned: list[str] | None = None
     if isinstance(reviewers, list) and len(reviewers) <= MAX_IDENTITIES and all(
         isinstance(item, dict) and _identity(item) is not None
         and item.get("isContainer", False) is False for item in reviewers
     ):
-        assigned = sorted({_identity(item) for item in reviewers})
+        assigned = sorted({cast(str, _identity(item)) for item in reviewers})
     draft = row.get("isDraft")
     return {
         "repo": repo, "from": [author] if author is not None else None,
@@ -141,14 +148,14 @@ def _facts(row, repo):
     }
 
 
-def _page(value, repo):
+def _page(value: object, repo: str) -> list[dict[str, Any]]:
     if not isinstance(value, dict) or not isinstance(value.get("value"), list):
         raise ValueError("invalid population page")
-    rows = value["value"]
+    rows: list[dict[str, Any]] = value["value"]
     if type(value.get("count")) is not int or value["count"] != len(rows) or len(rows) > PAGE_SIZE:
         raise ValueError("incomplete population page")
     project, repository = repo.split("/")
-    seen = set()
+    seen: set[int] = set()
     for row in rows:
         if not isinstance(row, dict) or (
             type(row.get("pullRequestId")) is not int or row["pullRequestId"] <= 0
@@ -159,7 +166,10 @@ def _page(value, repo):
         native_project = native_repo.get("project") if isinstance(native_repo, dict) else None
         if not isinstance(native_project, dict) or (
             repository.casefold() not in {
-                value.casefold() for value in (native_repo.get("name"), native_repo.get("id"))
+                value.casefold() for value in (
+                    cast(dict[str, Any], native_repo).get("name"),
+                    cast(dict[str, Any], native_repo).get("id"),
+                )
                 if isinstance(value, str)
             }
             or project.casefold() not in {
@@ -172,10 +182,10 @@ def _page(value, repo):
     return rows
 
 
-def _labels(value):
+def _labels(value: object) -> list[str] | None:
     if not isinstance(value, dict) or not isinstance(value.get("value"), list):
         return None
-    rows = value["value"]
+    rows: list[dict[str, Any]] = value["value"]
     if (type(value.get("count")) is not int or value["count"] != len(rows)
             or len(rows) > MAX_IDENTITIES
             or any(not isinstance(item, dict) or not isinstance(item.get("name"), str)
@@ -186,10 +196,11 @@ def _labels(value):
 
 
 def population(
-    provider, repo: str, *, api_base: str, expression: Expression, credential_source,
-    max_pages=4, max_pulls=200, deadline=None,
-    query_offset=0,
-) -> dict:
+    provider: str, repo: str, *, api_base: str, expression: Expression,
+    credential_source: CredentialSource,
+    max_pages: int = 4, max_pulls: int = 200, deadline: float | None = None,
+    query_offset: int = 0,
+) -> dict[str, Any]:
     queries = validate(provider, repo, api_base, expression, max_pages, max_pulls)
     if type(query_offset) is not int or not 0 <= query_offset < MAX_REQUESTS:
         raise ValueError("population query offset outside bounded rotation")
@@ -204,23 +215,25 @@ def population(
         credential_source, provider=provider, api_base=endpoint, repository=repo,
         max_requests=MAX_REQUESTS,
     )
-    result = {
+    result: dict[str, Any] = {
         "schema": "agent-worktrees.pr-population", "version": 1,
         "provider": provider, "api_base": endpoint, "repo": repo,
         "filter_revision": expression.revision, "outcome": "partial", "pages": 0,
         "max_pages": max_pages, "max_pulls": max_pulls, "error": "page_limit", "pulls": [],
     }
-    known = {}
+    known: dict[int, dict[str, Any]] = {}
     now = time.time()
     try:
         for query in queries:
-            seen = set()
+            seen: set[int] = set()
             page = 0
             while True:
                 if result["pages"] >= max_pages:
                     raise _Limit("page_limit")
-                parameters = {"searchCriteria.status": "active", "$top": PAGE_SIZE,
-                              "$skip": page * PAGE_SIZE, "api-version": "7.1"}
+                parameters: dict[str, str | int] = {
+                    "searchCriteria.status": "active", "$top": PAGE_SIZE,
+                    "$skip": page * PAGE_SIZE, "api-version": "7.1",
+                }
                 if query is not None:
                     key, identity = query
                     parameters["searchCriteria." + key] = identity
@@ -235,8 +248,10 @@ def population(
                     seen.add(number)
                     facts = _facts(row, repo)
                     if number not in known:
-                        member = {"number": number, "facts": facts,
-                                  "match": expression.evaluate(facts, now=now)}
+                        member: dict[str, Any] = {
+                            "number": number, "facts": facts,
+                            "match": expression.evaluate(facts, now=now),
+                        }
                         known[number] = member
                         result["pulls"].append(member)
                         if len(known) >= max_pulls:

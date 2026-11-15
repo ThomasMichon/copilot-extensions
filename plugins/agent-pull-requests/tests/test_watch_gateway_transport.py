@@ -7,24 +7,93 @@ import json
 import sys
 import threading
 import time
+from collections.abc import Awaitable, Callable
+from contextlib import AbstractAsyncContextManager
 from pathlib import Path
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 import pytest
-from fleet_manager.gateway_service_handler import RequestDisconnected
+from aiohttp import ClientSession
+from fleet_manager.gateway_service_handler import (
+    BoundedServiceResponse,
+    RequestDisconnected,
+    ServiceRequest,
+    ServiceResponse,
+)
 from single_instance_lease import OperationLock, OperationLockedError
 
 from agent_pull_requests.watch_gateway import WatchGateway, WatchScopeBinding
 from agent_pull_requests.watch_replay import ConsumerScope
 from agent_pull_requests.watch_replay_store import ReplayStore
 
+if TYPE_CHECKING:
+    from fleet_manager.gateway_service_connector import ServiceConnector
+    from fleet_manager.gateway_service_server import ServiceRuntime
 
-def test_real_gateway_scopes_reconcile_restart_ack_and_policy_withdrawal(tmp_path, monkeypatch):
+
+class FixtureSigningKey(Protocol):
+    def get_op_key(self, operation: str) -> object: ...
+
+
+class FixtureHarness(Protocol):
+    document: dict[str, Any]
+    keys: tuple[FixtureSigningKey, ...]
+
+
+class FixtureBackend(Protocol):
+    requests: list[tuple[str, str, dict[str, str], bytes]]
+
+
+class FixtureRig(Protocol):
+    h: FixtureHarness
+    origin: str
+    ca: str
+    session: ClientSession
+    state: ServiceRuntime
+    tasks: list[asyncio.Task[None]]
+    connectors: list[ServiceConnector]
+    backends: list[FixtureBackend]
+
+    def access(self, subject: str, key: int) -> str: ...
+
+    async def update(self) -> None: ...
+
+    async def auth(
+        self, path: str, method: str = "GET", *, subject: str = "caller-a", key: int = 3,
+        proof_method: str | None = None, proof_target: str | None = None,
+    ) -> dict[str, str]: ...
+
+
+class RunningFixture(Protocol):
+    def __call__(self, root: Path) -> AbstractAsyncContextManager[FixtureRig]: ...
+
+
+class Eventually(Protocol):
+    def __call__(
+        self, predicate: Callable[[], bool], timeout: float = 3,
+    ) -> Awaitable[None]: ...
+
+
+class ConnectHandler(Protocol):
+    def __call__(
+        self, rig: FixtureRig,
+        handle: Callable[[ServiceRequest], Awaitable[ServiceResponse | BoundedServiceResponse]], *,
+        fleet: str = "fleet-a", gateway: str = "gateway-a", response_limit: int = ...,
+    ) -> Awaitable[ServiceConnector]: ...
+
+
+def test_real_gateway_scopes_reconcile_restart_ack_and_policy_withdrawal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     # Reuse Fleet's transport fixtures, not a second authentication/test server.
     monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[3] / "fleet-manager" / "tests"))
-    from gateway_service_transport_fixtures import running
-    from test_gateway_service_handler import connect_handler
+    from gateway_service_transport_fixtures import running as legacy_running
+    from test_gateway_service_handler import connect_handler as legacy_connect_handler
 
-    async def scenario():
+    running = cast(RunningFixture, legacy_running)
+    connect_handler = cast(ConnectHandler, legacy_connect_handler)
+
+    async def scenario() -> None:
         store = ReplayStore((tmp_path / "replay").resolve(), "fleet/service/installation")
         store.provision()
         bindings = (
@@ -34,7 +103,7 @@ def test_real_gateway_scopes_reconcile_restart_ack_and_policy_withdrawal(tmp_pat
                               ConsumerScope("coordinator-b", "account-b", "example/project")),
         )
 
-        def adapter():
+        def adapter() -> WatchGateway:
             return WatchGateway(store, fleet="fleet-a", gateway="gateway-a",
                                 slot="service-a", bindings=bindings)
 
@@ -47,7 +116,10 @@ def test_real_gateway_scopes_reconcile_restart_ack_and_policy_withdrawal(tmp_pat
             await rig.update()
             await connect_handler(rig, owner.handler_binding().handle)
 
-            async def send(operation, payload=None, *, caller="caller-a", expected=200):
+            async def send(
+                operation: str, payload: dict[str, Any] | None = None, *,
+                caller: str = "caller-a", expected: int = 200,
+            ) -> dict[str, Any]:
                 method = "GET" if operation == "capabilities" else "POST"
                 path = "/api/v1/watch/project/" + operation
                 headers = await rig.auth(path, method, subject=caller)
@@ -58,10 +130,11 @@ def test_real_gateway_scopes_reconcile_restart_ack_and_policy_withdrawal(tmp_pat
                 ) as response:
                     assert response.status == expected
                     assert response.headers["Cache-Control"] == "no-store"
-                    return await response.json()
+                    value: dict[str, Any] = await response.json()
+                    return value
 
             assert (await send("capabilities"))["protocol"] == "agent-pull-requests.watch/v1"
-            original = {
+            original: dict[str, Any] = {
                 "request_id": "original", "issued_at": time.time(), "number": 1,
                 "until": ["merged"], "deadline_at": time.time() - 1,
             }
@@ -111,18 +184,24 @@ def test_real_gateway_scopes_reconcile_restart_ack_and_policy_withdrawal(tmp_pat
     asyncio.run(scenario())
 
 
-def test_owned_runtime_observes_reconnects_and_restarts_over_real_gateway(tmp_path, monkeypatch):
+def test_owned_runtime_observes_reconnects_and_restarts_over_real_gateway(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[3] / "fleet-manager" / "tests"))
-    from gateway_service_transport_fixtures import eventually, running
+    from gateway_service_transport_fixtures import eventually as legacy_eventually
+    from gateway_service_transport_fixtures import running as legacy_running
 
     from agent_pull_requests.watch_observer import NativeObservationBinding
     from agent_pull_requests.watch_service import WatchService
 
-    async def scenario():
+    running = cast(RunningFixture, legacy_running)
+    eventually = cast(Eventually, legacy_eventually)
+
+    async def scenario() -> None:
         store = ReplayStore((tmp_path / "runtime").resolve(), "fleet/service/installation")
         store.provision()
         scope = ConsumerScope("coordinator-a", "account-a", "example/project")
-        original = {
+        original: dict[str, Any] = {
             "request_id": "original", "issued_at": time.time(), "number": 1, "until": ("merged",),
         }
         receipt = store.execute(scope, "register", original, expires_at=int(time.time()) + 60)
@@ -144,10 +223,11 @@ def test_owned_runtime_observes_reconnects_and_restarts_over_real_gateway(tmp_pa
             f"print(json.dumps({snapshot!r}))"
         )
         async with running(tmp_path) as rig:
-            async def access():
-                return rig.access("service-a", 1)
+            async def access() -> str:
+                token: str = rig.access("service-a", 1)
+                return token
 
-            def make():
+            def make() -> WatchService:
                 return WatchService(
                     store, fleet="fleet-a", gateway="gateway-a", slot="service-a",
                     bindings=(WatchScopeBinding("caller-a", "project", scope),),
@@ -161,14 +241,16 @@ def test_owned_runtime_observes_reconnects_and_restarts_over_real_gateway(tmp_pa
                     interval=1,
                 )
 
-            async def send(service, operation, payload=None):
+            async def send(
+                service: WatchService, operation: str, payload: dict[str, Any] | None = None,
+            ) -> dict[str, Any]:
                 path = "/api/v1/watch/project/" + operation
                 for _ in range(100):
                     await eventually(lambda: service.status()["ready"])
                     async with rig.session.post(
                         rig.origin + path, headers=await rig.auth(path, "POST"), json=payload or {},
                     ) as response:
-                        value = await response.json()
+                        value: dict[str, Any] = await response.json()
                         if response.status != 503 or value != {"error": "watch_store_busy"}:
                             assert response.status == 200, value
                             return value
@@ -210,15 +292,20 @@ def test_owned_runtime_observes_reconnects_and_restarts_over_real_gateway(tmp_pa
 @pytest.mark.parametrize("loss", ["policy", "channel"])
 @pytest.mark.parametrize("stage", ["before-lookup", "commit-started"])
 def test_real_revocation_and_disconnect_preserve_uncertainty_and_original_identity(
-    tmp_path, monkeypatch, loss, stage,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, loss: str, stage: str,
+) -> None:
     monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[3] / "fleet-manager" / "tests"))
-    from gateway_service_transport_fixtures import eventually, running
-    from test_gateway_service_handler import connect_handler
+    from gateway_service_transport_fixtures import eventually as legacy_eventually
+    from gateway_service_transport_fixtures import running as legacy_running
+    from test_gateway_service_handler import connect_handler as legacy_connect_handler
 
     from agent_pull_requests import watch_replay_store
 
-    async def scenario():
+    running = cast(RunningFixture, legacy_running)
+    eventually = cast(Eventually, legacy_eventually)
+    connect_handler = cast(ConnectHandler, legacy_connect_handler)
+
+    async def scenario() -> None:
         store = ReplayStore((tmp_path / "replay").resolve(), "fleet/service/installation")
         store.provision()
         owner = WatchGateway(
@@ -228,29 +315,29 @@ def test_real_revocation_and_disconnect_preserve_uncertainty_and_original_identi
             ),),
         )
         started, release = threading.Event(), threading.Event()
-        received = []
+        received: list[ServiceRequest] = []
         decode, write = watch_replay_store.json_object, watch_replay_store._atomic_write_json
 
-        def hold():
+        def hold() -> None:
             if not started.is_set():
                 started.set()
                 assert release.wait(10)
 
-        def held_lookup(raw):
+        def held_lookup(raw: bytes) -> dict[str, Any]:
             hold()
             return decode(raw)
 
-        def held_commit(path, state):
+        def held_commit(path: Path, state: object) -> None:
             hold()
             write(path, state)
 
-        async def handle(request):
+        async def handle(request: ServiceRequest) -> ServiceResponse | BoundedServiceResponse:
             received.append(request)
             return await owner.handle(request)
 
         async with running(tmp_path) as rig:
             await connect_handler(rig, handle)
-            original = {
+            original: dict[str, Any] = {
                 "request_id": "original", "issued_at": time.time(), "number": 1, "until": ["merged"],
             }
             path = "/api/v1/watch/project/register"
@@ -290,13 +377,14 @@ def test_real_revocation_and_disconnect_preserve_uncertainty_and_original_identi
                 else:
                     await connect_handler(rig, handle)
 
-                async def send(operation, payload):
+                async def send(operation: str, payload: dict[str, Any]) -> dict[str, Any]:
                     selected = "/api/v1/watch/project/" + operation
                     async with rig.session.post(
                         rig.origin + selected, headers=await rig.auth(selected, "POST"), json=payload,
                     ) as response:
                         assert response.status == 200
-                        return await response.json()
+                        value: dict[str, Any] = await response.json()
+                        return value
 
                 inspect = {key: original[key] for key in ("request_id", "issued_at")}
                 reconciled = await send("inspect", inspect)

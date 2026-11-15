@@ -1,26 +1,39 @@
 """Filtered consumers retain independent intent and delivery under the existing owner."""
 
-import pytest
+from pathlib import Path
+from typing import Any, TypedDict
 
-from pr_filters import Definitions, FilterError, PROTOCOL
-from agent_pull_requests.filtered_projection import FilteredProjection
+import pytest
+from pr_filters import PROTOCOL, Definitions, FilterError
+
+from agent_pull_requests.filtered_projection import FilteredProjection, PopulationDemand
 from agent_pull_requests.filtered_subscriptions import FilteredSubscriptions
 from agent_pull_requests.repository_contract import RepositoryBackpressure, RepositoryIdentity
 from agent_pull_requests.repository_subscriptions import RepositoryRequestConflict
 from agent_pull_requests.watch_replay_store import ReplayStore, ReplayStoreInvalid
 
-CAPABILITIES = {
+Selected = tuple[
+    list[float], ReplayStore, RepositoryIdentity, FilteredProjection, FilteredSubscriptions,
+]
+
+
+class StoreFlags(TypedDict, total=False):
+    repository_cache: bool
+    repository_continuing: bool
+
+
+CAPABILITIES: dict[str, Any] = {
     "protocol": PROTOCOL, "fields": ["repo", "from", "assigned", "age", "tags", "publication"],
     "groups": [], "age_fields": ["created"],
 }
 
 
-def expression(where):
+def expression(where: dict[str, Any]) -> dict[str, Any]:
     return {"protocol": PROTOCOL, "where": where}
 
 
 @pytest.fixture
-def selected(tmp_path):
+def selected(tmp_path: Path) -> Selected:
     now = [100.0]
     store = ReplayStore(
         tmp_path, "test", clock=lambda: now[0], repository_cache=True,
@@ -32,43 +45,59 @@ def selected(tmp_path):
     return now, store, identity, projection, FilteredSubscriptions(projection)
 
 
-def execute(selected, consumer, operation, payload):
-    return selected[-1].execute(selected[2].key, consumer, operation, payload, expires_at=10000)
+def execute(
+    selected: Selected, consumer: str, operation: str, payload: dict[str, Any],
+) -> dict[str, Any]:
+    result: dict[str, Any] = selected[-1].execute(
+        selected[2].key, consumer, operation, payload, expires_at=10000,
+    )
+    return result
 
 
-def subscribe(selected, consumer, where, **changes):
+def subscribe(
+    selected: Selected, consumer: str, where: dict[str, Any], **changes: Any,
+) -> dict[str, Any]:
     return execute(selected, consumer, "subscribe", {
         "request_id": "original", "ttl": 60, "filter": expression(where), **changes,
     })
 
 
-def facts(**changes):
+def facts(**changes: Any) -> dict[str, Any]:
     return {
         "repo": "owner/repo", "from": ["alice"], "assigned": ["bob"], "created_at": 95,
         "activity_at": None, "tags": ["ready"], "publication": "published", **changes,
     }
 
 
-def observe(selected, pulls=None, *, outcome="complete", error="", demand=None):
+def observe(
+    selected: Selected, pulls: dict[int, dict[str, Any]] | None = None, *,
+    outcome: str = "complete", error: str = "", demand: PopulationDemand | None = None,
+) -> dict[str, Any]:
     now, _store, identity, projection, _registry = selected
     demand = demand or projection.demands(expires_at=10000)[identity.key]
-    return projection.apply(
+    result: dict[str, Any] = projection.apply(
         identity.key, demand,
         {"outcome": outcome, "error": error, "pages": 1,
          "pulls": [{"number": number, "facts": value} for number, value in (pulls or {}).items()]},
         observed_at=int(now[0]), expires_at=10000,
     )
+    return result
 
 
-def registration(result):
+def registration(result: dict[str, Any]) -> dict[str, Any]:
     return {"registration_id": result["subscription"]["registration_id"]}
 
 
-def events(selected, consumer, result):
-    return execute(selected, consumer, "events", registration(result))["events"]
+def events(selected: Selected, consumer: str, result: dict[str, Any]) -> list[dict[str, Any]]:
+    pending: list[dict[str, Any]] = execute(
+        selected, consumer, "events", registration(result),
+    )["events"]
+    return pending
 
 
-def test_union_acquisition_independent_membership_ack_and_original_restart(selected):
+def test_union_acquisition_independent_membership_ack_and_original_restart(
+    selected: Selected,
+) -> None:
     first = subscribe(selected, "authors", {"from": {"users": ["alice"]}})
     second = subscribe(selected, "tags", {"tags": {"any": ["ready"]}})
     demand = selected[3].demands(expires_at=10000)
@@ -103,7 +132,7 @@ def test_union_acquisition_independent_membership_ack_and_original_restart(selec
         subscribe(renewed, "authors", {"from": {"users": ["carol"]}})
 
 
-def test_clock_partial_facts_and_complete_departure_are_distinct(selected):
+def test_clock_partial_facts_and_complete_departure_are_distinct(selected: Selected) -> None:
     age = subscribe(selected, "age", {"age": {"field": "created", "min_seconds": 5, "max_seconds": 10}})
     other = subscribe(selected, "other", {"publication": ["published"]})
     observe(selected, {7: facts()})
@@ -118,7 +147,9 @@ def test_clock_partial_facts_and_complete_departure_are_distinct(selected):
     assert any(e["kind"] == "departure" for e in events(selected, "other", other))
 
 
-def test_expiry_cancel_and_inflight_withdrawal_preserve_only_delivered_pending(selected):
+def test_expiry_cancel_and_inflight_withdrawal_preserve_only_delivered_pending(
+    selected: Selected,
+) -> None:
     first = subscribe(selected, "first", {"repo": ["owner/repo"]}, ttl=1)
     second = subscribe(selected, "second", {"repo": ["owner/repo"]})
     demand = selected[3].demands(expires_at=10000)[selected[2].key]
@@ -140,7 +171,9 @@ def test_expiry_cancel_and_inflight_withdrawal_preserve_only_delivered_pending(s
         execute(selected, "second", "renew", {**registration(second), "expires_at": 200})
 
 
-def test_absolute_renewal_is_retry_safe_and_never_resets_baseline_or_ack(selected):
+def test_absolute_renewal_is_retry_safe_and_never_resets_baseline_or_ack(
+    selected: Selected,
+) -> None:
     first = subscribe(selected, "first", {"repo": ["owner/repo"]}, ttl=1)
     demand = selected[3].demands(expires_at=10000)[selected[2].key]
     selected[0][0] = 102
@@ -156,7 +189,9 @@ def test_absolute_renewal_is_retry_safe_and_never_resets_baseline_or_ack(selecte
         execute(selected, "first", "renew", {**registration(first), "expires_at": 100000})
 
 
-def test_inert_definitions_are_revision_bound_and_retries_survive_changed_configuration(selected):
+def test_inert_definitions_are_revision_bound_and_retries_survive_changed_configuration(
+    selected: Selected,
+) -> None:
     first = Definitions.parse({"protocol": PROTOCOL, "sets": {"team": expression({"from": {"users": ["alice"]}})}})
     selected[3].definitions = first
     assert not selected[3].demands(expires_at=10000)
@@ -168,7 +203,9 @@ def test_inert_definitions_are_revision_bound_and_retries_survive_changed_config
         execute(selected, "second", "subscribe", {"request_id": "new", "ttl": 60, "definition": "team"})
 
 
-def test_nested_scope_and_driver_refusal_leave_existing_store_unchanged(selected):
+def test_nested_scope_and_driver_refusal_leave_existing_store_unchanged(
+    selected: Selected,
+) -> None:
     before = selected[1].path.read_bytes()
     for where in (
         {"any": [{"repo": ["owner/repo"]}, {"repo": ["foreign/repo"]}]},
@@ -178,7 +215,10 @@ def test_nested_scope_and_driver_refusal_leave_existing_store_unchanged(selected
         with pytest.raises(FilterError):
             subscribe(selected, "first", where)
     assert selected[1].path.read_bytes() == before
-    for flags in ({}, {"repository_cache": True}, {"repository_cache": True, "repository_continuing": True}):
+    flags_cases: tuple[StoreFlags, ...] = (
+        {}, {"repository_cache": True}, {"repository_cache": True, "repository_continuing": True},
+    )
+    for flags in flags_cases:
         with pytest.raises(ReplayStoreInvalid):
             ReplayStore(selected[1].root, "test", clock=selected[1].clock, **flags).observation_targets(
                 expires_at=10000,
@@ -194,7 +234,9 @@ def test_nested_scope_and_driver_refusal_leave_existing_store_unchanged(selected
     assert old.path.read_bytes() == prior
 
 
-def test_unsettled_backpressure_still_permits_ack_and_resume(selected, monkeypatch):
+def test_unsettled_backpressure_still_permits_ack_and_resume(
+    selected: Selected, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from agent_pull_requests import filtered_state
     first = subscribe(selected, "first", {"repo": ["owner/repo"]})
     monkeypatch.setattr(filtered_state, "MAX_EVENTS", 2)
@@ -209,7 +251,7 @@ def test_unsettled_backpressure_still_permits_ack_and_resume(selected, monkeypat
     assert [e["kind"] for e in events(selected, "first", first)] == ["change"]
 
 
-def test_unknown_facts_do_not_remove_previously_accepted_membership(selected):
+def test_unknown_facts_do_not_remove_previously_accepted_membership(selected: Selected) -> None:
     first = subscribe(selected, "first", {"tags": {"any": ["ready"]}})
     observe(selected, {7: facts()})
     observe(selected, {7: facts(tags=None)})
@@ -220,7 +262,9 @@ def test_unknown_facts_do_not_remove_previously_accepted_membership(selected):
 
 
 @pytest.mark.parametrize("available", [False, True])
-def test_warm_cache_join_during_acquisition_keeps_its_own_change_revision(selected, available):
+def test_warm_cache_join_during_acquisition_keeps_its_own_change_revision(
+    selected: Selected, available: bool,
+) -> None:
     first = subscribe(selected, "first", {"repo": ["owner/repo"]})
     observe(selected, {7: facts()})
     captured = selected[3].demands(expires_at=10000)[selected[2].key]
@@ -238,7 +282,9 @@ def test_warm_cache_join_during_acquisition_keeps_its_own_change_revision(select
 
 
 @pytest.mark.parametrize("cancel", [False, True])
-def test_inactive_members_do_not_pin_cache_but_keep_delivered_evidence(selected, cancel):
+def test_inactive_members_do_not_pin_cache_but_keep_delivered_evidence(
+    selected: Selected, cancel: bool,
+) -> None:
     first = subscribe(selected, "first", {"repo": ["owner/repo"]}, ttl=1)
     observe(selected, {n: facts() for n in range(1, 201)})
     pending = events(selected, "first", first)
@@ -271,7 +317,9 @@ def test_inactive_members_do_not_pin_cache_but_keep_delivered_evidence(selected,
             after = page["events"][-1]["sequence"]
 
 
-def test_native_identity_and_aggregate_limits_refuse_before_mutating_demand(selected):
+def test_native_identity_and_aggregate_limits_refuse_before_mutating_demand(
+    selected: Selected,
+) -> None:
     from pr_filters.acquisition import PROTOCOL as ACQUISITION_PROTOCOL
 
     now, store, _identity, _projection, _registry = selected
@@ -302,7 +350,9 @@ def test_native_identity_and_aggregate_limits_refuse_before_mutating_demand(sele
 
 
 @pytest.mark.parametrize("cancel", [False, True])
-def test_broad_demand_cannot_mask_an_unexecutable_union_after_withdrawal(selected, cancel):
+def test_broad_demand_cannot_mask_an_unexecutable_union_after_withdrawal(
+    selected: Selected, cancel: bool,
+) -> None:
     from pr_filters.acquisition import PROTOCOL as ACQUISITION_PROTOCOL
 
     now, store, _identity, _projection, _registry = selected
@@ -330,7 +380,10 @@ def test_broad_demand_cannot_mask_an_unexecutable_union_after_withdrawal(selecte
     observe(selected, {7: facts(**{"from": [users[0]]})}, demand=demand)
 
 
-def test_initial_large_fanout_commits_resumable_progress_before_event_backpressure(selected):
+@pytest.mark.timeout(60)
+def test_initial_large_fanout_commits_resumable_progress_before_event_backpressure(
+    selected: Selected,
+) -> None:
     registrations = [subscribe(selected, f"consumer-{n}", {"repo": ["owner/repo"]}) for n in range(21)]
     population = {n: facts() for n in range(1, 201)}
     observe(selected, population)
@@ -352,7 +405,9 @@ def test_initial_large_fanout_commits_resumable_progress_before_event_backpressu
     assert execute(selected, "consumer-20", "query", registration(registrations[20]))["baseline"]["pulls"]
 
 
-def test_warm_cache_query_does_not_borrow_unprojected_nonmatching_facts(selected):
+def test_warm_cache_query_does_not_borrow_unprojected_nonmatching_facts(
+    selected: Selected,
+) -> None:
     subscribe(selected, "first", {"repo": ["owner/repo"]})
     observe(selected, {7: facts()})
     captured = selected[3].demands(expires_at=10000)[selected[2].key]
@@ -367,7 +422,9 @@ def test_warm_cache_query_does_not_borrow_unprojected_nonmatching_facts(selected
     assert any(e["kind"] == "departure" for e in events(selected, "joined", joined))
 
 
-def test_complete_absence_cannot_seed_disproved_membership_during_an_outage(selected):
+def test_complete_absence_cannot_seed_disproved_membership_during_an_outage(
+    selected: Selected,
+) -> None:
     subscribe(selected, "first", {"repo": ["owner/repo"]})
     observe(selected, {7: facts()})
     observe(selected)
@@ -377,7 +434,9 @@ def test_complete_absence_cannot_seed_disproved_membership_during_an_outage(sele
     assert not execute(selected, "joined", "query", registration(joined))["baseline"]["pulls"]
 
 
-def test_byte_backpressure_accounts_for_shared_cache_before_partial_projection(selected, monkeypatch):
+def test_byte_backpressure_accounts_for_shared_cache_before_partial_projection(
+    selected: Selected, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from agent_pull_requests import filtered_state
 
     registrations = [subscribe(selected, f"consumer-{n}", {"repo": ["owner/repo"]}) for n in range(2)]
@@ -402,7 +461,9 @@ def test_byte_backpressure_accounts_for_shared_cache_before_partial_projection(s
     assert execute(selected, "consumer-1", "query", registration(registrations[1]))["baseline"]["pulls"]
 
 
-def test_repeated_partial_acquisitions_bound_members_without_disproving_prior_membership(selected):
+def test_repeated_partial_acquisitions_bound_members_without_disproving_prior_membership(
+    selected: Selected,
+) -> None:
     first = subscribe(selected, "first", {"repo": ["owner/repo"]})
     for start in (1, 201):
         observe(selected, {n: facts() for n in range(start, start + 200)},
@@ -426,7 +487,9 @@ def test_repeated_partial_acquisitions_bound_members_without_disproving_prior_me
 @pytest.mark.parametrize(("outcome", "error"), [
     ("partial", "page_limit"), ("unavailable", "provider_unavailable"),
 ])
-def test_cached_pr_enters_and_leaves_age_window_without_fresh_acquisition(selected, outcome, error):
+def test_cached_pr_enters_and_leaves_age_window_without_fresh_acquisition(
+    selected: Selected, outcome: str, error: str,
+) -> None:
     watched = subscribe(selected, "age", {"age": {"field": "created", "min_seconds": 5, "max_seconds": 10}})
     observe(selected, {7: facts(created_at=100)})
     assert not execute(selected, "age", "query", registration(watched))["baseline"]["pulls"]
@@ -443,7 +506,9 @@ def test_cached_pr_enters_and_leaves_age_window_without_fresh_acquisition(select
     assert any(e["kind"] == "departure" and e["number"] == 7 for e in events(selected, "age", watched))
 
 
-def test_hot_first_subscriber_cannot_starve_later_projection_after_ack(selected, monkeypatch):
+def test_hot_first_subscriber_cannot_starve_later_projection_after_ack(
+    selected: Selected, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from agent_pull_requests import filtered_state
 
     first = subscribe(selected, "first", {"repo": ["owner/repo"]})
@@ -457,7 +522,7 @@ def test_hot_first_subscriber_cannot_starve_later_projection_after_ack(selected,
     assert execute(selected, "later", "query", registration(later))["baseline"]["pulls"]
 
 
-def test_configured_sponsor_cancellation_survives_receipt_retirement(selected):
+def test_configured_sponsor_cancellation_survives_receipt_retirement(selected: Selected) -> None:
     now, _store, identity, projection, registry = selected
     projection.sponsored_requests = frozenset({("sponsor", "startup")})
     payload = {"request_id": "startup", "ttl": 1, "filter": expression({"repo": ["owner/repo"]})}
@@ -472,7 +537,7 @@ def test_configured_sponsor_cancellation_survives_receipt_retirement(selected):
     assert registration(retry) == registration(original)
 
 
-def test_warm_baseline_pages_within_the_persisted_baseline_limit(selected):
+def test_warm_baseline_pages_within_the_persisted_baseline_limit(selected: Selected) -> None:
     subscribe(selected, "first", {"repo": ["owner/repo"]})
     tags = [f"{number:03d}" + "x" * 247 for number in range(250)]
     observe(selected, {number: facts(tags=tags) for number in range(1, 17)})
@@ -485,7 +550,9 @@ def test_warm_baseline_pages_within_the_persisted_baseline_limit(selected):
     assert [p["number"] for p in [*pulls, *remaining["pulls"]]] == list(range(1, 17))
 
 
-def test_slow_consumer_does_not_pin_other_consumers_acknowledged_event_space(selected, monkeypatch):
+def test_slow_consumer_does_not_pin_other_consumers_acknowledged_event_space(
+    selected: Selected, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from agent_pull_requests import filtered_state
 
     slow = subscribe(selected, "slow", {"repo": ["owner/repo"]})
@@ -501,7 +568,9 @@ def test_slow_consumer_does_not_pin_other_consumers_acknowledged_event_space(sel
     assert [event["kind"] for event in events(selected, "fast", fast)] == ["change"]
 
 
-def test_blocked_large_projection_does_not_prevent_smaller_owner_from_progressing(selected, monkeypatch):
+def test_blocked_large_projection_does_not_prevent_smaller_owner_from_progressing(
+    selected: Selected, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from agent_pull_requests import filtered_state
 
     broad = subscribe(selected, "broad", {"repo": ["owner/repo"]})
@@ -517,7 +586,7 @@ def test_blocked_large_projection_does_not_prevent_smaller_owner_from_progressin
     assert [pull["number"] for pull in result["pulls"]] == [8]
 
 
-def test_cache_catchup_preserves_the_timestamp_of_the_facts_it_copies(selected):
+def test_cache_catchup_preserves_the_timestamp_of_the_facts_it_copies(selected: Selected) -> None:
     subscribe(selected, "first", {"repo": ["owner/repo"]})
     observe(selected, {7: facts()})
     captured = selected[3].demands(expires_at=10000)[selected[2].key]

@@ -7,19 +7,42 @@ import subprocess
 import sys
 import threading
 import time
+from collections.abc import Callable
 from concurrent.futures import Future
 from dataclasses import replace
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, TypedDict, cast
+from weakref import ReferenceType
 
 import pytest
 from agent_procutil import no_window_kwargs
 
-from agent_pull_requests import watch_observer as observer, watch_replay_store as storage
+from agent_pull_requests import watch_observer as observer
+from agent_pull_requests import watch_replay_store as storage
 from agent_pull_requests.watch_contract import PRSnapshot
 from agent_pull_requests.watch_observer import NativeObservationBinding, ReplayObserver
 from agent_pull_requests.watch_provider import decode_snapshot
-from agent_pull_requests.watch_replay import ConsumerScope
+from agent_pull_requests.watch_replay import ConsumerScope, ObservationTarget
 from agent_pull_requests.watch_replay_store import ReplayCallerExpired, ReplayStore
 from agent_pull_requests.watch_storage import StateCommitUncertain
+
+if TYPE_CHECKING:
+    from typing_extensions import Unpack
+
+    from agent_pull_requests.filtered_state import Authority
+    from agent_pull_requests.repository_contract import RepositoryIdentity
+
+
+class BindingOptions(TypedDict, total=False):
+    prefix: tuple[str, ...] | None
+    credential_command: tuple[str, ...] | None
+    repository_identity: RepositoryIdentity | None
+    inventory_config: str | None
+
+
+class CycleOptions(TypedDict, total=False):
+    checkpoint: Callable[[], None] | None
+
 
 SCOPE = ConsumerScope("consumer-a", "account-a", "example/project")
 PEER = replace(SCOPE, consumer="consumer-b")
@@ -27,43 +50,57 @@ FOREIGN = replace(SCOPE, account="account-b")
 
 
 @pytest.fixture
-def store(tmp_path):
+def store(tmp_path: Path) -> ReplayStore:
     result = ReplayStore(tmp_path.resolve(), "fleet/service/installation")
     result.provision()
     return result
 
 
-def execute(store, operation, payload=None, scope=SCOPE):
+def execute(
+    store: ReplayStore, operation: str, payload: dict[str, Any] | None = None,
+    scope: ConsumerScope = SCOPE,
+) -> dict[str, Any]:
     return store.execute(scope, operation, payload or {}, expires_at=int(store.clock()) + 60)
 
 
-def register(store, scope=SCOPE, request="request", number=1, **kwargs):
+def register(
+    store: ReplayStore, scope: ConsumerScope = SCOPE, request: str = "request",
+    number: int = 1, **kwargs: Any,
+) -> tuple[dict[str, Any], dict[str, Any]]:
     payload = dict(request_id=request, issued_at=store.clock(), number=number,
                    until=("merged",), **kwargs)
     return payload, execute(store, "register", payload, scope)
 
 
-def binding(scope=SCOPE, **kwargs):
+def binding(
+    scope: ConsumerScope = SCOPE, **kwargs: Unpack[BindingOptions],
+) -> NativeObservationBinding:
     return NativeObservationBinding(scope.account, scope.repo, sys.executable, **kwargs)
 
 
-def cycle(owner, **kwargs):
+def cycle(owner: ReplayObserver, **kwargs: Unpack[CycleOptions]) -> dict[str, Any]:
     return owner.cycle(expires_at=int(owner.store.clock()) + 60, **kwargs)
 
 
-def test_busy_publication_retains_completed_read_without_repeating_native_acquisition(store, monkeypatch):
+def test_busy_publication_retains_completed_read_without_repeating_native_acquisition(
+    store: ReplayStore, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from single_instance_lease import OperationLockedError
     register(store)
-    reads, publications = [], []
+    reads: list[str] = []
+    publications: list[str] = []
     original = store.observe
-    def fetch(*_args, **_kwargs):
+    def fetch(*_args: object, **_kwargs: object) -> PRSnapshot:
         reads.append("read")
         return PRSnapshot(merged=True)
-    def publish(*args, **kwargs):
+    def publish(
+        target: ObservationTarget, snapshot: PRSnapshot, *, expires_at: int,
+        checkpoint: Callable[[], None] | None = None,
+    ) -> dict[str, Any]:
         publications.append("attempt")
         if len(publications) < 3:
             raise OperationLockedError("held by another admitted request")
-        return original(*args, **kwargs)
+        return original(target, snapshot, expires_at=expires_at, checkpoint=checkpoint)
     monkeypatch.setattr(observer, "fetch_snapshot", fetch)
     monkeypatch.setattr(store, "observe", publish)
     assert cycle(ReplayObserver(store, bindings=(binding(),)))["observed"] == 1
@@ -72,14 +109,15 @@ def test_busy_publication_retains_completed_read_without_repeating_native_acquis
 
 
 def test_legacy_only_cycle_releases_completed_snapshots_instead_of_retaining_entire_population(
-    store, monkeypatch,
-):
+    store: ReplayStore, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import weakref
-    references, peaks = [], []
+    references: list[ReferenceType[PRSnapshot]] = []
+    peaks: list[int] = []
     lock = threading.Lock()
     for number in range(1, 25):
         register(store, request=f"request-{number}", number=number)
-    def fetch(*_args, **_kwargs):
+    def fetch(*_args: object, **_kwargs: object) -> PRSnapshot:
         snapshot = PRSnapshot(pr_state="open", head_sha="head")
         with lock:
             references.append(weakref.ref(snapshot))
@@ -91,10 +129,12 @@ def test_legacy_only_cycle_releases_completed_snapshots_instead_of_retaining_ent
     assert max(peaks) <= 12
 
 
-def start_cycle(owner, **kwargs):
-    result = Future()
+def start_cycle(
+    owner: ReplayObserver, **kwargs: Unpack[CycleOptions],
+) -> tuple[threading.Thread, Future[dict[str, Any]]]:
+    result: Future[dict[str, Any]] = Future()
 
-    def run():
+    def run() -> None:
         try:
             result.set_result(cycle(owner, **kwargs))
         except BaseException as error:
@@ -105,12 +145,14 @@ def start_cycle(owner, **kwargs):
     return thread, result
 
 
-def test_coalesces_consumers_but_not_accounts_and_skips_pending(store, monkeypatch):
+def test_coalesces_consumers_but_not_accounts_and_skips_pending(
+    store: ReplayStore, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     for scope in (SCOPE, PEER, FOREIGN):
         register(store, scope)
-    calls = []
+    calls: list[tuple[str, int, str, list[str]]] = []
 
-    def fetch(repo, number, command, **kwargs):
+    def fetch(repo: str, number: int, command: str, **kwargs: Any) -> PRSnapshot:
         calls.append((repo, number, command, kwargs["credential_command"]))
         return PRSnapshot(merged=True)
 
@@ -131,13 +173,18 @@ def test_coalesces_consumers_but_not_accounts_and_skips_pending(store, monkeypat
     assert len(calls) == 2
 
 
-def test_unbound_account_or_repository_never_uses_another_binding(store, monkeypatch):
+def test_unbound_account_or_repository_never_uses_another_binding(
+    store: ReplayStore, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     register(store)
     register(store, FOREIGN)
     register(store, replace(SCOPE, repo="example/other"))
-    calls = []
-    monkeypatch.setattr(observer, "fetch_snapshot",
-                        lambda *args, **kwargs: calls.append(args) or PRSnapshot(merged=True))
+    calls: list[tuple[object, ...]] = []
+    def fetch(*args: object, **kwargs: object) -> PRSnapshot:
+        calls.append(args)
+        return PRSnapshot(merged=True)
+
+    monkeypatch.setattr(observer, "fetch_snapshot", fetch)
     assert cycle(ReplayObserver(store, bindings=(binding(),))) == {
         "status": "observed", "observed": 1, "unavailable": 0, "unbound": 2,
     }
@@ -145,13 +192,15 @@ def test_unbound_account_or_repository_never_uses_another_binding(store, monkeyp
     assert execute(store, "pending", scope=FOREIGN)["events"] == []
 
 
-def test_fetch_releases_disk_custody_and_does_not_apply_to_new_registration(store, monkeypatch):
+def test_fetch_releases_disk_custody_and_does_not_apply_to_new_registration(
+    store: ReplayStore, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(observer, "_MAX_READS", 1)
     original, receipt = register(store)
     second = ReplayStore(store.root, store.namespace)
-    fresh = []
+    fresh: list[tuple[dict[str, Any], dict[str, Any]]] = []
 
-    def fetch(*args, **kwargs):
+    def fetch(*args: object, **kwargs: object) -> PRSnapshot:
         fresh.append(register(second, request="new"))
         execute(second, "cancel", {
             "request_id": original["request_id"], "issued_at": original["issued_at"],
@@ -172,18 +221,18 @@ def test_fetch_releases_disk_custody_and_does_not_apply_to_new_registration(stor
 
 @pytest.mark.parametrize("completion", ["timeout", "replacement"])
 def test_earlier_read_skips_completed_target_and_preserves_later_progress(
-    store, monkeypatch, completion,
-):
+    store: ReplayStore, monkeypatch: pytest.MonkeyPatch, completion: str,
+) -> None:
     monkeypatch.setattr(observer, "_MAX_READS", 1)
     now = [time.time()]
     store.clock = lambda: now[0]
     register(store)
     original, receipt = register(store, request="second", number=2, deadline_at=now[0] + 10)
     register(store, request="third", number=3)
-    calls = []
-    replacement = []
+    calls: list[int] = []
+    replacement: list[tuple[dict[str, Any], dict[str, Any]]] = []
 
-    def fetch(repo, number, *args, **kwargs):
+    def fetch(repo: str, number: int, *args: object, **kwargs: object) -> PRSnapshot:
         calls.append(number)
         if number == 1:
             if completion == "timeout":
@@ -212,13 +261,15 @@ def test_earlier_read_skips_completed_target_and_preserves_later_progress(
         assert calls == [1, 3, 2]
 
 
-def test_provider_outage_preserves_identity_deadline_and_sweeps_during_read(store, monkeypatch):
+def test_provider_outage_preserves_identity_deadline_and_sweeps_during_read(
+    store: ReplayStore, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     now = [time.time()]
     store.clock = lambda: now[0]
     original, receipt = register(store, deadline_at=now[0] + 10)
-    calls = []
+    calls: list[tuple[object, ...]] = []
 
-    def unavailable(*args, **kwargs):
+    def unavailable(*args: object, **kwargs: object) -> PRSnapshot:
         calls.append(args)
         now[0] += 11
         raise ValueError("synthetic provider unavailable")
@@ -233,12 +284,14 @@ def test_provider_outage_preserves_identity_deadline_and_sweeps_during_read(stor
     assert execute(store, "pending")["events"] == [event]
 
 
-def test_preexisting_timeout_needs_no_provider_and_unlimited_wait_survives_loss(store, monkeypatch):
+def test_preexisting_timeout_needs_no_provider_and_unlimited_wait_survives_loss(
+    store: ReplayStore, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     register(store, deadline_at=store.clock() - 1)
     original, receipt = register(store, request="unlimited", number=2)
-    calls = []
+    calls: list[int] = []
 
-    def unavailable(repo, number, *args, **kwargs):
+    def unavailable(repo: str, number: int, *args: object, **kwargs: object) -> PRSnapshot:
         calls.append(number)
         raise ValueError("unavailable")
 
@@ -249,7 +302,9 @@ def test_preexisting_timeout_needs_no_provider_and_unlimited_wait_survives_loss(
     assert len(execute(store, "pending")["events"]) == 1
 
 
-def test_oversized_event_is_target_local_across_repeated_cycles(store, monkeypatch):
+def test_oversized_event_is_target_local_across_repeated_cycles(
+    store: ReplayStore, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     now = [time.time()]
     store.clock = lambda: now[0]
     original, receipt = register(store, deadline_at=now[0] + 10)
@@ -260,9 +315,9 @@ def test_oversized_event_is_target_local_across_repeated_cycles(store, monkeypat
         "base_ref": "main", "mergeable": True, "checks_state": "success",
         "title": "Fixture", "draft": False, "reviews": [{"body": "x" * 30000}],
     }, SCOPE.repo, 1)
-    calls = []
+    calls: list[int] = []
 
-    def fetch(repo, number, *args, **kwargs):
+    def fetch(repo: str, number: int, *args: object, **kwargs: object) -> PRSnapshot:
         calls.append(number)
         return large if number == 1 else PRSnapshot(merged=True)
 
@@ -287,17 +342,19 @@ def test_oversized_event_is_target_local_across_repeated_cycles(store, monkeypat
 @pytest.mark.parametrize("error", [
     ValueError("invalid observation"), storage.ReplayStoreInvalid("corrupt store"),
 ])
-def test_other_observation_refusals_stop_cycle(store, monkeypatch, error):
+def test_other_observation_refusals_stop_cycle(
+    store: ReplayStore, monkeypatch: pytest.MonkeyPatch, error: Exception,
+) -> None:
     monkeypatch.setattr(observer, "_MAX_READS", 1)
     register(store)
     register(store, request="other", number=2)
-    calls = []
+    calls: list[tuple[object, ...]] = []
 
-    def fetch(*args, **kwargs):
+    def fetch(*args: object, **kwargs: object) -> PRSnapshot:
         calls.append(args)
         return PRSnapshot(merged=True)
 
-    def refuse(*args, **kwargs):
+    def refuse(*args: object, **kwargs: object) -> None:
         raise error
 
     monkeypatch.setattr(observer, "fetch_snapshot", fetch)
@@ -308,18 +365,20 @@ def test_other_observation_refusals_stop_cycle(store, monkeypatch, error):
 
 
 @pytest.mark.parametrize("fail_read", [False, True])
-def test_authority_loss_in_read_stops_apply_and_later_reads(store, monkeypatch, fail_read):
+def test_authority_loss_in_read_stops_apply_and_later_reads(
+    store: ReplayStore, monkeypatch: pytest.MonkeyPatch, fail_read: bool,
+) -> None:
     monkeypatch.setattr(observer, "_MAX_READS", 1)
     register(store)
     register(store, request="second", number=2)
     lost = [False]
-    calls = []
+    calls: list[tuple[object, ...]] = []
 
-    def check():
+    def check() -> None:
         if lost[0]:
             raise PermissionError("synthetic disconnect")
 
-    def fetch(*args, **kwargs):
+    def fetch(*args: object, **kwargs: object) -> PRSnapshot:
         calls.append(args)
         lost[0] = True
         if fail_read:
@@ -334,12 +393,14 @@ def test_authority_loss_in_read_stops_apply_and_later_reads(store, monkeypatch, 
     assert len(store.observation_targets(expires_at=int(store.clock()) + 60)) == 2
 
 
-def test_expiry_in_provider_read_does_not_commit_snapshot(store, monkeypatch):
+def test_expiry_in_provider_read_does_not_commit_snapshot(
+    store: ReplayStore, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     now = [time.time()]
     store.clock = lambda: now[0]
     register(store)
 
-    def fetch(*args, **kwargs):
+    def fetch(*args: object, **kwargs: object) -> PRSnapshot:
         now[0] += 61
         return PRSnapshot(merged=True)
 
@@ -350,16 +411,18 @@ def test_expiry_in_provider_read_does_not_commit_snapshot(store, monkeypatch):
 
 
 @pytest.mark.parametrize("failure", ["pre-replace", "uncertain", "disconnect"])
-def test_observation_commit_loss_reconciles_original_event(store, monkeypatch, failure):
+def test_observation_commit_loss_reconciles_original_event(
+    store: ReplayStore, monkeypatch: pytest.MonkeyPatch, failure: str,
+) -> None:
     original, receipt = register(store)
     write = storage._atomic_write_json
     lost = [False]
 
-    def check():
+    def check() -> None:
         if lost[0]:
             raise PermissionError("disconnected")
 
-    def fail(path, state):
+    def fail(path: Path, state: dict[str, Any]) -> None:
         pending = any(entry["pending"] for group in state["registries"]
                       for entry in group["subscriptions"])
         if not pending:
@@ -391,12 +454,14 @@ def test_observation_commit_loss_reconciles_original_event(store, monkeypatch, f
     assert execute(store, "pending")["events"] == [event]
 
 
-def test_parallel_cycle_is_refused_without_waiting_for_inflight_provider(store, monkeypatch):
+def test_parallel_cycle_is_refused_without_waiting_for_inflight_provider(
+    store: ReplayStore, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     register(store)
     entered, release = threading.Event(), threading.Event()
-    results = []
+    results: list[dict[str, Any]] = []
 
-    def fetch(*args, **kwargs):
+    def fetch(*args: object, **kwargs: object) -> PRSnapshot:
         entered.set()
         assert release.wait(3)
         return PRSnapshot()
@@ -416,19 +481,22 @@ def test_parallel_cycle_is_refused_without_waiting_for_inflight_provider(store, 
     assert results[0]["observed"] == 1
 
 
-def test_slow_target_does_not_block_bounded_refill_or_shared_delivery(store, monkeypatch):
+def test_slow_target_does_not_block_bounded_refill_or_shared_delivery(
+    store: ReplayStore, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     for number in range(1, 8):
         register(store, request=f"request-{number}", number=number)
     register(store, PEER, number=2)
     register(store, FOREIGN, number=8)
     slow, release, full, advance, refilled = (threading.Event() for _ in range(5))
     lock = threading.Lock()
-    calls, active, peak = [], 0, 0
+    calls: list[int] = []
+    active, peak = 0, 0
     observe = store.observe
-    applied = []
-    delivered = []
+    applied: list[int] = []
+    delivered: list[Any] = []
 
-    def fetch(repo, number, *args, **kwargs):
+    def fetch(repo: str, number: int, *args: object, **kwargs: object) -> PRSnapshot:
         nonlocal active, peak
         with lock:
             calls.append(number)
@@ -447,7 +515,9 @@ def test_slow_target_does_not_block_bounded_refill_or_shared_delivery(store, mon
             with lock:
                 active -= 1
 
-    def commit(target, snapshot, **kwargs):
+    def commit(
+        target: ObservationTarget, snapshot: PRSnapshot, **kwargs: Unpack[Authority],
+    ) -> dict[str, Any]:
         result = observe(target, snapshot, **kwargs)
         applied.append(target.number)
         if set(applied) == set(range(2, 8)):
@@ -487,19 +557,21 @@ def test_slow_target_does_not_block_bounded_refill_or_shared_delivery(store, mon
 
 
 @pytest.mark.parametrize("ending", ["disconnect", "uncertain", "invalid"])
-def test_parallel_failure_stops_refill_but_joins_actual_reads(store, monkeypatch, ending):
+def test_parallel_failure_stops_refill_but_joins_actual_reads(
+    store: ReplayStore, monkeypatch: pytest.MonkeyPatch, ending: str,
+) -> None:
     for number in range(1, 8):
         register(store, request=f"request-{number}", number=number)
     entered, release, lost, failed = (threading.Event() for _ in range(4))
-    calls = []
+    calls: list[int] = []
     observe = store.observe
 
-    def checkpoint():
+    def checkpoint() -> None:
         if lost.is_set():
             failed.set()
             raise PermissionError("disconnected")
 
-    def fetch(repo, number, *args, **kwargs):
+    def fetch(repo: str, number: int, *args: object, **kwargs: object) -> PRSnapshot:
         calls.append(number)
         if number == 1:
             entered.set()
@@ -508,7 +580,9 @@ def test_parallel_failure_stops_refill_but_joins_actual_reads(store, monkeypatch
             assert entered.wait(3)
         return PRSnapshot(merged=True)
 
-    def commit(target, snapshot, **kwargs):
+    def commit(
+        target: ObservationTarget, snapshot: PRSnapshot, **kwargs: Unpack[Authority],
+    ) -> dict[str, Any]:
         if ending == "disconnect":
             lost.set()
             checkpoint()
@@ -546,7 +620,9 @@ def test_parallel_failure_stops_refill_but_joins_actual_reads(store, monkeypatch
     assert set(calls) <= {1, 2, 3, 4}
 
 
-def test_real_native_slow_child_does_not_delay_another_target(store, tmp_path, monkeypatch):
+def test_real_native_slow_child_does_not_delay_another_target(
+    store: ReplayStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     register(store)
     _, receipt = register(store, request="second", number=2)
     native, entered, release = (tmp_path / name for name in ("native.py", "entered", "release"))
@@ -566,10 +642,12 @@ def test_real_native_slow_child_does_not_delay_another_target(store, tmp_path, m
         encoding="utf-8",
     )
     applied = threading.Event()
-    events = []
+    events: list[dict[str, Any]] = []
     observe = store.observe
 
-    def commit(target, snapshot, **kwargs):
+    def commit(
+        target: ObservationTarget, snapshot: PRSnapshot, **kwargs: Unpack[Authority],
+    ) -> dict[str, Any]:
         result = observe(target, snapshot, **kwargs)
         if target.number == 2:
             events.extend(execute(store, "pending")["events"])
@@ -590,7 +668,9 @@ def test_real_native_slow_child_does_not_delay_another_target(store, tmp_path, m
     assert {event["number"] for event in execute(store, "pending")["events"]} == {1, 2}
 
 
-def test_deadlines_are_swept_while_every_read_slot_is_blocked(store, monkeypatch):
+def test_deadlines_are_swept_while_every_read_slot_is_blocked(
+    store: ReplayStore, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     now = [time.time()]
     store.clock = lambda: now[0]
     for number in range(1, 5):
@@ -598,16 +678,18 @@ def test_deadlines_are_swept_while_every_read_slot_is_blocked(store, monkeypatch
     original, receipt = register(store, request="deadline", number=5, deadline_at=now[0] + 10)
     full, release, swept, idle = (threading.Event() for _ in range(4))
     lock = threading.Lock()
-    calls, events = [], []
-    writes, polls = [], []
+    calls: list[int] = []
+    events: list[dict[str, Any]] = []
+    writes: list[dict[str, Any]] = []
+    polls: list[dict[str, Any]] = []
     sweep = store.sweep_timeouts
     write = storage._atomic_write_json
 
-    def commit(path, state):
+    def commit(path: Path, state: dict[str, Any]) -> None:
         writes.append(state)
         return write(path, state)
 
-    def fetch(repo, number, *args, **kwargs):
+    def fetch(repo: str, number: int, *args: object, **kwargs: object) -> PRSnapshot:
         with lock:
             calls.append(number)
             if len(calls) == 4:
@@ -615,7 +697,7 @@ def test_deadlines_are_swept_while_every_read_slot_is_blocked(store, monkeypatch
         assert release.wait(8)
         return PRSnapshot(merged=True)
 
-    def timeouts(**kwargs):
+    def timeouts(**kwargs: Unpack[Authority]) -> dict[str, Any]:
         result = sweep(**kwargs)
         if full.is_set() and now[0] <= original["deadline_at"]:
             polls.append(result)
@@ -649,17 +731,19 @@ def test_deadlines_are_swept_while_every_read_slot_is_blocked(store, monkeypatch
 
 
 @pytest.mark.parametrize("field", ["prefix", "credential_command"])
-def test_binding_refuses_mutable_argv(field):
+def test_binding_refuses_mutable_argv(field: str) -> None:
     with pytest.raises(ValueError, match="immutable"):
-        binding(**{field: [sys.executable]})
+        binding(**cast(BindingOptions, {field: [sys.executable]}))
 
 
-def test_duplicate_scope_is_not_silently_rebound(store):
+def test_duplicate_scope_is_not_silently_rebound(store: ReplayStore) -> None:
     with pytest.raises(ValueError, match="duplicate"):
         ReplayObserver(store, bindings=(binding(), binding()))
 
 
-def test_real_native_process_and_restarted_consumer_preserve_exact_event_and_ack(store, tmp_path):
+def test_real_native_process_and_restarted_consumer_preserve_exact_event_and_ack(
+    store: ReplayStore, tmp_path: Path,
+) -> None:
     original, receipt = register(store)
     register(store, PEER)
     native = tmp_path / "native.py"

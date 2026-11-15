@@ -8,7 +8,7 @@ import sys
 import time
 from pathlib import Path
 
-from pr_filters import Expression, MAX_BYTES
+from pr_filters import MAX_BYTES, Expression
 
 from .providers.observation_population import contract, population, validate
 
@@ -39,12 +39,12 @@ def dispatch(argv: list[str]) -> int:
             raise ValueError("population requires explicit bounded inputs and JSON")
         if not 1 <= args.seconds <= 60 or not 0 <= args.query_offset < 64:
             raise ValueError("population requires 1..60 seconds")
-        deadline = time.monotonic() + args.seconds
+        deadline: float = time.monotonic() + args.seconds
         path = Path(args.filter_file)
         if not path.is_absolute():
             raise ValueError("filter reference must be absolute")
         with path.open("rb") as stream:
-            expression = Expression.loads(stream.read(MAX_BYTES + 1))
+            expression: Expression = Expression.loads(stream.read(MAX_BYTES + 1))
         from .pr_inventory_config import load_binding
         selected = load_binding(Path(args.config), args.repo, providers=("azure-devops",))
         validate(selected.provider, args.repo, selected.api_base, expression,

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 import os
 import platform
 import re
@@ -10,13 +9,25 @@ import shlex
 import shutil
 import subprocess
 import sys
+from pathlib import Path
+from types import CodeType
+from typing import Any, Protocol, TypedDict, cast
 
 import pytest
 import yaml
 
 
+
+class _WindowsSubprocess(Protocol):
+    CREATE_NO_WINDOW: int
+
+
+class _CreationOptions(TypedDict, total=False):
+    creationflags: int
+
+
 ROOT = Path(__file__).resolve().parents[1]
-WORKFLOW = yaml.safe_load(
+WORKFLOW: dict[str | bool, Any] = yaml.safe_load(
     (ROOT / ".github/workflows/installation-context-acceptance.yml").read_text("utf-8")
 )
 JOB = WORKFLOW["jobs"]["immutable-runtime-linux"]
@@ -27,14 +38,40 @@ BASH = STEPS["Select the supported native installation-management Bash"]
 EXECUTION = STEPS["Qualify isolated native development lifecycle"]
 
 
-def _python_body(step):
+def test_pr_ratchet_uses_the_feature_head_and_merge_base(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.syspath_prepend(str(ROOT))
+    from tools import typecheck
+
+    ci = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text("utf-8"))
+    step = next(item for item in ci["jobs"]["checks"]["steps"]
+                if item.get("name") == "Whole-file strict new-code ratchet")
+    assert step["env"]["BASE"] == "${{ github.event.pull_request.base.sha || github.event.before }}"
+    assert step["env"]["HEAD"] == "${{ github.event.pull_request.head.sha || github.sha }}"
+    assert 'BASE="$(git merge-base "$BASE" "$HEAD")"' in step["run"]
+    feature, common = "a" * 40, "b" * 40
+    comparisons: list[list[str]] = []
+
+    def run(argv: list[str], cwd: Path, *, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+        assert cwd == tmp_path
+        if argv[1] == "rev-parse":
+            value = common if argv[-1] == common + "^{commit}" else feature
+            return subprocess.CompletedProcess(argv, 0, value + "\n", "")
+        comparisons.append(argv)
+        return subprocess.CompletedProcess(argv, 0, "pr-owned.py\0", "")
+
+    monkeypatch.setattr(typecheck, "_run", run)
+    assert typecheck.changed_paths(tmp_path, common, feature) == ("pr-owned.py",)
+    assert comparisons[0][-3:] == [common, feature, "--"]
+
+
+def _python_body(step: dict[str, Any]) -> CodeType:
     prefix, suffix = "python - <<'PY'\n", "\nPY\n"
     command = step["run"]
     assert command.startswith(prefix) and command.endswith(suffix)
     return compile(command[len(prefix):-len(suffix)], "<runtime-workflow-step>", "exec")
 
 
-def _enabled(expression, inputs):
+def _enabled(expression: str, inputs: dict[str, bool | str]) -> bool:
     assert expression.startswith("${{ ") and expression.endswith(" }}")
     for clause in expression[4:-3].split(" && "):
         if clause == "github.event_name == 'workflow_dispatch'":
@@ -50,7 +87,7 @@ def _enabled(expression, inputs):
     return True
 
 
-def test_filtered_acceptance_precedes_the_complementary_service_portfolio():
+def test_filtered_acceptance_precedes_the_complementary_service_portfolio() -> None:
     job = WORKFLOW["jobs"]["pr-service-linux"]
     assert job["runs-on"] == "ubuntu-latest" and job["timeout-minutes"] == 10
     checkout = job["steps"][0]
@@ -65,8 +102,9 @@ def test_filtered_acceptance_precedes_the_complementary_service_portfolio():
     assert WORKFLOW["jobs"]["pr-service-windows"]["steps"] == job["steps"]
 
 
-def test_manual_selection_preserves_every_existing_route_and_default():
+def test_manual_selection_preserves_every_existing_route_and_default() -> None:
     trigger = WORKFLOW.get("on", WORKFLOW.get(True))
+    assert isinstance(trigger, dict)
     assert set(trigger) == {"workflow_dispatch"}
     inputs = trigger["workflow_dispatch"]["inputs"]
     assert len(inputs) <= 25
@@ -130,13 +168,13 @@ def test_manual_selection_preserves_every_existing_route_and_default():
         },
         "native_daemon_exit": {"native-daemon-exit-windows"},
     }
-    defaults = {
+    defaults: dict[str, bool | str] = {
         name: entry["default"] for name, entry in inputs.items()
         if entry["type"] == "boolean"
     }
     assert set(defaults) == set(routes) and not any(defaults.values())
 
-    def selected(values):
+    def selected(values: dict[str, bool | str]) -> set[str]:
         return {
             name for name, job in WORKFLOW["jobs"].items()
             if _enabled(job["if"], values)
@@ -156,8 +194,8 @@ def test_manual_selection_preserves_every_existing_route_and_default():
 
 @pytest.mark.parametrize("requested", ["", "A" * 40, "0123456789abcdef" * 2 + "01234567"])
 def test_actual_validator_accepts_only_exact_sha_or_dispatch_default(
-    tmp_path, monkeypatch, requested,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, requested: str,
+) -> None:
     output = tmp_path / "outputs"
     monkeypatch.setenv("IMMUTABLE_RUNTIME_REF", requested)
     monkeypatch.setenv("DISPATCH_SHA", "b" * 40)
@@ -173,8 +211,8 @@ def test_actual_validator_accepts_only_exact_sha_or_dispatch_default(
     "$(touch unexpected)",
 ])
 def test_actual_validator_refuses_input_before_publishing_output(
-    tmp_path, monkeypatch, requested,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, requested: str,
+) -> None:
     output = tmp_path / "outputs"
     monkeypatch.setenv("IMMUTABLE_RUNTIME_REF", requested)
     monkeypatch.setenv("DISPATCH_SHA", "b" * 40)
@@ -184,7 +222,9 @@ def test_actual_validator_refuses_input_before_publishing_output(
     assert not output.exists()
 
 
-def test_actual_validator_also_checks_the_dispatch_sha(tmp_path, monkeypatch):
+def test_actual_validator_also_checks_the_dispatch_sha(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     output = tmp_path / "outputs"
     monkeypatch.setenv("IMMUTABLE_RUNTIME_REF", "")
     monkeypatch.setenv("DISPATCH_SHA", "dev")
@@ -195,12 +235,14 @@ def test_actual_validator_also_checks_the_dispatch_sha(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("matches", [True, False])
-def test_actual_identity_checks_checkout_before_recording_evidence(monkeypatch, capsys, matches):
+def test_actual_identity_checks_checkout_before_recording_evidence(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], matches: bool,
+) -> None:
     expected = "a" * 40
     actual = expected if matches else "b" * 40
-    calls = []
+    calls: list[list[str]] = []
 
-    def git(argv, **kwargs):
+    def git(argv: list[str], **kwargs: object) -> str:
         calls.append(argv)
         assert kwargs == {"text": True}
         if argv == ["git", "rev-parse", "HEAD"]:
@@ -225,10 +267,12 @@ def test_actual_identity_checks_checkout_before_recording_evidence(monkeypatch, 
 
 
 @pytest.mark.parametrize("fail_at", ["rev-parse", "show"])
-def test_actual_identity_propagates_git_failures(monkeypatch, fail_at):
+def test_actual_identity_propagates_git_failures(
+    monkeypatch: pytest.MonkeyPatch, fail_at: str,
+) -> None:
     monkeypatch.setenv("EXPECTED_SHA", "a" * 40)
 
-    def git(argv, **kwargs):
+    def git(argv: list[str], **kwargs: object) -> str:
         if argv[1] == fail_at:
             raise subprocess.CalledProcessError(23, argv)
         return "a" * 40 + "\n"
@@ -243,7 +287,7 @@ def test_actual_identity_propagates_git_failures(monkeypatch, fail_at):
     ("immutable-runtime-linux", "ubuntu-latest"),
     ("immutable-runtime-macos", "macos-latest"),
 ])
-def test_exact_native_matrix_and_read_only_immutable_checkout(name, runner):
+def test_exact_native_matrix_and_read_only_immutable_checkout(name: str, runner: str) -> None:
     job = WORKFLOW["jobs"][name]
     assert job["steps"] == JOB["steps"]
     assert job["if"] == "${{ inputs.immutable_runtime }}"
@@ -277,7 +321,7 @@ def test_exact_native_matrix_and_read_only_immutable_checkout(name, runner):
 
 
 @pytest.mark.parametrize("name", ["immutable-runtime-linux", "immutable-runtime-macos"])
-def test_exact_runner_selection_budgets_and_failure_propagation(name):
+def test_exact_runner_selection_budgets_and_failure_propagation(name: str) -> None:
     job = WORKFLOW["jobs"][name]
     assert EXECUTION["env"] == {"RUNTIME_MODE": "${{ matrix.mode }}"}
     assert [shlex.split(line) for line in EXECUTION["run"].splitlines()] == [
@@ -314,8 +358,8 @@ def test_exact_runner_selection_budgets_and_failure_propagation(name):
     ("macOS", False, True),
 ])
 def test_actual_bash_prerequisite_installs_only_missing_disposable_macos(
-    tmp_path, native_os, installed, install_fails,
-):
+    tmp_path: Path, native_os: str, installed: bool, install_fails: bool,
+) -> None:
     bash = shutil.which("bash")
     if os.name == "nt":
         git = shutil.which("git")
@@ -323,7 +367,7 @@ def test_actual_bash_prerequisite_installs_only_missing_disposable_macos(
         bash = str(Path(git).resolve().parent.parent / "bin" / "bash.exe")
     assert bash
 
-    def shell_path(path):
+    def shell_path(path: Path | str) -> str:
         value = str(path).replace("\\", "/")
         return "/" + value[0].lower() + value[2:] if os.name == "nt" else value
 
@@ -365,10 +409,13 @@ fi
     }
     environment.pop("HOMEBREW_NO_AUTO_UPDATE", None)
     environment.pop("HOMEBREW_NO_INSTALL_CLEANUP", None)
+    creation_options: _CreationOptions = {
+        "creationflags": cast(_WindowsSubprocess, subprocess).CREATE_NO_WINDOW,
+    } if os.name == "nt" else {}
     result = subprocess.run(
         [bash, "-e", "-c", BASH["run"]], env=environment,
         capture_output=True, text=True, timeout=45,
-        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+        **creation_options,
     )
     expected = ["--prefix bash"] if native_os == "macOS" else []
     if native_os == "macOS" and not installed:

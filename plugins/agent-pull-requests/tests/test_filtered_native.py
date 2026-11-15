@@ -1,21 +1,32 @@
 """Actual finite native-process fixture; no real backend, credential or service."""
 
+from __future__ import annotations
+
 import json
-from pathlib import Path
 import sys
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any, cast
 
 import pytest
-
-from pr_filters import Expression, PROTOCOL
+from pr_filters import PROTOCOL, Expression
 from pr_filters.acquisition import PROTOCOL as ACQUISITION_PROTOCOL
+
 from agent_pull_requests.filtered_native import population, qualify
+from agent_pull_requests.filtered_projection import FilteredProjection
+from agent_pull_requests.filtered_subscriptions import FilteredSubscriptions
 from agent_pull_requests.repository_contract import RepositoryIdentity
-from agent_pull_requests.repository_native import RepositoryNativeUnavailable, RepositoryNativeUnsupported
+from agent_pull_requests.repository_native import (
+    RepositoryNativeUnavailable,
+    RepositoryNativeUnsupported,
+)
 from agent_pull_requests.watch_observer import NativeObservationBinding, ReplayObserver
 from agent_pull_requests.watch_replay_store import ReplayStore
-from agent_pull_requests.filtered_subscriptions import FilteredSubscriptions
 
-SUPPORT = {"protocol": PROTOCOL, "fields": ["repo", "from", "age", "publication", "assigned", "tags"],
+Native = tuple[NativeObservationBinding, Path, Path]
+
+SUPPORT: dict[str, Any] = {
+    "protocol": PROTOCOL, "fields": ["repo", "from", "age", "publication", "assigned", "tags"],
            "groups": [], "age_fields": ["created"], "acquisition": {
                "protocol": ACQUISITION_PROTOCOL, "user_ids": "uuid-lowercase",
                "query_fields": {"from": "creatorId", "assigned": "reviewerId"}, "max_query_branches": 64,
@@ -23,7 +34,7 @@ SUPPORT = {"protocol": PROTOCOL, "fields": ["repo", "from", "age", "publication"
 
 
 @pytest.fixture
-def native(tmp_path):
+def native(tmp_path: Path) -> Native:
     script, log, control = tmp_path / "native.py", tmp_path / "calls.jsonl", tmp_path / "control.json"
     control.write_text("{}")
     script.write_text('''
@@ -68,7 +79,9 @@ print(json.dumps(value))
     return binding, log, control
 
 
-def test_native_process_exact_scope_input_lifetime_and_driver_refusal(native, tmp_path):
+def test_native_process_exact_scope_input_lifetime_and_driver_refusal(
+    native: Native, tmp_path: Path,
+) -> None:
     binding, log, control = native
     selected = Expression.parse({"protocol": PROTOCOL, "where": {"repo": ["Project/repo"]}})
     support = qualify(binding, checkpoint=lambda: None)
@@ -78,7 +91,9 @@ def test_native_process_exact_scope_input_lifetime_and_driver_refusal(native, tm
     calls = [json.loads(line) for line in log.read_text().splitlines()]
     command = calls[-1]
     assert command[command.index("--config") + 1] == binding.inventory_config
-    assert json.loads(command[command.index("--credential-command") + 1]) == list(binding.credential_command)
+    assert json.loads(command[command.index("--credential-command") + 1]) == list(
+        cast(tuple[str, ...], binding.credential_command),
+    )
     assert command[-7:] == ["--max-pages", "4", "--max-pulls", "200", "--seconds", "60", "--json"]
     assert not Path(command[command.index("--filter-file") + 1]).exists()
     control.write_text(json.dumps({"unsupported": True}))
@@ -87,7 +102,9 @@ def test_native_process_exact_scope_input_lifetime_and_driver_refusal(native, tm
     assert "--contract" in json.loads(log.read_text().splitlines()[-1])
 
 
-def test_unavailable_and_wrong_revision_never_broaden_or_leave_an_input_file(native, tmp_path):
+def test_unavailable_and_wrong_revision_never_broaden_or_leave_an_input_file(
+    native: Native, tmp_path: Path,
+) -> None:
     binding, _log, control = native
     selected = Expression.parse({"protocol": PROTOCOL, "where": {"repo": ["Project/repo"]}})
     for settings in ({"unavailable": True}, {"foreign": True}):
@@ -97,14 +114,17 @@ def test_unavailable_and_wrong_revision_never_broaden_or_leave_an_input_file(nat
         assert not list(tmp_path.glob(".population-*.json"))
 
 
-def test_observer_has_no_provider_reads_for_inert_definitions_and_coalesces_live_demand(native, tmp_path):
+def test_observer_has_no_provider_reads_for_inert_definitions_and_coalesces_live_demand(
+    native: Native, tmp_path: Path,
+) -> None:
     binding, log, _control = native
     store = ReplayStore(tmp_path / "state", "test", clock=lambda: 100,
                         repository_cache=True, repository_continuing=True, repository_filtered=True)
     store.provision()
     observer = ReplayObserver(store, bindings=(binding,))
-    observer.repositories.capabilities[binding.account] = SUPPORT
-    registry = FilteredSubscriptions(observer.repositories)
+    projection = cast(FilteredProjection, observer.repositories)
+    projection.capabilities[binding.account] = SUPPORT
+    registry = FilteredSubscriptions(projection)
     assert observer.cycle(expires_at=10000)["observed"] == 0
     assert not log.exists()
     for consumer in ("first", "second"):
@@ -121,7 +141,9 @@ def test_observer_has_no_provider_reads_for_inert_definitions_and_coalesces_live
 
 
 @pytest.mark.parametrize("withdraw_all", [False, True])
-def test_inflight_read_keeps_results_for_remaining_captured_demand(native, tmp_path, monkeypatch, withdraw_all):
+def test_inflight_read_keeps_results_for_remaining_captured_demand(
+    native: Native, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, withdraw_all: bool,
+) -> None:
     from agent_pull_requests import filtered_native
 
     binding, _log, _control = native
@@ -129,17 +151,21 @@ def test_inflight_read_keeps_results_for_remaining_captured_demand(native, tmp_p
                         repository_cache=True, repository_continuing=True, repository_filtered=True)
     store.provision()
     observer = ReplayObserver(store, bindings=(binding,))
-    observer.repositories.capabilities[binding.account] = SUPPORT
-    registry = FilteredSubscriptions(observer.repositories)
-    registrations = {}
+    projection = cast(FilteredProjection, observer.repositories)
+    projection.capabilities[binding.account] = SUPPORT
+    registry = FilteredSubscriptions(projection)
+    registrations: dict[str, str] = {}
     for consumer in ("first", "second"):
         result = registry.execute(binding.account, consumer, "subscribe", {
             "request_id": "request", "ttl": 60,
             "filter": {"protocol": PROTOCOL, "where": {"repo": ["Project/repo"]}},
         }, expires_at=10000)
         registrations[consumer] = result["subscription"]["registration_id"]
-    reads = []
-    def acquire(_binding, _expression, *, root, checkpoint, start_checkpoint, query_offset):
+    reads: list[str] = []
+    def acquire(
+        _binding: NativeObservationBinding, _expression: Expression, *, root: Path,
+        checkpoint: Callable[[], None], start_checkpoint: Callable[[], None], query_offset: int,
+    ) -> dict[str, Any]:
         start_checkpoint()
         reads.append("once")
         for consumer in ("first", "second") if withdraw_all else ("first",):
@@ -161,9 +187,13 @@ def test_inflight_read_keeps_results_for_remaining_captured_demand(native, tmp_p
         assert bool(result["events"]) is (consumer == "second" and not withdraw_all)
 
 
-def test_expired_sponsor_conflict_does_not_stop_admitted_dynamic_observation(native, tmp_path, monkeypatch):
+def test_expired_sponsor_conflict_does_not_stop_admitted_dynamic_observation(
+    native: Native, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from types import SimpleNamespace
+
     from pr_filters import Definitions
+
     from agent_pull_requests import filtered_native
     from agent_pull_requests.watch_service import WatchService
 
@@ -173,14 +203,15 @@ def test_expired_sponsor_conflict_does_not_stop_admitted_dynamic_observation(nat
                         repository_cache=True, repository_continuing=True, repository_filtered=True)
     store.provision()
     observer = ReplayObserver(store, bindings=(binding,))
-    observer.repositories.capabilities[binding.account] = SUPPORT
+    projection = cast(FilteredProjection, observer.repositories)
+    projection.capabilities[binding.account] = SUPPORT
     users = [f"{n:08x}-1111-1111-1111-111111111111" for n in range(128)]
-    observer.repositories.definitions = Definitions.parse({
+    projection.definitions = Definitions.parse({
         "protocol": PROTOCOL, "sets": {"sponsor": {
             "protocol": PROTOCOL, "where": {"from": {"users": users[:64]}},
         }},
     })
-    registry = FilteredSubscriptions(observer.repositories)
+    registry = FilteredSubscriptions(projection)
     registry.execute(binding.account, "sponsor", "subscribe", {
         "request_id": "startup", "ttl": 1, "definition": "sponsor",
     }, expires_at=10000)
@@ -189,8 +220,10 @@ def test_expired_sponsor_conflict_does_not_stop_admitted_dynamic_observation(nat
         "request_id": "dynamic", "ttl": 60,
         "filter": {"protocol": PROTOCOL, "where": {"from": {"users": users[64:]}}},
     }, expires_at=10000)
-    reads = []
-    def acquire(_binding, expression, **kwargs):
+    reads: list[Expression] = []
+    def acquire(
+        _binding: NativeObservationBinding, expression: Expression, **kwargs: object,
+    ) -> dict[str, Any]:
         reads.append(expression)
         return {"outcome": "complete", "error": "", "pages": 1, "pulls": []}
     monkeypatch.setattr(filtered_native, "population", acquire)
@@ -202,7 +235,7 @@ def test_expired_sponsor_conflict_does_not_stop_admitted_dynamic_observation(nat
             account=binding.account, consumer="sponsor",
         )}),
     )
-    result = WatchService._observe_cycle(service)
+    result = WatchService._observe_cycle(cast(WatchService, service))
     assert result["status"] == "observed" and result["sponsor_conflicts"] == 1
     assert len(reads) == 1
     assert registry.execute(binding.account, "dynamic", "inspect", {

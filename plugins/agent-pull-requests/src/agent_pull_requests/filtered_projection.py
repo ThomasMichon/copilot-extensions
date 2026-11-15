@@ -1,18 +1,35 @@
 """Coalesced population demand and independent membership in ReplayStore custody."""
 
+from __future__ import annotations
+
+from collections.abc import Callable, Iterable
 import copy
+from typing import TYPE_CHECKING, TypedDict, cast
 import uuid
 
 from pr_filters import Definitions, Expression, FilterError, MATCH, NONMATCH, PROTOCOL as FILTER_PROTOCOL
 from pr_filters.acquisition import plan
 
-from .filtered_state import facts as validate_facts, release_inactive, trim
-from .repository_contract import MAX_PULLS, RepositoryBackpressure
-from .repository_projection import _new_repository
+from .filtered_state import Authority, Checkpoint, Document, facts as validate_facts, release_inactive, trim
+from .repository_contract import MAX_PULLS, RepositoryBackpressure, RepositoryIdentity
+from .repository_projection import _new_repository as _legacy_new_repository
+
+if TYPE_CHECKING:
+    from .watch_replay_store import ReplayStore
+
+_new_repository = cast(Callable[[RepositoryIdentity], Document], _legacy_new_repository)
+
+
+class PopulationDemand(TypedDict):
+    filter: Expression
+    registrations: dict[str, tuple[str, int]]
 
 
 class FilteredProjection:
-    def __init__(self, store, identities, *, capabilities, definitions=None):
+    def __init__(
+        self, store: ReplayStore, identities: Iterable[RepositoryIdentity], *,
+        capabilities: dict[str, Document], definitions: Definitions | None = None,
+    ) -> None:
         if not store.repository_filtered:
             raise ValueError("filtered projection requires selected storage generation")
         self.store = store
@@ -23,24 +40,24 @@ class FilteredProjection:
         if set(self.capabilities) != set(self.identities):
             raise ValueError("each filtered repository requires its executing driver declaration")
         self.definitions = definitions or Definitions.parse({"protocol": FILTER_PROTOCOL, "sets": {}})
-        self.sponsored_requests = frozenset()
+        self.sponsored_requests: frozenset[tuple[str, str]] = frozenset()
 
-    def repository(self, state, key):
+    def repository(self, state: Document, key: str) -> Document:
         identity = self.identities[key]
-        row = next((r for r in state["repositories"] if r["identity"] == identity.document()), None)
+        row: Document | None = next((r for r in state["repositories"] if r["identity"] == identity.document()), None)
         if row is None:
             row = _new_repository(identity)
             state["repositories"].append(row)
         return row
 
-    def require(self, key, expression):
+    def require(self, key: str, expression: Expression) -> None:
         identity = self.identities[key]
         support = self.capabilities[key]
         expression.require(support, {identity.repo})
         if identity.provider == "azure-devops":
             plan(expression, support.get("acquisition", {}))
 
-    def require_rows(self, key, rows):
+    def require_rows(self, key: str, rows: list[Document]) -> None:
         self.require(key, self.union(rows))
         if self.identities[key].provider == "azure-devops":
             constraints = self.capabilities[key]["acquisition"]
@@ -50,10 +67,10 @@ class FilteredProjection:
                 raise FilterError("population query branch limit after independent withdrawal")
 
     @staticmethod
-    def expression(row):
+    def expression(row: Document) -> Expression:
         return Expression.parse(row["request"]["filter"])
 
-    def seed(self, state, row, now):
+    def seed(self, state: Document, row: Document, now: int) -> None:
         repository = self.repository(state, row["target"])
         selected = self.expression(row)
         row["members"] = [
@@ -65,11 +82,12 @@ class FilteredProjection:
             "outcome": "unknown", "observed_at": None, "last_complete_at": None, "pages": 0, "error": "",
         }
 
-    def demands(self, **authority):
+    def demands(self, *, expires_at: int, checkpoint: Checkpoint | None = None) -> dict[str, PopulationDemand]:
         """One union per configured repository, containing only live interest."""
-        def read(document):
+        authority: Authority = {"expires_at": expires_at, "checkpoint": checkpoint}
+        def read(document: Document) -> dict[str, PopulationDemand]:
             state, now = document["repository_cache"], int(self.store.clock())
-            result = {}
+            result: dict[str, PopulationDemand] = {}
             for key, identity in self.identities.items():
                 rows = [r for r in state["registrations"] if r["target"] == key
                         and not r["cancelled"] and r["expires_at"] > now]
@@ -85,7 +103,7 @@ class FilteredProjection:
             return result
         return self.store._review_transaction(read, persist=False, **authority)
 
-    def union(self, rows):
+    def union(self, rows: Iterable[Document]) -> Expression:
         selections = {self.expression(row).canonical: self.expression(row) for row in rows}
         if len(selections) == 1:
             return next(iter(selections.values()))
@@ -96,7 +114,7 @@ class FilteredProjection:
         })
 
     @staticmethod
-    def event(state, row, number, kind, facts):
+    def event(state: Document, row: Document, number: int | None, kind: str, facts: Document | None) -> None:
         state["events"].append({
             "sequence": state["next_sequence"], "event_id": uuid.uuid4().hex,
             "target": row["target"], "registration_id": row["registration_id"],
@@ -104,10 +122,14 @@ class FilteredProjection:
         })
         state["next_sequence"] += 1
 
-    def apply(self, key, demand, scan, *, observed_at, **authority):
+    def apply(
+        self, key: str, demand: PopulationDemand, scan: Document, *, observed_at: int,
+        expires_at: int, checkpoint: Checkpoint | None = None,
+    ) -> Document:
         """A cancelled/expired/new interest cannot borrow an in-flight acquisition."""
         identity = self.identities[key]
-        prepared = {}
+        authority: Authority = {"expires_at": expires_at, "checkpoint": checkpoint}
+        prepared: dict[int, Document] = {}
         for pull in scan["pulls"]:
             number = pull["number"]
             if type(number) is not int or number < 1 or number in prepared:
@@ -117,7 +139,7 @@ class FilteredProjection:
         if len(prepared) > MAX_PULLS:
             raise ValueError("population acquisition capacity exceeded")
 
-        def apply(document):
+        def apply(document: Document) -> Document:
             state, now = document["repository_cache"], int(self.store.clock())
             if type(observed_at) is not int or not 0 <= observed_at <= now:
                 raise ValueError("invalid population cycle instant")
@@ -131,8 +153,8 @@ class FilteredProjection:
                 return {"status": "withdrawn", "observed": 0}
             rows.sort(key=lambda row: row["projected_sequence"])
             repository = self.repository(state, key)
-            cached = {p["number"]: p for p in repository["pulls"]}
-            old = {p["number"]: p["facts"] for p in repository["pulls"]}
+            cached: dict[int, Document] = {p["number"]: p for p in repository["pulls"]}
+            old: dict[int, Document] = {p["number"]: p["facts"] for p in repository["pulls"]}
             known = dict(prepared) if scan["outcome"] == "complete" else {**old, **prepared}
             keep = list(prepared) + [number for number in known if number not in prepared]
             known = {number: known[number] for number in keep[:MAX_PULLS * 2]}
@@ -153,7 +175,7 @@ class FilteredProjection:
                 before = copy.deepcopy(row)
                 event_count, sequence = len(state["events"]), state["next_sequence"]
                 selected = self.expression(row)
-                previous = set(row["members"])
+                previous: set[int] = set(row["members"])
                 members, unknown = set(previous), False
                 capacity_limited = False
                 retained = {int(number): pull["facts"] for number, pull in row["projected"].items()}
@@ -187,7 +209,7 @@ class FilteredProjection:
                         }
                     else:
                         row["projected"].pop(str(number), None)
-                coverage = {
+                coverage: Document = {
                     "outcome": "partial" if capacity_limited or (
                         unknown and scan["outcome"] == "complete"
                     ) else scan["outcome"],

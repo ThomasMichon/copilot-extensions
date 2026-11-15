@@ -1,8 +1,12 @@
 """Explicit generation-three population state in the existing ReplayStore envelope."""
 
+from __future__ import annotations
+
+from collections.abc import Callable
 import json
 import math
 import re
+from typing import Any, TypedDict, cast
 
 from pr_filters import Expression
 
@@ -10,13 +14,28 @@ from .repository_contract import (
     MAX_CACHE_BYTES, MAX_EVENTS, MAX_PULLS, MAX_REGISTRATIONS, MAX_TARGETS,
     RepositoryBackpressure, RepositoryIdentity,
 )
-from .repository_state import _fields, _integer
+from .repository_state import _fields as _legacy_fields, _integer as _legacy_integer
+
+Document = dict[str, Any]
+Checkpoint = Callable[[], None]
+
+
+class Authority(TypedDict):
+    expires_at: int
+    checkpoint: Checkpoint | None
+
+
+_fields = cast(Callable[[object, str], None], _legacy_fields)
+
+
+def _integer(value: object, minimum: int = 0) -> None:
+    cast(Callable[[object, int], None], _legacy_integer)(value, minimum)
 
 METADATA_RESERVE_BYTES = 1_048_576
 BASELINE_BYTES = 1_000_000
 FACT_FIELDS = "repo from assigned created_at activity_at tags publication"
 
-def release_inactive(state, now):
+def release_inactive(state: Document, now: int) -> None:
     for row in state["registrations"]:
         if row["cancelled"] or row["expires_at"] <= now:
             row["members"] = []
@@ -35,12 +54,12 @@ def text(value: object) -> str:
     return value
 
 
-def event_id(value):
+def event_id(value: object) -> None:
     if not isinstance(value, str) or re.fullmatch(r"[a-f0-9]{32}", value) is None:
         raise ValueError("invalid filtered event identity")
 
 
-def facts(value, identity):
+def facts(value: Document, identity: RepositoryIdentity) -> None:
     _fields(value, FACT_FIELDS)
     if value["repo"] != identity.repo:
         raise ValueError("population facts differ from admitted repository")
@@ -69,7 +88,7 @@ def facts(value, identity):
         raise ValueError("population facts exceed byte capacity")
 
 
-def coverage(value):
+def coverage(value: Document) -> None:
     _fields(value, "outcome observed_at last_complete_at error pages")
     if value["outcome"] not in ("unknown", "complete", "partial", "unavailable"):
         raise ValueError("invalid population coverage")
@@ -81,24 +100,25 @@ def coverage(value):
         raise ValueError("invalid population coverage bounds")
 
 
-def _members(value):
+def _members(value: object) -> None:
     if not isinstance(value, list) or len(value) > MAX_PULLS * 2 or any(
         type(number) is not int or number < 1 for number in value
     ) or len(set(value)) != len(value):
         raise ValueError("invalid filtered membership")
 
 
-def validate(value, namespace, *, version=3):
+def validate(value: object, namespace: str, *, version: int = 3) -> None:
     if version != 3:
         raise ValueError("filtered storage generation unsupported")
     _fields(value, "repositories registrations events next_sequence")
+    value = cast(Document, value)
     _integer(value["next_sequence"], 1)
     for name, maximum in (
         ("repositories", MAX_TARGETS), ("registrations", MAX_REGISTRATIONS), ("events", MAX_EVENTS),
     ):
         if not isinstance(value[name], list) or len(value[name]) > maximum:
             raise RepositoryBackpressure("filtered state capacity exceeded")
-    identities = {}
+    identities: dict[str, RepositoryIdentity] = {}
     for repository in value["repositories"]:
         _fields(repository, "identity inventory pulls")
         identity = RepositoryIdentity.parse(repository["identity"])
@@ -108,7 +128,7 @@ def validate(value, namespace, *, version=3):
         coverage(repository["inventory"])
         if not isinstance(repository["pulls"], list) or len(repository["pulls"]) > MAX_PULLS * 2:
             raise RepositoryBackpressure("filtered current-fact capacity exceeded")
-        numbers = []
+        numbers: list[int] = []
         for pull in repository["pulls"]:
             _fields(pull, "number facts observed_at")
             _integer(pull["number"], 1)
@@ -117,7 +137,8 @@ def validate(value, namespace, *, version=3):
             numbers.append(pull["number"])
         if len(set(numbers)) != len(numbers):
             raise ValueError("duplicate population identity")
-    registrations, requests = {}, set()
+    registrations: dict[str, Document] = {}
+    requests: set[tuple[str, str]] = set()
     for row in value["registrations"]:
         _fields(row, "registration_id request_id consumer target expires_at acknowledged cancelled "
                 "request delivered acknowledged_event members projected coverage generation baseline projected_sequence")
@@ -181,19 +202,19 @@ def validate(value, namespace, *, version=3):
     trim(value, new_sequence=value["next_sequence"], now=0, validate_only=True)
 
 
-def protected(event, registrations, now):
+def protected(event: Document, registrations: list[Document], now: int) -> bool:
     row = next((r for r in registrations if r["registration_id"] == event["registration_id"]), None)
     return row is not None and row["acknowledged"] < event["sequence"] and (
         not row["cancelled"] and row["expires_at"] > now or event["sequence"] <= row["delivered"]
     )
 
 
-def trim(value, *, new_sequence, now, validate_only=False):
+def trim(value: Document, *, new_sequence: int, now: int, validate_only: bool = False) -> None:
     total = len(json.dumps(value, allow_nan=False).encode())
     payload = len(json.dumps({**value, "registrations": []}, allow_nan=False).encode())
     removed = 0
     events = value["events"]
-    def fits():
+    def fits() -> bool:
         return total <= MAX_CACHE_BYTES and payload <= MAX_CACHE_BYTES - METADATA_RESERVE_BYTES and (
             len(events) - removed <= MAX_EVENTS
         )
@@ -201,7 +222,7 @@ def trim(value, *, new_sequence, now, validate_only=False):
         return
     if validate_only:
         raise RepositoryBackpressure("filtered state byte capacity exceeded")
-    retained = []
+    retained: list[Document] = []
     for event in events:
         if not fits() and event["sequence"] < new_sequence and not protected(event, value["registrations"], now):
             amount = len(json.dumps(event, allow_nan=False).encode()) + (2 if len(events) - removed > 1 else 0)

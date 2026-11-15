@@ -11,17 +11,38 @@ from collections.abc import Callable, Iterator
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import TypeVar
+from typing import Any, Literal, Protocol, TypeVar, cast, overload
 
 from single_instance_lease import OperationLock, OperationLockedError
 
 from .watch_contract import PRSnapshot
 from .watch_replay import ConsumerScope, ObservationTarget, WatchReplay
-from .watch_storage import _atomic_write_json
-from . import review_intent
+from .watch_storage import _atomic_write_json as _atomic_write_json
+from . import review_intent as _review_intent
 from .review_workspace import _digest, _scope
 
 _T = TypeVar("_T")
+Document = dict[str, Any]
+Checkpoint = Callable[[], None]
+Commit = Callable[[], None]
+
+
+class _ReviewIntentAPI(Protocol):
+    def encoded(self, value: object) -> bytes: ...
+    def text(self, value: object, limit: int = 256) -> str: ...
+    def intent(self, value: object, *, persisted: bool = False, versions: tuple[int, ...] = (1,)) -> Document: ...
+    def receipt(self, value: object, *, operation: Document, action: Document, limit: int) -> Document: ...
+    def confirms(self, value: Document, selected: Document, scope: Document) -> bool: ...
+    def new_operation(
+        self, selected: Document, *, created_at: float, receipt_bytes: int, mappings: bool = False,
+    ) -> Document: ...
+    def validate_operations(
+        self, operations: object, *, receipt_bytes: int, review_bytes: int,
+        versions: tuple[int, ...] = (1,), selections: bool = False, mappings: bool = False,
+    ) -> None: ...
+
+
+review_intent = cast(_ReviewIntentAPI, _review_intent)
 SERVICE_SCHEMA = "agent-pull-requests.watch-service-store/v1"
 OWNER_SCHEMA = "agent-pull-requests.owner-store"
 MAX_OWNER_BYTES = 256 * 1024 * 1024
@@ -55,9 +76,9 @@ class ReplayCallerExpired(PermissionError):
     """Caller authority expired before a transaction could commit."""
 
 
-def json_object(raw: bytes) -> dict:
-    def pairs(items: list[tuple[str, object]]) -> dict:
-        result = {}
+def json_object(raw: bytes) -> Document:
+    def pairs(items: list[tuple[str, object]]) -> Document:
+        result: Document = {}
         for key, value in items:
             if key in result:
                 raise ValueError("duplicate JSON member")
@@ -143,7 +164,7 @@ class ReplayStore:
                     time.sleep(min(.01, max(0, deadline - time.monotonic())))
             yield lock
 
-    def _encode(self, state: dict, *, owner_state: dict | None = None) -> dict:
+    def _encode(self, state: Document, *, owner_state: Document | None = None) -> Document:
         if owner_state is not None and owner_state.get("schema") == OWNER_SCHEMA:
             document = copy.deepcopy(owner_state)
             document["replay"] = state
@@ -156,13 +177,13 @@ class ReplayStore:
             "replay": state,
         }
 
-    def _decode(self, state: dict) -> dict:
+    def _decode(self, state: Document) -> Document:
         if state.get("schema") == OWNER_SCHEMA:
             self._validate_owner(state)
-            return copy.deepcopy(state["replay"])
+            return copy.deepcopy(cast(Document, state["replay"]))
         return self._decode_legacy(state)
 
-    def _decode_legacy(self, state: dict) -> dict:
+    def _decode_legacy(self, state: Document) -> Document:
         if self.service_identity is None:
             return state
         if (
@@ -174,7 +195,7 @@ class ReplayStore:
             raise ValueError("replay service storage binding mismatch")
         return state["replay"]
 
-    def _read_document(self) -> dict:
+    def _read_document(self) -> Document:
         info = self.path.lstat()
         if (
             not stat.S_ISREG(info.st_mode) or info.st_nlink != 1
@@ -191,7 +212,7 @@ class ReplayStore:
             raise ReplayStoreInvalid("invalid persisted owner state") from None
 
     @staticmethod
-    def _replay_reservation(state: dict) -> int:
+    def _replay_reservation(state: Document) -> int:
         from .watch_replay import MAX_BATCH_BYTES
         growth = 0
         for group in state["registries"]:
@@ -202,7 +223,7 @@ class ReplayStore:
                 growth += 2048 if subscription.get("pending") is not None else 2 * MAX_BATCH_BYTES + 2048
         return len(review_intent.encoded(state)) + growth + 1024
 
-    def _validate_owner(self, document: dict) -> None:
+    def _validate_owner(self, document: Document) -> None:
         version = document.get("version")
         names = {"schema", "version", "namespace", "service", "replay", "reviews", "capacities"}
         cache = "repository_cache_version" in document
@@ -377,7 +398,7 @@ class ReplayStore:
         self, *, lifecycle_checkpoint: Callable[[], None], expires_at: int,
         checkpoint: Callable[[], None] | None = None, replay_bytes: int = 64 * 1024 * 1024,
         review_bytes: int = 64 * 1024 * 1024, receipt_bytes: int = 4096,
-    ) -> dict:
+    ) -> Document:
         """Explicit layout adoption; existing lifecycle owner excludes incompatible readers."""
         if not callable(lifecycle_checkpoint):
             raise ValueError("actual reader lifecycle checkpoint required")
@@ -406,7 +427,22 @@ class ReplayStore:
             self.check_current(expires_at, checkpoint)
             return {"status": "adopted", "version": 2}
 
-    def _review_transaction(self, operation, *, expires_at, checkpoint=None, persist=True, staged=False):
+    @overload
+    def _review_transaction(
+        self, operation: Callable[[Document], _T], *, expires_at: int,
+        checkpoint: Checkpoint | None = None, persist: bool = True, staged: Literal[False] = False,
+    ) -> _T: ...
+
+    @overload
+    def _review_transaction(
+        self, operation: Callable[[Document, Commit], _T], *, expires_at: int,
+        checkpoint: Checkpoint | None = None, persist: bool = True, staged: Literal[True],
+    ) -> _T: ...
+
+    def _review_transaction(
+        self, operation: Callable[[Document], _T] | Callable[[Document, Commit], _T], *,
+        expires_at: int, checkpoint: Checkpoint | None = None, persist: bool = True, staged: bool = False,
+    ) -> _T:
         if checkpoint is not None and not callable(checkpoint):
             raise ValueError("invalid request checkpoint")
         self.check_current(expires_at, checkpoint)
@@ -417,7 +453,7 @@ class ReplayStore:
                 raise ReplayStoreInvalid("review operations require explicit owner adoption")
             self._validate_owner(document)
 
-            def commit():
+            def commit() -> None:
                 self._validate_owner(document)
                 lock.assert_owned()
                 self.check_current(expires_at, checkpoint)
@@ -426,7 +462,10 @@ class ReplayStore:
 
             # A bounded cache mutation may require a durable owner reservation
             # before its separate pointer write, without releasing replay custody.
-            result = operation(document, commit) if staged else operation(document)
+            result = (
+                cast(Callable[[Document, Commit], _T], operation)(document, commit) if staged
+                else cast(Callable[[Document], _T], operation)(document)
+            )
             self._validate_owner(document)
             self.check_current(expires_at, checkpoint)
             if persist:
@@ -437,12 +476,12 @@ class ReplayStore:
     def adopt_prepared_reviews(
         self, *, lifecycle_checkpoint: Callable[[], None], expires_at: int,
         checkpoint: Callable[[], None] | None = None,
-    ) -> dict:
+    ) -> Document:
         """Explicit orthogonal extension; the existing owner excludes old strict readers."""
         if not callable(lifecycle_checkpoint):
             raise ValueError("actual reader lifecycle checkpoint required")
 
-        def adopt(document: dict) -> dict:
+        def adopt(document: Document) -> Document:
             lifecycle_checkpoint()
             status = "already_adopted" if "review_intent_version" in document else "adopted"
             document["review_intent_version"] = 2
@@ -453,22 +492,26 @@ class ReplayStore:
         return self._review_transaction(adopt, expires_at=expires_at, checkpoint=checkpoint)
 
     @staticmethod
-    def _review_operation(document, operation_id, scope):
+    def _review_operation(document: Document, operation_id: str, scope: Document) -> Document:
         review_intent.text(operation_id, 128)
         scope = _scope(scope)
-        operation = next((row for row in document["reviews"] if row["intent"]["operation_id"] == operation_id), None)
+        operation: Document | None = next(
+            (row for row in document["reviews"] if row["intent"]["operation_id"] == operation_id), None,
+        )
         if operation is None or operation["intent"]["scope"] != scope:
             raise ValueError("review operation missing or outside selected scope")
         if operation.get("selection", {}).get("stage") == "prepared":
             raise ValueError("pre-approval selection is not execution-admitted")
         return operation
 
-    def admit_review(self, selected: dict, *, expires_at: int, checkpoint=None) -> dict:
+    def admit_review(
+        self, selected: Document, *, expires_at: int, checkpoint: Checkpoint | None = None,
+    ) -> Document:
         """Owner-only data admission; never authorizes or invokes backend effects."""
         selected = review_intent.intent(selected, versions=(1, 2))
         digest = _digest(selected)
 
-        def admit(document):
+        def admit(document: Document) -> Document:
             from .terminal_retention import require_live
             require_live(
                 document, selected["scope"], operation_id=selected["operation_id"],
@@ -494,8 +537,10 @@ class ReplayStore:
 
         return self._review_transaction(admit, expires_at=expires_at, checkpoint=checkpoint)
 
-    def inspect_review(self, operation_id, scope, *, expires_at: int, checkpoint=None) -> dict:
-        def inspect(document):
+    def inspect_review(
+        self, operation_id: str, scope: Document, *, expires_at: int, checkpoint: Checkpoint | None = None,
+    ) -> Document:
+        def inspect(document: Document) -> Document:
             from .terminal_retention import require_live
             require_live(document, scope, operation_id=operation_id)
             return self._review_operation(document, operation_id, scope)
@@ -515,13 +560,13 @@ class ReplayStore:
         )
 
     def prepared_review_receipt(
-        self, operation_id: str, scope: dict, action_id: str, *,
+        self, operation_id: str, scope: Document, action_id: str, *,
         expires_at: int, checkpoint: Callable[[], None] | None = None,
-    ) -> dict:
+    ) -> Document:
         """Read original intent/receipt correlation, never tag discovery or fresh native proof."""
         review_intent.text(action_id, 128)
 
-        def project(document: dict) -> dict:
+        def project(document: Document) -> Document:
             if document.get("review_intent_version") != 2:
                 raise ReplayStoreInvalid("prepared receipt requires explicit storage adoption")
             operation = self._review_operation(document, operation_id, scope)
@@ -551,9 +596,12 @@ class ReplayStore:
             project, expires_at=expires_at, checkpoint=checkpoint, persist=False,
         )
 
-    def begin_review_action(self, operation_id, scope, action_id, *, expires_at: int, checkpoint=None) -> dict:
+    def begin_review_action(
+        self, operation_id: str, scope: Document, action_id: str, *,
+        expires_at: int, checkpoint: Checkpoint | None = None,
+    ) -> Document:
         """Durably fence one admitted action before an existing protected sender may run."""
-        def begin(document):
+        def begin(document: Document) -> Document:
             operation = self._review_operation(document, operation_id, scope)
             from .terminal_retention import require_live
             require_live(
@@ -578,16 +626,17 @@ class ReplayStore:
         return self._review_transaction(begin, expires_at=expires_at, checkpoint=checkpoint)
 
     def record_review_receipt(
-        self, operation_id, scope, action_id, attempt_id, value, *, expires_at: int, checkpoint=None,
+        self, operation_id: str, scope: Document, action_id: str, attempt_id: object, value: Document, *,
+        expires_at: int, checkpoint: Checkpoint | None = None,
         confirm: bool = True,
-    ) -> dict:
+    ) -> Document:
         """Existing sender-only receipt transition; no serving authorization or backend call."""
         value = copy.deepcopy(value)
         if type(confirm) is not bool:
             raise ValueError("receipt confirmation disposition must be boolean")
-        def record(document):
+        def record(document: Document) -> Document:
             operation = self._review_operation(document, operation_id, scope)
-            action = next((row for row in operation["actions"] if row["id"] == action_id), None)
+            action: Document | None = next((row for row in operation["actions"] if row["id"] == action_id), None)
             if (
                 action is None or action["state"] == "unattempted"
                 or not isinstance(attempt_id, str) or action["attempt_id"] != attempt_id
@@ -667,7 +716,7 @@ class ReplayStore:
     def _transaction(
         self, operation: Callable[[WatchReplay], _T], *, expires_at: int,
         checkpoint: Callable[[], None] | None = None,
-        prepare: Callable[[dict], None] | None = None,
+        prepare: Callable[[Document], None] | None = None,
     ) -> _T:
         if checkpoint is not None and not callable(checkpoint):
             raise ValueError("invalid request checkpoint")
@@ -675,7 +724,7 @@ class ReplayStore:
         with self._lock() as lock:
             self.check_current(expires_at, checkpoint)
 
-            def commit(state: dict) -> None:
+            def commit(state: Document) -> None:
                 encoded_state = self._encode(state, owner_state=document)
                 lock.assert_owned()
                 self.check_current(expires_at, checkpoint)
@@ -704,16 +753,16 @@ class ReplayStore:
     def observation_targets(
         self, *, expires_at: int, checkpoint: Callable[[], None] | None = None,
     ) -> tuple[ObservationTarget, ...]:
-        document = None
+        document: Document | None = None
 
-        def prepare(current: dict) -> None:
+        def prepare(current: Document) -> None:
             nonlocal document
             document = current
 
         def targets(core: WatchReplay) -> tuple[ObservationTarget, ...]:
             from .terminal_retention import replay_epoch
             return tuple(
-                replace(target, retention_epoch=replay_epoch(document, target))
+                replace(target, retention_epoch=replay_epoch(cast(Document, document), target))
                 for target in core.observation_targets()
             )
 
@@ -726,18 +775,19 @@ class ReplayStore:
     def observe(
         self, target: ObservationTarget, snapshot: PRSnapshot, *, expires_at: int,
         checkpoint: Callable[[], None] | None = None,
-    ) -> dict:
+    ) -> Document:
         """Trusted owner-only input, never a serving operation."""
-        def prepare(document: dict) -> None:
-            nonlocal snapshot
+        selected_snapshot: PRSnapshot | None = snapshot
+        def prepare(document: Document) -> None:
+            nonlocal selected_snapshot
             from .terminal_retention import replay_observation
-            snapshot = replay_observation(document, target, snapshot)
+            selected_snapshot = replay_observation(document, target, snapshot)
 
         return self._transaction(
             lambda core: core.observe(
-                target.account, target.repo, target.number, snapshot,
+                target.account, target.repo, target.number, selected_snapshot,
                 registration_ids=target.registration_ids,
-            ) if snapshot is not None else {"status": "stale_observation"},
+            ) if selected_snapshot is not None else {"status": "stale_observation"},
             expires_at=expires_at, checkpoint=checkpoint,
             prepare=prepare if self.terminal_retention else None,
         )
@@ -756,16 +806,16 @@ class ReplayStore:
 
     def sweep_timeouts(
         self, *, expires_at: int, checkpoint: Callable[[], None] | None = None,
-    ) -> dict:
+    ) -> Document:
         return self._transaction(
             lambda core: core.sweep_timeouts(), expires_at=expires_at, checkpoint=checkpoint,
         )
 
     def execute(
-        self, scope: ConsumerScope, operation: str, payload: dict, *, expires_at: int,
+        self, scope: ConsumerScope, operation: str, payload: Document, *, expires_at: int,
         checkpoint: Callable[[], None] | None = None,
-    ) -> dict:
-        def dispatch(core: WatchReplay) -> dict:
+    ) -> Document:
+        def dispatch(core: WatchReplay) -> Document:
             if operation == "pending":
                 swept = core.sweep_timeouts()
                 if swept["status"] == "uncertain":
