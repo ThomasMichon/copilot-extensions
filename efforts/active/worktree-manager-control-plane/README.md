@@ -218,6 +218,16 @@ realized in `main`; unchecked items are the remaining delta.
       §`idempotent-and-re-runnable`, §`restart-aware`.
 
 ### Phase 3 — Extracted Picker over the engine boundary (In progress)
+
+- [ ] **WM4118-P:** Consume authoritative origin and interface independently
+  through the existing `agent-worktrees --json` boundary for Picker grouping,
+  filtering and visibility. Preserve user-origin ACP visibility and existing
+  system/delegate hide/reveal behavior; interface is not origin. Missing
+  legacy values remain unknown, with no historical backfill.
+- [ ] **WM4118-LV:** Exercise explicit axes independently, user-ACP and
+  system/delegate visibility controls, missing legacy fields and truthful
+  older-engine degradation through the real Picker consumer boundary.
+  Provenance tags grant no ownership, readiness or cleanup eligibility.
 - [x] `picker_app.py` Textual Picker reads live worktrees **only** via
       `engine_client` → `agent-worktrees --json`; owns no worktree state; injected
       source (live/fixture/demo); headless SVG capture. First state-view slice
@@ -2660,6 +2670,13 @@ version-consistency guard; do not build competing mechanisms.
 
 ## Validation Plan
 
+- [ ] **WM4118-G:** Resolve only the Manager Picker Plan/local Validation
+  consumer slice of #4118. Preserve the existing engine/API boundary and
+  incumbent visibility rules. Worktrees/Dispatch/other creation stamps and
+  Bridge launch/API remain separately owned and unfinished; this intake
+  transfers no custody and adds no whole-producer/native-before-planned-
+  receipt prerequisite.
+
 - [ ] **G3418-MGR:** Resolve P3418-MGR-1 through P3418-MGR-6 and
   V3418-MGR-1 through V3418-MGR-4 at the finite Manager consumer boundary,
   without requiring unrelated phases, every host or a new native program.
@@ -2887,6 +2904,14 @@ tiers without imposing every-host or native-on-every-leaf requirements.
   coverage opportunity and all owner/resource boundaries.
 
 ## Coordination
+
+The finite #4118 intake below receives the Manager Picker consumer only.
+Worktrees creation/producer stamps and Bridge launch/session/API stay with
+their existing owners. Preserve all incumbent claims, source/resource
+custody and phase acceptance; this appoints no executor and initiates no
+launch or UI/native operation. #4118 remains OPEN for its whole producer and
+consumer contract; other producers need not finish before this planned
+consumer slice can be received.
 
 - **C3939-THEME:** Existing Manager presentation/configuration and Worktrees
   configuration/output owners retain the finite theme mapping. Claim waves

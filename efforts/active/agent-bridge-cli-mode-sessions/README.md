@@ -70,6 +70,13 @@ still requires the existing owner's bounded contribution claim.
 
 ## Coordination
 
+The finite #4118 intake below receives only Bridge creation/session-record/API
+provenance. Existing launch, session, API and transport owners retain their
+scopes. Worktrees/Dispatch/other-producer stamping and the Manager consumer
+remain independent; #4118 stays OPEN for its whole contract. This plan grants
+no launch, record migration, implementation or source/resource transfer, and
+does not make the broader venue lane a prerequisite to planned receiving.
+
 <!-- backlog-reconciliation:7556:qualified-sixteen:3323:Coordination -->
 
 The proposed Phase 4-consuming Windows transport family preserves existing
@@ -188,6 +195,17 @@ mechanism CLI mode binds through.
       proceed.
 
 ### Phase 2 — Session Host CLI mode + cwd-keyed discovery
+
+- [ ] **B4118-P:** Persist independent `interface=cli|acp` and
+  `origin=user|delegate` facts from authoritative Bridge launch context through
+  the existing session record and owned/represented/status responses.
+  `cli_mode`, caller presence and transport do not establish origin; retain
+  truthful unknown legacy metadata without historical migration or backfill.
+- [ ] **B4118-LV:** Exercise actual creation, serialization and status responses
+  across supported user/delegate and CLI/ACP combinations, so changing one
+  axis cannot silently change the other. Cover missing legacy fields and
+  truthful unknown/unsupported results; do not mock past the record/API
+  consumer boundary.
 
 - [x] **Design refinement, discovered during implementation:** for the
       local, single-machine case, no client-side discovery-file mechanism is
@@ -808,6 +826,13 @@ or a claim that the historical failure was newly reproduced._
   reception by #7212, retry caller mutations or terminate unrelated work.
 
 ## Validation Plan
+
+- [ ] **B4118-G:** Resolve the finite Bridge Plan/local Validation at its
+  session-record/API boundary, retaining independent interface/origin,
+  explicit CLI-mode behavior and unknown legacy values. No Worktrees
+  producer, Manager consumer, historical migration or whole-parent/all-venue
+  native gate is transferred or added. Planned receipt is not technical
+  completion of #4118.
 
 - [ ] Complete every directly retained #1167 Plan/Validation row above at its
   original evidence tier and bounds, preserving existing owners and holds.
