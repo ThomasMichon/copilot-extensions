@@ -3978,6 +3978,15 @@ Fleet V2 receiver and authentication detail. Only the existing Windows provider
 Plan and paired Validation receive direct planned acceptance. Other finite
 native, owner, deferred-effect and source gaps remain; no new disposition,
 implementation or resource release follows from the proposal.
+The [accepted provider receiving and separate tracking judgment](journal/2026/11.15-portable-receiving-boundaries.md#accepted-provider-receiving-and-separate-tracking-judgment)
+records #12741's actual merge and #6804's audited redundant-planned-tracking
+retirement. The complete queue is 837 open, 108 above fixed 729; provider
+acceptance, existing source/resource custody and all parent gates remain open.
+The [next complete source-contract frontier](journal/2026/11.15-portable-receiving-boundaries.md#current-source-contracts-and-expanded-canonical-parents)
+preserves eighteen complete original/discussion unions, including the expanded
+#7116 acquisition and #7117 interrupted-installation parents. It separates
+actual source credit from retained installed, hosted, causal and owner-bound
+acceptance; it adds no disposition or technical-completion credit.
 
 ### Phase 2b - Vision-linked stabilization roadmap
 
