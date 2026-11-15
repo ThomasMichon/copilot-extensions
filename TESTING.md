@@ -1101,14 +1101,6 @@ live enforcement depends on the independently governed Main controller.
 Installed Manager TTY qualification is a separate, positively selected native
 contract, not part of unit coverage:
 
-The existing manual `Installation context full` workflow also exposes this
-same owner as portfolio `manager-installed-tty`. Dispatch at the published
-candidate ref and supply its exact commit as `source_sha`. It runs and
-revalidates the existing identity-bound contract on disposable Windows; it
-does not promote, install on an operator machine, or relax the original
-720-second budget and 30-second cleanup reserve. The source-owned receipt and
-bounded diagnostics are retained even on failure.
-
 ```powershell
 python tools\run-manager-runtime-acceptance.py --contract installed-tty --root <fresh-private-root> --candidate-commit <candidate-sha> --candidate-tree <candidate-tree> --source-commit <dev-source-sha> --main-before <pinned-main-sha> --run-id <run-id> --run-attempt <attempt> --output <result-json>
 ```

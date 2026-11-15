@@ -1,5 +1,5 @@
 {
-  "comment": "Qualify and diagnose native installed Manager TTY launches at immutable Windows sources",
+  "comment": "Preserve native installed Manager TTY preparation and scoped Windows fault metadata",
   "changes": [
     {
       "plugin": "worktree-manager",
