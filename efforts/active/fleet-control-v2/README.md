@@ -417,6 +417,14 @@ All detailed slices are **agent-recommended** and remain subject to review.
   GI-S3 Plan and matching local validation. These are independently progressable
   source contributions, not closure of the resident/provider/live-adoption
   items above; keep existing clients and explicit unsupported outcomes.
+- [ ] `P.6236.pr-service-interface`: Retain the separately owned PR-service work
+  under #6007/#7188/#7189/#7193. Before affected wiring, obtain the serving
+  owner's actual agreement to the smallest versioned role/route, renewable
+  forge-credential and typed event/replay/ACK interfaces. Keep scoped
+  pending-event reads/ACK service-owned; add no Gateway queue/per-task waiter,
+  broker/controller, callback-argv runner or local tenancy. Proposal review is
+  not owner agreement; this grants no implementation, adoption or ownership
+  transfer.
 
 ### Phase 2b - Central push-backed current state
 - [x] Review the [backing-store amendment](central-state-backing-store.md) under
@@ -551,6 +559,14 @@ All entries are **agent-recommended implementation gates**, not completed tests.
   venue/metric and evidence tier. Preserve all checked prerequisite credit and
   existing owners; paper acceptance is not runtime qualification, claim release
   or whole-product completion.
+- [ ] `V.6236.pr-service-interface`: Read back the accepted current receiver and
+  serving-owner agreement for the role/route, renewable forge-credential and
+  typed event/replay/ACK boundaries; confirm scoped pending-event reads/ACK
+  remain service-owned, and distinguish proposal review from interface
+  agreement and source delivery from runtime/adoption. Preserve no extra
+  Gateway queue/waiter, broker/controller, callback-argv runner, in-fleet local
+  tenancy or owner/source/claim transfer. This is interface acceptance only,
+  not a generic ACK or all-parent completion gate.
 
 ## Proposal
 
