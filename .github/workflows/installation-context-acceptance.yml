@@ -103,10 +103,6 @@ on:
         description: Qualify native daemon status, application cleanup and refusal without other runtime consumers
         type: boolean
         default: false
-      wmi_durable_launch:
-        description: Qualify the WMI bootstrap, strict caller-Job loss and exact fixture cleanup
-        type: boolean
-        default: false
 
 permissions:
   contents: read
@@ -1400,7 +1396,7 @@ jobs:
           --test-timeout 60 --timeout 600 --plugin-timeout 720
 
   wmi-durable-launch-windows:
-    if: ${{ inputs.wmi_durable_launch }}
+    if: ${{ inputs.native_daemon_exit }}
     name: WMI durable launch (disposable Windows)
     runs-on: windows-latest
     timeout-minutes: 5
