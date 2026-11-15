@@ -33,6 +33,13 @@ deployment or destructive migration of durable data.
 
 ## Coordination
 
+The finite #4194 intake below stays within the existing Phase 3/3a query
+boundary. The Coordinator and current index, source, serving, Gateway and
+corpus custodians retain their scopes. This assigns no new owner and grants
+no credential, policy, store, query or deployment operation. Direct planned
+receiving is separate from implementation, current receiving readback and
+source disposition; existing live-Gateway and rollout gates stay independent.
+
 The proposed #4220/#5302 families retain existing Index source/data,
 serving-worker, migration, corpus/model/engine/canary and native/deployment
 custodians. #6383 fleet source-credential/index-client, #5789 Gateway,
@@ -263,6 +270,18 @@ and rollback gates; legacy backfill is not a blocker for cold creation.
   The two-chunk synthetic proof does not satisfy this completion gate.
 
 ### Phase 3a - Authorized-store migration and serving eligibility
+
+- [ ] **I4194-P1:** Enforce the existing trust-domain compatibility policy on
+  ordinary NON-Gateway search as well as Gateway queries, including when
+  optional source/repository filters are omitted. Missing or unreadable
+  domain policy must fail closed OR return the supported explicit-unavailable
+  result, never search all domains. Keep the separately authorized family
+  route distinct; introduce no new authorization policy.
+- [ ] **I4194-V1:** Exercise actual ordinary non-Gateway and Gateway query
+  boundaries with optional filters omitted/present, policy-compatible and
+  policy-incompatible domains, and missing/unreadable domain policy. Verify
+  the existing policy's permitted behavior, no incompatible cross-domain
+  results and no search-all fallback.
 
 - [x] Review the [authorized-store migration](authorized-store-migration.md)
   contract (#6605).
@@ -542,6 +561,14 @@ with its existing owners and no execution is authorized here.)_
   or cold-creation dependency is authorized by documentary intake.
 
 ## Validation Plan
+
+- [ ] **I4194-G:** Verify query-time trust-domain compatibility on ordinary
+  NON-Gateway search and the separately authorized Gateway/family route,
+  including omitted optional filters and query-derived metadata. Missing or
+  unreadable policy must fail closed OR return the supported explicit-
+  unavailable result, never broaden to search all. Preserve existing
+  source-specific and live-Gateway evidence tiers; planned receipt neither
+  authorizes rollout nor requires implementation/native proof first.
 
 - [x] Unit regressions for layered designation, unconfigured/client nonactivation
   and daemon detachment while retaining contained-test ownership.
