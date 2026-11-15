@@ -33,6 +33,14 @@ which repository wins.
 
 ## Coordination
 
+The finite #4186 intake below belongs to Phase 5 and retains the existing
+Chronicle, renderer, configured-sink, source-segment and reservation
+custodians. A host-supplied caller remains acceptable; this appoints no
+executor and moves no claim. The ordered render/persist/land/complete
+contract is planned work, not a running collector or landing receipt.
+Normal reviewed receiving, current readback and a separate source judgment
+remain distinct from implementation and actual segment completion.
+
 - **Topology:** Independent per-slice pull requests, each merged when its own
   review, CI and mergeability gates pass; sequence actual dependencies only.
 - **Host (owns PRs):** Primary contributor.
@@ -131,6 +139,23 @@ particular control-repository name, machine inventory, or private topology.
 - [ ] Provide setup and migration guidance before any release can make an empty aggregate passive.
 
 ### Phase 5 — Gate collection and chronicling
+
+- [ ] **L4186-P1:** Provide a runnable host-supplied caller that consumes the
+  existing queued manifest through the existing renderer and persists returned
+  artifacts under the configured output-root and action validation.
+- [ ] **L4186-P2:** Land artifacts through the configured sink's existing
+  authorized policy. Renderer success or a push alone is not landing where
+  that sink requires more.
+- [ ] **L4186-P3:** Mark exactly the source segments complete ONLY after the
+  applicable render, persistence and authorized landing succeed. Preserve
+  segment identity, active claims/reservations and same-holder retry;
+  never release another holder's custody.
+- [ ] **L4186-V1:** At the actual caller/sink/segment boundary, exercise success,
+  renderer, persistence and landing failures, uncertain landing and retry.
+  Complete only exact eligible segments, preserve active/other-holder
+  reservations and reconcile uncertain landing through its owner. No new
+  daemon, scheduler, two-cycle, full-accounting or every-host/native gate
+  is introduced.
 
 - [ ] Adapt session sync to consume only authorized collection claims from the resolved plan.
 - [ ] Adapt chronicler construction and routing to consume only authorized rendered-log claims and sinks.
@@ -270,6 +295,14 @@ https://github.com/ThomasMichon/copilot-extensions/pull/1857 ;
 https://github.com/ThomasMichon/copilot-extensions/pull/5671 .
 
 ## Validation Plan
+
+- [ ] **G4186:** Verify the runnable host caller consumes the queued manifest
+  through the existing renderer, persists returned artifacts, lands through
+  the configured sink's authorized policy, and ONLY THEN marks the exact
+  source segments complete. Exercise failure, uncertain-landing and
+  same-holder retry paths while preserving existing claims/reservations.
+  Renderer success, a push, release availability or unrelated installed-sync
+  cycles are not substitutes.
 
 - [ ] Complete every directly retained #1817 Plan/Validation clause above at its original evidence tier and bounds; preserve current owners, holds and unfinished acceptance. Tracker consolidation is not implementation.
 - [ ] G5941: Resolve EVERY N5941/local Validation/continuing Coordination

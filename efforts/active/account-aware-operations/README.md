@@ -25,6 +25,15 @@ switch or leaking one operation's credentials into another.
 
 ## Coordination
 
+The finite #4199 push-race intake below remains with the existing identity,
+command and actual push-consumer owners. Keep the WHOLE #4199 outcome
+independently OPEN until actual implementation OR exact complete authorized
+receiving is accepted; partial #5791 same-account/missing-token coverage is
+insufficient. This proposed direct receipt changes no Draft status,
+temporary-token implementation restriction or executor assignment and
+authorizes no credential operation. Planned receiving, current readback and
+a separate source-specific judgment remain distinct from technical delivery.
+
 - **Topology:** contract-first host with independent command-adoption slices.
 - **Host (owns PRs):** identity contract host.
 - **Delegates:** command owners adopt the shared resolver without redefining it.
@@ -124,6 +133,19 @@ degradation without global identity mutation.
   this effort's Phase 1 does not reopen #69's credited source Phase 1.
 
 ### Phase 2 - Add scoped command execution
+
+- [ ] **AA4199-P:** Correct the actual ordinary AND pinned push consumers so
+  their authentication decisions do not depend on a cached observation of
+  the global active account. Preserve legitimate same-account credential-
+  helper, scope and rotation behavior; do not blindly force a token, mutate
+  global selection or persist credentials. This is the distinct push
+  check/use race, not #5791's broader missing/rejected-credential cases.
+- [ ] **AA4199-LV:** At the actual ordinary and pinned push-consumer decision,
+  use a synthetic controlled account-selection change between observation
+  and authentication use. Verify no cached-global-state dependence while
+  retaining the legitimate same-account helper/scope/rotation path. A safe
+  sibling wrapper or #5791 coverage is not proof; do not use live accounts,
+  authentication or network pushes.
 
 - [ ] Resolve the intended account before launching a repository-facing
   command and inject credentials only into that child process.
@@ -307,6 +329,13 @@ _Correlated via a facility-driven sweep of open `bug`-labeled issues against act
   - `<project> --version` mis-routing is exactly this effort's `project-addressed-not-cwd-bound` scope.
 
 ## Validation Plan
+
+- [ ] **AA4199-G:** Qualify the ordinary AND pinned push-consumer correction
+  with controlled selection-change and same-account helper/scope/rotation
+  compatibility controls. Keep the complete narrow race separate from
+  #5791 coverage and preserve current identity/credential owners. Report
+  source, release and installed evidence separately; no global-account
+  mutation, forced-token policy or native test is supplied by this plan.
 
 - [ ] Parallel child processes targeting repositories with different bindings
   consistently use the intended identities.
