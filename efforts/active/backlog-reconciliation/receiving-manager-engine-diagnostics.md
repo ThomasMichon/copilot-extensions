@@ -63,23 +63,28 @@ run a test, restart a guest or release a claim as part of this proposal.
 
 ## Planned receiving and separate judgment
 
-- [ ] Land this complete planned contract through the normal reviewed PR flow.
-- [ ] Requalify source and receiver; reconcile any material new text, owner,
+- [x] Land this complete planned contract through the normal reviewed PR flow:
+  #12747 merged after current-head approval and required checks.
+- [x] Requalify source and receiver; reconcile any material new text, owner,
   assignment or explicit tracking-token condition before publication.
-- [ ] Append clauses ME1-ME6 and the incumbent/coordination boundary directly
+- [x] Append clauses ME1-ME6 and the incumbent/coordination boundary directly
   to #7743 without replacing its original text or prior discussion.
-- [ ] Read back the complete authored receiving contribution under the original
+- [x] Read back the complete authored receiving contribution under the original
   publisher identity; verify all six clauses and retained conditions.
-- [ ] Separately judge whether #8312 is redundant planned tracking. If the
+- [x] Separately judge whether #8312 is redundant planned tracking. If the
   accepted receiver retains its whole unresolved contract and no actual token
   condition conflicts, explain the unfinished work and close `NOT_PLANNED`,
   never `COMPLETED`. Otherwise leave #8312 OPEN with the concrete gap.
+  The [actual receiving contribution](https://github.com/ThomasMichon/copilot-extensions/issues/7743#issuecomment-6900167239)
+  directly retains all six unchecked clauses. The separate
+  [source explanation](https://github.com/ThomasMichon/copilot-extensions/issues/8312#issuecomment-6900183663)
+  and provider readback confirm #8312 CLOSED `NOT_PLANNED`; #7743 stays OPEN.
 
 ## Validation and technical work that stays open
 
-- [ ] Verify the accepted public receiver against every crosswalk row, including
+- [x] Verify the accepted public receiver against every crosswalk row, including
   the ordinary-path-versus-bypass distinction and existing owner conditions.
-- [ ] Preserve every incumbent #7743 check state and responsibility.
+- [x] Preserve every incumbent #7743 check state and responsibility.
 - [ ] Under its own authorized owner, exercise the actual ordinary scoped
   handoff with native captured stdout/stderr, real return-code propagation,
   serial/guard/participant/no-window controls, failure and interruption cases.
