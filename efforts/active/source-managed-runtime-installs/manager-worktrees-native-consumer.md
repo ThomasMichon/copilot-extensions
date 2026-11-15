@@ -125,6 +125,23 @@ finishing this fixture cannot finalize the parent worktrees.
 
 ## Journal
 
+### 2026-11-15 - Physical application environment prerequisite
+
+The fixture's `_python()` helper hardcoded a legacy direct-slot interpreter,
+so it could not launch an actual complete application in its nested `.venv`.
+The bounded correction uses the existing runtime owner's `slot_python()`
+resolver, still bound to the exact `current-version` rather than last-good
+fallback. Three contained controls pass: actual subprocess launches from a
+legacy physical environment and a nested physical environment, plus refusal
+when the selected generation has no interpreter. Python lint and the install
+contract check pass.
+
+This is the first Q2 fixture prerequisite, not Q2 completion or a hosted
+ordinary-update result. No service, Scheduled Task or installed operator
+runtime was started or changed. The required authentic selected-source case,
+its two-app portfolio and its real Manager ordinary caller remain to be wired;
+the original whole-suite synthetic-artifact case remains unchanged.
+
 ### 2026-11-15 - Bounded contract accepted
 
 #12682 merged as `5290d7b3263a0a7f165ba7e3991e0aec983ef81d` after

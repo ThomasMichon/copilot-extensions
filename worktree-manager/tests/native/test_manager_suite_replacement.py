@@ -18,6 +18,7 @@ import sys
 import shutil
 import subprocess
 import time
+import venv
 from types import ModuleType, SimpleNamespace
 
 import pytest
@@ -33,6 +34,39 @@ def test_fullsuite_refuses_execution_outside_the_disposable_venue(monkeypatch: p
     monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
     with pytest.raises(RuntimeError, match="disposable GitHub-hosted Windows VM"):
         require_venue()
+
+
+@pytest.mark.parametrize("nested", (False, True), ids=("legacy", "application"))
+def test_native_probe_launches_the_selected_physical_environment(
+    tmp_path: Path, nested: bool,
+) -> None:
+    from agent_procutil import no_window_kwargs
+
+    root = tmp_path / "installed"
+    slot = root / "versions" / "1.2.3"
+    environment = slot / ".venv" if nested else slot
+    venv.EnvBuilder(with_pip=False).create(environment)
+    (root / "current-version").write_text(slot.name, encoding="utf-8")
+    selected = fixture._python(root)
+    result = subprocess.run(
+        [selected, "-I", "-B", "-c",
+         "import json,sys;print(json.dumps({'prefix':sys.prefix,'executable':sys.executable}))"],
+        capture_output=True, text=True, timeout=15, check=True, **no_window_kwargs(),
+    )
+    observed = json.loads(result.stdout)
+    assert Path(observed["prefix"]).resolve() == environment.resolve()
+    assert Path(observed["executable"]).resolve() == selected.resolve()
+
+
+def test_native_probe_does_not_substitute_a_previous_generation(tmp_path: Path) -> None:
+    root = tmp_path / "installed"
+    previous = root / "versions" / "1.0.0" / "Scripts"
+    previous.mkdir(parents=True)
+    (previous / "python.exe").touch()
+    (root / "current-version").write_text("2.0.0", encoding="utf-8")
+    (root / "last-known-good").write_text("1.0.0", encoding="utf-8")
+    with pytest.raises(RuntimeError, match="Selected fixture generation has no interpreter"):
+        fixture._python(root)
 
 
 @pytest.mark.parametrize("mutation", ("none", "same-stat-content", "added", "removed"))

@@ -118,8 +118,13 @@ def _commit(case: Path, root: Path) -> str:
 
 
 def _python(root: Path) -> Path:
+    from worktree_manager.self_install import _runtime_installer
+
     generation = (root / "current-version").read_text(encoding="utf-8").strip()
-    return root / "versions" / generation / "Scripts" / "python.exe"
+    selected = _runtime_installer().runtime.slot_python(root, generation)
+    if selected is None:
+        raise RuntimeError(f"Selected fixture generation has no interpreter: {root}: {generation}")
+    return selected
 
 
 def _probe(case: Path, kind: str) -> dict[str, Any]:
